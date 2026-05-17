@@ -782,8 +782,17 @@ def _gen_set_attribute(args: Dict) -> str:
     """Generate code that writes a single USD attribute value via ``attr.Set()``.
 
     The generated script obtains the attribute by name and calls ``Set``
-    with the supplied value.  No type coercion is performed — the value
-    must be compatible with the attribute's ``SdfValueTypeName``.
+    with the supplied value.
+
+    Round 2 repair (2026-05-17): when the attribute does not exist on the
+    prim, USD's ``Set`` requires a typeName to create it on the fly. The
+    template author rarely supplies one — they assume the schema has it.
+    For unschemed names (custom signals like ``estop:pressed``, transform
+    op overrides like ``xformOp:orient`` on a non-xformable, primvars
+    like ``primvars:displayColor`` on a fresh Cube), we now infer the
+    typeName from (a) a small map of known attribute-name → Sdf type and
+    (b) the runtime shape of ``value``. Also coerces vector values to
+    proper Gf types (Vec3f/Quatf/etc) where applicable.
 
     Args:
         args: Tool arguments dict containing:
@@ -800,10 +809,103 @@ def _gen_set_attribute(args: Dict) -> str:
     value = args["value"]
     return (
         "import omni.usd\n"
+        "from pxr import Sdf, Gf, Vt\n"
         "stage = omni.usd.get_context().get_stage()\n"
-        f"prim = stage.GetPrimAtPath('{prim_path}')\n"
-        f"attr = prim.GetAttribute('{attr_name}')\n"
-        f"attr.Set({repr(value)})"
+        f"prim = stage.GetPrimAtPath({prim_path!r})\n"
+        "if not prim.IsValid():\n"
+        f"    raise RuntimeError('set_attribute: prim not found: {prim_path}')\n"
+        f"_attr_name = {attr_name!r}\n"
+        f"_value = {value!r}\n"
+        # Round 2: helper to pick an Sdf type when the attribute doesn't exist.
+        "_KNOWN_TYPENAMES = {\n"
+        "    'xformOp:translate': Sdf.ValueTypeNames.Double3,\n"
+        "    'xformOp:scale': Sdf.ValueTypeNames.Float3,\n"
+        "    'xformOp:rotateXYZ': Sdf.ValueTypeNames.Float3,\n"
+        "    'xformOp:rotateYXZ': Sdf.ValueTypeNames.Float3,\n"
+        "    'xformOp:rotateZYX': Sdf.ValueTypeNames.Float3,\n"
+        "    'xformOp:orient': Sdf.ValueTypeNames.Quatf,\n"
+        "    'primvars:displayColor': Sdf.ValueTypeNames.Color3fArray,\n"
+        "    'primvars:displayOpacity': Sdf.ValueTypeNames.FloatArray,\n"
+        "    'inputs:intensity': Sdf.ValueTypeNames.Float,\n"
+        "    'inputs:color': Sdf.ValueTypeNames.Color3f,\n"
+        "    'physics:mass': Sdf.ValueTypeNames.Float,\n"
+        "    'physxRigidBody:sleepThreshold': Sdf.ValueTypeNames.Float,\n"
+        "    'size': Sdf.ValueTypeNames.Double,\n"
+        "    'radius': Sdf.ValueTypeNames.Double,\n"
+        "    'height': Sdf.ValueTypeNames.Double,\n"
+        "}\n"
+        "def _infer_typename(name, val):\n"
+        "    if name in _KNOWN_TYPENAMES:\n"
+        "        return _KNOWN_TYPENAMES[name]\n"
+        "    if isinstance(val, bool):\n"
+        "        return Sdf.ValueTypeNames.Bool\n"
+        "    if isinstance(val, int):\n"
+        "        return Sdf.ValueTypeNames.Int\n"
+        "    if isinstance(val, float):\n"
+        "        return Sdf.ValueTypeNames.Float\n"
+        "    if isinstance(val, str):\n"
+        "        return Sdf.ValueTypeNames.String\n"
+        "    if isinstance(val, (list, tuple)):\n"
+        "        if len(val) == 0:\n"
+        "            return None\n"
+        "        first = val[0]\n"
+        "        if isinstance(first, (list, tuple)):\n"
+        "            # array-of-vectors\n"
+        "            if len(first) == 3:\n"
+        "                return Sdf.ValueTypeNames.Color3fArray\n"
+        "            if len(first) == 4:\n"
+        "                return Sdf.ValueTypeNames.Float4Array\n"
+        "        if len(val) == 3 and all(isinstance(x, (int, float)) for x in val):\n"
+        "            return Sdf.ValueTypeNames.Float3\n"
+        "        if len(val) == 4 and all(isinstance(x, (int, float)) for x in val):\n"
+        "            return Sdf.ValueTypeNames.Quatf\n"
+        "        if all(isinstance(x, (int, float)) for x in val):\n"
+        "            return Sdf.ValueTypeNames.FloatArray\n"
+        "    return None\n"
+        "def _coerce_value(name, val, tn):\n"
+        "    # Build a Gf type instance for known Vec3/Quat shapes; leave\n"
+        "    # plain scalars alone (USD accepts native Python numbers).\n"
+        "    if tn is None:\n"
+        "        return val\n"
+        "    try:\n"
+        "        tn_str = str(tn)\n"
+        "    except Exception:\n"
+        "        return val\n"
+        "    if tn_str in ('double3', 'vector3d', 'point3d', 'normal3d'):\n"
+        "        if isinstance(val, (list, tuple)) and len(val) == 3:\n"
+        "            return Gf.Vec3d(*val)\n"
+        "    if tn_str in ('float3', 'vector3f', 'point3f', 'normal3f', 'color3f'):\n"
+        "        if isinstance(val, (list, tuple)) and len(val) == 3:\n"
+        "            return Gf.Vec3f(*val)\n"
+        "    if tn_str == 'double2':\n"
+        "        if isinstance(val, (list, tuple)) and len(val) == 2:\n"
+        "            return Gf.Vec2d(float(val[0]), float(val[1]))\n"
+        "    if tn_str == 'float2':\n"
+        "        if isinstance(val, (list, tuple)) and len(val) == 2:\n"
+        "            return Gf.Vec2f(float(val[0]), float(val[1]))\n"
+        "    if tn_str == 'int2':\n"
+        "        if isinstance(val, (list, tuple)) and len(val) == 2:\n"
+        "            return Gf.Vec2i(int(val[0]), int(val[1]))\n"
+        "    if tn_str == 'quatf':\n"
+        "        if isinstance(val, (list, tuple)) and len(val) == 4:\n"
+        "            return Gf.Quatf(float(val[0]), Gf.Vec3f(float(val[1]), float(val[2]), float(val[3])))\n"
+        "    if tn_str == 'quatd':\n"
+        "        if isinstance(val, (list, tuple)) and len(val) == 4:\n"
+        "            return Gf.Quatd(float(val[0]), Gf.Vec3d(float(val[1]), float(val[2]), float(val[3])))\n"
+        "    if tn_str == 'color3f[]':\n"
+        "        if isinstance(val, (list, tuple)):\n"
+        "            return Vt.Vec3fArray([Gf.Vec3f(*c) for c in val])\n"
+        "    return val\n"
+        "_attr = prim.GetAttribute(_attr_name)\n"
+        "if not _attr or not _attr.IsDefined():\n"
+        "    _tn = _infer_typename(_attr_name, _value)\n"
+        "    if _tn is None:\n"
+        "        # Last resort: create as String so USD has *some* typeName.\n"
+        "        _tn = Sdf.ValueTypeNames.String\n"
+        "    _attr = prim.CreateAttribute(_attr_name, _tn, custom=True)\n"
+        "_tn_existing = _attr.GetTypeName() if _attr else None\n"
+        "_to_set = _coerce_value(_attr_name, _value, _tn_existing)\n"
+        "_attr.Set(_to_set)"
     )
 
 
