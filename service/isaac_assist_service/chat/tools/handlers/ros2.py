@@ -156,20 +156,16 @@ tf_graph_path = "/World/ROS2_TF_Tree"
 tf_prim = stage.GetPrimAtPath(tf_graph_path)
 if not tf_prim.IsValid():
     print("No TF publisher graph found — creating one at " + tf_graph_path)
-    _bt = og.GraphBackingType
-    if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-        _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-    elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-        _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-    else:
-        _backing = list(_bt)[0]
+    # Round 2 repair (2026-05-17): pipeline_stage requires GraphPipelineStage
+    # enum, not GraphBackingType — Isaac Sim 5.1 strict API check.
+    _ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 
     keys = og.Controller.Keys
     og.Controller.edit(
         {{
             "graph_path": tf_graph_path,
             "evaluator_name": "execution",
-            "pipeline_stage": _backing,
+            "pipeline_stage": _ps,
         }},
         {{
             keys.CREATE_NODES: [
@@ -339,21 +335,15 @@ _V = tuple(int(x) for x in isaacsim.__version__.split(".")[:2])
 _ROS2_NS = "isaacsim.ros2.nodes" if _V >= (6, 0) else "isaacsim.ros2.bridge"
 print(f"Isaac Sim version: {{isaacsim.__version__}}, using namespace: {{_ROS2_NS}}")
 
-# Resolve backing type
-_bt = og.GraphBackingType
-if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-else:
-    _backing = list(_bt)[0]
+# Round 2 repair (2026-05-17): pipeline_stage requires GraphPipelineStage enum.
+_ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 
 keys = og.Controller.Keys
 (graph, nodes, _, _) = og.Controller.edit(
     {{
         "graph_path": "/World/ROS2_Bridge",
         "evaluator_name": "execution",
-        "pipeline_stage": _backing,
+        "pipeline_stage": _ps,
     }},
     {{
         keys.CREATE_NODES: [
@@ -512,21 +502,20 @@ for graph in all_graphs:
         break
 
 if not clock_exists:
-    # Resolve backing type
-    _bt = og.GraphBackingType
-    if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-        _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-    elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-        _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-    else:
-        _backing = list(_bt)[0]
+    # Round 2 repair (2026-05-17): Isaac Sim 5.1 `og.Controller.edit`
+    # expects `pipeline_stage` to be a `GraphPipelineStage` enum value, not
+    # the `GraphBackingType` we passed before. Wrong type makes
+    # `get_global_orchestration_graphs_in_pipeline_stage` reject the
+    # call internally with "incompatible function arguments". The correct
+    # value for an action-graph driven by playback tick is SIMULATION.
+    _ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 
     keys = og.Controller.Keys
     (graph, nodes, _, _) = og.Controller.edit(
         {{
             "graph_path": "/World/ROS2ClockGraph",
             "evaluator_name": "execution",
-            "pipeline_stage": _backing,
+            "pipeline_stage": _ps,
         }},
         {{
             keys.CREATE_NODES: [
@@ -630,20 +619,15 @@ if not _ros2_os.environ.get('AMENT_PREFIX_PATH'):
         'can be built. No nodes were created this call.'
     )
 
-_bt = og.GraphBackingType
-if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-else:
-    _backing = list(_bt)[0]
+# Round 2 repair (2026-05-17): pipeline_stage requires GraphPipelineStage enum.
+_ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 
 keys = og.Controller.Keys
 (graph, nodes, _, _) = og.Controller.edit(
     {{
         "graph_path": "{graph_path}",
         "evaluator_name": "execution",
-        "pipeline_stage": _backing,
+        "pipeline_stage": _ps,
     }},
     {{
         keys.CREATE_NODES: [
