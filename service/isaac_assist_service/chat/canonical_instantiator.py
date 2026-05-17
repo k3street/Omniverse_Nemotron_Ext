@@ -633,6 +633,22 @@ def substitute_role_placeholders(
     out = _ROLE_INDEXED_NOFIELD_PAT.sub(_indexed_nofield, out)
     out = _ROLE_DOTTED_PAT.sub(_dotted, out)
     out = _ROLE_BARE_PAT.sub(_bare, out)
+
+    # Round 2 repair (2026-05-17): unwrap doubly-quoted strings produced
+    # when a template author wraps a string placeholder in literal quotes,
+    # e.g. `robot_name="{{primary_robot.class}}"`. `_format_for_code`
+    # always returns `repr(s)` ('franka_panda' with quotes), so the naive
+    # substitution yields `robot_name="'franka_panda'"` — a literal
+    # containing a quoted token, which then arrives at the handler as
+    # `"'franka_panda'"` (no registry match → robot_wizard rejects with
+    # "either robot_name or asset_path must be provided"). Templates can't
+    # be retrofitted easily (the lint passes both shapes); the deterministic
+    # fix is at the substitution layer.
+    _re_local = __import__("re")
+    # `"'foo'"` → `"foo"` and `'"foo"'` → `'foo'`. Inner quotes must be the
+    # opposite char so we don't accidentally rewrite legal `"\"x\""` escapes.
+    out = _re_local.sub(r'"\'([^\'"\n]*)\'"', r'"\1"', out)
+    out = _re_local.sub(r"'\"([^\"'\n]*)\"'", r"'\1'", out)
     return out
 
 
