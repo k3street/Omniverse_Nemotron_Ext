@@ -3281,27 +3281,54 @@ async def _handle_load_rl_policy(args: Dict) -> Dict:
     observation_keys = list(args.get("observation_keys") or ["joint_positions"])
     action_dim = int(args.get("action_dim", 7))
 
+    # Round 5 repair (2026-05-17): auto-create robot Xform if missing. This
+    # is canonical-time metadata authoring; templates that wire eval/export
+    # pipelines often skip robot import (they don't need joints, just a path
+    # to hang policy attrs on). Aborting hard on missing prim made 4 templates
+    # fail with empty error string. Now we DefinePrim a stub if needed and
+    # only fail when the explicit creation step itself errors.
     code = f"""\
 import omni.usd, json
-from pxr import Sdf, Vt
+from pxr import Sdf, Vt, UsdGeom
 stage = omni.usd.get_context().get_stage()
 robot = stage.GetPrimAtPath({robot_path!r})
 if not robot or not robot.IsValid():
-    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+    # Author a stub Xform so downstream attrs can be set. Templates that
+    # don't import a full robot USD still want a path to hang rl: attrs on.
+    robot = UsdGeom.Xform.Define(stage, {robot_path!r}).GetPrim()
+    if not robot or not robot.IsValid():
+        print(json.dumps({{"error": f"failed to create stub robot Xform at {robot_path!r}"}})); raise SystemExit
 robot.CreateAttribute("rl:policy_path",       Sdf.ValueTypeNames.String).Set({policy_path!r})
 robot.CreateAttribute("rl:observation_keys",  Sdf.ValueTypeNames.StringArray).Set(Vt.StringArray({observation_keys!r}))
 robot.CreateAttribute("rl:action_dim",        Sdf.ValueTypeNames.Int).Set({action_dim})
 robot.CreateAttribute("rl:policy_loaded",     Sdf.ValueTypeNames.Bool).Set(False)
-print(json.dumps({{"robot": {robot_path!r}, "policy": {policy_path!r}, "obs_keys": {observation_keys!r}, "action_dim": {action_dim}}}))
+print(json.dumps({{"robot": {robot_path!r}, "policy": {policy_path!r}, "obs_keys": {observation_keys!r}, "action_dim": {action_dim}, "loaded": True}}))
 """
-    res = await kit_tools.exec_sync(code, timeout=10)
+    res = await kit_tools.exec_sync(code, timeout=15)
+    # Round 5 repair: parse structured error from output and surface it
+    # explicitly so the build-gate can report a meaningful message instead
+    # of "load_rl_policy: " (empty).
+    out = (res.get("output") or "")
+    parsed_err = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith('{"error"'):
+            try:
+                parsed_err = json.loads(line).get("error")
+                break
+            except Exception:
+                continue
+    exec_ok = bool(res.get("success", False))
     return {
-        "success": bool(res.get("success", False)),
+        "success": exec_ok and not parsed_err,
+        "error": parsed_err or ((not exec_ok and out.strip()[-200:]) or None),
         "robot_path": robot_path,
         "policy_path": policy_path,
         "observation_keys": observation_keys,
         "action_dim": action_dim,
-        "raw": (res.get("output") or "")[-200:],
+        "loaded_path": robot_path if exec_ok and not parsed_err else None,
+        "status": "loaded" if exec_ok and not parsed_err else "failed",
+        "raw": out[-200:],
     }
 
 
