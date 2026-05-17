@@ -55,6 +55,8 @@ docs/research/PRIVATE/
 docs/research/
 # Working specs evolve fast — keep internal; top-level specs/ is the public anchor
 docs/specs/
+# Internal status/planning artifacts
+docs/long-term-plan.html
 
 # Floor-plan-ui build artifacts
 web/floor-plan-ui/node_modules/
