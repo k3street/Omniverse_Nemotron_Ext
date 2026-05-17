@@ -126,8 +126,34 @@ _a_plan_calls = _ensure_attr("ctrl:plan_calls", Sdf.ValueTypeNames.Int, 0)
 _a_plan_fails = _ensure_attr("ctrl:plan_fails", Sdf.ValueTypeNames.Int, 0)
 _a_last_fail_goal = _ensure_attr("ctrl:last_fail_goal", Sdf.ValueTypeNames.String, "")
 # Reset counters on install (avoid stale values from prior runs).
-_a_err.Set(0); _a_cubes.Set(0); _a_cycles.Set(0); _a_tick.Set(0); _a_last_err.Set("")
-_a_plan_calls.Set(0); _a_plan_fails.Set(0); _a_last_fail_goal.Set("")
+# Guard each Set() — when the robot prim was created indirectly
+# (e.g. UR10 import_robot + reference resolution) the initial _ensure_attr()
+# capture may target a soon-expired Xform handle. Re-acquiring via stage
+# path always returns the live handle. Symptom this protects against:
+# "Accessed invalid attribute 'ctrl:cubes_delivered' on expired 'Xform' prim </World/UR10>".
+def _safe_attr_set(attr_name, value, default_type):
+    try:
+        _attr = _robot_prim.GetAttribute(attr_name)
+        _attr.Set(value)
+        return
+    except Exception: pass
+    try:
+        _live = stage.GetPrimAtPath(ROBOT_PATH)
+        if _live and _live.IsValid():
+            _attr = _live.GetAttribute(attr_name)
+            if not _attr or not _attr.IsDefined():
+                _attr = _live.CreateAttribute(attr_name, default_type)
+            _attr.Set(value)
+    except Exception: pass
+
+_safe_attr_set("ctrl:error_count", 0, Sdf.ValueTypeNames.Int)
+_safe_attr_set("ctrl:cubes_delivered", 0, Sdf.ValueTypeNames.Int)
+_safe_attr_set("ctrl:cycles_attempted", 0, Sdf.ValueTypeNames.Int)
+_safe_attr_set("ctrl:tick_count", 0, Sdf.ValueTypeNames.Int)
+_safe_attr_set("ctrl:last_error", "", Sdf.ValueTypeNames.String)
+_safe_attr_set("ctrl:plan_calls", 0, Sdf.ValueTypeNames.Int)
+_safe_attr_set("ctrl:plan_fails", 0, Sdf.ValueTypeNames.Int)
+_safe_attr_set("ctrl:last_fail_goal", "", Sdf.ValueTypeNames.String)
 """
 
 _PP_SCENE_RESET_MGR_SNIPPET = """
@@ -5040,8 +5066,34 @@ def _curobo_pp_reset_hook():
         S["segments"] = None; S["seg_idx"] = 0; S["seg_start_t"] = None
         S["cubes"] = 0; S["errors"] = 0; S["ticks"] = 0
         S["home_returned"] = False
-        _a_cubes.Set(0); _a_err.Set(0); _a_tick.Set(0)
-        _a_last_err.Set(""); _a_picked.Set(""); _a_phase.Set("wait_sensor")
+        # Re-fetch ctrl:* attrs in case stage reset expired our captured refs.
+        # Play/Stop cycle invalidates Usd.Attribute handles on physics-tracked prims.
+        # Round 2 repair (2026-05-17): re-fetch the stage from omni.usd as well —
+        # closing over the outer ``stage`` reference can yield an expired Python
+        # binding after new_stage(), and pybind reports the resulting unbound
+        # call as ``Stage.GetPrimAtPath(Stage, str) did not match C++ signature``
+        # because the captured handle no longer maps to a live Stage instance.
+        try:
+            import omni.usd as _omni_usd_rh
+            _stage_live = _omni_usd_rh.get_context().get_stage()
+            if _stage_live is None:
+                _stage_live = stage  # fall back to closed-over ref
+            _rp = _stage_live.GetPrimAtPath(ROBOT_PATH)
+            if _rp and _rp.IsValid():
+                for _name, _val in (
+                    ("ctrl:cubes_delivered", 0),
+                    ("ctrl:error_count", 0),
+                    ("ctrl:tick_count", 0),
+                    ("ctrl:last_error", ""),
+                    ("ctrl:picked_path", ""),
+                    ("ctrl:phase", "wait_sensor"),
+                ):
+                    _attr = _rp.GetAttribute(_name)
+                    if _attr and _attr.IsDefined():
+                        try: _attr.Set(_val)
+                        except Exception: pass
+        except Exception as _ae:
+            print(f"(curobo_pp reset attr-refresh soft-fail: {{_ae}})")
         _resume_belt()
         return True
     except Exception as _re:
