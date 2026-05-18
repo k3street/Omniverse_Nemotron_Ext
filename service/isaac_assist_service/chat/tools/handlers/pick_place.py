@@ -377,6 +377,35 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
     drop_h = float(args.get("drop_height", 0.18))
 
     if mode == "native":
+        # Round 9 repair (2026-05-18): the native path is Franka-only
+        # (it imports isaacsim.robot.manipulators.examples.franka and
+        # creates a ParallelGripper bound to panda_leftfinger /
+        # panda_rightfinger). Templates routinely pass UR10 / cobotta /
+        # other arms with target_source="native" and then crash at
+        # gripper init with `Prim path expression
+        # ['/World/UR10/panda_rightfinger'] is invalid`. Auto-route to
+        # the builtin dispatcher when the robot is not a Franka — that
+        # path picks the correct per-family PickPlaceController.
+        _rf_native = (args.get("robot_family") or "").lower()
+        if not _rf_native:
+            _rp_lc_native = (robot_path or "").lower()
+            if "ur10" in _rp_lc_native or "ur5" in _rp_lc_native or "ur16" in _rp_lc_native:
+                _rf_native = "ur10"
+            elif "cobotta" in _rp_lc_native:
+                _rf_native = "cobotta_pro_900"
+            elif "franka" in _rp_lc_native or "panda" in _rp_lc_native:
+                _rf_native = "franka"
+        if _rf_native and _rf_native != "franka":
+            return _gen_pick_place_builtin(
+                robot_path=robot_path,
+                robot_family=_rf_native,
+                sensor_path=args.get("sensor_path"),
+                belt_path=args.get("belt_path"),
+                source_paths=args.get("source_paths") or [],
+                destination_path=args.get("destination_path"),
+                drop_target=args.get("drop_target"),
+                ee_offset=args.get("end_effector_offset", [0.0, 0.0, 0.02]),
+            )
         return _gen_pick_place_native(
             robot_path=robot_path,
             sensor_path=args.get("sensor_path"),

@@ -712,6 +712,15 @@ if _existing_graph and _existing_graph.IsValid():
 _ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 
 keys = og.Controller.Keys
+# Round 9 repair (2026-05-18): SET_VALUES inline crashes the whole
+# Controller.edit call when ANY attribute path is missing on the new
+# Isaac Sim 5.1 node types (e.g. PublishOdom.inputs:chassisPrim was
+# renamed). Author the graph + connections WITHOUT SET_VALUES, then
+# apply each value individually with a try/except so a single missing
+# attribute doesn't abort the whole bridge build.
+_set_pairs = [
+{val_block}
+]
 (graph, nodes, _, _) = og.Controller.edit(
     {{
         "graph_path": "{graph_path}",
@@ -725,12 +734,24 @@ keys = og.Controller.Keys
         keys.CONNECT: [
             {conn_defs}
         ],
-        keys.SET_VALUES: [
-{val_block}
-        ],
     }},
 )
+
+_set_ok = 0
+_set_skip = []
+for _attr_path, _val in _set_pairs:
+    _full = '{graph_path}/' + _attr_path
+    try:
+        og.Controller.attribute(_full).set(_val)
+        _set_ok += 1
+    except Exception as _ae:
+        _set_skip.append((_attr_path, str(_ae)[:80]))
+
 print('ROS2 bridge profile {profile_name} ready at {graph_path} for robot {robot_path}')
+if _set_skip:
+    print(f'(setup_ros2_bridge: applied {{_set_ok}} attrs; {{len(_set_skip)}} skipped)')
+    for _ap, _ar in _set_skip:
+        print(f'  skip: {{_ap}} -> {{_ar}}')
 """
 
 

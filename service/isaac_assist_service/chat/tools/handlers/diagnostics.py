@@ -779,16 +779,46 @@ else:
     n_joints = len(q)
     eps = 1e-4
 
-    # Numerical Jacobian (6 x n_joints)
+    # Numerical Jacobian (6 x n_joints).
+    # Round 9 repair (2026-05-18): compute_forward_kinematics returns
+    # (translation [3], rotation_matrix [3,3]); the previous code tried
+    # to subtract two rotation matrices directly into a 3-vector slot
+    # and crashed with "could not broadcast (3,3) into (3,)". Convert the
+    # rotation-matrix delta to an axis-angle vector via skew-symmetric
+    # extraction of (R_p R_0^T - I) for small eps; that vector behaves
+    # like an angular-velocity column and is the correct geometric
+    # Jacobian row.
+    def _rot_to_vec(R0, Rp):
+        try:
+            dR = np.asarray(Rp) @ np.asarray(R0).T
+            return np.array([dR[2, 1] - dR[1, 2],
+                             dR[0, 2] - dR[2, 0],
+                             dR[1, 0] - dR[0, 1]]) * 0.5
+        except Exception:
+            return np.zeros(3)
+
     J = np.zeros((6, n_joints))
     ee_frame = kin.get_all_frame_names()[-1]
     pos0, ori0 = kin.compute_forward_kinematics(ee_frame, q)
-    pos0, ori0 = np.array(pos0), np.array(ori0)
+    pos0 = np.array(pos0)
+    ori0_arr = np.array(ori0)
     for k in range(n_joints):
         q_plus = q.copy(); q_plus[k] += eps
         pos_p, ori_p = kin.compute_forward_kinematics(ee_frame, q_plus)
         J[:3, k] = (np.array(pos_p) - pos0) / eps
-        J[3:, k] = (np.array(ori_p) - ori0) / eps
+        ori_p_arr = np.array(ori_p)
+        # If FK returns quaternion or axis-angle (length-4 or length-3),
+        # use direct difference; if it returns a 3x3 rotation matrix,
+        # extract the skew-symmetric axis-angle vector.
+        if ori_p_arr.ndim == 2 and ori_p_arr.shape == (3, 3):
+            J[3:, k] = _rot_to_vec(ori0_arr, ori_p_arr) / eps
+        elif ori_p_arr.shape == (4,):
+            # quaternion (w,x,y,z) — use vector part diff as proxy
+            J[3:, k] = (ori_p_arr[1:4] - ori0_arr[1:4]) / eps
+        elif ori_p_arr.shape == (3,):
+            J[3:, k] = (ori_p_arr - ori0_arr) / eps
+        else:
+            J[3:, k] = 0.0
 
     # SVD condition number
     _, sigma, _ = np.linalg.svd(J)
