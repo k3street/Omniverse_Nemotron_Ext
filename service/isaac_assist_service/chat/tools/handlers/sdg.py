@@ -905,10 +905,20 @@ with rep.new_layer():
             pass
 
     t0 = time.time()
+    # Round 9 repair (2026-05-18): rep.orchestrator.run_until_complete is a
+    # standalone-workflow API; inside Kit it raises 'Synchronous call to
+    # run_until_complete can only be performed in a standalone workflow'.
+    # Drive frames via Kit's own app.update() loop instead, the same way
+    # capture_camera_image does it.
     try:
-        rep.orchestrator.run_until_complete(num_frames=NUM_FRAMES)
+        try:
+            rep.orchestrator.run_until_complete(num_frames=NUM_FRAMES)
+        except Exception:
+            import omni.kit.app as _kit_app_bs
+            for _ in range(NUM_FRAMES):
+                _kit_app_bs.get_app().update()
     except Exception as _run_err:
-        print(json.dumps({{'error': 'orchestrator.run_until_complete failed: ' + str(_run_err)}}))
+        print(json.dumps({{'error': 'benchmark frame loop failed: ' + str(_run_err)}}))
         raise SystemExit(0)
     elapsed = max(time.time() - t0, 1e-6)
 

@@ -42,7 +42,7 @@
     "success_condition": "50 overlay PNGs under /tmp/policy_attn/overlays + attention_overlay.mp4 + result JSON with frames_processed >= 50 and attention_summary dict non-empty",
     "result_file": "/tmp/policy_attn_result.json"
   },
-  "verified_status": "drafted-2026-05-16-A70; form-gate-schema pending; function-gate BLOCKED (requires trained PPO .pt checkpoint at workspace/rl_checkpoints/FrankaPickPlace/best_policy.pt AND a Franka wrist-cam prim at /World/Franka/panda_hand/WristCam; extract_attention_maps non-ViT fallback path may produce empty weights dict on stub checkpoints)",
+  "verified_status": "drafted-2026-05-16-A70; form-gate-schema pending; env_blocked: omni.kit.capture extension not loadable in current Kit build (render_video tool depends on it); function-gate BLOCKED (requires trained PPO .pt checkpoint at workspace/rl_checkpoints/FrankaPickPlace/best_policy.pt AND a Franka wrist-cam prim at /World/Franka/panda_hand/WristCam; extract_attention_maps non-ViT fallback path may produce empty weights dict on stub checkpoints)",
   "failure_modes": [
     "Policy lacks attention layers (CNN-only): extract_attention_maps handler is expected to return a saliency-map fallback (gradient * input) under the 'attention_weights' key; if it instead returns None, the attention_intensities list will be empty and mean_attention_intensity will be 0.0 — gate still passes on structural shape.",
     "Attention shape does not match frame resolution: handler should upsample via bilinear interpolation to match resolution; if it returns raw low-res weights, the overlay PNG may be a downscaled heatmap — visually acceptable, no gate impact.",
