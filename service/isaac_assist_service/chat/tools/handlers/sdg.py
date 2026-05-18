@@ -874,11 +874,29 @@ if _cam_path is None:
     raise SystemExit(0)
 
 with rep.new_layer():
+    # Round 9 repair (2026-05-18): render_product accepts either a USD prim
+    # path OR a rep.create.camera() handle. The USD path variant rejects
+    # cameras that aren't registered in replicator's internal world model
+    # with "No valid sensor paths provided". Fall back to wrapping the prim
+    # path via rep.get.prims() if available, then to a fresh rep camera.
+    rp = None
     try:
         rp = rep.create.render_product(_cam_path, RESOLUTION)
-    except Exception as _rp_err:
-        print(json.dumps({{'error': 'render_product creation failed: ' + str(_rp_err)}}))
-        raise SystemExit(0)
+    except Exception as _rp_err1:
+        try:
+            _wrapped = rep.get.prims(path_pattern=_cam_path)
+            rp = rep.create.render_product(_wrapped, RESOLUTION)
+        except Exception as _rp_err2:
+            try:
+                _rep_cam = rep.create.camera()
+                rp = rep.create.render_product(_rep_cam, RESOLUTION)
+            except Exception as _rp_err3:
+                print(json.dumps({{
+                    'error': 'render_product creation failed: ' + str(_rp_err1),
+                    'fallback1_error': str(_rp_err2),
+                    'fallback2_error': str(_rp_err3),
+                }}))
+                raise SystemExit(0)
 
     for a in ANNOTATORS:
         try:

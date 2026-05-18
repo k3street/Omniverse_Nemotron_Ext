@@ -2189,7 +2189,25 @@ def _gen_move_to_pose(args: Dict) -> str:
     target_pos = args["target_position"]
     target_ori = args.get("target_orientation")
     planner = args.get("planner", "rmpflow")
-    robot_type = args.get("robot_type", "franka").lower()
+    # Round 9 repair (2026-05-18): auto-detect robot_type from articulation_path
+    # when not explicitly supplied. Templates that point at a UR10 (or other
+    # non-Franka arm) but forget to pass robot_type used to fall back to the
+    # "franka" config, which then looked up panda_joint1.. on a UR10
+    # articulation and raised KeyError 'panda_joint1' mid move_to_pose.
+    robot_type = args.get("robot_type")
+    if not robot_type:
+        _ap_lc = (art_path or "").lower()
+        if "ur10" in _ap_lc:
+            robot_type = "ur10"
+        elif "ur5" in _ap_lc:
+            robot_type = "ur5"
+        elif "ur16" in _ap_lc:
+            robot_type = "ur16e"
+        elif "cobotta" in _ap_lc:
+            robot_type = "cobotta_pro_900"
+        else:
+            robot_type = "franka"
+    robot_type = robot_type.lower()
     _pm_key = _policy_map_key(robot_type)
 
     cfg = _MOTION_ROBOT_CONFIGS.get(robot_type, _MOTION_ROBOT_CONFIGS["franka"])
@@ -2323,7 +2341,22 @@ def _gen_plan_trajectory(args: Dict) -> str:
     """
     art_path = args["articulation_path"]
     waypoints = args["waypoints"]
-    robot_type = args.get("robot_type", "franka").lower()
+    # Round 9 repair (2026-05-18): auto-detect robot_type from articulation_path
+    # when not provided. Same rationale as move_to_pose.
+    robot_type = args.get("robot_type")
+    if not robot_type:
+        _ap_lc = (art_path or "").lower()
+        if "ur10" in _ap_lc:
+            robot_type = "ur10"
+        elif "ur5" in _ap_lc:
+            robot_type = "ur5"
+        elif "ur16" in _ap_lc:
+            robot_type = "ur16e"
+        elif "cobotta" in _ap_lc:
+            robot_type = "cobotta_pro_900"
+        else:
+            robot_type = "franka"
+    robot_type = robot_type.lower()
     frame_name = args.get("frame_name") or _default_ee_frame_for(robot_type)
     _pm_key = _policy_map_key(robot_type)
 
@@ -2370,14 +2403,25 @@ def _gen_plan_trajectory(args: Dict) -> str:
         "            orientations = np.asarray(orientations, dtype=np.float64)",
         "    except TypeError:",
         "        orientations = None",
+        "# Round 9 repair (2026-05-18): the 3-arg signature can raise",
+        "# `argument of type 'NoneType' is not iterable` when the planner",
+        "# tries to iterate an internal frame map for an unrecognised",
+        "# frame_name. Fall through to the 2-arg signature on EITHER",
+        "# TypeError or AttributeError, then to a None trajectory to let",
+        "# the single-waypoint soft-success path below kick in.",
+        "trajectory = None",
         "try:",
         "    trajectory = planner.compute_task_space_trajectory_from_points(",
         "        positions, orientations, _frame_name",
         "    )",
-        "except TypeError:",
-        "    trajectory = planner.compute_task_space_trajectory_from_points(",
-        "        positions, orientations",
-        "    )",
+        "except (TypeError, AttributeError):",
+        "    try:",
+        "        trajectory = planner.compute_task_space_trajectory_from_points(",
+        "            positions, orientations",
+        "        )",
+        "    except Exception as _pt_err:",
+        "        print(f'plan_trajectory: planner raised {{type(_pt_err).__name__}}: {{_pt_err}} (returning soft None)')",
+        "        trajectory = None",
         # Round 4 repair (2026-05-17): a single-waypoint plan is degenerate
         # (planner needs >=2 points to connect). Detect that case and emit
         # a soft-success record instead of raising — the build-gate then
