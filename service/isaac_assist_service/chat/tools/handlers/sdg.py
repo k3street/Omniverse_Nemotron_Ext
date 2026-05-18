@@ -837,15 +837,48 @@ async def _handle_benchmark_sdg(args: Dict) -> Dict:
     code = f"""\
 import json
 import time
-import omni.replicator.core as rep
 
 ANNOTATORS = {list(annotators)!r}
 NUM_FRAMES = {num_frames}
 RESOLUTION = ({resolution[0]}, {resolution[1]})
 
+# Round 9 repair (2026-05-18): wrap the full replicator import + run in a
+# try/except so missing extensions or empty stages produce a structured
+# diagnostic instead of an empty error string.
+try:
+    import omni.replicator.core as rep
+except Exception as _e_imp:
+    print(json.dumps({{
+        'error': 'omni.replicator.core unavailable: ' + str(_e_imp),
+        'hint': 'enable omni.replicator.core extension before benchmarking SDG',
+    }}))
+    raise SystemExit(0)
+
+# Find any camera prim on the stage; if none exists, create a temporary
+# scratch camera so the benchmark can still measure render throughput.
+import omni.usd as _usd
+from pxr import UsdGeom as _UsdGeom
+_stage = _usd.get_context().get_stage()
+_cam_path = None
+if _stage is not None:
+    for _p in _stage.Traverse():
+        if _p.GetTypeName() == 'Camera':
+            _cam_path = str(_p.GetPath())
+            break
+    if _cam_path is None:
+        _scratch = '/World/_BenchmarkSdgCamera'
+        _UsdGeom.Camera.Define(_stage, _scratch)
+        _cam_path = _scratch
+if _cam_path is None:
+    print(json.dumps({{'error': 'no USD stage available for SDG benchmark'}}))
+    raise SystemExit(0)
+
 with rep.new_layer():
-    camera = rep.get.camera()
-    rp = rep.create.render_product(camera, RESOLUTION)
+    try:
+        rp = rep.create.render_product(_cam_path, RESOLUTION)
+    except Exception as _rp_err:
+        print(json.dumps({{'error': 'render_product creation failed: ' + str(_rp_err)}}))
+        raise SystemExit(0)
 
     for a in ANNOTATORS:
         try:
@@ -854,7 +887,11 @@ with rep.new_layer():
             pass
 
     t0 = time.time()
-    rep.orchestrator.run_until_complete(num_frames=NUM_FRAMES)
+    try:
+        rep.orchestrator.run_until_complete(num_frames=NUM_FRAMES)
+    except Exception as _run_err:
+        print(json.dumps({{'error': 'orchestrator.run_until_complete failed: ' + str(_run_err)}}))
+        raise SystemExit(0)
     elapsed = max(time.time() - t0, 1e-6)
 
 fps = NUM_FRAMES / elapsed
@@ -890,8 +927,9 @@ print(json.dumps({{
     result = await kit_tools.queue_exec_patch(
         code, f"Benchmark SDG ({num_frames} frames, {len(annotators)} annotators)"
     )
-    return {
-        "success": bool(result.get("success", False)),
+    success = bool(result.get("success", False))
+    out: Dict[str, Any] = {
+        "success": success,
         "queued": result.get("queued", False),
         "pipeline_id": pipeline_id,
         "num_frames": num_frames,
@@ -900,6 +938,15 @@ print(json.dumps({{
         "expected_fps_range": list(baseline) if baseline else None,
         "note": "Actual FPS is printed by the Kit-side benchmark once the patch is approved and executed.",
     }
+    # Round 9 repair (2026-05-18): surface error + output so build-gate
+    # callers don't see an empty error string when the underlying queue
+    # patch failed (e.g. extension off, replicator missing, sandboxed FS).
+    if not success:
+        err = (result.get("error") or result.get("output") or "").strip()
+        out["error"] = err or "benchmark_sdg: Kit RPC patch failed (no diagnostic returned)"
+        if result.get("output"):
+            out["output"] = result.get("output")
+    return out
 
 
 # ---------------------------------------------------------------------------

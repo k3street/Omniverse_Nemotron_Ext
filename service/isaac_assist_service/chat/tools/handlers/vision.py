@@ -679,18 +679,41 @@ else:
             except Exception:
                 pass
         data = annot.get_data()
-        # Encode the numpy RGB(A) array to PNG via PIL
+        # Encode the numpy RGB(A) array to PNG via PIL.
+        # Round 9 repair (2026-05-18): PIL.save() can raise
+        # 'tile cannot extend outside image' when the array stride/shape
+        # doesn't match what PIL expects (non-contiguous numpy view,
+        # transposed axes, or weird padding from Replicator).
+        # Mitigation: validate ndim/dtype, force contiguous, fall back to
+        # cv2 png encode if PIL still rejects.
         try:
             from PIL import Image
             import numpy as np
             arr = np.asarray(data)
             if arr.ndim == 3 and arr.shape[2] == 4:
-                img = Image.fromarray(arr[:, :, :3].astype('uint8'), mode='RGB')
+                arr3 = arr[:, :, :3]
+            elif arr.ndim == 3 and arr.shape[2] == 3:
+                arr3 = arr
+            elif arr.ndim == 2:
+                arr3 = np.stack([arr, arr, arr], axis=-1)
             else:
-                img = Image.fromarray(arr.astype('uint8'), mode='RGB')
+                raise ValueError(f'Unexpected RGB shape {{arr.shape}}')
+            arr3 = np.ascontiguousarray(arr3.astype('uint8'))
             import io
-            buf = io.BytesIO()
-            img.save(buf, format='PNG')
+            try:
+                img = Image.fromarray(arr3, mode='RGB')
+                buf = io.BytesIO()
+                img.save(buf, format='PNG')
+            except Exception as _pil_err:
+                # Fallback path: encode via cv2 (handles odd strides cleanly)
+                try:
+                    import cv2 as _cv2
+                    ok, raw = _cv2.imencode('.png', _cv2.cvtColor(arr3, _cv2.COLOR_RGB2BGR))
+                    if not ok:
+                        raise RuntimeError('cv2.imencode returned False')
+                    buf = io.BytesIO(raw.tobytes())
+                except Exception:
+                    raise _pil_err
             b64 = base64.b64encode(buf.getvalue()).decode('ascii')
         finally:
             try:
