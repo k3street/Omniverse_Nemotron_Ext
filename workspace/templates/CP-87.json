@@ -20,7 +20,7 @@
     "Wire ROS2 bridge with standard topic names via setup_ros2_control_compat.",
     "Emit ros2_control YAML for user's outside-Kit launch (joint_trajectory_controller).",
     "Verify form gate then function gate.",
-    "Note: agent should NOT run external 'ros2 launch' \u2014 that is the user's side. simulate_traversal_check measures Isaac-side cube delivery."
+    "Note: agent should NOT run external 'ros2 launch' — that is the user's side. simulate_traversal_check measures Isaac-side cube delivery."
   ],
   "code": "precheck_ros2_environment()\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(robot_name=\"franka_panda\", dest_path=\"/World/Franka\", position=[0, 0, 0.75])\ncreate_prim(prim_path=\"/World/Cube\", prim_type=\"Cube\", position=[0.45, 0, 0.78], scale=[0.025, 0.025, 0.025])\napply_api_schema(prim_path=\"/World/Cube\", schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path=\"/World/Cube\", schema_name=\"PhysicsCollisionAPI\")\nbulk_set_attribute(\n    prim_paths=['/World/Cube'],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=['/World/Cube'],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=32,\n)\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, 0.4, 0.78], size=[0.15, 0.15, 0.10])\nsetup_pick_place_controller(robot_path=\"/World/Franka\", source_paths=[\"/World/Cube\"], destination_path=\"/World/Bin\", target_source=\"ros2_cmd\")\nsetup_ros2_control_compat(robot_path=\"/World/Franka\", controller_type=\"joint_trajectory_controller\")\nsetup_ros2_bridge(profile=\"franka_moveit2\", robot_path=\"/World/Franka\")\nemit_ros2_control_yaml(robot_path=\"/World/Franka\", controller_type=\"joint_trajectory_controller\", output_path=\"/tmp/cp87_ros2_control.yaml\")\n",
   "verify_args": {
@@ -63,11 +63,11 @@
   "extends": "CP-01",
   "extension_notes": "M1 ROS2 production parity variant of CP-01. Not in patched-set.",
   "failure_modes": [
-    "AMENT_PREFIX_PATH unset \u2192 precheck flags",
-    "rosbridge:9090 not running \u2192 precheck flags",
-    "ROS2 topic name mismatch \u2192 external MoveIt2 sees no /joint_states"
+    "AMENT_PREFIX_PATH unset → precheck flags",
+    "rosbridge:9090 not running → precheck flags",
+    "ROS2 topic name mismatch → external MoveIt2 sees no /joint_states"
   ],
-  "verified_status": "draft",
+  "verified_status": "draft; R6-deferred: env-blocked: rclpy ABI mismatch (Python 3.11 vs ROS2 humble 3.10)",
   "intent": {
     "pattern_hint": "other",
     "structural_features": {

@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-teaching-mode-pose-replay",
-  "goal": "Demonstrate the teach-pendant workflow in Isaac Sim: start teaching mode on a Franka Panda, capture 6 named waypoints that trace a pick-to-place arc over a table surface, interpolate a smooth dense trajectory between them, save the trajectory to workspace/trajectories/teach_demo.json, then replay it at 0.5× speed to verify the path. No physics delivery gate; success criterion is a completed replay with no IK failures reported in console. Exercises start_teaching_mode (mode='drag_target'), teach_robot_pose ×6, record_waypoints, interpolate_trajectory (method='cubic'), and replay_trajectory.",
+  "goal": "Demonstrate the teach-pendant workflow in Isaac Sim: start teaching mode on a Franka Panda, capture 6 named waypoints that trace a pick-to-place arc over a table surface, interpolate a smooth dense trajectory between them, save the trajectory to workspace/trajectories/teach_demo.json, then replay it at 0.5\u00d7 speed to verify the path. No physics delivery gate; success criterion is a completed replay with no IK failures reported in console. Exercises start_teaching_mode (mode='drag_target'), teach_robot_pose \u00d76, record_waypoints, interpolate_trajectory (method='cubic'), and replay_trajectory.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -15,14 +15,14 @@
     "replay_trajectory",
     "get_console_errors"
   ],
-  "thoughts": "Design rationale for CP-NEW-teaching-mode-pose-replay:\n\n1) Pattern novelty: no canonical in A1-A20 exercises the teach-pendant / waypoint-capture / trajectory-replay triad. This canonical validates that start_teaching_mode → teach_robot_pose → record_waypoints → interpolate_trajectory → replay_trajectory chain works end-to-end.\n\n2) Waypoint geometry: Franka at origin on table (z=0.75). 6 waypoints trace a smooth pick-to-place arc:\n   home    → robot fully upright, all joints near 0\n   above_source → EE above source cube at [0.40, 0.20, 1.05]\n   pick    → EE lowered to grasp height [0.40, 0.20, 0.85]\n   lift    → EE raised [0.40, 0.20, 1.10]\n   place   → EE above drop zone [0.00, -0.45, 1.05]\n   drop    → EE lowered to release height [0.00, -0.45, 0.85]\n   All positions within Franka 0.85m reach envelope.\n\n3) teach_robot_pose captures the current joint config after teleporting EE to each target. In direct-eval context, EE positions are set via set_joint_targets to approximate the desired configuration; this is the standard sim teaching workflow without a real drag-target UI.\n\n4) record_waypoints(format='json') writes to workspace/trajectories/teach_demo.json. interpolate_trajectory(method='cubic') produces smooth dense trajectory (50 steps between pairs → 300 steps total). replay_trajectory(speed=0.5) plays back at half speed for visual inspection.\n\n5) Physics: CPU dynamics, minimal scene. Ground plane + work table. No rigid-body parts (waypoint capture does not require them).\n\n6) get_console_errors(last_n=5) at the end: any IK failure or joint-limit violation surfaces here. Template treats 0 errors as pass criterion.\n\n7) motion_controller_preference: direct_joint. start_teaching_mode uses mode='drag_target' with RMPflow tracking internally, but the orchestration is joint-space waypoints, not cuRobo plan_pose. No cuRobo dependency.",
-  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics scene: CPU dynamics ───────────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda robot ────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Start simulation so physics and articulation settle ───────────────────────\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=30)\n\n# ── Activate teaching mode (drag_target with RMPflow EE tracking) ─────────────\nstart_teaching_mode(\n    articulation_path=\"/World/Franka\",\n    mode=\"drag_target\",\n    robot_type=\"franka\",\n)\n\n# ── Capture 6 waypoints along pick-to-place arc ───────────────────────────────\n# Teaching workflow: drive the robot to each target configuration with\n# set_joint_targets, step physics to settle, THEN teach_robot_pose snapshots\n# the current (different) joint config for each pose.\n# Franka Panda 7-DOF joint configs (radians) for each waypoint:\n#   home         — arm upright, all joints near 0\n#   above_source — EE above [0.40, 0.20, 1.05]\n#   pick         — EE lowered to [0.40, 0.20, 0.85]\n#   lift         — EE raised to [0.40, 0.20, 1.10]\n#   place        — EE over drop zone [0.00, -0.45, 1.05]\n#   drop         — EE lowered to [0.00, -0.45, 0.85]\n\n# Joint configs (7-DOF radians) for each waypoint\n_home_q         = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]\n_above_source_q = [0.45, -0.50, -0.20, -2.10, 0.10, 1.70, 1.10]\n_pick_q         = [0.45, -0.30, -0.20, -2.50, 0.10, 2.30, 1.10]\n_place_q        = [-0.30, -0.50, 0.10, -2.10, -0.10, 1.70, 0.40]\n_drop_q         = [-0.30, -0.30, 0.10, -2.50, -0.10, 2.30, 0.40]\n_joint_names    = [\"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n                  \"panda_joint5\", \"panda_joint6\", \"panda_joint7\"]\n\n_teach_sequence = [\n    (\"home\",         _home_q),\n    (\"above_source\", _above_source_q),\n    (\"pick\",         _pick_q),\n    (\"lift\",         _above_source_q),\n    (\"place\",        _place_q),\n    (\"drop\",         _drop_q),\n]\nfor _pose_name, _q in _teach_sequence:\n    for _jn, _pos in zip(_joint_names, _q):\n        set_joint_targets(articulation_path=\"/World/Franka\", joint_name=_jn, target_position=_pos)\n    sim_control(action=\"step\", step_count=30)\n    teach_robot_pose(robot_path=\"/World/Franka\", pose_name=_pose_name)\n\n# ── Save sparse waypoints to JSON ─────────────────────────────────────────────\nrecord_waypoints(\n    articulation_path=\"/World/Franka\",\n    output_path=\"workspace/trajectories/teach_demo.json\",\n    format=\"json\",\n)\n\n# ── Interpolate to smooth dense trajectory (cubic spline, 50 steps/segment) ──\n# waypoints must supply joint_positions (7-DOF radians) — pose_name is NOT\n# a recognised key in interpolate_trajectory.waypoints[].required.\ninterpolate_trajectory(\n    articulation_path=\"/World/Franka\",\n    waypoints=[\n        {\"joint_positions\": _home_q},\n        {\"joint_positions\": _above_source_q},\n        {\"joint_positions\": _pick_q},\n        {\"joint_positions\": _above_source_q},  # lift = same config as above_source\n        {\"joint_positions\": _place_q},\n        {\"joint_positions\": _drop_q},\n    ],\n    method=\"cubic\",\n    num_steps=50,\n    output_path=\"workspace/trajectories/teach_demo_dense.json\",\n    robot_type=\"franka\",\n)\n\n# ── Replay dense trajectory at half speed ─────────────────────────────────────\nreplay_trajectory(\n    articulation_path=\"/World/Franka\",\n    trajectory_path=\"workspace/trajectories/teach_demo_dense.json\",\n    speed=0.5,\n)\n\n# ── Verify: check for IK / joint-limit errors ─────────────────────────────────\nget_console_errors(last_n=5, min_level=\"error\")",
+  "thoughts": "Design rationale for CP-NEW-teaching-mode-pose-replay:\n\n1) Pattern novelty: no canonical in A1-A20 exercises the teach-pendant / waypoint-capture / trajectory-replay triad. This canonical validates that start_teaching_mode \u2192 teach_robot_pose \u2192 record_waypoints \u2192 interpolate_trajectory \u2192 replay_trajectory chain works end-to-end.\n\n2) Waypoint geometry: Franka at origin on table (z=0.75). 6 waypoints trace a smooth pick-to-place arc:\n   home    \u2192 robot fully upright, all joints near 0\n   above_source \u2192 EE above source cube at [0.40, 0.20, 1.05]\n   pick    \u2192 EE lowered to grasp height [0.40, 0.20, 0.85]\n   lift    \u2192 EE raised [0.40, 0.20, 1.10]\n   place   \u2192 EE above drop zone [0.00, -0.45, 1.05]\n   drop    \u2192 EE lowered to release height [0.00, -0.45, 0.85]\n   All positions within Franka 0.85m reach envelope.\n\n3) teach_robot_pose captures the current joint config after teleporting EE to each target. In direct-eval context, EE positions are set via set_joint_targets to approximate the desired configuration; this is the standard sim teaching workflow without a real drag-target UI.\n\n4) record_waypoints(format='json') writes to workspace/trajectories/teach_demo.json. interpolate_trajectory(method='cubic') produces smooth dense trajectory (50 steps between pairs \u2192 300 steps total). replay_trajectory(speed=0.5) plays back at half speed for visual inspection.\n\n5) Physics: CPU dynamics, minimal scene. Ground plane + work table. No rigid-body parts (waypoint capture does not require them).\n\n6) get_console_errors(last_n=5) at the end: any IK failure or joint-limit violation surfaces here. Template treats 0 errors as pass criterion.\n\n7) motion_controller_preference: direct_joint. start_teaching_mode uses mode='drag_target' with RMPflow tracking internally, but the orchestration is joint-space waypoints, not cuRobo plan_pose. No cuRobo dependency.",
+  "code": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics scene: CPU dynamics \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Franka Panda robot \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# \u2500\u2500 Start simulation so physics and articulation settle \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=30)\n\n# \u2500\u2500 Activate teaching mode (drag_target with RMPflow EE tracking) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nstart_teaching_mode(\n    articulation_path=\"/World/Franka\",\n    mode=\"drag_target\",\n    robot_type=\"franka\",\n)\n\n# \u2500\u2500 Capture 6 waypoints along pick-to-place arc \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Teaching workflow: drive the robot to each target configuration with\n# set_joint_targets, step physics to settle, THEN teach_robot_pose snapshots\n# the current (different) joint config for each pose.\n# Franka Panda 7-DOF joint configs (radians) for each waypoint:\n#   home         \u2014 arm upright, all joints near 0\n#   above_source \u2014 EE above [0.40, 0.20, 1.05]\n#   pick         \u2014 EE lowered to [0.40, 0.20, 0.85]\n#   lift         \u2014 EE raised to [0.40, 0.20, 1.10]\n#   place        \u2014 EE over drop zone [0.00, -0.45, 1.05]\n#   drop         \u2014 EE lowered to [0.00, -0.45, 0.85]\n\n# Joint configs (7-DOF radians) for each waypoint\n_home_q         = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]\n_above_source_q = [0.45, -0.50, -0.20, -2.10, 0.10, 1.70, 1.10]\n_pick_q         = [0.45, -0.30, -0.20, -2.50, 0.10, 2.30, 1.10]\n_place_q        = [-0.30, -0.50, 0.10, -2.10, -0.10, 1.70, 0.40]\n_drop_q         = [-0.30, -0.30, 0.10, -2.50, -0.10, 2.30, 0.40]\n_joint_names    = [\"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n                  \"panda_joint5\", \"panda_joint6\", \"panda_joint7\"]\n\n_teach_sequence = [\n    (\"home\",         _home_q),\n    (\"above_source\", _above_source_q),\n    (\"pick\",         _pick_q),\n    (\"lift\",         _above_source_q),\n    (\"place\",        _place_q),\n    (\"drop\",         _drop_q),\n]\nfor _pose_name, _q in _teach_sequence:\n    for _jn, _pos in zip(_joint_names, _q):\n        set_joint_targets(articulation_path=\"/World/Franka\", joint_name=_jn, target_position=_pos)\n    sim_control(action=\"step\", step_count=30)\n    teach_robot_pose(robot_path=\"/World/Franka\", pose_name=_pose_name)\n\n# \u2500\u2500 Save sparse waypoints to JSON \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nrecord_waypoints(\n    articulation_path=\"/World/Franka\",\n    output_path=\"workspace/trajectories/teach_demo.json\",\n    format=\"json\",\n)\n\n# \u2500\u2500 Interpolate to smooth dense trajectory (cubic spline, 50 steps/segment) \u2500\u2500\n# waypoints must supply joint_positions (7-DOF radians) \u2014 pose_name is NOT\n# a recognised key in interpolate_trajectory.waypoints[].required.\ninterpolate_trajectory(\n    articulation_path=\"/World/Franka\",\n    waypoints=[\n        {\"joint_positions\": _home_q},\n        {\"joint_positions\": _above_source_q},\n        {\"joint_positions\": _pick_q},\n        {\"joint_positions\": _above_source_q},  # lift = same config as above_source\n        {\"joint_positions\": _place_q},\n        {\"joint_positions\": _drop_q},\n    ],\n    method=\"cubic\",\n    num_steps=50,\n    output_path=\"workspace/trajectories/teach_demo_dense.json\",\n    robot_type=\"franka\",\n)\n\n# \u2500\u2500 Replay dense trajectory at half speed \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nreplay_trajectory(\n    articulation_path=\"/World/Franka\",\n    trajectory_path=\"workspace/trajectories/teach_demo_dense.json\",\n    speed=0.5,\n)\n\n# \u2500\u2500 Verify: check for IK / joint-limit errors \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nget_console_errors(last_n=5, min_level=\"error\")",
   "failure_modes": [
-    "teach_robot_pose requires simulation playing — if sim is paused when called, joint snapshot returns zero-config. Ensure sim_control(action='play') precedes all teach_robot_pose calls.",
-    "interpolate_trajectory.waypoints[] must supply joint_positions (List[float]) — pose_name is not a valid key; the handler dereferences joint_positions directly and KeyErrors on unknown keys. Always pass explicit joint config vectors.",
-    "record_waypoints output_path directory must exist — create workspace/trajectories/ beforehand or the write will fail with FileNotFoundError.",
+    "teach_robot_pose requires simulation playing \u2014 if sim is paused when called, joint snapshot returns zero-config. Ensure sim_control(action='play') precedes all teach_robot_pose calls.",
+    "interpolate_trajectory.waypoints[] must supply joint_positions (List[float]) \u2014 pose_name is not a valid key; the handler dereferences joint_positions directly and KeyErrors on unknown keys. Always pass explicit joint config vectors.",
+    "record_waypoints output_path directory must exist \u2014 create workspace/trajectories/ beforehand or the write will fail with FileNotFoundError.",
     "replay_trajectory at speed=0.5 on a 300-step trajectory takes ~60 sim seconds; if the caller has a short timeout, raise speed to 1.0.",
-    "cubic interpolation near Franka wrist singularities (joints 4+6 near ±pi) can produce large joint swings between waypoints. Add an extra via-waypoint at the midpoint of the swing segment if large oscillations appear."
+    "cubic interpolation near Franka wrist singularities (joints 4+6 near \u00b1pi) can produce large joint swings between waypoints. Add an extra via-waypoint at the midpoint of the swing segment if large oscillations appear."
   ],
   "intent": {
     "pattern_hint": "other",
@@ -46,13 +46,19 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "ur10", "ur5e"],
+      "constraints": [
+        "franka_panda",
+        "ur10",
+        "ur5e"
+      ],
       "expected_count": 1,
       "required": true,
       "disambiguator": "any_6dof_arm"
     },
     "waypoints": {
-      "constraints": ["pose"],
+      "constraints": [
+        "pose"
+      ],
       "expected_count": 6,
       "required": true,
       "param_name": "n_waypoints",
@@ -63,19 +69,70 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka_panda",
-      "position": [0, 0, 0.75],
-      "orientation": [0.7071068, 0, 0, 0.7071068]
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
     },
     "waypoints": [
-      {"pose_name": "home",         "ee_target": [0.30, 0.00, 1.10]},
-      {"pose_name": "above_source", "ee_target": [0.40, 0.20, 1.05]},
-      {"pose_name": "pick",         "ee_target": [0.40, 0.20, 0.85]},
-      {"pose_name": "lift",         "ee_target": [0.40, 0.20, 1.10]},
-      {"pose_name": "place",        "ee_target": [0.00,-0.45, 1.05]},
-      {"pose_name": "drop",         "ee_target": [0.00,-0.45, 0.85]}
+      {
+        "pose_name": "home",
+        "ee_target": [
+          0.3,
+          0.0,
+          1.1
+        ]
+      },
+      {
+        "pose_name": "above_source",
+        "ee_target": [
+          0.4,
+          0.2,
+          1.05
+        ]
+      },
+      {
+        "pose_name": "pick",
+        "ee_target": [
+          0.4,
+          0.2,
+          0.85
+        ]
+      },
+      {
+        "pose_name": "lift",
+        "ee_target": [
+          0.4,
+          0.2,
+          1.1
+        ]
+      },
+      {
+        "pose_name": "place",
+        "ee_target": [
+          0.0,
+          -0.45,
+          1.05
+        ]
+      },
+      {
+        "pose_name": "drop",
+        "ee_target": [
+          0.0,
+          -0.45,
+          0.85
+        ]
+      }
     ]
   },
-  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=30)\nstart_teaching_mode(\n    articulation_path=\"{{primary_robot.path}}\",\n    mode=\"drag_target\",\n    robot_type=\"franka\",\n)\n_waypoint_configs = [\n    (\"home\",         [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]),\n    (\"above_source\", [0.45, -0.50, -0.20, -2.10, 0.10, 1.70, 1.10]),\n    (\"pick\",         [0.45, -0.30, -0.20, -2.50, 0.10, 2.30, 1.10]),\n    (\"lift\",         [0.45, -0.50, -0.20, -2.10, 0.10, 1.70, 1.10]),\n    (\"place\",        [-0.30, -0.50, 0.10, -2.10, -0.10, 1.70, 0.40]),\n    (\"drop\",         [-0.30, -0.30, 0.10, -2.50, -0.10, 2.30, 0.40]),\n]\n_joint_names = [\"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n               \"panda_joint5\", \"panda_joint6\", \"panda_joint7\"]\nfor _name, _q in _waypoint_configs:\n    for _jn, _pos in zip(_joint_names, _q):\n        set_joint_targets(articulation_path=\"{{primary_robot.path}}\", joint_name=_jn, target_position=_pos)\n    sim_control(action=\"step\", step_count=30)\n    teach_robot_pose(robot_path=\"{{primary_robot.path}}\", pose_name=_name)\nrecord_waypoints(\n    articulation_path=\"{{primary_robot.path}}\",\n    output_path=\"workspace/trajectories/teach_demo.json\",\n    format=\"json\",\n)\ninterpolate_trajectory(\n    articulation_path=\"{{primary_robot.path}}\",\n    waypoints=[{\"joint_positions\": _q} for _name, _q in _waypoint_configs],\n    method=\"cubic\",\n    num_steps=50,\n    output_path=\"workspace/trajectories/teach_demo_dense.json\",\n    robot_type=\"franka\",\n)\nreplay_trajectory(\n    articulation_path=\"{{primary_robot.path}}\",\n    trajectory_path=\"workspace/trajectories/teach_demo_dense.json\",\n    speed=0.5,\n)\nget_console_errors(last_n=5, min_level=\"error\")",
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=30)\nstart_teaching_mode(\n    articulation_path={{primary_robot.path}},\n    mode=\"drag_target\",\n    robot_type=\"franka\",\n)\n_waypoint_configs = [\n    (\"home\",         [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]),\n    (\"above_source\", [0.45, -0.50, -0.20, -2.10, 0.10, 1.70, 1.10]),\n    (\"pick\",         [0.45, -0.30, -0.20, -2.50, 0.10, 2.30, 1.10]),\n    (\"lift\",         [0.45, -0.50, -0.20, -2.10, 0.10, 1.70, 1.10]),\n    (\"place\",        [-0.30, -0.50, 0.10, -2.10, -0.10, 1.70, 0.40]),\n    (\"drop\",         [-0.30, -0.30, 0.10, -2.50, -0.10, 2.30, 0.40]),\n]\n_joint_names = [\"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n               \"panda_joint5\", \"panda_joint6\", \"panda_joint7\"]\nfor _name, _q in _waypoint_configs:\n    for _jn, _pos in zip(_joint_names, _q):\n        set_joint_targets(articulation_path={{primary_robot.path}}, joint_name=_jn, target_position=_pos)\n    sim_control(action=\"step\", step_count=30)\n    teach_robot_pose(robot_path={{primary_robot.path}}, pose_name=_name)\nrecord_waypoints(\n    articulation_path={{primary_robot.path}},\n    output_path=\"workspace/trajectories/teach_demo.json\",\n    format=\"json\",\n)\ninterpolate_trajectory(\n    articulation_path={{primary_robot.path}},\n    waypoints=[{\"joint_positions\": _q} for _name, _q in _waypoint_configs],\n    method=\"cubic\",\n    num_steps=50,\n    output_path=\"workspace/trajectories/teach_demo_dense.json\",\n    robot_type=\"franka\",\n)\nreplay_trajectory(\n    articulation_path={{primary_robot.path}},\n    trajectory_path=\"workspace/trajectories/teach_demo_dense.json\",\n    speed=0.5,\n)\nget_console_errors(last_n=5, min_level=\"error\")",
   "settle_state": {},
   "verify_args": {
     "stages": [
@@ -97,13 +154,21 @@
   },
   "diagnose_args": {
     "robot_path": "/World/Franka",
-    "obstacles": ["/World/Table"],
-    "robot_base": [0.0, 0.0, 0.75]
+    "obstacles": [
+      "/World/Table"
+    ],
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
   },
   "motion_controllers": {
     "verified": [],
-    "untested": ["direct_joint"],
+    "untested": [
+      "direct_joint"
+    ],
     "failed": {}
   },
-  "verified_status": "form-gate-schema ✓ (R-A30-fix); function-gate ⏳"
+  "verified_status": "form-gate-schema \u2713 (R-A30-fix); function-gate \u23f3"
 }

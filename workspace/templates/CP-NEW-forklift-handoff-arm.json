@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-forklift-handoff-arm",
-  "goal": "Forklift→arm depalletize handoff: a wheeled-robot proxy ('Forklift') with a raised dummy platform Xform navigates to a handoff zone carrying a Pallet slab loaded with 3 small workpiece cubes. The forklift signals 'ready' via handoff:state='placed' on a HandoffMarker prim. A stationary Franka arm depalletizes each item from the pallet → outfeed conveyor (adjacent to the marker). After all 3 items have moved, handoff:state is toggled to 'complete' and the forklift navigates 2.0 m back to its depot pose. Realizes industrial-forklift-handoff-arm-001 (Phase 8 industrial-asset). Forklift Nucleus asset is unavailable; this canonical uses the wheeled-robot+raised-Xform proxy specified by A90.",
+  "goal": "Forklift\u2192arm depalletize handoff: a wheeled-robot proxy ('Forklift') with a raised dummy platform Xform navigates to a handoff zone carrying a Pallet slab loaded with 3 small workpiece cubes. The forklift signals 'ready' via handoff:state='placed' on a HandoffMarker prim. A stationary Franka arm depalletizes each item from the pallet \u2192 outfeed conveyor (adjacent to the marker). After all 3 items have moved, handoff:state is toggled to 'complete' and the forklift navigates 2.0 m back to its depot pose. Realizes industrial-forklift-handoff-arm-001 (Phase 8 industrial-asset). Forklift Nucleus asset is unavailable; this canonical uses the wheeled-robot+raised-Xform proxy specified by A90.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -18,36 +18,68 @@
   "thoughts": [
     "Pattern hint=pick_place. Success criterion is workpiece-delivered-to-final-destination (the outfeed conveyor); the forklift navigate + handoff handshake are structural features stacked on top of the depalletize base pattern. This is the same pattern_hint as A42 vision-depalletize, but the geometric source is a mobile pallet on a forklift proxy rather than a fixed pallet.",
     "Differentiation from A67 (CP-NEW-cart-handoff-amr): A67 is arm-RELEASES-cart-onto-AMR-that-departs (pattern_hint=navigate; success = AMR at goal pose). A90 is forklift-ARRIVES-WITH-PALLET-and-arm-DEPALLETIZES (pattern_hint=pick_place; success = items on outfeed). Distinct topology: A67 single cart transfer + AMR-driven success; A90 multi-item depalletize + arm-driven success.",
-    "Differentiation from A42 (CP-NEW-vision-depalletize): A42 has a STATIC pallet at fixed [0, 0.50, 0.775], no mobile robot, no handoff signal, vision-guided picks (vision_detect_objects + compute_stack_placement). A90 has a MOBILE pallet riding on a forklift proxy that navigated in, handoff handshake gates the depalletize, no vision tools — pose-known picks. Tool overlap with A42 is minimal: A90 omits vision/grid tools; A42 omits navigate/handoff.",
-    "Forklift proxy construction: create_wheeled_robot at /World/Forklift (drive=differential, wheel_radius=0.05, wheel_base=0.20 — larger than a Jetbot to read as a forklift footprint). A child Xform '/World/Forklift/Platform' represents the raised forks at platform_z ≈ 0.45 m above the floor (typical forklift fork height with a pallet on it). The Pallet cube is co-placed above the platform Xform; pallet-rides-on-forklift is approximated by static co-placement (same caveat as A67), since differential-drive proxies don't expose a real forks-prismatic-joint. failure_modes documents this.",
-    "Pallet + items layout: Pallet at [1.0, 0, 0.475] scale [0.30, 0.20, 0.025] — pallet half-extents 0.30×0.20×0.025 m, top surface at z=0.500. Three 0.08 m cube workpieces ride on the pallet top at z=0.540 (pallet_top + cube_half=0.04), arranged in a 1×3 row at x ∈ {-0.10, 0, +0.10} relative to the pallet center, all at pallet_y=0. After forklift arrives at handoff pose, the pallet world position is [1.0, 0, 0.475] (same depot pose used at build time — the forklift starts already AT the handoff zone in this canonical to keep the canonical short; the navigate-back-to-depot at the end demonstrates the navigate axis).",
-    "Franka arm placement: robot_wizard franka at [0, 0, 0.75] (on a 0.75 m table). Pallet at [1.0, 0, 0.475] means horizontal distance from Franka base = 1.0 m. Franka reach is 0.85 m, so the FAR corner of the pallet (x=1.30, y=±0.10) is OUTSIDE reach — this is the 'arm reach insufficient for far-corner items' failure mode the task asks to document. The 3-item row sits at x ∈ {0.90, 1.00, 1.10} from the robot base, all within reach for the items themselves. Far-corner reach concern is documented but NOT a build-time failure.",
-    "Outfeed conveyor: a static cube fixture at [0, -0.50, 0.78] scale [0.40, 0.30, 0.03] — within easy Franka reach (0.50 m from base). Drop-pose is [0, -0.50, 0.85] (above conveyor surface). No actual surface velocity is applied — the task is depalletize-to-static-outfeed, the 'conveyor' is a fixture for the drop zone semantics; a real implementation would apply create_conveyor here, but the canonical keeps it locally-runnable with a plain cube.",
-    "Handoff handshake: setup_robot_handoff_signal('/World/HandoffMarker') with robot_a=/World/Forklift, robot_b=/World/Franka. State machine documented in code: 'idle' → 'placed' (forklift signals 'pallet ready') → 'complete' (arm signals 'all items moved'). The final navigate_to fires after state='complete' to send the forklift back to depot at [-1.0, 0]. The handoff toggle inside the canonical is unconditional (no polling); a real controller would gate the depalletize loop on state=='placed'. Documented in failure_modes.",
-    "setup_pick_place_controller: target_source='native' (mature path), source_paths is the 3-item list in fixed pick order (near→far: item at x=0.90 first, x=1.00, x=1.10 last), destination_path=/World/Outfeed. drop_targets dict maps each source to the same drop pose [0, -0.50, 0.85]. No sensor_path (free-run). End-effector offset uses the verified [0, 0.005, 0] default from native mode.",
-    "Function-gate criterion: after 240 s, all 3 workpieces are within xy_tolerance=0.18 m of /World/Outfeed center [0, -0.50, *]. Generous tolerance because outfeed surface is 0.40×0.30 m and 3 items may stack loosely; lower tolerance would force tight stacking semantics that this canonical does not enforce."
+    "Differentiation from A42 (CP-NEW-vision-depalletize): A42 has a STATIC pallet at fixed [0, 0.50, 0.775], no mobile robot, no handoff signal, vision-guided picks (vision_detect_objects + compute_stack_placement). A90 has a MOBILE pallet riding on a forklift proxy that navigated in, handoff handshake gates the depalletize, no vision tools \u2014 pose-known picks. Tool overlap with A42 is minimal: A90 omits vision/grid tools; A42 omits navigate/handoff.",
+    "Forklift proxy construction: create_wheeled_robot at /World/Forklift (drive=differential, wheel_radius=0.05, wheel_base=0.20 \u2014 larger than a Jetbot to read as a forklift footprint). A child Xform '/World/Forklift/Platform' represents the raised forks at platform_z \u2248 0.45 m above the floor (typical forklift fork height with a pallet on it). The Pallet cube is co-placed above the platform Xform; pallet-rides-on-forklift is approximated by static co-placement (same caveat as A67), since differential-drive proxies don't expose a real forks-prismatic-joint. failure_modes documents this.",
+    "Pallet + items layout: Pallet at [1.0, 0, 0.475] scale [0.30, 0.20, 0.025] \u2014 pallet half-extents 0.30\u00d70.20\u00d70.025 m, top surface at z=0.500. Three 0.08 m cube workpieces ride on the pallet top at z=0.540 (pallet_top + cube_half=0.04), arranged in a 1\u00d73 row at x \u2208 {-0.10, 0, +0.10} relative to the pallet center, all at pallet_y=0. After forklift arrives at handoff pose, the pallet world position is [1.0, 0, 0.475] (same depot pose used at build time \u2014 the forklift starts already AT the handoff zone in this canonical to keep the canonical short; the navigate-back-to-depot at the end demonstrates the navigate axis).",
+    "Franka arm placement: robot_wizard franka at [0, 0, 0.75] (on a 0.75 m table). Pallet at [1.0, 0, 0.475] means horizontal distance from Franka base = 1.0 m. Franka reach is 0.85 m, so the FAR corner of the pallet (x=1.30, y=\u00b10.10) is OUTSIDE reach \u2014 this is the 'arm reach insufficient for far-corner items' failure mode the task asks to document. The 3-item row sits at x \u2208 {0.90, 1.00, 1.10} from the robot base, all within reach for the items themselves. Far-corner reach concern is documented but NOT a build-time failure.",
+    "Outfeed conveyor: a static cube fixture at [0, -0.50, 0.78] scale [0.40, 0.30, 0.03] \u2014 within easy Franka reach (0.50 m from base). Drop-pose is [0, -0.50, 0.85] (above conveyor surface). No actual surface velocity is applied \u2014 the task is depalletize-to-static-outfeed, the 'conveyor' is a fixture for the drop zone semantics; a real implementation would apply create_conveyor here, but the canonical keeps it locally-runnable with a plain cube.",
+    "Handoff handshake: setup_robot_handoff_signal('/World/HandoffMarker') with robot_a=/World/Forklift, robot_b=/World/Franka. State machine documented in code: 'idle' \u2192 'placed' (forklift signals 'pallet ready') \u2192 'complete' (arm signals 'all items moved'). The final navigate_to fires after state='complete' to send the forklift back to depot at [-1.0, 0]. The handoff toggle inside the canonical is unconditional (no polling); a real controller would gate the depalletize loop on state=='placed'. Documented in failure_modes.",
+    "setup_pick_place_controller: target_source='native' (mature path), source_paths is the 3-item list in fixed pick order (near\u2192far: item at x=0.90 first, x=1.00, x=1.10 last), destination_path=/World/Outfeed. drop_targets dict maps each source to the same drop pose [0, -0.50, 0.85]. No sensor_path (free-run). End-effector offset uses the verified [0, 0.005, 0] default from native mode.",
+    "Function-gate criterion: after 240 s, all 3 workpieces are within xy_tolerance=0.18 m of /World/Outfeed center [0, -0.50, *]. Generous tolerance because outfeed surface is 0.40\u00d70.30 m and 3 items may stack loosely; lower tolerance would force tight stacking semantics that this canonical does not enforce."
   ],
-  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm on a 0.75 m table (stationary depalletizer) ───────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Forklift proxy — wheeled robot with a raised platform Xform ──────────────\n# Nucleus forklift asset is unavailable (A90 brief: \"locally-runnable proxy\").\n# Differential-drive footprint with larger wheel base reads as forklift-class.\ncreate_wheeled_robot(\n    robot_path=\"/World/Forklift\",\n    drive_type=\"differential\",\n    wheel_radius=0.05,\n    wheel_base=0.20,\n)\nset_attribute(prim_path=\"/World/Forklift\", attr_name=\"xformOp:translate\", value=[1.0, 0, 0.05])\n\nsetup_nav_robot(\n    robot_path=\"/World/Forklift\",\n    nav_topic=\"/forklift/cmd_vel\",\n    odom_topic=\"/forklift/odom\",\n)\n\n# Raised dummy platform Xform — represents the forks at typical pallet-carry height.\ncreate_prim(prim_path=\"/World/Forklift/Platform\", prim_type=\"Xform\", position=[0, 0, 0.45])\n\n# ── Pallet slab — co-placed above the forklift platform ──────────────────────\n# Pallet top z = 0.475 + 0.025 = 0.500. Static co-placement (no FixedJoint) —\n# differential-drive proxy has no real fork joint; pallet rides by friction.\ncreate_prim(\n    prim_path=\"/World/Pallet\",\n    prim_type=\"Cube\",\n    position=[1.0, 0, 0.475],\n    scale=[0.30, 0.20, 0.025],\n)\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── 3 workpiece cubes (0.08 m) in a single row on the pallet top ─────────────\n# Cube centre z = 0.500 + 0.04 = 0.540. Row offsets in pallet-local x: -0.10, 0, +0.10.\n# World x = 1.0 + offset → {0.90, 1.00, 1.10}.\n# Far item (x=1.10) is at horizontal distance 1.10 m from Franka base — outside\n# Franka 0.85 m reach if not accounting for table height. Documented in failure_modes.\ncreate_prim(prim_path=\"/World/Item_1\", prim_type=\"Cube\", position=[0.90, 0, 0.540], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Item_1\", schema_name=api)\n\ncreate_prim(prim_path=\"/World/Item_2\", prim_type=\"Cube\", position=[1.00, 0, 0.540], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Item_2\", schema_name=api)\n\ncreate_prim(prim_path=\"/World/Item_3\", prim_type=\"Cube\", position=[1.10, 0, 0.540], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Item_3\", schema_name=api)\n\n# ── Outfeed conveyor (static cube acts as drop fixture) ──────────────────────\ncreate_prim(\n    prim_path=\"/World/Outfeed\",\n    prim_type=\"Cube\",\n    position=[0, -0.50, 0.78],\n    scale=[0.40, 0.30, 0.03],\n)\napply_api_schema(prim_path=\"/World/Outfeed\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Depot pose marker (where forklift returns after handoff) ─────────────────\ncreate_prim(\n    prim_path=\"/World/Depot\",\n    prim_type=\"Cube\",\n    position=[-1.0, 0, 0.025],\n    scale=[0.30, 0.30, 0.05],\n)\n\n# ── Handoff signal — gates the depalletize loop and the forklift departure ──\nsetup_robot_handoff_signal(\n    handoff_path=\"/World/HandoffMarker\",\n    position=[0.6, 0, 0.55],\n    robot_a=\"/World/Forklift\",\n    robot_b=\"/World/Franka\",\n)\n\n# Forklift is at the handoff zone; signal: pallet is ready for depalletize.\nset_attribute(prim_path=\"/World/HandoffMarker\", attr_name=\"handoff:state\", value=\"placed\")\n\n# Pre-check before scheduling the depalletize\nprim_exists(prim_path=\"/World/Forklift\")\nget_world_transform(prim_path=\"/World/Pallet\")\n\n# ── Franka depalletize: 3 items → outfeed (near→far order) ──────────────────\n# native target_source. drop_targets uses one drop pose per item (same point).\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"native\",\n    source_paths=[\"/World/Item_1\", \"/World/Item_2\", \"/World/Item_3\"],\n    destination_path=\"/World/Outfeed\",\n    drop_targets={\n        \"/World/Item_1\": [0, -0.50, 0.85],\n        \"/World/Item_2\": [0, -0.50, 0.85],\n        \"/World/Item_3\": [0, -0.50, 0.85],\n    },\n    end_effector_offset=[0, 0.005, 0],\n)\n\n# Arm signals completion; forklift departs.\nset_attribute(prim_path=\"/World/HandoffMarker\", attr_name=\"handoff:state\", value=\"complete\")\n\nnavigate_to(\n    robot_path=\"/World/Forklift\",\n    target_position=[-1.0, 0.0],\n    planner=\"direct\",\n)",
+  "code": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Franka arm on a 0.75 m table (stationary depalletizer) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# \u2500\u2500 Forklift proxy \u2014 wheeled robot with a raised platform Xform \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Nucleus forklift asset is unavailable (A90 brief: \"locally-runnable proxy\").\n# Differential-drive footprint with larger wheel base reads as forklift-class.\ncreate_prim(prim_path=\"/World/Forklift\", prim_type=\"Xform\")\napply_api_schema(prim_path=\"/World/Forklift\", schema_name=\"PhysicsArticulationRootAPI\")\ncreate_wheeled_robot(\n    robot_path=\"/World/Forklift\",\n    drive_type=\"differential\",\n    wheel_radius=0.05,\n    wheel_base=0.20,\n)\nset_attribute(prim_path=\"/World/Forklift\", attr_name=\"xformOp:translate\", value=[1.0, 0, 0.05])\n\nsetup_nav_robot(\n    robot_path=\"/World/Forklift\",\n    nav_topic=\"/forklift/cmd_vel\",\n    odom_topic=\"/forklift/odom\",\n)\n\n# Raised dummy platform Xform \u2014 represents the forks at typical pallet-carry height.\ncreate_prim(prim_path=\"/World/Forklift/Platform\", prim_type=\"Xform\", position=[0, 0, 0.45])\n\n# \u2500\u2500 Pallet slab \u2014 co-placed above the forklift platform \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Pallet top z = 0.475 + 0.025 = 0.500. Static co-placement (no FixedJoint) \u2014\n# differential-drive proxy has no real fork joint; pallet rides by friction.\ncreate_prim(\n    prim_path=\"/World/Pallet\",\n    prim_type=\"Cube\",\n    position=[1.0, 0, 0.475],\n    scale=[0.30, 0.20, 0.025],\n)\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 3 workpiece cubes (0.08 m) in a single row on the pallet top \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Cube centre z = 0.500 + 0.04 = 0.540. Row offsets in pallet-local x: -0.10, 0, +0.10.\n# World x = 1.0 + offset \u2192 {0.90, 1.00, 1.10}.\n# Far item (x=1.10) is at horizontal distance 1.10 m from Franka base \u2014 outside\n# Franka 0.85 m reach if not accounting for table height. Documented in failure_modes.\ncreate_prim(prim_path=\"/World/Item_1\", prim_type=\"Cube\", position=[0.90, 0, 0.540], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Item_1\", schema_name=api)\n\ncreate_prim(prim_path=\"/World/Item_2\", prim_type=\"Cube\", position=[1.00, 0, 0.540], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Item_2\", schema_name=api)\n\ncreate_prim(prim_path=\"/World/Item_3\", prim_type=\"Cube\", position=[1.10, 0, 0.540], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Item_3\", schema_name=api)\n\n# \u2500\u2500 Outfeed conveyor (static cube acts as drop fixture) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(\n    prim_path=\"/World/Outfeed\",\n    prim_type=\"Cube\",\n    position=[0, -0.50, 0.78],\n    scale=[0.40, 0.30, 0.03],\n)\napply_api_schema(prim_path=\"/World/Outfeed\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Depot pose marker (where forklift returns after handoff) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(\n    prim_path=\"/World/Depot\",\n    prim_type=\"Cube\",\n    position=[-1.0, 0, 0.025],\n    scale=[0.30, 0.30, 0.05],\n)\n\n# \u2500\u2500 Handoff signal \u2014 gates the depalletize loop and the forklift departure \u2500\u2500\nsetup_robot_handoff_signal(\n    handoff_path=\"/World/HandoffMarker\",\n    position=[0.6, 0, 0.55],\n    robot_a=\"/World/Forklift\",\n    robot_b=\"/World/Franka\",\n)\n\n# Forklift is at the handoff zone; signal: pallet is ready for depalletize.\ncreate_prim(prim_path=\"/World/HandoffMarker\", prim_type=\"Xform\")\nset_attribute(prim_path=\"/World/HandoffMarker\", attr_name=\"handoff:state\", value=\"placed\")\n\n# Pre-check before scheduling the depalletize\nprim_exists(prim_path=\"/World/Forklift\")\nget_world_transform(prim_path=\"/World/Pallet\")\n\n# \u2500\u2500 Franka depalletize: 3 items \u2192 outfeed (near\u2192far order) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# native target_source. drop_targets uses one drop pose per item (same point).\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"native\",\n    source_paths=[\"/World/Item_1\", \"/World/Item_2\", \"/World/Item_3\"],\n    destination_path=\"/World/Outfeed\",\n    drop_targets={\n        \"/World/Item_1\": [0, -0.50, 0.85],\n        \"/World/Item_2\": [0, -0.50, 0.85],\n        \"/World/Item_3\": [0, -0.50, 0.85],\n    },\n    end_effector_offset=[0, 0.005, 0],\n)\n\n# Arm signals completion; forklift departs.\nset_attribute(prim_path=\"/World/HandoffMarker\", attr_name=\"handoff:state\", value=\"complete\")\n\nnavigate_to(\n    robot_path=\"/World/Forklift\",\n    target_position=[-1.0, 0.0],\n    planner=\"direct\",\n)",
   "settle_state": {
     "forklift_start": {
-      "/World/Forklift": [1.0, 0, 0.05]
+      "/World/Forklift": [
+        1.0,
+        0,
+        0.05
+      ]
     },
     "pallet": {
-      "/World/Pallet": [1.0, 0, 0.475]
+      "/World/Pallet": [
+        1.0,
+        0,
+        0.475
+      ]
     },
     "items": {
-      "/World/Item_1": [0.90, 0, 0.540],
-      "/World/Item_2": [1.00, 0, 0.540],
-      "/World/Item_3": [1.10, 0, 0.540]
+      "/World/Item_1": [
+        0.9,
+        0,
+        0.54
+      ],
+      "/World/Item_2": [
+        1.0,
+        0,
+        0.54
+      ],
+      "/World/Item_3": [
+        1.1,
+        0,
+        0.54
+      ]
     },
     "outfeed": {
-      "/World/Outfeed": [0, -0.50, 0.78]
+      "/World/Outfeed": [
+        0,
+        -0.5,
+        0.78
+      ]
     },
     "handoff_marker": {
-      "/World/HandoffMarker": [0.6, 0, 0.55]
+      "/World/HandoffMarker": [
+        0.6,
+        0,
+        0.55
+      ]
     },
     "depot": {
-      "/World/Depot": [-1.0, 0, 0.025]
+      "/World/Depot": [
+        -1.0,
+        0,
+        0.025
+      ]
     }
   },
   "verify_args": {
@@ -77,8 +109,16 @@
   },
   "diagnose_args": {
     "robot_path": "/World/Franka",
-    "robot_base": [0.0, 0.0, 0.75],
-    "obstacles": ["/World/Pallet", "/World/Forklift", "/World/Outfeed"],
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "obstacles": [
+      "/World/Pallet",
+      "/World/Forklift",
+      "/World/Outfeed"
+    ],
     "handoff_path": "/World/HandoffMarker",
     "forklift_path": "/World/Forklift",
     "depot_path": "/World/Depot"
@@ -86,15 +126,15 @@
   "extends": "industrial-forklift-handoff-arm-001",
   "extension_notes": "First canonical to combine a wheeled-robot forklift proxy + setup_robot_handoff_signal + arm depalletize in one scene. Nucleus forklift asset is unavailable (blocker `nucleus_only_asset` per docs/research/2026-05-16-A55-canonical.md). A90 brief explicitly authorizes the wheeled-robot+platform-Xform proxy. Distinct from A67 (cart-handoff-amr: pattern_hint=navigate, AMR-driven success) and A42 (vision-depalletize: static pallet, no mobile robot, vision tools).",
   "failure_modes": [
-    "Pallet rides on forklift via static co-placement, not a FixedJoint — the differential-drive wheeled-robot proxy exposes no forks-prismatic-joint, so the pallet is co-placed above the raised /World/Forklift/Platform Xform and stays put by friction. If the forklift accelerates sharply (rare in this canonical, which only navigates once at the end), the pallet may slide. Mitigation: a create_articulated_joint FixedJoint between /World/Pallet and /World/Forklift after handoff:state='placed' would make this robust. Documented but not applied to keep the canonical short.",
-    "Far-corner items on the pallet are outside Franka reach — /World/Item_3 at x=1.10 is at horizontal distance 1.10 m from the Franka base, which exceeds the 0.85 m nominal reach. With the table at z=0.75 and items at z=0.540 (below the base), the planar reach for this z is even tighter. native target_source may reject the IK for Item_3 at build time. Mitigation: move the pallet closer (pallet x=0.85 instead of 1.0) OR use a longer-reach arm (UR10, reach 1.30 m). Documented but accepted at current geometry.",
-    "Pallet height variance breaks fixed pick-z — the canonical assumes pallet_top=0.500 (pallet z=0.475 + half_extent=0.025). If the pallet is replaced with a different size (e.g. EUR-pallet 0.144 m thick) the items sit at a different z and the native pick fails. A real implementation would call get_bounding_box('/World/Pallet') and compute item z dynamically. Mitigation: parameterise pallet_thickness in role_defaults; documented.",
-    "Handoff signal race — forklift could depart before the arm has picked the last item if the navigate_to fires too early. In this canonical the navigate_to is sequenced AFTER setup_pick_place_controller registers the cycle, but setup_pick_place_controller is async (returns immediately while the controller runs over many physics ticks). The set_attribute('complete') and navigate_to fire BEFORE the last item lands on the outfeed. A real controller would poll item-on-outfeed state and only then issue 'complete'. Documented as the 'race' failure mode A90 brief asks to flag.",
-    "Forklift platform sag during transit — N/A in this canonical (forklift only navigates at the END, with pallet already empty), but a real forklift-with-load transit may sag if PhysX mass/damping defaults are wrong. Documented for future canonicals that add a navigate-IN phase.",
-    "Outfeed is a static cube, not a moving conveyor — A90 brief says 'outfeed conveyor' but the canonical uses a static cube fixture for the drop zone. A real implementation would call create_conveyor with surface_velocity to carry items downstream. Items stack at the same drop point in this canonical. Documented; create_conveyor is the upgrade path.",
-    "create_wheeled_robot at empty path — Forklift is created via create_wheeled_robot without a prior articulation reference. On Kit, the handler synthesizes a Jetbot-like primitive shape (not a forklift mesh). The canonical readme treats the shape as semantic-only (proxy for footprint), not visually accurate. Documented; the proper backing would be the warehouse_with_forklifts.usd Nucleus asset (Environments/...), which is the blocker `nucleus_only_asset` flagged in A55."
+    "Pallet rides on forklift via static co-placement, not a FixedJoint \u2014 the differential-drive wheeled-robot proxy exposes no forks-prismatic-joint, so the pallet is co-placed above the raised /World/Forklift/Platform Xform and stays put by friction. If the forklift accelerates sharply (rare in this canonical, which only navigates once at the end), the pallet may slide. Mitigation: a create_articulated_joint FixedJoint between /World/Pallet and /World/Forklift after handoff:state='placed' would make this robust. Documented but not applied to keep the canonical short.",
+    "Far-corner items on the pallet are outside Franka reach \u2014 /World/Item_3 at x=1.10 is at horizontal distance 1.10 m from the Franka base, which exceeds the 0.85 m nominal reach. With the table at z=0.75 and items at z=0.540 (below the base), the planar reach for this z is even tighter. native target_source may reject the IK for Item_3 at build time. Mitigation: move the pallet closer (pallet x=0.85 instead of 1.0) OR use a longer-reach arm (UR10, reach 1.30 m). Documented but accepted at current geometry.",
+    "Pallet height variance breaks fixed pick-z \u2014 the canonical assumes pallet_top=0.500 (pallet z=0.475 + half_extent=0.025). If the pallet is replaced with a different size (e.g. EUR-pallet 0.144 m thick) the items sit at a different z and the native pick fails. A real implementation would call get_bounding_box('/World/Pallet') and compute item z dynamically. Mitigation: parameterise pallet_thickness in role_defaults; documented.",
+    "Handoff signal race \u2014 forklift could depart before the arm has picked the last item if the navigate_to fires too early. In this canonical the navigate_to is sequenced AFTER setup_pick_place_controller registers the cycle, but setup_pick_place_controller is async (returns immediately while the controller runs over many physics ticks). The set_attribute('complete') and navigate_to fire BEFORE the last item lands on the outfeed. A real controller would poll item-on-outfeed state and only then issue 'complete'. Documented as the 'race' failure mode A90 brief asks to flag.",
+    "Forklift platform sag during transit \u2014 N/A in this canonical (forklift only navigates at the END, with pallet already empty), but a real forklift-with-load transit may sag if PhysX mass/damping defaults are wrong. Documented for future canonicals that add a navigate-IN phase.",
+    "Outfeed is a static cube, not a moving conveyor \u2014 A90 brief says 'outfeed conveyor' but the canonical uses a static cube fixture for the drop zone. A real implementation would call create_conveyor with surface_velocity to carry items downstream. Items stack at the same drop point in this canonical. Documented; create_conveyor is the upgrade path.",
+    "create_wheeled_robot at empty path \u2014 Forklift is created via create_wheeled_robot without a prior articulation reference. On Kit, the handler synthesizes a Jetbot-like primitive shape (not a forklift mesh). The canonical readme treats the shape as semantic-only (proxy for footprint), not visually accurate. Documented; the proper backing would be the warehouse_with_forklifts.usd Nucleus asset (Environments/...), which is the blocker `nucleus_only_asset` flagged in A55."
   ],
-  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳; phase8-industrial-asset; nucleus_only_asset-blocker-workaround=wheeled_robot_proxy",
+  "verified_status": "drafted-2026-05-16; form-gate-schema \u2713; function-gate \u23f3; phase8-industrial-asset; nucleus_only_asset-blocker-workaround=wheeled_robot_proxy",
   "motion_controllers": {
     "verified": [],
     "failed": {},
@@ -201,42 +241,118 @@
       "class": "wheeled_robot",
       "drive_type": "differential",
       "wheel_radius": 0.05,
-      "wheel_base": 0.20,
-      "start_position": [1.0, 0, 0.05],
-      "depot_position": [-1.0, 0.0],
+      "wheel_base": 0.2,
+      "start_position": [
+        1.0,
+        0,
+        0.05
+      ],
+      "depot_position": [
+        -1.0,
+        0.0
+      ],
       "platform_path": "/World/Forklift/Platform",
-      "platform_offset": [0, 0, 0.45]
+      "platform_offset": [
+        0,
+        0,
+        0.45
+      ]
     },
     "static_arm": {
       "path": "/World/Franka",
       "class": "franka",
-      "position": [0, 0, 0.75],
-      "orientation": [1, 0, 0, 0]
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        1,
+        0,
+        0,
+        0
+      ]
     },
     "pallet": {
       "path": "/World/Pallet",
-      "position": [1.0, 0, 0.475],
-      "scale": [0.30, 0.20, 0.025]
+      "position": [
+        1.0,
+        0,
+        0.475
+      ],
+      "scale": [
+        0.3,
+        0.2,
+        0.025
+      ]
     },
     "workpieces": [
-      {"path": "/World/Item_1", "position": [0.90, 0, 0.540], "size": 0.08},
-      {"path": "/World/Item_2", "position": [1.00, 0, 0.540], "size": 0.08},
-      {"path": "/World/Item_3", "position": [1.10, 0, 0.540], "size": 0.08}
+      {
+        "path": "/World/Item_1",
+        "position": [
+          0.9,
+          0,
+          0.54
+        ],
+        "size": 0.08
+      },
+      {
+        "path": "/World/Item_2",
+        "position": [
+          1.0,
+          0,
+          0.54
+        ],
+        "size": 0.08
+      },
+      {
+        "path": "/World/Item_3",
+        "position": [
+          1.1,
+          0,
+          0.54
+        ],
+        "size": 0.08
+      }
     ],
     "outfeed": {
       "path": "/World/Outfeed",
-      "position": [0, -0.50, 0.78],
-      "scale": [0.40, 0.30, 0.03],
-      "drop_pose": [0, -0.50, 0.85]
+      "position": [
+        0,
+        -0.5,
+        0.78
+      ],
+      "scale": [
+        0.4,
+        0.3,
+        0.03
+      ],
+      "drop_pose": [
+        0,
+        -0.5,
+        0.85
+      ]
     },
     "handoff_marker": {
       "path": "/World/HandoffMarker",
-      "position": [0.6, 0, 0.55]
+      "position": [
+        0.6,
+        0,
+        0.55
+      ]
     },
     "depot": {
       "path": "/World/Depot",
-      "position": [-1.0, 0, 0.025],
-      "scale": [0.30, 0.30, 0.05]
+      "position": [
+        -1.0,
+        0,
+        0.025
+      ],
+      "scale": [
+        0.3,
+        0.3,
+        0.05
+      ]
     }
   },
   "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{static_arm.class}},\n    dest_path={{static_arm.path}},\n    position={{static_arm.position}},\n    orientation={{static_arm.orientation}},\n)\n\ncreate_wheeled_robot(\n    robot_path={{forklift.path}},\n    drive_type={{forklift.drive_type}},\n    wheel_radius={{forklift.wheel_radius}},\n    wheel_base={{forklift.wheel_base}},\n)\nset_attribute(prim_path={{forklift.path}}, attr_name=\"xformOp:translate\", value={{forklift.start_position}})\n\nsetup_nav_robot(\n    robot_path={{forklift.path}},\n    nav_topic=\"/forklift/cmd_vel\",\n    odom_topic=\"/forklift/odom\",\n)\n\ncreate_prim(prim_path={{forklift.platform_path}}, prim_type=\"Xform\", position={{forklift.platform_offset}})\n\ncreate_prim(\n    prim_path={{pallet.path}},\n    prim_type=\"Cube\",\n    position={{pallet.position}},\n    scale={{pallet.scale}},\n)\napply_api_schema(prim_path={{pallet.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size={{workpieces[0].size}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size={{workpieces[1].size}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size={{workpieces[2].size}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\n\ncreate_prim(\n    prim_path={{outfeed.path}},\n    prim_type=\"Cube\",\n    position={{outfeed.position}},\n    scale={{outfeed.scale}},\n)\napply_api_schema(prim_path={{outfeed.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(\n    prim_path={{depot.path}},\n    prim_type=\"Cube\",\n    position={{depot.position}},\n    scale={{depot.scale}},\n)\n\nsetup_robot_handoff_signal(\n    handoff_path={{handoff_marker.path}},\n    position={{handoff_marker.position}},\n    robot_a={{forklift.path}},\n    robot_b={{static_arm.path}},\n)\n\nset_attribute(prim_path={{handoff_marker.path}}, attr_name=\"handoff:state\", value=\"placed\")\n\nprim_exists(prim_path={{forklift.path}})\nget_world_transform(prim_path={{pallet.path}})\n\nsetup_pick_place_controller(\n    robot_path={{static_arm.path}},\n    target_source=\"native\",\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}],\n    destination_path={{outfeed.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{outfeed.drop_pose}},\n        {{workpieces[1].path}}: {{outfeed.drop_pose}},\n        {{workpieces[2].path}}: {{outfeed.drop_pose}},\n    },\n    end_effector_offset=[0, 0.005, 0],\n)\n\nset_attribute(prim_path={{handoff_marker.path}}, attr_name=\"handoff:state\", value=\"complete\")\n\nnavigate_to(\n    robot_path={{forklift.path}},\n    target_position={{forklift.depot_position}},\n    planner=\"direct\",\n)"

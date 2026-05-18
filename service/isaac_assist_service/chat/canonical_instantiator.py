@@ -521,6 +521,83 @@ def _format_for_code(v: Any) -> str:
     return repr(v)
 
 
+def _strip_inner_quotes_within_string_literals(code: str) -> str:
+    """Walk *code* as Python source, treat anything inside an outer quote
+    (single- or double-quoted) as a string literal, and strip any nested
+    quote-of-the-opposite-style pair embedded inside that literal.
+
+    Required for the Round 8 path-concat substitution bug: a template like
+
+        ee_link="{{primary_robot.path}}/panda_hand"
+
+    after substitution becomes
+
+        ee_link="'/World/Franka'/panda_hand"
+
+    because ``_format_for_code`` always returns ``repr(s)`` (single-quoted).
+    The token-scanner approach is strictly more correct than a regex pass:
+    it understands which characters are inside vs. outside an outer string
+    literal, so dicts like ``{"red": '/World/RedBin', "blue": '/World/BlueBin'}``
+    are left untouched (the inner ``'/World/RedBin'`` lives between OUTER
+    literals, not inside one).
+
+    Backslash escapes are NOT honoured — canonicals don't use escaped quotes
+    inside template strings, and adding escape handling would only obscure
+    the intent. Triple-quoted strings are similarly not special-cased; they
+    don't appear in canonical templates.
+    """
+    if not code:
+        return code
+
+    out: list[str] = []
+    i = 0
+    n = len(code)
+    while i < n:
+        ch = code[i]
+        if ch == '"' or ch == "'":
+            outer = ch
+            inner = "'" if outer == '"' else '"'
+            # Find matching outer close on the same line (canonicals don't
+            # author multi-line string literals inside tool-call args).
+            j = i + 1
+            literal_chars: list[str] = []
+            while j < n and code[j] != outer and code[j] != "\n":
+                literal_chars.append(code[j])
+                j += 1
+            if j >= n or code[j] == "\n":
+                # No matching close on this line — emit as-is, advance one char.
+                out.append(ch)
+                i += 1
+                continue
+            # We have an outer literal from i..j (inclusive). Strip every
+            # matched pair of `inner` quotes inside literal_chars.
+            cleaned: list[str] = []
+            k = 0
+            while k < len(literal_chars):
+                c = literal_chars[k]
+                if c == inner:
+                    # look for the matching inner close
+                    m_ = k + 1
+                    while m_ < len(literal_chars) and literal_chars[m_] != inner:
+                        m_ += 1
+                    if m_ < len(literal_chars):
+                        # Inner pair found — emit the content between them
+                        # without the inner quotes.
+                        cleaned.extend(literal_chars[k + 1 : m_])
+                        k = m_ + 1
+                        continue
+                cleaned.append(c)
+                k += 1
+            out.append(outer)
+            out.extend(cleaned)
+            out.append(outer)
+            i = j + 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def substitute_role_placeholders(
     code_template: str,
     role_defaults: Dict[str, Any],
@@ -644,11 +721,19 @@ def substitute_role_placeholders(
     # "either robot_name or asset_path must be provided"). Templates can't
     # be retrofitted easily (the lint passes both shapes); the deterministic
     # fix is at the substitution layer.
-    _re_local = __import__("re")
-    # `"'foo'"` → `"foo"` and `'"foo"'` → `'foo'`. Inner quotes must be the
-    # opposite char so we don't accidentally rewrite legal `"\"x\""` escapes.
-    out = _re_local.sub(r'"\'([^\'"\n]*)\'"', r'"\1"', out)
-    out = _re_local.sub(r"'\"([^\"'\n]*)\"'", r"'\1'", out)
+    #
+    # Round 8 repair (2026-05-18): extend to handle CONCATENATED path
+    # placeholders such as `ee_link="{{primary_robot.path}}/panda_hand"`.
+    # After substitution this becomes `ee_link="'/World/Franka'/panda_hand"`
+    # — the inner-quoted token is no longer at both ends of the outer
+    # literal. The fix runs as a token scanner: walk through the substituted
+    # code, track when we are inside a string literal, and when a quoted
+    # value of the OPPOSITE quote style appears INSIDE such a literal,
+    # strip those inner quotes (since `_format_for_code` always wraps the
+    # substituted string token in quotes). A regex-only solution mis-fires
+    # on valid `destination_map={"red": '/World/RedBin', ...}` dicts where
+    # adjacent string-key/string-value pairs trick the pattern.
+    out = _strip_inner_quotes_within_string_literals(out)
     return out
 
 

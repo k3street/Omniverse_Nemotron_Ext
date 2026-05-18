@@ -7,10 +7,13 @@ live Isaac Sim scene data. All functions return structured dicts.
 from __future__ import annotations
 import logging
 import json
+import os
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
-KIT_RPC_BASE = "http://127.0.0.1:8001"
+# KIT_RPC_PORT env-var allows per-process targeting of a specific Kit instance
+# in a multi-Kit pool. Defaults to 8001 (single-Kit baseline).
+KIT_RPC_BASE = f"http://127.0.0.1:{os.environ.get('KIT_RPC_PORT', '8001')}"
 
 
 async def _get(path: str, params: Dict = None) -> Dict[str, Any]:

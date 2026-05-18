@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-ik-singularity-avoidance",
-  "goal": "Demonstrate IK singularity detection and constraint-aware replanning for a UR10 arm. Build a minimal scene: ground plane, UR10 mounted at origin. Define a 3-waypoint Cartesian path that deliberately passes through a wrist-singularity zone (arm nearly fully extended, wrist-joint angles near 0). For each waypoint: call check_singularity to obtain the condition number; if condition_number >= 100 (danger), call plan_trajectory with planner='lula_rrt' to replan around the singularity; if 50 <= condition_number < 100 (warning), call interpolate_trajectory with method='rmpflow' for smooth collision-aware blending; if < 50, drive joints directly via set_joint_targets. Confirm arm state after each move with get_joint_positions. Call check_physics_health at the end. Exercises check_singularity → conditional plan_trajectory / interpolate_trajectory → set_joint_targets pipeline — first library use of check_singularity.",
+  "goal": "Demonstrate IK singularity detection and constraint-aware replanning for a UR10 arm. Build a minimal scene: ground plane, UR10 mounted at origin. Define a 3-waypoint Cartesian path that deliberately passes through a wrist-singularity zone (arm nearly fully extended, wrist-joint angles near 0). For each waypoint: call check_singularity to obtain the condition number; if condition_number >= 100 (danger), call plan_trajectory with planner='lula_rrt' to replan around the singularity; if 50 <= condition_number < 100 (warning), call interpolate_trajectory with method='rmpflow' for smooth collision-aware blending; if < 50, drive joints directly via set_joint_targets. Confirm arm state after each move with get_joint_positions. Call check_physics_health at the end. Exercises check_singularity \u2192 conditional plan_trajectory / interpolate_trajectory \u2192 set_joint_targets pipeline \u2014 first library use of check_singularity.",
   "tools_used": [
     "create_prim",
     "apply_api_schema",
@@ -14,15 +14,27 @@
     "get_joint_positions",
     "check_physics_health"
   ],
-  "thoughts": "Design rationale for CP-NEW-ik-singularity-avoidance:\n\n1) Pattern gap: no existing canonical exercises check_singularity. First library use. Pattern is distinct from pick_place, sort, rl-train, assembly-constraint, and multi-robot canonicals.\n\n2) Robot choice: UR10 per backlog spec (industrial-ik-singularity-avoidance-001). UR10 wrist singularity occurs when joint_4 ≈ 0 and joints 5/6 become co-planar. We construct WP1 to target arm nearly fully extended horizontally.\n\n3) Three waypoints and expected singularity tier:\n   - WP0 [0.4, 0.1, 0.6]: nominal reach — condition_number < 50 — direct set_joint_targets.\n   - WP1 [0.7, 0.0, 0.35]: near-extended, wrist singularity — condition_number >= 100 — plan_trajectory(planner='lula_rrt') bypasses singular config.\n   - WP2 [0.3, -0.1, 0.6]: retracted exit, slightly near warning zone — condition_number 50-99 — interpolate_trajectory(method='rmpflow') for smooth avoidance.\n\n4) After plan_trajectory returns a joint-space path, the handler replays it automatically via the internal trajectory executor. set_joint_targets per-joint is used only for the direct WP0 move (joint_0 as representative step).\n\n5) interpolate_trajectory requires joint-space waypoints (joint_positions list, 6 DOF for UR10). WP2 joint-space target near home: [0.0, -1.0, 1.2, -0.2, -1.57, 0.0].\n\n6) simulate_args.cube_path is set to the UR10 root path (convention for arm-only canonicals with no separate object).\n\n7) verified_status: drafted — function gate requires live Kit + UR10 USD + cuRobo/Lula.",
-  "code": "# ── Ground plane and lighting ─────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=800.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, -0.05],\n    scale=[4.0, 4.0, 0.1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics scene (CPU broadphase for determinism) ────────────────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── UR10 from local asset library ────────────────────────────────────────────\nimport_robot(\n    file_path=\"UR10\",\n    format=\"asset_library\",\n    dest_path=\"/World/UR10\",\n)\n\n# ── Initialise articulation ───────────────────────────────────────────────────\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=5)\nsim_control(action=\"pause\")\n\n# ── WP0: safe pose — condition_number < 50 — direct joint move ───────────────\ncheck_singularity(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.4, 0.1, 0.6],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n)\n# condition_number < 50: drive base joint to approach position\nset_joint_targets(\n    articulation_path=\"/World/UR10\",\n    joint_name=\"shoulder_pan_joint\",\n    target_position=0.3,\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=60)\nsim_control(action=\"pause\")\nget_joint_positions(articulation=\"/World/UR10\")\n\n# ── WP1: near wrist singularity — condition_number >= 100 → lula_rrt replan ──\ncheck_singularity(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.7, 0.0, 0.35],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n)\n# condition_number >= 100: Lula RRT plans a joint path avoiding the singularity\nplan_trajectory(\n    articulation_path=\"/World/UR10\",\n    waypoints=[\n        {\"position\": [0.7, 0.0, 0.35], \"orientation\": [1.0, 0.0, 0.0, 0.0]}\n    ],\n    planner=\"lula_rrt\",\n    robot_type=\"ur10\",\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=120)\nsim_control(action=\"pause\")\nget_joint_positions(articulation=\"/World/UR10\")\n\n# ── WP2: near-warning exit — condition_number 50-99 → RMPflow interpolation ──\ncheck_singularity(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.3, -0.1, 0.6],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n)\n# condition_number in [50, 100): smooth RMPflow joint-space interpolation\n# UR10 6-DOF home-region joint positions in radians\ninterpolate_trajectory(\n    articulation_path=\"/World/UR10\",\n    waypoints=[\n        {\"joint_positions\": [0.0, -1.0, 1.2, -0.2, -1.57, 0.0]},\n        {\"joint_positions\": [0.3, -0.8, 1.0, -0.2, -1.57, 0.0]}\n    ],\n    method=\"rmpflow\",\n    num_steps=80,\n    robot_type=\"ur10\",\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=80)\nsim_control(action=\"pause\")\nget_joint_positions(articulation=\"/World/UR10\")\n\n# ── Physics health check ──────────────────────────────────────────────────────\ncheck_physics_health()",
-  "code_template": "# ── Ground plane and lighting ─────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=800.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, -0.05],\n    scale=[4.0, 4.0, 0.1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics scene ─────────────────────────────────────────────────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── UR10 from local asset library ────────────────────────────────────────────\nimport_robot(\n    file_path=\"{{robot.asset_name}}\",\n    format=\"asset_library\",\n    dest_path=\"{{robot.path}}\",\n)\n\n# ── Initialise articulation ───────────────────────────────────────────────────\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=5)\nsim_control(action=\"pause\")\n\n# ── WP0: safe pose — direct joint move ───────────────────────────────────────\ncheck_singularity(\n    articulation_path=\"{{robot.path}}\",\n    target_position={{wp0.position}},\n    target_orientation={{wp0.orientation}},\n)\nset_joint_targets(\n    articulation_path=\"{{robot.path}}\",\n    joint_name=\"{{robot.base_joint}}\",\n    target_position={{wp0.base_joint_rad}},\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=60)\nsim_control(action=\"pause\")\nget_joint_positions(articulation=\"{{robot.path}}\")\n\n# ── WP1: singularity zone — lula_rrt replan ──────────────────────────────────\ncheck_singularity(\n    articulation_path=\"{{robot.path}}\",\n    target_position={{wp1.position}},\n    target_orientation={{wp1.orientation}},\n)\nplan_trajectory(\n    articulation_path=\"{{robot.path}}\",\n    waypoints=[{\"position\": {{wp1.position}}, \"orientation\": {{wp1.orientation}}}],\n    planner=\"lula_rrt\",\n    robot_type=\"{{robot.name}}\",\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=120)\nsim_control(action=\"pause\")\nget_joint_positions(articulation=\"{{robot.path}}\")\n\n# ── WP2: near-warning exit — RMPflow interpolation ───────────────────────────\ncheck_singularity(\n    articulation_path=\"{{robot.path}}\",\n    target_position={{wp2.position}},\n    target_orientation={{wp2.orientation}},\n)\ninterpolate_trajectory(\n    articulation_path=\"{{robot.path}}\",\n    waypoints=[\n        {\"joint_positions\": {{wp2.joint_start}}},\n        {\"joint_positions\": {{wp2.joint_end}}}\n    ],\n    method=\"rmpflow\",\n    num_steps={{wp2.interp_steps}},\n    robot_type=\"{{robot.name}}\",\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count={{wp2.interp_steps}})\nsim_control(action=\"pause\")\nget_joint_positions(articulation=\"{{robot.path}}\")\n\n# ── Physics health check ──────────────────────────────────────────────────────\ncheck_physics_health()",
+  "thoughts": "Design rationale for CP-NEW-ik-singularity-avoidance:\n\n1) Pattern gap: no existing canonical exercises check_singularity. First library use. Pattern is distinct from pick_place, sort, rl-train, assembly-constraint, and multi-robot canonicals.\n\n2) Robot choice: UR10 per backlog spec (industrial-ik-singularity-avoidance-001). UR10 wrist singularity occurs when joint_4 \u2248 0 and joints 5/6 become co-planar. We construct WP1 to target arm nearly fully extended horizontally.\n\n3) Three waypoints and expected singularity tier:\n   - WP0 [0.4, 0.1, 0.6]: nominal reach \u2014 condition_number < 50 \u2014 direct set_joint_targets.\n   - WP1 [0.7, 0.0, 0.35]: near-extended, wrist singularity \u2014 condition_number >= 100 \u2014 plan_trajectory(planner='lula_rrt') bypasses singular config.\n   - WP2 [0.3, -0.1, 0.6]: retracted exit, slightly near warning zone \u2014 condition_number 50-99 \u2014 interpolate_trajectory(method='rmpflow') for smooth avoidance.\n\n4) After plan_trajectory returns a joint-space path, the handler replays it automatically via the internal trajectory executor. set_joint_targets per-joint is used only for the direct WP0 move (joint_0 as representative step).\n\n5) interpolate_trajectory requires joint-space waypoints (joint_positions list, 6 DOF for UR10). WP2 joint-space target near home: [0.0, -1.0, 1.2, -0.2, -1.57, 0.0].\n\n6) simulate_args.cube_path is set to the UR10 root path (convention for arm-only canonicals with no separate object).\n\n7) verified_status: drafted \u2014 function gate requires live Kit + UR10 USD + cuRobo/Lula.",
+  "code": "# \u2500\u2500 Ground plane and lighting \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=800.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, -0.05],\n    scale=[4.0, 4.0, 0.1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics scene (CPU broadphase for determinism) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# \u2500\u2500 UR10 from local asset library \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nimport_robot(\n    file_path=\"UR10\",\n    format=\"asset_library\",\n    dest_path=\"/World/UR10\",\n)\n\n# \u2500\u2500 Initialise articulation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=5)\nsim_control(action=\"pause\")\n\n# \u2500\u2500 WP0: safe pose \u2014 condition_number < 50 \u2014 direct joint move \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncheck_singularity(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.4, 0.1, 0.6],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n)\n# condition_number < 50: drive base joint to approach position\nset_joint_targets(\n    articulation_path=\"/World/UR10\",\n    joint_name=\"shoulder_pan_joint\",\n    target_position=0.3,\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=60)\nsim_control(action=\"pause\")\nget_joint_positions(articulation=\"/World/UR10\")\n\n# \u2500\u2500 WP1: near wrist singularity \u2014 condition_number >= 100 \u2192 lula_rrt replan \u2500\u2500\ncheck_singularity(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.7, 0.0, 0.35],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n)\n# condition_number >= 100: Lula RRT plans a joint path avoiding the singularity\nplan_trajectory(\n    articulation_path=\"/World/UR10\",\n    waypoints=[\n        {\"position\": [0.7, 0.0, 0.35], \"orientation\": [1.0, 0.0, 0.0, 0.0]}\n    ],\n    planner=\"lula_rrt\",\n    robot_type=\"ur10\",\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=120)\nsim_control(action=\"pause\")\nget_joint_positions(articulation=\"/World/UR10\")\n\n# \u2500\u2500 WP2: near-warning exit \u2014 condition_number 50-99 \u2192 RMPflow interpolation \u2500\u2500\ncheck_singularity(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.3, -0.1, 0.6],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n)\n# condition_number in [50, 100): smooth RMPflow joint-space interpolation\n# UR10 6-DOF home-region joint positions in radians\ninterpolate_trajectory(\n    articulation_path=\"/World/UR10\",\n    waypoints=[\n        {\"joint_positions\": [0.0, -1.0, 1.2, -0.2, -1.57, 0.0]},\n        {\"joint_positions\": [0.3, -0.8, 1.0, -0.2, -1.57, 0.0]}\n    ],\n    method=\"rmpflow\",\n    num_steps=80,\n    robot_type=\"ur10\",\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=80)\nsim_control(action=\"pause\")\nget_joint_positions(articulation=\"/World/UR10\")\n\n# \u2500\u2500 Physics health check \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncheck_physics_health()",
+  "code_template": "# \u2500\u2500 Ground plane and lighting \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=800.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0.0, 0.0, -0.05],\n    scale=[4.0, 4.0, 0.1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics scene \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# \u2500\u2500 UR10 from local asset library \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nimport_robot(\n    file_path={{robot.asset_name}},\n    format=\"asset_library\",\n    dest_path={{robot.path}},\n)\n\n# \u2500\u2500 Initialise articulation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=5)\nsim_control(action=\"pause\")\n\n# \u2500\u2500 WP0: safe pose \u2014 direct joint move \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncheck_singularity(\n    articulation_path={{robot.path}},\n    target_position={{wp0.position}},\n    target_orientation={{wp0.orientation}},\n)\nset_joint_targets(\n    articulation_path={{robot.path}},\n    joint_name={{robot.base_joint}},\n    target_position={{wp0.base_joint_rad}},\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=60)\nsim_control(action=\"pause\")\nget_joint_positions(articulation={{robot.path}})\n\n# \u2500\u2500 WP1: singularity zone \u2014 lula_rrt replan \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncheck_singularity(\n    articulation_path={{robot.path}},\n    target_position={{wp1.position}},\n    target_orientation={{wp1.orientation}},\n)\nplan_trajectory(\n    articulation_path={{robot.path}},\n    waypoints=[{\"position\": {{wp1.position}}, \"orientation\": {{wp1.orientation}}}],\n    planner=\"lula_rrt\",\n    robot_type={{robot.name}},\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=120)\nsim_control(action=\"pause\")\nget_joint_positions(articulation={{robot.path}})\n\n# \u2500\u2500 WP2: near-warning exit \u2014 RMPflow interpolation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncheck_singularity(\n    articulation_path={{robot.path}},\n    target_position={{wp2.position}},\n    target_orientation={{wp2.orientation}},\n)\ninterpolate_trajectory(\n    articulation_path={{robot.path}},\n    waypoints=[\n        {\"joint_positions\": {{wp2.joint_start}}},\n        {\"joint_positions\": {{wp2.joint_end}}}\n    ],\n    method=\"rmpflow\",\n    num_steps={{wp2.interp_steps}},\n    robot_type={{robot.name}},\n)\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count={{wp2.interp_steps}})\nsim_control(action=\"pause\")\nget_joint_positions(articulation={{robot.path}})\n\n# \u2500\u2500 Physics health check \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncheck_physics_health()",
   "settle_state": {
     "robot_path": "/World/UR10",
     "robot_type": "ur10",
-    "wp0_position": [0.4, 0.1, 0.6],
-    "wp1_position": [0.7, 0.0, 0.35],
-    "wp2_position": [0.3, -0.1, 0.6],
+    "wp0_position": [
+      0.4,
+      0.1,
+      0.6
+    ],
+    "wp1_position": [
+      0.7,
+      0.0,
+      0.35
+    ],
+    "wp2_position": [
+      0.3,
+      -0.1,
+      0.6
+    ],
     "singularity_threshold_danger": 100,
     "singularity_threshold_warning": 50
   },
@@ -45,19 +57,27 @@
     "target_path": "/World/UR10",
     "cube_path": "/World/UR10",
     "duration_s": 4.3,
-    "settle_steps_per_waypoint": [60, 120, 80],
+    "settle_steps_per_waypoint": [
+      60,
+      120,
+      80
+    ],
     "total_sim_steps": 260
   },
   "diagnose_args": {
     "robot_path": "/World/UR10",
-    "singular_waypoint_position": [0.7, 0.0, 0.35],
+    "singular_waypoint_position": [
+      0.7,
+      0.0,
+      0.35
+    ],
     "singularity_type": "wrist_singularity"
   },
   "failure_modes": [
     "check_singularity returns condition_number; >=100 = danger, 50-99 = warning, <50 = safe. Conditionally choose the planner based on this value.",
-    "plan_trajectory planner must be 'lula_rrt' or 'rmpflow'. 'curobo' is NOT a valid enum value — use 'lula_rrt' for singularity-aware RRT replanning.",
-    "interpolate_trajectory waypoints require {'joint_positions': [list_of_floats]} — not Cartesian position/orientation dicts. UR10 is 6-DOF.",
-    "import_robot for UR10: file_path='UR10', format='asset_library', dest_path='/World/UR10'. Do NOT use robot_name kwarg — it does not exist in ImportRobotArgs.",
+    "plan_trajectory planner must be 'lula_rrt' or 'rmpflow'. 'curobo' is NOT a valid enum value \u2014 use 'lula_rrt' for singularity-aware RRT replanning.",
+    "interpolate_trajectory waypoints require {'joint_positions': [list_of_floats]} \u2014 not Cartesian position/orientation dicts. UR10 is 6-DOF.",
+    "import_robot for UR10: file_path='UR10', format='asset_library', dest_path='/World/UR10'. Do NOT use robot_name kwarg \u2014 it does not exist in ImportRobotArgs.",
     "get_joint_positions requires the kwarg 'articulation' (not 'articulation_path'). Wrong kwarg is silently ignored and returns empty list.",
     "set_joint_targets drives a single joint: provide joint_name + target_position (radians). No Cartesian target or target_positions list in the schema."
   ],
@@ -71,12 +91,16 @@
       "has_stacking": false,
       "has_singularity_detection": true,
       "has_conditional_replanning": true,
-      "first_library_use": ["check_singularity"]
+      "first_library_use": [
+        "check_singularity"
+      ]
     }
   },
   "roles": {
     "robot": {
-      "constraints": ["UR10"],
+      "constraints": [
+        "UR10"
+      ],
       "expected_count": 1,
       "required": true,
       "disambiguator": "6dof_arm_singularity_avoidance"
@@ -90,25 +114,68 @@
       "base_joint": "shoulder_pan_joint"
     },
     "wp0": {
-      "position": [0.4, 0.1, 0.6],
-      "orientation": [1.0, 0.0, 0.0, 0.0],
+      "position": [
+        0.4,
+        0.1,
+        0.6
+      ],
+      "orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
       "base_joint_rad": 0.3
     },
     "wp1": {
-      "position": [0.7, 0.0, 0.35],
-      "orientation": [1.0, 0.0, 0.0, 0.0]
+      "position": [
+        0.7,
+        0.0,
+        0.35
+      ],
+      "orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ]
     },
     "wp2": {
-      "position": [0.3, -0.1, 0.6],
-      "orientation": [1.0, 0.0, 0.0, 0.0],
-      "joint_start": [0.0, -1.0, 1.2, -0.2, -1.57, 0.0],
-      "joint_end": [0.3, -0.8, 1.0, -0.2, -1.57, 0.0],
+      "position": [
+        0.3,
+        -0.1,
+        0.6
+      ],
+      "orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "joint_start": [
+        0.0,
+        -1.0,
+        1.2,
+        -0.2,
+        -1.57,
+        0.0
+      ],
+      "joint_end": [
+        0.3,
+        -0.8,
+        1.0,
+        -0.2,
+        -1.57,
+        0.0
+      ],
       "interp_steps": 80
     }
   },
   "motion_controllers": {
     "verified": [],
-    "untested": ["lula_rrt"],
+    "untested": [
+      "lula_rrt"
+    ],
     "failed": {}
   },
   "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending live Kit + UR10 USD"
