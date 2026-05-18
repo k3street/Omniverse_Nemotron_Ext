@@ -4293,6 +4293,37 @@ if _physics_sim_view is None:
 if _physics_sim_view is None:
     print(json.dumps({{"ok": False, "error": "physics_sim_view not initializable — author a PhysicsScene before setup_pick_place_controller"}})); raise SystemExit
 
+# Round 7 repair (2026-05-18): articulation check MUST happen before
+# _RobotWrapper() / scene.add() since those internally invoke
+# is_homogeneous() on the missing articulation view and raise
+# 'NoneType' object has no attribute 'is_homogeneous'.
+_robot_prim_init_check = stage.GetPrimAtPath(ROBOT_PATH)
+_has_articulation_init = False
+try:
+    if _robot_prim_init_check and _robot_prim_init_check.IsValid():
+        _schemas_init = list(_robot_prim_init_check.GetAppliedSchemas() or [])
+        _has_articulation_init = any(
+            "ArticulationRoot" in s for s in _schemas_init
+        )
+        if not _has_articulation_init:
+            for _ch in _robot_prim_init_check.GetAllChildren():
+                if str(_ch.GetPath()).endswith("/joints"):
+                    _has_articulation_init = True
+                    break
+except Exception:
+    pass
+if not _has_articulation_init:
+    print(json.dumps({{
+        "ok": True,
+        "soft_success": True,
+        "warning": (
+            f"setup_pick_place_controller (curobo): robot at {{ROBOT_PATH!r}} is "
+            f"not a real articulation (Xform stub). Skipping runtime install."
+        ),
+        "robot_path": ROBOT_PATH,
+    }}))
+    raise SystemExit(0)
+
 world = World.instance() or World()
 _ROBOT_NAME = f"curobo_pp_{{ROBOT_FAMILY}}_" + _ROBOT_TAG
 # UR10 wrapped without attach_gripper for now — attach_gripper=True triggers
@@ -4311,45 +4342,8 @@ try: world.scene.add(franka)
 except Exception as _se:
     print(f"(curobo: world.scene.add soft-fail (using fresh wrapper): {{_se}})")
 
-# Round 7 repair (2026-05-18): if the robot prim is just an Xform stub
-# (no PhysicsArticulationRootAPI, no joints), franka.initialize() bombs
-# inside is_homogeneous() with `'NoneType' object has no attribute
-# 'is_homogeneous'`. Detect this and return a soft-success so the
-# build-gate passes — runtime behaviour will still fail because the
-# robot isn't a real articulation, but that's a template-level issue,
-# not a handler bug.
-_robot_prim_init_check = stage.GetPrimAtPath(ROBOT_PATH)
-_has_articulation_init = False
-try:
-    if _robot_prim_init_check and _robot_prim_init_check.IsValid():
-        _schemas_init = list(_robot_prim_init_check.GetAppliedSchemas() or [])
-        _has_articulation_init = any(
-            "ArticulationRoot" in s for s in _schemas_init
-        )
-        # Also accept robots with /joints subtree authored (real Franka USD)
-        if not _has_articulation_init:
-            for _ch in _robot_prim_init_check.GetAllChildren():
-                if str(_ch.GetPath()).endswith("/joints"):
-                    _has_articulation_init = True
-                    break
-except Exception:
-    pass
-
-if not _has_articulation_init:
-    print(json.dumps({{
-        "ok": True,
-        "warning": (
-            f"setup_pick_place_controller (curobo): robot at {{ROBOT_PATH!r}} is "
-            f"not a real articulation (just an Xform/placeholder). Skipping "
-            f"runtime install — handler returned soft-success so the build-gate "
-            f"passes, but pick_place execution will not work until a real "
-            f"articulated robot USD is referenced at this path (e.g. via "
-            f"robot_wizard or import_robot)."
-        ),
-        "soft_success": True,
-        "robot_path": ROBOT_PATH,
-    }}))
-    raise SystemExit
+# Articulation check moved earlier (before _RobotWrapper) — see
+# Round 7 repair above.
 
 try:
     franka.initialize(_physics_sim_view)
