@@ -48,6 +48,19 @@ def _kit_exec_tick(event):
                 exec_globals = {"__builtins__": __builtins__}
                 exec(code, exec_globals)
             success = True
+        except SystemExit as _se:
+            # Round 7 repair (2026-05-18): some handlers raise SystemExit
+            # as a clean short-circuit (e.g. setup_pick_place_controller
+            # curobo soft-success for non-articulation stubs). Treat as
+            # success unless code() of SystemExit is non-zero.
+            _se_code = getattr(_se, "code", 0)
+            if isinstance(_se_code, int) and _se_code != 0:
+                output_buf.write(f"\nError: SystemExit({_se_code})")
+            elif _se_code is None or _se_code == 0:
+                success = True
+            else:
+                # Non-int code → treated as error message
+                output_buf.write(f"\nError: {_se_code}")
         except Exception as e:
             output_buf.write(f"\nError: {e}")
 
