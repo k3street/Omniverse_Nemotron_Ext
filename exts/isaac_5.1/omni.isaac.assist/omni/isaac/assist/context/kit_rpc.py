@@ -51,13 +51,30 @@ def _kit_exec_tick(event):
         except SystemExit as _se:
             # Round 7 repair (2026-05-18): some handlers raise SystemExit
             # as a clean short-circuit (e.g. setup_pick_place_controller
-            # curobo soft-success for non-articulation stubs). Treat as
-            # success unless code() of SystemExit is non-zero.
+            # curobo soft-success for non-articulation stubs). Without
+            # this branch the worker thread vanishes without setting
+            # result_holder.event and the request hangs the full
+            # timeout window (~600s) before returning 504.
             _se_code = getattr(_se, "code", 0)
             if isinstance(_se_code, int) and _se_code != 0:
                 output_buf.write(f"\nError: SystemExit({_se_code})")
             elif _se_code is None or _se_code == 0:
-                success = True
+                # Inspect the captured output for an explicit error
+                # marker — many SystemExit short-circuits emit
+                # `{"error": "..."}` JSON before raising. Surface those
+                # as failure even though the SystemExit itself is clean.
+                _captured = output_buf.getvalue()
+                if (
+                    '"error"' in _captured
+                    or "Error:" in _captured
+                    or '"ok": false' in _captured.lower()
+                ):
+                    # Keep success=False; downstream parses the JSON to
+                    # extract the error string. No additional marker
+                    # needed.
+                    pass
+                else:
+                    success = True
             else:
                 # Non-int code → treated as error message
                 output_buf.write(f"\nError: {_se_code}")
