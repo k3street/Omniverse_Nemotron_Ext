@@ -660,7 +660,24 @@ else:
         rp = rep.create.render_product('{camera_path}', ({width}, {height}))
         annot = rep.AnnotatorRegistry.get_annotator('rgb')
         annot.attach([rp])
-        rep.orchestrator.step()
+        # Round 7 repair (2026-05-18): rep.orchestrator.step() is the
+        # standalone-workflow API and raises 'Synchronous call to step'
+        # when invoked from inside Kit (we ARE inside Kit). Use the
+        # Kit-facing app.update() loop instead — three frames is
+        # typically enough for the annotator to fill.
+        try:
+            import omni.kit.app as _kit_app_cc
+            for _ in range(3):
+                _kit_app_cc.get_app().update()
+        except Exception:
+            # If kit.app is unavailable for some reason, try the async
+            # step as a fallback and swallow exceptions.
+            try:
+                import asyncio as _asyncio_cc
+                _loop_cc = _asyncio_cc.get_event_loop()
+                _loop_cc.run_until_complete(rep.orchestrator.step_async())
+            except Exception:
+                pass
         data = annot.get_data()
         # Encode the numpy RGB(A) array to PNG via PIL
         try:

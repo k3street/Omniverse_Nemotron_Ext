@@ -397,6 +397,11 @@ async def execute_tool_call(
 
             # Add sensor spec auto-lookup for add_sensor_to_prim
             if tool_name == "add_sensor_to_prim" and arguments.get("product_name"):
+                # Round 7 repair (2026-05-18): _handle_lookup_product_spec
+                # was referenced here without import — caused NameError on
+                # multi-sensor-fusion-rgbd-imu and similar templates. Import
+                # lazily so we don't pull scene_blueprints at module load.
+                from .handlers.scene_blueprints import _handle_lookup_product_spec
                 spec_result = await _handle_lookup_product_spec({"product_name": arguments["product_name"]})
                 if spec_result.get("found"):
                     return {

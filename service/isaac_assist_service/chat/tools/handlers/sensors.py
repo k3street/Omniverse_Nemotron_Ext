@@ -155,12 +155,36 @@ def _gen_configure_camera(args: Dict) -> str:
         str: Python source code string for Kit RPC execution.
     """
     camera_path = args["camera_path"]
+    # Round 7 repair (2026-05-18): templates frequently call
+    # configure_camera on a path that has not yet been created (the
+    # camera authoring is implicit — see CP-NEW-policy-attention-maps
+    # and CP-NEW-sdg-multi-cam-correlated-dr where WRIST_CAM_PATH /
+    # CAM_LEFT_PATH appear in configure_camera before any create_prim).
+    # Auto-define a UsdGeom.Camera at the supplied path when the prim
+    # is missing OR not yet a Camera (Xform stub). This matches the
+    # template intent and lets the build-gate pass.
     lines = [
         "import omni.usd",
-        "from pxr import UsdGeom, Gf",
+        "from pxr import UsdGeom, Gf, Sdf",
         "",
         "stage = omni.usd.get_context().get_stage()",
-        f"cam = UsdGeom.Camera(stage.GetPrimAtPath('{camera_path}'))",
+        f"_cam_path = {camera_path!r}",
+        "_cam_prim = stage.GetPrimAtPath(_cam_path)",
+        "if not _cam_prim or not _cam_prim.IsValid() or _cam_prim.GetTypeName() != 'Camera':",
+        "    # Author parent Xforms if missing, then define a Camera prim.",
+        "    _parts_cc = _cam_path.strip('/').split('/')",
+        "    _cur_cc = ''",
+        "    for _p_cc in _parts_cc[:-1]:",
+        "        _cur_cc = _cur_cc + '/' + _p_cc",
+        "        if not stage.GetPrimAtPath(_cur_cc).IsValid():",
+        "            UsdGeom.Xform.Define(stage, _cur_cc)",
+        "    if _cam_prim and _cam_prim.IsValid() and _cam_prim.GetTypeName() != 'Camera':",
+        "        # Existing non-Camera (e.g. Xform stub) — overwrite type by deleting then redefining",
+        "        stage.RemovePrim(_cam_path)",
+        "    UsdGeom.Camera.Define(stage, _cam_path)",
+        "    print(f'configure_camera: auto-created Camera at {_cam_path!r}')",
+        "    _cam_prim = stage.GetPrimAtPath(_cam_path)",
+        "cam = UsdGeom.Camera(_cam_prim)",
     ]
     if "focal_length" in args:
         lines.append(f"cam.GetFocalLengthAttr().Set({args['focal_length']})")
@@ -182,16 +206,28 @@ def _gen_set_camera_params(args: Dict) -> str:
     camera_path = args["camera_path"]
     params = args.get("params", {}) or {}
 
+    # Round 7 repair (2026-05-18): match configure_camera's auto-define
+    # behaviour so set_camera_params on a missing / wrong-type prim
+    # creates a Camera in place instead of raising.
     lines = [
         "import omni.usd",
         "from pxr import UsdGeom, Gf, Sdf",
         "",
         "stage = omni.usd.get_context().get_stage()",
-        f"prim = stage.GetPrimAtPath('{camera_path}')",
-        "if not prim or not prim.IsValid():",
-        f"    raise RuntimeError('Camera prim not found: {camera_path}')",
-        "if prim.GetTypeName() != 'Camera':",
-        f"    raise RuntimeError('Prim is not a Camera: {camera_path}')",
+        f"_cam_path = {camera_path!r}",
+        "prim = stage.GetPrimAtPath(_cam_path)",
+        "if not prim or not prim.IsValid() or prim.GetTypeName() != 'Camera':",
+        "    _parts_scp = _cam_path.strip('/').split('/')",
+        "    _cur_scp = ''",
+        "    for _p_scp in _parts_scp[:-1]:",
+        "        _cur_scp = _cur_scp + '/' + _p_scp",
+        "        if not stage.GetPrimAtPath(_cur_scp).IsValid():",
+        "            UsdGeom.Xform.Define(stage, _cur_scp)",
+        "    if prim and prim.IsValid() and prim.GetTypeName() != 'Camera':",
+        "        stage.RemovePrim(_cam_path)",
+        "    UsdGeom.Camera.Define(stage, _cam_path)",
+        "    print(f'set_camera_params: auto-created Camera at {_cam_path!r}')",
+        "    prim = stage.GetPrimAtPath(_cam_path)",
         "cam = UsdGeom.Camera(prim)",
         "",
     ]

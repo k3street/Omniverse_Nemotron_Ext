@@ -156,8 +156,28 @@ def _gen_add_domain_randomizer(args: Dict) -> str:
 
     if rand_type == "pose":
         surface = params.get("surface_prim", "/World/Ground")
-        min_angle = params.get("min_angle", -180)
-        max_angle = params.get("max_angle", 180)
+        # rep.randomizer.rotation expects float3 (Euler XYZ degrees).
+        # Templates often pass a scalar (yaw-only) — promote to 3-tuple so
+        # OgnSampleRotation.inputs:minAngle/maxAngle accept it.
+        raw_min = params.get("min_angle", -180)
+        raw_max = params.get("max_angle", 180)
+        def _as_float3(v, default=0.0):
+            if isinstance(v, (list, tuple)):
+                if len(v) >= 3:
+                    return (float(v[0]), float(v[1]), float(v[2]))
+                if len(v) == 1:
+                    s = float(v[0])
+                    return (default, default, s)  # yaw-only
+                # 2-tuple: treat as (pitch, yaw) fallback
+                return (float(v[0]), float(v[1]) if len(v) > 1 else default, default)
+            try:
+                s = float(v)
+            except Exception:
+                s = float(default)
+            # Scalar -> yaw-only Z rotation (most common DR case)
+            return (0.0, 0.0, s)
+        min_angle = _as_float3(raw_min, default=-180.0)
+        max_angle = _as_float3(raw_max, default=180.0)
         lines.extend([
             "with rep.trigger.on_frame():",
             f"    with rep.get.prims(path_pattern=\"{target}\"):",
@@ -165,7 +185,7 @@ def _gen_add_domain_randomizer(args: Dict) -> str:
             f"            surface_prims=rep.get.prims(path_pattern=\"{surface}\")",
             f"        )",
             f"        rep.randomizer.rotation(",
-            f"            min_angle={min_angle}, max_angle={max_angle}",
+            f"            min_angle={min_angle!r}, max_angle={max_angle!r}",
             f"        )",
         ])
 
@@ -746,14 +766,36 @@ async def _handle_preview_sdg(args: Dict) -> Dict:
     from .. import kit_tools
     num_samples = args.get("num_samples", 3)
 
+    # Round 7 repair (2026-05-18): rep.orchestrator.step() is the
+    # standalone-workflow API and raises 'Synchronous call to step'
+    # inside Kit. Use the Kit-facing app.update() loop so preview frames
+    # still trigger the Replicator graph without crashing on the sync
+    # step gate.
     code = f"""\
 import omni.replicator.core as rep
 import json
 
 num_samples = {num_samples}
-for i in range(num_samples):
-    rep.orchestrator.step()
-    print(f"Preview frame {{i + 1}}/{num_samples} generated")
+try:
+    import omni.kit.app as _kit_app_psdg
+    _app_psdg = _kit_app_psdg.get_app()
+    for i in range(num_samples):
+        for _ in range(2):
+            _app_psdg.update()
+        print(f"Preview frame {{i + 1}}/{num_samples} generated (kit.app.update)")
+except Exception as _exc_psdg:
+    print(f"preview_sdg: kit.app.update fallback failed: {{_exc_psdg}}")
+    # Last-resort: try step_async via asyncio.ensure_future so we at
+    # least surface the right error message rather than the sync-step
+    # standalone-workflow one.
+    try:
+        import asyncio as _asyncio_psdg
+        _loop_psdg = _asyncio_psdg.get_event_loop()
+        for i in range(num_samples):
+            _loop_psdg.run_until_complete(rep.orchestrator.step_async())
+            print(f"Preview frame {{i + 1}}/{num_samples} generated (step_async)")
+    except Exception as _exc2_psdg:
+        print(f"preview_sdg: step_async also failed: {{_exc2_psdg}}")
 
 print(json.dumps({{"preview_frames": num_samples, "status": "done"}}))
 """

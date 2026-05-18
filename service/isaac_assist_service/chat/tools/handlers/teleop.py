@@ -179,8 +179,30 @@ def _teleop_physics_step(dt):
     elapsed = now - _teleop_state['last_cmd_time']
     targets = _teleop_state['last_joint_targets']
 
-    robot = stage.GetPrimAtPath(ROBOT_PATH)
-    if not robot.IsValid():
+    # Round 7 repair (2026-05-18): Kit RPC pumps physics_step on every
+    # template build. A stale teleop callback from a previous template
+    # invalidly re-enters here with ROBOT_PATH pointing at a now-cleared
+    # /World/<prev> subtree, raising Boost.Python.ArgumentError in
+    # GetPrimAtPath on str -> Sdf.Path coercion when the path got
+    # mutated. Guard the lookup with a try/except + Sdf.Path explicit
+    # conversion + early-return on stage swap.
+    try:
+        from pxr import Sdf as _Sdf_tp
+        _rp = _Sdf_tp.Path(ROBOT_PATH) if isinstance(ROBOT_PATH, str) else ROBOT_PATH
+        robot = stage.GetPrimAtPath(_rp)
+    except Exception:
+        # Stage swapped or path invalid — auto-unsubscribe so we don't
+        # keep ticking against a dead context.
+        try:
+            _sub_te = _teleop_state.get('physics_sub')
+            if _sub_te is not None and hasattr(_sub_te, 'unsubscribe'):
+                _sub_te.unsubscribe()
+            _teleop_state['physics_sub'] = None
+            _teleop_state['active'] = False
+        except Exception:
+            pass
+        return
+    if not robot or not robot.IsValid():
         return
 
     # Iterate joints and apply targets

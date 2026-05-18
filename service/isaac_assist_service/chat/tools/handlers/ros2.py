@@ -691,6 +691,23 @@ if not _mgr.is_extension_enabled('isaacsim.ros2.bridge'):
     for _ in range(8):
         _kit_app.get_app().update()
 
+# Round 7 repair (2026-05-18): idempotency. Templates that re-attach to
+# an existing bridge (or that get called twice during the same template
+# build — e.g. CP-NEW-jetbot-sensor-bridge) failed with
+# `OmniGraphError: Failed to wrap graph in node`. Delete any existing
+# graph at this path so og.Controller.edit can author a fresh one.
+import omni.usd as _omni_usd_rb
+_stage_rb = _omni_usd_rb.get_context().get_stage()
+_existing_graph = _stage_rb.GetPrimAtPath("{graph_path}")
+if _existing_graph and _existing_graph.IsValid():
+    try:
+        _stage_rb.RemovePrim("{graph_path}")
+        for _ in range(2):
+            _kit_app.get_app().update()
+        print(f"setup_ros2_bridge: removed pre-existing graph at {graph_path!r} for re-author")
+    except Exception as _rge:
+        print(f"setup_ros2_bridge: graph removal soft-fail: {{_rge}}")
+
 # Round 2 repair (2026-05-17): pipeline_stage requires GraphPipelineStage enum.
 _ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 

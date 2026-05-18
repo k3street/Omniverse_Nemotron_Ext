@@ -950,6 +950,64 @@ async def _handle_execute_with_retry(args: Dict) -> Dict:
     if not code:
         return {"ok": False, "error": "code is required."}
 
+    # Round 7 repair (2026-05-18): if `code` looks like a single tool-call
+    # (one assignment-free function call to a known handler), dispatch
+    # via execute_tool_call so the tool registry resolves it. Sending
+    # raw `setup_pick_place_controller(...)` to Kit RPC fails with
+    # `name 'setup_pick_place_controller' is not defined` because Kit
+    # has no tool namespace at script scope.
+    try:
+        import ast as _ast_ewr
+        _parsed_ewr = _ast_ewr.parse(code.strip(), mode="exec")
+        # Accept either a single Expr(Call(...)) or list of those.
+        _calls_ewr = []
+        for _stmt in _parsed_ewr.body:
+            if isinstance(_stmt, _ast_ewr.Expr) and isinstance(_stmt.value, _ast_ewr.Call) and isinstance(_stmt.value.func, _ast_ewr.Name):
+                _calls_ewr.append(_stmt.value)
+            else:
+                _calls_ewr = None
+                break
+        if _calls_ewr and all(c.func.id in _te.DATA_HANDLERS or c.func.id in _te.CODE_GEN_HANDLERS for c in _calls_ewr):
+            # Single-tool dispatch path
+            _last_result = None
+            _all_ok = True
+            _errs_ewr = []
+            for _c in _calls_ewr:
+                _kwargs_ewr = {}
+                try:
+                    for _kw in _c.keywords:
+                        _kwargs_ewr[_kw.arg] = _ast_ewr.literal_eval(_kw.value)
+                except (ValueError, SyntaxError) as _evae:
+                    # Complex args we can't statically eval — fall back to Kit RPC path below
+                    _calls_ewr = None
+                    break
+                if _calls_ewr is None:
+                    break
+                _last_result = await _te.execute_tool_call(_c.func.id, _kwargs_ewr)
+                _ok_ewr = (_last_result.get("type") != "error") and (_last_result.get("success") is not False)
+                if not _ok_ewr:
+                    _all_ok = False
+                    _errs_ewr.append(f"{_c.func.id}: {(_last_result.get('error') or '')[:200]}")
+            if _calls_ewr is not None:
+                return {
+                    "success": _all_ok,
+                    "ok": True,
+                    "type": "tool_call_replay",
+                    "code": code,
+                    "description": description,
+                    "max_retries": max_retries,
+                    "context_hints": context_hints,
+                    "error": ("; ".join(_errs_ewr) or None) if not _all_ok else None,
+                    "output": str(_last_result)[-400:] if _last_result else "",
+                    "next_action": (
+                        "Sub-tool replayed via execute_tool_call (Round 7 dispatch). "
+                        f"Up to {max_retries} retries remaining."
+                    ),
+                }
+    except Exception as _ewr_dispatch_exc:
+        # Fall through to legacy Kit-RPC path
+        pass
+
     # Pre-flight validation (same as run_usd_script)
     issues = validate_patch(code)
     if has_blocking_issues(issues):
