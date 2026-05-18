@@ -2358,11 +2358,18 @@ def _gen_plan_trajectory(args: Dict) -> str:
         # and expects np.ndarray (not python list). Stack the list-of-arrays
         # into a single 2D ndarray before the call.
         "positions = np.asarray(positions, dtype=np.float64)",
+        "# Round 9 repair (2026-05-18): the orientations literal can be the",
+        "# bare token 'None' (no orientation supplied for any waypoint) OR a",
+        "# list of mixed [array, None, ...]. Both paths now short-circuit to",
+        "# None safely without iterating on a NoneType.",
         "if orientations is not None:",
-        "    if any(o is None for o in orientations):",
+        "    try:",
+        "        if not isinstance(orientations, (list, tuple)) or any(o is None for o in orientations):",
+        "            orientations = None",
+        "        else:",
+        "            orientations = np.asarray(orientations, dtype=np.float64)",
+        "    except TypeError:",
         "        orientations = None",
-        "    else:",
-        "        orientations = np.asarray(orientations, dtype=np.float64)",
         "try:",
         "    trajectory = planner.compute_task_space_trajectory_from_points(",
         "        positions, orientations, _frame_name",
@@ -3675,33 +3682,51 @@ def _gen_record_trajectory(args: Dict) -> str:
         "_state = {'last_sample': 0.0, 'elapsed': 0.0, 'sub': None}\n"
         "\n"
         "def _step_callback(dt):\n"
-        "    _state['elapsed'] += dt\n"
-        "    if _state['elapsed'] - _state['last_sample'] < interval:\n"
-        "        return\n"
-        "    _state['last_sample'] = _state['elapsed']\n"
-        "    pos, vel, eff = [], [], []\n"
-        "    for jp in joint_prims:\n"
-        "        pos_attr = jp.GetAttribute('state:angular:physics:position') or jp.GetAttribute('state:linear:physics:position')\n"
-        "        vel_attr = jp.GetAttribute('state:angular:physics:velocity') or jp.GetAttribute('state:linear:physics:velocity')\n"
-        "        eff_attr = jp.GetAttribute('drive:angular:physics:appliedForce') or jp.GetAttribute('drive:linear:physics:appliedForce')\n"
-        "        pos.append(float(pos_attr.Get()) if pos_attr and pos_attr.IsDefined() else 0.0)\n"
-        "        vel.append(float(vel_attr.Get()) if vel_attr and vel_attr.IsDefined() else 0.0)\n"
-        "        eff.append(float(eff_attr.Get()) if eff_attr and eff_attr.IsDefined() else 0.0)\n"
-        "    samples['time'].append(_state['elapsed'])\n"
-        "    samples['positions'].append(pos)\n"
-        "    samples['velocities'].append(vel)\n"
-        "    samples['efforts'].append(eff)\n"
-        "    if _state['elapsed'] >= duration and _state['sub'] is not None:\n"
-        "        _state['sub'].unsubscribe()\n"
-        "        _state['sub'] = None\n"
-        "        os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)\n"
-        "        np.savez(output_path,\n"
-        "                 time=np.array(samples['time']),\n"
-        "                 positions=np.array(samples['positions']),\n"
-        "                 velocities=np.array(samples['velocities']),\n"
-        "                 efforts=np.array(samples['efforts']),\n"
-        "                 joint_names=np.array(joint_names))\n"
-        "        print('record_trajectory wrote', output_path, 'samples=', len(samples['time']))\n"
+        "    # Round 9 repair (2026-05-18): wrap callback body so a stale\n"
+        "    # physics-step subscription cannot break unrelated tool calls\n"
+        "    # (e.g. move_to_pose / check_singularity in later exec_sync) by\n"
+        "    # tripping on expired joint prims from a prior stage.\n"
+        "    try:\n"
+        "        _state['elapsed'] += dt\n"
+        "        if _state['elapsed'] - _state['last_sample'] < interval:\n"
+        "            return\n"
+        "        _state['last_sample'] = _state['elapsed']\n"
+        "        pos, vel, eff = [], [], []\n"
+        "        for jp in joint_prims:\n"
+        "            try:\n"
+        "                if not jp or not jp.IsValid():\n"
+        "                    pos.append(0.0); vel.append(0.0); eff.append(0.0); continue\n"
+        "                pos_attr = jp.GetAttribute('state:angular:physics:position') or jp.GetAttribute('state:linear:physics:position')\n"
+        "                vel_attr = jp.GetAttribute('state:angular:physics:velocity') or jp.GetAttribute('state:linear:physics:velocity')\n"
+        "                eff_attr = jp.GetAttribute('drive:angular:physics:appliedForce') or jp.GetAttribute('drive:linear:physics:appliedForce')\n"
+        "                pos.append(float(pos_attr.Get()) if pos_attr and pos_attr.IsDefined() else 0.0)\n"
+        "                vel.append(float(vel_attr.Get()) if vel_attr and vel_attr.IsDefined() else 0.0)\n"
+        "                eff.append(float(eff_attr.Get()) if eff_attr and eff_attr.IsDefined() else 0.0)\n"
+        "            except Exception:\n"
+        "                pos.append(0.0); vel.append(0.0); eff.append(0.0)\n"
+        "        samples['time'].append(_state['elapsed'])\n"
+        "        samples['positions'].append(pos)\n"
+        "        samples['velocities'].append(vel)\n"
+        "        samples['efforts'].append(eff)\n"
+        "        if _state['elapsed'] >= duration and _state['sub'] is not None:\n"
+        "            _state['sub'].unsubscribe()\n"
+        "            _state['sub'] = None\n"
+        "            os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)\n"
+        "            np.savez(output_path,\n"
+        "                     time=np.array(samples['time']),\n"
+        "                     positions=np.array(samples['positions']),\n"
+        "                     velocities=np.array(samples['velocities']),\n"
+        "                     efforts=np.array(samples['efforts']),\n"
+        "                     joint_names=np.array(joint_names))\n"
+        "            print('record_trajectory wrote', output_path, 'samples=', len(samples['time']))\n"
+        "    except Exception:\n"
+        "        # Auto-disarm: unsubscribe so the stale callback stops firing.\n"
+        "        try:\n"
+        "            if _state.get('sub') is not None:\n"
+        "                _state['sub'].unsubscribe()\n"
+        "                _state['sub'] = None\n"
+        "        except Exception:\n"
+        "            pass\n"
         "\n"
         "physx = omni.physx.get_physx_interface()\n"
         "_state['sub'] = physx.subscribe_physics_step_events(_step_callback)\n"
