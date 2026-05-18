@@ -34,7 +34,7 @@
     "success_threshold": 0.5,
     "result_file": "/tmp/groot_finetune_result.json"
   },
-  "verified_status": "drafted-2026-05-16-needs-groot-n17-weights; form-gate-schema ✓; function-gate BLOCKED (requires GR00T N1.6-3B weights ~50GB + HuggingFace token + 24GB VRAM GPU + LeRobot v2 demo dataset at workspace/demo_data/franka_pick_place_n10); patched-r-a20-fix; patched-r-a-enum-fix",
+  "verified_status": "drafted-2026-05-16-needs-groot-n17-weights; form-gate-schema ✓; function-gate BLOCKED (requires GR00T N1.6-3B weights ~50GB + HuggingFace token + 24GB VRAM GPU + LeRobot v2 demo dataset at workspace/demo_data/franka_pick_place_n10); patched-r-a20-fix; patched-r-a-enum-fix; env_blocked: torch_cuda_attr — torch._C._CudaDeviceProperties missing 'total_mem' on Blackwell sm_120; needs torch>=2.10 path or workaround",
   "failure_modes": [
     "finetune_groot fails at model download: HF token missing or no internet access; weights ~50 GB must be pre-cached",
     "VRAM OOM: full fine-tuning (lora=False) needs A100/H100; LoRA on RTX 5070 is borderline at 24 GB — reduce batch_size if OOM",

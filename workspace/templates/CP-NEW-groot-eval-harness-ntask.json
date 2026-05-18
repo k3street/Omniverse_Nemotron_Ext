@@ -34,7 +34,7 @@
     "success_condition": "n_tasks_succeeded >= 1 and comparison is non-empty",
     "result_file": "/tmp/groot_ntask_eval_result.json"
   },
-  "verified_status": "drafted-2026-05-16-A51; form-gate-schema pending; function-gate BLOCKED (requires GR00T-N1.6-3B weights ~25-50 GB + HuggingFace token + omni.isaac.groot extension + Isaac-GR00T-* task registry entries + 12 GB free VRAM)",
+  "verified_status": "drafted-2026-05-16-A51; form-gate-schema pending; function-gate BLOCKED (requires GR00T-N1.6-3B weights ~25-50 GB + HuggingFace token + omni.isaac.groot extension + Isaac-GR00T-* task registry entries + 12 GB free VRAM); env_blocked: gr00t_dep — GR00T policy server requires gr00t module / N1.6-3B model on disk",
   "failure_modes": [
     "check_vram_headroom returns headroom_ok=False: <12 GB free VRAM; close other Kit sessions or use a higher-VRAM GPU",
     "load_groot_policy fails at model download: HuggingFace token missing or no internet; pre-cache weights at ~/.cache/huggingface/hub/ before running",

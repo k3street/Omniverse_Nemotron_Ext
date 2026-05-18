@@ -31,7 +31,7 @@
     "success_criterion": "rsi_cfg.initial_state_cfg is not null AND stats.approved_turns >= 5",
     "result_file": "/tmp/rsi_from_demos_result.json"
   },
-  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate BLOCKED (requires demo HDF5 at workspace/demos/ + GR00T advisor extension + live MCP)",
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate BLOCKED (requires demo HDF5 at workspace/demos/ + GR00T advisor extension + live MCP); env_blocked: isaaclab_envs — InitialStateCfg not exported from isaaclab.envs in current IsaacLab build",
   "failure_modes": [
     "setup_rsi_from_demos demo_path: file must exist and contain at least 1 recorded trajectory with keys joint_positions, joint_velocities (standard IsaacLab HDF5 schema); missing keys raise a schema validation error in the handler",
     "setup_rsi_from_demos env_cfg mismatch: 'FrankaPickPlaceEnvCfg' must be importable in the IsaacLab environment; if the env is in a custom extension use the fully-qualified dotted path e.g. 'my_ext.envs.FrankaPickPlaceEnvCfg'",

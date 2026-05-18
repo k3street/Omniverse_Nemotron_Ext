@@ -33,7 +33,7 @@
     "play_animation requires reach_and_grab animation pre-baked into asset",
     "Operator marked as planning_obstacle \u2014 cuRobo may take longer to find collision-free path"
   ],
-  "verified_status": "build-spec-2026-05-10; build 16/19 (OperatorAvatar SimReady missing); gate stable_fail",
+  "verified_status": "build-spec-2026-05-10; build 16/19 (OperatorAvatar SimReady missing); gate stable_fail; env_blocked: nucleus-asset — OperatorAvatar.usd missing from /mnt/shared_data Isaac assets 5.0",
   "migration_deferred": {
     "reason": "asset_blocked",
     "details": "Requires Avatar (human operator) USD from NVIDIA Isaac Nucleus; not available locally",

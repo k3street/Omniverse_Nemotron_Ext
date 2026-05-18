@@ -109,7 +109,7 @@
     "target_path": "{{primary_destination.path}}",
     "duration_s": 180
   },
-  "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (33s); fixture variant scaffold",
+  "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (33s); fixture variant scaffold; env_blocked: isaaclab_tasks — module 'isaaclab_tasks.envs' missing in current IsaacLab build",
   "motion_controllers": {
     "verified": [],
     "untested": [
