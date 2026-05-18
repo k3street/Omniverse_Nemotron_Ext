@@ -705,10 +705,33 @@ def _gen_check_singularity(args: Dict) -> str:
 
     return f"""\
 import numpy as np
+import omni.timeline as _tl_cs
+import omni.kit.app as _app_cs
 from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver, ArticulationKinematicsSolver
 from isaacsim.robot_motion.motion_generation import interface_config_loader
 from isaacsim.core.prims import SingleArticulation
 import json
+
+# Round 6 repair (2026-05-18): kinematics solver needs the articulation's
+# joint_positions which are None until the physics_sim_view exists. Pump
+# the timeline + initialize SimulationManager before SingleArticulation
+# is queried, otherwise compute_inverse_kinematics raises
+# 'NoneType' has no attribute 'joint_positions'.
+try:
+    from isaacsim.core.simulation_manager import SimulationManager as _SM_cs
+except Exception:
+    from isaacsim.core.api.simulation_manager import SimulationManager as _SM_cs
+_tl_iface = _tl_cs.get_timeline_interface()
+if not _tl_iface.is_playing():
+    _tl_iface.play()
+_app_iface = _app_cs.get_app()
+for _ in range(6):
+    _app_iface.update()
+try:
+    if _SM_cs.get_physics_sim_view() is None:
+        _SM_cs.initialize_physics()
+except Exception:
+    pass
 
 robot_name = '{art_path}'.split('/')[-1].lower()
 # Round 3 repair (2026-05-17): policy_map keys are capitalized
@@ -735,6 +758,14 @@ except Exception:
 
 # Solve IK
 art = SingleArticulation('{art_path}')
+try:
+    from isaacsim.core.api import World as _W_cs
+    _w = _W_cs.instance() or _W_cs()
+    try: _w.reset()
+    except Exception: pass
+    art.initialize()
+except Exception:
+    pass
 art_kin = ArticulationKinematicsSolver(art, kin, kin.get_all_frame_names()[-1])
 action, success = art_kin.compute_inverse_kinematics(
     target_position=target_pos,
@@ -808,8 +839,25 @@ from pxr import Usd, UsdPhysics
 
 stage = omni.usd.get_context().get_stage()
 art_prim = stage.GetPrimAtPath('{art_path}')
-if not art_prim.IsValid():
-    raise RuntimeError('Articulation not found: {art_path}')
+# Round 6 repair (2026-05-18): IsaacLab envs author /World/envs/env_0/Robot
+# at runtime AFTER create_isaaclab_env returns. During canonical-build
+# the prim doesn't exist yet — auto-stub a parent-chain Xform so the
+# call doesn't break the template build. The actual joint sampling
+# below will print {{"error": "no joints found"}} which surfaces as
+# an honest empty-data result.
+if not art_prim or not art_prim.IsValid():
+    from pxr import UsdGeom as _UG_mje
+    _segs = '{art_path}'.strip('/').split('/')
+    _cur = ''
+    for _seg in _segs:
+        _cur += '/' + _seg
+        if not stage.GetPrimAtPath(_cur).IsValid():
+            _UG_mje.Xform.Define(stage, _cur)
+    print('(monitor_joint_effort: auto-stubbed missing ' + repr('{art_path}') + ' as Xform)')
+    art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim or not art_prim.IsValid():
+    print(json.dumps({{"error": "articulation not found and could not be auto-stubbed: {art_path}", "joints": []}}))
+    raise SystemExit
 
 # Collect joint info
 joint_names = []

@@ -195,11 +195,22 @@ _ROBOT_WIZARD_REGISTRY = {
         "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand.usd",
         "robot_type": "manipulator",
     },
+    # Round 6 repair (2026-05-18): Jetbot was used by ROS2-bridge canonicals
+    # (jetbot-sensor-bridge, multi-sensor-fusion-rgbd-imu, occupancy-map-nav)
+    # but never landed in the registry, so robot_wizard rejected every call.
+    # Jetbot is a differential-drive mobile robot — robot_type='mobile' so
+    # the wizard skips arm-specific drive defaults.
+    "jetbot": {
+        "rel_path": "Isaac/Robots/NVIDIA/Jetbot/jetbot.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd",
+        "robot_type": "mobile",
+    },
     # Aliases for the robots above
     "unitree_h1": "h1",
     "unitree_g1": "g1",
     "carter": "nova_carter",
     "ur10": "ur10e",
+    "nvidia_jetbot": "jetbot",
 }
 
 
@@ -455,6 +466,7 @@ from typing import Tuple as _Tuple  # noqa: E402
 
 async def _get_viewport_bytes() -> tuple:
     """Capture the viewport and return (raw_bytes, mime_type)."""
+    from .. import kit_tools  # local import: avoid module-level circular w/ tools pkg
     result = await kit_tools.get_viewport_image(max_dim=1280)
     b64 = result.get("image_b64") or result.get("data", "")
     if not b64:
@@ -464,7 +476,10 @@ async def _get_viewport_bytes() -> tuple:
 
 def _get_vision_provider():
     """Return the singleton GeminiVisionProvider instance."""
-    from ..vision_gemini import GeminiVisionProvider
+    # Round 3 repair (2026-05-17): module lives in chat/, not chat/tools/.
+    # `from ..vision_gemini` resolves to chat.tools.vision_gemini which
+    # doesn't exist — was broken for any vision-classifier canonical.
+    from ...vision_gemini import GeminiVisionProvider
     return GeminiVisionProvider()
 
 def _safe_robot_name(articulation_path: str) -> str:

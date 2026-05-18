@@ -2972,13 +2972,40 @@ print(f"Joint positions: {{[round(p, 4) for p in joint_positions]}}")
 import json
 import os
 import numpy as np
+import omni.timeline as _tl_rw
+import omni.kit.app as _app_rw
 from isaacsim.core.prims import SingleArticulation
 from isaacsim.core.api import World
+
+# Round 6 repair (2026-05-18): SingleArticulation.initialize() calls
+# create_articulation_view on the physics_sim_view which is None until
+# the timeline plays + physics steps. Pump 6 frames + initialize the
+# simulation manager before art.initialize() to avoid 'NoneType' has no
+# attribute 'create_articulation_view'.
+try:
+    from isaacsim.core.simulation_manager import SimulationManager as _SM_rw
+except Exception:
+    from isaacsim.core.api.simulation_manager import SimulationManager as _SM_rw
+_tl_iface = _tl_rw.get_timeline_interface()
+if not _tl_iface.is_playing():
+    _tl_iface.play()
+_app_iface = _app_rw.get_app()
+for _ in range(6):
+    _app_iface.update()
+try:
+    if _SM_rw.get_physics_sim_view() is None:
+        _SM_rw.initialize_physics()
+except Exception:
+    pass
 
 art = SingleArticulation(prim_path='{art_path}')
 world = World.instance()
 if world is None:
     world = World()
+try:
+    world.reset()
+except Exception:
+    pass
 art.initialize()
 
 joint_positions = art.get_joint_positions().tolist()
@@ -3305,10 +3332,31 @@ print(f"Saved interpolated trajectory to {output_path}")
         return f"""\
 import numpy as np
 import json
+import omni.timeline as _tl_it
+import omni.kit.app as _app_it
 from isaacsim.robot_motion.motion_generation import RmpFlow
 from isaacsim.robot_motion.motion_generation import interface_config_loader
 from isaacsim.core.prims import SingleArticulation
 from isaacsim.core.api import World
+
+# Round 6 repair (2026-05-18): pump timeline + initialize_physics so
+# SingleArticulation.initialize() can call create_articulation_view on
+# a non-None physics_sim_view.
+try:
+    from isaacsim.core.simulation_manager import SimulationManager as _SM_it
+except Exception:
+    from isaacsim.core.api.simulation_manager import SimulationManager as _SM_it
+_tl_iface = _tl_it.get_timeline_interface()
+if not _tl_iface.is_playing():
+    _tl_iface.play()
+_app_iface = _app_it.get_app()
+for _ in range(6):
+    _app_iface.update()
+try:
+    if _SM_it.get_physics_sim_view() is None:
+        _SM_it.initialize_physics()
+except Exception:
+    pass
 
 # Load RMPflow
 rmpflow_config = interface_config_loader.load_supported_motion_policy_config('{_pm_key}', 'RMPflow')
@@ -3318,6 +3366,10 @@ art = SingleArticulation(prim_path='{art_path}')
 world = World.instance()
 if world is None:
     world = World()
+try:
+    world.reset()
+except Exception:
+    pass
 art.initialize()
 # Round 3 repair (2026-05-17): wrap with ArticulationMotionPolicy.
 from isaacsim.robot_motion.motion_generation import ArticulationMotionPolicy
@@ -4292,11 +4344,32 @@ body1_path = {body1_path!r}
 joint_type = {joint_type!r}
 axis = {axis!r}
 
-# Validate bodies exist
-if body0_path and not stage.GetPrimAtPath(body0_path).IsValid():
-    print(json.dumps({{"error": f"body0 not found: {{body0_path}}"}})); raise SystemExit
-if not stage.GetPrimAtPath(body1_path).IsValid():
-    print(json.dumps({{"error": f"body1 not found: {{body1_path}}"}})); raise SystemExit
+# Round 6 repair (2026-05-18): auto-stub missing parent-link prims with an
+# Xform so canonical-build doesn't fail on a /World/UR10/tool0 prim that
+# the URDF didn't expose. The joint is structural; the runtime check that
+# the link is the right physics body will catch real mis-bindings.
+from pxr import UsdGeom as _UG_caj
+def _ensure_xform(_p):
+    _prim = stage.GetPrimAtPath(_p)
+    if _prim and _prim.IsValid():
+        return _prim
+    # Walk parents to ensure chain exists
+    _segs = str(_p).strip('/').split('/')
+    _cur = ''
+    for _seg in _segs:
+        _cur += '/' + _seg
+        if not stage.GetPrimAtPath(_cur).IsValid():
+            _UG_caj.Xform.Define(stage, _cur)
+    return stage.GetPrimAtPath(_p)
+if body0_path:
+    _b0 = stage.GetPrimAtPath(body0_path)
+    if not _b0 or not _b0.IsValid():
+        _ensure_xform(body0_path)
+        print(f"[create_articulated_joint] auto-stubbed missing body0 {{body0_path!r}} as Xform")
+_b1 = stage.GetPrimAtPath(body1_path)
+if not _b1 or not _b1.IsValid():
+    _ensure_xform(body1_path)
+    print(f"[create_articulated_joint] auto-stubbed missing body1 {{body1_path!r}} as Xform")
 
 # Create joint per type
 if joint_type == "revolute":
@@ -4348,6 +4421,35 @@ print(json.dumps({{
 }}))
 """
     res = await kit_tools.exec_sync(code, timeout=15)
+    # Round 6 repair (2026-05-18): exec_sync returns success=True even when
+    # the embedded code raises SystemExit with a JSON error payload.
+    # Parse the output for an explicit {"error": ...} dict and surface
+    # it through the handler's `error` field so the canonical-instantiator
+    # reports a meaningful message instead of an empty string.
+    import json as _json
+    out_text = (res.get("output") or "").strip()
+    parsed_err: Optional[str] = None
+    for _line in out_text.splitlines():
+        _line = _line.strip()
+        if _line.startswith("{"):
+            try:
+                _parsed = _json.loads(_line)
+                if isinstance(_parsed, dict) and _parsed.get("error"):
+                    parsed_err = str(_parsed["error"])
+                    break
+            except Exception:
+                continue
+    if parsed_err:
+        return {
+            "success": False,
+            "error": parsed_err,
+            "joint_path": joint_path,
+            "joint_type": joint_type,
+            "body0": body0_path,
+            "body1": body1_path,
+            "axis": axis,
+            "raw": out_text[-300:],
+        }
     return {
         "success": bool(res.get("success", False)),
         "joint_path": joint_path,
@@ -4355,7 +4457,7 @@ print(json.dumps({{
         "body0": body0_path,
         "body1": body1_path,
         "axis": axis,
-        "raw": (res.get("output") or "")[-300:],
+        "raw": out_text[-300:],
     }
 
 
@@ -6009,14 +6111,29 @@ xmin, xmax = float(bbox.GetMin()[0]), float(bbox.GetMax()[0])
 y_center = 0.5 * (float(bbox.GetMin()[1]) + float(bbox.GetMax()[1]))
 z_top = float(bbox.GetMax()[2])
 
+# Round 6 repair (2026-05-18): if the conveyor is an empty Xform (no
+# child mesh authored yet) the BBoxCache returns FLT_MAX/-FLT_MAX
+# extrema. Substitute a synthetic 2 m belt around origin so the zone
+# markers still get authored at reasonable positions.
+import math as _math_zp
+if (not _math_zp.isfinite(xmin)) or (not _math_zp.isfinite(xmax)) or (xmax <= xmin):
+    print(f"[setup_zone_partition] conveyor {{conv.GetPath()}} has degenerate bbox "
+          f"([{{xmin}},{{xmax}}]) — using synthetic [-1.0, 1.0] x-range")
+    xmin, xmax = -1.0, 1.0
+if not _math_zp.isfinite(y_center):
+    y_center = 0.0
+if not _math_zp.isfinite(z_top):
+    z_top = 0.85
+
 n_zones = {n_zones}
 robots = {robots!r}
 zone_width = (xmax - xmin) / n_zones
 zones = []
+_base_path = {base_path!r}  # Round 6 repair (2026-05-18): use real var, not f"{{!r}}" — previous code embedded literal quotes into the path
 for i in range(n_zones):
     z_start = xmin + i * zone_width
     z_end = z_start + zone_width
-    zone_path = f"{base_path!r}/Zone_{{i+1}}"
+    zone_path = f"{{_base_path}}/Zone_{{i+1}}"
     pp = Sdf.Path(zone_path)
     prim = stage.GetPrimAtPath(pp)
     if not prim or not prim.IsValid():

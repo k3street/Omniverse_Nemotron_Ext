@@ -404,6 +404,18 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             mutex_path=args.get("mutex_path"),
         )
     if mode == "curobo":
+        # Round 6 repair (2026-05-18): auto-detect robot_family from
+        # robot_path when caller didn't supply it. Templates routinely
+        # pass UR10 in robot_path but forget to set robot_family, then
+        # the curobo gen-fn defaults to "franka" and creates a panda
+        # gripper view on a UR10 articulation → ParallelGripper failure.
+        _rf = args.get("robot_family")
+        if not _rf:
+            _rp_lc = (robot_path or "").lower()
+            if "ur10" in _rp_lc or "ur5" in _rp_lc or "ur16" in _rp_lc:
+                _rf = "ur10"
+            else:
+                _rf = "franka"
         return _gen_pick_place_curobo(
             robot_path=robot_path,
             sensor_path=args.get("sensor_path"),
@@ -418,7 +430,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             color_routing=args.get("color_routing"),
             drop_targets=args.get("drop_targets"),
             gripper_rotation=args.get("gripper_rotation"),
-            robot_family=args.get("robot_family", "franka"),
+            robot_family=_rf,
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", _UPRIGHT_DOT_THRESHOLD_DEFAULT)),
             mutex_path=args.get("mutex_path"),
@@ -3951,7 +3963,19 @@ from isaacsim.core.utils.types import ArticulationAction
 
 # Robot-family branching: Franka uses 7-DOF + ParallelGripper, UR10 uses 6-DOF
 # without built-in gripper (suction via separate surface_gripper tool).
-ROBOT_FAMILY = {robot_family!r}
+# Round 6 repair (2026-05-18): accept "franka_panda" / "panda" / "frankarobotics"
+# as friendly aliases (templates use these forms for robot_wizard so they
+# naturally appear in robot_family too). Normalize before branching.
+_ROBOT_FAMILY_RAW = {robot_family!r}
+_ROBOT_FAMILY_NORM = {{
+    "franka_panda": "franka",
+    "panda": "franka",
+    "franka_emika_panda": "franka",
+    "frankarobotics": "franka",
+    "frankaemika_panda": "franka",
+    "ur10e": "ur10",
+}}.get(str(_ROBOT_FAMILY_RAW).lower(), str(_ROBOT_FAMILY_RAW).lower())
+ROBOT_FAMILY = _ROBOT_FAMILY_NORM
 if ROBOT_FAMILY == "franka":
     from isaacsim.robot.manipulators.examples.franka import Franka as _RobotWrapper
     _ARM_DOF = 7
@@ -4199,6 +4223,27 @@ try:
         SimulationManager.initialize_physics()
 except Exception: pass
 _physics_sim_view = SimulationManager.get_physics_sim_view()
+# Round 6 repair (2026-05-18): if get_physics_sim_view() still returns
+# None after initialize_physics (no PhysicsScene authored yet),
+# franka.initialize() will crash inside is_homogeneous() check. Author
+# a default PhysicsScene + pump another world.reset() to materialize it.
+if _physics_sim_view is None:
+    try:
+        from pxr import UsdPhysics as _UP_pp
+        _stage_pp = omni.usd.get_context().get_stage()
+        if not _stage_pp.GetPrimAtPath("/PhysicsScene").IsValid():
+            _UP_pp.Scene.Define(_stage_pp, "/PhysicsScene")
+        _w_pp = World.instance() or World()
+        try: _w_pp.reset()
+        except Exception: pass
+        for _ in range(6): _app.update()
+        if SimulationManager.get_physics_sim_view() is None:
+            SimulationManager.initialize_physics()
+        _physics_sim_view = SimulationManager.get_physics_sim_view()
+    except Exception as _e_psv:
+        print(f"(curobo: PhysicsScene-fallback failed: {{_e_psv}})")
+if _physics_sim_view is None:
+    print(json.dumps({{"ok": False, "error": "physics_sim_view not initializable — author a PhysicsScene before setup_pick_place_controller"}})); raise SystemExit
 
 world = World.instance() or World()
 _ROBOT_NAME = f"curobo_pp_{{ROBOT_FAMILY}}_" + _ROBOT_TAG

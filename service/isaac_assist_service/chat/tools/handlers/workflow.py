@@ -966,8 +966,15 @@ async def _handle_execute_with_retry(args: Dict) -> Dict:
     # actual exec result via existing patch-status machinery. We surface
     # the budget so the caller can decide whether to retry on failure.
     result = await kit_tools.queue_exec_patch(code, description)
+    # Round 6 repair (2026-05-18): when the patch fails, surface the Kit
+    # error message via `error` so canonical_instantiator records a
+    # meaningful message instead of an empty string.
+    _success = bool(result.get("success", False))
+    _err = None
+    if not _success:
+        _err = (result.get("error") or result.get("output") or "").strip()[:400] or None
     return {
-        "success": bool(result.get("success", False)),
+        "success": _success,
         "ok": True,
         "type": "code_patch",
         "code": code,
@@ -976,6 +983,8 @@ async def _handle_execute_with_retry(args: Dict) -> Dict:
         "patch_id": result.get("patch_id"),
         "max_retries": max_retries,
         "context_hints": context_hints,
+        "error": _err,
+        "output": (result.get("output") or "")[-400:],
         "next_action": (
             "Wait for patch result. On failure, call execute_with_retry again "
             f"with patched code (up to {max_retries} attempts total)."

@@ -994,13 +994,25 @@ def _gen_assign_material(args: Dict) -> str:
     Returns:
         Python source string for Kit exec.
     """
+    # Round 6 repair (2026-05-18): MaterialBindingAPI.Bind raises
+    # `Cannot set target <>` when the Material prim doesn't exist on
+    # the stage. Validate both prims before binding and emit a clear
+    # diagnostic so failed templates report the missing prim path
+    # rather than an inscrutable pxr error.
     return (
         "import omni.usd\n"
         "from pxr import UsdShade\n"
         "stage = omni.usd.get_context().get_stage()\n"
-        f"mat = UsdShade.Material(stage.GetPrimAtPath('{args['material_path']}'))\n"
-        f"prim = stage.GetPrimAtPath('{args['prim_path']}')\n"
-        "UsdShade.MaterialBindingAPI(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)"
+        f"_mat_path = {args['material_path']!r}\n"
+        f"_prim_path = {args['prim_path']!r}\n"
+        "_mat_prim = stage.GetPrimAtPath(_mat_path)\n"
+        "_target_prim = stage.GetPrimAtPath(_prim_path)\n"
+        "if not _mat_prim or not _mat_prim.IsValid():\n"
+        "    raise RuntimeError(f'assign_material: Material prim not found at {_mat_path!r} — call create_material(material_path={_mat_path!r}, ...) first')\n"
+        "if not _target_prim or not _target_prim.IsValid():\n"
+        "    raise RuntimeError(f'assign_material: target prim not found at {_prim_path!r}')\n"
+        "mat = UsdShade.Material(_mat_prim)\n"
+        "UsdShade.MaterialBindingAPI(_target_prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)"
     )
 
 
@@ -1878,6 +1890,27 @@ def _poisson_filter(points, min_dist):
     return kept
 
 
+def _sample_aabb_top_face(prim, n):
+    \"\"\"Round 6 repair (2026-05-18): when the target is implicit geometry
+    (Cube/Cylinder/Plane) we have no GetPointsAttr/triangulation. Sample
+    points uniformly on the prim's AXIS-ALIGNED TOP face — the common
+    intent for scatter_on_surface(table) calls is to place objects on
+    the table top, not on its sides.\"\"\"
+    _bbc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    _world_range = _bbc.ComputeWorldBound(prim).ComputeAlignedRange()
+    _mn = _world_range.GetMin()
+    _mx = _world_range.GetMax()
+    samples = []
+    normals = []
+    z_top = float(_mx[2])
+    for _ in range(n):
+        x = _mn[0] + random.random() * (_mx[0] - _mn[0])
+        y = _mn[1] + random.random() * (_mx[1] - _mn[1])
+        samples.append(Gf.Vec3d(float(x), float(y), z_top))
+        normals.append(Gf.Vec3d(0.0, 0.0, 1.0))
+    return samples, normals
+
+
 target_prim = stage.GetPrimAtPath(target_mesh_path)
 if not target_prim or not target_prim.IsValid():
     # Fall back to trimesh for filesystem mesh paths. If THAT also fails,
@@ -1896,6 +1929,15 @@ if not target_prim or not target_prim.IsValid():
             f'scatter_on_surface: target {{target_mesh_path!r}} is not a valid stage prim '
             f'and trimesh could not load it as a mesh file: {{e}}'
         )
+elif target_prim.IsA(UsdGeom.Mesh):
+    samples, normals = _sample_surface_points(target_prim, count)
+elif (target_prim.IsA(UsdGeom.Cube) or target_prim.IsA(UsdGeom.Cylinder)
+      or target_prim.IsA(UsdGeom.Cone) or target_prim.IsA(UsdGeom.Capsule)
+      or target_prim.IsA(UsdGeom.Sphere) or target_prim.IsA(UsdGeom.Plane)):
+    # Round 6 repair: implicit prim — sample its top AABB face.
+    print(f'scatter_on_surface: target {{target_mesh_path!r}} is implicit '
+          f'{{target_prim.GetTypeName()}}; sampling AABB top face')
+    samples, normals = _sample_aabb_top_face(target_prim, count)
 else:
     samples, normals = _sample_surface_points(target_prim, count)
 if not samples:

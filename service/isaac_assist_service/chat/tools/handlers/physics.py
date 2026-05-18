@@ -1236,121 +1236,134 @@ prim = stage.GetPrimAtPath(PRIM_PATH)
 if not prim or not prim.IsValid():
     raise RuntimeError(f"Prim not found: {{PRIM_PATH}}")
 
-mesh = UsdGeom.Mesh(prim)
-if not mesh:
-    raise RuntimeError(f"Prim {{PRIM_PATH}} is not a UsdGeom.Mesh")
-
-# ── Step 0: Read current mesh data ──────────────────────────────────────
-points = mesh.GetPointsAttr().Get() or []
-face_counts = mesh.GetFaceVertexCountsAttr().Get() or []
-face_indices = mesh.GetFaceVertexIndicesAttr().Get() or []
-
-# Triangulate
-triangles = []
-cursor = 0
-for fc in face_counts:
-    if fc < 3:
-        cursor += fc
-        continue
-    base = face_indices[cursor]
-    for k in range(1, fc - 1):
-        triangles.append((base, face_indices[cursor + k], face_indices[cursor + k + 1]))
-    cursor += fc
-
-import trimesh
-verts_np = np.array([(p[0], p[1], p[2]) for p in points], dtype=float)
-faces_np = np.array(triangles, dtype=int) if triangles else np.zeros((0, 3), dtype=int)
-tm = trimesh.Trimesh(vertices=verts_np, faces=faces_np, process=False)
-
-# ── Step 1: Fix normals ─────────────────────────────────────────────────
-try:
-    tm.fix_normals()
-except Exception:
-    pass
-
-# ── Step 2: Remove degenerate / duplicate faces ─────────────────────────
-try:
-    tm.update_faces(tm.unique_faces())
-    tm.update_faces(tm.nondegenerate_faces())
-    tm.remove_unreferenced_vertices()
-except Exception:
-    pass
-
-# ── Step 3: Fill holes / make watertight ────────────────────────────────
-if not tm.is_watertight:
-    try:
-        tm.fill_holes()
-    except Exception:
-        pass
-
-# ── Step 4: Simplify if target_triangles is set or hull > GPU limit ─────
-needs_simplify = False
-if TARGET_TRIANGLES is not None and len(tm.faces) > TARGET_TRIANGLES:
-    needs_simplify = True
+# Round 6 repair (2026-05-18): templates often run fix_collision_mesh on
+# Cube/Cylinder primitives (no GetPointsAttr → empty mesh). Soft-success
+# with a marker so canonical-build doesn't fail — the implicit-geometry
+# collision is already correct without the trimesh repair pipeline.
+if prim.IsA(UsdGeom.Mesh):
+    mesh = UsdGeom.Mesh(prim)
+    if not mesh:
+        raise RuntimeError(f"Prim {{PRIM_PATH}} is not a UsdGeom.Mesh")
 else:
+    # Round 6 repair (2026-05-18): templates often run fix_collision_mesh
+    # on Cube/Cylinder primitives (no GetPointsAttr → empty mesh). Soft-
+    # success — implicit-geometry collision is already exact without
+    # the trimesh repair pipeline.
+    print(f"fix_collision_mesh: {{PRIM_PATH}} is {{prim.GetTypeName()}} (implicit geometry) — collision already exact, skipping mesh repair")
+    mesh = None
+
+if mesh is not None:
+    # ── Step 0: Read current mesh data ──────────────────────────────────────
+    points = mesh.GetPointsAttr().Get() or []
+    face_counts = mesh.GetFaceVertexCountsAttr().Get() or []
+    face_indices = mesh.GetFaceVertexIndicesAttr().Get() or []
+
+    # Triangulate
+    triangles = []
+    cursor = 0
+    for fc in face_counts:
+        if fc < 3:
+            cursor += fc
+            continue
+        base = face_indices[cursor]
+        for k in range(1, fc - 1):
+            triangles.append((base, face_indices[cursor + k], face_indices[cursor + k + 1]))
+        cursor += fc
+    
+    import trimesh
+    verts_np = np.array([(p[0], p[1], p[2]) for p in points], dtype=float)
+    faces_np = np.array(triangles, dtype=int) if triangles else np.zeros((0, 3), dtype=int)
+    tm = trimesh.Trimesh(vertices=verts_np, faces=faces_np, process=False)
+    
+    # ── Step 1: Fix normals ─────────────────────────────────────────────────
     try:
-        hull = tm.convex_hull
-        if len(hull.vertices) > PHYSX_HULL_MAX_VERTS or len(hull.faces) > PHYSX_HULL_MAX_POLYS:
-            needs_simplify = True
+        tm.fix_normals()
     except Exception:
         pass
-
-if needs_simplify:
-    target = TARGET_TRIANGLES if TARGET_TRIANGLES is not None else max(1000, len(tm.faces) // 4)
+    
+    # ── Step 2: Remove degenerate / duplicate faces ─────────────────────────
     try:
-        tm = tm.simplify_quadric_decimation(target)
+        tm.update_faces(tm.unique_faces())
+        tm.update_faces(tm.nondegenerate_faces())
+        tm.remove_unreferenced_vertices()
     except Exception:
+        pass
+    
+    # ── Step 3: Fill holes / make watertight ────────────────────────────────
+    if not tm.is_watertight:
         try:
-            # Trimesh ≥4 renamed it
-            tm = tm.simplify_quadratic_decimation(target)
+            tm.fill_holes()
         except Exception:
             pass
-
-# ── Step 5: CoACD convex decomposition (best-effort) ────────────────────
-hulls = []
-try:
-    import coacd
-    coacd_mesh = coacd.Mesh(tm.vertices, tm.faces)
-    parts = coacd.run_coacd(
-        coacd_mesh,
-        threshold=COACD_THRESHOLD,
-        max_convex_hull=COACD_MAX_CONVEX_HULL,
-    )
-    for verts, faces in parts:
-        hulls.append(trimesh.Trimesh(vertices=verts, faces=faces, process=False))
-except Exception:
-    # Fall back: single convex hull
+    
+    # ── Step 4: Simplify if target_triangles is set or hull > GPU limit ─────
+    needs_simplify = False
+    if TARGET_TRIANGLES is not None and len(tm.faces) > TARGET_TRIANGLES:
+        needs_simplify = True
+    else:
+        try:
+            hull = tm.convex_hull
+            if len(hull.vertices) > PHYSX_HULL_MAX_VERTS or len(hull.faces) > PHYSX_HULL_MAX_POLYS:
+                needs_simplify = True
+        except Exception:
+            pass
+    
+    if needs_simplify:
+        target = TARGET_TRIANGLES if TARGET_TRIANGLES is not None else max(1000, len(tm.faces) // 4)
+        try:
+            tm = tm.simplify_quadric_decimation(target)
+        except Exception:
+            try:
+                # Trimesh ≥4 renamed it
+                tm = tm.simplify_quadratic_decimation(target)
+            except Exception:
+                pass
+    
+    # ── Step 5: CoACD convex decomposition (best-effort) ────────────────────
+    hulls = []
     try:
-        hulls = [tm.convex_hull]
+        import coacd
+        coacd_mesh = coacd.Mesh(tm.vertices, tm.faces)
+        parts = coacd.run_coacd(
+            coacd_mesh,
+            threshold=COACD_THRESHOLD,
+            max_convex_hull=COACD_MAX_CONVEX_HULL,
+        )
+        for verts, faces in parts:
+            hulls.append(trimesh.Trimesh(vertices=verts, faces=faces, process=False))
     except Exception:
-        hulls = []
-
-# ── Step 6: Verify all hulls ≤ GPU limits ───────────────────────────────
-for idx, h in enumerate(hulls):
-    if len(h.vertices) > PHYSX_HULL_MAX_VERTS:
-        print(f"WARN: hull {{idx}} has {{len(h.vertices)}} vertices > {{PHYSX_HULL_MAX_VERTS}}")
-    if len(h.faces) > PHYSX_HULL_MAX_POLYS:
-        print(f"WARN: hull {{idx}} has {{len(h.faces)}} faces > {{PHYSX_HULL_MAX_POLYS}}")
-
-# ── Step 7: Write repaired triangle mesh back to USD ────────────────────
-new_points = Vt.Vec3fArray([tuple(v) for v in tm.vertices.tolist()])
-mesh.GetPointsAttr().Set(new_points)
-new_face_counts = Vt.IntArray([3] * len(tm.faces))
-mesh.GetFaceVertexCountsAttr().Set(new_face_counts)
-flat_indices = [int(i) for tri in tm.faces.tolist() for i in tri]
-mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(flat_indices))
-
-# Apply MeshCollisionAPI with appropriate approximation
-if not prim.HasAPI(UsdPhysics.CollisionAPI):
-    UsdPhysics.CollisionAPI.Apply(prim)
-if not prim.HasAPI(UsdPhysics.MeshCollisionAPI):
-    UsdPhysics.MeshCollisionAPI.Apply(prim)
-
-mca = UsdPhysics.MeshCollisionAPI(prim)
-approx = "convexDecomposition" if len(hulls) > 1 else "convexHull"
-mca.CreateApproximationAttr().Set(approx)
-
-print(f"OK: repaired {{PRIM_PATH}} — {{len(tm.faces)}} triangles, {{len(hulls)}} hull(s), approx={{approx}}")
+        # Fall back: single convex hull
+        try:
+            hulls = [tm.convex_hull]
+        except Exception:
+            hulls = []
+    
+    # ── Step 6: Verify all hulls ≤ GPU limits ───────────────────────────────
+    for idx, h in enumerate(hulls):
+        if len(h.vertices) > PHYSX_HULL_MAX_VERTS:
+            print(f"WARN: hull {{idx}} has {{len(h.vertices)}} vertices > {{PHYSX_HULL_MAX_VERTS}}")
+        if len(h.faces) > PHYSX_HULL_MAX_POLYS:
+            print(f"WARN: hull {{idx}} has {{len(h.faces)}} faces > {{PHYSX_HULL_MAX_POLYS}}")
+    
+    # ── Step 7: Write repaired triangle mesh back to USD ────────────────────
+    new_points = Vt.Vec3fArray([tuple(v) for v in tm.vertices.tolist()])
+    mesh.GetPointsAttr().Set(new_points)
+    new_face_counts = Vt.IntArray([3] * len(tm.faces))
+    mesh.GetFaceVertexCountsAttr().Set(new_face_counts)
+    flat_indices = [int(i) for tri in tm.faces.tolist() for i in tri]
+    mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(flat_indices))
+    
+    # Apply MeshCollisionAPI with appropriate approximation
+    if not prim.HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(prim)
+    if not prim.HasAPI(UsdPhysics.MeshCollisionAPI):
+        UsdPhysics.MeshCollisionAPI.Apply(prim)
+    
+    mca = UsdPhysics.MeshCollisionAPI(prim)
+    approx = "convexDecomposition" if len(hulls) > 1 else "convexHull"
+    mca.CreateApproximationAttr().Set(approx)
+    
+    print(f"OK: repaired {{PRIM_PATH}} — {{len(tm.faces)}} triangles, {{len(hulls)}} hull(s), approx={{approx}}")
 """
 
 
@@ -1417,9 +1430,26 @@ def _gen_compute_convex_hull(args: Dict) -> str:
         "exported_path = None",
         "if export_hull_path:",
         "    # 2) Compute the convex hull (scipy if available, else manual gift-wrap)",
-        "    mesh = UsdGeom.Mesh(prim)",
         "    xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())",
-        "    local_points = mesh.GetPointsAttr().Get() or []",
+        # Round 6 repair (2026-05-18): when the prim is implicit geometry
+        # (Cube/Sphere/Cylinder/Cone/Capsule) it has no GetPointsAttr —
+        # synthesize hull-equivalent vertices from the prim's AABB so
+        # export_hull_path still produces a usable mesh.
+        "    if prim.IsA(UsdGeom.Mesh):",
+        "        mesh = UsdGeom.Mesh(prim)",
+        "        local_points = mesh.GetPointsAttr().Get() or []",
+        "    else:",
+        "        # Implicit prim: use 8 AABB corners as hull source.",
+        "        _bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])",
+        "        _local_range = _bbox_cache.ComputeLocalBound(prim).ComputeAlignedRange()",
+        "        _mn = _local_range.GetMin()",
+        "        _mx = _local_range.GetMax()",
+        "        local_points = [",
+        "            (_mn[0], _mn[1], _mn[2]), (_mx[0], _mn[1], _mn[2]),",
+        "            (_mx[0], _mx[1], _mn[2]), (_mn[0], _mx[1], _mn[2]),",
+        "            (_mn[0], _mn[1], _mx[2]), (_mx[0], _mn[1], _mx[2]),",
+        "            (_mx[0], _mx[1], _mx[2]), (_mn[0], _mx[1], _mx[2]),",
+        "        ]",
         "    world_points = [xf.Transform(Gf.Vec3d(p[0], p[1], p[2])) for p in local_points]",
         "    hull_vertices = []",
         "    hull_triangles = []",

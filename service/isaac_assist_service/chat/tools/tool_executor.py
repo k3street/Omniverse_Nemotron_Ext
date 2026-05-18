@@ -259,6 +259,12 @@ def _validate_args_pydantic(tool_name: str, arguments: Dict[str, Any]) -> Option
     models (extra='allow', Optional fields) mean validation rarely
     rejects; it catches the egregious cases (wrong type, missing
     required field).
+
+    Round 3 repair (2026-05-17): when args come from the canonical
+    sandbox-capture path, they may include `_SandboxResult` proxies
+    (returned by tools whose output is fed to a later tool). Pydantic
+    can't validate proxies, so skip validation and let the handler
+    receive the args as-is.
     """
     try:
         from .handlers._models import MODEL_REGISTRY
@@ -267,6 +273,31 @@ def _validate_args_pydantic(tool_name: str, arguments: Dict[str, Any]) -> Option
     model_cls = MODEL_REGISTRY.get(tool_name)
     if model_cls is None:
         return None  # Unknown tool — fall through to dispatch's own error path
+    # Sandbox-capture bypass: if any arg is a _SandboxResult, skip validation.
+    # Detect by class name rather than imp so we don't have to import
+    # canonical_instantiator (which would create a cycle).
+    # Round 6 repair (2026-05-18): recurse to arbitrary depth so a
+    # _SandboxResult buried inside `trajectory[0]["pose"]["orientation"]`
+    # still defers validation. Previous one-level cap silently rejected
+    # legitimate canonical args that nested data through tool return
+    # values (e.g. follow_trajectory_with_compliance trajectory dicts).
+    def _has_sandbox(obj, depth=0):
+        if depth > 8:  # belt-and-suspenders against pathological cycles
+            return False
+        if type(obj).__name__ == "_SandboxResult":
+            return True
+        if isinstance(obj, dict):
+            for vv in obj.values():
+                if _has_sandbox(vv, depth + 1):
+                    return True
+        elif isinstance(obj, (list, tuple)):
+            for vv in obj:
+                if _has_sandbox(vv, depth + 1):
+                    return True
+        return False
+    for v in arguments.values():
+        if _has_sandbox(v):
+            return None
     try:
         model_cls.model_validate(arguments)
         return None
@@ -293,7 +324,7 @@ async def execute_tool_call(
     All returns flow through `_apply_result_cap` (P1 from kcode-spec sec 6.2)
     which truncates oversized result payloads to bound LLM token cost.
     """
-    logger.info(f"[ToolExecutor] Executing tool: {tool_name}({json.dumps(arguments)[:200]})")
+    logger.info(f"[ToolExecutor] Executing tool: {tool_name}({json.dumps(arguments, default=str)[:200]})")
 
     # Phase 10: input validation via Pydantic model.
     validation_err = _validate_args_pydantic(tool_name, arguments)
@@ -320,6 +351,20 @@ async def execute_tool_call(
         if tool_name == "run_usd_script":
             code = arguments.get("code", "")
             desc = arguments.get("description", "Run custom script")
+            # Round 6 repair (2026-05-18): legacy templates call
+            # `omni.physx.get_physx_interface().subscribe_contact_report_events`
+            # but in Kit 105+ that method only exists on the simulation
+            # interface (`get_physx_simulation_interface`). Translate the
+            # call so canonicals still work without rewriting every
+            # template — wraps the original interface call so older Kit
+            # builds (pre-105) still hit the fallback.
+            if "subscribe_contact_report_events" in code and "get_physx_simulation_interface" not in code:
+                code = code.replace(
+                    "omni.physx.get_physx_interface()",
+                    "(omni.physx.get_physx_simulation_interface() "
+                    "if hasattr(omni.physx, 'get_physx_simulation_interface') "
+                    "else omni.physx.get_physx_interface())",
+                )
             # Pre-flight validation
             issues = validate_patch(code)
             if has_blocking_issues(issues):
