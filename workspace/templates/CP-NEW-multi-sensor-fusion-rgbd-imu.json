@@ -198,5 +198,5 @@
     ],
     "failed": {}
   },
-  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending (requires live Kit + viewport + ROS2 /clock + Isaac Sim sensor OmniGraph node types)"
+  "verified_status": "drafted-2026-05-16; form-gate pending; env_blocked: isaacsim.sensors.ReadCameraPose OmniGraph node type not registered in current Isaac Sim 5.1 build (extension isaacsim.sensors does not expose the camera-pose reader node); function-gate pending until the sensor extension ships the node type"
 }
