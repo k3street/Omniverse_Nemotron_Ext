@@ -26,7 +26,13 @@ except Exception:
     HAS_CARB_SETTINGS = False
 
 from ..service_client import AssistServiceClient
-from ..webrtc_client import ViewportWebRTCClient
+try:
+    from ..webrtc_client import ViewportWebRTCClient
+    HAS_LIVEKIT = True
+except Exception as e:
+    ViewportWebRTCClient = None
+    HAS_LIVEKIT = False
+    LIVEKIT_IMPORT_ERROR = e
 from .verbs import verb_for
 from . import animations as anim
 
@@ -255,6 +261,7 @@ class ChatViewWindow(ui.Window):
         self._undo_progress_row = None
         self._undo_handled_via_sse = False
         self._clear_chat_confirm = False
+        self._new_scene_confirm = False
 
         # Text scaling (Phase 7). Loaded from carb settings if available,
         # else defaults to 100%. _scaled_labels is the registry: each
@@ -266,8 +273,10 @@ class ChatViewWindow(ui.Window):
         self._scaled_labels: List[Tuple[ui.Label, int]] = []
         self._scale_popup: Optional[ui.Window] = None
         self._model_popup: Optional[ui.Window] = None
+        self._settings_popup: Optional[ui.Window] = None
         self._current_model_label: str = "?"
         self._scale_lbl: Optional[ui.Label] = None
+        self._settings_status_lbl: Optional[ui.Label] = None
         # Debounce: rapid A+/A- clicks coalesce into one apply task.
         self._scale_apply_task: Optional[asyncio.Task] = None
 
@@ -491,9 +500,12 @@ class ChatViewWindow(ui.Window):
     # Each entry: (label_shown_to_user, llm_mode, cloud_or_local_model_name)
     # Free / cheap options first; high-cost models last so users notice.
     _MODEL_OPTIONS = (
-        ("Gemini 3 Flash",          "cloud",     "gemini-3-flash-preview"),
-        ("Gemini 2.5 Flash",        "cloud",     "gemini-2.5-flash"),
-        ("Gemini 2.5 Pro",          "cloud",     "gemini-2.5-pro"),
+        ("Local Qwen3.6",           "local",     "qwen3.6:latest"),
+        ("Local DeepSeek R1 32B",   "local",     "deepseek-r1:32b"),
+        ("Local Nemotron3 33B",     "local",     "nemotron3:33b"),
+        ("Gemini 3 Flash",          "google",    "gemini-3-flash-preview"),
+        ("Gemini 2.5 Flash",        "google",    "gemini-2.5-flash"),
+        ("Gemini 2.5 Pro",          "google",    "gemini-2.5-pro"),
         ("Kimi K2 (Moonshot)",      "moonshot",  "kimi-k2-0905-preview"),
         ("Claude Opus 4.7",         "anthropic", "claude-opus-4-7"),
         ("Claude Sonnet 4.6",       "anthropic", "claude-sonnet-4-6"),
@@ -510,34 +522,71 @@ class ChatViewWindow(ui.Window):
                 self._model_popup = None
         self._model_popup = ui.Window(
             "Model",
-            width=260,
-            height=24 + 26 * len(self._MODEL_OPTIONS) + 16,
-            flags=ui.WINDOW_FLAGS_NO_RESIZE | ui.WINDOW_FLAGS_NO_SCROLLBAR,
+            width=300,
+            height=270,
+            flags=ui.WINDOW_FLAGS_NO_RESIZE,
         )
         with self._model_popup.frame:
             with ui.VStack(spacing=2):
                 ui.Spacer(height=4)
-                ui.Label(
-                    f"Current: {self._current_model_label}",
-                    style={"color": COL_TEXT_DIM, "font_size": self._sz(10)},
-                    height=14,
-                )
+                with ui.HStack(height=18):
+                    ui.Spacer(width=6)
+                    ui.Label(
+                        f"Current: {self._current_model_label}",
+                        style={"color": COL_TEXT_DIM, "font_size": self._sz(10)},
+                    )
+                    ui.Spacer(width=6)
                 ui.Spacer(height=4)
-                for label, mode, model in self._MODEL_OPTIONS:
+                model_scroll = ui.ScrollingFrame(
+                    height=210,
+                    horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF,
+                    vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
+                )
+                with model_scroll:
+                    with ui.VStack(spacing=4):
+                        for label, mode, model in self._MODEL_OPTIONS:
+                            ui.Button(
+                                label,
+                                height=24,
+                                clicked_fn=lambda m=mode, n=model, l=label: self._switch_model(m, n, l),
+                                style={"font_size": self._sz(11)},
+                                tooltip=model,
+                            )
+                ui.Spacer(height=4)
+                with ui.HStack(height=24):
+                    ui.Spacer()
                     ui.Button(
-                        label,
+                        "Close",
+                        width=70,
                         height=22,
-                        clicked_fn=lambda m=mode, n=model, l=label: self._switch_model(m, n, l),
+                        clicked_fn=self._close_model_popup,
                         style={"font_size": self._sz(11)},
                     )
+                    ui.Spacer(width=6)
+
+    def _close_model_popup(self):
+        if self._model_popup is not None:
+            try:
+                self._model_popup.visible = False
+            except Exception:
+                pass
 
     def _switch_model(self, mode: str, model_name: str, label: str):
         """POST {LLM_MODE, CLOUD_MODEL_NAME or LOCAL_MODEL_NAME} to /settings/."""
         import asyncio
         import aiohttp
         async def _do_switch():
-            key = "LOCAL_MODEL_NAME" if mode == "local" else "CLOUD_MODEL_NAME"
-            settings = {"LLM_MODE": mode, key: model_name}
+            target_mode = mode
+            settings = {"LLM_MODE": target_mode}
+            if target_mode == "local":
+                settings["LOCAL_MODEL_NAME"] = model_name
+                settings["DISTILLER_MODEL_NAME"] = model_name
+            elif target_mode in ("google", "gemini", "cloud"):
+                target_mode = "google"
+                settings["LLM_MODE"] = target_mode
+                settings["GEMINI_MODEL_NAME"] = model_name
+            else:
+                settings["CLOUD_MODEL_NAME"] = model_name
             url = "http://localhost:8000/api/v1/settings/"
             try:
                 async with aiohttp.ClientSession() as session:
@@ -549,6 +598,9 @@ class ChatViewWindow(ui.Window):
                         if resp.status == 200:
                             self._current_model_label = label
                             self.btn_model.tooltip = f"Current: {label}"
+                            self.btn_model.text = "Model"
+                            self._add_assistant_bubble(f"Model switched to {label}.")
+                            self._refresh_settings_status()
                         else:
                             try:
                                 logger.warning(
@@ -566,6 +618,163 @@ class ChatViewWindow(ui.Window):
             asyncio.ensure_future(_do_switch())
         except Exception as e:
             logger.warning(f"[ModelSwitch] dispatch failed: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Settings popup (Set button)
+    # ═══════════════════════════════════════════════════════════════════════
+    def _open_settings_popup(self):
+        if self._settings_popup is not None:
+            try:
+                self._settings_popup.visible = not self._settings_popup.visible
+                return
+            except Exception:
+                self._settings_popup = None
+
+        self._settings_popup = ui.Window(
+            "Isaac Assist Settings",
+            width=310,
+            height=210,
+            flags=ui.WINDOW_FLAGS_NO_RESIZE,
+        )
+        with self._settings_popup.frame:
+            with ui.VStack(spacing=6):
+                ui.Spacer(height=4)
+                with ui.HStack(height=18):
+                    ui.Spacer(width=6)
+                    self._settings_status_lbl = ui.Label(
+                        "Loading settings...",
+                        style={"color": COL_TEXT_DIM, "font_size": self._sz(10)},
+                    )
+                    ui.Spacer(width=6)
+                with ui.HStack(height=24, spacing=6):
+                    ui.Spacer(width=6)
+                    ui.Button(
+                        "Local",
+                        height=22,
+                        clicked_fn=lambda: self._switch_model("local", "qwen3.6:latest", "Local Qwen3.6"),
+                        style={"font_size": self._sz(11)},
+                        tooltip="Use local Ollama qwen3.6",
+                    )
+                    ui.Button(
+                        "Auto On",
+                        height=22,
+                        clicked_fn=lambda: self._update_setting("AUTO_APPROVE", "true"),
+                        style={"font_size": self._sz(11)},
+                        tooltip="Execute generated Kit patches immediately",
+                    )
+                    ui.Button(
+                        "Auto Off",
+                        height=22,
+                        clicked_fn=lambda: self._update_setting("AUTO_APPROVE", "false"),
+                        style={"font_size": self._sz(11)},
+                        tooltip="Queue generated Kit patches for approval",
+                    )
+                    ui.Spacer(width=6)
+                with ui.HStack(height=24, spacing=6):
+                    ui.Spacer(width=6)
+                    ui.Button(
+                        "Model",
+                        height=22,
+                        clicked_fn=self._open_model_popup,
+                        style={"font_size": self._sz(11)},
+                        tooltip="Open model selector",
+                    )
+                    ui.Button(
+                        "Text",
+                        height=22,
+                        clicked_fn=self._open_scale_popup,
+                        style={"font_size": self._sz(11)},
+                        tooltip="Open text size controls",
+                    )
+                    ui.Button(
+                        "Refresh",
+                        height=22,
+                        clicked_fn=self._refresh_settings_status,
+                        style={"font_size": self._sz(11)},
+                    )
+                    ui.Spacer(width=6)
+                ui.Spacer()
+                with ui.HStack(height=24):
+                    ui.Spacer()
+                    ui.Button(
+                        "Close",
+                        width=70,
+                        height=22,
+                        clicked_fn=self._close_settings_popup,
+                        style={"font_size": self._sz(11)},
+                    )
+                    ui.Spacer(width=6)
+
+        self._refresh_settings_status()
+
+    def _close_settings_popup(self):
+        if self._settings_popup is not None:
+            try:
+                self._settings_popup.visible = False
+            except Exception:
+                pass
+
+    def _set_settings_status(self, text: str):
+        if self._settings_status_lbl is not None:
+            try:
+                self._settings_status_lbl.text = text
+            except Exception:
+                pass
+
+    def _refresh_settings_status(self):
+        import asyncio
+        import aiohttp
+
+        async def _load():
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        "http://localhost:8000/api/v1/settings/",
+                        timeout=aiohttp.ClientTimeout(total=5),
+                    ) as resp:
+                        data = await resp.json()
+                settings = data.get("settings", {})
+                mode = settings.get("LLM_MODE", "?")
+                if mode == "local":
+                    model = settings.get("LOCAL_MODEL_NAME")
+                elif mode in ("google", "gemini", "cloud"):
+                    model = settings.get("GEMINI_MODEL_NAME")
+                else:
+                    model = settings.get("CLOUD_MODEL_NAME")
+                model = model or "?"
+                auto = settings.get("AUTO_APPROVE", "?")
+                self._current_model_label = model
+                self._set_settings_status(f"Mode: {mode} | Model: {model} | Auto: {auto}")
+                try:
+                    self.btn_model.tooltip = f"Current: {model}"
+                except Exception:
+                    pass
+            except Exception as e:
+                self._set_settings_status(f"Settings unavailable: {e}")
+
+        asyncio.ensure_future(_load())
+
+    def _update_setting(self, key: str, value: str):
+        import asyncio
+        import aiohttp
+
+        async def _do_update():
+            self._set_settings_status(f"Updating {key}...")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        "http://localhost:8000/api/v1/settings/",
+                        json={"settings": {key: value}},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status != 200:
+                            self._set_settings_status(f"Update failed: HTTP {resp.status}")
+                            return
+                self._refresh_settings_status()
+            except Exception as e:
+                self._set_settings_status(f"Update failed: {e}")
+
+        asyncio.ensure_future(_do_update())
 
     # ═══════════════════════════════════════════════════════════════════════
     # UI construction
@@ -607,7 +816,7 @@ class ChatViewWindow(ui.Window):
             )
             self.btn_new = ui.Button(
                 "New",
-                width=40,
+                width=64,
                 height=22,
                 clicked_fn=self._new_scene,
                 style={"font_size": 11},
@@ -615,7 +824,7 @@ class ChatViewWindow(ui.Window):
             )
             self.btn_clear = ui.Button(
                 "Clear",
-                width=44,
+                width=64,
                 height=22,
                 clicked_fn=self._on_clear_chat_clicked,
                 style={"font_size": 11},
@@ -629,12 +838,20 @@ class ChatViewWindow(ui.Window):
                 style={"font_size": 11},
             )
             self.btn_model = ui.Button(
-                "M",
-                width=24,
+                "Model",
+                width=56,
                 height=22,
                 clicked_fn=self._open_model_popup,
                 style={"font_size": 11},
                 tooltip="Switch LLM model / provider",
+            )
+            self.btn_settings = ui.Button(
+                "Set",
+                width=34,
+                height=22,
+                clicked_fn=self._open_settings_popup,
+                style={"font_size": 11},
+                tooltip="Isaac Assist settings",
             )
 
     def _build_chat_area(self):
@@ -1614,8 +1831,6 @@ class ChatViewWindow(ui.Window):
     # Clear chat (soft-confirm)
     # ═══════════════════════════════════════════════════════════════════════
     def _on_clear_chat_clicked(self):
-        if self._turn_active:
-            return  # never clear during a live turn
         if not self._clear_chat_confirm:
             self._clear_chat_confirm = True
             self.btn_clear.text = "Confirm?"
@@ -1635,6 +1850,12 @@ class ChatViewWindow(ui.Window):
             self.btn_clear.style = {"font_size": 11}
 
     async def _do_clear_chat(self):
+        was_active = self._turn_active
+        if was_active:
+            try:
+                await self.service.cancel_turn()
+            except Exception as e:
+                logger.warning(f"cancel before clear_chat failed: {e}")
         try:
             await self.service.clear_chat()
         except Exception as e:
@@ -1645,6 +1866,9 @@ class ChatViewWindow(ui.Window):
         self.chips_container.visible = True
         self.chips_container.height = ui.Pixel(22)
         self._collapse_live_strip()
+        self._clear_chat_confirm = False
+        self.btn_clear.text = "Clear"
+        self.btn_clear.style = {"font_size": 11}
         # Defense in depth: even if a turn is somehow stuck (server hang,
         # missed agent_reply), Clear forcibly resets the Stop-button to
         # idle so the user is never trapped in the "Stopping..." state.
@@ -1677,9 +1901,20 @@ class ChatViewWindow(ui.Window):
             self.btn_new.style = {"font_size": 11}
 
     async def _do_new_scene(self):
+        was_active = self._turn_active
+        if was_active:
+            try:
+                await self.service.cancel_turn()
+            except Exception as e:
+                logger.warning(f"cancel before new_scene failed: {e}")
         try:
             import omni.usd
-            omni.usd.get_context().new_stage()
+            ctx = omni.usd.get_context()
+            new_stage_async = getattr(ctx, "new_stage_async", None)
+            if callable(new_stage_async):
+                await new_stage_async()
+            else:
+                ctx.new_stage()
         except Exception as e:
             logger.error(f"[IsaacAssist] new_stage failed: {e}")
         try:
@@ -1706,6 +1941,9 @@ class ChatViewWindow(ui.Window):
         self.chat_layout.clear()
         self._undoable_bubbles = []
         self._collapse_live_strip()
+        self._new_scene_confirm = False
+        self.btn_new.text = "New"
+        self.btn_new.style = {"font_size": 11}
         # Re-show the empty-state chips after a wipe — feels like a fresh start.
         self._chips_shown = True
         self.chips_container.visible = True
@@ -1744,6 +1982,13 @@ class ChatViewWindow(ui.Window):
             pass
 
     def _toggle_livekit(self):
+        if not HAS_LIVEKIT:
+            self.btn_livekit.text = "Vision"
+            self._add_assistant_bubble(
+                f"LiveKit vision is unavailable in this Isaac Sim Python environment: {LIVEKIT_IMPORT_ERROR}",
+                error=True,
+            )
+            return
         if self.webrtc and self.webrtc._streaming:
             self.btn_livekit.text = "Vision"
             asyncio.ensure_future(self.webrtc.disconnect())

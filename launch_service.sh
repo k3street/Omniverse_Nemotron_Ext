@@ -18,6 +18,7 @@ cd "$SCRIPT_DIR"
 # ── Load environment ─────────────────────────────────────────────────────────
 [ -f .env ]              && { set -a; source .env; set +a; }
 [ -f service/isaac_assist_service/.env ] && { set -a; source service/isaac_assist_service/.env; set +a; }
+[ -f .env.local ]        && { set -a; source .env.local; set +a; }
 
 # ── Determine mode ────────────────────────────────────────────────────────────
 MODE="$1"
@@ -67,14 +68,25 @@ fi
 
 export LLM_MODE="$MODE"
 
+UVICORN_BIN="${UVICORN_BIN:-uvicorn}"
+if [ -x "$SCRIPT_DIR/.venv/bin/uvicorn" ]; then
+    UVICORN_BIN="$SCRIPT_DIR/.venv/bin/uvicorn"
+fi
+
 echo ""
 echo "Starting Isaac Assist service..."
 echo "  Mode:  $MODE"
 echo "  Model: $MODEL"
 echo "  Port:  8000"
+echo "  Uvicorn: $UVICORN_BIN"
 echo ""
 
-exec uvicorn service.isaac_assist_service.main:app \
+RELOAD_ARGS=()
+if [ "${ISAAC_ASSIST_RELOAD:-1}" != "0" ]; then
+    RELOAD_ARGS=(--reload)
+fi
+
+exec "$UVICORN_BIN" service.isaac_assist_service.main:app \
     --host 0.0.0.0 \
     --port 8000 \
-    --reload
+    "${RELOAD_ARGS[@]}"

@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "default_unscoped_profile": "isaacsim-5.1",
+  "profiles": {
+    "isaacsim-5.1": {
+      "isaac_sim_versions": ["5.1", "5.1.0"],
+      "isaac_lab_versions": ["2.x"],
+      "extension_folder": "exts/isaac_5.1",
+      "launch_selector": "./launch_isaac.sh --version 5.1",
+      "knowledge_files": [
+        "workspace/knowledge/code_patterns_5.1.0.jsonl",
+        "workspace/knowledge/knowledge_5.1.0.jsonl",
+        "workspace/knowledge/negative_patterns_5.1.0.jsonl"
+      ],
+      "template_policy": "Legacy unscoped templates are treated as 5.1-only unless explicitly tagged otherwise.",
+      "qa_policy": "Existing QA tasks, personas, and controller matrices are 5.1-baseline unless tagged with runtime_profiles or isaac_sim_versions.",
+      "api_scope": {
+        "ros2_omnigraph_namespace": "isaacsim.ros2.bridge",
+        "allowed": [
+          "5.1-verified isaacsim.* imports",
+          "pxr and omni.usd APIs",
+          "isaacsim.ros2.bridge.* node type strings"
+        ],
+        "blocked": [
+          "isaacsim.ros2.nodes.* node type strings in generated 5.1 code",
+          "6.0-only docs/templates unless the task is migration analysis"
+        ]
+      }
+    },
+    "isaacsim-6.0": {
+      "isaac_sim_versions": ["6.0", "6.0.0"],
+      "isaac_lab_versions": ["3.x"],
+      "extension_folder": "exts/isaac_6.0",
+      "launch_selector": "./launch_isaac.sh --version 6.0",
+      "knowledge_files": [
+        "workspace/knowledge/code_patterns_6.0.0.jsonl",
+        "workspace/knowledge/knowledge_6.0.0.jsonl",
+        "workspace/knowledge/negative_patterns_6.0.0.jsonl"
+      ],
+      "template_policy": "Only templates explicitly tagged for isaacsim-6.0, 6.0, 6.0.0, or any may be used.",
+      "qa_policy": "6.0 QA evidence must be tagged, copied into a 6.0-specific task, or recorded as a migration finding.",
+      "api_scope": {
+        "ros2_omnigraph_namespace": "isaacsim.ros2.nodes",
+        "allowed": [
+          "6.0-tagged docs/templates/patterns",
+          "pxr and omni.usd APIs for conservative cross-version USD edits",
+          "isaacsim.ros2.nodes.* node type strings for new ROS2 graph code"
+        ],
+        "blocked": [
+          "unscoped legacy templates",
+          "5.1 bridge recipes saved as 6.0 known-good without live validation",
+          "isaacsim.ros2.bridge.* node type strings in generated 6.0 code"
+        ]
+      }
+    }
+  },
+  "artifact_rules": {
+    "templates": "Add runtime_profiles, isaac_sim_versions, or version_scope before a template is used outside the 5.1 lane.",
+    "code_patterns": "Save verified snippets to code_patterns_<version>.jsonl and include runtime_profiles, isaac_sim_versions, and isaac_lab_versions metadata.",
+    "qa_docs": "Use Runtime Scope metadata in new QA docs. Unscoped old QA docs are 5.1-baseline.",
+    "research_reports": "May mention multiple versions, but conclusions must name which profile they apply to.",
+    "launchers": "Use explicit --version when reproducing QA or known-good evidence."
+  }
+}

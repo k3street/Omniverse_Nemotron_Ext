@@ -72,7 +72,7 @@ def get_llm_provider():
     # Qwen 3.5 tool-call JSON parsing bugs in the native Ollama API.
     # See: https://github.com/ollama/ollama/issues/14493
     _require_model(config.local_model_name, mode)
-    ollama_base = config.openai_api_base.rstrip("/")
+    ollama_base = config.ollama_openai_base.rstrip("/")
     if not ollama_base.endswith("/chat/completions"):
         ollama_base += "/chat/completions"
     return OpenAICompatProvider(

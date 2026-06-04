@@ -17,6 +17,7 @@ class SettingsManager:
         "CLOUD_MODEL_NAME":  "cloud_model_name",
         "GEMINI_MODEL_NAME": "gemini_model_name",
         "LOCAL_MODEL_NAME":  "local_model_name",
+        "DISTILLER_MODEL_NAME": "distiller_model_name",
         "GEMINI_API_KEY":    "api_key_gemini",
         "API_KEY_GEMINI":    "api_key_gemini",
         "ANTHROPIC_API_KEY": "api_key_anthropic",
@@ -30,14 +31,19 @@ class SettingsManager:
     _INT_KEYS  = {"MAX_TOOL_ROUNDS"}
 
     def __init__(self):
-        # Target the root repo .env (where all API keys live)
-        self.env_path = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))) / ".env"
+        # Persist machine-local UI changes to .env.local when it exists.
+        # launch_service.sh loads .env.local after .env, so writing .env would
+        # appear to work until the next restart and then get overridden.
+        repo_root = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+        local_env = repo_root / ".env.local"
+        self.env_path = local_env if local_env.exists() else repo_root / ".env"
     
     def get_settings(self) -> Dict[str, Any]:
         """Returns the current loaded configuration settings."""
         return {
             "LLM_MODE": config.llm_mode,
             "LOCAL_MODEL_NAME": config.local_model_name,
+            "DISTILLER_MODEL_NAME": config.distiller_model_name,
             "CLOUD_MODEL_NAME": config.cloud_model_name,
             "GEMINI_MODEL_NAME": config.gemini_model_name,
             "VISION_MODEL_NAME": config.vision_model_name,

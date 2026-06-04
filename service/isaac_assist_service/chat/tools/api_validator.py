@@ -23,11 +23,13 @@ from __future__ import annotations
 import ast
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
+
+from ...runtime_profiles import RuntimeProfile, get_runtime_profile
 
 logger = logging.getLogger(__name__)
 
-# ── Allowlist of real Isaac Sim 5.1 modules ─────────────────────────────────
+# ── Allowlist of real Isaac Sim 5.1/6.0 baseline modules ───────────────────
 # Seeded from live introspection. Extend via workspace/knowledge/module_allowlist.txt.
 _CORE_ALLOWLIST = {
     # Standard Python / Python tools
@@ -75,6 +77,27 @@ _CORE_ALLOWLIST = {
     # Known-deprecated (flag as errors) — handled in _BLOCKED_MODULES below
 }
 
+_PROFILE_ALLOWLIST = {
+    "isaacsim-5.1": set(),
+    "isaacsim-6.0": {
+        "isaacsim.ros2.nodes",
+        "isaacsim.replicator.agent.core",
+        "isaacsim.sensors.experimental.physics",
+    },
+}
+
+_PROFILE_BLOCKED_MODULES = {
+    "isaacsim-5.1": {
+        "isaacsim.ros2.nodes": "isaacsim.ros2.bridge",
+    },
+    "isaacsim-6.0": {
+        # 6.0 keeps some compatibility shims, but new known-good code should
+        # use the 6.0 node namespace.  Flag this as version-wrong so saved
+        # 5.1 snippets do not become 6.0 templates by accident.
+        "isaacsim.ros2.bridge": "isaacsim.ros2.nodes",
+    },
+}
+
 # Modules that WERE in Isaac Sim 4.x but are removed/renamed in 5.x.
 # If the LLM emits these, flag loudly with a hint.
 _BLOCKED_MODULES = {
@@ -117,7 +140,35 @@ def _module_allowed(module: str, allowlist: set) -> bool:
     return False
 
 
-def validate_code(code: str) -> Tuple[bool, List[dict]]:
+def _blocked_for_profile(module: str, profile: RuntimeProfile) -> Optional[str]:
+    for blocked, replacement in _PROFILE_BLOCKED_MODULES.get(profile.key, {}).items():
+        if module == blocked or module.startswith(blocked + "."):
+            return replacement
+    return None
+
+
+def _check_version_wrong_node_strings(code: str, profile: RuntimeProfile) -> List[dict]:
+    issues: List[dict] = []
+    if profile.key == "isaacsim-6.0" and "isaacsim.ros2.bridge." in code:
+        issues.append({
+            "severity": "version_mismatch",
+            "line": 0,
+            "module": "isaacsim.ros2.bridge",
+            "message": "Isaac Sim 6.0 code contains 5.1 ROS2 OmniGraph node namespace strings",
+            "fix_hint": "Use `isaacsim.ros2.nodes.*` node type strings for Isaac Sim 6.0.",
+        })
+    if profile.key == "isaacsim-5.1" and "isaacsim.ros2.nodes." in code:
+        issues.append({
+            "severity": "version_mismatch",
+            "line": 0,
+            "module": "isaacsim.ros2.nodes",
+            "message": "Isaac Sim 5.1 code contains 6.0 ROS2 OmniGraph node namespace strings",
+            "fix_hint": "Use `isaacsim.ros2.bridge.*` node type strings for Isaac Sim 5.1.",
+        })
+    return issues
+
+
+def validate_code(code: str, profile: Optional[RuntimeProfile | str] = None) -> Tuple[bool, List[dict]]:
     """
     Parse `code` and validate all imports against the allowlist.
 
@@ -127,7 +178,12 @@ def validate_code(code: str) -> Tuple[bool, List[dict]]:
 
     Syntax errors also return ok=False with severity='syntax'.
     """
-    allowlist = _CORE_ALLOWLIST | _load_extra_allowlist()
+    runtime_profile = profile if isinstance(profile, RuntimeProfile) else get_runtime_profile(profile)
+    allowlist = (
+        _CORE_ALLOWLIST
+        | _PROFILE_ALLOWLIST.get(runtime_profile.key, set())
+        | _load_extra_allowlist()
+    )
     issues: List[dict] = []
 
     try:
@@ -145,7 +201,16 @@ def validate_code(code: str) -> Tuple[bool, List[dict]]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 mod = alias.name
-                if mod in _BLOCKED_MODULES:
+                profile_replacement = _blocked_for_profile(mod, runtime_profile)
+                if profile_replacement:
+                    issues.append({
+                        "severity": "version_mismatch",
+                        "line": node.lineno,
+                        "module": mod,
+                        "message": f"'{mod}' is not valid for {runtime_profile.key}",
+                        "fix_hint": f"Use `{profile_replacement}` instead.",
+                    })
+                elif mod in _BLOCKED_MODULES:
                     issues.append({
                         "severity": "deprecated",
                         "line": node.lineno,
@@ -163,7 +228,16 @@ def validate_code(code: str) -> Tuple[bool, List[dict]]:
                     })
         elif isinstance(node, ast.ImportFrom):
             mod = node.module or ""
-            if mod in _BLOCKED_MODULES:
+            profile_replacement = _blocked_for_profile(mod, runtime_profile)
+            if profile_replacement:
+                issues.append({
+                    "severity": "version_mismatch",
+                    "line": node.lineno,
+                    "module": mod,
+                    "message": f"'from {mod} import ...' is not valid for {runtime_profile.key}",
+                    "fix_hint": f"Use `from {profile_replacement} import ...` instead.",
+                })
+            elif mod in _BLOCKED_MODULES:
                 issues.append({
                     "severity": "deprecated",
                     "line": node.lineno,
@@ -180,7 +254,9 @@ def validate_code(code: str) -> Tuple[bool, List[dict]]:
                     "fix_hint": "Verify the module exists; if it does, add it to workspace/knowledge/module_allowlist.txt.",
                 })
 
-    has_blocker = any(i["severity"] in ("syntax", "deprecated") for i in issues)
+    issues.extend(_check_version_wrong_node_strings(code, runtime_profile))
+
+    has_blocker = any(i["severity"] in ("syntax", "deprecated", "version_mismatch") for i in issues)
     return not has_blocker, issues
 
 
@@ -191,5 +267,5 @@ def format_issues_for_llm(issues: List[dict]) -> str:
     lines = ["Your generated code was rejected by the API validator:"]
     for i in issues:
         lines.append(f"  - line {i['line']}: {i['message']}. {i['fix_hint']}")
-    lines.append("Regenerate the code using only modules that exist in Isaac Sim 5.x.")
+    lines.append("Regenerate the code using only modules and node namespaces for the active Isaac runtime profile.")
     return "\n".join(lines)

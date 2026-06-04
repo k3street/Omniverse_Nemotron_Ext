@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from .provider_factory import get_llm_provider, get_distiller_provider
 from .intent_router import classify_intent
+from ..runtime_profiles import get_runtime_profile
 from ..config import config
 
 
@@ -867,7 +868,8 @@ class ChatOrchestrator:
                 logger.warning(f"[{session_id}] Context fetch failed: {e}")
 
         # ── 3. Collect RAG / KB data (fetched before distillation) ───────────
-        isaac_version = detect_isaac_version()
+        runtime_profile = get_runtime_profile()
+        isaac_version = runtime_profile.isaac_sim_version
         rag_text = ""
         patterns_text = ""
         error_learnings_text = ""
@@ -943,7 +945,11 @@ class ChatOrchestrator:
             # default (fits CP-{01,02,N} for assembly-line family without
             # bloating prompt). Env-tunable for experimentation.
             _template_top_k = int(os.environ.get("TEMPLATE_TOP_K", "3"))
-            scored = retrieve_templates_with_scores(user_message, top_k=_template_top_k)
+            scored = retrieve_templates_with_scores(
+                user_message,
+                top_k=_template_top_k,
+                profile=runtime_profile,
+            )
             top_sim = scored[0]["similarity"] if scored else 0.0
             second_sim = scored[1]["similarity"] if len(scored) > 1 else 0.0
             margin = top_sim - second_sim
@@ -1363,12 +1369,19 @@ class ChatOrchestrator:
                         if "success" in result
                         else (result.get("type") != "error")
                     )
+                    _error_text = None
+                    if not _success:
+                        _error_text = (
+                            result.get("error")
+                            or result.get("output")
+                            or result.get("message")
+                        )
                     _trace_emit(session_id, "tool_call_finished", {
                         "tc_id": tc_id,
                         "tool": fn_name,
                         "success": bool(_success),
                         "elapsed_ms": _elapsed_ms,
-                        "error": (result.get("error") if result.get("type") == "error" else None),
+                        "error": str(_error_text)[:500] if _error_text else None,
                     })
 
                 executed_tools.append({
@@ -1631,6 +1644,21 @@ class ChatOrchestrator:
         # one more call with tools disabled, asking for a concise summary.
         if not reply.strip() and executed_tools:
             logger.warning(f"[{session_id}] Empty reply with {len(executed_tools)} tools — forcing summary")
+            failures = []
+            successes = []
+            for t in executed_tools:
+                res = t.get("result") or {}
+                ok = (
+                    res.get("success") is True
+                    or res.get("executed") is True
+                    or (res.get("queued") is True and res.get("type") == "code_patch")
+                )
+                name = t.get("tool") or "?"
+                if ok:
+                    successes.append(name)
+                else:
+                    err = res.get("error") or res.get("output") or res.get("message") or str(res)
+                    failures.append((name, str(err)[:180]))
             messages.append({
                 "role": "user",
                 "content": (
@@ -1640,7 +1668,8 @@ class ChatOrchestrator:
                     "(c) any caveats or next step you'd suggest. "
                     "Do NOT call more tools. If the viewport might not show the result "
                     "(e.g., camera not framed on the new prim), say so explicitly and "
-                    "tell them to frame-focus on the prim path."
+                    "tell them to frame-focus on the prim path. If any tool failed, "
+                    "say that plainly and do not claim the stage was changed by that failed tool."
                 ),
             })
             try:
@@ -1652,12 +1681,26 @@ class ChatOrchestrator:
                 logger.warning(f"[{session_id}] Anti-ghosting summary failed: {e}")
             if not reply:
                 # Fallback — synthesize from tool names so the user sees something
-                tools_run = ", ".join({t.get("tool") for t in executed_tools if t.get("tool")})
-                reply = (
-                    f"I ran these tools: {tools_run}. "
-                    "Check the stage tree / viewport for the result; frame-focus on the new "
-                    "prim if the camera isn't on it yet."
-                )
+                if failures and not successes:
+                    failed = "; ".join(f"{name}: {err}" for name, err in failures[:4])
+                    reply = (
+                        "I attempted tool calls, but they did not complete successfully: "
+                        f"{failed}. I did not verify a stage change from those failed calls."
+                    )
+                elif failures:
+                    ok_tools = ", ".join(sorted(set(successes)))
+                    failed = "; ".join(f"{name}: {err}" for name, err in failures[:4])
+                    reply = (
+                        f"Some tools completed ({ok_tools}), but these failed: {failed}. "
+                        "Please check the stage tree or viewport for only the completed changes."
+                    )
+                else:
+                    tools_run = ", ".join(sorted({t.get("tool") for t in executed_tools if t.get("tool")}))
+                    reply = (
+                        f"I ran these tools: {tools_run}. "
+                        "Check the stage tree / viewport for the result; frame-focus on the new "
+                        "prim if the camera isn't on it yet."
+                    )
 
         # Anti-fabricated-menu-path: Kit menu paths like
         # "Window > Extensions" or "**Isaac Utils** > **Common Samples** > ..."

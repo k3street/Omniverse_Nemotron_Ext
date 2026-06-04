@@ -287,12 +287,21 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "create_material",
-            "description": "Create a new MDL material (OmniPBR, OmniGlass, OmniSurface) with specified appearance properties.",
+            "description": (
+                "Create a visual material with specified appearance properties. "
+                "For OmniPBR-style colors, this emits a USD Preview Surface material, "
+                "which is the safe Isaac Sim 5.1/6.0 path. Do not create an OmniPBR "
+                "USD prim type in run_usd_script; bind this material with assign_material."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "material_path": {"type": "string", "description": "USD path for the material"},
-                    "shader_type": {"type": "string", "enum": ["OmniPBR", "OmniGlass", "OmniSurface"]},
+                    "shader_type": {
+                        "type": "string",
+                        "enum": ["OmniPBR", "OmniGlass", "OmniSurface"],
+                        "description": "Use OmniPBR for ordinary colored PBR surfaces; it is generated as USD Preview Surface.",
+                    },
                     "diffuse_color": {"type": "array", "items": {"type": "number"}, "description": "RGB color [r, g, b] 0-1"},
                     "metallic": {"type": "number", "description": "Metallic factor 0-1"},
                     "roughness": {"type": "number", "description": "Roughness factor 0-1"},

@@ -48,6 +48,7 @@ Every action goes through an **approval flow** — Isaac Assist never modifies y
 ## Quick Links
 
 - **New here?** Start with the [Quick Start](getting-started/quick-start.md)
+- **Working across Isaac versions?** Read the [Runtime Version Scopes](runtime-version-scopes.md)
 - **Looking for a specific tool?** See the [Tools Reference](reference/tools.md)
 - **Something not working?** Check [Troubleshooting](reference/troubleshooting.md)
 - **Want to understand the architecture?** Read the [Architecture Overview](architecture/overview.md)

@@ -60,6 +60,7 @@ class Config:
 
         # ── Misc ─────────────────────────────────────────────────────────────
         self.openai_api_base  = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
+        self.ollama_openai_base = os.environ.get("OLLAMA_OPENAI_BASE", "http://localhost:11434/v1")
         self.contribute_data       = os.environ.get("CONTRIBUTE_DATA", "false").lower() == "true"
         self.auto_approve          = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
         self.auto_inject_viewport  = os.environ.get("AUTO_INJECT_VIEWPORT", "false").lower() == "true"

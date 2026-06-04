@@ -82,6 +82,17 @@ cp service/isaac_assist_service/.env.example service/isaac_assist_service/.env
 # Open .env and set your preferred LLM mode and API keys
 ```
 
+You can also keep machine-local overrides in repo-root `.env.local`:
+
+```bash
+cp .env.local.example .env.local
+```
+
+The launchers treat `.env`, `service/isaac_assist_service/.env`, and `.env.local`
+as optional. Missing `.env` files are fine; `.env.local` is the recommended place
+for per-machine paths such as `ISAAC_RUNTIME_PROFILE`, `ISAAC_SIM_ROOT`, and
+`ISAAC_LAB_ROOT`.
+
 #### Key settings in `.env`
 
 | Variable | Default | Description |
@@ -207,21 +218,38 @@ The `launch_isaac.sh` script configures the correct ROS2 environment and registe
 
 # Launch Isaac Sim and open a specific USD file
 ./launch_isaac.sh /path/to/scene.usd
+
+# Force a specific Isaac Sim generation
+./launch_isaac.sh --version 5.1
+./launch_isaac.sh --version 6.0
+
+# Run through Isaac Lab 3.x
+./launch_isaac.sh --lab
+./launch_isaac.sh --lab scripts/train.py --task MyTask
 ```
 
-To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` in your `.env` file or export it before launching:
+The launcher auto-detects Isaac Sim 6.0/source builds first, then falls back to Isaac Sim 5.1. It also selects the matching extension folder automatically:
+
+| Isaac Sim | Extension folder |
+|---|---|
+| 5.1 | `<repo_root>/exts/isaac_5.1` |
+| 6.0 | `<repo_root>/exts/isaac_6.0` |
+
+To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` or `ISAAC_SIM_ROOT` in your `.env` file or export it before launching:
 
 ```bash
 export ISAAC_SIM_PATH=/path/to/your/isaac-sim
 ./launch_isaac.sh
 ```
 
-The script auto-detects architecture (`x86_64` or `aarch64`) and sets default paths accordingly:
+To point at a custom Isaac Lab checkout, set `ISAAC_LAB_ROOT` or `ISAACLAB_PATH` to a directory containing `isaaclab.sh`.
+
+The script auto-detects architecture (`x86_64` or `aarch64`) and checks default paths in newest-first order:
 
 | Architecture | Default Path |
 |---|---|
-| x86_64 | `~/isaac-sim/isaac-sim-standalone-5.1.0-linux-x86_64` |
-| aarch64 (Jetson / DGX Spark) | `~/Documents/Github/isaacsim/_build/linux-aarch64/release` |
+| x86_64 | `~/IsaacSim/_build/linux-x86_64/release`, `~/isaac-sim/isaac-sim-standalone-6.0.0-linux-x86_64`, `~/.local/share/ov/pkg/isaac-sim-6.0.0`, `~/isaac-sim/isaac-sim-standalone-5.1.0-linux-x86_64`, `~/.local/share/ov/pkg/isaac-sim-5.1.0` |
+| aarch64 (Jetson / DGX Spark) | `~/IsaacSim/_build/linux-aarch64/release`, `~/Documents/Github/isaacsim/_build/linux-aarch64/release`, `~/.local/share/ov/pkg/isaac-sim-5.1.0` |
 
 ### 5.2 Manual extension loading (Isaac Sim Extension Manager)
 
@@ -355,10 +383,21 @@ The knowledge base lives in `workspace/knowledge/` and consists of:
 | File | Purpose |
 |---|---|
 | `code_patterns_5.1.0.jsonl` | Verified code snippets for Isaac Sim 5.1 |
-| `code_patterns_6.0.0.jsonl` | Verified code snippets for Isaac Sim 6.0 *(coming soon)* |
+| `code_patterns_6.0.0.jsonl` | Verified code snippets for Isaac Sim 6.0 / Isaac Lab 3.x |
 | `knowledge_5.1.0.jsonl` | Indexed documentation chunks |
 
 When a user asks the LLM to perform an action, the system automatically retrieves relevant patterns for the active Isaac Sim version and injects them into the prompt. This means the LLM sees **working, tested code** rather than hallucinating outdated Kit commands.
+
+Runtime selection is controlled by `ISAAC_VERSION`, `ISAAC_RUNTIME_PROFILE`, `ISAAC_SIM_ROOT`, or `ISAAC_SIM_PATH`. The active profiles are:
+
+| Profile | Isaac Sim | Isaac Lab | ROS2 OmniGraph namespace |
+|---|---|---|---|
+| `isaacsim-5.1` | 5.1.x | 2.x | `isaacsim.ros2.bridge.*` |
+| `isaacsim-6.0` | 6.0.x | 3.x | `isaacsim.ros2.nodes.*` |
+
+Unscoped legacy templates are treated as **5.1-only**. A template or code pattern must explicitly opt into 6.0 before it is used in a 6.0 session.
+
+See [Runtime Version Scopes](docs/runtime-version-scopes.md) for the full policy covering launchers, extension folders, QA docs, templates, known-good code, and research reports.
 
 ### 9.2 Contributing Code Patterns
 
@@ -368,6 +407,9 @@ Code patterns are stored as JSONL (one JSON object per line). Each entry has thi
 {
   "title": "Short descriptive title",
   "keywords": ["keyword1", "keyword2", "keyword3"],
+  "runtime_profiles": ["isaacsim-6.0"],
+  "isaac_sim_versions": ["6.0.0"],
+  "isaac_lab_versions": ["3.x"],
   "code": "import omni.usd\nfrom pxr import UsdGeom\n\n# ... working code ...",
   "note": "Brief note about gotchas or why this approach is preferred."
 }

@@ -41,6 +41,7 @@ trap cleanup EXIT INT TERM
 # ── Load environment ─────────────────────────────────────────────────────────
 [ -f .env ]              && { set -a; source .env; set +a; }
 [ -f service/isaac_assist_service/.env ] && { set -a; source service/isaac_assist_service/.env; set +a; }
+[ -f .env.local ]        && { set -a; source .env.local; set +a; }
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 LLM_ARG="$1"

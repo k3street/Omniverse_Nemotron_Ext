@@ -12,6 +12,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 settings_manager = SettingsManager()
 
+
+def _active_model_name(config):
+    mode = (config.llm_mode or "local").lower()
+    if mode == "local":
+        return config.local_model_name
+    if mode in ("google", "gemini", "cloud"):
+        return config.gemini_model_name
+    return config.cloud_model_name
+
 class SettingsUpdateRequest(BaseModel):
     settings: Dict[str, str]
 
@@ -76,7 +85,7 @@ async def get_llm_mode():
     from ..config import config
     return {
         "llm_mode": config.llm_mode,
-        "model": config.cloud_model_name if config.llm_mode != "local" else config.local_model_name,
+        "model": _active_model_name(config),
     }
 
 
@@ -101,7 +110,7 @@ async def switch_llm_mode(req: ModeSwitchRequest):
     orchestrator.refresh_provider()
 
     from ..config import config
-    model = config.cloud_model_name if mode != "local" else config.local_model_name
+    model = _active_model_name(config)
     logger.info(f"LLM mode switched to '{mode}' (model: {model})")
 
     return {

@@ -23,6 +23,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
+from ..runtime_profiles import get_runtime_profile, prompt_runtime_rules
 from .tools.tool_schemas import ISAAC_SIM_TOOLS
 
 logger = logging.getLogger(__name__)
@@ -638,6 +639,8 @@ async def distill_context(
 
     if isaac_version:
         system += f"\nIsaac Sim version: {isaac_version}"
+    runtime_profile = get_runtime_profile(isaac_version or None)
+    system += f"\n\n{prompt_runtime_rules(runtime_profile)}"
 
     # Filtered scene context
     filtered_scene = filter_scene_context(scene_context, user_message, knowledge)

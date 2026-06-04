@@ -16,6 +16,10 @@ import os
 import json
 from typing import List, Dict, Any, Optional
 
+from ..runtime_profiles import (
+    detect_isaac_version as _detect_profile_isaac_version,
+    get_runtime_profile,
+)
 from .storage.fts_store import FTSStore
 
 logger = logging.getLogger(__name__)
@@ -32,11 +36,8 @@ def _get_store() -> FTSStore:
 
 
 def detect_isaac_version() -> str:
-    """Detect Isaac Sim version from environment."""
-    isaac_path = os.environ.get("ISAAC_SIM_PATH", "")
-    if "6.0" in isaac_path:
-        return "6.0.0"
-    return "5.1.0"
+    """Detect Isaac Sim version from the active runtime profile."""
+    return _detect_profile_isaac_version()
 
 
 def retrieve_context(user_message: str, version: str = None, limit: int = 5) -> List[Dict[str, Any]]:
@@ -214,12 +215,16 @@ def save_pattern_from_success(
     if not title.endswith((".", "?", "!")):
         title = title.rstrip(",;: ")
 
+    profile = get_runtime_profile(version)
     pattern = {
         "title": title,
         "keywords": keywords,
         "code": code[:3000],
         "note": note,
         "source": "auto_captured",
+        "runtime_profiles": [profile.key],
+        "isaac_sim_versions": [profile.isaac_sim_version],
+        "isaac_lab_versions": [profile.isaac_lab_version],
     }
 
     pattern_file = os.path.join(PATTERNS_DIR, f"code_patterns_{version}.jsonl")

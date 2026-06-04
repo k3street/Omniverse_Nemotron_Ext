@@ -114,7 +114,7 @@ _TEST_VECTORS = [
     (
         "create_material",
         {"material_path": "/World/Mat", "shader_type": "OmniPBR"},
-        ["UsdShade.Material", "OmniPBR.mdl", "diffuse_color"],
+        ["UsdShade.Material.Define", "UsdPreviewSurface", "diffuseColor"],
     ),
     (
         "create_material",
@@ -130,7 +130,7 @@ _TEST_VECTORS = [
     (
         "assign_material",
         {"prim_path": "/World/Cube", "material_path": "/World/Mat"},
-        ["MaterialBindingAPI", "Bind"],
+        ["MaterialBindingAPI.Apply", "CreateDisplayColorPrimvar", "Bind"],
     ),
     (
         "sim_control",

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Isaac Sim 6 + Isaac Assist
+Comment=Launch Isaac Sim 6 with the Isaac Assist extension and local backend
+Exec=/home/kimate/Omniverse_Nemotron_Ext/launch_isaac_assist_desktop.sh
+Path=/home/kimate/Omniverse_Nemotron_Ext
+Icon=/home/kimate/Omniverse_Nemotron_Ext/assets/isaac_assist_icon.png
+Terminal=false
+Categories=Development;
+StartupNotify=true
+StartupWMClass=IsaacSim

@@ -22,6 +22,16 @@ from .manipulation.routes import router as manipulation_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def _active_model_name(config):
+    mode = (config.llm_mode or "local").lower()
+    if mode == "local":
+        return config.local_model_name
+    if mode in ("google", "gemini", "cloud"):
+        return config.gemini_model_name
+    return config.cloud_model_name
+
+
 app = FastAPI(
     title="Isaac Assist Service",
     description="Background service governing LLM inference, Stage Analysis, and Validation for Omniverse.",
@@ -57,7 +67,7 @@ async def health_check():
         "status": "ok",
         "service": "isaac-assist-backend",
         "llm_mode": config.llm_mode,
-        "model": config.cloud_model_name if config.llm_mode != "local" else config.local_model_name,
+        "model": _active_model_name(config),
     }
 
 if __name__ == "__main__":

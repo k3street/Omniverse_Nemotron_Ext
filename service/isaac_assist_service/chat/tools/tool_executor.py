@@ -2735,6 +2735,25 @@ def _gen_create_material(args: Dict) -> str:
     opacity = args.get("opacity", 1.0)
     ior = args.get("ior", 1.5)
 
+    if shader == "OmniPBR":
+        return f"""\
+import omni.usd
+from pxr import UsdShade, Sdf, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+# USD Preview Surface is the safe cross-version visual material path.
+# Do not create an "OmniPBR" prim type; Isaac Sim 6 rejects that pattern.
+mat = UsdShade.Material.Define(stage, '{mat_path}')
+shader = UsdShade.Shader.Define(stage, '{mat_path}/PreviewSurface')
+shader.CreateIdAttr('UsdPreviewSurface')
+shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f({color[0]}, {color[1]}, {color[2]}))
+shader.CreateInput('metallic', Sdf.ValueTypeNames.Float).Set({metallic})
+shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set({roughness})
+shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set({opacity})
+mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), 'surface')
+"""
+
     mdl_file = 'OmniPBR.mdl' if shader == 'OmniPBR' else f'{shader}.mdl'
 
     return f"""\
@@ -2770,11 +2789,18 @@ mat.CreateDisplacementOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'ou
 def _gen_assign_material(args: Dict) -> str:
     return (
         "import omni.usd\n"
-        "from pxr import UsdShade\n"
+        "from pxr import UsdGeom, UsdShade\n"
         "stage = omni.usd.get_context().get_stage()\n"
         f"mat = UsdShade.Material(stage.GetPrimAtPath('{args['material_path']}'))\n"
         f"prim = stage.GetPrimAtPath('{args['prim_path']}')\n"
-        "UsdShade.MaterialBindingAPI(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)"
+        "UsdShade.MaterialBindingAPI.Apply(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)\n"
+        "# Also set primvars:displayColor when the material has a Preview Surface diffuseColor;\n"
+        "# this makes floors/planes visible in display modes that ignore shaders.\n"
+        "shader = stage.GetPrimAtPath(str(mat.GetPrim().GetPath()) + '/PreviewSurface')\n"
+        "if shader.IsValid() and prim.IsValid() and prim.IsA(UsdGeom.Gprim):\n"
+        "    color = shader.GetAttribute('inputs:diffuseColor').Get()\n"
+        "    if color is not None:\n"
+        "        UsdGeom.Gprim(prim).CreateDisplayColorPrimvar(UsdGeom.Tokens.constant).Set([color])"
     )
 
 
@@ -19924,6 +19950,25 @@ def _gen_create_material(args: Dict) -> str:
     opacity = args.get("opacity", 1.0)
     ior = args.get("ior", 1.5)
 
+    if shader == "OmniPBR":
+        return f"""\
+import omni.usd
+from pxr import UsdShade, Sdf, Gf
+
+stage = omni.usd.get_context().get_stage()
+
+# USD Preview Surface is the safe cross-version visual material path.
+# Do not create an "OmniPBR" prim type; Isaac Sim 6 rejects that pattern.
+mat = UsdShade.Material.Define(stage, '{mat_path}')
+shader = UsdShade.Shader.Define(stage, '{mat_path}/PreviewSurface')
+shader.CreateIdAttr('UsdPreviewSurface')
+shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f({color[0]}, {color[1]}, {color[2]}))
+shader.CreateInput('metallic', Sdf.ValueTypeNames.Float).Set({metallic})
+shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set({roughness})
+shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set({opacity})
+mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), 'surface')
+"""
+
     mdl_file = 'OmniPBR.mdl' if shader == 'OmniPBR' else f'{shader}.mdl'
 
     return f"""\
@@ -19959,11 +20004,18 @@ mat.CreateDisplacementOutput('mdl').ConnectToSource(shader.ConnectableAPI(), 'ou
 def _gen_assign_material(args: Dict) -> str:
     return (
         "import omni.usd\n"
-        "from pxr import UsdShade\n"
+        "from pxr import UsdGeom, UsdShade\n"
         "stage = omni.usd.get_context().get_stage()\n"
         f"mat = UsdShade.Material(stage.GetPrimAtPath('{args['material_path']}'))\n"
         f"prim = stage.GetPrimAtPath('{args['prim_path']}')\n"
-        "UsdShade.MaterialBindingAPI(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)"
+        "UsdShade.MaterialBindingAPI.Apply(prim).Bind(mat, UsdShade.Tokens.strongerThanDescendants)\n"
+        "# Also set primvars:displayColor when the material has a Preview Surface diffuseColor;\n"
+        "# this makes floors/planes visible in display modes that ignore shaders.\n"
+        "shader = stage.GetPrimAtPath(str(mat.GetPrim().GetPath()) + '/PreviewSurface')\n"
+        "if shader.IsValid() and prim.IsValid() and prim.IsA(UsdGeom.Gprim):\n"
+        "    color = shader.GetAttribute('inputs:diffuseColor').Get()\n"
+        "    if color is not None:\n"
+        "        UsdGeom.Gprim(prim).CreateDisplayColorPrimvar(UsdGeom.Tokens.constant).Set([color])"
     )
 
 
@@ -65481,4 +65533,3 @@ def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
         return "diffik", "Isaac Lab available; no better option"
     # 5) Last resort
     return "native", "no better option; falling back to native"
-
