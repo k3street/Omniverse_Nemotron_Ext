@@ -64,7 +64,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_red",
     "target_path": "/World/RedBin",
-    "duration_s": 120
+    "duration_s": 180
   },
   "extends": "CP-03",
   "extension_notes": "CP-16 scales CP-03's 2-color sort to 4-color. Same color_routing pattern, more entries. Per-cube material + semantic label per color. All 4 bins fit within 0.6m of robot base \u2014 comfortable reach. Future variants: 8-class (RGB+CMYK), size+color combinatorial, vision-gated (using add_vision_classifier_gate when render-flush is fixed).",

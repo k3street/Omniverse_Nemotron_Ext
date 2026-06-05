@@ -25,9 +25,9 @@
   "extends": "phase9-yrkesroll-#14",
   "extension_notes": "Sim2real-gap canonical. Requires real-recorded rosbag at /data/sim2real/. Without that asset, replay_rosbag returns immediately. Validation = /tmp/sim2real_gap.json populated.",
   "failure_modes": [
-    "Real rosbag at /data/sim2real/ not available — handler may return error",
-    "compare_sim_real_video requires camera frames to be timestamp-aligned — sim camera capture rate must match real",
+    "Real rosbag at /data/sim2real/ not available \u2014 handler may return error",
+    "compare_sim_real_video requires camera frames to be timestamp-aligned \u2014 sim camera capture rate must match real",
     "joint_pos_rmse computation assumes joint name parity between sim Franka and real Franka URDF"
   ],
-  "verified_status": "draft (Phase 9 #14; needs real rosbag asset)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK 17/18; 1 error on replay_rosbag (needs real rosbag asset)"
 }

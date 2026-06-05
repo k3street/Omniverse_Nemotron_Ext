@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-y-merge-singulation",
-  "goal": "Build a Y-merge conveyor singulation: two upstream belts merge into one downstream belt; cubes from each must alternate (no double-stacking at merge). Realizes Phase 9 yrkesroll #9 (logistics — postal sorter pattern).",
+  "goal": "Build a Y-merge conveyor singulation: two upstream belts merge into one downstream belt; cubes from each must alternate (no double-stacking at merge). Realizes Phase 9 yrkesroll #9 (logistics \u2014 postal sorter pattern).",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -12,7 +12,7 @@
     "add_proximity_sensor"
   ],
   "thoughts": [
-    "Two upstream belts at angles ±30° merging into one downstream belt. Geometry: 3 conveyors total. Singulation = ensuring 1 cube at a time on downstream.",
+    "Two upstream belts at angles \u00b130\u00b0 merging into one downstream belt. Geometry: 3 conveyors total. Singulation = ensuring 1 cube at a time on downstream.",
     "For V0: no actual claim-mutex on merge; cubes physically jam if conflict. Tests merge geometry + physics.",
     "Robot at downstream end picks any cube reaching pick zone; delivers to single bin.",
     "Function-gate: ANY cube delivered counts (cube_paths over both belt feeds).",
@@ -21,17 +21,24 @@
   "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[2.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltLeft\",\n    position=[-1.0, 0.10, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, 0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltRight\",\n    position=[-1.0, 0.70, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, -0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltMerge\",\n    position=[0.0, 0.40, 0.78],\n    size=[1.0, 0.30, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\nfor i in range(3):\n    path = f\"/World/Cube_L{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.5 + i*0.40, 0.10, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nfor i in range(3):\n    path = f\"/World/Cube_R{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.5 + i*0.40, 0.70, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.5, 0.75], size=[0.30, 0.30, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.40, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/BeltMerge\",\n    source_paths=[f\"/World/Cube_L{i+1}\" for i in range(3)] + [f\"/World/Cube_R{i+1}\" for i in range(3)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/BeltMerge\", \"/World/Bin\"],\n)",
   "verify_args": null,
   "simulate_args": {
-    "cube_paths": ["/World/Cube_L1","/World/Cube_L2","/World/Cube_L3","/World/Cube_R1","/World/Cube_R2","/World/Cube_R3"],
+    "cube_paths": [
+      "/World/Cube_L1",
+      "/World/Cube_L2",
+      "/World/Cube_L3",
+      "/World/Cube_R1",
+      "/World/Cube_R2",
+      "/World/Cube_R3"
+    ],
     "target_path": "/World/Bin",
     "duration_s": 150
   },
   "diagnose_args": null,
   "extends": "phase9-yrkesroll-#9",
-  "extension_notes": "Y-merge geometry — 2 upstream feeders converging to 1 downstream. Physics-only singulation (no controller-side mutex). Cubes may jam if simultaneous arrivals at merge.",
+  "extension_notes": "Y-merge geometry \u2014 2 upstream feeders converging to 1 downstream. Physics-only singulation (no controller-side mutex). Cubes may jam if simultaneous arrivals at merge.",
   "failure_modes": [
     "Belt junctions create gaps where cubes fall off-grid",
-    "Surface velocity vectors don't smoothly transition at merge — cubes may stop at junction",
-    "Singulation conflict at merge causes one cube to push another out of belt — that one is lost"
+    "Surface velocity vectors don't smoothly transition at merge \u2014 cubes may stop at junction",
+    "Singulation conflict at merge causes one cube to push another out of belt \u2014 that one is lost"
   ],
-  "verified_status": "draft (Phase 9 #9)"
+  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (53s); 6 cubes via Y-merge"
 }

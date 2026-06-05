@@ -12,7 +12,7 @@
   ],
   "thoughts": [
     "TacEx = NVIDIA's tactile-sensor research framework. Integrates with Franka panda_hand to emit per-fingertip pressure map.",
-    "Pattern: pick peg → approach hole → use tactile feedback during last 1cm to align.",
+    "Pattern: pick peg \u2192 approach hole \u2192 use tactile feedback during last 1cm to align.",
     "Without TacEx live, fall back to FT sensor + slow-approach trajectory.",
     "Function-gate: peg ends in HolePanel xy + above_floor (same as CP-58).",
     "Single-peg variant of CP-58 with tactile twist."
@@ -28,9 +28,9 @@
   "extends": "phase10-yrkesroll-#19",
   "extension_notes": "Tactile-research canonical. TacEx integration is research-tier (not yet wired in tool_executor). Falls back to FT sensor + slow approach trajectory.",
   "failure_modes": [
-    "TacEx framework not available — fallback to FT-only",
-    "Peg drops with 4mm+ lateral error from drop_target — usual peg-in-hole physics issue",
+    "TacEx framework not available \u2014 fallback to FT-only",
+    "Peg drops with 4mm+ lateral error from drop_target \u2014 usual peg-in-hole physics issue",
     "Slow approach trajectory may not be triggered without contact-aware controller mode"
   ],
-  "verified_status": "draft (Phase 10 #19; needs TacEx framework)"
+  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (PhysX numerical instability during grip \u2014 cube velocity blows to >200km/s)"
 }

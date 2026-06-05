@@ -243,6 +243,106 @@ async def _handle_diagnose_modbus_bridge(args: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
+async def _handle_list_bridges(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Enumerate all known bridges (alive + dead) by scanning /tmp/bridges/.
+
+    Returns: {bridges: [{bridge_id, pid, alive, log_path, kind}, ...]}
+    where kind is inferred from worker_path filename suffix.
+    """
+    bridges: List[Dict[str, Any]] = []
+    if not _BRIDGE_DIR.exists():
+        return {"bridges": [], "n": 0}
+    pid_files = sorted(_BRIDGE_DIR.glob("*.pid"))
+    for pf in pid_files:
+        bridge_id = pf.stem
+        log_path = _bridge_path(bridge_id, "log")
+        worker_path = _bridge_path(bridge_id, "py")
+        try:
+            pid = int(pf.read_text().strip())
+        except Exception:
+            continue
+        alive = False
+        try:
+            os.kill(pid, 0)
+            try:
+                status = Path(f"/proc/{pid}/status").read_text()
+                state_line = next((l for l in status.splitlines() if l.startswith("State:")), "")
+                if "Z" in state_line:
+                    alive = False
+                else:
+                    alive = True
+            except Exception:
+                alive = True
+        except ProcessLookupError:
+            alive = False
+        # Infer kind from worker code
+        kind = "unknown"
+        if worker_path.exists():
+            txt = worker_path.read_text()[:500]
+            if "ModbusTcpClient" in txt or "pymodbus" in txt:
+                kind = "modbus"
+            elif "asyncua" in txt:
+                kind = "opcua"
+            elif "paho.mqtt" in txt or "mqtt.Client" in txt:
+                kind = "mqtt_sparkplug"
+        bridges.append({
+            "bridge_id": bridge_id,
+            "pid": pid,
+            "alive": alive,
+            "log_path": str(log_path),
+            "worker_path": str(worker_path),
+            "kind": kind,
+        })
+    return {"bridges": bridges, "n": len(bridges),
+            "n_alive": sum(1 for b in bridges if b["alive"])}
+
+
+async def _handle_bridge_pause(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Pause a running bridge subprocess by sending SIGSTOP. The subprocess
+    stops emitting attribute updates but stays alive. Use _handle_bridge_resume
+    to restart it.
+
+    Args:
+      bridge_id: id returned by attach handler
+
+    Returns: {ok, pid, paused: True}
+    """
+    bridge_id = args.get("bridge_id")
+    if not bridge_id:
+        return {"error": "bridge_pause requires bridge_id"}
+    pid_path = _bridge_path(bridge_id, "pid")
+    if not pid_path.exists():
+        return {"error": "no such bridge_id"}
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, signal.SIGSTOP)
+    except (ProcessLookupError, ValueError, OSError) as e:
+        return {"error": f"pause failed: {type(e).__name__}: {e}"}
+    return {"ok": True, "pid": pid, "paused": True}
+
+
+async def _handle_bridge_resume(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Resume a paused bridge subprocess by sending SIGCONT.
+
+    Args:
+      bridge_id: id returned by attach handler
+
+    Returns: {ok, pid, paused: False}
+    """
+    bridge_id = args.get("bridge_id")
+    if not bridge_id:
+        return {"error": "bridge_resume requires bridge_id"}
+    pid_path = _bridge_path(bridge_id, "pid")
+    if not pid_path.exists():
+        return {"error": "no such bridge_id"}
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, signal.SIGCONT)
+    except (ProcessLookupError, ValueError, OSError) as e:
+        return {"error": f"resume failed: {type(e).__name__}: {e}"}
+    return {"ok": True, "pid": pid, "paused": False}
+
+
 async def _handle_modbus_tcp_bridge_detach(args: Dict[str, Any]) -> Dict[str, Any]:
     """Stop a previously-attached Modbus bridge cleanly. Sends SIGTERM,
     waits up to 5s, then SIGKILL if still alive."""
@@ -628,3 +728,6 @@ def register_bridge_handlers(handlers: Dict[str, Any]) -> None:
     handlers["mqtt_sparkplug_bridge_detach"] = _handle_mqtt_sparkplug_bridge_detach
     handlers["diagnose_mqtt_sparkplug_bridge"] = _handle_diagnose_mqtt_sparkplug_bridge
     handlers["openplc_runtime_attach"] = _handle_openplc_runtime_attach
+    handlers["bridge_pause"] = _handle_bridge_pause
+    handlers["bridge_resume"] = _handle_bridge_resume
+    handlers["list_bridges"] = _handle_list_bridges

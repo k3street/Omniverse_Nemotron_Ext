@@ -36,6 +36,9 @@ from service.isaac_assist_service.chat.tools.bridge_tools import (
     _handle_mqtt_sparkplug_bridge_detach,
     _handle_diagnose_mqtt_sparkplug_bridge,
     _handle_openplc_runtime_attach,
+    _handle_bridge_pause,
+    _handle_bridge_resume,
+    _handle_list_bridges,
 )
 
 
@@ -188,6 +191,104 @@ async def test_register_handlers_dispatch():
 async def test_openplc_attach_missing_io_maps():
     res = await _handle_openplc_runtime_attach({"host": "127.0.0.1"})
     assert "error" in res and ("input_map" in res["error"].lower() or "output_map" in res["error"].lower())
+
+
+@pytest.mark.asyncio
+async def test_bridge_pause_missing_id():
+    res = await _handle_bridge_pause({})
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_bridge_resume_missing_id():
+    res = await _handle_bridge_resume({})
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_bridge_pause_nonexistent():
+    res = await _handle_bridge_pause({"bridge_id": "nonexistent_xyz"})
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_list_bridges_returns_dict():
+    """list_bridges always returns dict with 'bridges' and 'n' keys."""
+    res = await _handle_list_bridges({})
+    assert "bridges" in res
+    assert "n" in res
+    assert isinstance(res["bridges"], list)
+    assert res["n"] == len(res["bridges"])
+    if res["n"] > 0:
+        # Each bridge should have these fields
+        for b in res["bridges"]:
+            assert "bridge_id" in b
+            assert "pid" in b
+            assert "alive" in b
+            assert "kind" in b
+
+
+@pytest.mark.asyncio
+async def test_bridge_pause_resume_lifecycle(mock_modbus_server):
+    """attach → pause → resume → detach: full lifecycle."""
+    port = mock_modbus_server
+    res = await _handle_modbus_tcp_bridge_attach({
+        "host": "127.0.0.1", "port": port,
+        "register_map": {"/World/Test": 0},
+        "rate_hz": 5.0,
+    })
+    assert res.get("ok"), res
+    bid = res["bridge_id"]
+
+    # Pause
+    await asyncio.sleep(0.5)
+    paused = await _handle_bridge_pause({"bridge_id": bid})
+    assert paused.get("ok"), paused
+    assert paused["paused"] is True
+
+    # Wait — paused process shouldn't emit new updates
+    diag1 = await _handle_diagnose_modbus_bridge({"bridge_id": bid})
+    n1 = diag1["n_register_updates"]
+    await asyncio.sleep(0.6)
+    diag2 = await _handle_diagnose_modbus_bridge({"bridge_id": bid})
+    n2 = diag2["n_register_updates"]
+    # Paused, count should not significantly grow (allow small tolerance for
+    # in-flight writes already in stdout buffer)
+    assert n2 - n1 < 3, f"paused but updates grew from {n1} to {n2}"
+
+    # Resume
+    resumed = await _handle_bridge_resume({"bridge_id": bid})
+    assert resumed.get("ok"), resumed
+    assert resumed["paused"] is False
+
+    # After resume, count should grow again
+    await asyncio.sleep(0.6)
+    diag3 = await _handle_diagnose_modbus_bridge({"bridge_id": bid})
+    n3 = diag3["n_register_updates"]
+    assert n3 > n2, f"resumed but updates didn't grow: {n2} -> {n3}"
+
+    # Cleanup
+    await _handle_modbus_tcp_bridge_detach({"bridge_id": bid})
+
+
+@pytest.mark.asyncio
+async def test_list_bridges_after_attach(mock_modbus_server):
+    """list_bridges shows the just-attached bridge."""
+    port = mock_modbus_server
+    res = await _handle_modbus_tcp_bridge_attach({
+        "host": "127.0.0.1", "port": port,
+        "register_map": {"/World/X": 0},
+        "rate_hz": 5.0,
+    })
+    bid = res["bridge_id"]
+
+    listing = await _handle_list_bridges({})
+    found = [b for b in listing["bridges"] if b["bridge_id"] == bid]
+    assert len(found) == 1
+    assert found[0]["alive"] is True
+    assert found[0]["kind"] == "modbus"
+
+    await _handle_modbus_tcp_bridge_detach({"bridge_id": bid})
 
 
 @pytest.mark.asyncio
