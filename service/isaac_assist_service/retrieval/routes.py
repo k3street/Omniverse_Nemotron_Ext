@@ -1,11 +1,13 @@
+import functools
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, Any, List, Optional
 from .models import RetrievalQuery
 from .storage.fts_store import FTSStore
 from .indexer import DocumentIndexer
 from .source_registry import SourceRegistry
-import json
-from pathlib import Path
 
 router = APIRouter()
 store = FTSStore()
@@ -14,19 +16,15 @@ indexer = DocumentIndexer()
 
 # ── Product spec database ────────────────────────────────────────────────────
 _SPECS_PATH = Path(__file__).resolve().parents[2] / "workspace" / "knowledge" / "sensor_specs.jsonl"
-_specs_cache: Optional[List[Dict]] = None
 
+@functools.lru_cache(maxsize=1)
 def _load_specs() -> List[Dict]:
-    global _specs_cache
-    if _specs_cache is not None:
-        return _specs_cache
     specs = []
     if _SPECS_PATH.exists():
         for line in _SPECS_PATH.read_text().splitlines():
             line = line.strip()
             if line:
                 specs.append(json.loads(line))
-    _specs_cache = specs
     return specs
 
 

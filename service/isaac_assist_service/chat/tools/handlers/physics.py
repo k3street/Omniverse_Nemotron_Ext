@@ -11,6 +11,7 @@ Per `specs/IA_FULL_SPEC_2026-05-10.md` Phases 2 + 5.
 """
 from __future__ import annotations
 
+import functools
 import json
 import re
 from pathlib import Path
@@ -25,9 +26,8 @@ _WORKSPACE = Path(__file__).resolve().parents[5] / "workspace"
 _DEFORMABLE_PRESETS_PATH = _WORKSPACE / "knowledge" / "deformable_presets.json"
 _PHYSICS_MATERIALS_PATH = _WORKSPACE / "knowledge" / "physics_materials.json"
 
-# Lazy-initialised caches (filled by _load_*).
-_deformable_presets: Optional[Dict] = None
-_physics_materials: Optional[Dict] = None
+# Lazy-initialised caches — wrapped with lru_cache(maxsize=1) for
+# race-safe single-execution (conc-2 hardening, 2026-05-14).
 
 _PHYSICS_SETTINGS_PRESETS = {
     "rl_training": {
@@ -95,25 +95,17 @@ _PHYSX_HULL_MAX_POLYS = 255    # Cooked hull polygon limit
 
 _PHYSX_HULL_MAX_VERTS = 64     # GPU PhysX vertex limit per hull
 
+@functools.lru_cache(maxsize=1)
 def _load_deformable_presets() -> Dict:
-    global _deformable_presets
-    if _deformable_presets is not None:
-        return _deformable_presets
     if _DEFORMABLE_PRESETS_PATH.exists():
-        _deformable_presets = json.loads(_DEFORMABLE_PRESETS_PATH.read_text())
-    else:
-        _deformable_presets = {"presets": {}}
-    return _deformable_presets
+        return json.loads(_DEFORMABLE_PRESETS_PATH.read_text())
+    return {"presets": {}}
 
+@functools.lru_cache(maxsize=1)
 def _load_physics_materials() -> Dict:
-    global _physics_materials
-    if _physics_materials is not None:
-        return _physics_materials
     if _PHYSICS_MATERIALS_PATH.exists():
-        _physics_materials = json.loads(_PHYSICS_MATERIALS_PATH.read_text())
-    else:
-        _physics_materials = {"materials": {}, "pairs": {}, "aliases": {}}
-    return _physics_materials
+        return json.loads(_PHYSICS_MATERIALS_PATH.read_text())
+    return {"materials": {}, "pairs": {}, "aliases": {}}
 
 def _normalize_material_name(name: str) -> str:
     """Normalize a user-supplied material name to a database key."""

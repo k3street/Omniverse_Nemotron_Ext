@@ -3,6 +3,7 @@ import sys
 import os
 import subprocess
 import datetime
+from datetime import timezone
 from typing import Dict, Any, List
 
 def run_shell(cmd: str) -> str:
@@ -41,7 +42,7 @@ def collect_fingerprint() -> Dict[str, Any]:
     # Generic OS info
     fingerprint = {
         "fingerprint_id": "auto_gen",
-        "collected_at": datetime.datetime.utcnow().isoformat(),
+        "collected_at": datetime.datetime.now(timezone.utc).isoformat(),
         
         "os_distribution": platform.system(),
         "os_version": platform.release(),

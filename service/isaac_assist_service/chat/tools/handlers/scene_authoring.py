@@ -40,7 +40,12 @@ from typing import Any, Callable, Dict, Optional
 
 _STAGE_INDEX: Dict[str, Dict[str, Any]] = {}
 
-_STAGE_INDEX_META: Dict[str, Any] = {"prim_scope": None, "prim_count": 0}
+_STAGE_INDEX_META: Dict[str, Any] = {
+    "prim_scope": None,
+    "prim_count": 0,
+    "build_id": 0,
+    "building": False,
+}
 
 # ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 21, 2026-05-13)
@@ -3703,16 +3708,20 @@ async def _handle_build_stage_index(args: Dict) -> Dict:
     prim_scope = args.get("prim_scope") or "/World"
     max_prims = int(args.get("max_prims", 50000))
     code = _gen_build_stage_index({"prim_scope": prim_scope, "max_prims": max_prims})
-    queued = await kit_tools.queue_exec_patch(code, f"Build stage index under {prim_scope}")
     # Even when Kit is offline we still reset the local cache so repeated
     # builds don't accumulate stale data.
     _STAGE_INDEX.clear()
     _STAGE_INDEX_META["prim_scope"] = prim_scope
     _STAGE_INDEX_META["prim_count"] = 0
     _STAGE_INDEX_META["max_prims"] = max_prims
+    _STAGE_INDEX_META["build_id"] = int(_STAGE_INDEX_META.get("build_id") or 0) + 1
+    _STAGE_INDEX_META["building"] = True
+    queued = await kit_tools.queue_exec_patch(code, f"Build stage index under {prim_scope}")
     return {
         "prim_scope": prim_scope,
         "max_prims": max_prims,
+        "build_id": _STAGE_INDEX_META["build_id"],
+        "building": _STAGE_INDEX_META["building"],
         "queued": bool(queued.get("queued", False)) if isinstance(queued, dict) else False,
         "note": "Kit will populate the index asynchronously via the queued patch.",
     }
@@ -3729,10 +3738,15 @@ async def _handle_query_stage_index(args: Dict) -> Dict:
     max_results = int(args.get("max_results", 100))
 
     if not _STAGE_INDEX:
+        note = "Stage index is empty — call build_stage_index first."
+        if _STAGE_INDEX_META.get("building"):
+            note = "Stage index is being rebuilt; retry after Kit populates the index."
         return {
             "results": [],
             "total_indexed": 0,
-            "note": "Stage index is empty — call build_stage_index first.",
+            "build_id": int(_STAGE_INDEX_META.get("build_id") or 0),
+            "building": bool(_STAGE_INDEX_META.get("building")),
+            "note": note,
         }
 
     scored: List[Dict[str, Any]] = []
@@ -3765,6 +3779,8 @@ async def _handle_query_stage_index(args: Dict) -> Dict:
         "context_count": len(context_records),
         "keywords": keywords,
         "selected_prim": selected_prim,
+        "build_id": int(_STAGE_INDEX_META.get("build_id") or 0),
+        "building": bool(_STAGE_INDEX_META.get("building")),
     }
 
 

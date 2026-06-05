@@ -14,6 +14,29 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 # ---------------------------------------------------------------------------
+# Module-level named constants (extracted 2026-05-14, refactor/magic-1)
+
+# RmpFlow integration constants
+_RMPFLOW_MAX_SUBSTEP_S: float = 0.016   # RmpFlow maximum substep size, seconds (~62.5 Hz integration cap)
+_PHYSICS_DT_DEFAULT_S: float = 1.0 / 60.0  # default physics timestep, seconds (60 Hz)
+
+# Franka gripper geometry
+_FRANKA_PALM_TO_FINGERTIP_M: float = 0.105  # distance from panda_hand palm frame to fingertip ends, meters;
+                                              # EE target is set to cube_center + this offset so fingertips
+                                              # wrap the cube (observed 2026-04-19: lower value collides belt)
+_FRANKA_FINGER_OPEN_M: float = 0.04         # finger joint position for fully open gripper, meters
+
+# Orientation constraint threshold
+_UPRIGHT_DOT_THRESHOLD_DEFAULT: float = 0.85  # minimum dot(ee_z, world_z) for "upright" cuRobo grasp filter
+
+# Friction material physics properties
+_GRIP_FRICTION_STATIC: float = 1.5    # static friction coefficient for FrictionGripMaterial
+_GRIP_FRICTION_DYNAMIC: float = 1.2   # dynamic friction coefficient for FrictionGripMaterial
+
+# Minimum belt velocity magnitude treated as "moving" (below this → belt is stopped)
+_BELT_MOVING_THRESHOLD: float = 1e-6  # m/s; sum(|v_i|) below this treats belt as stationary
+
+# ---------------------------------------------------------------------------
 # Phase 14 + 16 (2026-05-13): migrated from tool_executor.py.
 
 _PP_CTRL_ATTRS = [
@@ -162,15 +185,27 @@ if not hasattr(builtins, _MGR_ATTR):
 """
 
 def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
-    """Pick best available target_source for the current env.
+    """Select the best available pick-place variant for the current environment.
 
-    Returns (resolved_target_source, reason_str). Used by
-    setup_pick_place_controller when target_source='auto'.
+    Probes GPU capability, cuRobo availability, scipy, and Isaac Lab in priority
+    order, returning the first viable variant. Called by
+    ``_gen_setup_pick_place_controller`` when ``target_source="auto"``.
 
-    Priority: curobo > native > spline > diffik.
-    (Skips sensor_gated/fixed_poses/cube_tracking/ros2_cmd — those
-    require explicit opt-in because of sim2real-honesty or config
-    requirements.)
+    Priority order: curobo > spline > native > diffik > native (fallback).
+    ``sensor_gated``, ``fixed_poses``, ``cube_tracking``, and ``ros2_cmd`` are
+    never auto-selected — they require explicit opt-in due to sim2real-honesty
+    constraints or mandatory config (e.g. sensor_path, pose_sequence).
+
+    Args:
+        args (dict): Tool arguments dict. Reads ``robot_path`` to detect Franka
+            for the native fallback path; all other probe inputs are hardware
+            / package availability checks.
+
+    Returns:
+        tuple[str, str]: ``(resolved_target_source, reason_str)`` where
+            ``resolved_target_source`` is one of ``"curobo"``, ``"spline"``,
+            ``"native"``, or ``"diffik"``, and ``reason_str`` is a human-readable
+            explanation of why that variant was chosen.
     """
     # Probes migrated to handlers/_shared.py (Phase 8 wave 17).
     from ._shared import (
@@ -252,6 +287,43 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
     Shared across modes: RmpFlow + ArticulationMotionPolicy for
     joint-level control, UsdPhysics.FixedJoint for cube-to-EE attach
     during transport, gripper joint targets for open/close.
+
+    Args:
+        args: Tool arguments dict containing:
+            - target_source (str, optional): Variant selector. One of
+              ``"cube_tracking"`` (default), ``"sensor_gated"``,
+              ``"fixed_poses"``, ``"ros2_cmd"``, ``"builtin"``, ``"native"``,
+              ``"spline"``, ``"curobo"``, ``"diffik"``, ``"osc"``, or
+              ``"auto"`` (probes hardware + packages via
+              ``_resolve_auto_target_source``).
+            - robot_path (str): USD prim path of the robot articulation root.
+            - source_paths (list[str]): Cube prim paths to deliver.
+            - destination_path (str): Drop bin prim path.
+            - sensor_path (str, optional): Proximity sensor path (required for
+              sensor_gated mode).
+            - belt_path (str, optional): Conveyor belt prim path.
+            - end_effector_link (str, optional): EE link name. Defaults to
+              ``"panda_hand"``.
+            - gripper_joint_1 (str, optional): Defaults to
+              ``"panda_finger_joint1"``.
+            - gripper_joint_2 (str, optional): Defaults to
+              ``"panda_finger_joint2"``.
+            - gripper_open (float, optional): Open position (m). Defaults to
+              ``_FRANKA_FINGER_OPEN_M`` (0.04).
+            - gripper_close (float, optional): Closed position (m). Defaults
+              to 0.0.
+            - Additional variant-specific keys forwarded to the selected
+              generator (see each ``_gen_pick_place_*`` docstring).
+
+    Returns:
+        str: Python source code to be exec'd in Kit. The caller (tool_executor)
+        passes this to ``queue_exec_patch``; the generated code installs a
+        physics-step callback and prints a JSON result dict.
+
+    Raises:
+        ValueError: If ``target_source`` is not a recognised variant name.
+        KeyError: If a required arg (e.g. ``robot_path``, or ``sensor_path``
+            for sensor_gated mode) is absent from ``args``.
     """
     # _resolve_auto_target_source migrated to module body (Phase 8 wave 9).
     mode = args.get("target_source", "cube_tracking")
@@ -271,7 +343,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
     ee_link = args.get("end_effector_link", "panda_hand")
     fj1 = args.get("gripper_joint_1", "panda_finger_joint1")
     fj2 = args.get("gripper_joint_2", "panda_finger_joint2")
-    open_val = float(args.get("gripper_open", 0.04))
+    open_val = float(args.get("gripper_open", _FRANKA_FINGER_OPEN_M))
     close_val = float(args.get("gripper_close", 0.0))
     approach_h = float(args.get("approach_height", 0.12))
     lift_h = float(args.get("lift_height", 0.20))
@@ -321,7 +393,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             gripper_rotation=args.get("gripper_rotation"),
             robot_family=args.get("robot_family", "franka"),
             require_upright=bool(args.get("require_upright", False)),
-            upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
+            upright_dot_threshold=float(args.get("upright_dot_threshold", _UPRIGHT_DOT_THRESHOLD_DEFAULT)),
             mutex_path=args.get("mutex_path"),
             scenario_profile=args.get("scenario_profile"),
         )
@@ -470,9 +542,9 @@ rmpflow = RmpFlow(
     urdf_path=cfg["urdf"],
     rmpflow_config_path=cfg["rmpflow"],
     end_effector_frame_name=EE_LINK,
-    maximum_substep_size=0.016,
+    maximum_substep_size={_RMPFLOW_MAX_SUBSTEP_S},
 )
-amp = ArticulationMotionPolicy(franka, rmpflow, default_physics_dt=1.0/60.0)
+amp = ArticulationMotionPolicy(franka, rmpflow, default_physics_dt={_PHYSICS_DT_DEFAULT_S})
 
 # Gripper fingers are NOT articulated by rmpflow — apply direct position
 # targets for open/close. RmpFlow only drives the 7 arm joints.
@@ -577,11 +649,11 @@ def _advance(dt):
             if cube is None:
                 S["remaining"].pop(0); S["phase"] = "next"; return
             # panda_hand (the EE frame) is the gripper palm; fingertips
-            # extend ~0.105m below. Target the palm at cube_top + 0.105m
+            # extend ~{_FRANKA_PALM_TO_FINGERTIP_M}m below. Target the palm at cube_top + {_FRANKA_PALM_TO_FINGERTIP_M}m
             # so the fingertips wrap the cube. Previously we targeted
             # cube + 0.015m which put the fingertips 9cm inside the belt,
             # and RmpFlow refused to penetrate the collision.
-            tgt = cube + np.array([0, 0, 0.105])
+            tgt = cube + np.array([0, 0, {_FRANKA_PALM_TO_FINGERTIP_M}])
             S["current_target"] = tgt
             _set_target(tgt)
             S["phase"] = "descend"
@@ -596,14 +668,14 @@ def _advance(dt):
     elif phase == "grasp":
         if now - S["phase_enter_t"] > 0.4:  # brief pause for gripper to close
             # Contact gate: verify EE (panda_hand palm) is at the descend
-            # target (cube + 0.105m so fingertips wrap the cube). Checking
+            # target (cube + {_FRANKA_PALM_TO_FINGERTIP_M}m so fingertips wrap the cube). Checking
             # against cube center directly would always fail since palm-to-
-            # cube-center is ~0.105m by design. Observed 2026-04-19: without
+            # cube-center is ~{_FRANKA_PALM_TO_FINGERTIP_M}m by design. Observed 2026-04-19: without
             # this gate, FixedJoint.Apply preserves a 0.5m offset when
             # descend times out.
             ee = _ee_pos_np()
             cube = _bbox_center_np(S["current_cube"])
-            target_pos = cube + np.array([0, 0, 0.105]) if cube is not None else None
+            target_pos = cube + np.array([0, 0, {_FRANKA_PALM_TO_FINGERTIP_M}]) if cube is not None else None
             _grip_ok = (ee is not None and target_pos is not None
                         and float(np.linalg.norm(ee - target_pos)) <= 0.06)
             if not _grip_ok:
@@ -706,9 +778,9 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_builtin(robot_path, robot_family, sensor_path, belt_path,
-                             source_paths, destination_path, drop_target,
-                             ee_offset):
+def _gen_pick_place_builtin(robot_path: str, robot_family: str, sensor_path: str, belt_path: str,
+                             source_paths: list, destination_path: str, drop_target: str,
+                             ee_offset: list) -> str:
     """Robot-agnostic pick-place using Isaac Sim's bundled per-robot controllers.
 
     Wraps NVIDIA's pre-configured PickPlaceController classes:
@@ -724,8 +796,25 @@ def _gen_pick_place_builtin(robot_path, robot_family, sensor_path, belt_path,
     /World/UR10). We pass the user's robot_path explicitly so existing scenes
     composed via robot_wizard work unchanged.
 
-    robot_family: "auto" | "franka" | "ur10" | "ur10e" | "cobotta_pro_900"
-        "auto" tries to detect from the robot prim's USD reference path.
+    Args:
+        robot_path (str): USD prim path of the robot articulation root.
+        robot_family (str): One of ``"auto"``, ``"franka"``, ``"ur10"``,
+            ``"ur10e"``, or ``"cobotta_pro_900"``. ``"auto"`` scans the robot
+            prim's USD reference paths for known robot name substrings.
+        sensor_path (str or None): Proximity sensor prim path.
+        belt_path (str or None): Conveyor belt prim path.
+        source_paths (list[str]): Ordered cube prim paths to deliver.
+        destination_path (str or None): Default drop bin prim path.
+        drop_target (str or None): Drop bin override.
+        ee_offset (list[float]): [x, y, z] EE-to-fingertip offset, meters.
+            Defaults to ``[0.0, 0.0, 0.02]`` at the dispatcher level (slightly
+            different from other variants' ``[0.0, 0.005, 0.0]`` default).
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        Prints a JSON dict with ``{"ok": True, "mode": "builtin", "family": ...}``
+        on success, or raises ``RuntimeError`` for pre-flight failures or
+        unknown robot families.
     """
     import json as _json
     return f"""\
@@ -1006,7 +1095,7 @@ _belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
 _belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_belt_prim and _belt_prim.IsValid()) else None
 _belt_en = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocityEnabled") if (_belt_prim and _belt_prim.IsValid()) else None
 _captured_belt = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
-_nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > 1e-6) else (0.2, 0.0, 0.0)
+_nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > {_BELT_MOVING_THRESHOLD}) else (0.2, 0.0, 0.0)
 
 # BELT-PAUSE-FROM-CALLBACK FIX (2026-05-08):
 # Direct USD writes from inside _on_step (subscribed to physics_step_events)
@@ -1416,6 +1505,23 @@ def _gen_setup_pick_place_ros2_bridge(args: Dict) -> str:
     Topics subscribed (outside → Isaac):
       /isaac/robot/target_pose (geometry_msgs/PoseStamped, EE target)
       /isaac/robot/gripper_cmd (std_msgs/Float32, 0.0 closed → 0.04 open)
+
+    Args:
+        args: Tool arguments dict containing:
+            - robot_path (str): USD prim path of the robot articulation.
+            - source_paths (list[str]): Cube prim paths included in the
+              published pose array.
+            - destination_path (str): Drop bin prim path.
+            - end_effector_link (str, optional): EE link name. Defaults to
+              ``"panda_hand"``.
+            - ros_domain_id (int, optional): ROS2 domain ID for all nodes in
+              the OmniGraph. Defaults to 0.
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        Creates an OmniGraph at ``/World/ROS2PickPlaceBridge``, writes
+        scenario metadata to ``/tmp/isaac_pickplace_bridge.json``, and prints
+        a JSON dict with ``{"ok": True, "graph_path": ..., "meta_file": ...}``.
     """
     robot_path = args["robot_path"]
     source_paths = args["source_paths"]
@@ -1505,12 +1611,12 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_sensor_gated(robot_path, sensor_path, belt_path, pick_pose_name,
-                                  drop_pose_name, home_pose_name,
-                                  pick_target, drop_target, home_target,
-                                  grip_style, source_paths,
-                                  ee_link, fj1, fj2,
-                                  open_val, close_val):
+def _gen_pick_place_sensor_gated(robot_path: str, sensor_path: str, belt_path: str, pick_pose_name: str,
+                                  drop_pose_name: str, home_pose_name: str,
+                                  pick_target: str, drop_target: str, home_target: str,
+                                  grip_style: str, source_paths: list,
+                                  ee_link: str, fj1: str, fj2: str,
+                                  open_val: float, close_val: float) -> str:
     """Industrial-pattern controller: belt runs continuously until a proximity
     sensor triggers at a fixed pick station. On trigger, belt pauses; robot
     moves to PICK config; gripper closes; belt resumes (cube attached via
@@ -1529,6 +1635,38 @@ def _gen_pick_place_sensor_gated(robot_path, sensor_path, belt_path, pick_pose_n
     If world-coord targets are provided, they override the pose-name
     variant. Sim2real-honest in both cases: sensor is still binary,
     belt pauses on trigger, no ground-truth cube tracking.
+
+    Args:
+        robot_path (str): USD prim path of the robot articulation root.
+        sensor_path (str): Proximity sensor prim path (required — belt stops
+            on trigger).
+        belt_path (str or None): Conveyor belt prim path.
+        pick_pose_name (str): Pose file name to use for the pick position
+            (pose-name style). Defaults to ``"pick"`` at dispatcher level.
+        drop_pose_name (str): Pose file name for the drop position. Defaults
+            to ``"drop"``.
+        home_pose_name (str): Pose file name for the home position. Defaults
+            to ``"home"``.
+        pick_target (str or None): World-coordinate pick target ``[x, y, z]``
+            as JSON string or list. Overrides ``pick_pose_name`` when set.
+        drop_target (str or None): World-coordinate drop target. Overrides
+            ``drop_pose_name`` when set.
+        home_target (str or None): World-coordinate home target. Overrides
+            ``home_pose_name`` when set.
+        grip_style (str): ``"fixed_joint"`` or ``"friction"``. Defaults to
+            ``"fixed_joint"``.
+        source_paths (list[str]): Cube prim paths; used to count delivered
+            cubes and emit ``ctrl:cubes_delivered``.
+        ee_link (str): End-effector link name.
+        fj1 (str): Finger joint 1 name.
+        fj2 (str): Finger joint 2 name.
+        open_val (float): Gripper open position (m).
+        close_val (float): Gripper closed position (m).
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        Prints a JSON dict with ``{"ok": True, "mode": "sensor_gated", ...}``
+        on success, or raises ``RuntimeError`` for pre-flight failures.
     """
     # (Phase 8 wave 9) tool_executor imports migrated to module body:
     # _PP_RMPFLOW_HEADER migrated to module body (Phase 8 wave 9).
@@ -1629,8 +1767,8 @@ GRIPPER_CLOSE = {close_val}
 stage = omni.usd.get_context().get_stage()
 world = World.instance() or World()
 
-# Canonical Franka ready pose — 9 DOFs (7 arm + 2 fingers at 0.04 open).
-_FRANKA_READY = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04])
+# Canonical Franka ready pose — 9 DOFs (7 arm + 2 fingers at {_FRANKA_FINGER_OPEN_M}m open).
+_FRANKA_READY = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, {_FRANKA_FINGER_OPEN_M}, {_FRANKA_FINGER_OPEN_M}])
 
 franka = SingleArticulation(ROBOT_PATH, name="franka_pp_sg")
 try:
@@ -1760,7 +1898,7 @@ if _USE_COORDS:
         urdf_path=cfg["urdf"],
         rmpflow_config_path=cfg["rmpflow"],
         end_effector_frame_name=EE_LINK,
-        maximum_substep_size=0.016,
+        maximum_substep_size={_RMPFLOW_MAX_SUBSTEP_S},
     )
 
     # CRITICAL: tell RmpFlow where the robot base is in world. Without
@@ -1790,7 +1928,7 @@ if _USE_COORDS:
     except Exception as _e:
         print(f"(set_cspace_target skipped: {{_e}})")
 
-    amp = ArticulationMotionPolicy(franka, rmpflow, default_physics_dt=1.0/60.0)
+    amp = ArticulationMotionPolicy(franka, rmpflow, default_physics_dt={_PHYSICS_DT_DEFAULT_S})
     _TARGETS = {{"pick": PICK_TARGET, "drop": DROP_TARGET, "home": HOME_TARGET}}
 
     def _ee_pos_np():
@@ -1887,8 +2025,8 @@ if GRIP_STYLE == "friction" and SOURCE_PATHS:
         UsdShade.Material.Define(stage, _mat_path)
         _mat_prim = stage.GetPrimAtPath(_mat_path)
     _pmat = _UP.MaterialAPI.Apply(_mat_prim)
-    _pmat.CreateStaticFrictionAttr().Set(1.5)
-    _pmat.CreateDynamicFrictionAttr().Set(1.2)
+    _pmat.CreateStaticFrictionAttr().Set({_GRIP_FRICTION_STATIC})
+    _pmat.CreateDynamicFrictionAttr().Set({_GRIP_FRICTION_DYNAMIC})
     _pmat.CreateRestitutionAttr().Set(0.0)
     # Apply material to source cubes + gripper fingers via relationship
     _attach_paths = list(SOURCE_PATHS) + [
@@ -2145,11 +2283,11 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_native(robot_path, sensor_path, belt_path,
-                           source_paths, destination_path,
-                           drop_target, ee_offset,
+def _gen_pick_place_native(robot_path: str, sensor_path: str, belt_path: str,
+                           source_paths: list, destination_path: str,
+                           drop_target: str, ee_offset: list,
                            end_effector_initial_height=None,
-                           events_dt=None):
+                           events_dt=None) -> str:
     """Canonical Isaac Sim pick-place — ports the 62-line standalone at
     `standalone_examples/api/isaacsim.robot.manipulators/franka/pick_place.py`
     into an embedded (Kit RPC) context, wrapped with sensor-gating.
@@ -2194,13 +2332,38 @@ def _gen_pick_place_native(robot_path, sensor_path, belt_path,
 
     Other differences from the 62-line standalone (not bugs, just
     adaptations):
-      - No `SimulationApp` / `world.step(render=True)` loop —
-        physics ticks via `omni.physx.subscribe_physics_step_events`.
+      - No ``SimulationApp`` / ``world.step(render=True)`` loop —
+        physics ticks via ``omni.physx.subscribe_physics_step_events``.
       - Sensor-gated wrapper: wait for proximity sensor →
-        `controller.reset()` → forward() each tick until `is_done()` →
+        ``controller.reset()`` → ``forward()`` each tick until ``is_done()`` →
         pause belt during pick → resume during transport → repeat.
-      - Live cube tracking: `picking_position` reads source prim's
+      - Live cube tracking: ``picking_position`` reads source prim's
         current world pose each tick (retargets as cube moves on belt).
+
+    Args:
+        robot_path (str): USD prim path of the Franka articulation root.
+        sensor_path (str or None): Proximity sensor prim path. When set, the
+            controller waits for a sensor trigger before each pick cycle.
+        belt_path (str or None): Conveyor belt prim path. Belt is paused while
+            the robot picks a cube and resumed after the cube is released.
+        source_paths (list[str]): Ordered cube prim paths to deliver.
+        destination_path (str or None): Default bin prim path.
+        drop_target (str or None): Drop bin override (takes precedence over
+            destination_path when non-None).
+        ee_offset (list[float]): [x, y, z] EE-to-fingertip offset, meters.
+            Applied to cube center to compute the grasp target.
+        end_effector_initial_height (float or None): Override for the approach
+            clearance height. Auto-computed from source/dest Z + clearance when
+            None (fix #2 above).
+        events_dt (list[float] or None): Per-phase time-budget list passed to
+            ``PickPlaceController``. Uses the controller's built-in defaults
+            when None.
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        Prints a JSON dict with ``{"ok": True, "mode": "native", ...}`` on
+        success, or raises ``RuntimeError`` for pre-flight failures (prim not
+        found, articulation init failure, etc.).
     """
     # (Phase 8 wave 9) tool_executor imports migrated to module body:
     # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
@@ -2775,14 +2938,14 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_spline(robot_path, sensor_path, belt_path,
-                           source_paths, destination_path,
-                           drop_target, ee_offset,
+def _gen_pick_place_spline(robot_path: str, sensor_path: str, belt_path: str,
+                           source_paths: list, destination_path: str,
+                           drop_target: str, ee_offset: list,
                            end_effector_initial_height=None,
                            spline_waypoint_dt=None,
-                           grip_style="friction",
+                           grip_style: str = "friction",
                            color_routing=None,
-                           mutex_path=None):
+                           mutex_path=None) -> str:
     """Deterministic CPU-only pick-place: pre-plan 6-waypoint Cartesian
     trajectory per cube, warm-start IK chain for consistent redundancy
     branch, interpolate via scipy.CubicSpline (or numpy linear fallback).
@@ -2818,6 +2981,34 @@ def _gen_pick_place_spline(robot_path, sensor_path, belt_path,
     Interpolation: scipy.CubicSpline clamped (zero velocity at endpoints)
     through the 7-DoF joint configurations at waypoint times. Fallback
     to np.interp per-joint if scipy unavailable.
+
+    Args:
+        robot_path (str): USD prim path of the Franka articulation root.
+        sensor_path (str or None): Proximity sensor prim path. Belt pauses on
+            trigger; robot executes pick cycle; belt resumes after release.
+        belt_path (str or None): Conveyor belt prim path.
+        source_paths (list[str]): Ordered cube prim paths to deliver.
+        destination_path (str or None): Default drop bin prim path.
+        drop_target (str or None): Drop bin override.
+        ee_offset (list[float]): [x, y, z] EE-to-fingertip offset, meters.
+        end_effector_initial_height (float or None): Approach clearance height
+            override. Auto-computed from scene geometry when None.
+        spline_waypoint_dt (float or None): Time budget per waypoint segment
+            (seconds). Defaults to 1.5 s per segment when None.
+        grip_style (str): ``"fixed_joint"`` (attach cube via UsdPhysics.FixedJoint)
+            or ``"friction"`` (rely on contact forces). Defaults to
+            ``"fixed_joint"`` for reliability; unknown values coerce to
+            ``"fixed_joint"``.
+        color_routing (dict or None): Semantic color class name → bin prim
+            path. Cube's ``Semantics_color`` class selects the destination.
+            Falls through to ``destination_path`` when no entry matches.
+        mutex_path (str or None): Stage prim path used as a robot-claim mutex.
+            None disables multi-robot coordination.
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        Prints a JSON dict with ``{"ok": True, "mode": "spline", ...}`` on
+        success, or raises ``RuntimeError`` for pre-flight failures.
     """
     # (Phase 8 wave 9) tool_executor imports migrated to module body:
     # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
@@ -3534,64 +3725,109 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
-                           source_paths, destination_path,
-                           drop_target, ee_offset,
+def _gen_pick_place_curobo(robot_path: str, sensor_path: str, belt_path: str,
+                           source_paths: list, destination_path: str,
+                           drop_target: str, ee_offset: list,
                            end_effector_initial_height=None,
                            planning_obstacles=None,
                            curobo_world_yml=None,
                            color_routing=None,
                            drop_targets=None,
                            gripper_rotation=None,
-                           robot_family="franka",
-                           require_upright=False,
-                           upright_dot_threshold=0.85,
+                           robot_family: str = "franka",
+                           require_upright: bool = False,
+                           upright_dot_threshold: float = 0.85,
                            mutex_path=None,
-                           scenario_profile=None):
-    """Phase 4 POC: scenario_profile arg routes scene_cfg construction.
-
-    scenario_profile:
-      None or "single_belt_pick" (default):
-        Include Table/ConveyorBelt/Bin in scene_cfg + PLANNING_OBSTACLES.
-        Works for CP-22/59/65 multi-cube belt scenarios.
-      "obstacle_rich":
-        EXCLUDE Table/ConveyorBelt/Bin from scene_cfg. Use only
-        PLANNING_OBSTACLES (Pillar, packed pedestals, etc). Robot's
-        home pose at z=0.75 is on table top — including table makes
-        cuRobo flag robot as in-collision → 24/24 plan_pose fails.
-        For CP-37/46/48 etc with explicit obstacle list, this lets
-        plan_pose succeed.
-    """
-    # (Phase 8 wave 9) tool_executor imports migrated to module body:
-    # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
-    # _PP_SCENE_RESET_MGR_SNIPPET migrated to module body (Phase 8 wave 9).
+                           scenario_profile=None) -> str:
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
 
-    **Unlocked 2026-04-21** — four breakthroughs:
-      1. Env-bridge via `sys.path.insert` + `importlib.invalidate_caches()` (I-29)
-      2. `wp.func` monkey-patch for Warp 1.8.2 vs cuRobo's 1.9+ expectation (I-28)
-      3. `cuda-core[cu12]` pip-installed → enables cuRobo's runtime kernel backend
-      4. cuRobo content/ directory (franka.yml + default task YAMLs + URDF + meshes)
+    **Unlocked 2026-04-21** — four breakthroughs that enable cuRobo inside Kit:
+      1. Env-bridge via ``sys.path.insert`` + ``importlib.invalidate_caches()`` (I-29)
+      2. ``wp.func`` monkey-patch for Warp 1.8.2 vs cuRobo's 1.9+ expectation (I-28)
+      3. ``cuda-core[cu12]`` pip-installed → enables cuRobo's runtime kernel backend
+      4. cuRobo ``content/`` directory (franka.yml + task YAMLs + URDF + meshes)
          synced from NVlabs/curobo GitHub main branch into the installed package
 
     Pipeline (per cube):
-      - Plan 5 trajectory segments via `planner.plan_pose(goal_tool_pose, current_state)`:
+      - Plan 5 trajectory segments via ``planner.plan_pose(goal_tool_pose, current_state)``:
           S1: current → approach_above_cube (h1)
           S2: approach → descend_to_pick (cube_z + finger_len)
           S3: pick → lift → transit_above_drop (h1)
           S4: transit → descend_to_drop (drop_z)
           S5: drop → retreat → home
-      - Per-tick: sample interpolated_plan's joint positions over the segment's
-        motion_time; apply via apply_action(joint_positions=...)
-      - Gripper close between S2→S3, open between S4→S5
+      - Per-tick: sample ``interpolated_plan``'s joint positions over the segment's
+        ``motion_time``; apply via ``apply_action(joint_positions=...)``
+      - Gripper close between S2 → S3, open between S4 → S5
 
-    Planner is cached in `builtins._curobo_pp_planner` across installs to avoid
-    the ~5s warmup cost (first plan_pose compiles the CUDA graph).
+    Planner is cached in ``builtins._curobo_pp_planner`` across installs to avoid
+    the ~5s warmup cost (first ``plan_pose`` compiles the CUDA graph).
 
-    Expected cycle time: 3-5s after warmup (0.5s/plan × 5 plans + execution).
-    Expected delivery: 3-4/4 (collision-aware planning avoids wrist-snap AND
-    handles bin rim collisions that plague spline's cube 4).
+    Expected cycle time: 3–5 s after warmup (0.5s/plan × 5 plans + execution).
+    Expected delivery: 3–4/4 (collision-aware planning avoids wrist-snap AND
+    handles bin rim collisions that plague the spline variant's cube 4).
+
+    scene_cfg routing via ``scenario_profile``:
+      None / ``"single_belt_pick"`` (default):
+        Include Table, ConveyorBelt, and Bin in ``scene_cfg`` + PLANNING_OBSTACLES.
+        Correct for CP-22/59/65 multi-cube belt scenarios.
+      ``"obstacle_rich"``:
+        EXCLUDE Table/ConveyorBelt/Bin from ``scene_cfg``; use only
+        PLANNING_OBSTACLES (Pillar, packed pedestals, etc.).  When the robot
+        home pose is at z=0.75 (on a table), including the table prim makes
+        cuRobo flag the robot as in-collision → 24/24 ``plan_pose`` fails.
+        This profile lets ``plan_pose`` succeed for CP-37/46/48 etc. where
+        obstacles are supplied explicitly.
+
+    Args:
+        robot_path (str): USD prim path of the robot articulation root.
+        sensor_path (str or None): Proximity sensor prim path. Delivery waits
+            for a sensor trigger before picking each cube.
+        belt_path (str or None): Conveyor belt prim path. Belt is paused while
+            the robot picks and re-started after release.
+        source_paths (list[str]): Ordered list of cube prim paths to deliver.
+        destination_path (str or None): Default drop bin prim path.
+        drop_target (str or None): Alternative drop target (overrides
+            destination_path when non-None).
+        ee_offset (list[float]): [x, y, z] offset from EE link to fingertip
+            approach point, meters.
+        end_effector_initial_height (float or None): Override for the height
+            above the floor at which the EE starts its approach. Auto-computed
+            from source/dest Z + clearance when None.
+        planning_obstacles (list[str]): Extra prim paths to include as
+            collision primitives in the cuRobo scene model.
+        curobo_world_yml (str or None): Path to a custom world YAML for cuRobo.
+            Uses the built-in ``collision_primitives_3d.yml`` when None.
+        color_routing (dict or None): Map of semantic color class name → bin
+            prim path. When provided, ``_bin_drop_pos`` selects the destination
+            per cube based on the cube's ``Semantics_color`` class. Falls
+            through to ``destination_path`` when no entry matches.
+        drop_targets (dict or None): Alternative per-class routing dict (keyed
+            by semantic class, not color). Takes precedence over color_routing.
+        gripper_rotation (float or None): Additional yaw (degrees) to apply to
+            the grasp orientation. None uses a default downward-facing grasp.
+        robot_family (str): ``"franka"`` (7-DOF + ParallelGripper) or
+            ``"ur10"`` / ``"ur10e"`` (6-DOF, suction gripper). Defaults to
+            ``"franka"``.
+        require_upright (bool): If True, reject grasps where the EE +Z axis
+            deviates from world +Z by more than ``upright_dot_threshold``.
+            Defaults to False.
+        upright_dot_threshold (float): Minimum dot product for upright filter.
+            Defaults to ``_UPRIGHT_DOT_THRESHOLD_DEFAULT`` (0.85).
+        mutex_path (str or None): Stage prim path used as a robot-claim mutex.
+            When set, the robot must acquire the mutex before picking each cube
+            (multi-robot coordination). None disables mutex logic.
+        scenario_profile (str or None): Scene-cfg routing hint — see above.
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        When exec'd, the code installs a physics-step subscription that runs
+        the cuRobo pick-place state machine. Prints a JSON dict with
+        ``{"ok": True, "mode": "curobo", "cubes_queued": N, ...}`` on success,
+        or raises ``RuntimeError`` for pre-flight failures.
     """
+    # (Phase 8 wave 9) tool_executor imports migrated to module body:
+    # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
+    # _PP_SCENE_RESET_MGR_SNIPPET migrated to module body (Phase 8 wave 9).
     import json as _json
     _obs = _json.dumps(list(planning_obstacles) if planning_obstacles else [])
     return f"""\
@@ -4827,11 +5063,11 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_diffik(robot_path, sensor_path, belt_path,
-                            source_paths, destination_path,
-                            drop_target, ee_offset,
+def _gen_pick_place_diffik(robot_path: str, sensor_path: str, belt_path: str,
+                            source_paths: list, destination_path: str,
+                            drop_target: str, ee_offset: list,
                             end_effector_initial_height=None,
-                            diffik_method="dls"):
+                            diffik_method: str = "dls") -> str:
     """Isaac Lab DifferentialIKController-based pick-place.
 
     Env-bridge: sys.path.insert(0, isaac_lab_env/site-packages) +
@@ -4852,9 +5088,28 @@ def _gen_pick_place_diffik(robot_path, sensor_path, belt_path,
     gripper control to franka.gripper.forward().
 
     Limitations: no collision awareness, no self-collision guard, no
-    planning horizon. Expected delivery rate: 2-3/4 (similar to spline
+    planning horizon. Expected delivery rate: 2–3/4 (similar to spline
     for simple tabletop scenarios; worse when the 6 waypoints need
     obstacle avoidance).
+
+    Args:
+        robot_path (str): USD prim path of the Franka articulation root.
+        sensor_path (str or None): Proximity sensor prim path.
+        belt_path (str or None): Conveyor belt prim path.
+        source_paths (list[str]): Ordered cube prim paths to deliver.
+        destination_path (str or None): Default drop bin prim path.
+        drop_target (str or None): Drop bin override.
+        ee_offset (list[float]): [x, y, z] EE-to-fingertip offset, meters.
+        end_effector_initial_height (float or None): Approach clearance height
+            override. Auto-computed from scene geometry when None.
+        diffik_method (str): IK method passed to
+            ``DifferentialIKControllerCfg``. One of ``"dls"`` (damped least
+            squares, default), ``"pinv"``, ``"svd"``, or ``"trans"``.
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        Prints a JSON dict with ``{"ok": True, "mode": "diffik", ...}`` on
+        success, or raises ``RuntimeError`` for pre-flight failures.
     """
     # (Phase 8 wave 9) tool_executor imports migrated to module body:
     # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
@@ -5351,9 +5606,9 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_osc(robot_path, sensor_path, belt_path,
-                         source_paths, destination_path,
-                         drop_target, ee_offset):
+def _gen_pick_place_osc(robot_path: str, sensor_path: str, belt_path: str,
+                         source_paths: list, destination_path: str,
+                         drop_target: str, ee_offset: list) -> str:
     """Isaac Lab OperationalSpaceController-based pick-place.
 
     Simplified config (no inertial decoupling, no gravity comp, fixed
@@ -5368,10 +5623,24 @@ def _gen_pick_place_osc(robot_path, sensor_path, belt_path,
     — but currently we don't track teardown (cycle ends when all
     cubes delivered and stays in wait_sensor).
 
-    Expected delivery: 0-2/4 (experimental). Not a winner for standard
+    Expected delivery: 0–2/4 (experimental). Not a winner for standard
     pick-place; the point of having OSC in the matrix is for
     contact-rich tasks (polishing, assembly) where compliant motion
     matters more than drop precision.
+
+    Args:
+        robot_path (str): USD prim path of the Franka articulation root.
+        sensor_path (str or None): Proximity sensor prim path.
+        belt_path (str or None): Conveyor belt prim path.
+        source_paths (list[str]): Ordered cube prim paths to deliver.
+        destination_path (str or None): Default drop bin prim path.
+        drop_target (str or None): Drop bin override.
+        ee_offset (list[float]): [x, y, z] EE-to-fingertip offset, meters.
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        Prints a JSON dict with ``{"ok": True, "mode": "osc", ...}`` on
+        success, or raises ``RuntimeError`` for pre-flight failures.
     """
     # (Phase 8 wave 9) tool_executor imports migrated to module body:
     # _PP_OBSERVABILITY_SNIPPET migrated to module body (Phase 8 wave 9).
@@ -5834,10 +6103,37 @@ print(json.dumps({{
 """
 
 
-def _gen_pick_place_fixed_poses(robot_path, pose_sequence, cycles, ee_link, fj1, fj2):
-    """Pose-sequence controller: visit each named pose in order, repeat N cycles.
-    No sensor, no grasp logic — pure replay. Useful for demos or cycle-time
-    measurement before adding control logic.
+def _gen_pick_place_fixed_poses(robot_path: str, pose_sequence: list, cycles: int, ee_link: str, fj1: str, fj2: str) -> str:
+    """Timer-driven pose-sequence controller: replay named poses in order, N times.
+
+    No sensor input, no grasp logic, no cube tracking — the robot visits each
+    pose name from ``pose_sequence`` in order, waits until it arrives (or 4 s
+    elapses), then advances to the next. Useful for cycle-time measurement,
+    teach-pendant validation, or demonstrations before adding pick-place logic.
+
+    Poses are loaded from JSON files at
+    ``~/projects/Omniverse_Nemotron_Ext/workspace/robot_poses/<robot_key>/<name>.json``.
+    Each file is expected to contain ``{"dof_names": [...], "joint_positions": [...]}``.
+    The controller maps saved DOF names to the articulation's live DOF order so
+    the sequence is robust to partial saves and robot variants.
+
+    Args:
+        robot_path (str): USD prim path of the robot articulation.
+        pose_sequence (list[str]): Ordered list of pose names to visit, e.g.
+            ``["home", "pick", "drop"]``. Each must have a corresponding JSON
+            file in the robot's pose directory.
+        cycles (int): Number of full-sequence repetitions before the controller
+            sets ``done=True`` and stops advancing.
+        ee_link (str): Name of the end-effector link (currently unused in the
+            generated code; reserved for future gripper state integration).
+        fj1 (str): Name of finger joint 1 (currently unused; see ee_link note).
+        fj2 (str): Name of finger joint 2 (currently unused; see ee_link note).
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        Prints a JSON dict with ``{"ok": True, "mode": "fixed_poses", ...}``
+        after installing the physics callback. Raises ``FileNotFoundError``
+        in generated code if a named pose JSON does not exist.
     """
     import json as _json
     return f"""\
@@ -5916,10 +6212,37 @@ print(json.dumps({{"ok": True, "mode": "fixed_poses",
 """
 
 
-def _gen_pick_place_ros2_cmd(robot_path, target_topic, gripper_topic, ee_link, fj1, fj2):
-    """ROS2-commanded controller stub: subscribes to external target-pose and
-    gripper-command topics, applies them to the robot. State machine lives
-    OUTSIDE Isaac Sim — this tool only wires the I/O.
+def _gen_pick_place_ros2_cmd(robot_path: str, target_topic: str, gripper_topic: str, ee_link: str, fj1: str, fj2: str) -> str:
+    """Wire ROS2 I/O for an externally-commanded pick-place controller.
+
+    Generates an OmniGraph setup that subscribes to an external ROS2 controller's
+    target-pose and gripper-command topics and wires them into Kit. The state
+    machine logic lives entirely outside Isaac Sim (e.g. in a real PLC, a ROS2
+    node, or a digital-twin controller) — Isaac Sim provides only physics,
+    rendering, and the topic I/O layer.
+
+    This is the ``ros2_cmd`` target_source variant of
+    ``setup_pick_place_controller``, the inverse of
+    ``_gen_setup_pick_place_ros2_bridge`` (which publishes robot state outward).
+
+    Args:
+        robot_path (str): USD prim path of the robot articulation.
+        target_topic (str): ROS2 topic name carrying
+            ``geometry_msgs/PoseStamped`` EE targets from the external
+            controller. Defaults to ``"/isaac/robot/target_pose"`` at the
+            dispatcher level.
+        gripper_topic (str): ROS2 topic name carrying ``std_msgs/Float32``
+            gripper commands (0.0 = closed, 0.04 = open). Defaults to
+            ``"/isaac/robot/gripper_cmd"`` at the dispatcher level.
+        ee_link (str): End-effector link name (used for OmniGraph target-prim
+            wiring).
+        fj1 (str): Finger joint 1 name.
+        fj2 (str): Finger joint 2 name.
+
+    Returns:
+        str: Python source code to be exec'd in Kit via ``queue_exec_patch``.
+        Sets up OmniGraph subscriber nodes and prints a JSON dict with
+        ``{"ok": True, "mode": "ros2_cmd", ...}`` on success.
     """
     return f"""\
 # ── pick_place_controller (ros2_cmd) ─────────────────────────────────

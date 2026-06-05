@@ -9,6 +9,7 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from pathlib import Path
@@ -20,8 +21,7 @@ from typing import Any, Callable, Dict, List, Optional
 # ---------------------------------------------------------------------------
 # Theme-local asset-index unit (Phase 8 wave 23, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.scene_blueprints.
-
-_asset_index: Optional[List[Dict]] = None
+# conc-2 hardening (2026-05-14): lru_cache(maxsize=1) for race-safe load.
 
 _CATALOG_ROBOTS = {
     "franka": "franka.usd",
@@ -52,15 +52,11 @@ _CATALOG_ROBOTS = {
 
 def _invalidate_asset_index() -> None:
     """Invalidate the cached asset index so the next search rebuilds it."""
-    global _asset_index
-    _asset_index = None
+    _build_asset_index.cache_clear()
 
+@functools.lru_cache(maxsize=1)
 def _build_asset_index() -> List[Dict]:
     """Build searchable index from asset_catalog.json (fast) + known robots."""
-    global _asset_index
-    if _asset_index is not None:
-        return _asset_index
-
     index = []
     assets_root = getattr(config, "assets_root_path", None) or ""
     robots_sub = getattr(config, "assets_robots_subdir", None) or "Collected_Robots"
@@ -137,8 +133,7 @@ def _build_asset_index() -> List[Dict]:
             except PermissionError:
                 pass
 
-    _asset_index = index
-    return _asset_index
+    return index
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +204,22 @@ _LIST_LOCAL_ALLOWED_EXTS = {
 }
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Module-level named constants (extracted 2026-05-14, refactor/magic-1)
+
+_GRAVITY_MS2: float = 9.81            # Earth-surface gravity magnitude, m/s²
+_GRAVITY_MS2_NEGATIVE: float = -9.81  # signed gravity for physics_settings dicts (z-up, downward)
+
+# Physics solver iterations presets — used in _SCENE_TEMPLATES and
+# generated load_scene_template code
+_SOLVER_ITERS_HIGH: int = 32   # high-fidelity (manipulation, inspection): more accurate contacts
+_SOLVER_ITERS_STD: int = 16    # standard (warehouse, mobile nav): balanced performance
+
+# Physics timestep denominators — 1.0 / value gives step size in seconds
+_PHYSICS_HZ_HIGH: float = 120.0  # 120 Hz: high-accuracy physics (gripper contact tasks)
+_PHYSICS_HZ_STD: float = 60.0    # 60 Hz: standard physics (mobile nav, warehouse)
+
+# ---------------------------------------------------------------------------
 # Theme-local constants + helpers (Phase 8 wave 7, 2026-05-13)
 # Migrated from tool_executor.py — used only by this module.
 
@@ -231,7 +242,7 @@ _SCENE_TEMPLATES = {
             {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 1.8], "rotation": [-90, 0, 0]},
         ],
         "suggested_sensors": ["camera (overhead, 1280x720)", "contact_sensor (gripper fingers)"],
-        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
+        "physics_settings": {"gravity": _GRAVITY_MS2_NEGATIVE, "time_step": 1.0 / _PHYSICS_HZ_HIGH, "solver_iterations": _SOLVER_ITERS_HIGH},
     },
     "warehouse_picking": {
         "description": "Warehouse bin-picking scene with shelving units, a mobile robot, bins with objects, and an overhead camera. Good for logistics and order-fulfillment tasks.",
@@ -248,7 +259,7 @@ _SCENE_TEMPLATES = {
             {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 3.5], "rotation": [-90, 0, 0]},
         ],
         "suggested_sensors": ["camera (overhead, 1920x1080)", "rtx_lidar (mobile robot)"],
-        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
+        "physics_settings": {"gravity": _GRAVITY_MS2_NEGATIVE, "time_step": 1.0 / _PHYSICS_HZ_STD, "solver_iterations": _SOLVER_ITERS_STD},
     },
     "mobile_navigation": {
         "description": "Indoor navigation scene with a ground plane, walls, obstacles, and a wheeled robot with lidar. Good for SLAM and path-planning tasks.",
@@ -266,7 +277,7 @@ _SCENE_TEMPLATES = {
             {"name": "Jetbot", "prim_path": "/World/Jetbot", "asset_name": "jetbot", "position": [0, 0, 0.05], "scale": [1, 1, 1]},
         ],
         "suggested_sensors": ["rtx_lidar (robot-mounted, 360 deg)", "camera (front-facing)"],
-        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
+        "physics_settings": {"gravity": _GRAVITY_MS2_NEGATIVE, "time_step": 1.0 / _PHYSICS_HZ_STD, "solver_iterations": _SOLVER_ITERS_STD},
     },
     "inspection_cell": {
         "description": "Automated inspection cell with a conveyor belt, inspection cameras, structured lighting, and sample objects. Good for quality-inspection and defect-detection tasks.",
@@ -286,7 +297,7 @@ _SCENE_TEMPLATES = {
             {"name": "SampleObject_3", "prim_type": "Sphere", "position": [0.4, 0, 0.52], "scale": [0.03, 0.03, 0.03]},
         ],
         "suggested_sensors": ["camera (top-down, high-res 4K)", "camera (side-view, 1280x720)"],
-        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
+        "physics_settings": {"gravity": _GRAVITY_MS2_NEGATIVE, "time_step": 1.0 / _PHYSICS_HZ_HIGH, "solver_iterations": _SOLVER_ITERS_HIGH},
     },
 }
 
@@ -296,19 +307,14 @@ _TEMPLATE_LIBRARY_DIR = _WORKSPACE / "templates" / "library"
 
 _SENSOR_SPECS_PATH = _WORKSPACE / "knowledge" / "sensor_specs.jsonl"
 
-_sensor_specs: Optional[List[Dict]] = None
-
+@functools.lru_cache(maxsize=1)
 def _load_sensor_specs() -> List[Dict]:
-    global _sensor_specs
-    if _sensor_specs is not None:
-        return _sensor_specs
     specs = []
     if _SENSOR_SPECS_PATH.exists():
         for line in _SENSOR_SPECS_PATH.read_text().splitlines():
             line = line.strip()
             if line:
                 specs.append(json.loads(line))
-    _sensor_specs = specs
     return specs
 
 
@@ -1319,7 +1325,7 @@ async def _handle_generate_scene_blueprint(args: Dict) -> Dict:
 async def _handle_export_scene_package(args: Dict) -> Dict:
     """Export the current session's scene setup as a reusable file package."""
     import re as _re
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timezone as _tz
     from pathlib import Path as _Path
     from ...routes import _audit
 
@@ -1358,7 +1364,7 @@ async def _handle_export_scene_package(args: Dict) -> Dict:
     setup_lines = [
         '"""',
         f'Scene Setup: {scene_name}',
-        f'Auto-exported by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+        f'Auto-exported by Isaac Assist on {_dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")}',
         f'Patches: {len(patches)}',
         '"""',
         'import omni.usd',
@@ -1414,7 +1420,7 @@ async def _handle_export_scene_package(args: Dict) -> Dict:
         launch_lines = [
             '"""',
             f'ROS2 Launch File for scene: {scene_name}',
-            f'Auto-generated by Isaac Assist on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}',
+            f'Auto-generated by Isaac Assist on {_dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")}',
             '"""',
             'from launch import LaunchDescription',
             'from launch_ros.actions import Node',
@@ -1436,7 +1442,7 @@ async def _handle_export_scene_package(args: Dict) -> Dict:
     topic_list = "\n".join(f"- `{t}`" for t in sorted(ros2_topics)) or "- None detected"
     readme = f"""# {scene_name}
 
-Auto-exported by **Isaac Assist** on {_dt.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}.
+Auto-exported by **Isaac Assist** on {_dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S UTC")}.
 
 ## Scene Summary
 

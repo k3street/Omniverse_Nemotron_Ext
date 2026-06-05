@@ -30,6 +30,7 @@ Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2),
 """
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from service.isaac_assist_service.multimodal.types import (
@@ -54,8 +55,23 @@ _HANDOFF_MISMATCH_TOLERANCE: float = 0.01
 # Keyed by robot_path → dict of current param values.
 # Populated by setup_admittance_controller and setup_impedance_controller
 # on dry-run success.  Read + mutated by set_compliance_params.
+#
+# Concurrency rationale (CONC-1, 2026-05-14):
+# FastAPI's request handler model means two concurrent chat sessions can race
+# on this cross-session dict. The setup → set_params → release sequence is a
+# read-modify-write cycle (set_params reads the entry, mutates fields, writes
+# back; release pops the entry). Without serialization, set_params can see a
+# half-mutated state from setup, or operate on a dict that release just
+# popped. A single module-level `threading.Lock` is sufficient because all
+# operations are short-running (pure-Python list manipulation, no I/O), so
+# coarse-grained locking does not introduce meaningful contention.
+# `threading.Lock` is chosen over `asyncio.Lock` because the GIL is the
+# actual contention surface and `threading.Lock` works correctly across
+# both sync helpers and async handlers in CPython's single-threaded event
+# loop model.
 
 _INSTALLED_COMPLIANCE: Dict[str, Dict[str, list]] = {}
+_COMPLIANCE_LOCK: threading.Lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -193,15 +209,19 @@ async def _handle_setup_admittance_controller(
         result["ft_sensor_path"] = ft_sensor_path
 
     # Persist current params so set_compliance_params can mutate them later.
-    _INSTALLED_COMPLIANCE[robot_path] = {
-        "stiffness_xyz": stiffness_xyz,
-        "damping_xyz": damping_xyz,
-        "mass_xyz": mass_xyz,
-        "stiffness_rot": stiffness_rot,
-        "damping_rot": damping_rot,
-        "mass_rot": mass_rot,
-        "compliance_mode": "admittance",
-    }
+    # Lock held for the single dict-assign + return for consistency with the
+    # other handlers below (set_compliance_params, release_compliance) that
+    # do multi-step read-modify-write under the same lock.
+    with _COMPLIANCE_LOCK:
+        _INSTALLED_COMPLIANCE[robot_path] = {
+            "stiffness_xyz": stiffness_xyz,
+            "damping_xyz": damping_xyz,
+            "mass_xyz": mass_xyz,
+            "stiffness_rot": stiffness_rot,
+            "damping_rot": damping_rot,
+            "mass_rot": mass_rot,
+            "compliance_mode": "admittance",
+        }
 
     return result
 
@@ -396,13 +416,16 @@ async def _handle_setup_impedance_controller(
     }
 
     # Persist current params so set_compliance_params can mutate them later.
-    _INSTALLED_COMPLIANCE[robot_path] = {
-        "stiffness_xyz": Kx,
-        "damping_xyz": Dx,
-        "stiffness_rot": Kr,
-        "damping_rot": Dr,
-        "compliance_mode": "impedance",
-    }
+    # Same locking rationale as setup_admittance — keep cross-handler
+    # invariants under the same lock surface.
+    with _COMPLIANCE_LOCK:
+        _INSTALLED_COMPLIANCE[robot_path] = {
+            "stiffness_xyz": Kx,
+            "damping_xyz": Dx,
+            "stiffness_rot": Kr,
+            "damping_rot": Dr,
+            "compliance_mode": "impedance",
+        }
 
     return result
 
@@ -510,16 +533,14 @@ async def _handle_set_compliance_params(
             "runtime mutation of live ros2_control controller requires Kit RPC + bridge"
         )
 
-    if robot_path not in _INSTALLED_COMPLIANCE:
-        return {
-            "success": False,
-            "error": f"no compliance controller installed for {robot_path}",
-            "available_robots": list(_INSTALLED_COMPLIANCE.keys()),
-        }
-
-    state = _INSTALLED_COMPLIANCE[robot_path]
-
-    # Additive update: only overwrite fields supplied by the caller.
+    # Additive update under the global compliance lock.
+    # The read-validate-mutate-snapshot sequence below is the critical
+    # section that the CONC-1 audit flagged: without serialization a
+    # concurrent release_compliance() could pop the entry between the
+    # `robot_path not in` check and the `_INSTALLED_COMPLIANCE[robot_path]`
+    # lookup, raising KeyError; a concurrent setup_admittance_controller()
+    # could overwrite the entry mid-update, causing the snapshot returned
+    # to the caller to differ from what set_compliance_params just wrote.
     _PARAM_KEYS = (
         "stiffness_xyz",
         "damping_xyz",
@@ -528,13 +549,28 @@ async def _handle_set_compliance_params(
         "damping_rot",
         "mass_rot",
     )
-    for key in _PARAM_KEYS:
-        value = args.get(key)
-        if value is not None:
-            state[key] = list(value)
+    with _COMPLIANCE_LOCK:
+        if robot_path not in _INSTALLED_COMPLIANCE:
+            return {
+                "success": False,
+                "error": f"no compliance controller installed for {robot_path}",
+                "available_robots": list(_INSTALLED_COMPLIANCE.keys()),
+            }
+
+        state = _INSTALLED_COMPLIANCE[robot_path]
+
+        for key in _PARAM_KEYS:
+            value = args.get(key)
+            if value is not None:
+                state[key] = list(value)
+
+        # Snapshot the merged state under the lock so the returned dict
+        # reflects exactly what was written, even if another writer fires
+        # immediately after we release.
+        snapshot = dict(state)
 
     result: Dict[str, Any] = {"success": True, "robot_path": robot_path, "dry_run": True}
-    result.update(state)
+    result.update(snapshot)
     return result
 
 
@@ -639,7 +675,13 @@ async def _handle_release_compliance(
             "Use dry_run=True to release the in-memory state entry."
         )
 
-    entry = _INSTALLED_COMPLIANCE.pop(robot_path, None)
+    # The pop + post-read of compliance_mode runs under the lock so a
+    # concurrent setup_admittance/impedance cannot squeeze a new entry
+    # between pop() and our `entry.get(...)` (it could, but the new entry
+    # would be irrelevant to the released_mode of the entry we just popped).
+    with _COMPLIANCE_LOCK:
+        entry = _INSTALLED_COMPLIANCE.pop(robot_path, None)
+
     if entry is None:
         return {
             "success": True,
@@ -939,8 +981,14 @@ async def _handle_follow_trajectory_with_compliance(
         }
 
     # --- robot_path + installed-controller check (last — stateful) ---
+    # Snapshot the membership + keys under the lock so a concurrent
+    # release_compliance() can't make `available_robots` lie.
     robot_path: str = args.get("robot_path", "/World/Franka")
-    if robot_path not in _INSTALLED_COMPLIANCE:
+    with _COMPLIANCE_LOCK:
+        is_installed = robot_path in _INSTALLED_COMPLIANCE
+        if not is_installed:
+            available_robots = list(_INSTALLED_COMPLIANCE.keys())
+    if not is_installed:
         return {
             "success": False,
             "ok": False,
@@ -950,7 +998,7 @@ async def _handle_follow_trajectory_with_compliance(
                 "for torque-mode robots) before invoking "
                 "follow_trajectory_with_compliance."
             ),
-            "available_robots": list(_INSTALLED_COMPLIANCE.keys()),
+            "available_robots": available_robots,
             "suggested_tool": "setup_admittance_controller",
         }
 

@@ -83,6 +83,19 @@ _LIGHT_TYPE_NAMES = (
 
 
 def _gen_set_viewport_camera(args: Dict) -> str:
+    """Generate Python that points the active viewport at a named camera prim.
+
+    Validates that the target prim exists and is a UsdGeom.Camera, then
+    verifies that the viewport actually accepted the assignment (the Viewport
+    API can silently ignore the call when the camera path is invalid).
+
+    Args:
+        args: Tool arguments dict containing:
+            - camera_path (str): USD prim path to the target Camera.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     # Viewport API silently ignores camera_path assignment when the target
     # doesn't exist or isn't a Camera prim. Tool used to report success
     # while the viewport stayed on /OmniverseKit_Persp. Pre-check + verify.
@@ -369,6 +382,21 @@ else:
 
 
 def _gen_set_semantic_label(args: Dict) -> str:
+    """Generate Python that attaches a Semantics API label to a USD prim.
+
+    Applies ``Semantics.SemanticsAPI`` to the target prim and sets both the
+    semantic type and data attributes so the prim is visible to annotators
+    (e.g. Replicator semantic segmentation, object detection writers).
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): USD prim path to label.
+            - class_name (str): Semantic class value (e.g. ``"box"``, ``"robot"``).
+            - semantic_type (str, optional): Semantic type key. Defaults to ``"class"``.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     prim_path = args["prim_path"]
     class_name = args["class_name"]
     semantic_type = args.get("semantic_type", "class")
@@ -387,6 +415,21 @@ def _gen_set_semantic_label(args: Dict) -> str:
 
 
 def _gen_set_render_mode(args: Dict) -> str:
+    """Generate Python that switches the renderer to the requested render mode.
+
+    Rejects unknown mode names upfront (before code-gen) to prevent the agent
+    from receiving a false-positive success with an unrecognised mode string.
+    Supported modes: ``"preview"``, ``"rt"``, ``"path_traced"``.
+
+    Args:
+        args: Tool arguments dict containing:
+            - mode (str): Target render mode.  Must be one of the supported
+              keys listed above.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.  Returns a
+            ``raise ValueError(...)`` snippet if the mode is unrecognised.
+    """
     mode = args["mode"]
     _MODE_TO_HYDRA = {
         "preview": "rtx",  # Hydra Storm fallback handled below
@@ -429,6 +472,19 @@ def _gen_set_render_mode(args: Dict) -> str:
 
 
 def _gen_focus_viewport_on(args: Dict) -> str:
+    """Generate Python that frames the active viewport on a prim's bounding box.
+
+    Validates that the prim exists first; older implementations printed "prim not
+    found" yet returned ``success=True`` because the outer try/except swallowed
+    framing failures.
+
+    Args:
+        args: Tool arguments dict containing:
+            - prim_path (str): USD prim path to frame the viewport on.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     prim_path = args["prim_path"]
     # Old version printed "prim not found" and returned success=True — the
     # viewport wasn't framed but the agent could claim it was. Also the
@@ -479,6 +535,7 @@ async def _get_viewport_bytes() -> tuple:
 
 
 def _get_vision_provider():
+    """Return a singleton Gemini vision provider instance."""
     from ...vision_gemini import GeminiVisionProvider
     return GeminiVisionProvider()
 
@@ -498,6 +555,19 @@ def _parse_last_json_line(output: str):
 
 
 async def _handle_capture_viewport(args: Dict) -> Dict:
+    """Capture the current viewport and return a base64-encoded PNG image.
+
+    Args:
+        args: Tool arguments dict containing:
+            - max_dim (int, optional): Maximum pixel dimension for the returned
+              image. Defaults to ``1280``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - image_b64 (str): Base64-encoded PNG data.
+            - width (int): Image width in pixels.
+            - height (int): Image height in pixels.
+    """
     from .. import kit_tools
     max_dim = args.get("max_dim", 1280)
     return await kit_tools.get_viewport_image(max_dim=max_dim)
@@ -1162,6 +1232,21 @@ print(json.dumps({"camera_path": cam_path, "viewport_id": viewport_id, "resoluti
 
 
 async def _handle_vision_detect_objects(args: Dict) -> Dict:
+    """Capture the viewport and detect objects via the Gemini vision provider.
+
+    Args:
+        args: Tool arguments dict containing:
+            - labels (list[str], optional): Class labels to detect. Omit for
+              open-vocabulary detection.
+            - max_objects (int, optional): Maximum detections to return.
+              Defaults to ``10``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - detections (list): List of detected object dicts from the VLM.
+            - count (int): Number of detections returned.
+            - model (str): VLM model identifier used for inference.
+    """
     img, mime = await _get_viewport_bytes()
     if img is None:
         return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
@@ -1173,6 +1258,19 @@ async def _handle_vision_detect_objects(args: Dict) -> Dict:
 
 
 async def _handle_vision_bounding_boxes(args: Dict) -> Dict:
+    """Capture the viewport and return VLM-predicted bounding boxes for all objects.
+
+    Args:
+        args: Tool arguments dict containing:
+            - max_objects (int, optional): Maximum bounding boxes to return.
+              Defaults to ``25``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - bounding_boxes (list): List of bounding-box dicts (label + xyxy coords).
+            - count (int): Number of boxes returned.
+            - model (str): VLM model identifier used for inference.
+    """
     img, mime = await _get_viewport_bytes()
     if img is None:
         return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
@@ -1182,6 +1280,21 @@ async def _handle_vision_bounding_boxes(args: Dict) -> Dict:
 
 
 async def _handle_vision_plan_trajectory(args: Dict) -> Dict:
+    """Capture the viewport and ask the VLM to plan a visual trajectory for a task.
+
+    Args:
+        args: Tool arguments dict containing:
+            - instruction (str): Natural-language task description used to
+              guide trajectory planning.
+            - num_points (int, optional): Target number of trajectory waypoints.
+              Defaults to ``15``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - trajectory (list): Ordered list of waypoint dicts from the VLM.
+            - num_points (int): Number of waypoints returned.
+            - model (str): VLM model identifier used for inference.
+    """
     img, mime = await _get_viewport_bytes()
     if img is None:
         return {"error": "Could not capture viewport image. Is Isaac Sim running?"}
@@ -1193,6 +1306,18 @@ async def _handle_vision_plan_trajectory(args: Dict) -> Dict:
 
 
 async def _handle_vision_analyze_scene(args: Dict) -> Dict:
+    """Capture the viewport and answer an open-ended question about the scene.
+
+    Args:
+        args: Tool arguments dict containing:
+            - question (str): Natural-language question about the current scene
+              (e.g. ``"Are there any objects on the conveyor belt?"``).
+
+    Returns:
+        Dict[str, Any] with keys:
+            - analysis (str): VLM-generated natural-language answer.
+            - model (str): VLM model identifier used for inference.
+    """
     img, mime = await _get_viewport_bytes()
     if img is None:
         return {"error": "Could not capture viewport image. Is Isaac Sim running?"}

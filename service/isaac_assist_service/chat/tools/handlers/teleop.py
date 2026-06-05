@@ -36,6 +36,45 @@ _DEVICE_AXIS_DEFAULTS = {
 
 
 def _gen_start_teleop_session(args: Dict) -> str:
+    """Start an interactive teleoperation session for a robot in Isaac Sim.
+
+    Sets up a WebSocket server (default port 8766) that accepts joint
+    velocity commands as JSON messages and applies them each physics step
+    via a ``subscribe_physics_step_events`` callback.  Includes a two-tier
+    watchdog: commands are held for ``WATCHDOG_TIMEOUT_S`` (0.5 s) before
+    expiring, and after ``WATCHDOG_ZERO_VEL_S`` (2.0 s) of silence all
+    joint velocities are zeroed for safety.  Viewport streaming resolution
+    is configured via ``carb.settings`` using a preset table.
+
+    The WebSocket bridge requires the ``websockets`` package; if absent, a
+    warning is printed and the bridge is skipped (keyboard control still
+    works via the physics callback).
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - robot_path (str, required): USD prim path of the robot
+              articulation, e.g. ``"/World/Franka"``.
+            - input_device (str, default ``"keyboard"``): ``"keyboard"``,
+              ``"quest_3"``, ``"vision_pro"``, or ``"spacemouse"``.
+              Selects the default axis list stored in ``_teleop_state``.
+            - stream_quality (str, default ``"medium"``): ``"low"``,
+              ``"medium"``, or ``"high"``.  Controls render resolution and
+              bitrate via ``_STREAM_QUALITY_PRESETS``.
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit:
+        - Starts a WebSocket server in a daemon thread.
+        - Configures viewport streaming resolution.
+        - Registers a physics-step callback that applies joint velocity
+          commands received over WebSocket.
+        - Prints session config (device, resolution, watchdog timeouts,
+          WebSocket URL).
+
+    Raises:
+        KeyError: if ``robot_path`` is missing.
+        AssertionError: (in generated code) if no prim exists at
+            ``robot_path`` in the current stage.
+    """
     # Phase 8 wave 4 — _DEVICE_AXIS_DEFAULTS migrated to module body.
     robot_path = args["robot_path"]
     device = args.get("input_device", "keyboard")
@@ -264,6 +303,45 @@ for axis, cfg in mapping.items():
 
 
 def _gen_record_teleop_demo(args: Dict) -> str:
+    """Record a teleoperation demonstration to an HDF5 file.
+
+    Registers a physics-step callback that samples joint positions, joint
+    velocities, and end-effector pose (from a heuristic end-effector name
+    search: ``ee_link``, ``panda_hand``, ``tool0``, ``link_ee``, or the
+    last ``Xformable`` child) at the specified frequency.  Data is
+    accumulated in memory and written to disk in robomimic-compatible HDF5
+    schema when ``_finalize_recording()`` is called (typically by
+    ``stop_teleop_session``).
+
+    If a ``_teleop_state`` dict is already in scope (from
+    ``start_teleop_session``), the recording handles are stored there so
+    ``stop_teleop_session`` can finalise automatically.
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - output_path (str, required): destination HDF5 file path,
+              e.g. ``"/tmp/demo.hdf5"``.
+            - robot_path (str, required): USD prim path of the robot being
+              demonstrated, e.g. ``"/World/Franka"``.
+            - frequency_hz (int, default 30): recording sample rate in Hz.
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit:
+        - Discovers all ``RevoluteJoint`` and ``PrismaticJoint`` children.
+        - Starts a physics-step recording callback at ``frequency_hz``.
+        - Stores a ``_finalize_recording`` closure on ``_rec_data`` that
+          writes the HDF5 file with datasets ``obs/joint_positions``,
+          ``obs/joint_velocities``, ``obs/ee_pose``, and ``timestamps``.
+        - Prints recording metadata (robot path, file path, joint count,
+          frequency).
+
+    Raises:
+        KeyError: if ``output_path`` or ``robot_path`` is missing.
+        AssertionError: (in generated code) if no prim exists at
+            ``robot_path``.
+        ImportError: (in generated code, at finalize time) if ``h5py`` is
+            not installed.
+    """
     output_path = args["output_path"]
     robot_path = args["robot_path"]
     frequency_hz = args.get("frequency_hz", 30)

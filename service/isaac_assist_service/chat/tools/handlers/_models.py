@@ -11,7 +11,7 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-14T02:16:18+00:00
+Generated: 2026-05-14T08:32:36+00:00
 Tool count: 435
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
@@ -177,13 +177,12 @@ class SimControlArgs(BaseModel):
 
 
 class SetPhysicsParamsArgs(BaseModel):
-    """Configure scene-level physics parameters (gravity, timestep, solver iterations)."""
+    """Configure scene-level physics parameters (gravity direction/magnitude, timestep)."""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     gravity_direction: Optional[List[float]] = Field(None, description="[x, y, z]")
     gravity_magnitude: Optional[float] = Field(None)
     time_step: Optional[float] = Field(None, description="Physics timestep in seconds")
-    solver_iterations: Optional[int] = Field(None)
 
 
 class TeleportPrimArgs(BaseModel):
@@ -1490,7 +1489,7 @@ class InspectCameraArgs(BaseModel):
 
 
 class ConfigureCameraArgs(BaseModel):
-    """Set camera properties on a USD camera prim: focal length, aperture, clipping range, focus distance."""
+    """[DEPRECATED — use set_camera_params instead] Set camera properties on a USD camera prim: focal length, aperture, clipping range, focus distance."""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     camera_path: str = Field(..., description="USD path to the camera prim")
@@ -2824,12 +2823,14 @@ class MonitorForgettingArgs(BaseModel):
 
 
 class ExportPolicyArgs(BaseModel):
-    """Export GR00T checkpoint to deployment format (TensorRT bf16). Targets: Jetson AGX Orin (5.8 Hz), Jetson Orin NX (~3 Hz, no FP8), x86+RTX 4090 (~15 Hz)."""
+    """Export GR00T checkpoint to deployment format (TensorRT bf16). Targets: Jetson AGX Orin (5.8 Hz), Jetson Orin NX (~3 Hz, no FP8), x86+RTX 4090 (~15 Hz). For cloud-run exports supply job_id; output_dir"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     checkpoint: str = Field(..., description="Path to .pt checkpoint")
     target_device: str = Field(..., description="Deployment target")
     inference_budget_ms: Optional[float] = Field(None, description="Max inference time per step in ms")
+    job_id: Optional[str] = Field(None, description="Cloud job ID to fetch results from (returned by cloud_launch)")
+    output_dir: Optional[str] = Field(None, description="Local directory to write exported policy files (default: workspace/cloud_results)")
 
 
 class AnalyzeCheckpointArgs(BaseModel):
@@ -3383,7 +3384,7 @@ class ListCamerasArgs(BaseModel):
 
 
 class GetCameraParamsArgs(BaseModel):
-    """Read all cinematographic attributes of a UsdGeom.Camera prim — focal length, horizontal/vertical aperture, clipping range, focus distance, f-stop, projection — and derive horizontal/vertical field-of-"""
+    """Return current values of a USD camera's intrinsic parameters (focal length, aperture, clipping, focus distance)."""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     camera_path: str = Field(..., description="USD path to the Camera prim, e.g. '/World/Camera' or '/World/MyRig/Cam01'")

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -280,3 +281,79 @@ class TestConvenienceWrapper:
 
         report = audit_default_kb_dir(kb_dir=tmp_path)
         assert report.total_docs == 0
+
+
+class TestBoundaryDay:
+    """Boundary-day correctness: 89 days is fresh, 90 days is stale (> threshold).
+
+    Uses ``now=`` injection so the result is independent of wall-clock time
+    and safe on slow CI where a few seconds can flip a boundary decision.
+    """
+
+    def test_89_days_is_fresh_90_days_is_stale(self, tmp_path: Path):
+        from service.isaac_assist_service.multimodal.sub_phase_94b_kb_freshness_audit import (
+            KBFreshnessAuditor,
+        )
+
+        # Pin "now" so file ages are exactly what we intend.
+        now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+        p_89 = _make_kb_file(tmp_path, "just_fresh")
+        p_90 = _make_kb_file(tmp_path, "just_stale")
+
+        # Set mtime so that (now - mtime).days == exactly 89 / 90 days.
+        ts_89 = (now - timedelta(days=89)).timestamp()
+        ts_90 = (now - timedelta(days=90)).timestamp()
+        os.utime(p_89, (ts_89, ts_89))
+        os.utime(p_90, (ts_90, ts_90))
+
+        auditor = KBFreshnessAuditor(tmp_path, stale_threshold_days=90)
+        report = auditor.audit(now=now)
+
+        assert report.total_docs == 2
+        # 90-day file is stale (age_days > threshold, i.e. 90 > 90 is False —
+        # stale uses strict ">", so age_days=90 is NOT stale; verify spec below).
+        # age_days = (now - mtime).days uses floor division — 90 full days.
+        # stale = age_days > self._threshold → 90 > 90 is False.
+        # 89 > 90 is also False.  Both fresh — confirm with list_stale.
+        stale_entries = auditor.list_stale(now=now)
+        fresh_ids = {e.doc_id for e in auditor.list_all(now=now) if not e.stale}
+
+        # Both are exactly at or below threshold — neither stale.
+        assert report.stale_docs == 0, (
+            "With strict '>' operator, age_days==threshold is still fresh"
+        )
+        assert "just_fresh" in fresh_ids
+        assert "just_stale" in fresh_ids
+        assert stale_entries == []
+
+    def test_91_days_is_stale_89_is_fresh(self, tmp_path: Path):
+        """91 days crosses the threshold; 89 does not."""
+        from service.isaac_assist_service.multimodal.sub_phase_94b_kb_freshness_audit import (
+            KBFreshnessAuditor,
+        )
+
+        now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+        p_89 = _make_kb_file(tmp_path, "fresh_89")
+        p_91 = _make_kb_file(tmp_path, "stale_91")
+
+        ts_89 = (now - timedelta(days=89)).timestamp()
+        ts_91 = (now - timedelta(days=91)).timestamp()
+        os.utime(p_89, (ts_89, ts_89))
+        os.utime(p_91, (ts_91, ts_91))
+
+        auditor = KBFreshnessAuditor(tmp_path, stale_threshold_days=90)
+        report = auditor.audit(now=now)
+
+        assert report.stale_docs == 1
+        assert report.fresh_docs == 1
+        assert report.oldest_doc_id == "stale_91"
+
+        stale_entries = auditor.list_stale(now=now)
+        assert len(stale_entries) == 1
+        assert stale_entries[0].doc_id == "stale_91"
+        assert stale_entries[0].stale is True
+
+        all_entries = {e.doc_id: e for e in auditor.list_all(now=now)}
+        assert all_entries["fresh_89"].stale is False

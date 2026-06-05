@@ -720,6 +720,62 @@ print(json.dumps({{'articulation_path': '{art_path}', 'issues': issues, 'total':
 
 
 def _gen_robot_wizard(args: Dict) -> str:
+    """Load a robot asset into the stage and apply production-ready physics defaults.
+
+    End-to-end wizard that handles the full import pipeline in one call:
+    registry lookup → asset resolution → USD reference or URDF import →
+    drive-gain defaults for the robot class → convex-hull collision meshes →
+    optional placement (position / orientation) → optional USD variant
+    selection → optional home-joint configuration.
+
+    The registry maps well-known names (``franka_panda``, ``ur10``, ``h1``,
+    etc.) to verified Nucleus / local paths.  Unknown robots can be imported
+    by supplying ``asset_path`` directly.  Deprecated Isaac 4.x asset paths
+    are detected and rejected before any USD operation to prevent silent
+    empty-stage failures.
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - robot_name (str, optional): registry key, e.g. ``"franka_panda"``.
+              Aliases and hyphen/space variants are normalised.  Either
+              ``robot_name`` or ``asset_path`` must be provided.
+            - asset_path (str, optional): explicit USD, URDF, or Nucleus URL.
+              Required when ``robot_name`` is absent or unknown.
+            - robot_type (str, default from registry or ``"manipulator"``):
+              one of ``"manipulator"``, ``"mobile"``, ``"humanoid"``,
+              ``"quadruped"``.  Selects drive-gain defaults.
+            - drive_stiffness (float, optional): Kp override; otherwise taken
+              from registry profile then robot_type defaults.
+            - drive_damping (float, optional): Kd override; same fallback chain.
+            - variants (dict, optional): USD variant-set selections, e.g.
+              ``{"Gripper": "AlternateFinger"}``.
+            - home_joints (list[float], optional): joint target values (rad/m)
+              applied after import; currently maps to Franka joint names.
+            - dest_path (str, default ``"/World/Robot"``): stage prim path for
+              USD reference imports.  Ignored for URDF (importer picks path).
+            - position (list[float] len 3, optional): world translation
+              ``[x, y, z]`` applied after load.
+            - orientation (list[float] len 3 or 4, optional): euler
+              ``[roll, pitch, yaw]`` (rad) or quaternion ``[w, x, y, z]``.
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit, imports
+        the robot, applies drive defaults to all DriveAPI joints, applies
+        convex-hull collision to all Mesh prims, and optionally positions /
+        orients / configures variants and home joints.  Final ``print``
+        statements report counts for drives, collision meshes, and any
+        optional steps executed.
+
+    Raises:
+        KeyError: if neither ``robot_name`` nor ``asset_path`` is present.
+        ValueError: (in generated code) if neither key resolves to a usable
+            asset, or if the asset path contains a deprecated 4.x segment,
+            or if ``orientation`` is neither length 3 nor 4.
+        FileNotFoundError: (in generated code) if a local filesystem path
+            does not exist.
+        RuntimeError: (in generated code) if the USD reference resolves to an
+            empty prim (e.g. bad Nucleus URL) or URDF import fails.
+    """
     # Phase 8 wave 13 — _ROBOT_TYPE_DEFAULTS migrated.
     from ._shared import _ROBOT_WIZARD_REGISTRY, _resolve_robot_asset
 
@@ -985,6 +1041,43 @@ print(f"Robot setup complete: type={robot_type}, drives={{joint_count}}, collisi
 
 
 def _gen_tune_gains(args: Dict) -> str:
+    """Set or auto-tune PD drive gains on a robot articulation.
+
+    Supports two methods.  ``"manual"`` writes ``stiffness`` (Kp) and
+    ``damping`` (Kd) directly via ``UsdPhysics.DriveAPI`` — either to a
+    single named joint or to every joint under the articulation root.
+    ``"step_response"`` uses the Isaac Sim ``GainTuner`` utility to run an
+    automated test trajectory and report position/velocity RMSE.
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - articulation_path (str, required): USD prim path of the robot
+              articulation root, e.g. ``"/World/Franka"``.
+            - method (str, default ``"manual"``): ``"manual"`` or
+              ``"step_response"``.
+            - joint_name (str, optional): if provided with ``method="manual"``,
+              tunes only that one joint (looked up at
+              ``{articulation_path}/{joint_name}``); otherwise tunes all joints.
+            - kp (float, default 1000): stiffness value written to
+              ``DriveAPI.stiffness`` (manual mode only).
+            - kd (float, default 100): damping value written to
+              ``DriveAPI.damping`` (manual mode only).
+            - test_mode (str, default ``"step"``): ``"step"`` or
+              ``"sinusoidal"`` — test trajectory shape for
+              ``"step_response"`` method.
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit:
+        - ``"manual"`` mode: sets Kp/Kd on matching DriveAPI drives; raises
+          ``RuntimeError`` if zero drives are found.
+        - ``"step_response"`` mode: runs ``GainTuner``, prints position and
+          velocity RMSE after the test completes.
+
+    Raises:
+        KeyError: if ``articulation_path`` is missing.
+        RuntimeError: (in generated code) if the articulation prim is not
+            found, the named joint is not found, or no DriveAPI drives exist.
+    """
     art_path = args["articulation_path"]
     method = args.get("method", "manual")
     joint_name = args.get("joint_name")
@@ -1306,6 +1399,37 @@ print(f"  max_linear={{MAX_LINEAR_SPEED}} m/s, max_angular={{MAX_ANGULAR_SPEED}}
 
 
 def _gen_navigate_to(args: Dict) -> str:
+    """Drive a wheeled robot to a 2-D target position using a chosen planner.
+
+    Two planners are supported.  ``"direct"`` subscribes a physics-step
+    callback that feeds the target straight into a
+    ``WheelBasePoseController`` / ``DifferentialController`` pair each
+    simulation step.  ``"astar"`` first builds an 80 × 80 occupancy grid
+    (resolution 0.25 m, centred on the origin), runs A* to produce a
+    waypoint list, then drives through the waypoints in the same physics
+    callback.  Both planners use ``isaacsim.robot.wheeled_robots``.
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - robot_path (str, required): USD prim path of the wheeled robot,
+              e.g. ``"/World/JetBot"``.
+            - target_position (list[float] len >= 2, required): world-frame
+              ``[x, y]`` (or ``[x, y, z]``, z ignored) goal position in
+              metres.
+            - planner (str, default ``"direct"``): ``"direct"`` (reactive,
+              single-step) or ``"astar"`` (grid-based path planning).
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit,
+        registers a ``subscribe_physics_step_events`` callback that drives
+        the robot toward the target.  It unsubscribes itself when the
+        controller returns ``None`` (direct) or when the waypoint list is
+        exhausted (astar).  A ``print`` confirms navigation start and
+        completion.
+
+    Raises:
+        KeyError: if ``robot_path`` or ``target_position`` is missing.
+    """
     robot_path = args["robot_path"]
     target = args["target_position"]
     planner = args.get("planner", "direct")
@@ -1816,6 +1940,46 @@ print(f"URDF preview (first 500 chars):\\n{{urdf_string[:500]}}")
 
 
 def _gen_move_to_pose(args: Dict) -> str:
+    """Move a robot end-effector to a Cartesian pose using a motion planner.
+
+    Supports two planners.  ``"rmpflow"`` (default) is a reactive,
+    single-step controller: it loads the RMPflow config via
+    ``interface_config_loader``, initialises a ``SingleArticulation``, sets
+    the end-effector target, and calls ``get_next_articulation_action`` once
+    to obtain a joint-space action that is applied immediately.  ``"lula_rrt"``
+    is a global planner: it calls
+    ``LulaTaskSpaceTrajectoryGenerator.compute_task_space_trajectory_from_points``
+    to plan a full path (no online action application; the caller must replay
+    the trajectory).
+
+    The end-effector frame name is resolved from ``_MOTION_ROBOT_CONFIGS``
+    keyed by ``robot_type``.
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - articulation_path (str, required): USD prim path of the
+              articulation root, e.g. ``"/World/Franka"``.
+            - target_position (list[float] len 3, required): world-frame
+              Cartesian target ``[x, y, z]`` in metres.
+            - target_orientation (list[float] len 4, optional): target
+              end-effector orientation as quaternion ``[w, x, y, z]``.
+            - planner (str, default ``"rmpflow"``): ``"rmpflow"`` or
+              ``"lula_rrt"``.
+            - robot_type (str, default ``"franka"``): robot model name used to
+              look up the end-effector frame and motion-gen config.
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit:
+        - ``"rmpflow"``: applies a single joint action toward the target;
+          prints the action applied.
+        - ``"lula_rrt"``: plans and prints the number of trajectory
+          waypoints; raises ``RuntimeError`` if no path was found.
+
+    Raises:
+        KeyError: if ``articulation_path`` or ``target_position`` is missing.
+        RuntimeError: (in generated code, lula_rrt only) if the planner
+            returns ``None``.
+    """
     # Phase 8 wave 16 — _MOTION_ROBOT_CONFIGS migrated.
     art_path = args["articulation_path"]
     target_pos = args["target_position"]
@@ -1948,6 +2112,48 @@ def _gen_plan_trajectory(args: Dict) -> str:
 
 
 def _gen_set_motion_policy(args: Dict) -> str:
+    """Modify the runtime world model or joint limits seen by an RMPflow policy.
+
+    Three sub-operations are supported, selected by ``policy_type``:
+
+    - ``"add_obstacle"``: loads RMPflow for the robot, adds a named obstacle
+      (cuboid or sphere) to its world model at a specified position, and
+      calls ``update_world()``.
+    - ``"remove_obstacle"``: resets the RMPflow instance, clearing all
+      obstacles (RMPflow has no per-obstacle removal API).
+    - ``"set_joint_limits"``: prints informational guidance; runtime joint
+      limit adjustment is only effective via the config YAML before init.
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - articulation_path (str, required): USD prim path of the
+              articulation root (used to initialise ``SingleArticulation``
+              for ``set_joint_limits``).
+            - policy_type (str, required): ``"add_obstacle"``,
+              ``"remove_obstacle"``, or ``"set_joint_limits"``.
+            - robot_type (str, default ``"franka"``): robot model name passed
+              to ``load_supported_motion_gen_config``.
+            - obstacle_name (str, default ``"obstacle_0"``): name for the new
+              obstacle (``add_obstacle`` only).
+            - obstacle_type (str, default ``"cuboid"``): ``"cuboid"`` or
+              ``"sphere"`` (``add_obstacle`` only).
+            - obstacle_dims (list[float] len 3, default ``[0.1, 0.1, 0.1]``):
+              half-extents for cuboid or ``[radius, ...]`` for sphere
+              (``add_obstacle`` only).
+            - obstacle_position (list[float] len 3, default ``[0, 0, 0]``):
+              world position of the obstacle centre (``add_obstacle`` only).
+            - joint_limit_buffers (float, default 0.05): buffer in radians
+              (``set_joint_limits`` only; printed as guidance, not applied
+              at runtime).
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit,
+        performs the selected policy operation and prints a summary.
+
+    Raises:
+        KeyError: if ``articulation_path`` or ``policy_type`` is missing.
+        ValueError: (in generated code) if ``policy_type`` is unrecognised.
+    """
     art_path = args["articulation_path"]
     policy_type = args["policy_type"]
     robot_type = args.get("robot_type", "franka").lower()
@@ -2042,6 +2248,45 @@ def _gen_set_motion_policy(args: Dict) -> str:
 
 
 def _gen_solve_ik(args: Dict) -> str:
+    """Compute inverse kinematics for a robot end-effector target pose.
+
+    Tries two IK backends in order, falling back gracefully:
+
+    1. **cuRobo** (primary): GPU/CPU solver using a bundled YAML config
+       (``_CUROBO_ROBOT_YML_MAP``).  Does not require a live Kit Articulation
+       and works on USD-only stages.  Accepts quaternion ``(qw, qx, qy, qz)``.
+    2. **Lula** (legacy fallback): uses
+       ``isaacsim.robot_motion.motion_generation`` with
+       ``LulaKinematicsSolver`` + ``ArticulationKinematicsSolver``.  Requires
+       ``SingleArticulation.initialize()`` to succeed.
+
+    The end-effector frame and cuRobo YAML are resolved from
+    ``_MOTION_ROBOT_CONFIGS`` and ``_CUROBO_ROBOT_YML_MAP`` keyed by
+    ``robot_type``.
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - articulation_path (str, required): USD prim path of the robot
+              articulation, e.g. ``"/World/Franka"``.
+            - target_position (list[float] len 3, required): desired
+              end-effector world position ``[x, y, z]`` in metres.
+            - target_orientation (list[float] len 4, optional): desired
+              end-effector orientation as quaternion ``[qw, qx, qy, qz]``.
+            - robot_type (str, default ``"franka"``): robot model name used to
+              select the cuRobo YAML and Lula kinematics config.
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit, prints
+        which backend solved the IK and the resulting joint positions, then
+        emits a JSON line with keys ``method``, ``joint_positions``, and
+        ``errors`` (accumulated failure messages from backends that were
+        tried but failed).
+
+    Raises:
+        KeyError: if ``articulation_path`` or ``target_position`` is missing.
+        RuntimeError: (in generated code) if both cuRobo and Lula fail;
+            error messages from both backends are included in the message.
+    """
     # Phase 8 wave 16 — _CUROBO_ROBOT_YML_MAP migrated.
     art_path = args["articulation_path"]
     target_pos = args["target_position"]
@@ -3048,6 +3293,45 @@ def _gen_record_trajectory(args: Dict) -> str:
 
 
 def _gen_import_robot(args: Dict) -> str:
+    """Import a robot into the stage by name, library shorthand, or explicit path.
+
+    Handles three import modes selected by ``format``:
+
+    - ``"urdf"``: calls ``URDFParseAndImportFile`` via ``omni.kit.commands``;
+      validates the file exists before attempting import and verifies the
+      returned prim path is populated.
+    - ``"asset_library"`` (or any name matching ``_ROBOT_NAME_MAP``): resolves
+      a short name (e.g. ``"franka"``, ``"ur10"``) to a USD file inside the
+      configured robots subdirectory (Nucleus URL or local path).
+    - ``"usd"`` (default): treats ``file_path`` as a direct USD path or URL
+      and adds a USD reference on a new Xform prim at ``dest_path``.
+
+    Asset existence is verified before loading for local paths.  For all
+    USD reference modes, ``HasAuthoredReferences`` is checked post-load to
+    detect silent failures (e.g. 404 from Nucleus).
+
+    Args:
+        args: tool-call args dict. Expected keys:
+            - file_path (str, required): robot name shorthand (e.g.
+              ``"franka"``), a relative path within the library, or an
+              absolute USD / URDF path / URL.
+            - format (str, default ``"usd"``): ``"usd"``, ``"urdf"``, or
+              ``"asset_library"``.
+            - dest_path (str, default ``"/World/Robot"``): stage prim path
+              for the imported robot.
+
+    Returns:
+        Python source as a string.  The script, when exec'd in Kit,
+        imports the robot asset and prints a confirmation line including
+        the resolved prim path.
+
+    Raises:
+        KeyError: if ``file_path`` is missing.
+        FileNotFoundError: (in generated code) if a local path does not
+            exist.
+        RuntimeError: (in generated code) if import fails, the prim path
+            is absent after import, or ``HasAuthoredReferences`` is False.
+    """
     from ._shared import _SAFE_XFORM_SNIPPET
     from ....config import config  # noqa: E402
 
@@ -3215,7 +3499,8 @@ def _gen_teach_robot_pose(args: Dict) -> str:
     robot_path = args["robot_path"]
     pose_name = args["pose_name"]
     return f"""\
-import os, json, datetime, re
+import os, json, re
+from datetime import datetime, timezone
 import omni.usd
 from pxr import Usd, UsdPhysics
 
@@ -3236,7 +3521,7 @@ if positions is None or len(dof_names) == 0:
 pose = {{
     "robot_path": robot_path,
     "pose_name": pose_name,
-    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
     "dof_names": dof_names,
     "joint_positions": [float(x) for x in positions],
 }}

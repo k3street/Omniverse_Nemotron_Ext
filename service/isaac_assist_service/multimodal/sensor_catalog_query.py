@@ -8,6 +8,7 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phase 74.
 """
 from __future__ import annotations
 
+import functools
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,9 +25,6 @@ _CATALOG_PATH = Path(__file__).resolve().parent.parent.parent.parent / (
     "workspace/knowledge/sensor_specs.jsonl"
 )
 
-_catalog_cache: Optional[List[Dict]] = None
-
-
 def get_phase_metadata() -> Dict[str, Any]:
     """Return phase metadata for spec-coverage audits."""
     return {
@@ -41,18 +39,15 @@ def get_phase_metadata() -> Dict[str, Any]:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+@functools.lru_cache(maxsize=1)
 def _load_catalog() -> List[Dict]:
     """Load and cache the sensor catalog from disk."""
-    global _catalog_cache
-    if _catalog_cache is not None:
-        return _catalog_cache
     catalog: List[Dict] = []
     if _CATALOG_PATH.exists():
         for line in _CATALOG_PATH.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line:
                 catalog.append(json.loads(line))
-    _catalog_cache = catalog
     return catalog
 
 

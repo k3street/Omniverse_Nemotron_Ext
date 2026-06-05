@@ -13,8 +13,33 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 # Phase 8 wave 28 (2026-05-13): import shared async-task state.
+import threading
 import time as _time
-from ._state import ASYNC_TASKS as _ASYNC_TASKS, ASYNC_TASKS_LOCK as _ASYNC_TASKS_LOCK
+from ._state import (
+    ASYNC_TASKS as _ASYNC_TASKS,
+    ASYNC_TASKS_LOCK as _ASYNC_TASKS_LOCK,
+    _WORKFLOWS_REGISTRY_LOCK,
+    make_workflow_lock,
+)
+
+
+def _wf_lock_for(wf: Dict[str, Any]) -> threading.Lock:
+    """Return the per-workflow lock, creating one lazily if absent.
+
+    CONC-1 (2026-05-14): Workflows created by `_handle_start_workflow`
+    carry a `_lock` field from inception. Tests (and the `_forward_*`
+    helpers in `multimodal/routes.py`) sometimes construct minimal
+    workflow dicts without the `_lock` field; rather than crash, we
+    install a fresh lock the first time a handler needs it.
+
+    Because `setdefault` is implemented at the C level in CPython, the
+    setdefault call itself is atomic w.r.t. other Python threads: two
+    concurrent callers will both see the same `threading.Lock` instance
+    after the first one wins. (The second call's freshly-constructed
+    Lock object is discarded by setdefault.) This keeps the per-workflow
+    locking invariant intact even with mixed creation paths.
+    """
+    return wf.setdefault("_lock", make_workflow_lock())
 
 # ---------------------------------------------------------------------------
 # Theme-local helpers (Phase 8 wave 27, 2026-05-13)
@@ -517,6 +542,29 @@ async def _handle_post_action_suggestions(args: Dict) -> Dict:
 
 
 async def _handle_queue_write_locked_patch(args: Dict) -> Dict:
+    """Submit a Python patch to the write-locked queue for serialised USD edits.
+
+    Validates the patch through the patch validator before queueing. Blocked
+    patches (those with breaking issues) are rejected immediately without being
+    queued.
+
+    Args:
+        args: Tool arguments dict containing:
+            - code (str): Python source code to execute under the write lock.
+            - description (str, optional): Human-readable description of the
+              patch. Defaults to ``"Write-locked patch"``.
+            - priority (int, optional): Queue priority (higher = sooner).
+              Defaults to ``0``.
+
+    Returns:
+        Dict[str, Any] with keys:
+            - success (bool): True if the patch was queued successfully.
+            - description (str): Echo of the provided description.
+            - error (str, optional): Validation error message if the patch was
+              blocked.
+            - validation_blocked (bool, optional): True when the patch was
+              rejected by the validator.
+    """
     from .. import tool_executor as _te  # noqa: PLC0415
     code = args.get("code", "")
     desc = args.get("description", "Write-locked patch")
@@ -562,9 +610,9 @@ async def _handle_start_workflow(args: Dict) -> Dict:
 
     plan = _wf_make_initial_plan(workflow_type, goal, args.get("params") or {})
 
-    from datetime import datetime as _wf_dt  # noqa: PLC0415
+    from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
-        return _wf_dt.utcnow().isoformat() + "Z"
+        return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     workflow = {
         "id": wf_id,
@@ -585,8 +633,16 @@ async def _handle_start_workflow(args: Dict) -> Dict:
         "created_at": _wf_now_iso(),
         "updated_at": _wf_now_iso(),
         "snapshot_id": None,  # filled in by routes.py before phase 2 if available
+        # CONC-1 (2026-05-14): per-workflow lock attached at creation so
+        # later RMW-style handlers serialize on the same wf_id while
+        # remaining parallel across different wf_ids.
+        "_lock": make_workflow_lock(),
     }
-    _te._WORKFLOWS[wf_id] = workflow
+    # Registry-level lock guards the membership write; this is a single
+    # dict assign (atomic in CPython) but locking keeps the contract
+    # explicit and protects against any future read-then-write pattern.
+    with _WORKFLOWS_REGISTRY_LOCK:
+        _te._WORKFLOWS[wf_id] = workflow
 
     return {
         "ok": True,
@@ -605,41 +661,48 @@ async def _handle_edit_workflow_plan(args: Dict) -> Dict:
     in-flight workflows protects against mid-execution drift.
     """
     from .. import tool_executor as _te  # noqa: PLC0415
-    from datetime import datetime as _wf_dt  # noqa: PLC0415
+    from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
-        return _wf_dt.utcnow().isoformat() + "Z"
+        return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     wf_id = args.get("workflow_id")
     edits = args.get("plan_edits") or {}
     wf = _te._WORKFLOWS.get(wf_id)
     if not wf:
         return {"ok": False, "error": f"Unknown workflow_id '{wf_id}'."}
-    if wf["status"] != "awaiting_plan_approval":
-        return {
-            "ok": False,
-            "error": f"Workflow is in state '{wf['status']}'; plan can only be edited before approval.",
-        }
     if not isinstance(edits, dict):
         return {"ok": False, "error": "plan_edits must be a dict of {phase_name: {field: value}}."}
 
-    plan = wf["plan"]
+    # CONC-1 (2026-05-14): the state check + plan edits + event append form
+    # a single critical section that must run under the per-workflow lock,
+    # otherwise a concurrent approve_workflow_checkpoint on the same wf_id
+    # could advance the workflow past `awaiting_plan_approval` between our
+    # read of `wf["status"]` and our writes to `wf["plan"]`.
     applied: List[str] = []
-    for phase_name, phase_edits in edits.items():
-        if not isinstance(phase_edits, dict):
-            continue
-        if phase_name == "params":
-            plan["params"].update(phase_edits)
-            applied.append("params")
-            continue
-        # Find the phase in the plan
-        for phase in plan["phases"]:
-            if phase["name"] == phase_name:
-                phase.update({k: v for k, v in phase_edits.items() if k not in ("name", "status")})
-                applied.append(phase_name)
-                break
+    with _wf_lock_for(wf):
+        if wf["status"] != "awaiting_plan_approval":
+            return {
+                "ok": False,
+                "error": f"Workflow is in state '{wf['status']}'; plan can only be edited before approval.",
+            }
 
-    wf["events"].append({"type": "plan_edited", "at": _wf_now_iso(), "edits": list(edits.keys())})
-    wf["updated_at"] = _wf_now_iso()
+        plan = wf["plan"]
+        for phase_name, phase_edits in edits.items():
+            if not isinstance(phase_edits, dict):
+                continue
+            if phase_name == "params":
+                plan["params"].update(phase_edits)
+                applied.append("params")
+                continue
+            # Find the phase in the plan
+            for phase in plan["phases"]:
+                if phase["name"] == phase_name:
+                    phase.update({k: v for k, v in phase_edits.items() if k not in ("name", "status")})
+                    applied.append(phase_name)
+                    break
+
+        wf["events"].append({"type": "plan_edited", "at": _wf_now_iso(), "edits": list(edits.keys())})
+        wf["updated_at"] = _wf_now_iso()
 
     return {
         "ok": True,
@@ -652,9 +715,9 @@ async def _handle_edit_workflow_plan(args: Dict) -> Dict:
 async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
     """Resolve a checkpoint with approve / reject / revise."""
     from .. import tool_executor as _te  # noqa: PLC0415
-    from datetime import datetime as _wf_dt  # noqa: PLC0415
+    from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
-        return _wf_dt.utcnow().isoformat() + "Z"
+        return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     wf_id = args.get("workflow_id")
     phase = args.get("phase")
@@ -665,143 +728,180 @@ async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
         return {"ok": False, "error": f"Unknown workflow_id '{wf_id}'."}
     if action not in ("approve", "reject", "revise"):
         return {"ok": False, "error": f"action must be one of approve|reject|revise, got '{action}'."}
-    if wf["current_phase"] != phase:
-        return {
-            "ok": False,
-            "error": f"Workflow is at phase '{wf['current_phase']}', not '{phase}'.",
-        }
 
-    decision = {
-        "phase": phase,
-        "action": action,
-        "feedback": feedback,
-        "at": _wf_now_iso(),
-    }
-    wf["checkpoint_decisions"].append(decision)
-    wf["events"].append({"type": "checkpoint_decision", **decision})
-    wf["updated_at"] = _wf_now_iso()
+    # CONC-1 (2026-05-14): the phase check + decision append + status
+    # transition + advance is the canonical RMW that two concurrent
+    # approve calls on the same wf_id can interleave. Without the lock,
+    # both calls observe `current_phase == phase` (the precondition),
+    # both append a decision (so the events log contains two entries for
+    # what should be one transition), and both call _wf_advance_phase
+    # (which mutates `wf["plan"]["phases"][i]["status"]`).
+    with _wf_lock_for(wf):
+        if wf["current_phase"] != phase:
+            return {
+                "ok": False,
+                "error": f"Workflow is at phase '{wf['current_phase']}', not '{phase}'.",
+            }
 
-    if action == "reject":
-        wf["status"] = "cancelled"
-        return {
-            "ok": True,
-            "workflow_id": wf_id,
-            "status": wf["status"],
-            "rollback_required": True,
-            "snapshot_id": wf.get("snapshot_id"),
-        }
-
-    if action == "revise":
-        # Stay on the same phase; the LLM uses `feedback` to regenerate.
-        wf["status"] = "revising"
-        return {
-            "ok": True,
-            "workflow_id": wf_id,
-            "status": wf["status"],
+        decision = {
             "phase": phase,
+            "action": action,
             "feedback": feedback,
-            "next_action": "Re-generate the artifact for this phase using the user feedback, then call approve_workflow_checkpoint again.",
+            "at": _wf_now_iso(),
         }
+        wf["checkpoint_decisions"].append(decision)
+        wf["events"].append({"type": "checkpoint_decision", **decision})
+        wf["updated_at"] = _wf_now_iso()
 
-    # approve → advance to next phase
-    next_phase = _wf_advance_phase(wf)
-    if next_phase is None:
+        if action == "reject":
+            wf["status"] = "cancelled"
+            return {
+                "ok": True,
+                "workflow_id": wf_id,
+                "status": wf["status"],
+                "rollback_required": True,
+                "snapshot_id": wf.get("snapshot_id"),
+            }
+
+        if action == "revise":
+            # Stay on the same phase; the LLM uses `feedback` to regenerate.
+            wf["status"] = "revising"
+            return {
+                "ok": True,
+                "workflow_id": wf_id,
+                "status": wf["status"],
+                "phase": phase,
+                "feedback": feedback,
+                "next_action": "Re-generate the artifact for this phase using the user feedback, then call approve_workflow_checkpoint again.",
+            }
+
+        # approve → advance to next phase
+        next_phase = _wf_advance_phase(wf)
+        if next_phase is None:
+            return {
+                "ok": True,
+                "workflow_id": wf_id,
+                "status": wf["status"],
+                "message": "Workflow complete.",
+            }
+
+        # Decide whether the next phase needs another checkpoint
+        if next_phase["checkpoint"] and not wf["auto_approve_checkpoints"]:
+            wf["status"] = f"awaiting_{next_phase['name']}_approval"
+        else:
+            wf["status"] = f"executing_{next_phase['name']}"
+
         return {
             "ok": True,
             "workflow_id": wf_id,
             "status": wf["status"],
-            "message": "Workflow complete.",
+            "current_phase": wf["current_phase"],
+            "phase_meta": next_phase,
         }
-
-    # Decide whether the next phase needs another checkpoint
-    if next_phase["checkpoint"] and not wf["auto_approve_checkpoints"]:
-        wf["status"] = f"awaiting_{next_phase['name']}_approval"
-    else:
-        wf["status"] = f"executing_{next_phase['name']}"
-
-    return {
-        "ok": True,
-        "workflow_id": wf_id,
-        "status": wf["status"],
-        "current_phase": wf["current_phase"],
-        "phase_meta": next_phase,
-    }
 
 
 async def _handle_cancel_workflow(args: Dict) -> Dict:
     """Cancel a workflow and request rollback to its pre-workflow snapshot."""
     from .. import tool_executor as _te  # noqa: PLC0415
-    from datetime import datetime as _wf_dt  # noqa: PLC0415
+    from datetime import datetime as _wf_dt, timezone as _wf_tz  # noqa: PLC0415
     def _wf_now_iso() -> str:
-        return _wf_dt.utcnow().isoformat() + "Z"
+        return _wf_dt.now(_wf_tz.utc).isoformat() + "Z"
 
     wf_id = args.get("workflow_id")
     reason = args.get("reason", "user_cancelled")
     wf = _te._WORKFLOWS.get(wf_id)
     if not wf:
         return {"ok": False, "error": f"Unknown workflow_id '{wf_id}'."}
-    if wf["status"] in ("completed", "cancelled"):
-        return {
-            "ok": True,
-            "workflow_id": wf_id,
-            "status": wf["status"],
-            "message": "Workflow already finished; nothing to cancel.",
-        }
-    wf["status"] = "cancelled"
-    wf["events"].append({"type": "cancelled", "at": _wf_now_iso(), "reason": reason})
-    wf["updated_at"] = _wf_now_iso()
+
+    # CONC-1 (2026-05-14): under the per-workflow lock so the
+    # "already finished" guard + the status/events writes form one atomic
+    # transition. Without the lock a concurrent approve_workflow_checkpoint
+    # could set status back to an executing_X value after we set "cancelled".
+    with _wf_lock_for(wf):
+        if wf["status"] in ("completed", "cancelled"):
+            return {
+                "ok": True,
+                "workflow_id": wf_id,
+                "status": wf["status"],
+                "message": "Workflow already finished; nothing to cancel.",
+            }
+        wf["status"] = "cancelled"
+        wf["events"].append({"type": "cancelled", "at": _wf_now_iso(), "reason": reason})
+        wf["updated_at"] = _wf_now_iso()
+        status = wf["status"]
+        snapshot_id = wf.get("snapshot_id")
     return {
         "ok": True,
         "workflow_id": wf_id,
-        "status": wf["status"],
+        "status": status,
         "rollback_required": True,
-        "snapshot_id": wf.get("snapshot_id"),
+        "snapshot_id": snapshot_id,
         "reason": reason,
     }
 
 
 async def _handle_get_workflow_status(args: Dict) -> Dict:
-    """Return the current state of a workflow."""
+    """Return the current state of a workflow.
+
+    CONC-1 (2026-05-14): snapshot the workflow under the per-workflow lock
+    so the returned dict reflects one consistent moment in the workflow's
+    lifecycle, never a half-mutated state (e.g. status="cancelled" with
+    events still missing the cancellation entry that a concurrent
+    cancel_workflow is about to append).
+    """
     from .. import tool_executor as _te  # noqa: PLC0415
     wf_id = args.get("workflow_id")
     wf = _te._WORKFLOWS.get(wf_id)
     if not wf:
         return {"ok": False, "error": f"Unknown workflow_id '{wf_id}'."}
-    # Return a shallow copy without the verbose events log unless explicitly asked
-    return {
-        "ok": True,
-        "workflow_id": wf_id,
-        "type": wf["type"],
-        "goal": wf["goal"],
-        "status": wf["status"],
-        "current_phase": wf["current_phase"],
-        "completed_phases": list(wf["completed_phases"]),
-        "checkpoint_decisions": list(wf["checkpoint_decisions"]),
-        "error_fix_attempts": list(wf["error_fix_attempts"]),
-        "plan": wf["plan"],
-        "created_at": wf["created_at"],
-        "updated_at": wf["updated_at"],
-    }
-
-
-async def _handle_list_workflows(args: Dict) -> Dict:
-    """List active (and optionally completed) workflows."""
-    from .. import tool_executor as _te  # noqa: PLC0415
-    include_completed = bool(args.get("include_completed", False))
-    limit = int(args.get("limit", 20))
-    summaries = []
-    for wf_id, wf in _te._WORKFLOWS.items():
-        if not include_completed and wf["status"] in ("completed", "cancelled"):
-            continue
-        summaries.append({
+    with _wf_lock_for(wf):
+        # Return a shallow copy without the verbose events log unless explicitly asked.
+        return {
+            "ok": True,
             "workflow_id": wf_id,
             "type": wf["type"],
             "goal": wf["goal"],
             "status": wf["status"],
             "current_phase": wf["current_phase"],
+            "completed_phases": list(wf["completed_phases"]),
+            "checkpoint_decisions": list(wf["checkpoint_decisions"]),
+            "error_fix_attempts": list(wf["error_fix_attempts"]),
+            "plan": wf["plan"],
             "created_at": wf["created_at"],
             "updated_at": wf["updated_at"],
-        })
+        }
+
+
+async def _handle_list_workflows(args: Dict) -> Dict:
+    """List active (and optionally completed) workflows.
+
+    CONC-1 (2026-05-14): snapshot the registry membership under
+    `_WORKFLOWS_REGISTRY_LOCK` so iteration is not interrupted by a
+    concurrent start_workflow / cancel_workflow that mutates the dict
+    keys. Per-workflow state is then read under each wf's own lock so
+    individual entries are coherent. Acquiring both locks in this order
+    (registry → per-workflow) and never the reverse keeps the lock
+    graph acyclic and deadlock-free.
+    """
+    from .. import tool_executor as _te  # noqa: PLC0415
+    include_completed = bool(args.get("include_completed", False))
+    limit = int(args.get("limit", 20))
+    summaries: List[Dict[str, Any]] = []
+    with _WORKFLOWS_REGISTRY_LOCK:
+        items = list(_te._WORKFLOWS.items())
+    for wf_id, wf in items:
+        with _wf_lock_for(wf):
+            if not include_completed and wf["status"] in ("completed", "cancelled"):
+                continue
+            summaries.append({
+                "workflow_id": wf_id,
+                "type": wf["type"],
+                "goal": wf["goal"],
+                "status": wf["status"],
+                "current_phase": wf["current_phase"],
+                "created_at": wf["created_at"],
+                "updated_at": wf["updated_at"],
+            })
     # Newest first
     summaries.sort(key=lambda s: s["updated_at"], reverse=True)
     return {"ok": True, "count": len(summaries), "workflows": summaries[:limit]}

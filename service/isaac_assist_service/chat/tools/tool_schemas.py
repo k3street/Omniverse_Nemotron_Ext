@@ -339,14 +339,13 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_physics_params",
-            "description": "Configure scene-level physics parameters (gravity, timestep, solver iterations).",
+            "description": "Configure scene-level physics parameters (gravity direction/magnitude, timestep).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "gravity_direction": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z]"},
                     "gravity_magnitude": {"type": "number"},
                     "time_step": {"type": "number", "description": "Physics timestep in seconds"},
-                    "solver_iterations": {"type": "integer"},
                 },
             },
         },
@@ -3316,11 +3315,13 @@ ISAAC_SIM_TOOLS = [
                 },
             },
         },
+    # DEPRECATED: configure_camera — superseded by set_camera_params (more complete, nested params dict).
+    # Handler kept for back-compat; do not add new features here.
     {
             "type": "function",
             "function": {
                 "name": "configure_camera",
-                "description": "Set camera properties on a USD camera prim: focal length, aperture, clipping range, focus distance.",
+                "description": "[DEPRECATED — use set_camera_params instead] Set camera properties on a USD camera prim: focal length, aperture, clipping range, focus distance.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -6098,13 +6099,15 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "export_policy",
-                "description": "Export GR00T checkpoint to deployment format (TensorRT bf16). Targets: Jetson AGX Orin (5.8 Hz), Jetson Orin NX (~3 Hz, no FP8), x86+RTX 4090 (~15 Hz).",
+                "description": "Export GR00T checkpoint to deployment format (TensorRT bf16). Targets: Jetson AGX Orin (5.8 Hz), Jetson Orin NX (~3 Hz, no FP8), x86+RTX 4090 (~15 Hz). For cloud-run exports supply job_id; output_dir controls where results are written.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "checkpoint": {"type": "string", "description": "Path to .pt checkpoint"},
                         "target_device": {"type": "string", "enum": ["jetson_agx_orin", "jetson_orin_nx", "x86_rtx4090", "x86_a6000"], "description": "Deployment target"},
                         "inference_budget_ms": {"type": "number", "description": "Max inference time per step in ms"},
+                        "job_id": {"type": "string", "description": "Cloud job ID to fetch results from (returned by cloud_launch)"},
+                        "output_dir": {"type": "string", "description": "Local directory to write exported policy files (default: workspace/cloud_results)"},
                     },
                     "required": ["checkpoint", "target_device"],
                 },
@@ -7305,18 +7308,7 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "get_camera_params",
-                "description": (
-                    "Read all cinematographic attributes of a UsdGeom.Camera prim — focal length, "
-                    "horizontal/vertical aperture, clipping range, focus distance, f-stop, projection — "
-                    "and derive horizontal/vertical field-of-view from focal+aperture. "
-                    "Returns: {camera_path: str, projection: 'perspective'|'orthographic', "
-                    "focal_length_mm: float, horizontal_aperture_mm: float, vertical_aperture_mm: float, "
-                    "horizontal_fov_deg: float, vertical_fov_deg: float, clipping_range_m: [near, far], "
-                    "focus_distance_m: float, f_stop: float}. Use for: inspecting a camera before tweaking, "
-                    "verifying lens choice matches a real-world reference, computing what is in/out of frame. "
-                    "NOTE: focal/aperture are USD-native millimetres; clipping & focus distance are in scene "
-                    "units (metres by default). FoV is computed as 2*atan(aperture / (2*focal_length))."
-                ),
+                "description": "Return current values of a USD camera's intrinsic parameters (focal length, aperture, clipping, focus distance).",
                 "parameters": {
                     "type": "object",
                     "properties": {

@@ -3495,33 +3495,89 @@ async def _handle_proactive_check(args: Dict) -> Dict:
 
 
 async def _handle_simulate_traversal_check(args: Dict) -> Dict:
-    """Function-gate counterpart to verify_pickplace_pipeline's form-gate.
+    """Play the timeline and verify that a cube reaches the target bin (function-gate).
 
-    Plays the timeline for `duration_s` of sim time, samples cube position
-    twice (once just before stop for velocity, once at stop for final pose),
-    and checks whether the cube actually arrived at target_path's bbox AND
-    came to rest. Returns {success, cube_initial, cube_final, cube_velocity,
-    target_bbox, in_target_xy, above_floor, at_rest, sim_duration}.
+    Complements ``verify_pickplace_pipeline``'s static form-gate with a live
+    execution check: physics runs for ``duration_s`` sim-seconds, cube world
+    position is sampled just before and at stop to derive velocity, and three
+    pass criteria are evaluated — XY footprint inside target bbox, cube above
+    the bin floor (within ``floor_tolerance``), and speed below
+    ``rest_speed_threshold``.
+
+    Multi-run mode (``n_runs > 1``) snapshots the full pre-run scene state
+    (cube translates, PhysX velocities, ``ctrl:*`` attrs, articulation joint
+    positions, and all FixedJoint prims) and restores between runs to give
+    statistically meaningful stable_ok / flaky / stable_fail classification
+    without reloading the stage.
 
     Args:
-      cube_path: prim path of the cube to track (required for single-cube mode)
-      cube_paths: list of prim paths to track in MULTI-CUBE mode — success if
-                  ANY of them reaches target_path's bbox. Useful for Cortex
-                  behavior trees and multi-cube canonicals where simulate_
-                  traversal_check shouldn't be limited to Cube_1. cube_paths
-                  takes precedence over cube_path when both provided.
-      target_path: prim path of the destination (its world bbox is the target)
-      duration_s: sim duration in seconds (default 60)
-      xy_tolerance: xy bbox tolerance in meters (default 0.0 — strict)
-      floor_tolerance: z below target floor allowed in meters (default 0.10)
-      rest_speed_threshold: max speed (m/s) to consider "at rest" (default 0.05)
-      seed: int seed for RNGs (random/numpy/torch). Default 42.
-            Run i uses seed + i to vary while staying reproducible.
-      n_runs: number of repeated runs against the same built scene. Default 1.
-              Captures initial cube xform + robot joint state + ctrl:* attrs
-              before run 0, restores them before each subsequent run, deletes
-              FJ prims created during run. Returns success_rate + per_run.
-              Run-classification: stable_ok=>=4/5, flaky=1-3/5, stable_fail=0.
+        args: Tool arguments dict containing:
+            - cube_path (str): Prim path of the cube to track (single-cube mode).
+              Required unless ``cube_paths`` is provided.
+            - cube_paths (list[str], optional): Prim paths in MULTI-CUBE mode.
+              Success fires if ANY cube reaches the target bbox. Takes precedence
+              over ``cube_path`` when both are provided.
+            - target_path (str): Prim path of the destination container; its
+              world bounding box defines the acceptance region.
+            - duration_s (float, optional): Simulation duration in seconds.
+              Defaults to 60. Execution timeout scales as
+              ``max(900, n_runs * (duration_s + 30) * 1.5 + 60)`` seconds.
+            - xy_tolerance (float, optional): Expand the target bbox by this
+              margin in XY (meters). Defaults to 0.0 (strict containment).
+            - floor_tolerance (float, optional): Allow cube Z to be this far
+              below the bbox min Z (meters). Defaults to 0.10.
+            - rest_speed_threshold (float, optional): Maximum cube speed (m/s)
+              to classify as "at rest". Defaults to 0.05.
+            - require_upright (bool, optional): If True, additionally check that
+              the cube's local +Z dot world +Z >= ``upright_tolerance_dot``.
+              Defaults to False.
+            - upright_tolerance_dot (float, optional): Minimum dot product for
+              the upright check. Defaults to 0.95.
+            - seed (int, optional): Base RNG seed for random / numpy / torch.
+              Run ``i`` uses ``seed + i``. Defaults to 42.
+            - n_runs (int, optional): Number of repeated play→sample→stop cycles.
+              Capped at 50. Defaults to 1. When > 1, triggers the snapshot/restore
+              path; see Notes for concurrency hazards.
+
+    Returns:
+        Dict[str, Any] forwarded from Kit RPC ``exec_sync``, containing at
+        minimum:
+            - success (bool): True if the primary cube delivered (single-run),
+              or if n_ok * 2 >= n_runs (multi-run majority).
+            - cube_initial (list[float]): World XYZ of cube before play.
+            - cube_final (list[float] or None): World XYZ of cube at stop.
+            - cube_velocity (list[float]): Approximate [vx, vy, vz] at stop.
+            - cube_speed (float): Magnitude of cube_velocity.
+            - target_bbox (dict): ``{min: [x,y,z], max: [x,y,z]}`` of target.
+            - in_target_xy (bool): Whether cube_final XY is inside target bbox.
+            - above_floor (bool): Whether cube_final Z >= target min Z − floor_tol.
+            - at_rest (bool): Whether cube_speed < rest_speed_threshold.
+            - sim_t_reached (float): Actual sim time reached when timeline stopped.
+            - n_runs (int): Number of runs executed.
+            - n_ok (int): Number of successful runs.
+            - success_rate (float): n_ok / n_runs.
+            - status (str): ``"stable_ok"`` / ``"flaky"`` / ``"stable_fail"``.
+            - runs (list[dict]): Per-run result dicts with the same fields above.
+
+    Notes:
+        **BBoxCache stale-read hazard**: ``UsdGeom.BBoxCache`` caches transform
+        queries per-prim and does NOT invalidate against physics-driven xformOp
+        updates that happen mid-play. Reusing a single cache instance across the
+        play loop returns the authored (pre-play) cube position rather than the
+        live one. Fix (2026-05-07): ``_world_pos`` builds a *fresh*
+        ``BBoxCache`` on every call for moving prims; the static target bbox
+        is computed once before play where a single cache is safe.
+
+        **Articulation snapshot timing**: ``Articulation.initialize()`` called
+        against a stopped timeline can corrupt the PhysX SimulationView and
+        cause cubes to free-fall through the floor on the first play. The
+        articulation joint snapshot is therefore skipped on the n_runs=1 fast
+        path and only taken for multi-run mode, where the scene is already
+        validated live by run 0.
+
+        **Single-tenancy**: Kit RPC is single-tenant; concurrent calls that
+        start/stop the timeline race on the same timeline state. Do not run
+        ``simulate_traversal_check`` in parallel against the same Kit instance.
     """
     from .. import kit_tools  # noqa: PLC0415
     cube_paths = args.get("cube_paths") or []
