@@ -71,5 +71,17 @@
     "Wider drop_targets spacing (16cm) could mean longer transit time per cube \u2014 total cycle longer than CP-08.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (Mode B FixedJoint at grip_close + 16 IK seeds)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (Mode B FixedJoint at grip_close + 16 IK seeds)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Pallet"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

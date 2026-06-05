@@ -70,5 +70,17 @@
     "Drop precision drift can accumulate \u2014 same as CP-08, ~5cm. Pallet 30cm gives margin.",
     "verify_args: pick_path normally a conveyor or sensor; here using cube path directly. Verifier checks cube_path \u2192 place_path bridge. With Cube_1 path, bridge check may fail if expecting prims with physics surface velocity. Form-gate may show pipeline issue."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 Cube_3, Cube_4 delivered to Pallet)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 Cube_3, Cube_4 delivered to Pallet)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Pallet"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

@@ -84,5 +84,19 @@
     "Cube_l1 / Cube_l2 start within Franka reach (x=-0.2, +0.1 are |x|<0.7) \u2014 controller picks them immediately. Acceptable \u2014 order doesn't matter, all 6 will be processed.",
     "All bins same physical size (20cm) \u2014 works for 5cm cubes. If cubes were physically different, larger bin would be needed for 'large' class."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim. cube_final=(-0.34, -0.46, 0.785) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim. cube_final=(-0.34, -0.46, 0.785) in Bin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "drop_pose": [
+      -0.4,
+      -0.4,
+      0.75
+    ]
+  }
 }

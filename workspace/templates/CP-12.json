@@ -66,5 +66,17 @@
     "Drop z incorrect \u2014 Cube_3 (10cm) at drop_z=0.850 means cube center 5cm above pallet top, cube bottom flush at 0.80. Correct.",
     "Slot xy collision between adjacent cubes after placement \u2014 Cube_1 (5cm) at (-0.10, -0.50) and Cube_2 (8cm) at (0, -0.40) \u2192 centers 0.10\u221a2 = 0.14m apart. Cube radii sum: 2.5cm + 4cm = 6.5cm. 14cm > 6.5cm. No collision."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Pallet"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

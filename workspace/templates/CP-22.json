@@ -76,5 +76,19 @@
     "Robot cycle too long for belt pace \u2192 cubes pile up at downstream end of belt. Acceptable for canonical demo.",
     "Same physics gotchas as CP-01: GPU dynamics off, sleepThreshold=0, rubber on cubes."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending; function-gate likely lower delivery rate than CP-01 due to high speed"
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; function-gate likely lower delivery rate than CP-01 due to high speed",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "drop_pose": [
+      0,
+      -0.4,
+      0.75
+    ]
+  }
 }

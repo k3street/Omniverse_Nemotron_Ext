@@ -141,5 +141,17 @@
     "Cubes 14 / 17 (center column, layer 1) land on cubes 5 / 8 below \u2014 placement precision on previously-placed cube is fragile. With ~5cm drift, towers may topple.",
     "Conveyor 5m \u00d7 0.4m, cubes start at x=-2.0..+1.4 \u2014 first 4 cubes start outside reach (|x|>0.7), last 14 within reach immediately."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 12/18 cubes delivered to Pallet)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 12/18 cubes delivered to Pallet)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Pallet"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

@@ -63,5 +63,49 @@
     "Handoff station within both robots' reach \u2014 sqrt(0.7^2+0.3^2)=0.76m.",
     "Same physics gotchas."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "diagnose_args": {
+    "cycles": [
+      {
+        "robot_path": "/World/FrankaA",
+        "drop_pose": [
+          0.0,
+          -0.3,
+          0.825
+        ],
+        "robot_base": [
+          -0.7,
+          0.0,
+          0.75
+        ]
+      },
+      {
+        "robot_path": "/World/FrankaB",
+        "robot_base": [
+          0.7,
+          0.0,
+          0.75
+        ]
+      }
+    ],
+    "obstacles": [],
+    "has_mutex": false,
+    "robot_path": "/World/FrankaA",
+    "pick_pose": [
+      -2.0,
+      0.4,
+      0.835
+    ],
+    "drop_pose": [
+      0.7,
+      -0.5,
+      0.75
+    ],
+    "sensor_path": "/World/SensorA",
+    "robot_base": [
+      -0.7,
+      0,
+      0.75
+    ]
+  }
 }

@@ -71,5 +71,19 @@
     "Cube_4 lands within reach (x=-0.35, |x|<0.7) \u2014 controller picks immediately. Belt-feed visual reduced for it.",
     "Without sleepThreshold=0 \u2192 cubes settle, PhysX sleeps them, then belt's friction-based velocity skips sleeping bodies \u2192 cubes don't move with belt. Same as CP-01."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s. cube_final=(0.00, -0.45, 0.835) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s. cube_final=(0.00, -0.45, 0.835) in Bin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "drop_pose": [
+      0,
+      -0.4,
+      0.75
+    ]
+  }
 }

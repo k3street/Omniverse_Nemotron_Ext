@@ -713,6 +713,11 @@ ISAAC_SIM_TOOLS = [
                         "description": "Optional: bound user prims' xy world bbox. Format [[xmin,ymin],[xmax,ymax]] in meters. Triggers footprint_within_bounds check — every authored prim under /World whose xy bbox extends outside flags an issue. Use for CONSTRAINT-01-style 'build a cell that fits in 2x2m'.",
                         "items": {"type": "array", "items": {"type": "number"}},
                     },
+                    "feasibility": {
+                        "type": "boolean",
+                        "description": "Phase 1.5 / Opus §F: when true, also runs diagnose_scene_feasibility per stage and merges geometric pre-flight violations into issues[]. infeasible verdicts flip pipeline_ok=false BEFORE expensive simulate_traversal_check runs. Default off (preserves current contract).",
+                        "default": False,
+                    },
                 },
                 "required": [],
             },
@@ -757,6 +762,94 @@ ISAAC_SIM_TOOLS = [
                     "n_runs": {"type": "integer", "description": "Repeat count for the same built scene. Restores cube/controller state between runs. Clamped to 1..50.", "default": 1, "minimum": 1, "maximum": 50},
                 },
                 "required": ["target_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_scene_feasibility",
+            "description": (
+                "PRE-FLIGHT CONSTRAINT VALIDATOR. Runs deterministic geometric checks "
+                "on a built scene to predict whether simulate_traversal_check would "
+                "succeed before running expensive simulation. Returns verdict, metrics, "
+                "violations, alternatives, seed_used, cache_hit, and elapsed_ms."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path of the robot prim, e.g. /World/Franka."},
+                    "pick_pose": {"type": "array", "items": {"type": "number"}, "description": "World [x, y, z] of the pick target."},
+                    "drop_pose": {"type": "array", "items": {"type": "number"}, "description": "World [x, y, z] of the drop target."},
+                    "obstacles": {"type": "array", "items": {"type": "string"}, "description": "USD paths for collision context.", "default": []},
+                    "ee_offset": {"type": "array", "items": {"type": "number"}, "description": "Tool-tip offset [x, y, z]."},
+                    "robot_base": {"type": "array", "items": {"type": "number"}, "description": "World [x, y, z] of robot base.", "default": [0.0, 0.0, 0.0]},
+                    "max_reach": {"type": "number", "description": "Robot max reach in meters. Default 0.855 for Franka.", "default": 0.855},
+                    "sensor_path": {"type": "string", "description": "Optional sensor prim path for sensor-zone metric."},
+                    "cube_paths": {"type": "array", "items": {"type": "string"}, "description": "Optional cube paths for sensor-zone metric."},
+                    "cube_xys": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "description": "Optional cube xy positions [[x,y], ...]."},
+                    "sensor_xy": {"type": "array", "items": {"type": "number"}, "description": "Sensor world xy [x, y]."},
+                    "sensor_radius": {"type": "number", "description": "Sensor zone radius in meters.", "default": 0.1},
+                    "mutex_corridors": {"type": "object", "description": "Multi-robot mutex check context."},
+                    "path_n_samples": {"type": "integer", "description": "Samples for path-clearance metric.", "default": 20},
+                    "seed": {"type": "integer", "description": "Random seed for IK and sampling.", "default": 42},
+                    "use_cache": {"type": "boolean", "description": "Use 60s scene-graph hash cache.", "default": True},
+                    "lang": {"type": "string", "enum": ["sv", "en"], "description": "Message language.", "default": "sv"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_ros2_control_compat",
+            "description": (
+                "Configure Isaac Sim's ROS2 bridge for standard topic_based_ros2_control "
+                "topic names (/isaac_joint_states and /isaac_joint_commands)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "joint_states_topic": {"type": "string", "default": "/isaac_joint_states"},
+                    "joint_commands_topic": {"type": "string", "default": "/isaac_joint_commands"},
+                    "controller_type": {"type": "string", "default": "joint_trajectory_controller"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "emit_ros2_control_yaml",
+            "description": "Generate ros2_control YAML for outside-Kit launch and optionally write it to disk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "controller_type": {"type": "string", "default": "joint_trajectory_controller"},
+                    "output_path": {"type": "string", "description": "Optional file path to write YAML."},
+                    "joint_states_topic": {"type": "string", "default": "/isaac_joint_states"},
+                    "joint_commands_topic": {"type": "string", "default": "/isaac_joint_commands"},
+                    "update_rate_hz": {"type": "integer", "default": 100},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "precheck_ros2_environment",
+            "description": "Verify ROS2 environment readiness before scene build.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rosbridge_port": {"type": "integer", "default": 9090},
+                },
+                "required": [],
             },
         },
     },

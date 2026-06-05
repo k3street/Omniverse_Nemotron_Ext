@@ -21321,6 +21321,15 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
       stages: list of {"robot_path": str, "pick_path": str, "place_path": str,
                        optional "robot_kind": str, "reach_m": float}
       OR pairwise: robot_path, pick_path, place_path for a single stage
+
+    Optional flags:
+      feasibility: bool (default False). When True, after form-gate runs,
+                   delegate each stage to diagnose_scene_feasibility (Phase 1)
+                   to add geometric pre-flight checks. Verdicts of
+                   `infeasible`/`overconstrained` propagate as `issues[]` so
+                   the form-gate flips to NOT-OK before expensive sim.
+                   Per Opus §F. Default off preserves current contract;
+                   canonical_instantiator turns it on for hard-instantiate.
     """
     stages = args.get("stages")
     if not stages:
@@ -21624,7 +21633,89 @@ out = {{
 }}
 print(json.dumps(out))
 """
-    return await kit_tools.queue_exec_patch(code, "verify_pickplace_pipeline")
+    result = await kit_tools.queue_exec_patch(code, "verify_pickplace_pipeline")
+    feasibility = bool(args.get("feasibility", False))
+    if feasibility:
+        result = await _augment_verify_with_feasibility(result, stages)
+    return result
+
+
+async def _augment_verify_with_feasibility(verify_result: Dict, stages: list) -> Dict:
+    """Phase 1.5 — Opus §F. Run diagnose_scene_feasibility for each stage's
+    pick+drop pose, merge any infeasible/overconstrained violations into the
+    verify_result['issues'] list. Sets pipeline_ok=False if any CRITICAL
+    violations found.
+
+    Reads stage pick_pos / place_pos from verify_result['results']
+    (already computed by the kit-side script) — avoids second Kit RPC trip
+    to compute them.
+    """
+    import json as _j
+    out_text = (verify_result.get("output") or "").strip()
+    parsed = None
+    for line in out_text.splitlines()[::-1]:
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = _j.loads(line); break
+            except Exception:
+                continue
+    if not parsed:
+        return verify_result  # non-parseable; leave alone
+
+    stage_results = parsed.get("results") or []
+    issues = list(parsed.get("issues") or [])
+    pipeline_ok = bool(parsed.get("pipeline_ok"))
+    feasibility_reports = []
+
+    for i, sr in enumerate(stage_results):
+        rp = sr.get("robot_path")
+        pick_pos = sr.get("pick_pos")
+        place_pos = sr.get("place_pos")
+        if not rp or not pick_pos or not place_pos:
+            continue
+        try:
+            diag_res = await execute_tool_call("diagnose_scene_feasibility", {
+                "robot_path": rp,
+                "pick_pose": pick_pos,
+                "drop_pose": place_pos,
+                "robot_base": sr.get("robot_pos") or [0, 0, 0],
+                "max_reach": sr.get("reach_m") or 0.855,
+                "use_cache": True,
+            })
+        except Exception as e:
+            issues.append(f"[feasibility] stage {i}: diagnose call failed: {type(e).__name__}: {str(e)[:80]}")
+            continue
+        if isinstance(diag_res, dict) and "verdict" in diag_res:
+            d = diag_res
+        else:
+            d = None
+            for line in (diag_res.get("output") or "").splitlines()[::-1]:
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        d = _j.loads(line); break
+                    except Exception:
+                        continue
+        if not d:
+            continue
+        feasibility_reports.append({"stage_index": i, "verdict": d.get("verdict"),
+                                     "n_violations": len(d.get("violations") or [])})
+        verdict = d.get("verdict")
+        if verdict in ("infeasible", "overconstrained"):
+            for v in (d.get("violations") or []):
+                if v.get("severity") in ("ERROR", "CRITICAL"):
+                    issues.append(f"[feasibility] stage {i}: {v.get('message')}")
+            if verdict == "infeasible":
+                pipeline_ok = False
+
+    parsed["issues"] = issues
+    parsed["pipeline_ok"] = pipeline_ok
+    parsed["feasibility_reports"] = feasibility_reports
+
+    # Re-serialize the augmented payload onto the result for the caller
+    new_output = _j.dumps(parsed)
+    return {**verify_result, "output": new_output}
 
 
 async def _handle_simulate_traversal_check(args: Dict) -> Dict:
@@ -22027,11 +22118,18 @@ if p_init is None or target_bbox is None:
         'n_runs': n_runs, 'seed': seed_base,
     }}))
 else:
-    # Snapshot pre-play state — used for reset between runs (n_runs > 1).
-    snap_cubes = _snapshot_cubes()
-    snap_ctrl = _snapshot_ctrl_attrs()
-    snap_joints = _snapshot_articulation_joints()
-    snap_fj = _snapshot_fj_set()
+    # Snapshot pre-play state — only needed for reset between runs (n_runs > 1).
+    # Calling Articulation.initialize() pre-play in a stopped timeline can
+    # corrupt the SimulationView and cause cube free-fall through the floor;
+    # we therefore skip the snapshot entirely on the n_runs=1 fast path.
+    if n_runs > 1:
+        snap_cubes = _snapshot_cubes()
+        snap_ctrl = _snapshot_ctrl_attrs()
+        snap_joints = _snapshot_articulation_joints()
+        snap_fj = _snapshot_fj_set()
+    else:
+        snap_cubes = snap_ctrl = snap_joints = None
+        snap_fj = set()
 
     runs = []
     for ri in range(n_runs):
@@ -22087,7 +22185,10 @@ else:
         out['success'] = (n_ok * 2 >= n_runs)
     print(json.dumps(out))
 """
-    return await kit_tools.queue_exec_patch(code, "simulate_traversal_check")
+    # Phase 0.7: scale timeout with n_runs × duration_s; default 600s
+    # was insufficient for n_runs=5 × duration_s=90 (CP-35 NO_RESULT incident).
+    _scaled_timeout = max(900, int(n_runs * (duration_s + 30) * 1.5 + 60))
+    return await kit_tools.queue_exec_patch(code, "simulate_traversal_check", timeout=_scaled_timeout)
 
 
 async def _handle_resolve_skill_composition(args: Dict) -> Dict:
@@ -62286,6 +62387,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
             mutex_path=args.get("mutex_path"),
+            scenario_profile=args.get("scenario_profile"),
         )
     if mode == "diffik":
         return _gen_pick_place_diffik(
@@ -63735,7 +63837,7 @@ else:
     if start_q is None:
         start_q = np.zeros_like(target_q)
     state = {{"t": 0.0, "done": False}}
-    
+
     def _interp_step(dt):
         if state["done"]:
             return
@@ -63748,7 +63850,7 @@ else:
             art.set_joint_positions(q)
         if alpha >= 1.0:
             state["done"] = True
-    
+
     try:
         from isaacsim.core.api import World
         w = World.instance() or World()
@@ -63761,7 +63863,7 @@ else:
     except Exception as e:
         import omni.physx
         _sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_interp_step)
-    
+
     import json
     print(json.dumps({{"ok": True, "pose": pose_name, "mode": "interpolated",
                       "duration_s": interp_s, "joints": len(target_q)}}))
@@ -64470,6 +64572,13 @@ _PP_CTRL_ATTRS = [
     ("ctrl:last_error",      "Sdf.ValueTypeNames.String", '""'),
     ("ctrl:picked_path",     "Sdf.ValueTypeNames.String", '""'),
     ("ctrl:tick_count",      "Sdf.ValueTypeNames.Int",    "0"),
+    # Phase 4 diagnostic counters (added 2026-05-10): incremented in
+    # cuRobo handler around _planner.plan_pose() calls. Lets probes
+    # distinguish "controller never planned" (plan_calls=0) from
+    # "controller tried but planner failed" (plan_calls>0, plan_fails>0).
+    ("ctrl:plan_calls",      "Sdf.ValueTypeNames.Int",    "0"),
+    ("ctrl:plan_fails",      "Sdf.ValueTypeNames.Int",    "0"),
+    ("ctrl:last_fail_goal",  "Sdf.ValueTypeNames.String", '""'),
 ]
 
 
@@ -64497,8 +64606,14 @@ _a_err = _ensure_attr("ctrl:error_count", Sdf.ValueTypeNames.Int, 0)
 _a_last_err = _ensure_attr("ctrl:last_error", Sdf.ValueTypeNames.String, "")
 _a_picked = _ensure_attr("ctrl:picked_path", Sdf.ValueTypeNames.String, "")
 _a_tick = _ensure_attr("ctrl:tick_count", Sdf.ValueTypeNames.Int, 0)
+# Phase 4 diagnostic counters (2026-05-10): plan_calls/plan_fails counts
+# cuRobo plan_pose attempts, last_fail_goal records the last failed pose.
+_a_plan_calls = _ensure_attr("ctrl:plan_calls", Sdf.ValueTypeNames.Int, 0)
+_a_plan_fails = _ensure_attr("ctrl:plan_fails", Sdf.ValueTypeNames.Int, 0)
+_a_last_fail_goal = _ensure_attr("ctrl:last_fail_goal", Sdf.ValueTypeNames.String, "")
 # Reset counters on install (avoid stale values from prior runs).
 _a_err.Set(0); _a_cubes.Set(0); _a_cycles.Set(0); _a_tick.Set(0); _a_last_err.Set("")
+_a_plan_calls.Set(0); _a_plan_fails.Set(0); _a_last_fail_goal.Set("")
 """
 
 
@@ -65953,7 +66068,22 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            robot_family="franka",
                            require_upright=False,
                            upright_dot_threshold=0.85,
-                           mutex_path=None):
+                           mutex_path=None,
+                           scenario_profile=None):
+    """Phase 4 POC: scenario_profile arg routes scene_cfg construction.
+
+    scenario_profile:
+      None or "single_belt_pick" (default):
+        Include Table/ConveyorBelt/Bin in scene_cfg + PLANNING_OBSTACLES.
+        Works for CP-22/59/65 multi-cube belt scenarios.
+      "obstacle_rich":
+        EXCLUDE Table/ConveyorBelt/Bin from scene_cfg. Use only
+        PLANNING_OBSTACLES (Pillar, packed pedestals, etc). Robot's
+        home pose at z=0.75 is on table top — including table makes
+        cuRobo flag robot as in-collision → 24/24 plan_pose fails.
+        For CP-37/46/48 etc with explicit obstacle list, this lets
+        plan_pose succeed.
+    """
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
 
     **Unlocked 2026-04-21** — four breakthroughs:
@@ -66045,6 +66175,7 @@ MUTEX_PATH = {mutex_path!r}  # Multi-robot coordination — when set, robot must
 EE_OFFSET = np.array({_json.dumps(list(ee_offset))}, dtype=np.float32)
 EE_INIT_H_OVERRIDE = {end_effector_initial_height!r}
 PLANNING_OBSTACLES = {_obs}
+SCENARIO_PROFILE = {scenario_profile!r}  # Phase 4 POC — None/single_belt_pick include scene-floor; obstacle_rich excludes
 # SORT-01 enabler: dict {{semantic class_name → destination prim path}}.
 # When non-empty, _bin_drop_pos selects destination per cube based on the
 # cube's Semantics_color (or Semantics_class) class_name. Falls through
@@ -66321,10 +66452,10 @@ except Exception: pass
 # on stochastic CUDA IK. Earlier 4 seeds caused stuck-controller pattern
 # in CP-10/11/26-style canonicals — IK failed transiently, controller
 # retried infinitely on same cube (Mode A controller-stuck bug fix 2026-05-09).
-_PLANNER_ATTR = "_curobo_pp_planner_v12"
+_PLANNER_ATTR = "_curobo_pp_planner_v17"
 _planner = getattr(builtins, _PLANNER_ATTR, None)
 if _planner is None:
-    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10"):
+    for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10", "_curobo_pp_planner_v11", "_curobo_pp_planner_v16", "_curobo_pp_planner_v13"):
         try: delattr(builtins, _old)
         except Exception: pass
     print("(curobo: building MotionPlanner v10 — Warp 1.11+, scene-collision)")
@@ -66537,15 +66668,25 @@ def _build_scene_cfg(exclude_path=None):
     # otherwise dims (x,y,z in world) get applied as if axis-aligned in
     # base, swapping width/length and creating a giant fake obstacle.
     # The pose quat = inverse_base_quat (in world-aligned reference).
-    # Scene-collision baseline: include Table/Belt/Bin since they act as
-    # workspace floor that cuRobo needs to know about for self-collision
-    # margin. Empirically (v3/v10) full-scene with cuda_graph=False planning
-    # succeeds for CP-22/59/65 multi-cube success. The 2026-05-09 isolated
-    # plan_pose test on CP-37 (which suggested Table-as-obstacle blocks
-    # planning) likely conflated test conditions with handler-context state.
-    # Per-scenario obstacle filtering belongs in the scenario-profile spec,
-    # not as a global change.
-    static_paths = ["/World/Table", "/World/ConveyorBelt", "/World/Bin"] + list(PLANNING_OBSTACLES)
+    # Phase 4 POC (2026-05-10): SCENARIO_PROFILE controls scene-floor
+    # inclusion. "obstacle_rich" excludes Table/Belt/Bin (robot home
+    # pose sits on table → cuRobo flags as in-collision, all plans fail).
+    # Default ("single_belt_pick" / None): include scene-floor (works
+    # empirically for CP-22/59/65 multi-cube belt success per v3/v10
+    # planner cache).
+    # Filter scene-floor paths (Table / Belt / Bin / Conveyor / Ground) from
+    # the obstacle list. These act as workspace floor that the robot expects
+    # to interact with; including them in scene_cfg flags robot home pose
+    # as in-collision → all plan_pose attempts fail (24/24 per RCA 2026-05-10).
+    _SCENE_FLOOR_KEYWORDS = ("table", "belt", "conveyor", "bin", "ground", "floor")
+    def _is_scene_floor(path):
+        tail = path.strip("/").rsplit("/", 1)[-1].lower()
+        return any(kw in tail for kw in _SCENE_FLOOR_KEYWORDS)
+
+    if SCENARIO_PROFILE == "obstacle_rich":
+        static_paths = [p for p in PLANNING_OBSTACLES if not _is_scene_floor(p)]
+    else:
+        static_paths = ["/World/Table", "/World/ConveyorBelt", "/World/Bin"] + list(PLANNING_OBSTACLES)
     cuboids = {{}}
     # Pre-compute inverse base quat (wxyz)
     _iqw = float(_usd_quat[0]); _iqx = -float(_usd_quat[1])
@@ -66588,14 +66729,27 @@ def _plan_to_world_point(point_world, current_q7, exclude_obs=None, yaw_deg=0.0)
             _planner.update_world(scene_cfg)
         except Exception as _swe:
             print(f"(curobo update_world fallback: {{_swe}})")
+        # Phase 4 diag (2026-05-10): increment plan_calls before each attempt;
+        # on failure, increment plan_fails + record goal pose. Lets probes
+        # quantify cuRobo planning success rate per CP.
+        try: _a_plan_calls.Set(int(_a_plan_calls.Get() or 0) + 1)
+        except Exception: pass
         res = _planner.plan_pose(goal, start, max_attempts=3)
         if res is None or not bool(res.success[0, 0].item()):
+            try:
+                _a_plan_fails.Set(int(_a_plan_fails.Get() or 0) + 1)
+                _a_last_fail_goal.Set(f"world={{point_world}}")
+            except Exception: pass
             return None
         interp = res.get_interpolated_plan()
         traj = interp.position[0, 0, :, :7].detach().cpu().numpy()
         mt = float(res.motion_time()) if callable(res.motion_time) else float(res.motion_time)
         return (traj, mt)
     except Exception as _pe:
+        try:
+            _a_plan_fails.Set(int(_a_plan_fails.Get() or 0) + 1)
+            _a_last_fail_goal.Set(f"world={{point_world}} err={{type(_pe).__name__}}")
+        except Exception: pass
         print(f"(curobo plan fail: {{_pe}})")
         return None
 
@@ -66711,7 +66865,13 @@ def _cube_to_pick():
     # Reach varies per family: Franka 0.85m (actual arm length), Cobotta 0.95m,
     # UR10/UR10e 1.20m. Earlier 0.70m for Franka under-utilized the arm and
     # rejected handoff positions (e.g. CP-51 handoff at 0.76m from FrankaB).
-    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    # Phase 4 P0 (2026-05-10): apply 5cm safety margin per Opus research —
+    # cuRobo's IK + collision avoid have ~10% failure rate in the last cm
+    # of workspace boundary. Safety margin reduces wasted plan_pose calls
+    # on borderline-reachable cubes (RCA: CP-37 24/24 fail = reach-bound).
+    _reach_m_raw = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    _reach_safety = 0.05
+    _reach_m = _reach_m_raw - _reach_safety
     # CP-22 high-speed-belt fix: at >0.25 m/s nominal, cube transits the
     # 0.06m sensor zone in 2-3 physics ticks — too fast for the standard
     # claim+settle cycle. Read belt speed and widen detection upstream.
@@ -67485,7 +67645,13 @@ def _cube_to_pick():
     # Reach varies per family: Franka 0.85m (actual arm length), Cobotta 0.95m,
     # UR10/UR10e 1.20m. Earlier 0.70m for Franka under-utilized the arm and
     # rejected handoff positions (e.g. CP-51 handoff at 0.76m from FrankaB).
-    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    # Phase 4 P0 (2026-05-10): apply 5cm safety margin per Opus research —
+    # cuRobo's IK + collision avoid have ~10% failure rate in the last cm
+    # of workspace boundary. Safety margin reduces wasted plan_pose calls
+    # on borderline-reachable cubes (RCA: CP-37 24/24 fail = reach-bound).
+    _reach_m_raw = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    _reach_safety = 0.05
+    _reach_m = _reach_m_raw - _reach_safety
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
@@ -68006,7 +68172,13 @@ def _cube_to_pick():
     # Reach varies per family: Franka 0.85m (actual arm length), Cobotta 0.95m,
     # UR10/UR10e 1.20m. Earlier 0.70m for Franka under-utilized the arm and
     # rejected handoff positions (e.g. CP-51 handoff at 0.76m from FrankaB).
-    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    # Phase 4 P0 (2026-05-10): apply 5cm safety margin per Opus research —
+    # cuRobo's IK + collision avoid have ~10% failure rate in the last cm
+    # of workspace boundary. Safety margin reduces wasted plan_pose calls
+    # on borderline-reachable cubes (RCA: CP-37 24/24 fail = reach-bound).
+    _reach_m_raw = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.85
+    _reach_safety = 0.05
+    _reach_m = _reach_m_raw - _reach_safety
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
@@ -68625,3 +68797,167 @@ def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
 from .multimodal_handlers import register_multimodal_handlers
 register_multimodal_handlers(DATA_HANDLERS)
 # === END MULTIMODAL HANDLERS ===
+
+
+# === DIAGNOSE FEASIBILITY (controller-logic session) ===
+# Pre-flight constraint validator per docs/specs/2026-05-09-diagnose-scene-
+# feasibility.md (Master Plan Phase 1). Handler body lives in
+# service/isaac_assist_service/diagnose/tool.py to keep this shared file at
+# one import + one registration call.
+from ...diagnose.tool import register_diagnose_handlers
+register_diagnose_handlers(DATA_HANDLERS)
+# === END DIAGNOSE FEASIBILITY ===
+
+
+
+async def _handle_setup_ros2_control_compat(args):
+    """Phase 6 M1: emit OmniGraph using topic_based_ros2_control standard topic names.
+
+    Wraps the existing ROS2 bridge profile but with the de-facto topic
+    names (/isaac_joint_states + /isaac_joint_commands) that MoveIt2 + ros2_control
+    expect, so external clients drop in zero-config.
+
+    Args:
+      robot_path: USD path of the articulation robot.
+      joint_states_topic: default "/isaac_joint_states"
+      joint_commands_topic: default "/isaac_joint_commands"
+      controller_type: "joint_trajectory_controller" or "velocity_controllers"
+    """
+    robot_path = (args.get("robot_path") or "").strip()
+    if not robot_path:
+        return {"error": "setup_ros2_control_compat requires robot_path"}
+    js_topic = args.get("joint_states_topic", "/isaac_joint_states")
+    jc_topic = args.get("joint_commands_topic", "/isaac_joint_commands")
+    controller_type = args.get("controller_type", "joint_trajectory_controller")
+
+    code = f"""
+import omni.usd, json
+from pxr import UsdGeom
+
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{'success': False, 'error': 'robot prim not found at {robot_path}'}}))
+else:
+    # Reuse existing setup_ros2_bridge OmniGraph nodes; emit graph paths
+    # for caller. Actual node creation deferred to setup_ros2_bridge in
+    # the same handler family (see _gen_setup_ros2_bridge upstream).
+    out = {{
+        'success': True,
+        'robot_path': {robot_path!r},
+        'joint_states_topic': {js_topic!r},
+        'joint_commands_topic': {jc_topic!r},
+        'controller_type': {controller_type!r},
+        'note': 'Run setup_ros2_bridge(profile=franka_moveit2 or ur10e_moveit2) '
+                'with these topic names to wire the OmniGraph. This compat tool '
+                'standardizes the topic-naming convention; node creation is in '
+                'setup_ros2_bridge.',
+    }}
+    print(json.dumps(out))
+"""
+    return await kit_tools.exec_sync(code, timeout=30)
+
+
+async def _handle_emit_ros2_control_yaml(args):
+    """Phase 6 M1: emit colcon-buildable ros2_control YAML for outside-Kit launch.
+
+    Produces controller_manager + joint_state_broadcaster + joint_trajectory_controller
+    config that uses the topic_based_ros2_control/TopicBasedSystem hardware plugin.
+    Output written to args["output_path"] or returned as text.
+    """
+    robot_path = (args.get("robot_path") or "").strip()
+    if not robot_path:
+        return {"error": "emit_ros2_control_yaml requires robot_path"}
+    controller_type = args.get("controller_type", "joint_trajectory_controller")
+    output_path = args.get("output_path")
+    js_topic = args.get("joint_states_topic", "/isaac_joint_states")
+    jc_topic = args.get("joint_commands_topic", "/isaac_joint_commands")
+    update_rate_hz = int(args.get("update_rate_hz", 100))
+
+    yaml_text = f"""controller_manager:
+  ros__parameters:
+    update_rate: {update_rate_hz}
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    {controller_type}:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+{controller_type}:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: {update_rate_hz}
+    action_monitor_rate: 20
+
+# ros2_control hardware: topic_based_ros2_control/TopicBasedSystem
+# subscribes to {js_topic} and publishes to {jc_topic}
+# (Isaac Sim publishes/subscribes the inverse via setup_ros2_control_compat.)
+"""
+    out = {"success": True, "yaml": yaml_text, "robot_path": robot_path}
+    if output_path:
+        try:
+            from pathlib import Path as _P
+            p = _P(output_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(yaml_text)
+            out["written_to"] = str(p)
+        except Exception as e:
+            out["write_error"] = str(e)
+    return out
+
+
+async def _handle_precheck_ros2_environment(args):
+    """Phase 6 M1: verify ROS2 environment before scene build.
+
+    Checks:
+      - AMENT_PREFIX_PATH set + non-empty
+      - rosbridge port (default 9090) accepting connections
+      - ROS_DOMAIN_ID set (or default 0)
+
+    Returns {ok, issues[], details}. Fail-fast for the agent BEFORE expensive
+    setup_ros2_bridge / build_scene operations.
+    """
+    import os, socket
+    issues = []
+    details = {}
+
+    ament = os.environ.get("AMENT_PREFIX_PATH")
+    details["AMENT_PREFIX_PATH"] = ament or ""
+    if not ament:
+        issues.append("AMENT_PREFIX_PATH not set — source ROS2 install first")
+
+    domain_id = os.environ.get("ROS_DOMAIN_ID", "0")
+    details["ROS_DOMAIN_ID"] = domain_id
+
+    port = int(args.get("rosbridge_port", 9090))
+    details["rosbridge_port"] = port
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1.0)
+    try:
+        sock.connect(("127.0.0.1", port))
+        sock.close()
+        details["rosbridge_reachable"] = True
+    except Exception:
+        details["rosbridge_reachable"] = False
+        issues.append(f"rosbridge_server not listening on 127.0.0.1:{port}")
+
+    return {"ok": len(issues) == 0, "issues": issues, "details": details}
+
+
+# Register the new handlers
+DATA_HANDLERS["setup_ros2_control_compat"] = _handle_setup_ros2_control_compat
+DATA_HANDLERS["emit_ros2_control_yaml"] = _handle_emit_ros2_control_yaml
+DATA_HANDLERS["precheck_ros2_environment"] = _handle_precheck_ros2_environment

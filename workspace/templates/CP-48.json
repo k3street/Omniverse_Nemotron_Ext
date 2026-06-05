@@ -79,5 +79,23 @@
     "Same camera-view + scene-priors caveats as CP-33/CP-47.",
     "1 Gemini API call per build \u2014 cost-aware."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending; runtime-vision integration"
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; runtime-vision integration",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "pick_pose": [
+      0.2,
+      0.4,
+      0.835
+    ],
+    "drop_pose": [
+      -0.3,
+      -0.4,
+      0.75
+    ],
+    "robot_base": [
+      0,
+      0,
+      0.75
+    ]
+  }
 }

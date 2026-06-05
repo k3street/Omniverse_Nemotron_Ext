@@ -77,5 +77,24 @@
     "Bin size 0.25m x 0.25m, lid 0.10m x 0.10m \u2014 lid is smaller than bin opening. Should rest inside the rim, not seal flush. Realistic 'seal' needs lid_xy >= bin_xy.",
     "Same Franka cuRobo precision caveats as CP-08 \u2014 function-gate is form \u2713, runtime stochastic."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 3/5 cubes delivered to Container)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 3/5 cubes delivered to Container)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "pick_pose": [
+      -0.4,
+      0.4,
+      0.84
+    ],
+    "drop_pose": [
+      0.45,
+      -0.4,
+      0.75
+    ]
+  }
 }

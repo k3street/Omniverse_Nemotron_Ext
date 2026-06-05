@@ -55,5 +55,22 @@
     "_next_cube() picks nearest-to-base; with cubes at +Y 0.55 and 0.25, order may matter for FJ propagation.",
     "Bin overflow if both cubes land at same XY \u2014 no per-cube drop_target offset configured."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (drop-precision XY arrival gate (UR10 cuRobo))"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (drop-precision XY arrival gate (UR10 cuRobo))",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/Pedestal_1",
+      "/World/Pedestal_2"
+    ],
+    "pick_pose": [
+      -0.5,
+      0.55,
+      0.975
+    ],
+    "drop_pose": [
+      0.5,
+      -0.4,
+      0.75
+    ]
+  }
 }

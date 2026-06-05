@@ -57,5 +57,19 @@
     "UR10 attach_gripper=True path was reported earlier as failing init with 'Failed to get rigid body velocities' \u2014 but native handler does world.reset() between scene.add and initialize, which is the recipe ur10_pick_up.py uses. If this fails, the canonical exposes the gap.",
     "Same UR10 reach + asset-path drift caveats as CP-69."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (belt-pause-from-callback bug \u2014 cube continues past sensor before EE reaches; same root cause as CP-80)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (belt-pause-from-callback bug \u2014 cube continues past sensor before EE reaches; same root cause as CP-80)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "sensor_path": "/World/PickSensor",
+    "pick_pose": [
+      -1.0,
+      0.4,
+      0.835
+    ],
+    "drop_pose": [
+      0.5,
+      -0.4,
+      0.75
+    ]
+  }
 }

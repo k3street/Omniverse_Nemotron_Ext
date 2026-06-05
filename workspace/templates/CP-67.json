@@ -79,5 +79,39 @@
     "Both robots reach disc center at sqrt(0.5^2)=0.5m \u2014 within 0.85m reach.",
     "Physics: cube must not slide off disc during rotation. Friction-driven; rubber+rubber combo helps."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification likely fails (rotary disc bridge issue)"
+  "verified_status": "build-spec-2026-05-08; form-gate verification likely fails (rotary disc bridge issue)",
+  "diagnose_args": {
+    "cycles": [
+      {
+        "robot_path": "/World/FrankaA",
+        "robot_base": [
+          0.0,
+          0.5,
+          0.75
+        ]
+      },
+      {
+        "robot_path": "/World/FrankaB",
+        "robot_base": [
+          0.0,
+          -0.5,
+          0.75
+        ]
+      }
+    ],
+    "obstacles": [],
+    "has_mutex": true,
+    "robot_path": "/World/FrankaA",
+    "drop_pose": [
+      0,
+      -0.7,
+      0.75
+    ],
+    "sensor_path": "/World/SensorA",
+    "robot_base": [
+      0,
+      0.5,
+      0.75
+    ]
+  }
 }

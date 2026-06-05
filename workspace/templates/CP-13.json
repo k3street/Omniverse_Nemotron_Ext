@@ -60,5 +60,17 @@
     "Robot can't descend low enough for Cube_1 (z=0.825) without colliding with PalletBase (top z=0.80). Margin is 25mm \u2014 within EE_INITIAL_HEIGHT auto-clearance.",
     "Robot can't reach Cube_2 drop z=0.875 \u2014 well within Franka's vertical reach 0.85m above base."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s too short. cube_final=(-0.04, -0.47, 0.825) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s too short. cube_final=(-0.04, -0.47, 0.825) in Bin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/PalletBase"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

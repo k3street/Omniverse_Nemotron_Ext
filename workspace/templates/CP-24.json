@@ -72,5 +72,19 @@
     "Slot walls block transit \u2014 Franka's wrist may need clearance during retreat. cuRobo with planning_obstacles handles this; transit must approach vertically.",
     "Same physics rules \u2014 sleepThreshold=0, rubber on cubes."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tolerance=0.10 stack-precision slack)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tolerance=0.10 stack-precision slack)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "drop_pose": [
+      0,
+      -0.4,
+      0.75
+    ]
+  }
 }

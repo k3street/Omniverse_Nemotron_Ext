@@ -92,5 +92,17 @@
     "Donut center (0, -0.4) is empty \u2014 if a different cube is placed there (e.g. Cube_9 from copy/paste error), it'll collide with fingers during subsequent drops.",
     "Spacing 0.10m means donut diameter = 2*spacing = 0.20m + cube_size = 0.25m. Pallet must be \u22650.25m wide. Used 0.45m \u2014 safe."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Pallet"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

@@ -73,5 +73,19 @@
     "cuRobo plan uses bbox center \u2014 sphere AABB center matches sphere center. Plan unchanged from cube.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (belt-pause pre-step subscribe (Sphere_1 delivered))"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (belt-pause pre-step subscribe (Sphere_1 delivered))",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "drop_pose": [
+      0,
+      -0.4,
+      0.75
+    ]
+  }
 }

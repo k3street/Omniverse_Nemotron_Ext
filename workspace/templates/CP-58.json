@@ -77,5 +77,17 @@
     "Cylindrical pegs (radius 2cm, height 5cm) \u2014 gripper grips long axis. Within 4cm gripper opening since diameter 4cm.",
     "Same physics gotchas as CP-08."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2717 (peg-in-hole assembly \u2014 earlier \u2713 was false positive due to target_path override; real target is HolePanel and cube doesn't reach it)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2717 (peg-in-hole assembly \u2014 earlier \u2713 was false positive due to target_path override; real target is HolePanel and cube doesn't reach it)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/HolePanel"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

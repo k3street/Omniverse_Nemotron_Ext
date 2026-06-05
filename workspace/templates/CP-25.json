@@ -130,5 +130,17 @@
     "Cube 8-16 start within Franka reach (|x|<0.7 for some) \u2014 picked out of belt order. drop_targets dispatches by cube_path so order doesn't matter.",
     "Pallet 40\u00d740cm \u2014 within robot reach (max diagonal sqrt(0.105^2 + 0.505^2)=0.516m from base)."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 2/16 cubes delivered to Pallet)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 2/16 cubes delivered to Pallet)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Pallet"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  }
 }

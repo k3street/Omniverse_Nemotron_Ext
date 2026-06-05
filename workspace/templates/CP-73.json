@@ -77,5 +77,14 @@
     "Same UR10 surface-gripper limitation as CP-69 \u2014 function-gate deferred.",
     "Verifier looks for surfaceVelocity > 0 \u2014 already provided."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (Cortex+conveyor \u2014 multi-cube limitation + belt-pause bug)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (Cortex+conveyor \u2014 multi-cube limitation + belt-pause bug)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "sensor_path": "/World/PickSensor",
+    "drop_pose": [
+      0.5,
+      -0.3,
+      0.75
+    ]
+  }
 }

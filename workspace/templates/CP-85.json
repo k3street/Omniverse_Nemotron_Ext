@@ -48,5 +48,21 @@
     "set_semantic_label may need specific schema names \u2014 handler reads Semantics_color, Semantics_colour, Semantics_class.",
     "Same raycast dependencies as CP-78."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (smaller Bin_red + extra Bin_blue caused descent issue, NOT color_routing \u2014 see CP-86 \u2713)"
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (smaller Bin_red + extra Bin_blue caused descent issue, NOT color_routing \u2014 see CP-86 \u2713)",
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/Pedestal"
+    ],
+    "pick_pose": [
+      -0.5,
+      0.4,
+      0.975
+    ],
+    "drop_pose": [
+      0.5,
+      -0.3,
+      0.75
+    ]
+  }
 }

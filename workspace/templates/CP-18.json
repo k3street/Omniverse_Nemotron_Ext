@@ -79,5 +79,19 @@
     "Bad cube path not in source_paths \u2014 controller wouldn't see it, would never pick. Must include in source_paths.",
     "Both bins identical color \u2014 visual ambiguity. Use distinct color materials (green + red here)."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (150s sim. cube_final=(0.23, -0.49, 0.785) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (150s sim. cube_final=(0.23, -0.49, 0.785) in Bin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "drop_pose": [
+      0.3,
+      -0.4,
+      0.75
+    ]
+  }
 }

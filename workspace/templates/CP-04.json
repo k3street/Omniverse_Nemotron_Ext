@@ -83,5 +83,19 @@
     "Skipping footprint_bounds in verify_args \u2014 verifier won't catch out-of-bound prims and the constraint is silently violated.",
     "Inheriting CP-01's verify_args verbatim (footprint_bounds=null) negates the whole point of CP-04 vs CP-01."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s too short. cube_final=(0.00, -0.45, 0.835) in Bin)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (180s sim \u2014 orig 90s too short. cube_final=(0.00, -0.45, 0.835) in Bin)",
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "drop_pose": [
+      0,
+      -0.4,
+      0.75
+    ]
+  }
 }
