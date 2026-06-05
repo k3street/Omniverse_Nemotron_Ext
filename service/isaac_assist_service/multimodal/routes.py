@@ -34,6 +34,10 @@ from .persistence import (
     MultimodalStore,
     RevisionConflictError,
 )
+from .cosmos3_adapter import (
+    CosmosSceneObservation,
+    cosmos_observation_to_layout_spec,
+)
 from .ratify import ratify
 from .render import render_layout_spec_to_file
 from .types import LayoutSpec
@@ -114,6 +118,13 @@ class BuildRequest(BaseModel):
 
     template_id: Optional[str] = None
     force_freeform: bool = False
+
+
+class CosmosProposalRequest(BaseModel):
+    """Save a Cosmos 3 Reasoner scene observation as a canvas proposal."""
+
+    observation: CosmosSceneObservation
+    parent_revision: int = Field(default=0, ge=0)
 
 
 class ClientErrorReport(BaseModel):
@@ -206,6 +217,60 @@ async def patch_canvas(session_id: str, body: PatchRequest) -> Dict[str, Any]:
         ],
     })
 
+    return {
+        "valid": True,
+        "revision": saved.revision,
+        "spec": saved.model_dump(mode="json"),
+    }
+
+
+@router.post("/{session_id}/cosmos/propose")
+async def propose_canvas_from_cosmos(
+    session_id: str,
+    body: CosmosProposalRequest,
+) -> Dict[str, Any]:
+    """Convert a Cosmos 3 observation into a CAS-guarded LayoutSpec proposal.
+
+    The route accepts already-structured Cosmos output.  Actual Cosmos runtime
+    invocation belongs upstream so the canvas API stays deterministic and
+    testable across Isaac Sim 5.1 and 6.0.
+    """
+    store = get_store()
+    spec = cosmos_observation_to_layout_spec(
+        body.observation,
+        session_id=session_id,
+    )
+
+    validation = validate_layout_spec(spec)
+    if not validation.valid:
+        return {
+            "valid": False,
+            "issues": [
+                {"code": i.code, "severity": i.severity, "message": i.message}
+                for i in validation.issues
+            ],
+        }
+
+    try:
+        saved = await store.save_with_cas(session_id, spec, body.parent_revision)
+    except RevisionConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "conflict": True,
+                "expected_revision": e.expected,
+                "actual_revision": e.actual,
+                "current_spec": (
+                    e.current_spec.model_dump(mode="json") if e.current_spec else None
+                ),
+            },
+        )
+
+    store.append_event(session_id, "cosmos_canvas_proposal", {
+        "revision": saved.revision,
+        "input_kind": body.observation.input_kind,
+        "object_count": len(saved.objects or []),
+    })
     return {
         "valid": True,
         "revision": saved.revision,

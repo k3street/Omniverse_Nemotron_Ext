@@ -90,7 +90,7 @@ cp service/isaac_assist_service/.env.example service/isaac_assist_service/.env
 | Variable | Default | Description |
 |---|---|---|
 | `LLM_MODE` | `local` | `local` (Ollama), `anthropic` (Claude), `cloud` (Gemini), `openai`, or `grok` (xAI) |
-| `LOCAL_MODEL_NAME` | `qwen3.5:35b` | Model name as shown in `ollama list` |
+| `LOCAL_MODEL_NAME` | `qwen3.6:latest` | Model name as shown in `ollama list` |
 | `CLOUD_MODEL_NAME` | `claude-opus-4-6` | Cloud model identifier (used by all non-local modes) |
 | `ANTHROPIC_API_KEY` | *(empty)* | Required when `LLM_MODE=anthropic` |
 | `API_KEY_GEMINI` | *(empty)* | Required when `LLM_MODE=cloud` |
@@ -304,6 +304,27 @@ See [`.env.local.example`](.env.local.example) for the full annotated template.
 | `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server (optional, for voice/vision) |
 | `CONTRIBUTE_DATA` | `false` | Log approved patches for fine-tuning |
 
+#### Cosmos 3 scene proposal flow
+
+Cosmos 3 is treated as a world-model proposal layer, not as a direct Isaac Sim
+mutator. A Cosmos Reasoner workflow can turn a photo, screenshot, render, or
+prompt into structured scene observations, then submit them to:
+
+```text
+POST /api/v1/canvas/{session_id}/cosmos/propose
+```
+
+The backend converts that observation into a reviewable `LayoutSpec` proposal.
+The floor-plan UI remains the correction/confirmation surface, and the final
+build still goes through the Isaac Sim 5.1 or 6.0 version-aware harness. See
+[Cosmos 3 to Floor-Plan Flow](docs/architecture/cosmos3-floor-plan-flow.md).
+
+For scale-out, Isaac Assist treats DGX Spark, Brev, and
+[isaac-sim/IsaacAutomator](https://github.com/isaac-sim/IsaacAutomator) as
+remote capacity providers. See
+[Remote Scale Providers](docs/architecture/remote-scale-providers.md) for the
+planned extension/backend contract.
+
 #### Asset path examples
 
 ```bash
@@ -336,6 +357,7 @@ The FastAPI service exposes the following REST API modules, all prefixed under `
 | `/settings/llm_mode` | LLM Mode Switch | `GET` current mode, `PUT` to hot-switch provider |
 | `/chat/pipeline/plan` | Pipeline Planner | Template-based multi-phase autonomous scene builder |
 | `/finetune` | Fine-tuning Builder | Knowledge Base → training data pipeline |
+| `/canvas/{session_id}/cosmos/propose` | Cosmos 3 Adapter | Cosmos Reasoner scene observations → floor-plan `LayoutSpec` proposals |
 
 Full interactive documentation: **`http://localhost:8000/docs`**
 
@@ -348,6 +370,7 @@ The current `master` includes the PR 115-117 integration wave:
 - Extended canonical linting, including enum/nested validation and `--validate-sandbox`.
 - Coexistence protection for Isaac Sim 5.1 and 6.0 extension harnesses.
 - Floor-plan GUI build/test baseline pinned to Vite/Vitest versions that work on Node 18.
+- Cosmos 3 proposal adapter for photo/screenshot/prompt-to-floor-plan scene reconstruction.
 
 ---
 

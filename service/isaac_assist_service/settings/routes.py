@@ -1,11 +1,12 @@
 import asyncio
 import logging
 import subprocess
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from .manager import SettingsManager
+from ..scale_providers import scale_provider_notice
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,12 @@ class ModelPullRequest(BaseModel):
 @router.get("/")
 async def get_settings():
     """Retrieve current LLM configuration settings."""
-    return {"status": "success", "settings": settings_manager.get_settings()}
+    from ..config import config
+    return {
+        "status": "success",
+        "settings": settings_manager.get_settings(),
+        "scale_notice": scale_provider_notice(config),
+    }
 
 @router.post("/")
 async def update_settings(req: SettingsUpdateRequest):
@@ -77,6 +83,16 @@ VALID_MODES = ("local", "google", "anthropic", "openai", "grok", "gemini")
 
 class ModeSwitchRequest(BaseModel):
     mode: str
+
+
+@router.get("/scale_notice")
+async def get_scale_notice(job_kind: Optional[str] = None):
+    """Return advisory notice for configured remote scale providers."""
+    from ..config import config
+    return {
+        "status": "success",
+        "notice": scale_provider_notice(config, job_kind=job_kind),
+    }
 
 
 @router.get("/llm_mode")

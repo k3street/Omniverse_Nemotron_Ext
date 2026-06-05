@@ -26,6 +26,16 @@ class SettingsManager:
         "XAI_API_KEY":       "api_key_grok",
         "OPENAI_API_BASE":   "openai_api_base",
         "MAX_TOOL_ROUNDS":   "max_tool_rounds",
+        "ISAAC_ASSIST_SCALE_PROVIDER": "scale_provider",
+        "DGX_SPARK_COSMOS_BASE_URL": "dgx_spark_cosmos_base_url",
+        "BREV_API_KEY": "brev_api_key",
+        "BREV_PROJECT_ID": "brev_project_id",
+        "BREV_TEMPLATE_ID": "brev_template_id",
+        "ISAAC_AUTOMATOR_ROOT": "isaac_automator_root",
+        "ISAAC_AUTOMATOR_CLOUD": "isaac_automator_cloud",
+        "ISAAC_AUTOMATOR_DEPLOYMENT": "isaac_automator_deployment",
+        "ISAAC_AUTOMATOR_ISAACSIM_REF": "isaac_automator_isaacsim_ref",
+        "ISAAC_AUTOMATOR_ISAACLAB_REF": "isaac_automator_isaaclab_ref",
     }
     _BOOL_KEYS = {"CONTRIBUTE_DATA", "AUTO_APPROVE"}
     _INT_KEYS  = {"MAX_TOOL_ROUNDS"}
@@ -58,6 +68,16 @@ class SettingsManager:
             "AUTO_APPROVE": str(config.auto_approve).lower(),
             "AUTO_INJECT_VIEWPORT": str(config.auto_inject_viewport).lower(),
             "MAX_TOOL_ROUNDS": str(config.max_tool_rounds),
+            # Remote scale providers
+            "ISAAC_ASSIST_SCALE_PROVIDER": config.scale_provider,
+            "DGX_SPARK_COSMOS_BASE_URL": config.dgx_spark_cosmos_base_url,
+            "BREV_PROJECT_ID": config.brev_project_id,
+            "BREV_TEMPLATE_ID": config.brev_template_id,
+            "ISAAC_AUTOMATOR_ROOT": config.isaac_automator_root,
+            "ISAAC_AUTOMATOR_CLOUD": config.isaac_automator_cloud,
+            "ISAAC_AUTOMATOR_DEPLOYMENT": config.isaac_automator_deployment,
+            "ISAAC_AUTOMATOR_ISAACSIM_REF": config.isaac_automator_isaacsim_ref,
+            "ISAAC_AUTOMATOR_ISAACLAB_REF": config.isaac_automator_isaaclab_ref,
             # Manipulation stack
             "CONTINUITY_MANAGER_URL": config.continuity_manager_url,
             "POLICY_BANK_URL": config.policy_bank_url,

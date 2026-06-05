@@ -71,6 +71,18 @@ class Config:
         # ── External tools ───────────────────────────────────────────────────
         self.isaaclab_path = os.environ.get("ISAACLAB_PATH", "")
 
+        # ── Remote scale providers ───────────────────────────────────────────
+        self.scale_provider = os.environ.get("ISAAC_ASSIST_SCALE_PROVIDER", "local")
+        self.dgx_spark_cosmos_base_url = os.environ.get("DGX_SPARK_COSMOS_BASE_URL", "")
+        self.brev_api_key = os.environ.get("BREV_API_KEY", "")
+        self.brev_project_id = os.environ.get("BREV_PROJECT_ID", "")
+        self.brev_template_id = os.environ.get("BREV_TEMPLATE_ID", "")
+        self.isaac_automator_root = os.environ.get("ISAAC_AUTOMATOR_ROOT", "")
+        self.isaac_automator_cloud = os.environ.get("ISAAC_AUTOMATOR_CLOUD", "")
+        self.isaac_automator_deployment = os.environ.get("ISAAC_AUTOMATOR_DEPLOYMENT", "")
+        self.isaac_automator_isaacsim_ref = os.environ.get("ISAAC_AUTOMATOR_ISAACSIM_REF", "")
+        self.isaac_automator_isaaclab_ref = os.environ.get("ISAAC_AUTOMATOR_ISAACLAB_REF", "")
+
         # ── Manipulation stack (RL+VLA pipeline) ─────────────────────────────
         self.continuity_manager_url  = os.environ.get("CONTINUITY_MANAGER_URL", "http://localhost:7100")
         self.policy_bank_url         = os.environ.get("POLICY_BANK_URL",        "http://localhost:7101")
