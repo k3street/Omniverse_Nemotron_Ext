@@ -58,11 +58,14 @@ The first runtime route is:
 
 ```text
 POST /api/v1/canvas/{session_id}/cosmos/observe
+POST /api/v1/canvas/{session_id}/cosmos/observe_viewport
 ```
 
 It accepts `prompt`, optional `image_base64`, `mime_type`, and `input_kind`,
 calls the configured OpenAI-compatible Cosmos 3 Reasoner endpoint, parses a
 `CosmosSceneObservation`, then forwards through `cosmos/propose`.
+`cosmos/observe_viewport` first captures the active Isaac Sim viewport through
+Kit RPC `/capture`, then runs the same observation/proposal flow.
 
 Configuration:
 

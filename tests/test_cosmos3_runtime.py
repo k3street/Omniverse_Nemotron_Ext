@@ -99,3 +99,74 @@ def test_cosmos_observe_route_rejects_invalid_base64():
         assert exc.status_code == 422
     else:
         raise AssertionError("Expected HTTPException for invalid base64")
+
+
+def test_cosmos_observe_viewport_captures_and_saves(monkeypatch, tmp_path):
+    class FakeReasoner:
+        async def observe_scene(self, *, prompt, image_bytes, mime_type, input_kind):
+            assert prompt == "Use viewport"
+            assert image_bytes == b"viewport-png"
+            assert mime_type == "image/png"
+            assert input_kind == "screenshot"
+            return CosmosSceneObservation(
+                input_kind="screenshot",
+                prompt=prompt,
+                objects=[
+                    CosmosObjectProposal(label="target bin", confidence=0.8)
+                ],
+            )
+
+    async def fake_capture(max_dim=1280):
+        assert max_dim == 640
+        return {
+            "image_b64": base64.b64encode(b"viewport-png").decode("ascii"),
+            "width": 640,
+            "height": 360,
+        }
+
+    from service.isaac_assist_service.chat.tools import kit_tools
+
+    old_store = routes._store
+    routes._store = MultimodalStore(tmp_path / "state.db")
+    monkeypatch.setattr(routes, "build_cosmos3_reasoner", lambda: FakeReasoner())
+    monkeypatch.setattr(kit_tools, "get_viewport_image", fake_capture)
+    try:
+        req = routes.CosmosViewportObserveRequest(
+            prompt="Use viewport",
+            max_dim=640,
+        )
+
+        response = asyncio.run(routes.observe_canvas_from_viewport("viewport_smoke", req))
+
+        assert response["valid"] is True
+        assert response["viewport_capture"] == {
+            "width": 640,
+            "height": 360,
+            "max_dim": 640,
+        }
+        assert response["spec"]["objects"][0]["object_class"] == "bin"
+    finally:
+        routes._store.close()
+        routes._store = old_store
+
+
+def test_cosmos_observe_viewport_reports_missing_capture(monkeypatch):
+    async def fake_capture(max_dim=1280):
+        return {"error": "Kit is not running"}
+
+    from service.isaac_assist_service.chat.tools import kit_tools
+
+    monkeypatch.setattr(kit_tools, "get_viewport_image", fake_capture)
+
+    try:
+        asyncio.run(
+            routes.observe_canvas_from_viewport(
+                "viewport_missing",
+                routes.CosmosViewportObserveRequest(),
+            )
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 503
+        assert "Kit is not running" in str(exc.detail)
+    else:
+        raise AssertionError("Expected HTTPException for missing viewport capture")

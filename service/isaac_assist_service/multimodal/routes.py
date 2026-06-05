@@ -142,6 +142,14 @@ class CosmosObserveRequest(BaseModel):
     parent_revision: int = Field(default=0, ge=0)
 
 
+class CosmosViewportObserveRequest(BaseModel):
+    """Capture the live Isaac viewport, call Cosmos, and save a proposal."""
+
+    prompt: str = Field(default="Reconstruct the current Isaac Sim viewport as a robotics floor plan.")
+    max_dim: int = Field(default=1280, ge=64, le=4096)
+    parent_revision: int = Field(default=0, ge=0)
+
+
 class ClientErrorReport(BaseModel):
     """Error report submitted by the UI client for server-side logging.
 
@@ -332,6 +340,42 @@ async def observe_canvas_from_cosmos(
     )
     response = await propose_canvas_from_cosmos(session_id, proposal)
     response["observation"] = observation.model_dump(mode="json")
+    return response
+
+
+@router.post("/{session_id}/cosmos/observe_viewport")
+async def observe_canvas_from_viewport(
+    session_id: str,
+    body: CosmosViewportObserveRequest,
+) -> Dict[str, Any]:
+    """Capture the active Isaac viewport and infer a floor-plan proposal."""
+    from ..chat.tools import kit_tools  # noqa: PLC0415
+
+    capture = await kit_tools.get_viewport_image(max_dim=body.max_dim)
+    image_b64 = (
+        capture.get("image_b64")
+        or capture.get("image_base64")
+        or capture.get("data")
+    )
+    if not image_b64:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=capture.get("error") or "Kit RPC viewport capture did not return image data",
+        )
+
+    observe_request = CosmosObserveRequest(
+        prompt=body.prompt,
+        image_base64=image_b64,
+        mime_type="image/png",
+        input_kind="screenshot",
+        parent_revision=body.parent_revision,
+    )
+    response = await observe_canvas_from_cosmos(session_id, observe_request)
+    response["viewport_capture"] = {
+        "width": capture.get("width"),
+        "height": capture.get("height"),
+        "max_dim": body.max_dim,
+    }
     return response
 
 
