@@ -1,0 +1,127 @@
+{
+  "task_id": "CP-NEW-assembly-constraint-verify",
+  "goal": "Verify assembly tolerance between a cylindrical peg and a bushing hole using the assembly-constraint API end-to-end. Create a peg Cylinder and a bushing Cube with a centre hole (modelled as a Cylinder receptor), apply physics, run setup_assembly_constraint to declare the peg-in-bushing relationship with 0.5 mm tolerance, then validate_assembly_constraint to pre-flight check the constraint spec. Measure clearance with get_bounding_box on both prims. Settle physics with sim_control, query list_contacts to confirm the peg-bushing contact state. check_physics_health to confirm no instabilities. Exercises the setup_assembly_constraint → validate_assembly_constraint → get_bounding_box → list_contacts pipeline — unused in all prior canonicals.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "setup_assembly_constraint",
+    "validate_assembly_constraint",
+    "get_bounding_box",
+    "sim_control",
+    "list_contacts",
+    "check_physics_health"
+  ],
+  "thoughts": "Design rationale for CP-NEW-assembly-constraint-verify:\n\n1) Pattern gap: no existing canonical exercises setup_assembly_constraint + validate_assembly_constraint together. This is a pure assembly-QA workflow distinct from pick-place, sort, rl-train, safety-zone, and mesh-opt canonicals.\n\n2) A29 decision doc explicitly deferred this to A30: 'direct_joint + assembly_constraint, medium — deferred (good A30 candidate)'.\n\n3) Scene geometry:\n   - Bushing prim: Cube at [0, 0, 0.05] scaled [0.08, 0.08, 0.10] — 80mm square housing, 100mm tall. Static (no RigidBodyAPI). CollisionAPI applied.\n   - Bushing hole modelled as a Cylinder receptor prim /World/BushingHole at [0, 0, 0.05], radius=0.021m (21mm ID), height=0.10m, to mark the hole centre. No physics — just geometry anchor.\n   - Peg: Cylinder at [0, 0, 0.18], radius=0.020m (20mm OD), height=0.06m. RigidBodyAPI + CollisionAPI + MassAPI (mass=0.15 kg). Starts 30mm above bushing entry (z=0.18 vs bushing top z=0.10).\n   - Clearance = 1 mm radial gap (21mm ID - 20mm OD = 1mm per side). This is the nominal tolerance this canonical verifies.\n\n4) setup_assembly_constraint args:\n   - peg_path: /World/Peg\n   - hole_path: /World/BushingHole\n   - tolerance: 0.0005 (0.5mm — tighter than the 1mm clearance, intentionally satisfied)\n   - constraint_path: /World/Constraints/PegBushingConstraint\n\n5) validate_assembly_constraint args:\n   - name: 'peg_bushing_check'\n   - type: 'cylindrical_fit'\n   - target_a: {prim_path: '/World/Peg', radius: 0.020}\n   - target_b: {prim_path: '/World/BushingHole', radius: 0.021}\n   - tolerance_m: 0.0005\n   - params: {axis: 'Z', min_overlap_m: 0.04}\n\n6) get_bounding_box on /World/Peg and /World/BushingHole to compute actual clearance from bbox sizes.\n\n7) sim_control play → 30 steps settle → list_contacts on /World/Peg to confirm peg touches bushing bore wall.\n\n8) check_physics_health ensures no sleeping/tunnelling artefacts.\n\n9) No robot arm required — pure USD/physics-API workflow. direct_joint mc_preference is nominal (no joint motion involved in this setup phase).\n\n10) verified_status: drafted — function gate requires Kit RPC for sim_control + list_contacts.",
+  "code": "# ── Ground and lighting ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=800.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[20, 20, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics scene: CPU dynamics for determinism ───────────────────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── Bushing housing (static) ──────────────────────────────────────────────────\n# 80x80x100 mm square block; no RigidBodyAPI — it is world-fixed.\ncreate_prim(\n    prim_path=\"/World/Bushing\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.05],\n    scale=[0.08, 0.08, 0.10],\n)\napply_api_schema(prim_path=\"/World/Bushing\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Bushing hole anchor prim (geometry reference, no physics) ────────────────\n# Cylinder marks the bore centre-line: radius=21 mm, height=100 mm.\ncreate_prim(\n    prim_path=\"/World/BushingHole\",\n    prim_type=\"Cylinder\",\n    position=[0, 0, 0.05],\n    radius=0.021,\n    height=0.10,\n)\n# No CollisionAPI — pure geometry anchor for constraint reference.\n\n# ── Peg (dynamic) ────────────────────────────────────────────────────────────\n# Cylinder radius=20 mm, height=60 mm. Starts 30 mm above bushing top.\ncreate_prim(\n    prim_path=\"/World/Peg\",\n    prim_type=\"Cylinder\",\n    position=[0, 0, 0.18],\n    radius=0.020,\n    height=0.06,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Peg\", schema_name=api)\nset_attribute(prim_path=\"/World/Peg\", attr_name=\"physics:mass\", value=0.15)\n# Prevent peg from sleeping before fully settling.\nset_attribute(prim_path=\"/World/Peg\", attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# ── Assembly constraint declaration ──────────────────────────────────────────\n# Declares peg-in-bushing relationship; tolerance=0.5 mm.\n# The 1 mm radial clearance (21-20 mm) satisfies the 0.5 mm spec.\nsetup_assembly_constraint(\n    peg_path=\"/World/Peg\",\n    hole_path=\"/World/BushingHole\",\n    tolerance=0.0005,\n    constraint_path=\"/World/Constraints/PegBushingConstraint\",\n)\n\n# ── Pre-flight validation of the constraint spec ──────────────────────────────\n# validate_assembly_constraint is a pure-Python gate (no Kit needed).\nvalidate_assembly_constraint(\n    name=\"peg_bushing_check\",\n    type=\"concentric\",\n    target_a={\"prim_path\": \"/World/Peg\", \"radius\": 0.020},\n    target_b={\"prim_path\": \"/World/BushingHole\", \"radius\": 0.021},\n    tolerance_m=0.0005,\n    params={\"axis\": \"Z\", \"min_overlap_m\": 0.04},\n)\n\n# ── Bounding box clearance measurement ───────────────────────────────────────\n# Compute actual bbox of peg and bushing hole; compare radii from bbox sizes.\nget_bounding_box(prim_path=\"/World/Peg\")\nget_bounding_box(prim_path=\"/World/BushingHole\")\n# Expected: Peg bbox size [0.04, 0.04, 0.06]; BushingHole bbox size [0.042, 0.042, 0.10].\n# Radial clearance = (0.042 - 0.040) / 2 = 0.001 m = 1 mm. Satisfies 0.5 mm tolerance.\n\n# ── Simulate to confirm contact ───────────────────────────────────────────────\n# Play physics; peg drops ~80 mm under gravity into bushing bore.\nsim_control(action=\"play\")\n# Step 30 frames (~0.5 s at 60 Hz) to allow peg to settle inside bushing.\nsim_control(action=\"step\", step_count=30)\nsim_control(action=\"pause\")\n\n# ── Contact state verification ────────────────────────────────────────────────\n# Confirm peg contacts bushing bore (not tunnelled through).\nlist_contacts(prim_path=\"/World/Peg\", duration=0.1, min_impulse=0.001)\n\n# ── Physics health check ──────────────────────────────────────────────────────\ncheck_physics_health()",
+  "code_template": "# ── Ground and lighting ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=800.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[20, 20, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics scene ─────────────────────────────────────────────────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── Bushing housing (static) ──────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"{{bushing.path}}\",\n    prim_type=\"Cube\",\n    position={{bushing.position}},\n    scale={{bushing.scale}},\n)\napply_api_schema(prim_path=\"{{bushing.path}}\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Bushing hole anchor ───────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"{{bushing_hole.path}}\",\n    prim_type=\"Cylinder\",\n    position={{bushing_hole.position}},\n    radius={{bushing_hole.radius}},\n    height={{bushing_hole.height}},\n)\n\n# ── Peg (dynamic) ────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"{{peg.path}}\",\n    prim_type=\"Cylinder\",\n    position={{peg.initial_position}},\n    radius={{peg.radius}},\n    height={{peg.height}},\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"{{peg.path}}\", schema_name=api)\nset_attribute(prim_path=\"{{peg.path}}\", attr_name=\"physics:mass\", value={{peg.mass_kg}})\nset_attribute(prim_path=\"{{peg.path}}\", attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# ── Assembly constraint declaration ──────────────────────────────────────────\nsetup_assembly_constraint(\n    peg_path=\"{{peg.path}}\",\n    hole_path=\"{{bushing_hole.path}}\",\n    tolerance={{constraint.tolerance_m}},\n    constraint_path=\"{{constraint.path}}\",\n)\n\n# ── Pre-flight validation ─────────────────────────────────────────────────────\nvalidate_assembly_constraint(\n    name=\"{{constraint.name}}\",\n    type=\"concentric\",\n    target_a={\"prim_path\": \"{{peg.path}}\", \"radius\": {{peg.radius}}},\n    target_b={\"prim_path\": \"{{bushing_hole.path}}\", \"radius\": {{bushing_hole.radius}}},\n    tolerance_m={{constraint.tolerance_m}},\n    params={\"axis\": \"Z\", \"min_overlap_m\": {{constraint.min_overlap_m}}},\n)\n\n# ── Bounding box clearance check ─────────────────────────────────────────────\nget_bounding_box(prim_path=\"{{peg.path}}\")\nget_bounding_box(prim_path=\"{{bushing_hole.path}}\")\n\n# ── Settle physics ────────────────────────────────────────────────────────────\nsim_control(action=\"play\")\nsim_control(action=\"step\", step_count=30)\nsim_control(action=\"pause\")\n\n# ── Contact verification ──────────────────────────────────────────────────────\nlist_contacts(prim_path=\"{{peg.path}}\", duration=0.1, min_impulse=0.001)\n\n# ── Physics health ────────────────────────────────────────────────────────────\ncheck_physics_health()",
+  "settle_state": {
+    "peg_path": "/World/Peg",
+    "bushing_path": "/World/Bushing",
+    "bushing_hole_path": "/World/BushingHole",
+    "constraint_path": "/World/Constraints/PegBushingConstraint",
+    "tolerance_m": 0.0005,
+    "peg_radius_m": 0.020,
+    "bushing_hole_radius_m": 0.021,
+    "radial_clearance_m": 0.001
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "",
+        "pick_path": "/World/Peg",
+        "place_path": "/World/BushingHole",
+        "robot_kind": ""
+      }
+    ],
+    "constraint_name": "peg_bushing_check",
+    "constraint_type": "concentric",
+    "tolerance_m": 0.0005,
+    "expected_validation_pass": true,
+    "peg_path": "/World/Peg",
+    "bushing_hole_path": "/World/BushingHole",
+    "expected_contact_after_settle": true
+  },
+  "simulate_args": {
+    "target_path": "/World/Peg",
+    "cube_path": "/World/Peg",
+    "settle_steps": 30,
+    "check_contact_prim": "/World/Peg",
+    "min_impulse": 0.001,
+    "duration_s": 0.5
+  },
+  "diagnose_args": {
+    "peg_path": "/World/Peg",
+    "bushing_path": "/World/Bushing",
+    "constraint_path": "/World/Constraints/PegBushingConstraint",
+    "peg_radius_m": 0.020,
+    "bushing_hole_radius_m": 0.021
+  },
+  "failure_modes": [
+    "Peg tunnels through bushing at high velocity — keep peg mass <= 0.5 kg and use CPU broadphase MBP (not SAP) to avoid CCD miss.",
+    "validate_assembly_constraint type must be one of ['coincident_axes', 'concentric', 'tangent', 'parallel_planes', 'fixed_offset', 'angle_between', 'distance_between']; 'concentric' is correct for peg-in-bushing (axis-aligned cylinders with radial tolerance).",
+    "BushingHole has no CollisionAPI intentionally — it is a geometry anchor; adding CollisionAPI would cause peg-BushingHole contact reports that mask actual bushing bore contact.",
+    "setup_assembly_constraint constraint_path must be under a valid Xform parent — create /World/Constraints Xform first if the stage does not have it, or pass constraint_path=/World/PegBushingConstraint.",
+    "list_contacts requires physics to be playing or paused-after-step — calling it before sim_control(play) returns empty contact list."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_assembly_constraint": true,
+      "has_contact_verification": true,
+      "has_bbox_clearance_check": true
+    }
+  },
+  "roles": {
+    "peg": {
+      "constraints": ["Cylinder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "dynamic_cylindrical_insert_part"
+    },
+    "bushing_hole": {
+      "constraints": ["Cylinder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "static_bore_anchor_prim"
+    }
+  },
+  "role_defaults": {
+    "peg": {
+      "path": "/World/Peg",
+      "initial_position": [0, 0, 0.18],
+      "radius": 0.020,
+      "height": 0.06,
+      "mass_kg": 0.15
+    },
+    "bushing": {
+      "path": "/World/Bushing",
+      "position": [0, 0, 0.05],
+      "scale": [0.08, 0.08, 0.10]
+    },
+    "bushing_hole": {
+      "path": "/World/BushingHole",
+      "position": [0, 0, 0.05],
+      "radius": 0.021,
+      "height": 0.10
+    },
+    "constraint": {
+      "path": "/World/Constraints/PegBushingConstraint",
+      "name": "peg_bushing_check",
+      "tolerance_m": 0.0005,
+      "min_overlap_m": 0.04
+    }
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["direct_joint"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓ (R-A30-fix); function-gate ⏳ Kit RPC"
+}

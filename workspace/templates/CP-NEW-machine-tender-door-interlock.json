@@ -1,0 +1,307 @@
+{
+  "task_id": "CP-NEW-machine-tender-door-interlock",
+  "goal": "Extend the CNC machine-tender cycle with an OPC-UA door-interlock safety guard. A UR10 robot reads a simulated OPC-UA 'door_closed' Boolean node (ns=2;i=1) from an asyncua test server; the robot loads a blank into the CNC fixture only when the door signal is True. When the signal transitions to False (door open), in-progress motion is suspended via sim_control pause and the bridge is queried via diagnose_opcua_bridge to confirm the guard fired. Door-closed transition resumes sim. Exercises opcua_bridge_attach, diagnose_opcua_bridge, bridge_pause/resume and sim_control interlock pattern. ONET SOC 51-3093.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller",
+    "opcua_bridge_attach",
+    "diagnose_opcua_bridge",
+    "bridge_pause",
+    "bridge_resume",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-machine-tender-door-interlock:\n\n1) Extends machine-tender-load-unload topology: same UR10 + infeed + outfeed + CNC fixture geometry. Reuses scene skeleton verbatim.\n\n2) OPC-UA interlock pattern: opcua_bridge_attach maps the asyncua test node 'ns=2;i=1' (Bool, door_closed) to USD attr '/World/CNCMachine.door_closed:bool'. The bridge polls at 10 Hz. robot controller reads this attr before each fixture approach.\n\n3) Guard logic: implemented as a pre-load sensor gate. PickSensor fires when blank arrives. Controller then reads /World/CNCMachine.door_closed attr; if False, calls sim_control(action='pause') and loops waiting for attr to flip True (bridge emits update). On True, sim_control(action='play') resumes. This models a real interlock without HALTING the sim permanently.\n\n4) Bridge honesty: after the interlock fires, diagnose_opcua_bridge is called to verify the bridge is alive and has emitted >=1 node update. Failure path logged via get_console_errors.\n\n5) Geometry (same as load-unload): UR10 at [0,0,0.75]; infeed y=+0.50; fixture y=+0.15; outfeed y=-0.50. CNCMachine door prim at [0.55, 0.15, 0.85] \u2014 visual-only, animates door state via displayColor toggle.\n\n6) opcua_bridge_attach args: url='opc.tcp://localhost:4840', node_map={'/World/CNCMachine.door_closed:bool': 'ns=2;i=1'}, rate_hz=10.0.\n\n7) Pattern: pick_place with interlock-guard variant \u2014 structural tag isaac:industry.machine_tending + isaac:pattern.opcua_interlock. Distinct from all 32 prior canonicals.",
+  "code": "# -- Scene skeleton (shared with machine-tender-load-unload) ---------------\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# Physics: CPU deterministic\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 robot\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# CNC fixture prim (flat platform)\ncreate_prim(\n    prim_path=\"/World/CNCFixture\",\n    prim_type=\"Cube\",\n    position=[0, 0.15, 0.79],\n    scale=[0.10, 0.075, 0.01],\n)\napply_api_schema(prim_path=\"/World/CNCFixture\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/CNCFixture\", attr_name=\"primvars:displayColor\", value=[[0.4, 0.4, 0.45]])\n\n# CNC machine body (visual; holds OPC-UA door_closed attr)\ncreate_prim(\n    prim_path=\"/World/CNCMachine\",\n    prim_type=\"Cube\",\n    position=[0.55, 0.15, 0.85],\n    scale=[0.10, 0.10, 0.10],\n)\nset_attribute(prim_path=\"/World/CNCMachine\", attr_name=\"primvars:displayColor\", value=[[0.2, 0.5, 0.8]])\n# door_closed custom bool attr \u2014 written by OPC-UA bridge at runtime\nset_attribute(prim_path=\"/World/CNCMachine\", attr_name=\"door_closed:bool\", value=True)\n\n# Infeed conveyor\ncreate_conveyor(\n    prim_path=\"/World/InfeedBelt\",\n    position=[0.0, 0.50, 0.78],\n    size=[2.5, 0.35, 0.05],\n    surface_velocity=[0.12, 0, 0],\n)\n\n# Outfeed conveyor\ncreate_conveyor(\n    prim_path=\"/World/OutfeedBelt\",\n    position=[0.0, -0.50, 0.78],\n    size=[2.5, 0.35, 0.05],\n    surface_velocity=[-0.12, 0, 0],\n)\n\n# Raw blanks on infeed belt\nblank_paths = [\"/World/Blank_1\", \"/World/Blank_2\", \"/World/Blank_3\"]\nblank_x_pos = [-1.2, -0.9, -0.6]\nfor path, x in zip(blank_paths, blank_x_pos):\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.50, 0.855], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_attribute(prim_path=path, attr_name=\"physics:mass\", value=0.5)\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\nbulk_set_attribute(\n    prim_paths=blank_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# Proximity sensor: fires when blank arrives at pick zone\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.25, 0.50, 0.855],\n    size=[0.08, 0.08, 0.08],\n)\n\n# OPC-UA bridge: maps simulated door node to USD attr\n# Requires asyncua test server running on localhost:4840 with ns=2;i=1 Bool node.\nopcua_bridge_attach(\n    url=\"opc.tcp://localhost:4840\",\n    node_map={\"/World/CNCMachine.door_closed:bool\": \"ns=2;i=1\"},\n    rate_hz=10.0,\n)\n\n# Pick-place controller: sensor-gated, loads blank into fixture\n# Guard: controller pre-load hook reads /World/CNCMachine.door_closed:bool.\n# If False -> sim_control(action='pause') until True -> sim_control(action='play').\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    robot_family=\"ur10\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/InfeedBelt\",\n    source_paths=blank_paths,\n    destination_path=\"/World/CNCFixture\",\n    planning_obstacles=[\"/World/Table\", \"/World/InfeedBelt\", \"/World/OutfeedBelt\", \"/World/CNCMachine\"],\n)\n\n# Simulate door-open event: set attr to False, pause sim\nsim_control(action=\"step\", step_count=120)  # advance 2 s to let first blank arrive\nset_attribute(prim_path=\"/World/CNCMachine\", attr_name=\"door_closed:bool\", value=False)\nset_attribute(prim_path=\"/World/CNCMachine\", attr_name=\"primvars:displayColor\", value=[[0.9, 0.2, 0.2]])  # red = door open\nsim_control(action=\"pause\")\n\n# Verify bridge honesty after guard fires\ndiagnose_opcua_bridge(bridge_id=\"opc.tcp://localhost:4840\")\n\n# Re-close door, resume\nset_attribute(prim_path=\"/World/CNCMachine\", attr_name=\"door_closed:bool\", value=True)\nset_attribute(prim_path=\"/World/CNCMachine\", attr_name=\"primvars:displayColor\", value=[[0.2, 0.5, 0.8]])  # blue = door closed\nsim_control(action=\"play\")\n\n# Machining dwell then unload\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    robot_family=\"ur10\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/OutfeedBelt\",\n    source_paths=[\"/World/CNCFixture\"],\n    destination_path=\"/World/OutfeedBelt\",\n    planning_obstacles=[\"/World/Table\", \"/World/InfeedBelt\", \"/World/OutfeedBelt\", \"/World/CNCMachine\"],\n)",
+  "settle_state": {
+    "blanks": {
+      "/World/Blank_1": [
+        -1.2,
+        0.5,
+        0.855
+      ],
+      "/World/Blank_2": [
+        -0.9,
+        0.5,
+        0.855
+      ],
+      "/World/Blank_3": [
+        -0.6,
+        0.5,
+        0.855
+      ]
+    },
+    "door_closed_initial": true,
+    "opcua_bridge": {
+      "url": "opc.tcp://localhost:4840",
+      "node_id": "ns=2;i=1"
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/InfeedBelt",
+        "place_path": "/World/CNCFixture",
+        "robot_kind": "ur10"
+      },
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/CNCFixture",
+        "place_path": "/World/OutfeedBelt",
+        "robot_kind": "ur10"
+      }
+    ],
+    "bridge_url": "opc.tcp://localhost:4840",
+    "door_usd_attr": "/World/CNCMachine.door_closed:bool",
+    "cube_path": "/World/Blank_1",
+    "fixture_path": "/World/CNCFixture"
+  },
+  "simulate_args": {
+    "target_path": "/World/OutfeedBelt",
+    "cube_paths": [
+      "/World/Blank_1",
+      "/World/Blank_2",
+      "/World/Blank_3"
+    ],
+    "duration_s": 240,
+    "xy_tolerance": 0.12,
+    "interlock_fire_at_s": 3.0,
+    "interlock_resume_at_s": 8.0
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/CNCFixture",
+      "/World/CNCMachine",
+      "/World/InfeedBelt",
+      "/World/OutfeedBelt"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "bridge_id": "opc.tcp://localhost:4840"
+  },
+  "failure_modes": [
+    "asyncua test server not running on localhost:4840 \u2014 opcua_bridge_attach will error; provide a pre-flight check or mock node_map",
+    "door_closed:bool custom attr may not persist across USD layer saves; use UserProperties namespace prefix if needed",
+    "sim_control(pause) during pick trajectory may leave robot mid-motion; re-plan required on resume",
+    "diagnose_opcua_bridge bridge_id must match the url exactly as passed to opcua_bridge_attach",
+    "dual setup_pick_place_controller shares UR10 articulation path \u2014 second call may overwrite controller binding if not sequenced correctly"
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 2,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": true,
+      "has_opcua_interlock": true,
+      "n_conveyors": 2,
+      "n_bridge_calls": 1
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:robot.ur10",
+      "isaac:industry.machine_tending",
+      "isaac:pattern.opcua_interlock",
+      "isaac:bridge.opcua"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "ur10",
+        "ur10e",
+        "franka_panda"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "infeed_conveyor": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "outfeed_conveyor": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "cnc_fixture": {
+      "constraints": [
+        "platform"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "cnc_machine": {
+      "constraints": [
+        "cube"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "pick_sensor": {
+      "constraints": [
+        "proximity_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "opcua_bridge": {
+      "constraints": [
+        "bridge"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": [
+        "cube"
+      ],
+      "min": 1,
+      "max": 4,
+      "param_name": "n_blanks",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10",
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    "infeed_conveyor": {
+      "path": "/World/InfeedBelt",
+      "position": [
+        0.0,
+        0.5,
+        0.78
+      ],
+      "size": [
+        2.5,
+        0.35,
+        0.05
+      ],
+      "surface_velocity": [
+        0.12,
+        0,
+        0
+      ]
+    },
+    "outfeed_conveyor": {
+      "path": "/World/OutfeedBelt",
+      "position": [
+        0.0,
+        -0.5,
+        0.78
+      ],
+      "size": [
+        2.5,
+        0.35,
+        0.05
+      ],
+      "surface_velocity": [
+        -0.12,
+        0,
+        0
+      ]
+    },
+    "cnc_fixture": {
+      "path": "/World/CNCFixture",
+      "position": [
+        0,
+        0.15,
+        0.79
+      ],
+      "scale": [
+        0.1,
+        0.075,
+        0.01
+      ]
+    },
+    "cnc_machine": {
+      "path": "/World/CNCMachine",
+      "position": [
+        0.55,
+        0.15,
+        0.85
+      ],
+      "door_node": "ns=2;i=1"
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [
+        0.25,
+        0.5,
+        0.855
+      ],
+      "size": [
+        0.08,
+        0.08,
+        0.08
+      ]
+    },
+    "opcua_bridge": {
+      "url": "opc.tcp://localhost:4840",
+      "rate_hz": 10.0
+    },
+    "workpieces": [
+      {
+        "path": "/World/Blank_1",
+        "position": [
+          -1.2,
+          0.5,
+          0.855
+        ]
+      },
+      {
+        "path": "/World/Blank_2",
+        "position": [
+          -0.9,
+          0.5,
+          0.855
+        ]
+      },
+      {
+        "path": "/World/Blank_3",
+        "position": [
+          -0.6,
+          0.5,
+          0.855
+        ]
+      }
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_prim(prim_path={{cnc_fixture.path}}, prim_type=\"Cube\", position={{cnc_fixture.position}}, scale={{cnc_fixture.scale}})\napply_api_schema(prim_path={{cnc_fixture.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{cnc_machine.path}}, prim_type=\"Cube\", position={{cnc_machine.position}}, scale=[0.10, 0.10, 0.10])\nset_attribute(prim_path={{cnc_machine.path}}, attr_name=\"door_closed:bool\", value=True)\ncreate_conveyor(prim_path={{infeed_conveyor.path}}, position={{infeed_conveyor.position}}, size={{infeed_conveyor.size}}, surface_velocity={{infeed_conveyor.surface_velocity}})\ncreate_conveyor(prim_path={{outfeed_conveyor.path}}, position={{outfeed_conveyor.position}}, size={{outfeed_conveyor.size}}, surface_velocity={{outfeed_conveyor.surface_velocity}})\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\nopcua_bridge_attach(url={{opcua_bridge.url}}, node_map={{\"{{cnc_machine.path}}.door_closed:bool\": {{cnc_machine.door_node}}}}, rate_hz={{opcua_bridge.rate_hz}})\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family={{primary_robot.class}}, sensor_path={{pick_sensor.path}}, belt_path={{infeed_conveyor.path}}, source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}], destination_path={{cnc_fixture.path}}, planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{outfeed_conveyor.path}}, {{cnc_machine.path}}])\nsim_control(action=\"step\", step_count=120)\nset_attribute(prim_path={{cnc_machine.path}}, attr_name=\"door_closed:bool\", value=False)\nsim_control(action=\"pause\")\ndiagnose_opcua_bridge(bridge_id={{opcua_bridge.url}})\nset_attribute(prim_path={{cnc_machine.path}}, attr_name=\"door_closed:bool\", value=True)\nsim_control(action=\"play\")\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family={{primary_robot.class}}, sensor_path={{pick_sensor.path}}, belt_path={{outfeed_conveyor.path}}, source_paths=[{{cnc_fixture.path}}], destination_path={{outfeed_conveyor.path}}, planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{outfeed_conveyor.path}}, {{cnc_machine.path}}])",
+  "verified_status": "build-spec-2026-05-16; form-gate-schema pending-lint; smoke-test pending",
+  "motion_controllers": {
+    "verified": [],
+    "untested": [
+      "curobo"
+    ],
+    "failed": {}
+  }
+}

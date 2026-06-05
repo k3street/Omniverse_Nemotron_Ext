@@ -1,0 +1,91 @@
+{
+  "task_id": "CP-NEW-groot-export-dataset-hdf5",
+  "goal": "Export a recorded GR00T teleoperation demo corpus to HDF5 format for Isaac Lab training: (1) finetune_stats audits the corpus (turn count, approval rate, error rate); (2) redact_finetune_data strips operator PII and API keys from the raw JSONL before export; (3) export_finetune_data packages the approved, redacted turns into OpenAI-format JSONL; (4) export_dataset runs the Replicator step-loop to materialise the final HDF5 bundle (num_frames=50, output_dir=/tmp/groot_export_hdf5). SUCCESS criterion: /tmp/groot_export_hdf5 directory exists and contains at least one file after export_dataset completes. Exercises the dataset-export pipeline: finetune_stats -> redact_finetune_data -> export_finetune_data -> export_dataset.",
+  "tools_used": [
+    "finetune_stats",
+    "redact_finetune_data",
+    "export_finetune_data",
+    "export_dataset"
+  ],
+  "thoughts": [
+    "This canonical covers the minimum viable GR00T dataset-export path. No robot arm, no physics, no motion planning. The pipeline is: audit corpus -> redact PII -> package JSONL -> materialise HDF5. It is the cheapest pre-training data-prep canonical to execute and should be run before any fine-tuning investment.",
+    "finetune_stats requires no arguments. It returns a dict with 'total_turns', 'approval_rate', 'error_rate', 'date_range', and 'rejection_correction_pairs'. If approval_rate < 0.80 the canonical emits a WARN and continues — low approval rate does not block export, but is a data-quality signal.",
+    "redact_finetune_data requires 'input_path' (str). We point it at the raw JSONL produced by the teleoperation session. 'output_path' is optional; we set it explicitly to /tmp/groot_raw_redacted.jsonl so the path is deterministic. The tool strips sk-*, AIza*, Bearer *, ghp_* tokens and file-system paths containing usernames.",
+    "export_finetune_data requires 'format' (str). We use 'openai' — the format consumed by the Isaac Lab GR00T training pipeline. 'min_quality' defaults to 'approved_successful'; we pass it explicitly for clarity. 'output_path' is set to /tmp/groot_export_turns.jsonl.",
+    "export_dataset requires 'output_dir' (str) and 'num_frames' (int). We set output_dir=/tmp/groot_export_hdf5 and num_frames=50 (a minimal smoke-test batch; real training runs use 10 000+). 'step_batch' is left at the default (10). The tool runs a Replicator async step-loop; it must be called AFTER create_sdg_pipeline in a real SDG workflow, but for this data-export canonical the directory creation and file-write are the observable success criterion.",
+    "SUCCESS is defined as os.path.isdir('/tmp/groot_export_hdf5') and len(os.listdir('/tmp/groot_export_hdf5')) > 0 after export_dataset returns. We do NOT gate on frame count — the handler may batch-write and the file count varies by implementation.",
+    "POTENTIAL PITFALL: export_finetune_data filters by min_quality='approved_successful'. If the corpus has zero approved turns (fresh install, no recorded sessions), it returns an empty JSONL. The pipeline still runs correctly; the downstream HDF5 bundle will contain no demonstration data. The canonical passes the structural check regardless.",
+    "POTENTIAL PITFALL: export_dataset writes to output_dir. If the directory is not writable (e.g. /tmp is a tmpfs and is full), the tool will raise an OSError. The canonical catches this and surfaces it as a WARN rather than a hard failure."
+  ],
+  "code": "import json\nimport os\n\n# ── Constants ─────────────────────────────────────────────────────────────────\nRAW_JSONL_PATH = \"/tmp/groot_raw_turns.jsonl\"\nREDACTED_JSONL_PATH = \"/tmp/groot_raw_redacted.jsonl\"\nEXPORTED_JSONL_PATH = \"/tmp/groot_export_turns.jsonl\"\nHDF5_OUTPUT_DIR = \"/tmp/groot_export_hdf5\"\nNUM_FRAMES = 50\nRESULT_FILE = \"/tmp/groot_export_result.json\"\n\nos.makedirs(\"/tmp\", exist_ok=True)\nos.makedirs(HDF5_OUTPUT_DIR, exist_ok=True)\n\n# Ensure a minimal raw JSONL stub exists so redact_finetune_data has something to read\n# on a fresh system (real usage: file is populated by record_teleop_demo sessions)\nif not os.path.exists(RAW_JSONL_PATH):\n    with open(RAW_JSONL_PATH, \"w\") as f:\n        f.write(json.dumps({\"role\": \"user\", \"content\": \"pick the cube\"}) + \"\\n\")\n        f.write(json.dumps({\"role\": \"assistant\", \"content\": \"[tool call: grasp_object]\"}) + \"\\n\")\n\n# ── Step 1: Audit corpus statistics ──────────────────────────────────────────\n# Required: (none)\n# Returns: total_turns, approval_rate, tool_distribution, error_rate,\n#          date_range, rejection_correction_pairs\nstats = finetune_stats()\nprint(\"[STATS]\", stats)\n\napproval_rate = 0.0\nif isinstance(stats, dict):\n    approval_rate = stats.get(\"approval_rate\", 0.0)\n    total_turns = stats.get(\"total_turns\", 0)\n    if approval_rate < 0.80:\n        print(\n            f\"[WARN] Low approval rate {approval_rate:.1%} (threshold 80%). \"\n            f\"Consider reviewing rejected turns before export.\"\n        )\n    else:\n        print(f\"[OK] Corpus audit passed: {total_turns} turns, approval_rate={approval_rate:.1%}\")\n\n# ── Step 2: Redact PII and API keys from raw JSONL ───────────────────────────\n# Required: input_path (str)\n# Optional: output_path (str)\n# Strips sk-*, AIza*, Bearer *, ghp_* tokens and filesystem paths with usernames.\nredact_result = redact_finetune_data(\n    input_path=RAW_JSONL_PATH,\n    output_path=REDACTED_JSONL_PATH,\n)\nprint(\"[REDACT]\", redact_result)\n\nif isinstance(redact_result, dict):\n    redacted_count = redact_result.get(\"redacted_count\", 0)\n    print(f\"[OK] Redaction complete: {redacted_count} items redacted. Output: {REDACTED_JSONL_PATH}\")\nelse:\n    print(\"[WARN] redact_finetune_data did not return a dict; proceeding with raw input.\")\n    REDACTED_JSONL_PATH = RAW_JSONL_PATH\n\n# ── Step 3: Package approved turns into OpenAI-format JSONL ──────────────────\n# Required: format (str)\n# Optional: min_quality (str), output_path (str)\n# format='openai' produces the schema consumed by Isaac Lab GR00T training pipeline.\nexport_result = export_finetune_data(\n    format=\"openai\",\n    min_quality=\"approved_successful\",\n    output_path=EXPORTED_JSONL_PATH,\n)\nprint(\"[EXPORT_FT]\", export_result)\n\nexported_turns = 0\nif isinstance(export_result, dict):\n    exported_turns = export_result.get(\"exported_count\", 0)\n    print(f\"[OK] Exported {exported_turns} approved turns to {EXPORTED_JSONL_PATH}\")\n    if exported_turns == 0:\n        print(\n            \"[WARN] Zero turns exported (no approved_successful turns in corpus). \"\n            \"Record and approve teleoperation demos before running this pipeline in production.\"\n        )\n\n# ── Step 4: Materialise HDF5 bundle via Replicator step-loop ─────────────────\n# Required: output_dir (str), num_frames (int)\n# Optional: step_batch (int, default 10)\n# Runs a Replicator async step-loop; yields to Kit UI every step_batch frames.\n# In a full SDG workflow this follows create_sdg_pipeline; here it confirms\n# the dataset-write path works end-to-end with a minimal 50-frame batch.\ntry:\n    dataset_result = export_dataset(\n        output_dir=HDF5_OUTPUT_DIR,\n        num_frames=NUM_FRAMES,\n    )\n    print(\"[EXPORT_DS]\", dataset_result)\nexcept OSError as exc:\n    print(f\"[WARN] export_dataset raised OSError: {exc}. Check /tmp write permissions.\")\n    dataset_result = None\n\n# ── Step 5: Verify output directory is non-empty ──────────────────────���──────\npipeline_ok = os.path.isdir(HDF5_OUTPUT_DIR) and len(os.listdir(HDF5_OUTPUT_DIR)) > 0\noutput_files = os.listdir(HDF5_OUTPUT_DIR) if os.path.isdir(HDF5_OUTPUT_DIR) else []\n\n# ── Step 6: Persist result ────────────────────────────────────────────────────\nresult_payload = {\n    \"task_id\": \"CP-NEW-groot-export-dataset-hdf5\",\n    \"pipeline_ok\": pipeline_ok,\n    \"approval_rate\": approval_rate,\n    \"exported_turns\": exported_turns,\n    \"hdf5_output_dir\": HDF5_OUTPUT_DIR,\n    \"output_files\": output_files,\n    \"num_frames_requested\": NUM_FRAMES,\n}\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump(result_payload, f, indent=2)\n\nprint(f\"[RESULT] Written to {RESULT_FILE}\")\n\n# ── Step 7: Pass/fail gate ────────────────────────────────────────────────────\nif not pipeline_ok:\n    print(\n        \"[WARN] export_dataset did not produce files in HDF5_OUTPUT_DIR. \"\n        \"Verify that Replicator is active and the output directory is writable.\"\n    )\nelse:\n    print(\n        f\"[OK] Dataset export pipeline verified. \"\n        f\"{len(output_files)} file(s) in {HDF5_OUTPUT_DIR}.\"\n    )\n\nassert os.path.exists(RESULT_FILE), \"Result file must be written regardless of pipeline_ok\"",
+  "verify_args": null,
+  "simulate_args": null,
+  "settle_state": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "pipeline_ok",
+      "exported_turns",
+      "hdf5_output_dir"
+    ],
+    "success_condition": "pipeline_ok == True",
+    "result_file": "/tmp/groot_export_result.json"
+  },
+  "verified_status": "drafted-2026-05-16-A35; form-gate-schema pending",
+  "failure_modes": [
+    "finetune_stats returns None: no recorded chat turns in database; run record_teleop_demo sessions first or seed the database with at least one approved turn",
+    "redact_finetune_data raises FileNotFoundError: input_path does not exist; ensure RAW_JSONL_PATH is populated by a prior teleoperation or recording session",
+    "export_finetune_data returns exported_count=0: no approved_successful turns in corpus; review and approve turns via the admin console before exporting",
+    "export_dataset raises OSError: /tmp is full or not writable; free space on the filesystem or set HDF5_OUTPUT_DIR to a path with write access",
+    "export_dataset returns but HDF5_OUTPUT_DIR is empty: Replicator is not active in this Kit session; load the omni.replicator.core extension and call create_sdg_pipeline before export_dataset in a full SDG workflow",
+    "pipeline_ok=False after all steps: output directory exists but is empty; check Kit console for Replicator errors (TC_SYNTAX_ERROR or missing render product) via get_console_errors"
+  ],
+  "extends": "gr00t-category",
+  "extension_notes": "First gr00t-finetune canonical focused exclusively on the data-export pipeline. Distinct from CP-NEW-groot-finetune-n10-demos (which runs LoRA training) and CP-NEW-groot-load-eval-live (which exercises policy inference). This canonical only covers finetune_stats -> redact_finetune_data -> export_finetune_data -> export_dataset; no model weights, no GPU VRAM requirements, no HuggingFace token needed. Backlog source: groot-export-dataset-hdf5-001 (priority_tier=2, category=gr00t-finetune, blockers=[]).",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:training.groot_export",
+      "isaac:model.foundation",
+      "isaac:training.dataset_export",
+      "isaac:training.vla",
+      "isaac:topology.offline_training"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "demonstration_corpus": {
+      "constraints": [
+        "any_jsonl"
+      ],
+      "expected_count": 1,
+      "required": false
+    },
+    "export_output": {
+      "constraints": [
+        "hdf5_dir"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "demonstration_corpus": {
+      "path": "/tmp/groot_raw_turns.jsonl",
+      "format": "jsonl_raw"
+    },
+    "export_output": {
+      "output_dir": "/tmp/groot_export_hdf5",
+      "num_frames": 50
+    }
+  },
+  "code_template": "import json, os\nRAW_JSONL_PATH = {{demonstration_corpus.path}}\nREDACTED_JSONL_PATH = \"/tmp/groot_raw_redacted.jsonl\"\nEXPORTED_JSONL_PATH = \"/tmp/groot_export_turns.jsonl\"\nHDF5_OUTPUT_DIR = {{export_output.output_dir}}\nNUM_FRAMES = {{export_output.num_frames}}\nRESULT_FILE = \"/tmp/groot_export_result.json\"\nos.makedirs(HDF5_OUTPUT_DIR, exist_ok=True)\nstats = finetune_stats()\napproval_rate = stats.get(\"approval_rate\", 0.0) if isinstance(stats, dict) else 0.0\nredact_result = redact_finetune_data(input_path=RAW_JSONL_PATH, output_path=REDACTED_JSONL_PATH)\nexport_result = export_finetune_data(format=\"openai\", min_quality=\"approved_successful\", output_path=EXPORTED_JSONL_PATH)\nexported_turns = export_result.get(\"exported_count\", 0) if isinstance(export_result, dict) else 0\nexport_dataset(output_dir=HDF5_OUTPUT_DIR, num_frames=NUM_FRAMES)\npipeline_ok = os.path.isdir(HDF5_OUTPUT_DIR) and len(os.listdir(HDF5_OUTPUT_DIR)) > 0\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump({\"pipeline_ok\": pipeline_ok, \"exported_turns\": exported_turns, \"hdf5_output_dir\": HDF5_OUTPUT_DIR}, f, indent=2)\nassert os.path.exists(RESULT_FILE)"
+}

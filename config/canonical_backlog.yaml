@@ -22,7 +22,9 @@
   motion_controller_preference: curobo
   pattern_hint: sort
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-inspect-reject.json
+  drafted_date: "2026-05-10"
 
 - id: yrkesroll-inspector-defect-sdg-001
   source: industrial-asset
@@ -74,7 +76,9 @@
   motion_controller_preference: curobo
   pattern_hint: sort
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-palletizer-mixed-sku.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-welder-mig-tack-001
   source: ONET
@@ -107,7 +111,9 @@
   motion_controller_preference: admittance
   pattern_hint: compliance
   estimated_agent_minutes: 240
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-welder-seam-track.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-kit-prep-operator-001
   source: ONET
@@ -159,7 +165,10 @@
   motion_controller_preference: impedance
   pattern_hint: compliance
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  canonical_template: CP-NEW-peg-bushing-impedance
+  drafted_by: A11
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-assembler-snap-fit-002
   source: ONET
@@ -192,7 +201,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-machine-tender-load-unload.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-machine-tender-door-interlock-002
   source: ONET
@@ -208,7 +219,9 @@
   motion_controller_preference: curobo
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-machine-tender-door-interlock.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-forklift-amr-pallet-001
   source: ONET
@@ -259,7 +272,9 @@
   motion_controller_preference: none
   pattern_hint: sort
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-sorter-color-3lane.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-sorter-size-weight-002
   source: industrial-asset
@@ -273,10 +288,12 @@
   complexity: complex
   asset_dependencies: ["conveyor_primitives"]
   blockers: []
-  motion_controller_preference: none
+  motion_controller_preference: curobo
   pattern_hint: sort
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-sorter-size-weight.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-paint-sprayer-trajectory-001
   source: ONET
@@ -309,7 +326,9 @@
   motion_controller_preference: curobo
   pattern_hint: rl-train
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-dr-curriculum-trainer.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-controller-benchmark-shootout-001
   source: industrial-asset
@@ -325,7 +344,9 @@
   motion_controller_preference: curobo
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-controller-shootout-cp.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-3station-oee-cell-001
   source: industrial-asset
@@ -342,7 +363,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-3station-oee.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-y-merge-singulation-001
   source: industrial-asset
@@ -359,7 +382,9 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-y-merge-singulation.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-multi-cam-triangulation-001
   source: industrial-asset
@@ -376,7 +401,9 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-multi-cam-triangulation.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-sim2real-gap-measure-001
   source: industrial-asset
@@ -478,7 +505,10 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-vacuum-gripper-sheet-pick.json
+  drafted_date: "2026-05-16"
+  drafted_by: A23
 
 - id: yrkesroll-teaching-mode-pose-replay-001
   source: industrial-asset
@@ -495,7 +525,10 @@
   motion_controller_preference: direct_joint
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-teaching-mode-pose-replay.json
+  drafted_date: "2026-05-16"
+  drafted_by: A21
 
 - id: yrkesroll-deformable-bag-place-001
   source: industrial-asset
@@ -532,7 +565,11 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-bin-picking-random-pose.json
+  drafted_date: "2026-05-16"
+  drafted_by: A15
+  draft_notes: "A15; form-gate 0 ERROR 0 WARN (both passes); function-gate ⏳ (requires Franka USD + cuRobo + PhysX overlap_sphere live Kit)"
 
 - id: industrial-conveyor-recirculation-loop-001
   source: industrial-asset
@@ -545,10 +582,12 @@
   complexity: medium
   asset_dependencies: ["conveyor_primitives"]
   blockers: []
-  motion_controller_preference: none
-  pattern_hint: other
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-conveyor-recirculation-overflow.json
+  drafted_date: "2026-05-16"
 
 - id: industrial-assembly-line-4robot-handoff-001
   source: industrial-asset
@@ -584,7 +623,11 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-kitting-station-6sku.json
+  drafted_date: "2026-05-16"
+  drafted_by: A32
+  draft_notes: "A32; form-gate 1 OK, 0 ERROR, 0 WARN, 0 INFO (--validate-tool-calls); first use of create_rotary_table + create_kit_tray + track_slot_occupancy in kitting-carousel pattern; function-gate pending live Kit"
 
 - id: industrial-gravity-dispenser-feeder-001
   source: industrial-asset
@@ -601,7 +644,11 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-gravity-dispenser-feeder.json
+  drafted_date: "2026-05-16"
+  drafted_by: A24
+  draft_notes: "A24; form-gate 1 OK, 0 ERROR, 0 WARN, 0 INFO; first use of create_gravity_dispenser in library; function-gate pending live Kit"
 
 - id: industrial-heap-zone-unstack-001
   source: industrial-asset
@@ -688,7 +735,10 @@
   motion_controller_preference: ros2_control
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-zone-partition-safety.json
+  drafted_date: "2026-05-16"
+  drafted_by: A22
 
 - id: industrial-multi-rate-sensor-fusion-001
   source: industrial-asset
@@ -754,7 +804,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-assembly-constraint-verify.json
+  drafted_date: "2026-05-16"
+  drafted_by: A30
+  draft_notes: "A30 milestone; form-gate 1 OK 0 ERROR 0 WARN; first use of setup_assembly_constraint + validate_assembly_constraint in library; no robot arm required; function-gate pending live Kit"
 
 - id: industrial-nim-barcode-track-001
   source: industrial-asset
@@ -770,7 +824,11 @@
   motion_controller_preference: none
   pattern_hint: sort
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-nir-material-divert.json
+  drafted_date: "2026-05-16"
+  drafted_by: A37
+  draft_notes: "A37; form-gate 0 ERROR 0 WARN (--validate-tool-calls); first use of nir_material_sensor in library; function-gate pending live Kit"
 
 - id: industrial-forklift-handoff-arm-001
   source: industrial-asset
@@ -836,7 +894,9 @@
   motion_controller_preference: moveit2
   pattern_hint: navigate
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-occupancy-map-nav.json
+  drafted_date: "2026-05-16"
 
 - id: industrial-convex-hull-collision-opt-001
   source: industrial-asset
@@ -853,7 +913,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-convex-hull-collision-opt.json
+  drafted_date: "2026-05-16"
+  drafted_by: A29
+  draft_notes: "A29; form-gate 1 OK, 0 ERROR, 0 WARN, 0 INFO (--validate-tool-calls); first use of mesh-optimization pipeline in library; function-gate pending live Kit"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # RESEARCH BENCHMARKS (~15 entries)  — specific named tasks from open datasets
@@ -874,7 +938,11 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-rtx-sponge-bowl.json
+  drafted_date: "2026-05-16"
+  drafted_by: A17
+  draft_notes: "A17; form-gate 0 ERROR 0 WARN (both passes); function-gate ⏳ (requires Franka USD + cuRobo + PhysX live Kit)"
 
 - id: research-rtx-drawer-open-close-001
   source: RT-X
@@ -941,7 +1009,11 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-maniskill-pick-cube.json
+  drafted_date: "2026-05-16"
+  drafted_by: A19
+  draft_notes: "A19; form-gate 0 ERROR (both passes); run_arena_benchmark + arena_leaderboard first use in library"
 
 - id: research-maniskill-stack-cube-001
   source: ManiSkill
@@ -958,7 +1030,11 @@
   motion_controller_preference: curobo
   pattern_hint: reorient
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-maniskill-stack-cube.json
+  drafted_date: "2026-05-16"
+  drafted_by: A31
+  draft_notes: "A31; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first standalone use of place_on_top_of spatial resolver in library; grasp_object top_down + place_on_top_of center pattern; function-gate pending live Kit"
 
 - id: research-maniskill-peg-insertion-001
   source: ManiSkill
@@ -1204,7 +1280,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-parallel-env-scaling-32.json
+  drafted_date: "2026-05-16"
+  drafted_by: A13
+  draft_notes: "A13; form-gate 0 ERROR (1 WARN settle_state); function-gate BLOCKED (requires IsaacLab install + >= 6 GB free VRAM)"
 
 - id: rl-actuator-net-training-001
   source: retrieval-miss
@@ -1288,7 +1368,9 @@
   motion_controller_preference: curobo
   pattern_hint: rl-train
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-compare-policies-ab.json
+  drafted_date: "2026-05-16"
 
 - id: rl-isaaclab-cartpole-baseline-001
   source: retrieval-miss
@@ -1393,7 +1475,10 @@
   motion_controller_preference: direct_joint
   pattern_hint: finetune
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  drafted_date: "2026-05-16"
+  template_id: "CP-NEW-groot-finetune-n10-demos"
+  draft_notes: "A12; form-gate 0 ERROR (1 WARN settle_state); function-gate BLOCKED (GR00T N1.6-3B weights ~50GB + HF token + 24GB VRAM + LeRobot v2 demo dataset required)"
 
 - id: groot-monitor-forgetting-001
   source: retrieval-miss
@@ -1427,7 +1512,9 @@
   motion_controller_preference: none
   pattern_hint: finetune
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-suggest-config.json
+  drafted_date: "2026-05-16"
 
 - id: groot-redact-finetune-data-001
   source: retrieval-miss
@@ -1461,7 +1548,11 @@
   motion_controller_preference: none
   pattern_hint: finetune
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-export-dataset-hdf5.json
+  drafted_date: "2026-05-16"
+  drafted_by: A35
+  draft_notes: "A35; form-gate 1 OK, 0 ERROR, 0 WARN, 0 INFO (--validate-tool-calls); first standalone use of finetune_stats + redact_finetune_data + export_finetune_data + export_dataset in data-export pipeline; no GPU/weights required; function-gate pending live Kit"
 
 - id: groot-teleop-demo-record-001
   source: retrieval-miss
@@ -1545,7 +1636,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: finetune
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-load-eval-live.json
+  drafted_date: "2026-05-16"
+  drafted_by: A18
+  draft_notes: "A18; form-gate 0 ERROR 0 WARN (both passes); function-gate BLOCKED (requires GR00T-N1.6-3B weights ~50 GB + HF token + 12 GB free VRAM + omni.isaac.groot extension)"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ROS2 / MIDDLEWARE (~10 entries)  — bridge variants, multi-rate, OPC-UA, etc.

@@ -4,12 +4,17 @@ lint_canonical_templates.py — Conformance lint for workspace/templates/*.json
 
 Usage:
     python scripts/lint_canonical_templates.py [--strict] [--fix] [--json] [TEMPLATE_PATHS...]
+    python scripts/lint_canonical_templates.py --validate-tool-calls [TEMPLATE_PATHS...]
 
 Options:
-    --strict    Exit 1 if any ERROR is found (default: exit 0 unless parse failure)
-    --fix       Auto-fix safe, mechanical issues (e.g. add default verified_status for CP-*
-                templates missing it). Never touches code field content.
-    --json      Machine-readable JSON output
+    --strict               Exit 1 if any ERROR is found (default: exit 0 unless parse failure)
+    --fix                  Auto-fix safe, mechanical issues (e.g. add default verified_status for CP-*
+                           templates missing it). Never touches code field content.
+    --json                 Machine-readable JSON output
+    --validate-tool-calls  Also AST-parse the 'code' field and validate each tool call's
+                           kwargs against the corresponding Pydantic model in _models.py.
+    --strict-tool-calls    Also validate 'code_template' (template vars replaced with string
+                           placeholders before parse). Implies --validate-tool-calls.
 
 Exit codes:
     0  No errors (WARNs and INFOs are OK)
@@ -20,7 +25,9 @@ Reads the schema from scripts/canonical_schema.py (importable module).
 """
 
 import argparse
+import ast
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -55,6 +62,326 @@ class Issue:
             "message": self.message,
             "fixable": self.fixable,
         }
+
+
+# ── Tool-call validation (--validate-tool-calls) ─────────────────────────────
+
+# Regex that matches Jinja-style template variables: {{...}}
+# Used to sanitize code_template before AST parsing.
+_TEMPLATE_VAR_RE = re.compile(r"\{\{[^}]*\}\}")
+
+# Python built-ins and common stdlib / method names that appear in template
+# code but are NOT isaac_assist tools.  Names containing underscores that are
+# in this set are silently skipped during TC_UNKNOWN_TOOL filtering.
+_PYTHON_BUILTINS: frozenset[str] = frozenset({
+    # built-in functions
+    "abs", "all", "any", "bin", "bool", "breakpoint", "bytearray", "bytes",
+    "callable", "chr", "compile", "complex", "delattr", "dict", "dir",
+    "divmod", "enumerate", "eval", "exec", "filter", "float", "format",
+    "frozenset", "getattr", "globals", "hasattr", "hash", "help", "hex",
+    "id", "input", "int", "isinstance", "issubclass", "iter", "len",
+    "list", "locals", "map", "max", "memoryview", "min", "next", "object",
+    "oct", "open", "ord", "pow", "print", "property", "range", "repr",
+    "reversed", "round", "set", "setattr", "slice", "sorted", "staticmethod",
+    "str", "sum", "super", "tuple", "type", "vars", "zip",
+    # common math / stdlib
+    "math", "radians", "degrees", "sin", "cos", "tan", "sqrt", "ceil",
+    "floor", "log", "exp", "pi", "inf",
+    # common method names (called on objects, e.g. list.append)
+    "append", "extend", "insert", "remove", "pop", "clear", "sort",
+    "reverse", "copy", "update", "get", "items", "keys", "values",
+    "format_map", "join", "split", "strip", "lower", "upper",
+    # common Isaac-Sim helper patterns that are NOT tools
+    "get_stage", "get_context", "get_prim_at_path",
+    # type-annotation helpers
+    "Optional", "List", "Dict", "Tuple", "Union", "Any",
+})
+
+# Sentinel string used to replace template vars so string literals parse cleanly.
+_TEMPLATE_SENTINEL = '"__TEMPLATE_VAR__"'
+
+
+def _sanitize_template_vars(code: str) -> str:
+    """Replace ``{{var.field}}`` placeholders with a string literal sentinel."""
+    return _TEMPLATE_VAR_RE.sub(_TEMPLATE_SENTINEL, code)
+
+
+def _extract_tool_calls(code: str) -> "list[tuple[str, set[str], bool, int, ast.Call]]":
+    """
+    AST-parse *code* and return all top-level and nested tool calls.
+
+    Returns a list of (tool_name, kwargs_set, has_star_kwargs, lineno, call_node).
+    Only calls whose function name matches a known tool in the model map are
+    included; unrecognised function names are reported separately.
+
+    ``has_star_kwargs`` is True if the call contains ``**kwargs`` unpacking —
+    in that case required-field checks are skipped (dynamic dispatch).
+    ``call_node`` is the raw ``ast.Call`` node for deeper argument inspection.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return []
+
+    results = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            fn = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            fn = node.func.attr
+        else:
+            continue
+
+        kwargs = {kw.arg for kw in node.keywords if kw.arg is not None}
+        has_star = any(kw.arg is None for kw in node.keywords)
+        results.append((fn, kwargs, has_star, node.lineno, node))
+    return results
+
+
+def _extract_kw_ast_values(
+    call_node: "ast.Call",
+) -> "dict[str, ast.expr]":
+    """Return a mapping from kwarg name → AST value node for a call node."""
+    result = {}
+    for kw in call_node.keywords:
+        if kw.arg is not None:
+            result[kw.arg] = kw.value
+    return result
+
+
+def _ast_string_value(node: "ast.expr") -> "str | None":
+    """If *node* is a string literal AST node, return the string; else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _ast_dict_keys(node: "ast.expr") -> "list[str] | None":
+    """
+    If *node* is a dict literal with all string-constant keys, return those
+    key strings.  Returns None if node is not a dict literal or has
+    non-constant keys (e.g. variable-key dicts).
+    """
+    if not isinstance(node, ast.Dict):
+        return None
+    keys = []
+    for k in node.keys:
+        s = _ast_string_value(k)
+        if s is None:
+            return None  # non-constant key — skip validation
+        keys.append(s)
+    return keys
+
+
+def _ast_list_of_dicts_keys(node: "ast.expr") -> "list[list[str]] | None":
+    """
+    If *node* is a list literal (or list comp) containing at least one dict
+    literal with all-constant string keys, return a list-of-lists of those
+    key sets.  Returns None if node is not a list literal.
+    Skips non-dict items and dicts with non-constant keys.
+    """
+    if not isinstance(node, ast.List):
+        return None
+    result = []
+    for elt in node.elts:
+        keys = _ast_dict_keys(elt)
+        if keys is not None:
+            result.append(keys)
+    return result if result else None
+
+
+def lint_tool_calls(
+    path: Path,
+    data: dict,
+    include_code_template: bool = False,
+) -> "list[Issue]":
+    """
+    Validate tool call kwargs in the template ``code`` (and optionally
+    ``code_template``) fields against the Pydantic models in _models.py
+    and the JSONSchema definitions in tool_schemas.py.
+
+    Rule codes emitted:
+      TC_MODEL_UNAVAILABLE   WARN  — _models.py could not be imported; skipping
+      TC_SYNTAX_ERROR        WARN  — code field has a SyntaxError; cannot parse
+      TC_UNKNOWN_TOOL        WARN  — tool name not found in model map
+      TC_REQUIRED_MISSING    ERROR — required field(s) absent from call
+      TC_UNKNOWN_KWARG       WARN  — kwarg not in model (extra='allow' absorbed it)
+      TC_BAD_ENUM_VALUE      ERROR — string literal does not match the JSONSchema enum
+      TC_BAD_NESTED_KEY      ERROR — dict literal contains key(s) not in JSONSchema properties
+      TC_BAD_NESTED_ITEM     ERROR — list-of-dicts item is missing JSONSchema items.required key(s)
+
+    Returns a list of Issue objects.
+    """
+    issues: list[Issue] = []
+
+    def err(rule: str, msg: str) -> None:
+        issues.append(Issue("ERROR", rule, msg))
+
+    def warn(rule: str, msg: str) -> None:
+        issues.append(Issue("WARN", rule, msg))
+
+    # Obtain model map — lazy import via canonical_schema helper
+    tool_map = schema.get_tool_model_map()
+    if not tool_map:
+        warn(
+            "TC_MODEL_UNAVAILABLE",
+            "Tool model map is empty (could not import _models.py); "
+            "skipping tool-call validation",
+        )
+        return issues
+
+    # Obtain JSONSchema map for enum / nested-key / nested-item checks
+    jsonschema_map = schema.get_tool_jsonschema_map()
+
+    fields_to_check: list[tuple[str, str]] = [("code", "code")]
+    if include_code_template:
+        fields_to_check.append(("code_template", "code_template"))
+
+    for field_name, display_name in fields_to_check:
+        raw_code = data.get(field_name)
+        if not raw_code or not isinstance(raw_code, str):
+            continue
+
+        # For code_template: sanitize Jinja-style placeholders
+        is_template = field_name == "code_template"
+        code = _sanitize_template_vars(raw_code) if is_template else raw_code
+
+        # Attempt AST parse
+        try:
+            ast.parse(code)
+        except SyntaxError as exc:
+            warn(
+                "TC_SYNTAX_ERROR",
+                f"{display_name}: SyntaxError at line {exc.lineno} — "
+                f"{exc.msg}; tool-call validation skipped for this field",
+            )
+            continue
+
+        call_sites = _extract_tool_calls(code)
+
+        # Collect calls whose function name IS in the model map
+        # (unknown-name calls get WARN but no ERROR)
+        seen_unknown: set[str] = set()
+        for fn, kwargs, has_star, lineno, call_node in call_sites:
+            if fn not in tool_map:
+                # Only warn once per unknown tool name per field
+                if fn not in seen_unknown:
+                    seen_unknown.add(fn)
+                    # Skip Python builtins, common stdlib functions, and
+                    # typical method names that appear in template code.
+                    # Only warn on names that look like isaac_assist tools
+                    # (must contain an underscore to distinguish from builtins).
+                    if fn not in _PYTHON_BUILTINS and "_" in fn:
+                        warn(
+                            "TC_UNKNOWN_TOOL",
+                            f"{display_name}:line {lineno} — "
+                            f"'{fn}' not found in tool model map; "
+                            "cannot validate kwargs",
+                        )
+                continue
+
+            model = tool_map[fn]
+            model_fields = model.model_fields  # type: ignore[attr-defined]
+            required_fields = {
+                k for k, v in model_fields.items() if v.is_required()
+            }
+            known_fields = set(model_fields.keys())
+
+            # Skip required-field check when **kwargs unpacking is present
+            if not has_star:
+                missing = sorted(required_fields - kwargs)
+                if missing:
+                    err(
+                        "TC_REQUIRED_MISSING",
+                        f"{display_name}:line {lineno} — "
+                        f"{fn} missing required: {missing}",
+                    )
+
+            # Unknown kwargs: always report (even with extra='allow')
+            unknown = sorted(kwargs - known_fields)
+            if unknown:
+                # In code_template, template sentinel values become strings —
+                # the KWARG itself may still be a legitimate field that just
+                # receives a template-var value. Flag as WARN not ERROR.
+                warn(
+                    "TC_UNKNOWN_KWARG",
+                    f"{display_name}:line {lineno} — "
+                    f"{fn} unknown kwargs: {unknown}",
+                )
+
+            # ── JSONSchema-based deep checks ─────────────────────��────────────
+            # Only run when JSONSchema is available for this tool.
+            param_schemas = jsonschema_map.get(fn)
+            if not param_schemas:
+                continue
+
+            kw_values = _extract_kw_ast_values(call_node)
+
+            for param_name, value_node in kw_values.items():
+                param_schema = param_schemas.get(param_name)
+                if not param_schema:
+                    continue
+
+                # ── TC_BAD_ENUM_VALUE ─────────────��───────────────────────────
+                # When param schema has an 'enum' list and the call passes a
+                # string literal, verify the literal is in the enum.
+                enum_values = param_schema.get("enum")
+                if enum_values and isinstance(enum_values, list):
+                    literal = _ast_string_value(value_node)
+                    if literal is not None and literal not in enum_values:
+                        err(
+                            "TC_BAD_ENUM_VALUE",
+                            f"{display_name}:line {lineno} — "
+                            f"{fn}.{param_name}={literal!r} is not in the "
+                            f"allowed enum: {enum_values}",
+                        )
+
+                # ── TC_BAD_NESTED_KEY ─────────────────────────��───────────────
+                # When param schema has 'properties' (object type) and the call
+                # passes a dict literal, verify keys are in properties.
+                prop_schema = param_schema.get("properties")
+                if prop_schema and isinstance(prop_schema, dict):
+                    # Only applies when param_schema type is "object" or implied.
+                    dict_keys = _ast_dict_keys(value_node)
+                    if dict_keys is not None:
+                        allowed_keys = set(prop_schema.keys())
+                        bad_keys = sorted(set(dict_keys) - allowed_keys)
+                        if bad_keys:
+                            err(
+                                "TC_BAD_NESTED_KEY",
+                                f"{display_name}:line {lineno} — "
+                                f"{fn}.{param_name} dict has unrecognised "
+                                f"key(s) {bad_keys}; allowed: "
+                                f"{sorted(allowed_keys)}",
+                            )
+
+                # ── TC_BAD_NESTED_ITEM ──────────────────────────────────���─────
+                # When param schema type is "array" with items.required, and
+                # the call passes a list literal of dicts, verify each dict
+                # contains the required item keys.
+                items_schema = param_schema.get("items")
+                if items_schema and isinstance(items_schema, dict):
+                    items_required = items_schema.get("required")
+                    if items_required and isinstance(items_required, list):
+                        list_of_key_lists = _ast_list_of_dicts_keys(value_node)
+                        if list_of_key_lists is not None:
+                            for idx, item_keys in enumerate(list_of_key_lists):
+                                item_keys_set = set(item_keys)
+                                missing_item = sorted(
+                                    set(items_required) - item_keys_set
+                                )
+                                if missing_item:
+                                    err(
+                                        "TC_BAD_NESTED_ITEM",
+                                        f"{display_name}:line {lineno} — "
+                                        f"{fn}.{param_name}[{idx}] missing "
+                                        f"required item key(s) {missing_item}; "
+                                        f"required: {items_required}",
+                                    )
+
+    return issues
 
 
 # ── Per-template lint logic ──────────────────────────────────────────────────
@@ -378,7 +705,31 @@ def main(argv=None):
         action="store_true",
         help="Suppress OK lines; only print files with issues",
     )
+    parser.add_argument(
+        "--validate-tool-calls",
+        action="store_true",
+        dest="validate_tool_calls",
+        help=(
+            "AST-parse the 'code' field and validate each tool call's kwargs "
+            "against the Pydantic models in _models.py "
+            "(TC_REQUIRED_MISSING, TC_UNKNOWN_KWARG rule codes)"
+        ),
+    )
+    parser.add_argument(
+        "--strict-tool-calls",
+        action="store_true",
+        dest="strict_tool_calls",
+        help=(
+            "Also validate 'code_template' in addition to 'code'. "
+            "Implies --validate-tool-calls. Template vars ({{...}}) are "
+            "replaced with string sentinels before parsing."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    # --strict-tool-calls implies --validate-tool-calls
+    if args.strict_tool_calls:
+        args.validate_tool_calls = True
 
     if args.strict_warn:
         args.strict = True
@@ -421,6 +772,15 @@ def main(argv=None):
 
         # Lint
         issues = lint_one(path, data)
+
+        # Tool-call validation (optional pass)
+        if args.validate_tool_calls:
+            tc_issues = lint_tool_calls(
+                path,
+                data,
+                include_code_template=args.strict_tool_calls,
+            )
+            issues.extend(tc_issues)
 
         # Fix (if requested)
         if args.fix:

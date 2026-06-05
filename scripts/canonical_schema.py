@@ -146,6 +146,7 @@ VALID_ROUTING_AXES = {"color", "size", "shape", "label", "semantic_class"}
 
 # structural_tags must match this pattern: "namespace:segment.subsegment"
 import re
+from pathlib import Path
 STRUCTURAL_TAG_PATTERN = re.compile(r"^(isaac|cad|user):[a-z0-9_]+(\.[a-z0-9_]+)*$")
 
 # ── verify_args subkey requirements ─────────────────────────────────────────
@@ -174,3 +175,120 @@ def is_deprecated_field(field_name: str) -> bool:
         if field_name.startswith(prefix):
             return True
     return False
+
+
+# ── Tool-call validation helpers ─────────────────────────────────────────────
+# Used by lint_canonical_templates.py --validate-tool-calls pass.
+# Kept here so tests can import discovery logic independently.
+
+def _camel_to_snake(name: str) -> str:
+    """Convert 'SetDriveGainsArgs' → 'set_drive_gains_args'."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def build_tool_model_map() -> "dict[str, type]":
+    """
+    Return a mapping of tool_name (snake_case) → Pydantic model class.
+
+    Discovery strategy:
+      (a) Dynamic import of service.isaac_assist_service.chat.tools.handlers._models
+          via sys.path manipulation — zero subprocess overhead.
+      (b) On ImportError, return an empty dict so the caller can emit a single
+          WARN and skip tool-call validation rather than crashing lint.
+
+    Naming convention: ``SetDriveGainsArgs`` → ``set_drive_gains``
+    (strip trailing ``Args``, convert CamelCase → snake_case).
+    """
+    import importlib
+    import inspect
+    import sys as _sys
+
+    # Locate repo root relative to this file (scripts/canonical_schema.py)
+    _scripts_dir = Path(__file__).parent
+    _repo_root = _scripts_dir.parent
+    _service_root = str(_repo_root / "service")
+
+    if _service_root not in _sys.path:
+        _sys.path.insert(0, _service_root)
+
+    try:
+        mod = importlib.import_module(
+            "isaac_assist_service.chat.tools.handlers._models"
+        )
+    except ImportError:
+        return {}
+
+    tool_map: dict[str, type] = {}
+    for attr_name, cls in inspect.getmembers(mod, inspect.isclass):
+        if not attr_name.endswith("Args"):
+            continue
+        if not hasattr(cls, "model_fields"):
+            continue
+        # Strip trailing "Args" then convert to snake_case
+        base = attr_name[: -len("Args")]
+        tool_name = _camel_to_snake(base)
+        tool_map[tool_name] = cls
+    return tool_map
+
+
+# Lazily cached at module level; populated on first call to build_tool_model_map()
+_TOOL_MODEL_MAP: "dict[str, type] | None" = None
+
+
+def get_tool_model_map() -> "dict[str, type]":
+    """Return (and cache) the tool-name → Pydantic model map."""
+    global _TOOL_MODEL_MAP
+    if _TOOL_MODEL_MAP is None:
+        _TOOL_MODEL_MAP = build_tool_model_map()
+    return _TOOL_MODEL_MAP
+
+
+# ── JSONSchema tool map ───────────────────────────────────────────────────────
+# Provides per-parameter enum lists, nested-object property names, and
+# nested-array per-item required fields from tool_schemas.py ISAAC_SIM_TOOLS.
+
+def build_tool_jsonschema_map() -> "dict[str, dict]":
+    """
+    Return a mapping of tool_name → {param_name: param_schema_dict}.
+
+    Loaded from ISAAC_SIM_TOOLS in tool_schemas.py.  Each value is the
+    JSON Schema ``properties`` dict for that tool's parameters object.
+    Returns an empty dict if the module cannot be imported.
+    """
+    import importlib
+    import sys as _sys
+
+    _scripts_dir = Path(__file__).parent
+    _repo_root = _scripts_dir.parent
+    _service_root = str(_repo_root / "service")
+
+    if _service_root not in _sys.path:
+        _sys.path.insert(0, _service_root)
+
+    try:
+        mod = importlib.import_module(
+            "isaac_assist_service.chat.tools.tool_schemas"
+        )
+    except ImportError:
+        return {}
+
+    tool_map: dict[str, dict] = {}
+    for entry in getattr(mod, "ISAAC_SIM_TOOLS", []):
+        fn = entry.get("function", {})
+        name = fn.get("name")
+        params = fn.get("parameters", {})
+        props = params.get("properties", {})
+        if name and props:
+            tool_map[name] = props
+    return tool_map
+
+
+_TOOL_JSONSCHEMA_MAP: "dict[str, dict] | None" = None
+
+
+def get_tool_jsonschema_map() -> "dict[str, dict]":
+    """Return (and cache) the tool-name → JSONSchema properties map."""
+    global _TOOL_JSONSCHEMA_MAP
+    if _TOOL_JSONSCHEMA_MAP is None:
+        _TOOL_JSONSCHEMA_MAP = build_tool_jsonschema_map()
+    return _TOOL_JSONSCHEMA_MAP

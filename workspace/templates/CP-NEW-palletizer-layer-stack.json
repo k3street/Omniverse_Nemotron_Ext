@@ -11,7 +11,6 @@
     "set_physics_scene_config",
     "apply_physics_material",
     "bulk_set_attribute",
-    "compute_stack_placement",
     "setup_pick_place_controller"
   ],
   "thoughts": "Design rationale for CP-NEW-palletizer-layer-stack:\n\n1) Robot and reach geometry: UR10 (reach ~1.3m) mounted on a 0.75m table (effective tool height ~1.6m from floor). Robot base at [0, 0, 0.75]. Pallet at [0, -0.55, 0.775] — centre 0.55m behind robot base. Grid spans ±0.15m in X and 0 to +0.40m in Y from pallet centre. Maximum horizontal distance from robot base to far pallet corner ≈ sqrt(0.15^2 + (0.55+0.20)^2) ≈ 0.76m — well inside 1.3m reach. Conveyor in front at y=+0.45, belt top at z=0.805; boxes are 0.10m cubes so box top at z=0.905, box centre at z=0.855.\n\n2) Grid layout: compute_stack_placement(target='/World/Pallet', pattern='grid_2x3', n_items=6, cube_size=0.10, spacing=0.12, anchor='top') yields positions at pallet_top_z=0.825 + 0.10/2 = 0.875 with xy offsets: col 0 at x=-0.12, col 1 at x=+0.12; row 0 at y=-0.51, row 1 at y=-0.55, row 2 at y=-0.59 (rows separated by 0.04m gap between 0.10m-wide boxes). The 6 drop targets are pre-computed at canonical-author time and baked into drop_targets dict — no runtime tool composition needed.\n\n3) Conveyor and box placement: Infeed conveyor 3m long at y=0.45, surface_velocity=[0.15, 0, 0]. 6 boxes placed at x in [-1.6, -1.3, -1.0, -0.7, -0.4, -0.1], all outside robot's 0.65m front reach so conveyor has travel distance before pick. Belt top = 0.78+0.025=0.805; box centre z=0.855. Proximity sensor at [0.35, 0.45, 0.855] fires when a box enters the pick window.\n\n4) Physics: CPU dynamics (enable_gpu_dynamics=False, broadphase_type=MBP) for determinism. Box mass default 1 kg; rubber material reduces sliding on pallet. sleepThreshold=0.0 keeps boxes simulated through settle phase.\n\n5) cuRobo motion planner handles UR10 naturally; EE_INITIAL_HEIGHT = max(box_on_belt_z, max_drop_z) + 0.20 = 0.875 + 0.20 = 1.075m. All drop targets at identical z=0.875 (single-layer stack), so transit height is constant. Future extension: two-layer version raises drop z by one box height (0.10m) for layer 2.",
@@ -148,5 +147,5 @@
     "untested": ["curobo", "rmpflow"],
     "failed": {}
   },
-  "verified_status": "drafted-2026-05-16-patched-r-a-fix; form-gate ⏳ (schema-OK); function-gate ⏳"
+  "verified_status": "drafted-2026-05-16-patched-r-a-fix-2; form-gate ⏳ (schema-OK after 2 patch rounds; compute_stack_placement removed from tools_used — drop targets baked inline); function-gate ⏳"
 }

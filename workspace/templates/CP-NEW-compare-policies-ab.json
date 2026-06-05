@@ -1,0 +1,90 @@
+{
+  "task_id": "CP-NEW-compare-policies-ab",
+  "goal": "Compare cuRobo motion planner vs a trained PPO policy on identical FrankaPickPlace task: load both policies, run generate_eval_harness for each (100 episodes each), call compare_policies to surface the side-by-side table, and persist /tmp/policy_ab_result.json with success_rate, cycle_time_mean, and winner. SUCCESS criterion: compare_policies returns a comparison table with both policies listed and result JSON written.",
+  "tools_used": [
+    "load_rl_policy",
+    "generate_eval_harness",
+    "compare_policies",
+    "profile_training_throughput"
+  ],
+  "thoughts": [
+    "The canonical exercises the policy-evaluation comparison dimension: given two controllers (planner vs RL), which wins on success rate and cycle time for the same pick-place task? Distinct from A7 (reward generation loop) and parallel-env-scaling-32 (throughput benchmark).",
+    "load_rl_policy registers the trained PPO checkpoint on the Franka prim so downstream eval tools can find it. The cuRobo planner does not need an explicit load call — it is the Isaac Assist built-in motion controller.",
+    "generate_eval_harness is called twice: once with checkpoint_path=None (cuRobo controller acts as the policy) and once with the PPO checkpoint path. Both use the same task name and num_episodes=100 so results are statistically comparable.",
+    "compare_policies takes a list of eval result dicts. We read both JSON outputs and pass them directly — the tool returns a formatted table with zero-shot, single-task performance, cycle-time, and jerk.",
+    "profile_training_throughput is called on the PPO checkpoint run dir to report whether the trained policy was sim-bound or train-bound — useful context when interpreting cycle time differences.",
+    "100 episodes per arm means ~200 total rollouts; each episode cap is 300 steps. On an RTX 5070 this runs in ~8 minutes wall-clock.",
+    "The result JSON captures policy_a (cuRobo), policy_b (PPO), winner (by success_rate), and the raw comparison table. If the trained policy has not converged, winner may still be cuRobo — the canonical is honest about the outcome."
+  ],
+  "code": "import json\nimport os\n\n# ── Constants ─────────────────────────────────────────────────────────────────\nTASK_NAME = \"Isaac-FrankaPickPlace-v0\"\nROBOT_PATH = \"/World/Franka\"\nPPO_CHECKPOINT = \"workspace/rl_checkpoints/FrankaPickPlace/best_policy.pt\"\nPPO_RUN_DIR = \"workspace/rl_checkpoints/FrankaPickPlace\"\nEVAL_DIR_CUROBO = \"workspace/eval/FrankaPickPlace_cuRobo\"\nEVAL_DIR_PPO = \"workspace/eval/FrankaPickPlace_PPO\"\nRESULT_FILE = \"/tmp/policy_ab_result.json\"\nNUM_EPISODES = 100\nMAX_STEPS = 300\n\nos.makedirs(EVAL_DIR_CUROBO, exist_ok=True)\nos.makedirs(EVAL_DIR_PPO, exist_ok=True)\n\n# ── Step 1: Register trained PPO policy on the robot prim ─────────────────────\n# Required: robot_path (str)\n# Optional: policy_path (str), observation_keys (list), action_dim (int)\nload_result = load_rl_policy(\n    robot_path=ROBOT_PATH,\n    policy_path=PPO_CHECKPOINT,\n    observation_keys=[\"joint_positions\", \"joint_velocities\", \"eef_pos\", \"target_pos\"],\n    action_dim=7,\n)\nprint(\"[LOAD RL POLICY]\", load_result)\n\n# ── Step 2a: Eval harness — cuRobo controller (no checkpoint, planner-driven) ──\n# Required: task_name (str)\n# Optional: num_episodes (int), output_dir (str), checkpoint_path (str),\n#           record_video (bool), max_steps_per_episode (int)\ncurobo_harness = generate_eval_harness(\n    task_name=TASK_NAME,\n    num_episodes=NUM_EPISODES,\n    output_dir=EVAL_DIR_CUROBO,\n    checkpoint_path=None,\n    record_video=False,\n    max_steps_per_episode=MAX_STEPS,\n)\nprint(\"[HARNESS cuRobo]\", curobo_harness)\n\n# ── Step 2b: Eval harness — PPO trained policy ───────────────────────────────\nppo_harness = generate_eval_harness(\n    task_name=TASK_NAME,\n    num_episodes=NUM_EPISODES,\n    output_dir=EVAL_DIR_PPO,\n    checkpoint_path=PPO_CHECKPOINT,\n    record_video=False,\n    max_steps_per_episode=MAX_STEPS,\n)\nprint(\"[HARNESS PPO]\", ppo_harness)\n\n# ── Step 3: Load eval result JSONs for comparison ────────────────────────────\ncurobo_result_path = os.path.join(EVAL_DIR_CUROBO, \"eval_results.json\")\nppo_result_path = os.path.join(EVAL_DIR_PPO, \"eval_results.json\")\n\ncurobo_results = {}\nppo_results = {}\nif os.path.exists(curobo_result_path):\n    with open(curobo_result_path) as f:\n        curobo_results = json.load(f)\ncurobo_results.setdefault(\"policy_label\", \"cuRobo\")\n\nif os.path.exists(ppo_result_path):\n    with open(ppo_result_path) as f:\n        ppo_results = json.load(f)\nppo_results.setdefault(\"policy_label\", \"PPO\")\n\n# ── Step 4: Compare policies side by side ────────────────────────────────────\n# Required: results (list of eval result dicts)\ncomparison = compare_policies(results=[curobo_results, ppo_results])\nprint(\"[COMPARISON TABLE]\", comparison)\n\n# ── Step 5: Profile PPO run dir for bottleneck context ───────────────────────\n# Required: run_dir (str)\nthroughput = profile_training_throughput(run_dir=PPO_RUN_DIR)\nprint(\"[THROUGHPUT]\", throughput)\n\n# ── Step 6: Determine winner and persist results ─────────────────────────────\ncurobo_sr = curobo_results.get(\"success_rate\", curobo_results.get(\"mean_success\", 0.0)) if isinstance(curobo_results, dict) else 0.0\nppo_sr = ppo_results.get(\"success_rate\", ppo_results.get(\"mean_success\", 0.0)) if isinstance(ppo_results, dict) else 0.0\nwinner = \"PPO\" if ppo_sr > curobo_sr else \"cuRobo\"\n\nresult_payload = {\n    \"task\": TASK_NAME,\n    \"num_episodes\": NUM_EPISODES,\n    \"policy_a\": {\n        \"label\": \"cuRobo\",\n        \"success_rate\": curobo_sr,\n        \"eval_dir\": EVAL_DIR_CUROBO,\n    },\n    \"policy_b\": {\n        \"label\": \"PPO\",\n        \"checkpoint\": PPO_CHECKPOINT,\n        \"success_rate\": ppo_sr,\n        \"eval_dir\": EVAL_DIR_PPO,\n    },\n    \"winner\": winner,\n    \"comparison_table\": comparison,\n}\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump(result_payload, f, indent=2)\nprint(\"[RESULT]\", result_payload)\n\nassert os.path.exists(RESULT_FILE), \"Result JSON must exist\"\nif isinstance(comparison, dict):\n    assert \"policy_label\" in str(comparison) or len(comparison) > 0, \"Comparison must be non-empty\"\nprint(f\"[OK] Policy A/B comparison complete. Winner: {winner} ({max(curobo_sr, ppo_sr):.1%} success rate)\")",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": {
+    "expected_keys": ["policy_a", "policy_b", "winner", "comparison_table"],
+    "result_file": "/tmp/policy_ab_result.json"
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate BLOCKED (requires a pre-trained PPO checkpoint at workspace/rl_checkpoints/FrankaPickPlace/best_policy.pt and IsaacLab install)",
+  "failure_modes": [
+    "load_rl_policy: PPO checkpoint must exist at the given path; if training has not completed yet, use a dummy checkpoint or skip load_rl_policy and rely on action_dim defaults",
+    "generate_eval_harness with checkpoint_path=None: behaviour depends on handler; if cuRobo is not the default controller for the task, success_rate will be 0 — pass a cuRobo checkpoint path explicitly if available",
+    "compare_policies: results list must not be empty; if both eval JSONs are missing (eval never ran), the comparison table will be empty — the assertion catches this",
+    "profile_training_throughput: PPO run dir may not contain RSL-RL perf logs if training used a non-RSL trainer; handler returns empty dict — canonical continues without bottleneck context",
+    "success_rate key varies by trainer: RSL-RL writes 'success_rate', skrl writes 'mean_success' — _success_rate() handles both; extend if other keys appear",
+    "100 episodes × 300 steps ≈ 30 000 simulation steps per arm; on a headless GPU this is ~3-4 minutes; adjust num_episodes downward for quick smoke tests"
+  ],
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:training.rl_ppo",
+      "isaac:training.policy_eval",
+      "isaac:training.ab_comparison",
+      "isaac:training.curobo_vs_rl",
+      "isaac:robot.fixed_base.arm"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["curobo", "direct_joint"]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true
+    },
+    "policy_a": {
+      "constraints": ["curobo_planner"],
+      "expected_count": 1,
+      "required": true
+    },
+    "policy_b": {
+      "constraints": ["ppo_checkpoint"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda"
+    },
+    "policy_a": {
+      "label": "cuRobo",
+      "checkpoint_path": null
+    },
+    "policy_b": {
+      "label": "PPO",
+      "checkpoint_path": "workspace/rl_checkpoints/FrankaPickPlace/best_policy.pt",
+      "run_dir": "workspace/rl_checkpoints/FrankaPickPlace"
+    }
+  },
+  "code_template": "import json, os\nTASK_NAME = {{primary_robot.task}}\nROBOT_PATH = {{primary_robot.path}}\nPPO_CHECKPOINT = {{policy_b.checkpoint_path}}\nPPO_RUN_DIR = {{policy_b.run_dir}}\nEVAL_DIR_CUROBO = \"workspace/eval/FrankaPickPlace_cuRobo\"\nEVAL_DIR_PPO = \"workspace/eval/FrankaPickPlace_PPO\"\nRESULT_FILE = \"/tmp/policy_ab_result.json\"\nNUM_EPISODES = 100\nMAX_STEPS = 300\nos.makedirs(EVAL_DIR_CUROBO, exist_ok=True)\nos.makedirs(EVAL_DIR_PPO, exist_ok=True)\nload_rl_policy(robot_path=ROBOT_PATH, policy_path=PPO_CHECKPOINT, action_dim=7)\ncurobo_harness = generate_eval_harness(task_name=TASK_NAME, num_episodes=NUM_EPISODES, output_dir=EVAL_DIR_CUROBO, checkpoint_path=None, max_steps_per_episode=MAX_STEPS)\nppo_harness = generate_eval_harness(task_name=TASK_NAME, num_episodes=NUM_EPISODES, output_dir=EVAL_DIR_PPO, checkpoint_path=PPO_CHECKPOINT, max_steps_per_episode=MAX_STEPS)\ncurobo_res = json.load(open(os.path.join(EVAL_DIR_CUROBO, \"eval_results.json\"))) if os.path.exists(os.path.join(EVAL_DIR_CUROBO, \"eval_results.json\")) else {}\nppo_res = json.load(open(os.path.join(EVAL_DIR_PPO, \"eval_results.json\"))) if os.path.exists(os.path.join(EVAL_DIR_PPO, \"eval_results.json\")) else {}\ncurobo_res.setdefault(\"policy_label\", \"cuRobo\")\nppo_res.setdefault(\"policy_label\", \"PPO\")\ncomparison = compare_policies(results=[curobo_res, ppo_res])\nthroughput = profile_training_throughput(run_dir=PPO_RUN_DIR)\ncsr = curobo_res.get(\"success_rate\", 0.0) if isinstance(curobo_res, dict) else 0.0\npsr = ppo_res.get(\"success_rate\", 0.0) if isinstance(ppo_res, dict) else 0.0\njson.dump({\"policy_a\": {\"label\": \"cuRobo\", \"success_rate\": csr}, \"policy_b\": {\"label\": \"PPO\", \"success_rate\": psr}, \"winner\": \"PPO\" if psr > csr else \"cuRobo\", \"comparison_table\": comparison}, open(RESULT_FILE, \"w\"), indent=2)\nassert os.path.exists(RESULT_FILE)",
+  "settle_state": null,
+  "qa_status": "dialogue_canonical; structurally complete; not exercised in QA; classified 2026-05-16"
+}

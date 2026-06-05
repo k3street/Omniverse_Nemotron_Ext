@@ -1,0 +1,203 @@
+{
+  "task_id": "CP-NEW-peg-bushing-impedance",
+  "goal": "Assembler persona: Franka inserts a cylindrical peg into a bushing fixture using impedance control with a force/torque sensor capping insertion force at 20 N. Realizes ONET SOC 51-2028 yrkesroll-assembler-peg-bushing-001.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "add_force_torque_sensor",
+    "setup_assembly_constraint",
+    "validate_assembly_constraint",
+    "setup_impedance_controller",
+    "setup_pick_place_controller",
+    "add_proximity_sensor"
+  ],
+  "thoughts": [
+    "Distinction from CP-58 (peg-in-hole array + conveyor): single-peg, table-top, impedance-compliance path instead of cuRobo drop.",
+    "Distinction from CP-NEW-tactile-insertion (TacEx fallback + physx instability): uses validate_assembly_constraint pre-flight + explicit impedance params, no TacEx dependency.",
+    "Impedance: Franka in torque mode; Kx=[300,300,300] N/m, stiffness softened on Z to allow 20 N cap. Kr=[30,30,30] N·m/rad.",
+    "Force cap 20 N enforced via add_force_torque_sensor threshold=20.0 — simulation pauses pick-place on breach.",
+    "Bushing fixture = Cylinder prim (larger radius, hollow approximated as solid with PhysicsCollisionAPI) seated on table.",
+    "validate_assembly_constraint pre-flight confirms name/type/targets before runtime constraint creation.",
+    "setup_assembly_constraint binds peg → bushing with 3 mm tolerance; FixedJoint fires on alignment.",
+    "cuRobo NOT used for motion: impedance controller supplies Cartesian torque path; setup_pick_place_controller in target_source='curobo' for transit only; compliance layer takes over for last-5 mm descent.",
+    "motion_controllers: curobo (transit) + impedance (insertion phase)"
+  ],
+  "code": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Worktable\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Bushing fixture (larger cylinder, seated on table) ────────────────────────\ncreate_prim(\n    prim_path=\"/World/Bushing\",\n    prim_type=\"Cylinder\",\n    position=[0, -0.25, 0.815],\n    radius=0.025,\n    height=0.04,\n)\napply_api_schema(prim_path=\"/World/Bushing\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/Bushing\", attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Peg (cylindrical workpiece placed on table to the right) ──────────────────\ncreate_prim(\n    prim_path=\"/World/Peg\",\n    prim_type=\"Cylinder\",\n    position=[0.3, 0.1, 0.835],\n    radius=0.018,\n    height=0.05,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Peg\", schema_name=api)\n\napply_physics_material(prim_path=\"/World/Peg\", material_name=\"rubber\")\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Peg\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/Peg\", \"/World/Bushing\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\n# ── Pre-flight: validate assembly constraint spec before creating it ───────────\nvalidate_assembly_constraint(\n    name=\"peg_into_bushing\",\n    type=\"coincident_axes\",\n    target_a={\"path\": \"/World/Peg\"},\n    target_b={\"path\": \"/World/Bushing\"},\n    tolerance_m=0.003,\n    params={\"axis\": \"Z\", \"force_cap_N\": 20.0},\n)\n\n# ── Assembly constraint: peg → bushing, 3 mm tolerance ────────────────────────\nsetup_assembly_constraint(\n    peg_path=\"/World/Peg\",\n    hole_path=\"/World/Bushing\",\n    tolerance=0.003,\n    constraint_path=\"/World/AssemblyConstraint_PegBushing\",\n)\n\n# ── Force / torque sensor — 20 N insertion force cap ─────────────────────────\nadd_force_torque_sensor(\n    sensor_path=\"/World/Franka/FtSensor\",\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=20.0,\n    noise_std=0.05,\n)\n\n# ── Impedance controller — softened Z-stiffness for compliant insertion ───────\nsetup_impedance_controller(\n    robot_path=\"/World/Franka\",\n    target_frame=\"panda_hand\",\n    Kx=[300.0, 300.0, 80.0],\n    Kr=[30.0, 30.0, 30.0],\n    Dx=[30.0, 30.0, 10.0],\n    Dr=[3.0, 3.0, 3.0],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\n# ── Proximity sensor for pick detection ───────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.3, 0.1, 0.835],\n    size=[0.10, 0.10, 0.06],\n)\n\n# ── Pick-place controller: cuRobo for transit, drops at bushing center ─────────\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=None,\n    source_paths=[\"/World/Peg\"],\n    destination_path=\"/World/Bushing\",\n    drop_target=[0, -0.25, 0.84],\n    planning_obstacles=[\"/World/Table\", \"/World/Bushing\"],\n    approach_height=0.12,\n    lift_height=0.12,\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Peg": [
+        0.3,
+        0.1,
+        0.835
+      ]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Peg",
+        "place_path": "/World/Bushing",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Peg"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Peg",
+    "target_path": "/World/Bushing",
+    "duration_s": 180
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Bushing",
+      "/World/Table"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
+  },
+  "extends": "yrkesroll-assembler-peg-bushing-001",
+  "extension_notes": "Implements ONET SOC 51-2028 assembler persona. Key additions over CP-58: (1) single-peg table-top (no conveyor); (2) impedance controller for last-cm compliant descent; (3) validate_assembly_constraint pre-flight; (4) 20 N FT threshold honoring ONET force-limit spec. PhysX numerical instability (velocity blow-up during grip) is a known risk shared with tactile-insertion — mitigated by solver iteration count=16 + rubber material.",
+  "failure_modes": [
+    "PhysX numerical instability: peg velocity spikes >200 km/s during Franka grip — shared with tactile-insertion; solver_position_iteration_count=16 mitigates but does not eliminate",
+    "Bushing is solid Cylinder (no subtractive hole) — peg lands on top face, not inside; real hollow bushing needs mesh import or CreateDeformableMesh",
+    "setup_impedance_controller dry_run=True — no live torque-mode control without ROS2 bridge; transit via cuRobo is rigid",
+    "drop_target Z=0.84 requires cuRobo IK reachability at that exact coordinate — verify with solve_ik if planning fails",
+    "validate_assembly_constraint type='insertion_axis' may not be in the known-type set — handler will return error; constraint still created"
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳; patched-r-a-enum-fix",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": [
+      "curobo",
+      "impedance"
+    ]
+  },
+  "intent": {
+    "pattern_hint": "insert",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:topology.insertion",
+      "isaac:assembly.force_gated",
+      "isaac:insert.peg_in_bushing",
+      "isaac:sensor.force_torque",
+      "isaac:compliance.impedance",
+      "isaac:assembly.constraint_validated"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "bushing_fixture": {
+      "constraints": [
+        "cylinder"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "pick_sensor": {
+      "constraints": [
+        "proximity_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "ft_sensor": {
+      "constraints": [
+        "force_torque_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": [
+        "cylinder"
+      ],
+      "min": 1,
+      "max": 1,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "bushing_fixture": {
+      "path": "/World/Bushing",
+      "position": [
+        0,
+        -0.25,
+        0.815
+      ],
+      "radius": 0.025,
+      "height": 0.04
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [
+        0.3,
+        0.1,
+        0.835
+      ],
+      "size": [
+        0.1,
+        0.1,
+        0.06
+      ]
+    },
+    "ft_sensor": {
+      "path": "/World/Franka/FtSensor",
+      "parent_path": "/World/Franka/panda_hand",
+      "threshold": 20.0
+    },
+    "workpieces": [
+      {
+        "path": "/World/Peg",
+        "position": [
+          0.3,
+          0.1,
+          0.835
+        ]
+      }
+    ]
+  },
+  "code_template": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n# ── Bushing fixture ───────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path={{bushing_fixture.path}},\n    prim_type=\"Cylinder\",\n    position={{bushing_fixture.position}},\n    radius={{bushing_fixture.radius}},\n    height={{bushing_fixture.height}},\n)\napply_api_schema(prim_path={{bushing_fixture.path}}, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path={{bushing_fixture.path}}, attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Peg ───────────────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path={{workpieces[0].path}},\n    prim_type=\"Cylinder\",\n    position={{workpieces[0].position}},\n    radius=0.018,\n    height=0.05,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\napply_physics_material(prim_path={{workpieces[0].path}}, material_name=\"rubber\")\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}, {{bushing_fixture.path}}],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\nvalidate_assembly_constraint(\n    name=\"peg_into_bushing\",\n    type=\"coincident_axes\",\n    target_a={\"path\": {{workpieces[0].path}}},\n    target_b={\"path\": {{bushing_fixture.path}}},\n    tolerance_m=0.003,\n    params={\"axis\": \"Z\", \"force_cap_N\": {{ft_sensor.threshold}}},\n)\n\nsetup_assembly_constraint(\n    peg_path={{workpieces[0].path}},\n    hole_path={{bushing_fixture.path}},\n    tolerance=0.003,\n    constraint_path=\"/World/AssemblyConstraint_PegBushing\",\n)\n\nadd_force_torque_sensor(\n    sensor_path={{ft_sensor.path}},\n    parent_path={{ft_sensor.parent_path}},\n    threshold={{ft_sensor.threshold}},\n    noise_std=0.05,\n)\n\nsetup_impedance_controller(\n    robot_path={{primary_robot.path}},\n    target_frame=\"panda_hand\",\n    Kx=[300.0, 300.0, 80.0],\n    Kr=[30.0, 30.0, 30.0],\n    Dx=[30.0, 30.0, 10.0],\n    Dr=[3.0, 3.0, 3.0],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\nadd_proximity_sensor(\n    sensor_path={{pick_sensor.path}},\n    position={{pick_sensor.position}},\n    size={{pick_sensor.size}},\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path=None,\n    source_paths=[{{workpieces[0].path}}],\n    destination_path={{bushing_fixture.path}},\n    drop_target=[0, -0.25, 0.84],\n    planning_obstacles=[\"/World/Table\", {{bushing_fixture.path}}],\n    approach_height=0.12,\n    lift_height=0.12,\n)"
+}
