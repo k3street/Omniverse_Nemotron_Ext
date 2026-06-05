@@ -13,11 +13,32 @@ from typing import Any, Callable, Dict
 
 
 # ---------------------------------------------------------------------------
+# Arena-local constants + helpers (Phase 8 wave 1, 2026-05-13)
+# Migrated from tool_executor.py:106 (_ARENA_SCENE_MAP) and :3300
+# (_arena_env_id). Used only by this module — kept theme-local rather
+# than promoted to _shared.py.
+
+_ARENA_SCENE_MAP = {
+    "tabletop_pick_and_place": "isaaclab_tasks.envs.arena.scenes.tabletop",
+    "kitchen": "isaaclab_tasks.envs.arena.scenes.kitchen",
+    "galileo": "isaaclab_tasks.envs.arena.scenes.galileo",
+    "custom": None,
+}
+
+
+def _arena_env_id(scene_type: str, robot_asset: str, task: str) -> str:
+    """Generate a gymnasium-style env_id from arena components."""
+    scene_part = scene_type.replace("_", " ").title().replace(" ", "")
+    robot_part = robot_asset.split("/")[-1].replace(".usd", "").replace("_", " ").title().replace(" ", "")
+    task_part = task.replace("_", " ").title().replace(" ", "")
+    return f"Arena-{scene_part}{task_part}-{robot_part}-v0"
+
+
+# ---------------------------------------------------------------------------
 # Phase 6 wave 9 — arena creation + variants + benchmark
 
 
 def _gen_create_arena(args: Dict) -> str:
-    from ..tool_executor import _ARENA_SCENE_MAP, _arena_env_id  # noqa: E402
     scene_type = args["scene_type"]
     robot_asset = args["robot_asset"]
     task = args["task"]
@@ -182,6 +203,85 @@ def _gen_run_arena_benchmark(args: Dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
+
+
+async def _handle_arena_leaderboard(args: Dict) -> Dict:
+    """Format a leaderboard table from benchmark results."""
+    results = args.get("results", [])
+
+    if not results:
+        return {
+            "leaderboard": "No results to display.",
+            "entries": [],
+        }
+
+    # Collect all unique metric keys across results
+    all_metrics = set()
+    for r in results:
+        all_metrics.update(r.get("metrics", {}).keys())
+    metric_cols = sorted(all_metrics)
+
+    # Build leaderboard entries
+    entries = []
+    for i, r in enumerate(results):
+        entry = {
+            "rank": i + 1,
+            "env_id": r.get("env_id", "unknown"),
+            "robot": r.get("robot", "unknown"),
+        }
+        for m in metric_cols:
+            entry[m] = r.get("metrics", {}).get(m, "N/A")
+        entries.append(entry)
+
+    # Sort by success_rate descending if available, else by first metric
+    sort_key = "success_rate" if "success_rate" in metric_cols else (metric_cols[0] if metric_cols else None)
+    if sort_key:
+        entries.sort(
+            key=lambda e: e.get(sort_key, 0) if isinstance(e.get(sort_key), (int, float)) else 0,
+            reverse=True,
+        )
+        for i, e in enumerate(entries):
+            e["rank"] = i + 1
+
+    # Format as text table
+    header_cols = ["Rank", "Robot", "Env ID"] + metric_cols
+    rows = []
+    for e in entries:
+        row = [str(e["rank"]), e["robot"], e["env_id"]]
+        for m in metric_cols:
+            val = e.get(m, "N/A")
+            if isinstance(val, float):
+                row.append(f"{val:.4f}")
+            else:
+                row.append(str(val))
+        rows.append(row)
+
+    # Calculate column widths
+    col_widths = [len(h) for h in header_cols]
+    for row in rows:
+        for i, cell in enumerate(row):
+            col_widths[i] = max(col_widths[i], len(cell))
+
+    # Build formatted table
+    sep = "+" + "+".join("-" * (w + 2) for w in col_widths) + "+"
+    header_line = "|" + "|".join(f" {h:<{col_widths[i]}} " for i, h in enumerate(header_cols)) + "|"
+    table_lines = [sep, header_line, sep]
+    for row in rows:
+        line = "|" + "|".join(f" {cell:<{col_widths[i]}} " for i, cell in enumerate(row)) + "|"
+        table_lines.append(line)
+    table_lines.append(sep)
+    table_text = "\n".join(table_lines)
+
+    return {
+        "leaderboard": table_text,
+        "entries": entries,
+        "metric_columns": metric_cols,
+        "count": len(entries),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
@@ -189,8 +289,15 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 9 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (1)
+    data["arena_leaderboard"] = _handle_arena_leaderboard
+
+    # Code-gen handlers (3)
+    codegen["create_arena"] = _gen_create_arena
+    codegen["create_arena_variant"] = _gen_create_arena_variant
+    codegen["run_arena_benchmark"] = _gen_run_arena_benchmark

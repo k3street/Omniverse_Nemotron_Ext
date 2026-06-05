@@ -714,6 +714,127 @@ print(f"[preview_dr] wrote {{len(_written)}} frames to {{_OUTPUT_DIR}} resolutio
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
+
+
+async def _handle_preview_sdg(args: Dict) -> Dict:
+    """Step the Replicator orchestrator a few times for preview frames."""
+    from .. import kit_tools
+    num_samples = args.get("num_samples", 3)
+
+    code = f"""\
+import omni.replicator.core as rep
+import json
+
+num_samples = {num_samples}
+for i in range(num_samples):
+    rep.orchestrator.step()
+    print(f"Preview frame {{i + 1}}/{num_samples} generated")
+
+print(json.dumps({{"preview_frames": num_samples, "status": "done"}}))
+"""
+    return await kit_tools.queue_exec_patch(code, f"Preview SDG: generate {num_samples} sample frames")
+
+
+async def _handle_benchmark_sdg(args: Dict) -> Dict:
+    """Run a headless SDG throughput benchmark.
+
+    Generates a short measurement loop and queues it to Kit; returns the
+    patch queue status plus the expected preset baseline for the current
+    annotator combination.
+    """
+    from .. import kit_tools
+    pipeline_id = args.get("pipeline_id", "")
+    num_frames = int(args.get("num_frames", 100))
+    annotators = args.get("annotators") or ["rgb"]
+    resolution = args.get("resolution") or [1280, 720]
+
+    # Sanitize pipeline_id to avoid injection into the generated script.
+    import re as _re
+    if pipeline_id and not _re.match(r"^[a-zA-Z0-9/_.:-]*$", pipeline_id):
+        return {"error": f"Invalid characters in pipeline_id: {pipeline_id!r}"}
+    if not all(isinstance(a, str) and _re.match(r"^[a-zA-Z0-9_]+$", a) for a in annotators):
+        return {"error": f"Invalid annotator identifier in {annotators!r}"}
+    if not (isinstance(resolution, list) and len(resolution) == 2 and all(isinstance(x, int) for x in resolution)):
+        return {"error": "resolution must be [width, height] ints"}
+
+    # Preset baselines (expected FPS on RTX 4090) derived from the spec table.
+    preset_baselines = {
+        frozenset({"rgb"}): (30, 60),
+        frozenset({"rgb", "depth", "bounding_box_2d"}): (15, 25),
+        frozenset({"rgb", "depth", "semantic_segmentation", "instance_segmentation", "normals"}): (5, 10),
+    }
+    key = frozenset(annotators)
+    baseline = preset_baselines.get(key)
+
+    code = f"""\
+import json
+import time
+import omni.replicator.core as rep
+
+ANNOTATORS = {list(annotators)!r}
+NUM_FRAMES = {num_frames}
+RESOLUTION = ({resolution[0]}, {resolution[1]})
+
+with rep.new_layer():
+    camera = rep.get.camera()
+    rp = rep.create.render_product(camera, RESOLUTION)
+
+    for a in ANNOTATORS:
+        try:
+            rep.AnnotatorRegistry.get_annotator(a).attach([rp])
+        except Exception:
+            pass
+
+    t0 = time.time()
+    rep.orchestrator.run_until_complete(num_frames=NUM_FRAMES)
+    elapsed = max(time.time() - t0, 1e-6)
+
+fps = NUM_FRAMES / elapsed
+
+# VRAM + disk I/O are best-effort — fall back to nulls if unavailable
+vram_peak_mb = None
+try:
+    import torch
+    if torch.cuda.is_available():
+        vram_peak_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+except Exception:
+    pass
+
+# Coarse bottleneck label
+bottleneck = 'gpu_render'
+if fps < 5 and vram_peak_mb is not None and vram_peak_mb > 10_000:
+    bottleneck = 'gpu_memory'
+elif fps < 2:
+    bottleneck = 'disk_write'
+
+print(json.dumps({{
+    'pipeline_id': {pipeline_id!r},
+    'num_frames': NUM_FRAMES,
+    'annotators': ANNOTATORS,
+    'resolution': list(RESOLUTION),
+    'elapsed_s': round(elapsed, 3),
+    'fps': round(fps, 2),
+    'vram_peak_mb': vram_peak_mb,
+    'bottleneck': bottleneck,
+}}))
+"""
+
+    result = await kit_tools.queue_exec_patch(
+        code, f"Benchmark SDG ({num_frames} frames, {len(annotators)} annotators)"
+    )
+    return {
+        "queued": result.get("queued", False),
+        "pipeline_id": pipeline_id,
+        "num_frames": num_frames,
+        "annotators": list(annotators),
+        "resolution": list(resolution),
+        "expected_fps_range": list(baseline) if baseline else None,
+        "note": "Actual FPS is printed by the Kit-side benchmark once the patch is approved and executed.",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
@@ -721,8 +842,23 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 5 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (2)
+    data["benchmark_sdg"] = _handle_benchmark_sdg
+    data["preview_sdg"] = _handle_preview_sdg
+
+    # Code-gen handlers (10)
+    codegen["add_domain_randomizer"] = _gen_add_domain_randomizer
+    codegen["add_latency_randomization"] = _gen_add_latency_randomization
+    codegen["configure_coco_yolo_writer"] = _gen_configure_coco_yolo_writer
+    codegen["configure_correlated_dr"] = _gen_configure_correlated_dr
+    codegen["configure_differential_sdg"] = _gen_configure_differential_sdg
+    codegen["configure_sdg"] = _gen_configure_sdg
+    codegen["create_sdg_pipeline"] = _gen_create_sdg_pipeline
+    codegen["enforce_class_balance"] = _gen_enforce_class_balance
+    codegen["export_dataset"] = _gen_export_dataset
+    codegen["preview_dr"] = _gen_preview_dr

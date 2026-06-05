@@ -535,6 +535,314 @@ print(f'Replay PID: {{proc.pid}} — use proc.wait() to block, proc.terminate() 
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 wave 14 — ros2 diagnose/emit/precheck stragglers
+
+
+async def _handle_diagnose_ros2(args: Dict) -> Dict:
+    """Run comprehensive ROS2 integration health check on the current scene.
+
+    Checks performed:
+    1. ROS2Context node present in OmniGraph
+    2. ROS distro detection
+    3. QoS profile mismatches between common topic pairs
+    4. use_sim_time parameter configuration
+    5. Clock publishing (ROS2PublishClock node)
+    6. Domain ID consistency
+    7. Dangling OmniGraph connections
+    """
+    from .. import kit_tools  # noqa: PLC0415
+    from .. import tool_executor as _te  # noqa: PLC0415
+    _ROS2_QOS_PRESETS = _te._ROS2_QOS_PRESETS
+    from typing import List, Dict as _Dict, Any  # noqa: PLC0415
+    issues: List[_Dict[str, Any]] = []
+
+    # Generate diagnostic code that runs inside Kit
+    diag_code = '''\
+import omni.graph.core as og
+import json
+import os
+
+result = {
+    "ros2_context_found": False,
+    "ros2_context_path": None,
+    "distro": None,
+    "domain_id": None,
+    "clock_publisher_found": False,
+    "use_sim_time": None,
+    "og_graphs": [],
+    "dangling_connections": [],
+    "qos_nodes": [],
+}
+
+# Check ROS_DISTRO environment variable
+result["distro"] = os.environ.get("ROS_DISTRO", None)
+result["domain_id"] = os.environ.get("ROS_DOMAIN_ID", "0")
+
+# Scan all OmniGraph graphs
+try:
+    all_graphs = og.get_all_graphs()
+    for graph in all_graphs:
+        graph_path = graph.get_path_to_graph()
+        result["og_graphs"].append(graph_path)
+        nodes = graph.get_nodes()
+        for node in nodes:
+            node_type = node.get_type_name()
+            node_path = node.get_prim_path()
+
+            # Check for ROS2Context
+            if "ROS2Context" in node_type:
+                result["ros2_context_found"] = True
+                result["ros2_context_path"] = str(node_path)
+                # Try to read domain_id attribute
+                domain_attr = node.get_attribute("inputs:domain_id")
+                if domain_attr:
+                    result["domain_id_node"] = domain_attr.get()
+
+            # Check for ROS2PublishClock
+            if "PublishClock" in node_type:
+                result["clock_publisher_found"] = True
+
+            # Collect QoS-relevant nodes
+            if "ROS2" in node_type and "Publish" in node_type:
+                topic_attr = node.get_attribute("inputs:topicName")
+                qos_attr = node.get_attribute("inputs:qosProfile")
+                result["qos_nodes"].append({
+                    "node_type": node_type,
+                    "node_path": str(node_path),
+                    "topic": topic_attr.get() if topic_attr else None,
+                    "qos": qos_attr.get() if qos_attr else None,
+                })
+
+        # Check for dangling connections
+        for node in nodes:
+            for attr in node.get_attributes():
+                if attr.get_port_type() == og.AttributePortType.ATTRIBUTE_PORT_TYPE_INPUT:
+                    upstream = attr.get_upstream_connections()
+                    if not upstream and attr.get_name().startswith("inputs:execIn"):
+                        result["dangling_connections"].append({
+                            "node": str(node.get_prim_path()),
+                            "attr": attr.get_name(),
+                        })
+except Exception as e:
+    result["scan_error"] = str(e)
+
+# Check use_sim_time via carb settings
+try:
+    import carb.settings
+    settings = carb.settings.get_settings()
+    result["use_sim_time"] = settings.get("/persistent/exts/isaacsim.ros2.bridge/useSimTime")
+except Exception:
+    result["use_sim_time"] = None
+
+print(json.dumps(result))
+'''
+
+    try:
+        diag_result = await kit_tools.queue_exec_patch(diag_code, "ROS2 diagnostic scan")
+        # Parse the result if we got immediate output
+        if isinstance(diag_result, dict) and diag_result.get("output"):
+            import json as _json  # noqa: PLC0415
+            scene_info = _json.loads(diag_result["output"])
+        else:
+            scene_info = {}
+    except Exception:
+        scene_info = {}
+
+    # Issue 1: ROS2Context node
+    if not scene_info.get("ros2_context_found", False):
+        issues.append({
+            "id": "no_ros2_context",
+            "severity": "critical",
+            "message": "No ROS2Context node found in any OmniGraph",
+            "fix": "Add a ROS2Context node to your action graph. This is required for all ROS2 bridge communication.",
+            "tool_hint": "create_omnigraph with a ROS2Context node",
+        })
+
+    # Issue 2: ROS distro
+    distro = scene_info.get("distro")
+    if not distro:
+        issues.append({
+            "id": "no_ros_distro",
+            "severity": "warning",
+            "message": "ROS_DISTRO environment variable not set",
+            "fix": "Source your ROS2 workspace: source /opt/ros/<distro>/setup.bash",
+            "tool_hint": None,
+        })
+
+    # Issue 3: Clock publisher
+    if not scene_info.get("clock_publisher_found", False):
+        issues.append({
+            "id": "no_clock_publisher",
+            "severity": "warning",
+            "message": "No ROS2PublishClock node found — /clock topic will not be published",
+            "fix": "Add a ROS2PublishClock node to publish simulation time. Use configure_ros2_time tool.",
+            "tool_hint": "configure_ros2_time(mode='sim_time')",
+        })
+
+    # Issue 4: use_sim_time
+    use_sim_time = scene_info.get("use_sim_time")
+    clock_found = scene_info.get("clock_publisher_found", False)
+    if clock_found and use_sim_time is not True:
+        issues.append({
+            "id": "use_sim_time_mismatch",
+            "severity": "warning",
+            "message": "Clock publisher active but use_sim_time is not enabled",
+            "fix": "Set use_sim_time=true so ROS2 nodes use simulation clock instead of wall clock.",
+            "tool_hint": "configure_ros2_time(mode='sim_time')",
+        })
+
+    # Issue 5: Domain ID mismatch
+    env_domain = scene_info.get("domain_id", "0")
+    node_domain = scene_info.get("domain_id_node")
+    if node_domain is not None and str(node_domain) != str(env_domain):
+        issues.append({
+            "id": "domain_id_mismatch",
+            "severity": "critical",
+            "message": f"Domain ID mismatch: ROS_DOMAIN_ID={env_domain} but ROS2Context node has domain_id={node_domain}",
+            "fix": f"Set ROS_DOMAIN_ID={node_domain} in your environment, or update the ROS2Context node to domain_id={env_domain}.",
+            "tool_hint": None,
+        })
+
+    # Issue 6: QoS mismatches
+    for qos_node in scene_info.get("qos_nodes", []):
+        topic = qos_node.get("topic", "")
+        if topic:
+            topic_key = topic.strip("/").split("/")[-1]
+            preset = _ROS2_QOS_PRESETS.get(topic_key)
+            if preset and qos_node.get("qos"):
+                current_qos = str(qos_node["qos"])
+                expected_reliability = preset[0]
+                if expected_reliability not in current_qos:
+                    issues.append({
+                        "id": "qos_mismatch",
+                        "severity": "warning",
+                        "message": f"QoS mismatch on topic '{topic}': expected {expected_reliability} reliability",
+                        "fix": f"Use fix_ros2_qos(topic='{topic}') to apply the recommended QoS profile.",
+                        "tool_hint": f"fix_ros2_qos(topic='{topic}')",
+                    })
+
+    # Issue 7: Dangling connections
+    for dangling in scene_info.get("dangling_connections", []):
+        issues.append({
+            "id": "dangling_connection",
+            "severity": "info",
+            "message": f"Dangling execution input on {dangling['node']}.{dangling['attr']}",
+            "fix": "Connect this node's execIn to an OnPlaybackTick or upstream node.",
+            "tool_hint": None,
+        })
+
+    return {
+        "issues": issues,
+        "issue_count": len(issues),
+        "ros2_context_found": scene_info.get("ros2_context_found", False),
+        "distro": scene_info.get("distro"),
+        "domain_id": scene_info.get("domain_id", "0"),
+        "clock_publishing": scene_info.get("clock_publisher_found", False),
+        "graphs_scanned": len(scene_info.get("og_graphs", [])),
+        "message": f"Found {len(issues)} issue(s)" if issues else "All ROS2 checks passed — no issues found",
+    }
+
+
+async def _handle_emit_ros2_control_yaml(args: Dict) -> Dict:
+    """Phase 6 M1: emit colcon-buildable ros2_control YAML for outside-Kit launch.
+
+    Produces controller_manager + joint_state_broadcaster + joint_trajectory_controller
+    config that uses the topic_based_ros2_control/TopicBasedSystem hardware plugin.
+    Output written to args["output_path"] or returned as text.
+    """
+    robot_path = (args.get("robot_path") or "").strip()
+    if not robot_path:
+        return {"error": "emit_ros2_control_yaml requires robot_path"}
+    controller_type = args.get("controller_type", "joint_trajectory_controller")
+    output_path = args.get("output_path")
+    js_topic = args.get("joint_states_topic", "/isaac_joint_states")
+    jc_topic = args.get("joint_commands_topic", "/isaac_joint_commands")
+    update_rate_hz = int(args.get("update_rate_hz", 100))
+
+    yaml_text = f"""controller_manager:
+  ros__parameters:
+    update_rate: {update_rate_hz}
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    {controller_type}:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+{controller_type}:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: {update_rate_hz}
+    action_monitor_rate: 20
+
+# ros2_control hardware: topic_based_ros2_control/TopicBasedSystem
+# subscribes to {js_topic} and publishes to {jc_topic}
+# (Isaac Sim publishes/subscribes the inverse via setup_ros2_control_compat.)
+"""
+    out = {"success": True, "yaml": yaml_text, "robot_path": robot_path}
+    if output_path:
+        try:
+            from pathlib import Path as _P  # noqa: PLC0415
+            p = _P(output_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(yaml_text)
+            out["written_to"] = str(p)
+        except Exception as e:
+            out["write_error"] = str(e)
+    return out
+
+
+async def _handle_precheck_ros2_environment(args: Dict) -> Dict:
+    """Phase 6 M1: verify ROS2 environment before scene build.
+
+    Checks:
+      - AMENT_PREFIX_PATH set + non-empty
+      - rosbridge port (default 9090) accepting connections
+      - ROS_DOMAIN_ID set (or default 0)
+
+    Returns {ok, issues[], details}. Fail-fast for the agent BEFORE expensive
+    setup_ros2_bridge / build_scene operations.
+    """
+    import os, socket  # noqa: PLC0415
+    issues = []
+    details = {}
+
+    ament = os.environ.get("AMENT_PREFIX_PATH")
+    details["AMENT_PREFIX_PATH"] = ament or ""
+    if not ament:
+        issues.append("AMENT_PREFIX_PATH not set — source ROS2 install first")
+
+    domain_id = os.environ.get("ROS_DOMAIN_ID", "0")
+    details["ROS_DOMAIN_ID"] = domain_id
+
+    port = int(args.get("rosbridge_port", 9090))
+    details["rosbridge_port"] = port
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1.0)
+    try:
+        sock.connect(("127.0.0.1", port))
+        sock.close()
+        details["rosbridge_reachable"] = True
+    except Exception:
+        details["rosbridge_reachable"] = False
+        issues.append(f"rosbridge_server not listening on 127.0.0.1:{port}")
+
+    return {"ok": len(issues) == 0, "issues": issues, "details": details}
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
@@ -542,8 +850,20 @@ def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
 ) -> None:
-    """Phase 6 wave 7 — dispatch lines in tool_executor.py still
-    reference these names via re-import. Phase 9 swaps to register()
-    being authoritative; until then this is intentionally a no-op.
+    """Phase 9 — populate dispatch dicts with this module's handlers.
+
+    Called by `handlers/_dispatch.py:register_handlers()` which is the
+    sole dispatch entry point from `tool_executor.py`.
     """
-    return None
+    # Data handlers (3)
+    data["diagnose_ros2"] = _handle_diagnose_ros2
+    data["emit_ros2_control_yaml"] = _handle_emit_ros2_control_yaml
+    data["precheck_ros2_environment"] = _handle_precheck_ros2_environment
+
+    # Code-gen handlers (6)
+    codegen["configure_ros2_bridge"] = _gen_configure_ros2_bridge
+    codegen["configure_ros2_time"] = _gen_configure_ros2_time
+    codegen["fix_ros2_qos"] = _gen_fix_ros2_qos
+    codegen["replay_rosbag"] = _gen_replay_rosbag
+    codegen["setup_ros2_bridge"] = _gen_setup_ros2_bridge
+    codegen["show_tf_tree"] = _gen_show_tf_tree

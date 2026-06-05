@@ -1,14 +1,18 @@
-"""Phase 2 — smoke test for the themed handler package skeleton.
+"""Phase 2 + Phase 9 — handler package skeleton + dispatch contract.
 
-Asserts that every theme module imports cleanly and exposes a no-op
-`register()` that accepts the (data, codegen) signature. Spec says:
+Phase 2 (initial) asserted that every theme's `register()` was a no-op
+shape placeholder. Phase 9 (2026-05-13) flipped that — `register()` now
+populates the dispatch dicts.
 
-  > Test: smoke test `from service.isaac_assist_service.chat.tools.handlers
-  > import scene_authoring, physics, ...` does not raise.
+These tests assert the post-Phase-9 contract:
+  * every theme module imports cleanly
+  * every theme module exposes a `register(data, codegen)` callable
+  * calling `register_handlers(data, codegen)` populates both dicts
+    with at least one entry across the suite
+  * `_THEME_MODULES` references every themed module file in the package
 
-These tests will start carrying real weight in Phase 3-7 as each
-theme's `register()` populates the dispatch dicts. For now they're
-pure shape checks.
+Pre-Phase-9 versions of these tests asserted is_noop semantics; that
+contract was retired with the dispatch swap.
 """
 from __future__ import annotations
 
@@ -17,7 +21,8 @@ import pytest
 pytestmark = pytest.mark.l0
 
 
-# The 14 themed modules per IA_FULL_SPEC Phase 2 (+ _dispatch).
+# The 17 themed modules per IA_FULL_SPEC Phase 2 + Phase 9 additions.
+# Phase 9 added: animation, pick_place, rendering.
 THEMED_MODULES = (
     "scene_authoring",
     "physics",
@@ -33,6 +38,9 @@ THEMED_MODULES = (
     "workflow",
     "resolve",
     "vision",
+    "animation",
+    "pick_place",
+    "rendering",
 )
 
 
@@ -60,11 +68,8 @@ def test_themed_module_has_register(name):
 
 
 @pytest.mark.parametrize("name", THEMED_MODULES)
-def test_themed_module_register_is_noop(name):
-    """Phase 2 invariant: every theme's `register()` must be a no-op
-    and must not mutate the dicts it receives. Phase 3-7 lifts this
-    invariant theme-by-theme.
-    """
+def test_themed_module_register_returns_none(name):
+    """`register()` returns None and mutates the passed dicts in-place."""
     import importlib
 
     module = importlib.import_module(
@@ -74,8 +79,10 @@ def test_themed_module_register_is_noop(name):
     codegen: dict = {}
     result = module.register(data, codegen)
     assert result is None, f"{name}.register should return None"
-    assert data == {}, f"{name}.register modified data dict (should be no-op)"
-    assert codegen == {}, f"{name}.register modified codegen dict (should be no-op)"
+    # Phase 9: register() populates dispatch (data and/or codegen).
+    # A module is allowed to register only one side or the other,
+    # but the union across all themes must be non-empty (asserted by
+    # the central-registry test below).
 
 
 def test_dispatch_central_registry_imports():
@@ -86,20 +93,28 @@ def test_dispatch_central_registry_imports():
     assert callable(_dispatch.register_handlers)
 
 
-def test_dispatch_central_registry_is_noop():
-    """At Phase 2, calling `register_handlers(data, codegen)` does
-    nothing (every theme's `register()` is a no-op)."""
+def test_dispatch_central_registry_populates():
+    """Phase 9 contract: `register_handlers(data, codegen)` populates
+    both dispatch dicts with the union of every theme module's entries
+    plus external registrators (multimodal / diagnose / bridges / ros2).
+    """
     from service.isaac_assist_service.chat.tools.handlers import _dispatch
 
     data: dict = {}
     codegen: dict = {}
     _dispatch.register_handlers(data, codegen)
-    assert data == {}
-    assert codegen == {}
+    # Floor thresholds — these grow over time. They exist to catch
+    # the regression where Phase 9 silently reverts to a no-op.
+    assert len(data) >= 100, (
+        f"register_handlers should populate ≥100 data entries, got {len(data)}"
+    )
+    assert len(codegen) >= 100, (
+        f"register_handlers should populate ≥100 codegen entries, got {len(codegen)}"
+    )
 
 
 def test_dispatch_iterates_all_themes():
-    """The central registry must reference all 14 themed modules
+    """The central registry must reference every themed module
     (so a forgotten theme can't silently miss registration later)."""
     from service.isaac_assist_service.chat.tools.handlers import _dispatch
 
