@@ -1,0 +1,50 @@
+{
+  "task_id": "CP-44",
+  "goal": "Build a mixed-geometry station: 2 cubes + 2 spheres on conveyor → bin. Tests handler with heterogeneous object types in source_paths.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six mixed-geometry specifics for CP-44 (extends CP-01 — heterogeneous source items):\n1) 2 cubes (5cm) + 2 spheres (5cm diameter) on conveyor. source_paths includes both types.\n2) Cube_1, Cube_2 at x=[-1.4, -1.1]; Sphere_1, Sphere_2 at x=[-0.8, -0.5].\n3) Handler uses bbox center for pick — same for cube and sphere. Plan invariant.\n4) All items same effective size (5cm) so gripper close-distance unchanged.\n5) Industrial use: mixed-SKU lines with shape variation (e.g., cosmetics, hardware, small parts).\n6) source_paths order arbitrary — controller picks closest-by-reach regardless.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 2 cubes + 2 spheres mixed\nfor i, x in enumerate([-1.4, -1.1]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nfor i, x in enumerate([-0.8, -0.5]):\n    path = f\"/World/Sphere_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Sphere\", position=[x, 0.4, 0.835], radius=0.025)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nall_items = [\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Sphere_1\", \"/World/Sphere_2\"]\nbulk_set_attribute(\n    prim_paths=all_items,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in all_items:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=all_items,\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1":   [-1.4, 0.4, 0.835],
+      "/World/Cube_2":   [-1.1, 0.4, 0.835],
+      "/World/Sphere_1": [-0.8, 0.4, 0.835],
+      "/World/Sphere_2": [-0.5, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 90
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-44 demonstrates handler agnosticism to object type — cubes and spheres processed identically via bbox center. source_paths can be any pickable prim.",
+  "failure_modes": [
+    "Spheres roll on belt — picking timing harder. Sensor catches when sphere passes; cube static.",
+    "Gripper close on sphere fragile vs cube. Half delivery rate.",
+    "Cubes land flat in bin; spheres pile/roll. Bin floor matters less than xy match.",
+    "Same physics gotchas as CP-01."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+}

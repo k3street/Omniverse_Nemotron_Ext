@@ -1396,6 +1396,136 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "create_articulated_joint",
+            "description": "Tier B tool — creates a USD physics joint (revolute/prismatic/fixed/spherical) between two prims for articulated mechanisms (drawers, doors, hinges, levers, rotary tables). Supports axis specification + joint limits + optional drive. Unlocks #13 Leader/Follower Rotary Station + #30 FrankaDrawerOpen.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "joint_path": {"type": "string", "description": "USD path of the joint to create"},
+                    "body0_path": {"type": "string", "description": "USD path of first body (parent/static; optional for grounded joints)"},
+                    "body1_path": {"type": "string", "description": "USD path of second body (child/moving)"},
+                    "joint_type": {"type": "string", "enum": ["revolute", "prismatic", "fixed", "spherical"], "description": "Joint type (default 'revolute')"},
+                    "axis": {"type": "array", "items": {"type": "number"}, "description": "[x,y,z] axis of rotation/translation"},
+                    "limit_lower": {"type": "number", "description": "Lower joint limit (degrees for revolute, meters for prismatic)"},
+                    "limit_upper": {"type": "number", "description": "Upper joint limit"},
+                    "drive_type": {"type": "string", "enum": ["force", "acceleration"], "description": "Optional drive type"},
+                },
+                "required": ["joint_path", "body1_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "surface_gripper",
+            "description": "Tier B tool — adds suction/vacuum gripper to a robot via Isaac Sim's OgnSurfaceGripper OmniGraph node. End-effector attaches to nearby objects via FixedJoint when 'close' signal active; detaches on 'open'. Used for pick-and-place of items not gripped by parallel-finger gripper (e.g. flat plates, irregular boxes). Unlocks #25 UR10BinFilling, #27 UR10BinStacking, #29 SurfaceGripperGantry, #33 UR10ConveyorCortex.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string", "description": "USD path of the robot"},
+                    "ee_link": {"type": "string", "description": "USD path of end-effector link (default: <robot>/panda_hand)"},
+                    "grip_threshold": {"type": "number", "description": "Distance threshold for object pickup (default 0.01m)"},
+                    "force_limit": {"type": "number", "description": "Max sustainable suction force (default 100.0)"},
+                    "torque_limit": {"type": "number", "description": "Max torque (default 100.0)"},
+                    "graph_path": {"type": "string", "description": "OmniGraph path (default <robot>/SuctionGraph)"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_robot_claim_mutex",
+            "description": "Tier A tool — creates a mutex marker prim for shared-resource arbitration between multiple robots. Coordinates access to shared pickup zones, conveyor segments, or stations. Marker has mutex:claimed_by, mutex:claim_count, mutex:robots, mutex:resource_path attrs. Runtime claim/release requires controller hooks; canonical-time tool creates the marker. Unlocks #10 Parallel Picking Duo, #12 Producer/Consumer Bounded Buffer, #13 Leader/Follower Rotary Station, #14 Vision-Gated Bin Picking Duo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mutex_path": {"type": "string", "description": "USD path of the mutex marker"},
+                    "resource_path": {"type": "string", "description": "USD path of shared resource being protected"},
+                    "robots": {"type": "array", "items": {"type": "string"}, "description": "List of robot paths sharing access"},
+                },
+                "required": ["mutex_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_robot_handoff_signal",
+            "description": "Tier B tool — creates a handoff marker prim with state attributes for coordinating two robots in a handoff sequence. Robot A places at handoff, robot B picks. Marker has handoff:state, handoff:current_cube, handoff:position, handoff:robot_a, handoff:robot_b attrs. Runtime usage requires controller integration; canonical-time tool just creates the marker prim. Unlocks #6 Two-Cell Kit-Tray Relay, #7 Robot-to-Robot Handoff, #11 Fixed-Point Robot-to-Robot Handoff.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "handoff_path": {"type": "string", "description": "USD path of the handoff marker"},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "[x,y,z] world position of handoff station"},
+                    "robot_a": {"type": "string", "description": "USD path of placing robot"},
+                    "robot_b": {"type": "string", "description": "USD path of picking robot"},
+                },
+                "required": ["handoff_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_kit_tray",
+            "description": "Tier A tool — creates a kitting tray with N labeled slots at fixed positions. Used by kitting canonicals (recipe-based assembly, multi-source-to-tray, two-cell relay). Each slot is a child Xform under tray_path with kit:slot_index, kit:slot_size, kit:occupied attrs. Slot centers are returned for use as drop_targets in setup_pick_place_controller.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tray_path": {"type": "string", "description": "USD path of the tray to create"},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "[x,y,z] world position of tray center"},
+                    "tray_size": {"type": "array", "items": {"type": "number"}, "description": "[w,d,h] tray dimensions in meters"},
+                    "slot_layout": {"type": "string", "description": "'grid_RxC' (e.g. 'grid_2x2') or 'row_N' (e.g. 'row_4')"},
+                    "slot_size": {"type": "number", "description": "Edge length of each slot's expected item (default 0.05)"},
+                    "slot_spacing": {"type": "number", "description": "Center-to-center slot spacing"},
+                },
+                "required": ["tray_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "track_slot_occupancy",
+            "description": "Tier A companion to create_kit_tray. Returns occupancy mapping {slot_path: cube_path or None} by checking proximity of cubes to slot centers. Use after pick-place to verify kit completion.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tray_path": {"type": "string", "description": "USD path of the kit tray"},
+                    "cube_paths": {"type": "array", "items": {"type": "string"}, "description": "USD paths of items to check for in slots"},
+                },
+                "required": ["tray_path", "cube_paths"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_pick_place_with_vision",
+            "description": "Composite tool — runs RUNTIME vision classification of cubes in the scene, then installs cuRobo pick-place controller with vision-derived color_routing. The full pipeline is truly vision-driven: detection happens at install time, semantic labels are set dynamically based on detected colors, and standard color_routing dispatches cubes to matching destinations. Use INSTEAD of separate add_vision_classifier_gate + setup_pick_place_controller calls when the canonical's `code` block needs both in one step. Each call consumes 1 Gemini API call. Args same as add_vision_classifier_gate (cube_paths, class_labels, camera_path, destination_map) PLUS setup_pick_place_controller (robot_path, sensor_path, belt_path, planning_obstacles, etc).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "cube_paths": {"type": "array", "items": {"type": "string"}, "description": "Cubes to classify + pick (also used as source_paths for controller)"},
+                    "source_paths": {"type": "array", "items": {"type": "string"}, "description": "Alias for cube_paths (controller-side naming)"},
+                    "class_labels": {"type": "array", "items": {"type": "string"}, "description": "Expected class labels for vision (e.g. ['red cube', 'blue cube'])"},
+                    "camera_path": {"type": "string", "description": "USD path of camera for vision capture"},
+                    "destination_map": {"type": "object", "description": "{class_short_name: bin_path} (e.g. {'red': '/World/RedBin'}). Used as color_routing after vision classification."},
+                    "destination_path": {"type": "string", "description": "Fallback bin for unclassified cubes"},
+                    "sensor_path": {"type": "string"},
+                    "belt_path": {"type": "string"},
+                    "planning_obstacles": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["robot_path", "cube_paths", "class_labels", "camera_path", "destination_map"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "vision_analyze_scene",
             "description": "Use the Gemini Robotics-ER vision model for free-form spatial reasoning about the viewport. Ask questions like 'what object should I move to make room?', 'how full is the container?', 'describe the workspace layout'.",
             "parameters": {
@@ -2752,6 +2882,7 @@ ISAAC_SIM_TOOLS = [
                         "planning_obstacles": {"type": "array", "items": {"type": "string"}, "description": "curobo mode: list of USD paths to include as collision obstacles during planning. Each prim's world-bound is converted to a Cuboid. Use to avoid the conveyor/table/walls during transit."},
                         "color_routing": {"type": "object", "description": "curobo mode (SORT-01 enabler): dict mapping semantic class_name → destination prim path. When present, the controller looks up each picked cube's Semantics_color (or Semantics_class) class_name and routes to the matching bin instead of destination_path. Cubes must be labeled with set_semantic_label(prim_path, class_name='red'|'blue'|..., semantic_type='color') beforehand. Falls through to destination_path when no entry matches. Example: {\"red\": \"/World/RedBin\", \"blue\": \"/World/BlueBin\"}."},
                         "drop_targets": {"type": "object", "description": "curobo mode (stack-placement enabler): dict mapping cube_path → world drop position [x,y,z], OR list of [x,y,z] parallel to source_paths. When set, each cube is dropped at its specified position instead of destination_path's bbox center. Used by CP-08+ palletizing/stacking canonicals where each cube goes to a distinct grid/column position. Pair with compute_stack_placement to derive the positions. Falls through to drop_target then destination_path for cubes not listed. Example: {\"/World/Cube_1\": [0.4, -0.4, 0.13], \"/World/Cube_2\": [0.45, -0.4, 0.13]}."},
+                        "gripper_rotation": {"type": "object", "description": "curobo mode (Tier B brick-pattern enabler): dict mapping cube_path → yaw_deg (degrees), OR list of yaw_deg parallel to source_paths, OR scalar yaw_deg for all cubes. Rotates gripper around world Z-axis at drop time. Used by brick-layer palletizers (CP-N: layer 0 yaw=0, layer 1 yaw=90 for interlocking) and mixed-SKU palletizers needing per-item orientation. Yaw applies to drop-side trajectory segments (S4-S5); pick-side stays gripper-down regardless. Example: {\"/World/Cube_10\": 90, \"/World/Cube_11\": 90} for layer-1 cubes in CP-20 brick pattern."},
                         "diffik_method": {"type": "string", "enum": ["dls", "svd", "pinv"], "description": "diffik mode: Jacobian inversion method. 'dls' (damped least-squares, default, λ=0.05) handles singularities gracefully; 'pinv' is Moore-Penrose pseudoinverse; 'svd' is truncated SVD. Use 'dls' unless you know you need the others."},
                     },
                     "required": ["robot_path", "target_source"],

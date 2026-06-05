@@ -38431,6 +38431,604 @@ print(json.dumps(positions))
 DATA_HANDLERS["add_vision_classifier_gate"] = _handle_add_vision_classifier_gate
 
 
+async def _handle_setup_pick_place_with_vision(args: Dict) -> Dict:
+    """Composite tool — runs vision classification THEN setup_pick_place_controller.
+
+    For canonical-time integration of real runtime vision-driven sorting.
+    Workflow:
+      1. Calls add_vision_classifier_gate(cube_paths, class_labels, camera_path)
+         to detect cubes in viewport and map cube_path → detected_label.
+      2. Sets Semantics_color on each cube via Kit RPC (the detected label
+         becomes the cube's semantic class).
+      3. Calls setup_pick_place_controller(target_source='curobo',
+         color_routing=destination_map) to install the standard cuRobo
+         controller with vision-derived routing.
+
+    This makes the FULL pipeline truly vision-driven: classification runs
+    at controller-install-time, semantic labels reflect actual visual
+    content, and standard color_routing dispatches accordingly.
+
+    NOTE: each call to this tool consumes 1 Gemini API call (the vision
+    classification). Be cost-conscious in production deployments.
+
+    Args (forwards to underlying tools):
+      robot_path, source_paths (cube_paths), destination_path,
+      camera_path, class_labels, destination_map (class → bin_path),
+      sensor_path, belt_path, planning_obstacles
+      [+ any setup_pick_place_controller args]
+
+    Returns: combined dict with vision result + controller install result.
+    """
+    cube_paths = list(args.get("cube_paths") or args.get("source_paths") or [])
+    class_labels = list(args.get("class_labels") or [])
+    camera_path = args.get("camera_path")
+    destination_map = args.get("destination_map") or {}
+
+    if not cube_paths:
+        return {"type": "error", "error": "cube_paths/source_paths required"}
+    if not class_labels:
+        return {"type": "error", "error": "class_labels required"}
+    if not destination_map:
+        return {"type": "error", "error": "destination_map required (class→bin path)"}
+
+    # Step 1: vision classification
+    vision_res = await execute_tool_call("add_vision_classifier_gate", {
+        "cube_paths": cube_paths,
+        "class_labels": class_labels,
+        "camera_path": camera_path,
+        "destination_map": destination_map,
+    })
+    if vision_res.get("type") == "error":
+        return vision_res
+
+    cube_to_class = vision_res.get("cube_to_class") or {}
+    if not cube_to_class:
+        return {"type": "error",
+                "error": f"Vision returned 0 detections — check camera placement and scene visibility. raw_detections: {vision_res.get('raw_detections')}"}
+
+    # Step 2: Set Semantics_color on each cube via Kit-side script.
+    # Strip the " cube" suffix from labels (e.g., "red cube" → "red") to match
+    # color_routing dict's keys.
+    cube_to_short_class = {}
+    for cube, label in cube_to_class.items():
+        short = label.lower().replace(" cube", "").strip()
+        cube_to_short_class[cube] = short
+
+    label_code = f"""\
+import omni.usd
+from pxr import Usd, Sdf, Semantics
+
+stage = omni.usd.get_context().get_stage()
+mapping = {cube_to_short_class!r}
+applied = []
+for path, cls in mapping.items():
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): continue
+    sem = Semantics.SemanticsAPI.Apply(p, "Semantics_color")
+    if sem.GetSemanticTypeAttr() and sem.GetSemanticTypeAttr().IsValid():
+        pass
+    else:
+        sem.CreateSemanticTypeAttr().Set("color")
+    sem.CreateSemanticDataAttr().Set(cls)
+    applied.append(path)
+import json
+print(json.dumps({{"applied": applied}}))
+"""
+    label_res = await kit_tools.exec_sync(label_code, timeout=15)
+
+    # Step 3: Build color_routing dict from destination_map (already keyed by class)
+    color_routing = dict(destination_map)
+
+    # Step 4: install cuRobo controller with vision-derived color_routing
+    controller_args = dict(args)  # forward all args
+    controller_args["target_source"] = "curobo"
+    controller_args["color_routing"] = color_routing
+    # Drop vision-specific args before passing to setup_pick_place_controller
+    for k in ("class_labels", "destination_map", "camera_path", "cube_paths"):
+        controller_args.pop(k, None)
+    # source_paths might be missing if caller used cube_paths
+    if not controller_args.get("source_paths"):
+        controller_args["source_paths"] = cube_paths
+
+    install_res = await execute_tool_call("setup_pick_place_controller", controller_args)
+
+    return {
+        "vision_classification": cube_to_class,
+        "semantic_labels_applied": (label_res.get("output") or "")[-200:],
+        "color_routing": color_routing,
+        "controller_install": (install_res.get("output") or "")[-300:] if isinstance(install_res, dict) else str(install_res)[:300],
+        "raw_detections": vision_res.get("raw_detections", []),
+    }
+
+
+DATA_HANDLERS["setup_pick_place_with_vision"] = _handle_setup_pick_place_with_vision
+
+
+async def _handle_create_kit_tray(args: Dict) -> Dict:
+    """Tier A tool — creates a tray with N labeled slots for kitting workflows.
+
+    A kit tray is a flat platform with multiple discrete positions (slots)
+    where specific items belong. Each slot is a child Xform under the tray
+    prim, named slot_<n> with a fixed local position. Slots are queryable
+    via track_slot_occupancy at runtime.
+
+    Args:
+      tray_path:    USD path of the tray to create (parent prim)
+      position:     [x, y, z] world position of tray center
+      tray_size:    [w, d, h] tray dimensions
+      slot_layout:  pattern_name e.g. 'grid_2x2', 'grid_3x3', 'row_4'
+      slot_size:    width of each slot (default 0.05 = 5cm cube slot)
+      slot_spacing: center-to-center spacing (default = slot_size + 0.02)
+
+    Returns:
+      {tray_path, slot_paths: [path1, path2, ...], slot_centers: [[x,y,z], ...]}
+    """
+    tray_path = args["tray_path"]
+    position = args.get("position", [0, 0, 0.75])
+    tray_size = args.get("tray_size", [0.30, 0.30, 0.05])
+    slot_layout = args.get("slot_layout", "grid_2x2")
+    slot_size = float(args.get("slot_size", 0.05))
+    slot_spacing = float(args.get("slot_spacing", slot_size + 0.02))
+
+    # Parse slot_layout
+    if slot_layout.startswith("grid_") and "x" in slot_layout[5:]:
+        rows, cols = (int(x) for x in slot_layout[5:].split("x"))
+        n_slots = rows * cols
+    elif slot_layout.startswith("row_"):
+        rows, cols = 1, int(slot_layout[4:])
+        n_slots = cols
+    else:
+        return {"type": "error", "error": f"unsupported slot_layout: {slot_layout!r}"}
+
+    # Build the tray prim
+    await execute_tool_call("create_prim", {
+        "prim_path": tray_path,
+        "prim_type": "Cube",
+        "position": position,
+        "scale": [tray_size[0] / 2, tray_size[1] / 2, tray_size[2] / 2],
+    })
+    await execute_tool_call("apply_api_schema", {
+        "prim_path": tray_path,
+        "schema_name": "PhysicsCollisionAPI",
+    })
+
+    # Compute slot positions
+    cx, cy = position[0], position[1]
+    tray_top_z = position[2] + tray_size[2] / 2
+    slot_paths = []
+    slot_centers = []
+    for r in range(rows):
+        for c in range(cols):
+            x = cx + (c - (cols - 1) * 0.5) * slot_spacing
+            y = cy + (r - (rows - 1) * 0.5) * slot_spacing
+            z = tray_top_z + slot_size * 0.5
+            slot_idx = r * cols + c
+            slot_path = f"{tray_path}/slot_{slot_idx + 1}"
+            slot_paths.append(slot_path)
+            slot_centers.append([round(x, 6), round(y, 6), round(z, 6)])
+
+    # Create empty Xform prims for slot tracking (each slot is a marker prim)
+    slot_init_code = f"""\
+import omni.usd
+from pxr import UsdGeom, Gf, Sdf
+stage = omni.usd.get_context().get_stage()
+slot_paths = {slot_paths!r}
+slot_centers = {slot_centers!r}
+created = []
+for path, center in zip(slot_paths, slot_centers):
+    pp = Sdf.Path(path)
+    if not stage.GetPrimAtPath(pp).IsValid():
+        prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+        UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(center[0], center[1], center[2]))
+        # Mark as kit_slot for track_slot_occupancy
+        prim.CreateAttribute("kit:slot_index", Sdf.ValueTypeNames.Int).Set(slot_paths.index(path))
+        prim.CreateAttribute("kit:slot_size", Sdf.ValueTypeNames.Float).Set({slot_size})
+        prim.CreateAttribute("kit:occupied", Sdf.ValueTypeNames.Bool).Set(False)
+        created.append(path)
+import json
+print(json.dumps({{"created": created}}))
+"""
+    res = await kit_tools.exec_sync(slot_init_code, timeout=15)
+
+    return {
+        "tray_path": tray_path,
+        "slot_paths": slot_paths,
+        "slot_centers": slot_centers,
+        "n_slots": n_slots,
+    }
+
+
+async def _handle_track_slot_occupancy(args: Dict) -> Dict:
+    """Tier A companion — check which kit-tray slots are currently occupied.
+
+    Reads slot_paths under tray, checks if any cube is within slot_size/2
+    of each slot's xy center. Returns occupancy mapping.
+
+    Args:
+      tray_path:    USD path of the kit tray (created via create_kit_tray)
+      cube_paths:   USD paths of items to check
+
+    Returns:
+      {slot_occupancy: {slot_path: cube_path or None, ...}}
+    """
+    tray_path = args["tray_path"]
+    cube_paths = list(args.get("cube_paths") or [])
+
+    code = f"""\
+import omni.usd, json
+from pxr import Usd, UsdGeom, Sdf
+stage = omni.usd.get_context().get_stage()
+tray = stage.GetPrimAtPath({tray_path!r})
+result = {{"slot_occupancy": {{}}, "filled_count": 0}}
+if not tray or not tray.IsValid():
+    result["error"] = f"tray prim not found: {tray_path!r}"
+else:
+    cube_paths = {cube_paths!r}
+    cube_centers = {{}}
+    for cp in cube_paths:
+        prim = stage.GetPrimAtPath(cp)
+        if prim and prim.IsValid():
+            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+            b = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+            if not b.IsEmpty():
+                m = b.GetMidpoint()
+                cube_centers[cp] = [float(m[0]), float(m[1]), float(m[2])]
+    # For each slot, find nearest cube within slot_size/2
+    for child in tray.GetChildren():
+        if not child.GetName().startswith("slot_"): continue
+        size_attr = child.GetAttribute("kit:slot_size")
+        size = float(size_attr.Get()) if size_attr and size_attr.IsValid() else 0.05
+        x_t = UsdGeom.Xformable(child).ComputeLocalToWorldTransform(0).ExtractTranslation()
+        slot_xy = [float(x_t[0]), float(x_t[1])]
+        slot_path = str(child.GetPath())
+        nearest_cube = None
+        nearest_dist = float("inf")
+        for cp, c in cube_centers.items():
+            d = ((c[0] - slot_xy[0])**2 + (c[1] - slot_xy[1])**2) ** 0.5
+            if d < size * 0.6 and d < nearest_dist:  # 60% of slot size = "in slot"
+                nearest_cube = cp
+                nearest_dist = d
+        result["slot_occupancy"][slot_path] = nearest_cube
+        if nearest_cube: result["filled_count"] += 1
+print(json.dumps(result))
+"""
+    res = await kit_tools.exec_sync(code, timeout=15)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    return parsed or {"error": "could not parse track_slot_occupancy output"}
+
+
+DATA_HANDLERS["create_kit_tray"] = _handle_create_kit_tray
+DATA_HANDLERS["track_slot_occupancy"] = _handle_track_slot_occupancy
+
+
+async def _handle_setup_robot_handoff_signal(args: Dict) -> Dict:
+    """Tier B tool — creates a 'handoff signal' marker prim used to coordinate
+    two robots in a handoff sequence (robot A places at handoff, robot B picks
+    from handoff).
+
+    Creates a marker prim with attributes:
+      - handoff:state ('idle', 'placed', 'picked')
+      - handoff:current_cube (path of cube currently at handoff, or '')
+      - handoff:position (xyz of handoff station)
+      - handoff:robot_a (path of placing robot)
+      - handoff:robot_b (path of picking robot)
+
+    For runtime use, robots' controllers would read/write these attrs.
+    Without controller integration, this tool just creates the marker prim
+    so canonicals can reference it as a known handoff station.
+
+    Args:
+      handoff_path: USD path of the handoff marker
+      position:     [x, y, z] world position of the handoff station
+      robot_a:      USD path of robot that PLACES at handoff
+      robot_b:      USD path of robot that PICKS from handoff
+
+    Returns: {handoff_path, position, attrs_set}
+    """
+    handoff_path = args["handoff_path"]
+    position = args.get("position", [0, 0, 0.85])
+    robot_a = args.get("robot_a", "")
+    robot_b = args.get("robot_b", "")
+
+    code = f"""\
+import omni.usd
+from pxr import UsdGeom, Sdf, Gf
+import json
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({handoff_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("handoff:state",        Sdf.ValueTypeNames.String).Set("idle")
+prim.CreateAttribute("handoff:current_cube", Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("handoff:position",     Sdf.ValueTypeNames.Float3).Set(({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("handoff:robot_a",      Sdf.ValueTypeNames.String).Set({robot_a!r})
+prim.CreateAttribute("handoff:robot_b",      Sdf.ValueTypeNames.String).Set({robot_b!r})
+print(json.dumps({{"created": str(prim.GetPath()), "state": "idle"}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "handoff_path": handoff_path,
+        "position": position,
+        "robot_a": robot_a,
+        "robot_b": robot_b,
+        "state": "idle",
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["setup_robot_handoff_signal"] = _handle_setup_robot_handoff_signal
+
+
+async def _handle_setup_robot_claim_mutex(args: Dict) -> Dict:
+    """Tier A tool — creates a mutex marker prim for shared-resource arbitration
+    between multiple robots.
+
+    A claim mutex coordinates access to a shared pickup zone, conveyor segment,
+    or station. Only one robot can claim the mutex at a time; others wait or
+    skip.
+
+    Creates a marker prim with attributes:
+      - mutex:claimed_by (robot path, or empty if free)
+      - mutex:claim_count (total claims granted)
+      - mutex:robots (list of authorized robot paths)
+      - mutex:resource_path (USD path of shared resource being protected)
+
+    Runtime claim/release requires controller hooks. Canonical-time tool
+    creates the marker prim so scene defines the mutex location.
+
+    Args:
+      mutex_path:    USD path of the mutex marker
+      resource_path: USD path of resource being mutually-excluded
+      robots:        list of robot paths that share access
+
+    Returns: {mutex_path, resource_path, robots, state}
+    """
+    mutex_path = args["mutex_path"]
+    resource_path = args.get("resource_path", "")
+    robots = list(args.get("robots") or [])
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({mutex_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+prim.CreateAttribute("mutex:claimed_by",   Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("mutex:claim_count",  Sdf.ValueTypeNames.Int).Set(0)
+robots = {robots!r}
+prim.CreateAttribute("mutex:robots",       Sdf.ValueTypeNames.StringArray).Set(robots)
+prim.CreateAttribute("mutex:resource_path",Sdf.ValueTypeNames.String).Set({resource_path!r})
+print(json.dumps({{"created": str(prim.GetPath()), "robots": robots, "resource": {resource_path!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "mutex_path": mutex_path,
+        "resource_path": resource_path,
+        "robots": robots,
+        "state": "free",
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["setup_robot_claim_mutex"] = _handle_setup_robot_claim_mutex
+
+
+async def _handle_surface_gripper(args: Dict) -> Dict:
+    """Tier B tool — adds suction/vacuum gripper to a robot via Isaac Sim's
+    OgnSurfaceGripper OmniGraph node.
+
+    Wraps the existing OmniGraph OgnSurfaceGripper setup in a single call.
+    The surface gripper attaches an end-effector to objects via FixedJoint
+    when 'close' is signaled (suction on); detaches on 'open' (suction off).
+    Force-limit and torque-limit configurable.
+
+    Args:
+      robot_path:    USD path of the robot
+      ee_link:       USD path of the end-effector link to attach gripper to
+      grip_threshold: distance threshold for object pickup (default 0.01)
+      force_limit:   max force the suction can sustain (default 100.0)
+      torque_limit:  max torque (default 100.0)
+      graph_path:    OmniGraph path (default /World/<robot_name>/SuctionGraph)
+
+    Returns: {gripper_node_path, graph_path, force_limit, torque_limit}
+    """
+    robot_path = args["robot_path"]
+    ee_link = args.get("ee_link", f"{robot_path}/panda_hand")
+    grip_threshold = float(args.get("grip_threshold", 0.01))
+    force_limit = float(args.get("force_limit", 100.0))
+    torque_limit = float(args.get("torque_limit", 100.0))
+    graph_path = args.get("graph_path") or f"{robot_path}/SuctionGraph"
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf
+import omni.graph.core as og
+
+stage = omni.usd.get_context().get_stage()
+graph_path = {graph_path!r}
+art_path = {ee_link!r}
+robot_path = {robot_path!r}
+
+# Validate prims exist
+if not stage.GetPrimAtPath(robot_path).IsValid():
+    print(json.dumps({{"error": f"robot not found: {{robot_path}}"}})); raise SystemExit
+if not stage.GetPrimAtPath(art_path).IsValid():
+    print(json.dumps({{"error": f"ee_link not found: {{art_path}}"}})); raise SystemExit
+
+# Create OmniGraph for suction
+keys = og.Controller.Keys
+og.Controller.edit(
+    {{"graph_path": graph_path, "evaluator_name": "execution"}},
+    {{
+        keys.CREATE_NODES: [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("SurfaceGripper", "isaacsim.robot.surface_gripper.OgnSurfaceGripper"),
+        ],
+        keys.CONNECT: [
+            ("OnPlaybackTick.outputs:tick", "SurfaceGripper.inputs:execIn"),
+        ],
+        keys.SET_VALUES: [
+            ("SurfaceGripper.inputs:parentPath", art_path),
+            ("SurfaceGripper.inputs:enabled", True),
+            ("SurfaceGripper.inputs:gripThreshold", {grip_threshold}),
+            ("SurfaceGripper.inputs:forceLimit", {force_limit}),
+            ("SurfaceGripper.inputs:torqueLimit", {torque_limit}),
+        ],
+    }}
+)
+
+# Verify graph created
+gp = stage.GetPrimAtPath(graph_path)
+gn_path = f"{{graph_path}}/SurfaceGripper"
+gn = stage.GetPrimAtPath(gn_path)
+print(json.dumps({{
+    "graph_path": graph_path,
+    "gripper_node_path": gn_path,
+    "ee_link": art_path,
+    "graph_exists": bool(gp and gp.IsValid()),
+    "gripper_node_exists": bool(gn and gn.IsValid()),
+}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=15)
+    return {
+        "graph_path": graph_path,
+        "gripper_node_path": f"{graph_path}/SurfaceGripper",
+        "ee_link": ee_link,
+        "force_limit": force_limit,
+        "torque_limit": torque_limit,
+        "raw": (res.get("output") or "")[-300:],
+    }
+
+
+DATA_HANDLERS["surface_gripper"] = _handle_surface_gripper
+
+
+async def _handle_create_articulated_joint(args: Dict) -> Dict:
+    """Tier B tool — creates a USD physics joint between two prims for
+    articulated mechanisms (drawers, doors, hinges, sliders).
+
+    Wraps UsdPhysics joint creation for drawer-pull, door-open, lever-actuate,
+    rotary-table scenarios. Joint types: 'revolute' (rotation about axis),
+    'prismatic' (linear sliding), 'fixed' (rigid attachment), 'spherical'
+    (ball joint).
+
+    Args:
+      joint_path:    USD path of the joint to create
+      body0_path:    USD path of first body (parent / static frame)
+      body1_path:    USD path of second body (child / moving frame)
+      joint_type:    'revolute' | 'prismatic' | 'fixed' | 'spherical' (default 'revolute')
+      axis:          [x, y, z] axis of rotation/translation (default [0, 0, 1])
+      limit_lower:   joint limit (degrees for revolute, meters for prismatic)
+      limit_upper:   joint limit (default open: -inf to +inf)
+      drive_type:    'force' | 'acceleration' | None (default None = passive)
+
+    Returns: {joint_path, joint_type, body0, body1, axis}
+    """
+    joint_path = args["joint_path"]
+    body0_path = args.get("body0_path", "")
+    body1_path = args["body1_path"]
+    joint_type = args.get("joint_type", "revolute")
+    axis = args.get("axis", [0, 0, 1])
+    limit_lower = args.get("limit_lower")
+    limit_upper = args.get("limit_upper")
+    drive_type = args.get("drive_type")
+
+    if joint_type not in ("revolute", "prismatic", "fixed", "spherical"):
+        return {"type": "error", "error": f"unsupported joint_type: {joint_type!r}"}
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics, Sdf, Gf
+stage = omni.usd.get_context().get_stage()
+
+joint_path = {joint_path!r}
+body0_path = {body0_path!r}
+body1_path = {body1_path!r}
+joint_type = {joint_type!r}
+axis = {axis!r}
+
+# Validate bodies exist
+if body0_path and not stage.GetPrimAtPath(body0_path).IsValid():
+    print(json.dumps({{"error": f"body0 not found: {{body0_path}}"}})); raise SystemExit
+if not stage.GetPrimAtPath(body1_path).IsValid():
+    print(json.dumps({{"error": f"body1 not found: {{body1_path}}"}})); raise SystemExit
+
+# Create joint per type
+if joint_type == "revolute":
+    joint = UsdPhysics.RevoluteJoint.Define(stage, Sdf.Path(joint_path))
+elif joint_type == "prismatic":
+    joint = UsdPhysics.PrismaticJoint.Define(stage, Sdf.Path(joint_path))
+elif joint_type == "fixed":
+    joint = UsdPhysics.FixedJoint.Define(stage, Sdf.Path(joint_path))
+elif joint_type == "spherical":
+    joint = UsdPhysics.SphericalJoint.Define(stage, Sdf.Path(joint_path))
+
+if body0_path:
+    joint.CreateBody0Rel().SetTargets([Sdf.Path(body0_path)])
+joint.CreateBody1Rel().SetTargets([Sdf.Path(body1_path)])
+
+# Axis (revolute/prismatic): UsdPhysics convention is 'X', 'Y', 'Z' string — pick max-mag axis
+if joint_type in ("revolute", "prismatic"):
+    abs_axis = [abs(axis[0]), abs(axis[1]), abs(axis[2])]
+    idx = abs_axis.index(max(abs_axis))
+    joint.CreateAxisAttr().Set(["X", "Y", "Z"][idx])
+
+# Limits
+limit_lower = {limit_lower!r}
+limit_upper = {limit_upper!r}
+if limit_lower is not None or limit_upper is not None:
+    if joint_type in ("revolute", "prismatic"):
+        if limit_lower is not None:
+            joint.CreateLowerLimitAttr().Set(float(limit_lower))
+        if limit_upper is not None:
+            joint.CreateUpperLimitAttr().Set(float(limit_upper))
+
+# Drive (optional)
+drive_type = {drive_type!r}
+if drive_type and joint_type in ("revolute", "prismatic"):
+    drive_api_token = "angular" if joint_type == "revolute" else "linear"
+    drive = UsdPhysics.DriveAPI.Apply(joint.GetPrim(), drive_api_token)
+    drive.CreateTypeAttr().Set(drive_type)
+    drive.CreateMaxForceAttr().Set(1e6)
+    drive.CreateDampingAttr().Set(1e3)
+    drive.CreateStiffnessAttr().Set(1e4)
+
+print(json.dumps({{
+    "joint_path": joint_path,
+    "joint_type": joint_type,
+    "body0": body0_path,
+    "body1": body1_path,
+    "axis": axis,
+    "drive": drive_type,
+}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=15)
+    return {
+        "joint_path": joint_path,
+        "joint_type": joint_type,
+        "body0": body0_path,
+        "body1": body1_path,
+        "axis": axis,
+        "raw": (res.get("output") or "")[-300:],
+    }
+
+
+DATA_HANDLERS["create_articulated_joint"] = _handle_create_articulated_joint
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
@@ -60463,6 +61061,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             curobo_world_yml=args.get("curobo_world_yml"),
             color_routing=args.get("color_routing"),
             drop_targets=args.get("drop_targets"),
+            gripper_rotation=args.get("gripper_rotation"),
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
         )
@@ -63634,6 +64233,7 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            curobo_world_yml=None,
                            color_routing=None,
                            drop_targets=None,
+                           gripper_rotation=None,
                            require_upright=False,
                            upright_dot_threshold=0.85):
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
@@ -63714,6 +64314,9 @@ COLOR_ROUTING = {_json.dumps(color_routing or {})}
 # instead of DROP_TARGET / DEST_PATH for the named cube. Used by CP-08+
 # canonicals where each cube goes to a distinct grid/column position.
 DROP_TARGETS = {_json.dumps(drop_targets) if drop_targets else 'None'}
+# Per-cube yaw rotation (deg) at drop. Dict {{cube_path: yaw_deg}} or scalar.
+# When set, the drop pose's gripper orientation rotates around world Z by yaw_deg.
+GRIPPER_ROTATION = {_json.dumps(gripper_rotation) if gripper_rotation is not None else 'None'}
 
 # Per-robot subscription + scene-reset name. Earlier hardcoded
 # "_curobo_pp_sub" / "curobo_pp" meant a second install (e.g. for a
@@ -64077,6 +64680,46 @@ _dx = _iw*_world_down_x + _ix*_world_down_w + _iy*_world_down_z - _iz*_world_dow
 _dy = _iw*_world_down_y - _ix*_world_down_z + _iy*_world_down_w + _iz*_world_down_x
 _dz = _iw*_world_down_z + _ix*_world_down_y - _iy*_world_down_x + _iz*_world_down_w
 _DOWN_Q_BASE = torch.tensor([[[[[_dw, _dx, _dy, _dz]]]]], dtype=torch.float32, device='cuda')
+
+# Per-yaw quaternion in base frame: yaw_world * down_world expressed in base frame.
+# yaw is rotation around world +Z axis (vertical). Used by drop-pose planning when
+# gripper_rotation is set (CP-N brick-pattern, mixed-SKU palletizers).
+import math as _gm
+def _rotated_down_quat_base(yaw_deg):
+    a = _gm.radians(float(yaw_deg)) * 0.5
+    qyw, qyz = _gm.cos(a), _gm.sin(a)
+    # World-frame combined: q_yaw_world * down_world  (down_world = (0, 0, 1, 0))
+    # Quaternion mult formula expanded for q_yaw=(qyw,0,0,qyz) * (0,0,1,0):
+    cwo = -qyz * 0.0          # = 0  (qyw*0 - 0*0 - 0*1 - qyz*0)... actually let me recompute carefully
+    # (w1,x1,y1,z1) * (w2,x2,y2,z2) where (w1,x1,y1,z1)=(qyw,0,0,qyz), (w2,x2,y2,z2)=(0,0,1,0)
+    cw_world = qyw*0 - 0*0 - 0*1 - qyz*0
+    cx_world = qyw*0 + 0*0 + 0*1 - qyz*1
+    cy_world = qyw*1 - 0*0 + 0*0 + qyz*0
+    cz_world = qyw*0 + 0*1 - 0*0 + qyz*0
+    # cw_world = 0, cx_world = -qyz, cy_world = qyw, cz_world = 0
+    # Now express in BASE frame: q_base = inv(base_quat) * q_world
+    # Using existing _iw, _ix, _iy, _iz (inverse base quat conjugate)
+    iw, ix, iy, iz = _iw, _ix, _iy, _iz
+    bw = iw*cw_world - ix*cx_world - iy*cy_world - iz*cz_world
+    bx = iw*cx_world + ix*cw_world + iy*cz_world - iz*cy_world
+    by = iw*cy_world - ix*cz_world + iy*cw_world + iz*cx_world
+    bz = iw*cz_world + ix*cy_world - iy*cx_world + iz*cw_world
+    return torch.tensor([[[[[bw, bx, by, bz]]]]], dtype=torch.float32, device='cuda')
+
+def _yaw_for_cube(cube_path):
+    if GRIPPER_ROTATION is None:
+        return 0.0
+    if isinstance(GRIPPER_ROTATION, (int, float)):
+        return float(GRIPPER_ROTATION)
+    if isinstance(GRIPPER_ROTATION, dict):
+        return float(GRIPPER_ROTATION.get(cube_path, 0.0))
+    if isinstance(GRIPPER_ROTATION, list):
+        try:
+            idx = SOURCE_PATHS.index(cube_path)
+            if 0 <= idx < len(GRIPPER_ROTATION):
+                return float(GRIPPER_ROTATION[idx])
+        except ValueError: pass
+    return 0.0
 print(f"(curobo: down-quat in base frame = ({{_dw:.3f}}, {{_dx:.3f}}, {{_dy:.3f}}, {{_dz:.3f}}))")
 
 # Override h1 with high lift to avoid arm sweep over belt (no scene-coll)
@@ -64129,12 +64772,13 @@ def _build_scene_cfg(exclude_path=None):
             continue
     return _CuroboSceneCfg.create({{"cuboid": cuboids}})
 
-def _plan_to_world_point(point_world, current_q7, exclude_obs=None):
+def _plan_to_world_point(point_world, current_q7, exclude_obs=None, yaw_deg=0.0):
     # Convert world target to base frame, plan via cuRobo
     p_base = _world_to_base(point_world)
     pos_t = torch.tensor([[[[[float(p_base[0]), float(p_base[1]), float(p_base[2])]]]]],
                          dtype=torch.float32, device='cuda')
-    goal = GoalToolPose(tool_frames=['panda_hand'], position=pos_t, quaternion=_DOWN_Q_BASE)
+    quat_base = _rotated_down_quat_base(yaw_deg) if yaw_deg else _DOWN_Q_BASE
+    goal = GoalToolPose(tool_frames=['panda_hand'], position=pos_t, quaternion=quat_base)
     q = torch.tensor([[float(x) for x in current_q7[:7]]], dtype=torch.float32, device='cuda')
     start = JointState.from_position(q, joint_names=_PLANNER_JOINT_NAMES)
     try:
@@ -64285,20 +64929,23 @@ def _build_segments(cube_pos, drop_pos, current_q):
     pz = float(cube_pos[2]) + FL + float(EE_OFFSET[2])
     h_mid_pick = float(cube_pos[2]) + 0.18  # 18cm above cube
     h_mid_drop = float(drop_pos[2]) + 0.18  # 18cm above drop pose
+    drop_yaw = _yaw_for_cube(S.get("picked_path") or "")
+    # Yaw applied to drop-side segments (S4, S4.5, S5). Pick-side segments
+    # use yaw=0 — gripper picks straight-down regardless of drop rotation.
     goals = [
-        (np.array([cube_pos[0], cube_pos[1], h1]),       None),         # S1 above cube
-        (np.array([cube_pos[0], cube_pos[1], h_mid_pick]), None),       # S1.5 mid-height directly over cube
-        (np.array([cube_pos[0], cube_pos[1], pz]),       "close"),      # S2 descend, then close
-        (np.array([cube_pos[0], cube_pos[1], h1]),       None),         # S3 lift
-        (np.array([drop_pos[0], drop_pos[1], h1]),       None),         # S4 transit
-        (np.array([drop_pos[0], drop_pos[1], h_mid_drop]), None),       # S4.5 mid-height directly over drop
-        (np.array([drop_pos[0], drop_pos[1], drop_pos[2]]), "open"),   # S5 descend, then open
+        (np.array([cube_pos[0], cube_pos[1], h1]),         None,    0.0),       # S1 above cube
+        (np.array([cube_pos[0], cube_pos[1], h_mid_pick]), None,    0.0),       # S1.5 mid-height
+        (np.array([cube_pos[0], cube_pos[1], pz]),         "close", 0.0),       # S2 descend + close
+        (np.array([cube_pos[0], cube_pos[1], h1]),         None,    0.0),       # S3 lift
+        (np.array([drop_pos[0], drop_pos[1], h1]),         None,    drop_yaw),  # S4 transit (rotated)
+        (np.array([drop_pos[0], drop_pos[1], h_mid_drop]), None,    drop_yaw),  # S4.5 mid
+        (np.array([drop_pos[0], drop_pos[1], drop_pos[2]]),"open",  drop_yaw),  # S5 descend + open
     ]
     segs = []
     q = np.asarray(current_q, dtype=np.float32)
-    for goal_world, action_after in goals:
+    for goal_world, action_after, yaw_deg in goals:
         # Exclude the cube being picked from obstacle list (we're grabbing it)
-        res = _plan_to_world_point(goal_world, q, exclude_obs=S["picked_path"])
+        res = _plan_to_world_point(goal_world, q, exclude_obs=S["picked_path"], yaw_deg=yaw_deg)
         if res is None:
             print(f"(curobo: plan failed for goal {{goal_world.tolist()}})")
             return None
