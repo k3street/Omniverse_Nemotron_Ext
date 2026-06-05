@@ -38,6 +38,18 @@ class Config:
         self.ollama_host       = os.environ.get("OLLAMA_HOST", "127.0.0.1")
         self.ollama_vision_port = int(os.environ.get("OLLAMA_VISION_PORT", "11434"))
 
+        # ── Cosmos 3 scene proposal runtime ─────────────────────────────────
+        self.cosmos3_mode = os.environ.get("COSMOS3_MODE", "disabled")
+        self.cosmos3_reasoner_base_url = os.environ.get("COSMOS3_REASONER_BASE_URL", "")
+        self.cosmos3_reasoner_model = os.environ.get("COSMOS3_REASONER_MODEL", "Cosmos3-Nano")
+        self.cosmos3_generator_base_url = os.environ.get("COSMOS3_GENERATOR_BASE_URL", "")
+        self.cosmos3_generator_model = os.environ.get("COSMOS3_GENERATOR_MODEL", "Cosmos3-Super-Text2Image")
+        self.cosmos3_api_key = (
+            os.environ.get("COSMOS3_API_KEY")
+            or os.environ.get("NGC_API_KEY")
+            or ""
+        )
+
         # ── API keys (pulled from root .env or service .env) ─────────────────
         self.api_key_gemini    = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY_GEMINI", "")
         self.api_key_anthropic = os.environ.get("ANTHROPIC_API_KEY", "")

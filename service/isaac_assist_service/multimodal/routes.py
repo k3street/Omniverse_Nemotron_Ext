@@ -22,6 +22,7 @@ separate Vite project under web/floor-plan-ui/.
 """
 from __future__ import annotations
 
+import base64
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -37,6 +38,10 @@ from .persistence import (
 from .cosmos3_adapter import (
     CosmosSceneObservation,
     cosmos_observation_to_layout_spec,
+)
+from .cosmos3_runtime import (
+    CosmosRuntimeError,
+    build_cosmos3_reasoner,
 )
 from .ratify import ratify
 from .render import render_layout_spec_to_file
@@ -124,6 +129,16 @@ class CosmosProposalRequest(BaseModel):
     """Save a Cosmos 3 Reasoner scene observation as a canvas proposal."""
 
     observation: CosmosSceneObservation
+    parent_revision: int = Field(default=0, ge=0)
+
+
+class CosmosObserveRequest(BaseModel):
+    """Call a Cosmos Reasoner runtime and save the resulting canvas proposal."""
+
+    prompt: str = Field(default="Reconstruct this robotics scene.")
+    image_base64: Optional[str] = Field(default=None)
+    mime_type: str = Field(default="image/png")
+    input_kind: str = Field(default="photo")
     parent_revision: int = Field(default=0, ge=0)
 
 
@@ -276,6 +291,48 @@ async def propose_canvas_from_cosmos(
         "revision": saved.revision,
         "spec": saved.model_dump(mode="json"),
     }
+
+
+@router.post("/{session_id}/cosmos/observe")
+async def observe_canvas_from_cosmos(
+    session_id: str,
+    body: CosmosObserveRequest,
+) -> Dict[str, Any]:
+    """Call Cosmos 3 Reasoner, then save the inferred LayoutSpec proposal."""
+    image_bytes: Optional[bytes] = None
+    if body.image_base64:
+        raw = body.image_base64
+        if "," in raw and raw.lstrip().startswith("data:"):
+            raw = raw.split(",", 1)[1]
+        try:
+            image_bytes = base64.b64decode(raw, validate=True)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"image_base64 is not valid base64: {exc}",
+            )
+
+    reasoner = build_cosmos3_reasoner()
+    try:
+        observation = await reasoner.observe_scene(
+            prompt=body.prompt,
+            image_bytes=image_bytes,
+            mime_type=body.mime_type,
+            input_kind=body.input_kind,
+        )
+    except CosmosRuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+
+    proposal = CosmosProposalRequest(
+        observation=observation,
+        parent_revision=body.parent_revision,
+    )
+    response = await propose_canvas_from_cosmos(session_id, proposal)
+    response["observation"] = observation.model_dump(mode="json")
+    return response
 
 
 def _forward_workflow_approve(

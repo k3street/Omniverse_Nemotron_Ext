@@ -311,10 +311,13 @@ mutator. A Cosmos Reasoner workflow can turn a photo, screenshot, render, or
 prompt into structured scene observations, then submit them to:
 
 ```text
+POST /api/v1/canvas/{session_id}/cosmos/observe
 POST /api/v1/canvas/{session_id}/cosmos/propose
 ```
 
-The backend converts that observation into a reviewable `LayoutSpec` proposal.
+`cosmos/observe` calls a configured OpenAI-compatible Cosmos 3 Reasoner
+endpoint. `cosmos/propose` accepts already-structured observations. The backend
+converts the observation into a reviewable `LayoutSpec` proposal.
 The floor-plan UI remains the correction/confirmation surface, and the final
 build still goes through the Isaac Sim 5.1 or 6.0 version-aware harness. See
 [Cosmos 3 to Floor-Plan Flow](docs/architecture/cosmos3-floor-plan-flow.md).
@@ -358,6 +361,7 @@ The FastAPI service exposes the following REST API modules, all prefixed under `
 | `/chat/pipeline/plan` | Pipeline Planner | Template-based multi-phase autonomous scene builder |
 | `/finetune` | Fine-tuning Builder | Knowledge Base → training data pipeline |
 | `/canvas/{session_id}/cosmos/propose` | Cosmos 3 Adapter | Cosmos Reasoner scene observations → floor-plan `LayoutSpec` proposals |
+| `/canvas/{session_id}/cosmos/observe` | Cosmos 3 Runtime | Image/prompt → Cosmos observation → floor-plan `LayoutSpec` proposal |
 
 Full interactive documentation: **`http://localhost:8000/docs`**
 

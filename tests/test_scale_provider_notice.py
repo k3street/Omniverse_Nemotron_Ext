@@ -1,9 +1,14 @@
 from types import SimpleNamespace
 
+import pytest
+
 from service.isaac_assist_service.scale_providers import (
     isaac_automator_configured,
     scale_provider_notice,
 )
+
+
+pytestmark = pytest.mark.l0
 
 
 def _cfg(**overrides):

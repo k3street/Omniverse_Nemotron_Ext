@@ -54,6 +54,25 @@ POST /api/v1/canvas/{session_id}/cosmos/propose
 It uses the same compare-and-swap revision store as the normal canvas patch
 route, so Cosmos proposals behave like ordinary floor-plan edits.
 
+The first runtime route is:
+
+```text
+POST /api/v1/canvas/{session_id}/cosmos/observe
+```
+
+It accepts `prompt`, optional `image_base64`, `mime_type`, and `input_kind`,
+calls the configured OpenAI-compatible Cosmos 3 Reasoner endpoint, parses a
+`CosmosSceneObservation`, then forwards through `cosmos/propose`.
+
+Configuration:
+
+```text
+COSMOS3_MODE=local
+COSMOS3_REASONER_BASE_URL=http://dgx-spark.local:8081/v1
+COSMOS3_REASONER_MODEL=Cosmos3-Nano
+COSMOS3_API_KEY=...
+```
+
 ## Why Not Direct Cosmos-to-Isaac?
 
 Cosmos is probabilistic. Isaac Sim scene execution needs exact, version-aware

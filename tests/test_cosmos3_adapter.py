@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from service.isaac_assist_service.multimodal.cosmos3_adapter import (
     CosmosObjectProposal,
     CosmosRelationProposal,
@@ -9,6 +11,9 @@ from service.isaac_assist_service.multimodal.cosmos3_adapter import (
 )
 from service.isaac_assist_service.multimodal.persistence import MultimodalStore
 from service.isaac_assist_service.multimodal import routes
+
+
+pytestmark = pytest.mark.l0
 
 
 def test_cosmos_observation_maps_to_reviewable_layout_spec():
