@@ -184,3 +184,85 @@ def test_audit_runs_end_to_end(audit, allowlist, tmp_path):
     out = tmp_path / "tool_audit.md"
     out.write_text(md)
     assert out.exists() and out.stat().st_size > 100
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — CI gate: every tool resolves to a handler
+
+
+def test_every_tool_resolves(audit, allowlist, schema_names):
+    """Phase 4 CI gate (per IA_FULL_SPEC_2026-05-10.md Phase 4).
+
+    The single load-bearing invariant for Epoch I + every later phase:
+    every schema name either has a callable handler, or is on the
+    curated allowlist in `tests/fixtures/no_handler_tools.json`.
+
+    A new tool added to `tool_schemas.py` without a corresponding
+    handler ⇒ this test fails. A handler removed without
+    schema/allowlist update ⇒ this test fails. Phase 3-7 handler
+    moves run safely behind this gate.
+
+    The error message names the unresolved tools so the operator
+    can either: (a) add a handler, (b) add a reasoned allowlist
+    entry, or (c) remove the schema.
+    """
+    inline = audit._INLINE_HANDLED  # special-cased orchestrator-handled tools
+    composites_allowed = audit._ALLOWED_COMPOSITES
+
+    unresolved: list[str] = []
+    for name in schema_names:
+        in_data = name in DATA_HANDLERS
+        in_code = name in CODE_GEN_HANDLERS
+        data_callable = in_data and DATA_HANDLERS[name] is not None
+        code_callable = in_code and CODE_GEN_HANDLERS[name] is not None
+
+        if name in inline:
+            continue
+        if data_callable or code_callable:
+            continue
+        if (in_data or in_code) and name in allowlist:
+            continue
+        if in_data and in_code and name in composites_allowed:
+            continue
+        unresolved.append(name)
+
+    assert not unresolved, (
+        "Phase 4 CI gate failed: the following tool schemas have no "
+        "handler and are not allowlisted. Either implement a handler, "
+        "add a reasoned entry to tests/fixtures/no_handler_tools.json, "
+        "or remove the schema:\n"
+        + "\n".join(f"  - {n}" for n in sorted(unresolved))
+    )
+
+
+def test_allowlist_reasons_present_for_every_none_handler():
+    """Phase 4 quality gate: every name in `none_handlers` must have
+    a corresponding entry in `reasons` (so future audits can see WHY
+    a tool is allowlisted rather than implemented).
+    """
+    data = json.loads(_FIXTURE_PATH.read_text())
+    names = data.get("none_handlers", [])
+    reasons = data.get("reasons", {})
+    missing = [n for n in names if n not in reasons]
+    assert not missing, (
+        "Allowlist entries missing reasons (Phase 4 contract): "
+        f"{missing}. Every name in `none_handlers` must appear in "
+        "`reasons` with `reason`, `planned_status`, `owner` fields."
+    )
+
+
+def test_allowlist_reasons_have_required_fields():
+    """Phase 4 quality gate: each reason entry must include the
+    three fields the audit consumes (reason / planned_status / owner).
+    """
+    data = json.loads(_FIXTURE_PATH.read_text())
+    reasons = data.get("reasons", {})
+    required = {"reason", "planned_status", "owner"}
+    for name, entry in reasons.items():
+        if not isinstance(entry, dict):
+            pytest.fail(f"reasons[{name!r}] must be a dict, got {type(entry).__name__}")
+        missing = required - set(entry)
+        assert not missing, (
+            f"reasons[{name!r}] missing required fields {missing}; "
+            f"expected: {required}"
+        )

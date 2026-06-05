@@ -1,6 +1,6 @@
 {
-  "_doc": "Phase 1 — explicit allowlist of schema names whose handler value is intentionally None. These are handled inline by the LLM, special-cased in the orchestrator, or registered conditionally (e.g. ROS2 tools become None when ros-mcp is not installed). Any schema with a None handler that is NOT in this list ⇒ ghost (phase-1 fails). Any name in this list that is NOT actually None in DATA_HANDLERS/CODE_GEN_HANDLERS ⇒ stale fixture (phase-1 fails).",
-  "_source": "specs/IA_FULL_SPEC_2026-05-10.md Phase 1; tool_executor.py:4863 (explain_error) and 4897-4907 (ros2_*).",
+  "_doc": "Phase 1 + Phase 4 — explicit allowlist of schema names whose handler value is intentionally None. Two parallel shapes: `none_handlers` (array — used by Phase 1's test_tool_audit invariants) and `reasons` (dict — used by Phase 4's test_every_tool_resolves to surface per-entry justification when CI runs). Any schema with a None handler that is NOT in this list ⇒ ghost (CI fails). Any name in this list that has a callable handler ⇒ stale fixture (CI fails).",
+  "_source": "specs/IA_FULL_SPEC_2026-05-10.md Phase 1 + Phase 4; tool_executor.py:4863 (explain_error) and 4897-4907 (ros2_*).",
   "none_handlers": [
     "explain_error",
     "ros2_connect",
@@ -14,5 +14,67 @@
     "ros2_call_service",
     "ros2_list_nodes",
     "ros2_get_node_details"
-  ]
+  ],
+  "reasons": {
+    "explain_error": {
+      "reason": "handled inline by LLM reasoning, no execution",
+      "planned_status": "permanent — by design",
+      "owner": "chat-orchestrator"
+    },
+    "ros2_connect": {
+      "reason": "conditional None when ros-mcp not installed; live handler when installed",
+      "planned_status": "ships with ros-mcp install in production environments",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_list_topics": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_get_topic_type": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_get_message_type": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_subscribe_once": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_publish": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_publish_sequence": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_list_services": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_call_service": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_list_nodes": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    },
+    "ros2_get_node_details": {
+      "reason": "conditional None when ros-mcp not installed",
+      "planned_status": "ships with ros-mcp install",
+      "owner": "ros2 theme (Phase 7)"
+    }
+  }
 }

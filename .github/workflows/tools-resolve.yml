@@ -1,0 +1,61 @@
+# Phase 4 — CI gate: every tool resolves to a handler
+#
+# Per specs/IA_FULL_SPEC_2026-05-10.md Phase 4.
+#
+# Runs the load-bearing invariant for Epoch I and every later phase:
+# every schema name in ISAAC_SIM_TOOLS either has a callable handler in
+# DATA_HANDLERS / CODE_GEN_HANDLERS, or is on the curated allowlist
+# in tests/fixtures/no_handler_tools.json with a reason.
+#
+# A new tool added to tool_schemas.py without a handler ⇒ this gate
+# fails. A handler removed without allowlist update ⇒ this gate fails.
+# Phase 3-7 handler moves run safely behind this gate.
+
+name: tools-resolve
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - "refactor/**"
+      - "feat/**"
+  pull_request:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  tools-resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install minimal dependencies for the audit
+        run: |
+          pip install --upgrade pip
+          pip install pytest pydantic
+
+      - name: Run the Phase 4 CI gate
+        run: |
+          pytest tests/test_tool_audit.py::test_every_tool_resolves -v
+
+      - name: Run the allowlist-quality gates
+        run: |
+          pytest tests/test_tool_audit.py::test_allowlist_reasons_present_for_every_none_handler \
+                 tests/test_tool_audit.py::test_allowlist_reasons_have_required_fields -v
+
+      - name: Run full tool audit invariants
+        run: |
+          pytest tests/test_tool_audit.py -v

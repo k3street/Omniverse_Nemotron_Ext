@@ -1,0 +1,1018 @@
+{
+  "edges": [
+    [
+      "_gen_deformable",
+      "_gen_deformable_body"
+    ],
+    [
+      "_gen_deformable",
+      "_gen_deformable_surface"
+    ],
+    [
+      "_gen_deformable",
+      "_load_deformable_presets"
+    ],
+    [
+      "_handle_lookup_product_spec",
+      "_load_sensor_specs"
+    ],
+    [
+      "_handle_resolve_robot_class",
+      "_resolve_robot_asset"
+    ],
+    [
+      "_handle_verify_pickplace_pipeline",
+      "_augment_verify_with_feasibility"
+    ],
+    [
+      "_handle_catalog_search",
+      "_build_asset_index"
+    ],
+    [
+      "_handle_generate_scene_blueprint",
+      "_handle_catalog_search"
+    ],
+    [
+      "_handle_create_isaaclab_env",
+      "_generate_isaaclab_env_code"
+    ],
+    [
+      "_handle_vision_detect_objects",
+      "_get_viewport_bytes"
+    ],
+    [
+      "_handle_vision_detect_objects",
+      "_get_vision_provider"
+    ],
+    [
+      "_handle_vision_bounding_boxes",
+      "_get_viewport_bytes"
+    ],
+    [
+      "_handle_vision_bounding_boxes",
+      "_get_vision_provider"
+    ],
+    [
+      "_handle_vision_plan_trajectory",
+      "_get_viewport_bytes"
+    ],
+    [
+      "_handle_vision_plan_trajectory",
+      "_get_vision_provider"
+    ],
+    [
+      "_handle_vision_analyze_scene",
+      "_get_viewport_bytes"
+    ],
+    [
+      "_handle_vision_analyze_scene",
+      "_get_vision_provider"
+    ],
+    [
+      "_handle_add_vision_classifier_gate",
+      "execute_tool_call"
+    ],
+    [
+      "_handle_add_vision_classifier_gate",
+      "_get_viewport_bytes"
+    ],
+    [
+      "_handle_add_vision_classifier_gate",
+      "_get_vision_provider"
+    ],
+    [
+      "_handle_setup_pick_place_with_vision",
+      "execute_tool_call"
+    ],
+    [
+      "_handle_create_kit_tray",
+      "execute_tool_call"
+    ],
+    [
+      "_handle_create_rotary_table",
+      "execute_tool_call"
+    ],
+    [
+      "_handle_create_gravity_dispenser",
+      "execute_tool_call"
+    ],
+    [
+      "_handle_create_heap_zone",
+      "execute_tool_call"
+    ],
+    [
+      "_handle_create_recirculation_loop",
+      "execute_tool_call"
+    ],
+    [
+      "_handle_create_linear_axis_robot",
+      "execute_tool_call"
+    ],
+    [
+      "_gen_create_arena",
+      "_arena_env_id"
+    ],
+    [
+      "_handle_iterate_reward",
+      "_build_mutation_prompt"
+    ],
+    [
+      "_handle_inspect_camera",
+      "_gen_inspect_camera"
+    ],
+    [
+      "_gen_robot_wizard",
+      "_resolve_robot_asset"
+    ],
+    [
+      "_handle_apply_robot_fix_profile",
+      "_detect_robot_for_fix"
+    ],
+    [
+      "_handle_diagnose_performance",
+      "_analyze_performance"
+    ],
+    [
+      "_gen_apply_physics_material",
+      "_normalize_material_name"
+    ],
+    [
+      "_gen_apply_physics_material",
+      "_load_physics_materials"
+    ],
+    [
+      "_handle_lookup_material",
+      "_normalize_material_name"
+    ],
+    [
+      "_handle_lookup_material",
+      "_load_physics_materials"
+    ],
+    [
+      "_handle_scene_diff",
+      "_summarize_changes"
+    ],
+    [
+      "_handle_scene_diff",
+      "_parse_unified_diff_to_changes"
+    ],
+    [
+      "_gen_create_graph",
+      "_detect_template"
+    ],
+    [
+      "_handle_diagnose_training",
+      "_read_tb_scalars"
+    ],
+    [
+      "_handle_diagnose_training",
+      "_read_checkpoint_action_std"
+    ],
+    [
+      "_handle_profile_training_throughput",
+      "_read_tb_scalars"
+    ],
+    [
+      "_handle_validate_teleop_demo",
+      "_open_hdf5_safely"
+    ],
+    [
+      "_handle_summarize_teleop_session",
+      "_open_hdf5_safely"
+    ],
+    [
+      "_handle_build_stage_index",
+      "_gen_build_stage_index"
+    ],
+    [
+      "_handle_query_stage_index",
+      "_score_prim_for_query"
+    ],
+    [
+      "_handle_query_stage_index",
+      "_neighbour_paths"
+    ],
+    [
+      "_handle_save_delta_snapshot",
+      "_gen_save_delta_snapshot"
+    ],
+    [
+      "_handle_restore_delta_snapshot",
+      "_gen_restore_delta_snapshot"
+    ],
+    [
+      "_handle_calibrate_physics",
+      "_check_real_data_path"
+    ],
+    [
+      "_handle_calibrate_physics",
+      "_safe_robot_name"
+    ],
+    [
+      "_handle_calibrate_physics",
+      "_generate_calibration_script"
+    ],
+    [
+      "_handle_calibrate_physics",
+      "_suggested_dr_ranges"
+    ],
+    [
+      "_handle_quick_calibrate",
+      "_check_real_data_path"
+    ],
+    [
+      "_handle_quick_calibrate",
+      "_safe_robot_name"
+    ],
+    [
+      "_handle_quick_calibrate",
+      "_generate_calibration_script"
+    ],
+    [
+      "_handle_quick_calibrate",
+      "_suggested_dr_ranges"
+    ],
+    [
+      "_handle_validate_calibration",
+      "_check_real_data_path"
+    ],
+    [
+      "_handle_validate_calibration",
+      "_per_joint_rmse"
+    ],
+    [
+      "_handle_train_actuator_net",
+      "_check_real_data_path"
+    ],
+    [
+      "_handle_train_actuator_net",
+      "_safe_robot_name"
+    ],
+    [
+      "_handle_train_actuator_net",
+      "_generate_actuator_net_script"
+    ],
+    [
+      "_handle_start_workflow",
+      "_wf_now_iso"
+    ],
+    [
+      "_handle_start_workflow",
+      "_wf_make_initial_plan"
+    ],
+    [
+      "_handle_edit_workflow_plan",
+      "_wf_now_iso"
+    ],
+    [
+      "_handle_approve_workflow_checkpoint",
+      "_wf_advance_phase"
+    ],
+    [
+      "_handle_approve_workflow_checkpoint",
+      "_wf_now_iso"
+    ],
+    [
+      "_handle_cancel_workflow",
+      "_wf_now_iso"
+    ],
+    [
+      "_handle_check_collision_mesh",
+      "_gen_check_collision_mesh_code"
+    ],
+    [
+      "_handle_filter_templates_by_hardware",
+      "_load_template_manifests"
+    ],
+    [
+      "_handle_filter_templates_by_hardware",
+      "_detect_local_vram_gb"
+    ],
+    [
+      "_handle_check_vram_headroom",
+      "_detect_local_vram_gb"
+    ],
+    [
+      "_handle_check_vram_headroom",
+      "_detect_used_vram_gb"
+    ],
+    [
+      "_handle_dispatch_async_task",
+      "_async_task_runner"
+    ],
+    [
+      "_handle_measure_sim_real_gap",
+      "_load_trajectory_for_gap"
+    ],
+    [
+      "_handle_list_cameras",
+      "_parse_last_json_line"
+    ],
+    [
+      "_handle_get_camera_params",
+      "_parse_last_json_line"
+    ],
+    [
+      "_handle_capture_camera_image",
+      "_parse_last_json_line"
+    ],
+    [
+      "_handle_get_env_observations",
+      "_validate_env_id"
+    ],
+    [
+      "_handle_get_env_observations",
+      "_resolve_run_id"
+    ],
+    [
+      "_handle_get_env_observations",
+      "_query_run_ipc"
+    ],
+    [
+      "_handle_get_env_rewards",
+      "_validate_env_id"
+    ],
+    [
+      "_handle_get_env_rewards",
+      "_resolve_run_id"
+    ],
+    [
+      "_handle_get_env_rewards",
+      "_query_run_ipc"
+    ],
+    [
+      "_handle_get_env_termination_state",
+      "_validate_env_id"
+    ],
+    [
+      "_handle_get_env_termination_state",
+      "_resolve_run_id"
+    ],
+    [
+      "_handle_get_env_termination_state",
+      "_query_run_ipc"
+    ],
+    [
+      "_handle_pause_training",
+      "_resolve_run_id"
+    ],
+    [
+      "_handle_pause_training",
+      "_query_run_ipc"
+    ],
+    [
+      "_handle_checkpoint_training",
+      "_resolve_run_id"
+    ],
+    [
+      "_handle_checkpoint_training",
+      "_query_run_ipc"
+    ],
+    [
+      "_handle_select_by_criteria",
+      "_build_select_by_criteria_code"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_gen_pick_place_native"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_gen_pick_place_fixed_poses"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_gen_pick_place_curobo"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_gen_pick_place_diffik"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_gen_pick_place_ros2_cmd"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_gen_pick_place_spline"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_gen_pick_place_builtin"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_resolve_auto_target_source"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_gen_pick_place_osc"
+    ],
+    [
+      "_gen_setup_pick_place_controller",
+      "_gen_pick_place_sensor_gated"
+    ],
+    [
+      "_handle_list_available_controllers",
+      "_probe_scipy"
+    ],
+    [
+      "_handle_list_available_controllers",
+      "_probe_gpu_capability"
+    ],
+    [
+      "_handle_list_available_controllers",
+      "_probe_isaac_lab"
+    ],
+    [
+      "_handle_list_available_controllers",
+      "_probe_curobo"
+    ]
+  ],
+  "handler_fan_out": {
+    "_gen_apply_physics_material": 2,
+    "_gen_create_arena": 1,
+    "_gen_create_graph": 1,
+    "_gen_deformable": 3,
+    "_gen_robot_wizard": 1,
+    "_gen_setup_pick_place_controller": 10,
+    "_handle_add_vision_classifier_gate": 3,
+    "_handle_apply_robot_fix_profile": 1,
+    "_handle_approve_workflow_checkpoint": 2,
+    "_handle_build_stage_index": 1,
+    "_handle_calibrate_physics": 4,
+    "_handle_cancel_workflow": 1,
+    "_handle_capture_camera_image": 1,
+    "_handle_catalog_search": 1,
+    "_handle_check_collision_mesh": 1,
+    "_handle_check_vram_headroom": 2,
+    "_handle_checkpoint_training": 2,
+    "_handle_create_gravity_dispenser": 1,
+    "_handle_create_heap_zone": 1,
+    "_handle_create_isaaclab_env": 1,
+    "_handle_create_kit_tray": 1,
+    "_handle_create_linear_axis_robot": 1,
+    "_handle_create_recirculation_loop": 1,
+    "_handle_create_rotary_table": 1,
+    "_handle_diagnose_performance": 1,
+    "_handle_diagnose_training": 2,
+    "_handle_dispatch_async_task": 1,
+    "_handle_edit_workflow_plan": 1,
+    "_handle_filter_templates_by_hardware": 2,
+    "_handle_generate_scene_blueprint": 1,
+    "_handle_get_camera_params": 1,
+    "_handle_get_env_observations": 3,
+    "_handle_get_env_rewards": 3,
+    "_handle_get_env_termination_state": 3,
+    "_handle_inspect_camera": 1,
+    "_handle_iterate_reward": 1,
+    "_handle_list_available_controllers": 4,
+    "_handle_list_cameras": 1,
+    "_handle_lookup_material": 2,
+    "_handle_lookup_product_spec": 1,
+    "_handle_measure_sim_real_gap": 1,
+    "_handle_pause_training": 2,
+    "_handle_profile_training_throughput": 1,
+    "_handle_query_stage_index": 2,
+    "_handle_quick_calibrate": 4,
+    "_handle_resolve_robot_class": 1,
+    "_handle_restore_delta_snapshot": 1,
+    "_handle_save_delta_snapshot": 1,
+    "_handle_scene_diff": 2,
+    "_handle_select_by_criteria": 1,
+    "_handle_setup_pick_place_with_vision": 1,
+    "_handle_start_workflow": 2,
+    "_handle_summarize_teleop_session": 1,
+    "_handle_train_actuator_net": 3,
+    "_handle_validate_calibration": 2,
+    "_handle_validate_teleop_demo": 1,
+    "_handle_verify_pickplace_pipeline": 1,
+    "_handle_vision_analyze_scene": 2,
+    "_handle_vision_bounding_boxes": 2,
+    "_handle_vision_detect_objects": 2,
+    "_handle_vision_plan_trajectory": 2
+  },
+  "handlers": [
+    "_gen_activate_area",
+    "_gen_add_default_light",
+    "_gen_add_domain_randomizer",
+    "_gen_add_latency_randomization",
+    "_gen_add_node",
+    "_gen_add_proximity_sensor",
+    "_gen_add_reference",
+    "_gen_add_sensor",
+    "_gen_add_sublayer",
+    "_gen_add_usd_reference",
+    "_gen_anchor_robot",
+    "_gen_apply_api_schema",
+    "_gen_apply_force",
+    "_gen_apply_physics_material",
+    "_gen_assemble_robot",
+    "_gen_assign_class_to_children",
+    "_gen_assign_material",
+    "_gen_batch_apply_operation",
+    "_gen_batch_delete_prims",
+    "_gen_batch_set_attributes",
+    "_gen_build_scene_from_blueprint",
+    "_gen_build_stage_index",
+    "_gen_bulk_apply_schema",
+    "_gen_bulk_set_attribute",
+    "_gen_check_collision_mesh_code",
+    "_gen_check_path_clearance",
+    "_gen_check_physics_health",
+    "_gen_check_singularity",
+    "_gen_clone_envs",
+    "_gen_clone_prim",
+    "_gen_cloud_download_results",
+    "_gen_compute_convex_hull",
+    "_gen_configure_camera",
+    "_gen_configure_coco_yolo_writer",
+    "_gen_configure_correlated_dr",
+    "_gen_configure_differential_sdg",
+    "_gen_configure_ros2_bridge",
+    "_gen_configure_ros2_time",
+    "_gen_configure_sdg",
+    "_gen_configure_self_collision",
+    "_gen_configure_teleop_mapping",
+    "_gen_configure_zmq_stream",
+    "_gen_connect_nodes",
+    "_gen_create_arena",
+    "_gen_create_arena_variant",
+    "_gen_create_audio_prim",
+    "_gen_create_behavior",
+    "_gen_create_bin",
+    "_gen_create_broken_scene",
+    "_gen_create_calibration_experiment",
+    "_gen_create_conveyor",
+    "_gen_create_conveyor_track",
+    "_gen_create_graph",
+    "_gen_create_gripper",
+    "_gen_create_hdri_skydome",
+    "_gen_create_material",
+    "_gen_create_omnigraph",
+    "_gen_create_prim",
+    "_gen_create_sdg_pipeline",
+    "_gen_create_wheeled_robot",
+    "_gen_debug_draw",
+    "_gen_debug_graph",
+    "_gen_define_grasp_pose",
+    "_gen_deformable",
+    "_gen_deformable_body",
+    "_gen_deformable_surface",
+    "_gen_delete_node",
+    "_gen_delete_prim",
+    "_gen_duplicate_prims",
+    "_gen_enable_deterministic_mode",
+    "_gen_enable_extension",
+    "_gen_enable_post_process",
+    "_gen_enforce_class_balance",
+    "_gen_eval_harness",
+    "_gen_evaluate_groot",
+    "_gen_evaluate_reward",
+    "_gen_explain_graph",
+    "_gen_export_dataset",
+    "_gen_export_nav2_map",
+    "_gen_export_policy",
+    "_gen_export_stage",
+    "_gen_export_teleop_mapping",
+    "_gen_export_template",
+    "_gen_extract_attention_maps",
+    "_gen_finetune_groot",
+    "_gen_fix_collision_mesh",
+    "_gen_fix_ros2_qos",
+    "_gen_flatten_layers",
+    "_gen_focus_viewport_on",
+    "_gen_generate_occupancy_map",
+    "_gen_generate_teleop_watchdog_script",
+    "_gen_grasp_object",
+    "_gen_group_prims",
+    "_gen_highlight_prim",
+    "_gen_import_robot",
+    "_gen_import_template",
+    "_gen_inspect_camera",
+    "_gen_interpolate_trajectory",
+    "_gen_launch_training",
+    "_gen_load_payload",
+    "_gen_load_robot_pose",
+    "_gen_load_scene_template",
+    "_gen_merge_meshes",
+    "_gen_monitor_joint_effort",
+    "_gen_move_to_pose",
+    "_gen_navigate_to",
+    "_gen_open_stage",
+    "_gen_optimize_collision",
+    "_gen_optimize_scene",
+    "_gen_pick_place_builtin",
+    "_gen_pick_place_curobo",
+    "_gen_pick_place_diffik",
+    "_gen_pick_place_fixed_poses",
+    "_gen_pick_place_native",
+    "_gen_pick_place_osc",
+    "_gen_pick_place_ros2_cmd",
+    "_gen_pick_place_sensor_gated",
+    "_gen_pick_place_spline",
+    "_gen_plan_trajectory",
+    "_gen_play_animation",
+    "_gen_preflight_check",
+    "_gen_preview_dr",
+    "_gen_publish_robot_description",
+    "_gen_quick_demo",
+    "_gen_record_demo_video",
+    "_gen_record_teleop_demo",
+    "_gen_record_trajectory",
+    "_gen_record_waypoints",
+    "_gen_remove_semantic_label",
+    "_gen_render_video",
+    "_gen_replay_rosbag",
+    "_gen_replay_trajectory",
+    "_gen_restore_delta_snapshot",
+    "_gen_robot_wizard",
+    "_gen_run_arena_benchmark",
+    "_gen_save_delta_snapshot",
+    "_gen_save_stage",
+    "_gen_scatter_on_surface",
+    "_gen_set_attribute",
+    "_gen_set_audio_property",
+    "_gen_set_camera_look_at",
+    "_gen_set_camera_params",
+    "_gen_set_clearance_monitor",
+    "_gen_set_drive_gains",
+    "_gen_set_edit_target",
+    "_gen_set_environment_background",
+    "_gen_set_graph_variable",
+    "_gen_set_joint_limits",
+    "_gen_set_joint_targets",
+    "_gen_set_joint_velocity_limit",
+    "_gen_set_keyframe",
+    "_gen_set_light_color",
+    "_gen_set_light_intensity",
+    "_gen_set_linear_velocity",
+    "_gen_set_motion_policy",
+    "_gen_set_physics_params",
+    "_gen_set_physics_scene_config",
+    "_gen_set_prim_metadata",
+    "_gen_set_render_config",
+    "_gen_set_render_mode",
+    "_gen_set_render_resolution",
+    "_gen_set_semantic_label",
+    "_gen_set_timeline_range",
+    "_gen_set_variant",
+    "_gen_set_viewport_camera",
+    "_gen_setup_contact_sensors",
+    "_gen_setup_loco_manipulation_training",
+    "_gen_setup_multi_rate",
+    "_gen_setup_pick_place_controller",
+    "_gen_setup_pick_place_ros2_bridge",
+    "_gen_setup_ros2_bridge",
+    "_gen_setup_rsi_from_demos",
+    "_gen_setup_whole_body_control",
+    "_gen_show_tf_tree",
+    "_gen_show_workspace",
+    "_gen_sim_control",
+    "_gen_simplify_collision",
+    "_gen_solve_ik",
+    "_gen_start_teaching_mode",
+    "_gen_start_teleop_session",
+    "_gen_stop_teleop_session",
+    "_gen_teach_robot_pose",
+    "_gen_teleop_safety_config",
+    "_gen_teleport_prim",
+    "_gen_tune_gains",
+    "_gen_verify_import",
+    "_gen_visualize_clearance",
+    "_gen_visualize_collision_mesh",
+    "_gen_visualize_forces",
+    "_handle_add_force_torque_sensor",
+    "_handle_add_vision_classifier_gate",
+    "_handle_analyze_checkpoint",
+    "_handle_analyze_randomization",
+    "_handle_apply_dr_preset",
+    "_handle_apply_robot_fix_profile",
+    "_handle_approve_workflow_checkpoint",
+    "_handle_arena_leaderboard",
+    "_handle_barcode_reader_sensor",
+    "_handle_benchmark_sdg",
+    "_handle_build_stage_index",
+    "_handle_calibrate_physics",
+    "_handle_cancel_workflow",
+    "_handle_capture_camera_image",
+    "_handle_capture_viewport",
+    "_handle_catalog_search",
+    "_handle_check_collision_mesh",
+    "_handle_check_collisions",
+    "_handle_check_teleop_hardware",
+    "_handle_check_tf_health",
+    "_handle_check_vram_headroom",
+    "_handle_checkpoint_training",
+    "_handle_cloud_estimate_cost",
+    "_handle_cloud_launch",
+    "_handle_cloud_status",
+    "_handle_cloud_teardown",
+    "_handle_compare_policies",
+    "_handle_compare_sim_real_video",
+    "_handle_compute_stack_placement",
+    "_handle_compute_surface_area",
+    "_handle_compute_volume",
+    "_handle_console_error_autodetect",
+    "_handle_count_prims_under_path",
+    "_handle_create_articulated_joint",
+    "_handle_create_gravity_dispenser",
+    "_handle_create_heap_zone",
+    "_handle_create_isaaclab_env",
+    "_handle_create_kit_tray",
+    "_handle_create_linear_axis_robot",
+    "_handle_create_recirculation_loop",
+    "_handle_create_rotary_table",
+    "_handle_detect_ood",
+    "_handle_diagnose_domain_gap",
+    "_handle_diagnose_performance",
+    "_handle_diagnose_physics_error",
+    "_handle_diagnose_ros2",
+    "_handle_diagnose_training",
+    "_handle_diagnose_whole_body",
+    "_handle_dispatch_async_task",
+    "_handle_download_asset",
+    "_handle_edit_workflow_plan",
+    "_handle_emit_ros2_control_yaml",
+    "_handle_eureka_status",
+    "_handle_execute_with_retry",
+    "_handle_export_finetune_data",
+    "_handle_export_scene_package",
+    "_handle_filter_templates_by_hardware",
+    "_handle_find_heavy_prims",
+    "_handle_find_prims_by_name",
+    "_handle_find_prims_by_schema",
+    "_handle_finetune_stats",
+    "_handle_fix_error",
+    "_handle_generate_reward",
+    "_handle_generate_robot_description",
+    "_handle_generate_scene_blueprint",
+    "_handle_get_active_state",
+    "_handle_get_angular_velocity",
+    "_handle_get_articulation_mass",
+    "_handle_get_articulation_state",
+    "_handle_get_asset_info",
+    "_handle_get_attribute",
+    "_handle_get_bounding_box",
+    "_handle_get_camera_params",
+    "_handle_get_center_of_mass",
+    "_handle_get_console_errors",
+    "_handle_get_contact_report",
+    "_handle_get_debug_info",
+    "_handle_get_drive_gains",
+    "_handle_get_env_observations",
+    "_handle_get_env_rewards",
+    "_handle_get_env_termination_state",
+    "_handle_get_gripper_state",
+    "_handle_get_inertia",
+    "_handle_get_joint_limits",
+    "_handle_get_joint_positions",
+    "_handle_get_joint_targets",
+    "_handle_get_joint_torques",
+    "_handle_get_joint_velocities",
+    "_handle_get_kind",
+    "_handle_get_kinematic_state",
+    "_handle_get_light_properties",
+    "_handle_get_linear_velocity",
+    "_handle_get_mass",
+    "_handle_get_physics_errors",
+    "_handle_get_physics_scene_config",
+    "_handle_get_prim_metadata",
+    "_handle_get_prim_type",
+    "_handle_get_render_config",
+    "_handle_get_selected_prims",
+    "_handle_get_semantic_label",
+    "_handle_get_timeline_state",
+    "_handle_get_training_status",
+    "_handle_get_viewport_camera",
+    "_handle_get_workflow_status",
+    "_handle_get_world_transform",
+    "_handle_hardware_compatibility_check",
+    "_handle_inspect_camera",
+    "_handle_inspect_graph",
+    "_handle_iterate_reward",
+    "_handle_list_all_prims",
+    "_handle_list_applied_schemas",
+    "_handle_list_attributes",
+    "_handle_list_available_controllers",
+    "_handle_list_cameras",
+    "_handle_list_contacts",
+    "_handle_list_extensions",
+    "_handle_list_graphs",
+    "_handle_list_keyframes",
+    "_handle_list_layers",
+    "_handle_list_lights",
+    "_handle_list_local_files",
+    "_handle_list_opened_stages",
+    "_handle_list_payloads",
+    "_handle_list_references",
+    "_handle_list_relationships",
+    "_handle_list_scene_templates",
+    "_handle_list_semantic_classes",
+    "_handle_list_variant_sets",
+    "_handle_list_variants",
+    "_handle_list_workflows",
+    "_handle_load_groot_policy",
+    "_handle_load_rl_policy",
+    "_handle_load_scene_template",
+    "_handle_lookup_api_deprecation",
+    "_handle_lookup_knowledge",
+    "_handle_lookup_material",
+    "_handle_lookup_product_spec",
+    "_handle_measure_distance",
+    "_handle_measure_sim_real_gap",
+    "_handle_monitor_forgetting",
+    "_handle_nir_material_sensor",
+    "_handle_nucleus_browse",
+    "_handle_overlap_box",
+    "_handle_overlap_sphere",
+    "_handle_pause_training",
+    "_handle_pixel_to_world",
+    "_handle_place_on_top_of",
+    "_handle_post_action_suggestions",
+    "_handle_precheck_ros2_environment",
+    "_handle_preview_sdg",
+    "_handle_prim_exists",
+    "_handle_proactive_check",
+    "_handle_profile_training_throughput",
+    "_handle_query_async_task",
+    "_handle_query_stage_index",
+    "_handle_queue_write_locked_patch",
+    "_handle_quick_calibrate",
+    "_handle_raycast",
+    "_handle_record_feedback",
+    "_handle_redact_finetune_data",
+    "_handle_register_moving_obstacle",
+    "_handle_resolve_constraint_phrase",
+    "_handle_resolve_context_reference",
+    "_handle_resolve_coordinate_reference",
+    "_handle_resolve_count_vagueness",
+    "_handle_resolve_material_properties",
+    "_handle_resolve_prim_reference",
+    "_handle_resolve_relational_property",
+    "_handle_resolve_robot_class",
+    "_handle_resolve_sequence_phrase",
+    "_handle_resolve_size_adjective",
+    "_handle_resolve_skill_composition",
+    "_handle_resolve_success_condition",
+    "_handle_restore_delta_snapshot",
+    "_handle_review_reward",
+    "_handle_run_stage_analysis",
+    "_handle_save_delta_snapshot",
+    "_handle_scene_aware_starter_prompts",
+    "_handle_scene_diff",
+    "_handle_scene_summary",
+    "_handle_select_by_criteria",
+    "_handle_setup_assembly_constraint",
+    "_handle_setup_cortex_behavior",
+    "_handle_setup_grasp_pose_sampler",
+    "_handle_setup_isaac_ros_cumotion_moveit",
+    "_handle_setup_nav_robot",
+    "_handle_setup_pick_place_with_vision",
+    "_handle_setup_robot_claim_mutex",
+    "_handle_setup_robot_handoff_signal",
+    "_handle_setup_ros2_control_compat",
+    "_handle_setup_zone_partition",
+    "_handle_simulate_traversal_check",
+    "_handle_slash_command_discovery",
+    "_handle_start_workflow",
+    "_handle_suggest_data_mix",
+    "_handle_suggest_dr_ranges",
+    "_handle_suggest_finetune_config",
+    "_handle_suggest_parameter_adjustment",
+    "_handle_suggest_physics_settings",
+    "_handle_summarize_teleop_session",
+    "_handle_surface_gripper",
+    "_handle_sweep_sphere",
+    "_handle_trace_config",
+    "_handle_track_slot_occupancy",
+    "_handle_train_actuator_net",
+    "_handle_validate_annotations",
+    "_handle_validate_calibration",
+    "_handle_validate_scene_blueprint",
+    "_handle_validate_semantic_labels",
+    "_handle_validate_teleop_demo",
+    "_handle_verify_pickplace_pipeline",
+    "_handle_vision_analyze_scene",
+    "_handle_vision_bounding_boxes",
+    "_handle_vision_detect_objects",
+    "_handle_vision_plan_trajectory",
+    "_handle_visualize_behavior_tree",
+    "_handle_watch_changes"
+  ],
+  "high_fan_in_utilities": [
+    "execute_tool_call",
+    "_get_viewport_bytes",
+    "_get_vision_provider",
+    "_query_run_ipc",
+    "_resolve_run_id",
+    "_check_real_data_path",
+    "_wf_now_iso",
+    "_parse_last_json_line",
+    "_safe_robot_name",
+    "_validate_env_id"
+  ],
+  "utilities": [
+    "_analyze_performance",
+    "_apply_result_cap",
+    "_arena_env_id",
+    "_async_task_runner",
+    "_augment_verify_with_feasibility",
+    "_build_asset_index",
+    "_build_mutation_prompt",
+    "_build_select_by_criteria_code",
+    "_check_real_data_path",
+    "_detect_local_vram_gb",
+    "_detect_robot_for_fix",
+    "_detect_robot_type",
+    "_detect_template",
+    "_detect_used_vram_gb",
+    "_format_component_metrics",
+    "_generate_actuator_net_script",
+    "_generate_calibration_script",
+    "_generate_isaaclab_env_code",
+    "_generate_isaaclab_init_code",
+    "_get_viewport_bytes",
+    "_get_vision_provider",
+    "_load_deformable_presets",
+    "_load_physics_materials",
+    "_load_sensor_specs",
+    "_load_template_manifests",
+    "_load_trajectory_for_gap",
+    "_neighbour_paths",
+    "_normalize_material_name",
+    "_open_hdf5_safely",
+    "_parse_last_json_line",
+    "_parse_unified_diff_to_changes",
+    "_per_joint_rmse",
+    "_probe_curobo",
+    "_probe_gpu_capability",
+    "_probe_isaac_lab",
+    "_probe_scipy",
+    "_query_run_ipc",
+    "_read_checkpoint_action_std",
+    "_read_tb_scalars",
+    "_resolve_auto_target_source",
+    "_resolve_robot_asset",
+    "_resolve_run_id",
+    "_safe_robot_name",
+    "_score_prim_for_query",
+    "_suggested_dr_ranges",
+    "_summarize_changes",
+    "_validate_env_id",
+    "_wf_advance_phase",
+    "_wf_make_initial_plan",
+    "_wf_now_iso",
+    "execute_tool_call",
+    "get_nav2_bridge_profile"
+  ],
+  "utility_fan_in": {
+    "_analyze_performance": 1,
+    "_arena_env_id": 1,
+    "_async_task_runner": 1,
+    "_augment_verify_with_feasibility": 1,
+    "_build_asset_index": 1,
+    "_build_mutation_prompt": 1,
+    "_build_select_by_criteria_code": 1,
+    "_check_real_data_path": 4,
+    "_detect_local_vram_gb": 2,
+    "_detect_robot_for_fix": 1,
+    "_detect_template": 1,
+    "_detect_used_vram_gb": 1,
+    "_generate_actuator_net_script": 1,
+    "_generate_calibration_script": 2,
+    "_generate_isaaclab_env_code": 1,
+    "_get_viewport_bytes": 5,
+    "_get_vision_provider": 5,
+    "_load_deformable_presets": 1,
+    "_load_physics_materials": 2,
+    "_load_sensor_specs": 1,
+    "_load_template_manifests": 1,
+    "_load_trajectory_for_gap": 1,
+    "_neighbour_paths": 1,
+    "_normalize_material_name": 2,
+    "_open_hdf5_safely": 2,
+    "_parse_last_json_line": 3,
+    "_parse_unified_diff_to_changes": 1,
+    "_per_joint_rmse": 1,
+    "_probe_curobo": 1,
+    "_probe_gpu_capability": 1,
+    "_probe_isaac_lab": 1,
+    "_probe_scipy": 1,
+    "_query_run_ipc": 5,
+    "_read_checkpoint_action_std": 1,
+    "_read_tb_scalars": 2,
+    "_resolve_auto_target_source": 1,
+    "_resolve_robot_asset": 2,
+    "_resolve_run_id": 5,
+    "_safe_robot_name": 3,
+    "_score_prim_for_query": 1,
+    "_suggested_dr_ranges": 2,
+    "_summarize_changes": 1,
+    "_validate_env_id": 3,
+    "_wf_advance_phase": 1,
+    "_wf_make_initial_plan": 1,
+    "_wf_now_iso": 4,
+    "execute_tool_call": 8
+  }
+}

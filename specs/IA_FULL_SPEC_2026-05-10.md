@@ -204,6 +204,31 @@ handler verified by CI, every patch validator is a registered rule with
 a typed signature, and the recovered-state block is archived to a
 forensics document with cross-references to the active modules.
 
+## Phase 0b — Fork-reconciliation triage audit
+
+**Goal:** classify fork-divergent commits before handler migration
+continues, so adopted, deferred, and rejected work is explicit.
+
+**Why now:** the branch history contains older fork work that overlaps
+with later IA phases. A lightweight triage pass prevents accidental
+double-implementation and records which commits should be folded into
+future phases.
+
+**Files (new):**
+- `scripts/audit_fork_divergence.py`
+- `docs/audits/fork_divergence_template.md`
+
+**Build:** script a repeatable audit that scans divergent commits,
+classifies known subjects with simple rules, and emits a template/report
+that can be reviewed by humans.
+
+**Test:** the phase-file-write audit and safe-batch helper parse this
+lettered phase ID (`0b`) from the real spec.
+
+**Dependencies:** none.
+
+---
+
 ## Phase 1 — Audit duplicate handler names and ghost handlers
 
 **Goal:** establish a single ground-truth inventory of every tool name,
