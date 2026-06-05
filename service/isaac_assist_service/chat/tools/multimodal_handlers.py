@@ -56,6 +56,7 @@ _store: Optional[MultimodalStore] = None
 
 
 def _get_store() -> MultimodalStore:
+    """Return the process-local MultimodalStore singleton (lazy-instantiated)."""
     global _store
     if _store is None:
         _store = MultimodalStore()

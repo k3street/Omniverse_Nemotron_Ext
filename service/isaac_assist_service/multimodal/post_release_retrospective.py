@@ -158,6 +158,7 @@ class RetrospectiveBuilder:
     """
 
     def __init__(self, template_path: Optional[Path] = None) -> None:
+        """Initialise with an optional custom template path; defaults to the module-level default."""
         self._template_path: Path = (
             template_path if template_path is not None else _DEFAULT_TEMPLATE_PATH
         )

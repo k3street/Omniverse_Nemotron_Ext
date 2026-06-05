@@ -18,6 +18,17 @@ from typing import Any, Callable, Dict
 
 
 def _gen_set_timeline_range(args: Dict) -> str:
+    """Generate code to set the USD stage timeline start/end range and optional FPS.
+
+    Args:
+        args: Dict containing:
+            - start (float): First time code.
+            - end (float): Last time code (must be > start).
+            - fps (float, optional): Frames per second; leaves existing FPS unchanged if absent.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     start = args["start"]
     end = args["end"]
     fps = args.get("fps")
@@ -68,6 +79,18 @@ def _gen_set_timeline_range(args: Dict) -> str:
 
 
 def _gen_set_keyframe(args: Dict) -> str:
+    """Generate code to author a single keyframe on a USD attribute.
+
+    Args:
+        args: Dict containing:
+            - prim_path (str): USD path to the target prim.
+            - attr (str): Attribute name on that prim.
+            - time (float): Time in seconds.
+            - value: Value to set (list/tuple auto-cast to Gf.Vec3f/Vec4f).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     prim_path = args["prim_path"]
     attr = args["attr"]
     time = args["time"]
@@ -118,6 +141,16 @@ def _gen_set_keyframe(args: Dict) -> str:
 
 
 def _gen_play_animation(args: Dict) -> str:
+    """Generate code that configures the timeline window and calls play().
+
+    Args:
+        args: Dict containing:
+            - start (float): Playback start in seconds.
+            - end (float): Playback end in seconds (must be > start).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     start = args["start"]
     end = args["end"]
     return (
@@ -158,6 +191,19 @@ def _gen_play_animation(args: Dict) -> str:
 
 
 def _gen_create_audio_prim(args: Dict) -> str:
+    """Generate code to define a UsdMedia.SpatialAudio prim at a world position.
+
+    Args:
+        args: Dict containing:
+            - audio_file (str): Asset path to the audio file.
+            - position (list): [x, y, z] world-space position.
+            - prim_path (str, optional): Desired USD path; auto-assigned if empty.
+            - start_time (float, optional): Playback start offset in seconds (default 0.0).
+            - auto_play (bool, optional): True to play on scene load (default True).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     from ._shared import _SAFE_XFORM_SNIPPET
     pos = args["position"]
     audio_file = args["audio_file"]
@@ -216,6 +262,18 @@ print(f"create_audio_prim: defined SpatialAudio at {{desired}} -> {audio_file}")
 
 
 def _gen_set_audio_property(args: Dict) -> str:
+    """Generate code to set a named property on a SpatialAudio prim.
+
+    Args:
+        args: Dict containing:
+            - prim_path (str): USD path to the SpatialAudio prim.
+            - prop (str): Friendly property name (volume, gain, pitch, auto_play,
+              start_time, attenuation_start, attenuation_end).
+            - value: New value for the property.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     prim_path = args["prim_path"]
     prop = args["prop"]
     value = args["value"]

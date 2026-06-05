@@ -36,6 +36,7 @@ class OllamaProvider:
     that expose it (e.g. Qwen, Llama 3.1+).
     """
     def __init__(self, host: str = "127.0.0.1", port: int = 11434, model: str = "isaac-assist-nemotron"):
+        """Initialise with Ollama host/port and model name; derives the API URL."""
         self.base_url = f"http://{host}:{port}/api/chat"
         self.model = model
 

@@ -35,6 +35,15 @@ Complexity = Literal["single", "multi", "complex"]
 
 
 class IntentClassification(TypedDict):
+    """Three-axis intent classification returned by the intent router.
+
+    Attributes:
+        intent: One of the eight named Isaac Sim intent categories.
+        multi_step: True when the request has two or more linked dependent actions.
+        complexity: ``"single"`` | ``"multi"`` | ``"complex"`` request complexity tier.
+        confidence: Model confidence in the classification (0.0–1.0).
+    """
+
     intent: Intent
     multi_step: bool
     complexity: Complexity

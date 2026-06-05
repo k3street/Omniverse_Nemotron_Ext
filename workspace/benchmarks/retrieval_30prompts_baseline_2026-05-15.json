@@ -1,0 +1,1399 @@
+{
+  "benchmark": "retrieval_30prompts",
+  "date": "2026-05-15",
+  "n_prompts": 30,
+  "n_templates_indexed": 321,
+  "thresholds": {
+    "sim_min": 0.45,
+    "margin_min": 0.2
+  },
+  "aggregate": {
+    "hit_at_1": 0.8333,
+    "hit_at_3": 0.9333,
+    "mode_accuracy": 0.5667,
+    "hard_instantiate_rate": 0.1667,
+    "avg_latency_ms": 101.28,
+    "latency_p50_ms": 102.51,
+    "latency_p95_ms": 126.59
+  },
+  "category_breakdown": {
+    "amr_navigation": {
+      "n": 2,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 0.0,
+      "avg_top1_sim": 0.605
+    },
+    "contact_rich": {
+      "n": 2,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.654
+    },
+    "industrial_bridge": {
+      "n": 1,
+      "hit_at_1": 0.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.309
+    },
+    "multi_robot": {
+      "n": 2,
+      "hit_at_1": 0.5,
+      "hit_at_3": 1.0,
+      "mode_correct": 0.0,
+      "avg_top1_sim": 0.582
+    },
+    "navigate": {
+      "n": 1,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.667
+    },
+    "no_match": {
+      "n": 5,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 0.0,
+      "avg_top1_sim": 0.263
+    },
+    "palletize": {
+      "n": 1,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.416
+    },
+    "pick_place": {
+      "n": 5,
+      "hit_at_1": 0.6,
+      "hit_at_3": 0.8,
+      "mode_correct": 0.8,
+      "avg_top1_sim": 0.446
+    },
+    "reorient": {
+      "n": 1,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.569
+    },
+    "rl_training": {
+      "n": 2,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 0.0,
+      "avg_top1_sim": 0.647
+    },
+    "ros2_bridge": {
+      "n": 2,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 0.5,
+      "avg_top1_sim": 0.424
+    },
+    "sensor_setup": {
+      "n": 3,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.489
+    },
+    "sort": {
+      "n": 2,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.552
+    },
+    "vision": {
+      "n": 1,
+      "hit_at_1": 0.0,
+      "hit_at_3": 0.0,
+      "mode_correct": 1.0,
+      "avg_top1_sim": 0.554
+    }
+  },
+  "failure_cases": [
+    {
+      "id": "B02",
+      "category": "multi_robot",
+      "prompt": "Set up a two-robot assembly line where cubes pass from robot 1 to robot 2 via a second conveyor",
+      "ground_truth": [
+        "CP-02"
+      ],
+      "top1_id": "CP-51",
+      "top1_sim": 0.5479,
+      "top3": [
+        {
+          "task_id": "CP-51",
+          "similarity": 0.5479,
+          "distance": 0.6781
+        },
+        {
+          "task_id": "CP-02",
+          "similarity": 0.517,
+          "distance": 0.7245
+        },
+        {
+          "task_id": "CP-14",
+          "similarity": 0.4947,
+          "distance": 0.758
+        }
+      ]
+    },
+    {
+      "id": "B01",
+      "category": "pick_place",
+      "prompt": "Build a Franka pick-place cell with a conveyor belt and a single bin",
+      "ground_truth": [
+        "CP-01"
+      ],
+      "top1_id": "CP-77",
+      "top1_sim": 0.4784,
+      "top3": [
+        {
+          "task_id": "CP-77",
+          "similarity": 0.4784,
+          "distance": 0.7824
+        },
+        {
+          "task_id": "CP-NEW-y-merge-singulation",
+          "similarity": 0.3964,
+          "distance": 0.9054
+        },
+        {
+          "task_id": "CP-44",
+          "similarity": 0.3939,
+          "distance": 0.9092
+        }
+      ]
+    },
+    {
+      "id": "B06",
+      "category": "pick_place",
+      "prompt": "Franka arm picks cubes from belt and drops into bin, using cuRobo for trajectory planning",
+      "ground_truth": [
+        "CP-01"
+      ],
+      "top1_id": "CP-07",
+      "top1_sim": 0.5785,
+      "top3": [
+        {
+          "task_id": "CP-07",
+          "similarity": 0.5785,
+          "distance": 0.6322
+        },
+        {
+          "task_id": "CP-01",
+          "similarity": 0.5758,
+          "distance": 0.6363
+        },
+        {
+          "task_id": "CP-06",
+          "similarity": 0.5552,
+          "distance": 0.6672
+        }
+      ]
+    },
+    {
+      "id": "B10",
+      "category": "vision",
+      "prompt": "Vision-classify cubes on a conveyor and route them to bins based on detected color",
+      "ground_truth": [
+        "CP-47"
+      ],
+      "top1_id": "CP-34",
+      "top1_sim": 0.5544,
+      "top3": [
+        {
+          "task_id": "CP-34",
+          "similarity": 0.5544,
+          "distance": 0.6684
+        },
+        {
+          "task_id": "CP-32",
+          "similarity": 0.5539,
+          "distance": 0.6692
+        },
+        {
+          "task_id": "CP-03",
+          "similarity": 0.5176,
+          "distance": 0.7236
+        }
+      ]
+    },
+    {
+      "id": "B28",
+      "category": "industrial_bridge",
+      "prompt": "OPC-UA bridge connecting 12 conveyors to external PLC",
+      "ground_truth": [
+        "CP-NEW-opcua-12conveyors"
+      ],
+      "top1_id": "F-02",
+      "top1_sim": 0.3088,
+      "top3": [
+        {
+          "task_id": "F-02",
+          "similarity": 0.3088,
+          "distance": 1.0368
+        },
+        {
+          "task_id": "CP-NEW-plc-fixture",
+          "similarity": 0.2809,
+          "distance": 1.0787
+        },
+        {
+          "task_id": "CP-NEW-opcua-12conveyors",
+          "similarity": 0.2749,
+          "distance": 1.0876
+        }
+      ]
+    }
+  ],
+  "per_prompt": [
+    {
+      "id": "B01",
+      "prompt": "Build a Franka pick-place cell with a conveyor belt and a single bin",
+      "category": "pick_place",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-01"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "actual_action": "few_shot",
+      "top1_id": "CP-77",
+      "top1_sim": 0.4784,
+      "margin": 0.082,
+      "hit_at_1": false,
+      "hit_at_3": false,
+      "mode_correct": false,
+      "latency_ms": 126.59,
+      "top3": [
+        {
+          "task_id": "CP-77",
+          "similarity": 0.4784,
+          "distance": 0.7824
+        },
+        {
+          "task_id": "CP-NEW-y-merge-singulation",
+          "similarity": 0.3964,
+          "distance": 0.9054
+        },
+        {
+          "task_id": "CP-44",
+          "similarity": 0.3939,
+          "distance": 0.9092
+        }
+      ],
+      "notes": "Canonical single-robot pick-place. Close phrasing to the calibration points. CP-01 should rank clearly above CP-02 (two-robot) if thoughts tokens work."
+    },
+    {
+      "id": "B02",
+      "prompt": "Set up a two-robot assembly line where cubes pass from robot 1 to robot 2 via a second conveyor",
+      "category": "multi_robot",
+      "complexity": "multi",
+      "ground_truth": [
+        "CP-02"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "actual_action": "few_shot",
+      "top1_id": "CP-51",
+      "top1_sim": 0.5479,
+      "margin": 0.0309,
+      "hit_at_1": false,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 95.87,
+      "top3": [
+        {
+          "task_id": "CP-51",
+          "similarity": 0.5479,
+          "distance": 0.6781
+        },
+        {
+          "task_id": "CP-02",
+          "similarity": 0.517,
+          "distance": 0.7245
+        },
+        {
+          "task_id": "CP-14",
+          "similarity": 0.4947,
+          "distance": 0.758
+        }
+      ],
+      "notes": "Multi-station two-robot chain. The explicit 'robot 1 to robot 2' phrasing and 'second conveyor' should match CP-02 thoughts tokens over CP-01/CP-51."
+    },
+    {
+      "id": "B03",
+      "prompt": "Sort red and blue cubes into color-matched bins using a Franka arm",
+      "category": "sort",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-03"
+      ],
+      "acceptable_alternatives": [
+        "CP-16"
+      ],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-16",
+      "top1_sim": 0.546,
+      "margin": 0.0509,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 93.35,
+      "top3": [
+        {
+          "task_id": "CP-16",
+          "similarity": 0.546,
+          "distance": 0.6811
+        },
+        {
+          "task_id": "CP-03",
+          "similarity": 0.4951,
+          "distance": 0.7574
+        },
+        {
+          "task_id": "CP-35",
+          "similarity": 0.4862,
+          "distance": 0.7706
+        }
+      ],
+      "notes": "2-color sort. CP-03 is the canonical; CP-16 (4-color) is also a reasonable alternative. Margin may collapse between the two since their goals are very similar."
+    },
+    {
+      "id": "B04",
+      "prompt": "Create a compact pick-and-place cell that fits within a 2x2 meter footprint",
+      "category": "pick_place",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-04"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-04",
+      "top1_sim": 0.2722,
+      "margin": 0.0596,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 93.01,
+      "top3": [
+        {
+          "task_id": "CP-04",
+          "similarity": 0.2722,
+          "distance": 1.0917
+        },
+        {
+          "task_id": "CP-65",
+          "similarity": 0.2126,
+          "distance": 1.181
+        },
+        {
+          "task_id": "CP-15",
+          "similarity": 0.1643,
+          "distance": 1.2535
+        }
+      ],
+      "notes": "Footprint constraint is the key discriminator. CP-04 goal mentions '2x2 m footprint' explicitly. Sim tends to be lower due to sparse vocabulary."
+    },
+    {
+      "id": "B05",
+      "prompt": "Build a reorient-and-deliver station where cubes start on their side and a flip-wall tips them upright before pick",
+      "category": "reorient",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-05"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-05",
+      "top1_sim": 0.5691,
+      "margin": 0.1089,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 94.69,
+      "top3": [
+        {
+          "task_id": "CP-05",
+          "similarity": 0.5691,
+          "distance": 0.6464
+        },
+        {
+          "task_id": "CP-31",
+          "similarity": 0.4602,
+          "distance": 0.8097
+        },
+        {
+          "task_id": "CP-56",
+          "similarity": 0.4249,
+          "distance": 0.8627
+        }
+      ],
+      "notes": "Unique to CP-05. 'flip-wall', 'on its side', 'upright' are very specific discriminating tokens present in CP-05 goal."
+    },
+    {
+      "id": "B06",
+      "prompt": "Franka arm picks cubes from belt and drops into bin, using cuRobo for trajectory planning",
+      "category": "pick_place",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-01"
+      ],
+      "acceptable_alternatives": [
+        "CP-04",
+        "CP-22",
+        "CP-23"
+      ],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-07",
+      "top1_sim": 0.5785,
+      "margin": 0.0027,
+      "hit_at_1": false,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 94.58,
+      "top3": [
+        {
+          "task_id": "CP-07",
+          "similarity": 0.5785,
+          "distance": 0.6322
+        },
+        {
+          "task_id": "CP-01",
+          "similarity": 0.5758,
+          "distance": 0.6363
+        },
+        {
+          "task_id": "CP-06",
+          "similarity": 0.5552,
+          "distance": 0.6672
+        }
+      ],
+      "notes": "Paraphrase of CP-01 with explicit cuRobo mention. Should retrieve CP-01 or close variants. Alternative phrasing test."
+    },
+    {
+      "id": "B07",
+      "prompt": "UR10 picks colored cubes off a conveyor and routes them to color-matched bins",
+      "category": "sort",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-82"
+      ],
+      "acceptable_alternatives": [
+        "CP-85",
+        "CP-86"
+      ],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-82",
+      "top1_sim": 0.5583,
+      "margin": 0.0061,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 94.33,
+      "top3": [
+        {
+          "task_id": "CP-82",
+          "similarity": 0.5583,
+          "distance": 0.6626
+        },
+        {
+          "task_id": "CP-03",
+          "similarity": 0.5521,
+          "distance": 0.6718
+        },
+        {
+          "task_id": "CP-85",
+          "similarity": 0.5437,
+          "distance": 0.6845
+        }
+      ],
+      "notes": "UR10-specific color-routing. CP-82 is the two-cube cuRobo version. CP-85 (single-cube builtin) is also valid. The UR10 token is a strong discriminator vs Franka-family."
+    },
+    {
+      "id": "B08",
+      "prompt": "Build a 3-station serial pick-place line with per-station OEE logging",
+      "category": "pick_place",
+      "complexity": "multi",
+      "ground_truth": [
+        "CP-NEW-3station-oee"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-NEW-3station-oee",
+      "top1_sim": 0.4323,
+      "margin": 0.2403,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 95.16,
+      "top3": [
+        {
+          "task_id": "CP-NEW-3station-oee",
+          "similarity": 0.4323,
+          "distance": 0.8515
+        },
+        {
+          "task_id": "CP-49",
+          "similarity": 0.192,
+          "distance": 1.2119
+        },
+        {
+          "task_id": "K-04",
+          "similarity": 0.1565,
+          "distance": 1.2653
+        }
+      ],
+      "notes": "Very specific. 'OEE', '3-station serial' are unique to CP-NEW-3station-oee. Sim likely above 0.35 but margin may be low."
+    },
+    {
+      "id": "B09",
+      "prompt": "Build a parallel-robot mutual-exclusion pick-place where two Frankas share one conveyor and one bin",
+      "category": "multi_robot",
+      "complexity": "multi",
+      "ground_truth": [
+        "CP-52"
+      ],
+      "acceptable_alternatives": [
+        "CP-53"
+      ],
+      "expected_action": "hard_instantiate",
+      "actual_action": "few_shot",
+      "top1_id": "CP-52",
+      "top1_sim": 0.6156,
+      "margin": 0.0444,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 103.98,
+      "top3": [
+        {
+          "task_id": "CP-52",
+          "similarity": 0.6156,
+          "distance": 0.5767
+        },
+        {
+          "task_id": "CP-07",
+          "similarity": 0.5711,
+          "distance": 0.6433
+        },
+        {
+          "task_id": "CP-14",
+          "similarity": 0.5162,
+          "distance": 0.7257
+        }
+      ],
+      "notes": "CP-52 has 'parallel-picking duo' + 'setup_robot_claim_mutex' \u2014 unique enough to score high. Observed sim ~0.62 in spot checks."
+    },
+    {
+      "id": "B10",
+      "prompt": "Vision-classify cubes on a conveyor and route them to bins based on detected color",
+      "category": "vision",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-47"
+      ],
+      "acceptable_alternatives": [
+        "CP-48",
+        "CP-50"
+      ],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-34",
+      "top1_sim": 0.5544,
+      "margin": 0.0006,
+      "hit_at_1": false,
+      "hit_at_3": false,
+      "mode_correct": true,
+      "latency_ms": 103.51,
+      "top3": [
+        {
+          "task_id": "CP-34",
+          "similarity": 0.5544,
+          "distance": 0.6684
+        },
+        {
+          "task_id": "CP-32",
+          "similarity": 0.5539,
+          "distance": 0.6692
+        },
+        {
+          "task_id": "CP-03",
+          "similarity": 0.5176,
+          "distance": 0.7236
+        }
+      ],
+      "notes": "CP-47 is the canonical vision-sorter. CP-48 (inspect-reject) and CP-50 (vision-kitting) are reasonable alternatives."
+    },
+    {
+      "id": "B11",
+      "prompt": "Navigate a Nova Carter AMR to dock at a pick station, load a cube from a Franka arm, then depart",
+      "category": "amr_navigation",
+      "complexity": "multi",
+      "ground_truth": [
+        "CP-NEW-amr-pickup-handoff"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "actual_action": "hard_instantiate",
+      "top1_id": "CP-NEW-amr-pickup-handoff",
+      "top1_sim": 0.571,
+      "margin": 0.2513,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 104.66,
+      "top3": [
+        {
+          "task_id": "CP-NEW-amr-pickup-handoff",
+          "similarity": 0.571,
+          "distance": 0.6435
+        },
+        {
+          "task_id": "CP-31",
+          "similarity": 0.3197,
+          "distance": 1.0204
+        },
+        {
+          "task_id": "CP-75",
+          "similarity": 0.302,
+          "distance": 1.047
+        }
+      ],
+      "notes": "AMR pickup handoff is specific. 'Nova Carter', 'dock', 'depart' are strong discriminating tokens."
+    },
+    {
+      "id": "B12",
+      "prompt": "Coordinate 3 AMRs navigating a shared corridor with obstacle avoidance",
+      "category": "amr_navigation",
+      "complexity": "multi",
+      "ground_truth": [
+        "CP-NEW-multi-amr-corridor"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "actual_action": "hard_instantiate",
+      "top1_id": "CP-NEW-multi-amr-corridor",
+      "top1_sim": 0.6392,
+      "margin": 0.3448,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 103.13,
+      "top3": [
+        {
+          "task_id": "CP-NEW-multi-amr-corridor",
+          "similarity": 0.6392,
+          "distance": 0.5411
+        },
+        {
+          "task_id": "CP-NEW-amr-pickup-handoff",
+          "similarity": 0.2944,
+          "distance": 1.0584
+        },
+        {
+          "task_id": "CP-68",
+          "similarity": 0.2411,
+          "distance": 1.1384
+        }
+      ],
+      "notes": "Multi-AMR corridor navigation. Unique enough that only CP-NEW-multi-amr-corridor should match."
+    },
+    {
+      "id": "B13",
+      "prompt": "Train an RL policy with 64 parallel Franka environments using IsaacLab and RSL-RL",
+      "category": "rl_training",
+      "complexity": "multi",
+      "ground_truth": [
+        "CP-NEW-rl-clone-env"
+      ],
+      "acceptable_alternatives": [
+        "M-08"
+      ],
+      "expected_action": "hard_instantiate",
+      "actual_action": "hard_instantiate",
+      "top1_id": "CP-NEW-rl-clone-env",
+      "top1_sim": 0.6141,
+      "margin": 0.2746,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 103.77,
+      "top3": [
+        {
+          "task_id": "CP-NEW-rl-clone-env",
+          "similarity": 0.6141,
+          "distance": 0.5789
+        },
+        {
+          "task_id": "M-13",
+          "similarity": 0.3395,
+          "distance": 0.9907
+        },
+        {
+          "task_id": "M-11",
+          "similarity": 0.3221,
+          "distance": 1.0169
+        }
+      ],
+      "notes": "RL training with clone_envs. CP-NEW-rl-clone-env has '64 parallel Franka-reach envs cloned via clone_envs'. M-08 (IsaacLab Allegro) is adjacent but different task."
+    },
+    {
+      "id": "B14",
+      "prompt": "Set up ROS2 MoveIt2 bridge for a Franka arm with joint state topics",
+      "category": "ros2_bridge",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-87"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-87",
+      "top1_sim": 0.4838,
+      "margin": 0.0519,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 103.94,
+      "top3": [
+        {
+          "task_id": "CP-87",
+          "similarity": 0.4838,
+          "distance": 0.7743
+        },
+        {
+          "task_id": "E-07",
+          "similarity": 0.432,
+          "distance": 0.8521
+        },
+        {
+          "task_id": "D-12",
+          "similarity": 0.4125,
+          "distance": 0.8813
+        }
+      ],
+      "notes": "CP-87 goal explicitly mentions 'ROS2-MoveIt2 Franka pick-place' and '/isaac_joint_states + /isaac_joint_commands'. Observed sim ~0.43 \u2014 may fall below threshold."
+    },
+    {
+      "id": "B15",
+      "prompt": "Stand up 8 Nova Carters each with their own ROS2 namespace",
+      "category": "ros2_bridge",
+      "complexity": "multi",
+      "ground_truth": [
+        "S-07"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "actual_action": "few_shot",
+      "top1_id": "S-07",
+      "top1_sim": 0.3639,
+      "margin": 0.0712,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 102.02,
+      "top3": [
+        {
+          "task_id": "S-07",
+          "similarity": 0.3639,
+          "distance": 0.9541
+        },
+        {
+          "task_id": "S-10",
+          "similarity": 0.2927,
+          "distance": 1.061
+        },
+        {
+          "task_id": "S-02",
+          "similarity": 0.2411,
+          "distance": 1.1384
+        }
+      ],
+      "notes": "S-07 goal is 'Stand up 8 Nova Carters with per-robot ROS2 namespaces in one sim'. Very specific phrasing; observed sim ~0.53."
+    },
+    {
+      "id": "B16",
+      "prompt": "Import a robot URDF into Isaac Sim and check its collision meshes",
+      "category": "sensor_setup",
+      "complexity": "atomic",
+      "ground_truth": [
+        "M-01"
+      ],
+      "acceptable_alternatives": [
+        "R-03"
+      ],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "M-01",
+      "top1_sim": 0.576,
+      "margin": 0.0312,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 102.63,
+      "top3": [
+        {
+          "task_id": "M-01",
+          "similarity": 0.576,
+          "distance": 0.6361
+        },
+        {
+          "task_id": "A-01",
+          "similarity": 0.5448,
+          "distance": 0.6828
+        },
+        {
+          "task_id": "AM-08",
+          "similarity": 0.526,
+          "distance": 0.711
+        }
+      ],
+      "notes": "M-01 is URDF import + collision audit. R-03 is a different prefix but adjacent. 'Import URDF' + 'collision meshes' are strong signals."
+    },
+    {
+      "id": "B17",
+      "prompt": "Anchor the Franka robot base so it doesn't float when simulation starts",
+      "category": "sensor_setup",
+      "complexity": "atomic",
+      "ground_truth": [
+        "FX-01"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "FX-01",
+      "top1_sim": 0.4814,
+      "margin": 0.168,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 102.51,
+      "top3": [
+        {
+          "task_id": "FX-01",
+          "similarity": 0.4814,
+          "distance": 0.7778
+        },
+        {
+          "task_id": "CP-NEW-brick-stacking",
+          "similarity": 0.3135,
+          "distance": 1.0298
+        },
+        {
+          "task_id": "CP-36",
+          "similarity": 0.2337,
+          "distance": 1.1494
+        }
+      ],
+      "notes": "FX-01 is 'Anchor a Franka articulation... so its base does not free-fall on Play'. 'anchor', 'float', 'simulation' are discriminating. Observed sim ~0.28-0.34."
+    },
+    {
+      "id": "B18",
+      "prompt": "Generate 10k COCO-format synthetic images for apple detection with stable annotation IDs",
+      "category": "sensor_setup",
+      "complexity": "multi",
+      "ground_truth": [
+        "P-01"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "P-01",
+      "top1_sim": 0.4098,
+      "margin": 0.0053,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 102.69,
+      "top3": [
+        {
+          "task_id": "P-01",
+          "similarity": 0.4098,
+          "distance": 0.8853
+        },
+        {
+          "task_id": "CP-NEW-defect-sdg",
+          "similarity": 0.4045,
+          "distance": 0.8932
+        },
+        {
+          "task_id": "E-06",
+          "similarity": 0.3084,
+          "distance": 1.0374
+        }
+      ],
+      "notes": "P-01 goal is 'Generate 10k COCO apple-detection images where annotation IDs stay stable'. Very specific \u2014 'COCO', 'apple', 'annotation IDs' distinguish from CP-NEW-defect-sdg."
+    },
+    {
+      "id": "B19",
+      "prompt": "Build an IsaacLab task from scratch: Allegro hand with cube reorientation, InteractiveSceneCfg, no GUI",
+      "category": "rl_training",
+      "complexity": "multi",
+      "ground_truth": [
+        "M-08"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "actual_action": "hard_instantiate",
+      "top1_id": "M-08",
+      "top1_sim": 0.6793,
+      "margin": 0.2096,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 104.3,
+      "top3": [
+        {
+          "task_id": "M-08",
+          "similarity": 0.6793,
+          "distance": 0.4811
+        },
+        {
+          "task_id": "M-04",
+          "similarity": 0.4697,
+          "distance": 0.7955
+        },
+        {
+          "task_id": "A-03",
+          "similarity": 0.3612,
+          "distance": 0.9581
+        }
+      ],
+      "notes": "M-08 goal matches verbatim on 'Allegro hand', 'InteractiveSceneCfg', 'no GUI'. High specificity. Observed sim ~0.46."
+    },
+    {
+      "id": "B20",
+      "prompt": "Set up a Carter wheeled robot for autonomous navigation using Nav2",
+      "category": "navigate",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-64"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "hard_instantiate",
+      "actual_action": "hard_instantiate",
+      "top1_id": "CP-64",
+      "top1_sim": 0.6669,
+      "margin": 0.2715,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 102.64,
+      "top3": [
+        {
+          "task_id": "CP-64",
+          "similarity": 0.6669,
+          "distance": 0.4996
+        },
+        {
+          "task_id": "S-10",
+          "similarity": 0.3954,
+          "distance": 0.9069
+        },
+        {
+          "task_id": "CP-NEW-amr-pickup-handoff",
+          "similarity": 0.3761,
+          "distance": 0.9358
+        }
+      ],
+      "notes": "CP-64 is 'mobile robot with Nav2 navigation config: a Carter wheeled robot via setup_nav_robot'. Very specific. Observed sim ~0.64."
+    },
+    {
+      "id": "B21",
+      "prompt": "pick and place",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [
+        null
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "actual_action": "few_shot",
+      "top1_id": "A-09",
+      "top1_sim": 0.1774,
+      "margin": 0.0012,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 104.02,
+      "top3": [
+        {
+          "task_id": "A-09",
+          "similarity": 0.1774,
+          "distance": 1.234
+        },
+        {
+          "task_id": "AM-06",
+          "similarity": 0.1762,
+          "distance": 1.2358
+        },
+        {
+          "task_id": "CP-NEW-3station-oee",
+          "similarity": 0.1205,
+          "distance": 1.3192
+        }
+      ],
+      "notes": "Too generic. No template should fire hard-instantiate. Expected: sim < 0.45 for all top-K."
+    },
+    {
+      "id": "B22",
+      "prompt": "Franka and conveyor",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [
+        null
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "actual_action": "few_shot",
+      "top1_id": "CP-07",
+      "top1_sim": 0.1756,
+      "margin": 0.0048,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 127.91,
+      "top3": [
+        {
+          "task_id": "CP-07",
+          "similarity": 0.1756,
+          "distance": 1.2365
+        },
+        {
+          "task_id": "CP-77",
+          "similarity": 0.1709,
+          "distance": 1.2437
+        },
+        {
+          "task_id": "CP-NEW-y-merge-singulation",
+          "similarity": 0.1678,
+          "distance": 1.2483
+        }
+      ],
+      "notes": "Ambiguous: both CP-01 and CP-02 are plausible. Expected: low margin (< 0.20) even if sim is moderate, so few-shot fallback fires."
+    },
+    {
+      "id": "B23",
+      "prompt": "sort items into bins",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [
+        null
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "actual_action": "few_shot",
+      "top1_id": "CP-35",
+      "top1_sim": 0.2529,
+      "margin": 0.1123,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 95.27,
+      "top3": [
+        {
+          "task_id": "CP-35",
+          "similarity": 0.2529,
+          "distance": 1.1207
+        },
+        {
+          "task_id": "CP-16",
+          "similarity": 0.1405,
+          "distance": 1.2892
+        },
+        {
+          "task_id": "CP-57",
+          "similarity": 0.1405,
+          "distance": 1.2892
+        }
+      ],
+      "notes": "Vague sort request. Missing color/count/robot info. Expected: sim < 0.40 or margin < 0.20 for all candidates."
+    },
+    {
+      "id": "B24",
+      "prompt": "I need help with Isaac Sim",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [
+        null
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "actual_action": "few_shot",
+      "top1_id": "F-08",
+      "top1_sim": 0.4205,
+      "margin": 0.1311,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 93.72,
+      "top3": [
+        {
+          "task_id": "F-08",
+          "similarity": 0.4205,
+          "distance": 0.8692
+        },
+        {
+          "task_id": "AL-01",
+          "similarity": 0.2894,
+          "distance": 1.0659
+        },
+        {
+          "task_id": "R-01",
+          "similarity": 0.2771,
+          "distance": 1.0843
+        }
+      ],
+      "notes": "Completely generic help request. Expected: sim near 0 for all templates. Graceful no-match."
+    },
+    {
+      "id": "B25",
+      "prompt": "my robot isn't moving what's wrong",
+      "category": "no_match",
+      "complexity": "none",
+      "ground_truth": [
+        null
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "fallback",
+      "actual_action": "few_shot",
+      "top1_id": "A-02",
+      "top1_sim": 0.2906,
+      "margin": 0.0135,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": false,
+      "latency_ms": 93.51,
+      "top3": [
+        {
+          "task_id": "A-02",
+          "similarity": 0.2906,
+          "distance": 1.0641
+        },
+        {
+          "task_id": "FX-01",
+          "similarity": 0.2771,
+          "distance": 1.0844
+        },
+        {
+          "task_id": "AM-02",
+          "similarity": 0.2323,
+          "distance": 1.1515
+        }
+      ],
+      "notes": "Diagnostic question, no build intent. Expected: low sim across board. AD-series templates exist but are unlikely to surface with confidence."
+    },
+    {
+      "id": "B26",
+      "prompt": "palletize boxes",
+      "category": "palletize",
+      "complexity": "none",
+      "ground_truth": [
+        null
+      ],
+      "acceptable_alternatives": [
+        "CP-08",
+        "CP-10",
+        "CP-25",
+        "CP-30",
+        "CP-46"
+      ],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-25",
+      "top1_sim": 0.4161,
+      "margin": 0.0733,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 92.64,
+      "top3": [
+        {
+          "task_id": "CP-25",
+          "similarity": 0.4161,
+          "distance": 0.8759
+        },
+        {
+          "task_id": "CP-20",
+          "similarity": 0.3428,
+          "distance": 0.9858
+        },
+        {
+          "task_id": "CP-46",
+          "similarity": 0.297,
+          "distance": 1.0545
+        }
+      ],
+      "notes": "Ambiguous \u2014 many palletizer templates exist (2x2, 3x3, 4x4, 6-cube, brick-layer). No single canonical should dominate with margin >= 0.20. Expected: few-shot fallback is correct."
+    },
+    {
+      "id": "B27",
+      "prompt": "build a contact-rich peg insertion task with force sensing and 5mm clearance",
+      "category": "contact_rich",
+      "complexity": "multi",
+      "ground_truth": [
+        "CP-58"
+      ],
+      "acceptable_alternatives": [
+        "CP-NEW-peg-in-hole-single"
+      ],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-NEW-peg-in-hole-single",
+      "top1_sim": 0.5422,
+      "margin": 0.0614,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 95.02,
+      "top3": [
+        {
+          "task_id": "CP-NEW-peg-in-hole-single",
+          "similarity": 0.5422,
+          "distance": 0.6866
+        },
+        {
+          "task_id": "CP-58",
+          "similarity": 0.4808,
+          "distance": 0.7787
+        },
+        {
+          "task_id": "CP-NEW-tactile-insertion",
+          "similarity": 0.4175,
+          "distance": 0.8737
+        }
+      ],
+      "notes": "CP-58 is the peg-in-hole array canonical. CP-NEW-peg-in-hole-single is the single-peg variant. 'force sensing', '5mm clearance' are discriminating. Expect sim ~0.38."
+    },
+    {
+      "id": "B28",
+      "prompt": "OPC-UA bridge connecting 12 conveyors to external PLC",
+      "category": "industrial_bridge",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-NEW-opcua-12conveyors"
+      ],
+      "acceptable_alternatives": [],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "F-02",
+      "top1_sim": 0.3088,
+      "margin": 0.0279,
+      "hit_at_1": false,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 104.44,
+      "top3": [
+        {
+          "task_id": "F-02",
+          "similarity": 0.3088,
+          "distance": 1.0368
+        },
+        {
+          "task_id": "CP-NEW-plc-fixture",
+          "similarity": 0.2809,
+          "distance": 1.0787
+        },
+        {
+          "task_id": "CP-NEW-opcua-12conveyors",
+          "similarity": 0.2749,
+          "distance": 1.0876
+        }
+      ],
+      "notes": "CP-NEW-opcua-12conveyors is very specific. 'OPC-UA', '12 conveyors', 'PLC' are strong tokens. Observed sim ~0.39."
+    },
+    {
+      "id": "B29",
+      "prompt": "UR5e arm picks cubes off a stationary feeder platform and fills a bin",
+      "category": "pick_place",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-01"
+      ],
+      "acceptable_alternatives": [
+        "CP-75",
+        "CP-71"
+      ],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-71",
+      "top1_sim": 0.4681,
+      "margin": 0.0075,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 102.35,
+      "top3": [
+        {
+          "task_id": "CP-71",
+          "similarity": 0.4681,
+          "distance": 0.7978
+        },
+        {
+          "task_id": "CP-57",
+          "similarity": 0.4607,
+          "distance": 0.809
+        },
+        {
+          "task_id": "CP-31",
+          "similarity": 0.3848,
+          "distance": 0.9227
+        }
+      ],
+      "notes": "UR5e is listed in CP-01 roles.primary_robot.constraints. The stationary feeder pattern matches CP-75 (UR10 static-cube) too. Tests robot-name aliasing \u2014 UR5e is not the primary training phrasing."
+    },
+    {
+      "id": "B30",
+      "prompt": "drawer opening station: robot pulls open a cabinet drawer using a prismatic joint",
+      "category": "contact_rich",
+      "complexity": "atomic",
+      "ground_truth": [
+        "CP-55"
+      ],
+      "acceptable_alternatives": [
+        "CP-NEW-drawer-open"
+      ],
+      "expected_action": "few_shot",
+      "actual_action": "few_shot",
+      "top1_id": "CP-55",
+      "top1_sim": 0.7663,
+      "margin": 0.0764,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "mode_correct": true,
+      "latency_ms": 102.11,
+      "top3": [
+        {
+          "task_id": "CP-55",
+          "similarity": 0.7663,
+          "distance": 0.3505
+        },
+        {
+          "task_id": "CP-NEW-drawer-open",
+          "similarity": 0.6899,
+          "distance": 0.4651
+        },
+        {
+          "task_id": "A-03",
+          "similarity": 0.2941,
+          "distance": 1.0589
+        }
+      ],
+      "notes": "CP-55 is the drawer-open station canonical. CP-NEW-drawer-open is the draft variant. 'prismatic joint', 'cabinet drawer' are strong discriminators. Observed sim ~0.59."
+    }
+  ]
+}

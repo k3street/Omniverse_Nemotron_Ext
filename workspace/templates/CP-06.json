@@ -63,8 +63,6 @@
     "isaacsim.robot.manipulators.examples not installed \u2192 ModuleNotFoundError. This module is bundled with Isaac Sim 5.x but may be missing in stripped installs."
   ],
   "extension_notes": "CP-06 is the 'parallel canonical' to CP-01: same scene, different controller path. Validates that target_source='builtin' works for Franka. CP-07 (UR10 + builtin) is blocked on surface_gripper variant \u2014 needs Sprint 3's `surface_gripper` tool to enable. CP-08 (CobottaPro900) blocked because Cobotta wrapper class isn't in this Isaac Sim install \u2014 would need custom wrapper.",
-  "delivery": "Cube_1 picked from conveyor and dropped into Bin via Franka + bundled PickPlaceController",
-  "cube_path": "/World/Cube_1",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "sensor_path": "/World/PickSensor",

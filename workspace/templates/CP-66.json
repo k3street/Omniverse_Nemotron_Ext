@@ -1,6 +1,6 @@
 {
   "task_id": "CP-66",
-  "goal": "Build a recycling multi-sensor station: 4 cubes (different materials \u2014 plastic/metal/glass/cardboard) flow on conveyor past barcode_reader + nir_material_sensor; routed to material-specific bins. Realizes #18 Recycling Multi-Sensor.",
+  "goal": "Build a recycling multi-sensor station: 4 cubes (different materials — plastic/metal/glass/cardboard) flow on conveyor past barcode_reader + nir_material_sensor; routed to material-specific bins. Realizes #18 Recycling Multi-Sensor.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -19,7 +19,7 @@
     "nir_material_sensor",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six recycling-multi-sensor specifics for CP-66:\n1) 4 cubes representing 4 materials: plastic (gray), metal (silver), glass (cyan-tint), cardboard (brown).\n2) Each cube has set_semantic_label semantic_type='material' with class_name matching material.\n3) Barcode reader at conveyor pre-pick zone \u2014 reads cube identity.\n4) NIR material sensor at conveyor pick zone \u2014 reads material:type attr.\n5) 4 destination bins (one per material). color_routing matches material-class to bin.\n6) Realizes #18 multi-sensor recycling station.",
+  "thoughts": "Six recycling-multi-sensor specifics for CP-66:\n1) 4 cubes representing 4 materials: plastic (gray), metal (silver), glass (cyan-tint), cardboard (brown).\n2) Each cube has set_semantic_label semantic_type='material' with class_name matching material.\n3) Barcode reader at conveyor pre-pick zone — reads cube identity.\n4) NIR material sensor at conveyor pick zone — reads material:type attr.\n5) 4 destination bins (one per material). color_routing matches material-class to bin.\n6) Realizes #18 multi-sensor recycling station.",
   "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\ncreate_material(material_path=\"/World/Mats/Plastic\",   shader_type=\"OmniPBR\", diffuse_color=[0.6, 0.6, 0.6])\ncreate_material(material_path=\"/World/Mats/Metal\",     shader_type=\"OmniPBR\", diffuse_color=[0.85, 0.85, 0.85])\ncreate_material(material_path=\"/World/Mats/Glass\",     shader_type=\"OmniPBR\", diffuse_color=[0.7, 0.95, 0.95])\ncreate_material(material_path=\"/World/Mats/Cardboard\", shader_type=\"OmniPBR\", diffuse_color=[0.5, 0.35, 0.2])\n\nmaterial_specs = [\n    (\"/World/Cube_1\", -1.4,  \"plastic\",   \"Plastic\"),\n    (\"/World/Cube_2\", -1.15, \"metal\",     \"Metal\"),\n    (\"/World/Cube_3\", -0.9,  \"glass\",     \"Glass\"),\n    (\"/World/Cube_4\", -0.65, \"cardboard\", \"Cardboard\"),\n]\nfor path, x, mat_class, mat_name in material_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=f\"/World/Mats/{mat_name}\")\n    set_semantic_label(prim_path=path, class_name=mat_class, semantic_type=\"material\")\n\nbulk_set_attribute(prim_paths=[c[0] for c in material_specs], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor c in material_specs:\n    apply_physics_material(prim_path=c[0], material_name=\"rubber\")\n\n# Pre-pick sensors\nbarcode_reader_sensor(\n    sensor_path=\"/World/BarcodeReader\",\n    position=[-0.3, 0.4, 0.85],\n    scan_radius=0.05,\n)\nnir_material_sensor(\n    sensor_path=\"/World/NirSensor\",\n    position=[0.0, 0.4, 0.85],\n    scan_radius=0.05,\n)\n\n# 4 destination bins\nbin_specs = [\n    (\"/World/PlasticBin\",  -0.45, \"Plastic\"),\n    (\"/World/MetalBin\",    -0.15, \"Metal\"),\n    (\"/World/GlassBin\",     0.15, \"Glass\"),\n    (\"/World/CardboardBin\", 0.45, \"Cardboard\"),\n]\nfor path, x, mat in bin_specs:\n    create_bin(prim_path=path, position=[x, -0.5, 0.75], size=[0.18, 0.18, 0.15])\n    assign_material(prim_path=path, material_path=f\"/World/Mats/{mat}\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[c[0] for c in material_specs],\n    destination_path=\"/World/PlasticBin\",\n    color_routing={\n        \"plastic\":   \"/World/PlasticBin\",\n        \"metal\":     \"/World/MetalBin\",\n        \"glass\":     \"/World/GlassBin\",\n        \"cardboard\": \"/World/CardboardBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/PlasticBin\", \"/World/MetalBin\", \"/World/GlassBin\", \"/World/CardboardBin\"],\n)",
   "settle_state": {
     "cubes": {
@@ -71,11 +71,11 @@
   "extends": "CP-17",
   "extension_notes": "CP-66 combines barcode_reader_sensor + nir_material_sensor with 4-class semantic routing. Uses semantic_type='material' instead of 'color'. cuRobo's color_routing dispatches per material class (Semantics_class API). Realizes #18 Recycling Multi-Sensor.",
   "failure_modes": [
-    "Sensors are scaffolding \u2014 no runtime read logic. color_routing reads pre-set Semantics_class.",
-    "4 bins arranged tightly \u2014 0.30m spacing; planning_obstacles avoids each.",
+    "Sensors are scaffolding — no runtime read logic. color_routing reads pre-set Semantics_class.",
+    "4 bins arranged tightly — 0.30m spacing; planning_obstacles avoids each.",
     "Same physics gotchas as CP-17."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (120s sim. cube_final=(-0.49, -0.46, 0.824) in Bin)",
+  "verified_status": "build-spec-2026-04-XX; form-gate ✓; function-gate ✓ (120s sim. cube_final=(-0.49, -0.46, 0.824) in Bin)",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "sensor_path": "/World/PickSensor",
@@ -83,6 +83,15 @@
       0.0,
       0.0,
       0.75
+    ]
+  },
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
     ]
   }
 }

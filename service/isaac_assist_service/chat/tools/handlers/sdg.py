@@ -7,10 +7,12 @@ Same migration pattern as Phase 3 / Phase 5 / Phase 6 waves 1-4.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
+# audit-Q17: cohesive — full SDG/DR handler domain (pipeline config, COCO/YOLO writers, domain randomization, dataset export, class balance)
 from __future__ import annotations
 
 import json
 from typing import Any, Callable, Dict
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 
 # ---------------------------------------------------------------------------
@@ -738,6 +740,7 @@ print(f"[preview_dr] wrote {{len(_written)}} frames to {{_OUTPUT_DIR}} resolutio
 # Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
 
 
+@with_telemetry
 async def _handle_preview_sdg(args: Dict) -> Dict:
     """Step the Replicator orchestrator a few times for preview frames."""
     from .. import kit_tools
@@ -757,6 +760,7 @@ print(json.dumps({{"preview_frames": num_samples, "status": "done"}}))
     return await kit_tools.queue_exec_patch(code, f"Preview SDG: generate {num_samples} sample frames")
 
 
+@with_telemetry
 async def _handle_benchmark_sdg(args: Dict) -> Dict:
     """Run a headless SDG throughput benchmark.
 
@@ -860,6 +864,7 @@ print(json.dumps({{
 # Phase 61 — sample_correlated_dr (typed in-process sampler)
 
 
+@with_telemetry
 async def _handle_sample_correlated_dr(args: Dict) -> Dict[str, Any]:
     """Draw N samples from a correlated multivariate normal preset.
 

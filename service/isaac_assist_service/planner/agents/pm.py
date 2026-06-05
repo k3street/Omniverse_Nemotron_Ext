@@ -51,6 +51,7 @@ class IterationRecord:
             ``feedback_sent`` (truncated to 400 chars), and ``duration_s``.
         """
         def _safe(r: AgentResult | None) -> dict | None:
+            """Serialise an AgentResult to dict, or return None if the result is absent."""
             return r.to_dict() if r else None
         return {
             "iteration":     self.iteration,

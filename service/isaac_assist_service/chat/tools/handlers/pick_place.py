@@ -9,6 +9,7 @@ internal calls resolve via module-local namespace.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
+# audit-Q17: cohesive — full pick-place handler suite (9 controller variants + ROS2 bridge + dispatcher) stays together by design
 from __future__ import annotations
 
 from typing import Any, Callable, Dict

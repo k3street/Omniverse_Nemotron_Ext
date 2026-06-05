@@ -34,6 +34,7 @@ PHASE_STATUS: Literal["landed"] = "landed"
 
 
 def get_phase_metadata() -> dict:
+    """Return Phase 20 status metadata for health checks and CI reporting."""
     return {
         "phase": "20",
         "title": "Role-based template refactor",
@@ -72,6 +73,17 @@ def fuzzy_score(query: str, text: str) -> float:
 
 @dataclass
 class TemplateMatch:
+    """A single ranked template result from RoleRetriever.
+
+    Attributes:
+        template_id: identifier of the matched template
+        source: "role_based", "legacy", or "wizard"
+        match_score: similarity in [0.0, 1.0]; higher is better
+        matched_role: role name that produced the match, or None for legacy
+        matched_tags: query tokens that overlapped with the entry's tags
+        notes: human-readable annotation from the template entry
+    """
+
     template_id: str
     source: Literal["role_based", "legacy", "wizard"]
     match_score: float
@@ -97,6 +109,14 @@ class RoleRetriever:
         role_index: RoleTemplateIndex | None = None,
         legacy_templates: list[dict] | None = None,
     ) -> None:
+        """Initialise the retriever with an optional role index and legacy template list.
+
+        Args:
+            role_index: pre-built RoleTemplateIndex; defaults to the module-level
+                ROLE_TEMPLATE_INDEX singleton if None.
+            legacy_templates: flat list of legacy template dicts (role-free).
+                Defaults to empty if None.
+        """
         self._role_index: RoleTemplateIndex = (
             role_index
             if role_index is not None

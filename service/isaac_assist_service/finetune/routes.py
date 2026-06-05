@@ -15,6 +15,13 @@ kb = KnowledgeBase()
 exporter = FinetuneExporter(kb)
 
 class ExportRequest(BaseModel):
+    """Request body for the ``/export`` fine-tune endpoint.
+
+    Attributes:
+        version: Knowledge-base version identifier to export.
+        target_format: One of ``"unsloth"``, ``"gemini"``, ``"openai"``, or ``"alpaca"``.
+    """
+
     version: str
     target_format: str # "unsloth" | "gemini" | "openai" | "alpaca"
 

@@ -1,6 +1,6 @@
 {
   "task_id": "CP-10",
-  "goal": "Build a 3\u00d73 grid palletizer: a Franka Panda picks 9 cubes from a conveyor and stacks them in a 3\u00d73 grid on top of a 0.45\u00d70.45m pallet behind the robot. Scales the CP-08 pattern (compute_stack_placement + drop_targets dict) from 4 to 9 cubes. Stress-tests cuRobo's planning at the edge of reach (0.51m to corner cubes).",
+  "goal": "Build a 3×3 grid palletizer: a Franka Panda picks 9 cubes from a conveyor and stacks them in a 3×3 grid on top of a 0.45×0.45m pallet behind the robot. Scales the CP-08 pattern (compute_stack_placement + drop_targets dict) from 4 to 9 cubes. Stress-tests cuRobo's planning at the edge of reach (0.51m to corner cubes).",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -14,8 +14,8 @@
     "compute_stack_placement",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six 3x3-palletizer specifics for CP-10 (extends CP-08 \u2014 orientation rule, cuRobo, drop_targets dict pattern, settle_state all inherited):\n1) Pallet 0.45x0.45x0.05m at [0, -0.4, 0.775] (vs CP-08's 0.30x0.30) \u2014 accommodates 3x3 grid with 0.10m spacing for 5cm cubes.\n2) compute_stack_placement(target='/World/Pallet', pattern='grid_3x3', n_items=9, cube_size=0.05, spacing=0.10, anchor='top') yields 9 positions: xy={-0.10,0,0.10}\u00d7{-0.5,-0.4,-0.3}, all at z=0.825.\n3) Reach check: furthest corner cube at (0.1, -0.5) \u2192 sqrt(0.01+0.25)=0.51m from robot base \u2014 well within Franka's 0.85m reach.\n4) Spacing 0.10m (vs 0.08m in CP-08) for 5cm cubes \u2014 gives 0.05m gap. Larger gap accommodates 8 cubes worth of cumulative drop-precision drift.\n5) 9 cubes on 6m conveyor at x \u2208 [-2.7..-0.3] in 0.30m increments. First few start outside robot reach (|x|>0.7), later ones inside. Sequential pickup either way.\n6) drop_targets dict has 9 entries \u2014 Cube_N \u2192 grid slot N. _bin_drop_pos(cube_path) lookup is O(1).",
-  "code": "# DomeLight + Ground + parent Xform + table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka \u2014 same pose as CP-01\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Wider conveyor (6m) for 9 cubes at 0.30m spacing\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[6.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 9 cubes spaced 0.30m\nfor i, x in enumerate([-2.7, -2.4, -2.1, -1.8, -1.5, -1.2, -0.9, -0.6, -0.3]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(9)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(9)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Pallet 0.45x0.45x0.05m\n# Cube primitive default size=2; scale=[0.225, 0.225, 0.025] \u2192 0.45x0.45x0.05m\ncreate_prim(prim_path=\"/World/Pallet\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.225, 0.225, 0.025])\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\n# Pick sensor\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with 9-entry drop_targets dict.\n# Positions computed via:\n#   compute_stack_placement(target='/World/Pallet', pattern='grid_3x3',\n#                            n_items=9, cube_size=0.05, spacing=0.10, anchor='top')\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(9)],\n    destination_path=\"/World/Pallet\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.10, -0.50, 0.825],\n        \"/World/Cube_2\": [ 0.00, -0.50, 0.825],\n        \"/World/Cube_3\": [ 0.10, -0.50, 0.825],\n        \"/World/Cube_4\": [-0.10, -0.40, 0.825],\n        \"/World/Cube_5\": [ 0.00, -0.40, 0.825],\n        \"/World/Cube_6\": [ 0.10, -0.40, 0.825],\n        \"/World/Cube_7\": [-0.10, -0.30, 0.825],\n        \"/World/Cube_8\": [ 0.00, -0.30, 0.825],\n        \"/World/Cube_9\": [ 0.10, -0.30, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Pallet\"],\n)",
+  "thoughts": "Six 3x3-palletizer specifics for CP-10 (extends CP-08 — orientation rule, cuRobo, drop_targets dict pattern, settle_state all inherited):\n1) Pallet 0.45x0.45x0.05m at [0, -0.4, 0.775] (vs CP-08's 0.30x0.30) — accommodates 3x3 grid with 0.10m spacing for 5cm cubes.\n2) compute_stack_placement(target='/World/Pallet', pattern='grid_3x3', n_items=9, cube_size=0.05, spacing=0.10, anchor='top') yields 9 positions: xy={-0.10,0,0.10}×{-0.5,-0.4,-0.3}, all at z=0.825.\n3) Reach check: furthest corner cube at (0.1, -0.5) → sqrt(0.01+0.25)=0.51m from robot base — well within Franka's 0.85m reach.\n4) Spacing 0.10m (vs 0.08m in CP-08) for 5cm cubes — gives 0.05m gap. Larger gap accommodates 8 cubes worth of cumulative drop-precision drift.\n5) 9 cubes on 6m conveyor at x ∈ [-2.7..-0.3] in 0.30m increments. First few start outside robot reach (|x|>0.7), later ones inside. Sequential pickup either way.\n6) drop_targets dict has 9 entries — Cube_N → grid slot N. _bin_drop_pos(cube_path) lookup is O(1).",
+  "code": "# DomeLight + Ground + parent Xform + table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka — same pose as CP-01\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Wider conveyor (6m) for 9 cubes at 0.30m spacing\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[6.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 9 cubes spaced 0.30m\nfor i, x in enumerate([-2.7, -2.4, -2.1, -1.8, -1.5, -1.2, -0.9, -0.6, -0.3]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(9)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(9)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Pallet 0.45x0.45x0.05m\n# Cube primitive default size=2; scale=[0.225, 0.225, 0.025] → 0.45x0.45x0.05m\ncreate_prim(prim_path=\"/World/Pallet\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.225, 0.225, 0.025])\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\n# Pick sensor\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with 9-entry drop_targets dict.\n# Positions computed via:\n#   compute_stack_placement(target='/World/Pallet', pattern='grid_3x3',\n#                            n_items=9, cube_size=0.05, spacing=0.10, anchor='top')\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(9)],\n    destination_path=\"/World/Pallet\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.10, -0.50, 0.825],\n        \"/World/Cube_2\": [ 0.00, -0.50, 0.825],\n        \"/World/Cube_3\": [ 0.10, -0.50, 0.825],\n        \"/World/Cube_4\": [-0.10, -0.40, 0.825],\n        \"/World/Cube_5\": [ 0.00, -0.40, 0.825],\n        \"/World/Cube_6\": [ 0.10, -0.40, 0.825],\n        \"/World/Cube_7\": [-0.10, -0.30, 0.825],\n        \"/World/Cube_8\": [ 0.00, -0.30, 0.825],\n        \"/World/Cube_9\": [ 0.10, -0.30, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Pallet\"],\n)",
   "settle_state": {
     "cubes": {
       "/World/Cube_1": [
@@ -91,15 +91,110 @@
     "rest_speed_threshold": 100.0
   },
   "extends": "CP-08",
-  "extension_notes": "CP-10 scales CP-08's 4-cube grid_2x2 to 9-cube grid_3x3. Same code pattern. Validates compute_stack_placement at scale and drop_targets dict with 9 entries. Function-gate timing: 9 cubes \u00d7 ~10s/cube \u2248 90-180s. Stack stability not asserted (cubes are loose 5cm rubber on flat pallet \u2014 may settle into staggered positions if drop precision drifts).",
+  "extension_notes": "CP-10 scales CP-08's 4-cube grid_2x2 to 9-cube grid_3x3. Same code pattern. Validates compute_stack_placement at scale and drop_targets dict with 9 entries. Function-gate timing: 9 cubes × ~10s/cube ≈ 90-180s. Stack stability not asserted (cubes are loose 5cm rubber on flat pallet — may settle into staggered positions if drop precision drifts).",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "has_stacking": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:stack.grid_3x3"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "primary_destination": {
+      "constraints": ["platform", "pallet"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 9,
+      "param_name": "n_cubes",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.4, 0.78],
+      "size": [6.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "primary_destination": {
+      "path": "/World/Pallet",
+      "position": [0, -0.4, 0.775],
+      "scale": [0.225, 0.225, 0.025]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.4, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [-2.7, 0.4, 0.835], "drop_target": [-0.10, -0.50, 0.825]},
+      {"path": "/World/Cube_2", "position": [-2.4, 0.4, 0.835], "drop_target": [0.00, -0.50, 0.825]},
+      {"path": "/World/Cube_3", "position": [-2.1, 0.4, 0.835], "drop_target": [0.10, -0.50, 0.825]},
+      {"path": "/World/Cube_4", "position": [-1.8, 0.4, 0.835], "drop_target": [-0.10, -0.40, 0.825]},
+      {"path": "/World/Cube_5", "position": [-1.5, 0.4, 0.835], "drop_target": [0.00, -0.40, 0.825]},
+      {"path": "/World/Cube_6", "position": [-1.2, 0.4, 0.835], "drop_target": [0.10, -0.40, 0.825]},
+      {"path": "/World/Cube_7", "position": [-0.9, 0.4, 0.835], "drop_target": [-0.10, -0.30, 0.825]},
+      {"path": "/World/Cube_8", "position": [-0.6, 0.4, 0.835], "drop_target": [0.00, -0.30, 0.825]},
+      {"path": "/World/Cube_9", "position": [-0.3, 0.4, 0.835], "drop_target": [0.10, -0.30, 0.825]}
+    ]
+  },
+  "code_template": "# DomeLight + Ground + parent Xform + table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[4].path}}, prim_type=\"Cube\", position={{workpieces[4].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[4].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[5].path}}, prim_type=\"Cube\", position={{workpieces[5].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[5].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[6].path}}, prim_type=\"Cube\", position={{workpieces[6].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[6].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[7].path}}, prim_type=\"Cube\", position={{workpieces[7].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[7].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[8].path}}, prim_type=\"Cube\", position={{workpieces[8].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[8].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}, {{workpieces[6].path}}, {{workpieces[7].path}}, {{workpieces[8].path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\nfor path in [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}, {{workpieces[6].path}}, {{workpieces[7].path}}, {{workpieces[8].path}}]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_prim(prim_path={{primary_destination.path}}, prim_type=\"Cube\", position={{primary_destination.position}}, scale={{primary_destination.scale}})\napply_api_schema(prim_path={{primary_destination.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}, {{workpieces[6].path}}, {{workpieces[7].path}}, {{workpieces[8].path}}],\n    destination_path={{primary_destination.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{workpieces[0].drop_target}},\n        {{workpieces[1].path}}: {{workpieces[1].drop_target}},\n        {{workpieces[2].path}}: {{workpieces[2].drop_target}},\n        {{workpieces[3].path}}: {{workpieces[3].drop_target}},\n        {{workpieces[4].path}}: {{workpieces[4].drop_target}},\n        {{workpieces[5].path}}: {{workpieces[5].drop_target}},\n        {{workpieces[6].path}}: {{workpieces[6].drop_target}},\n        {{workpieces[7].path}}: {{workpieces[7].drop_target}},\n        {{workpieces[8].path}}: {{workpieces[8].drop_target}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{primary_destination.path}}],\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{input_conveyor.path}}",
+        "place_path": "{{primary_destination.path}}",
+        "robot_kind": "{{primary_robot.class}}"
+      }
+    ],
+    "cube_path": "{{workpieces[0].path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{workpieces[0].path}}",
+    "target_path": "{{primary_destination.path}}",
+    "duration_s": 180,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 100.0
+  },
   "failure_modes": [
-    "Cubes_7..9 start within Franka reach immediately \u2014 controller picks them out of conveyor order. Verifier still passes if Cube_1 reaches pallet eventually.",
-    "Cumulative drop precision drift \u2014 9 sequential drops at 1-2cm-each-error compounds. Last cube may drift outside its grid slot. Spacing 0.10m gives 5cm margin \u2014 should hold.",
-    "Pallet too small for 3x3 + spacing \u2014 verify pallet xy \u2265 3*spacing + cube_size = 0.35m. Used 0.45m for safety.",
-    "drop_targets dict missing some cube \u2014 falls through to DEST_PATH (pallet bbox center), all unmapped cubes pile up at center.",
-    "Conveyor not wide enough \u2014 Cube_1 starts at x=-2.7, conveyor [-3, +3] = 6m. Within bound."
+    "Cubes_7..9 start within Franka reach immediately — controller picks them out of conveyor order. Verifier still passes if Cube_1 reaches pallet eventually.",
+    "Cumulative drop precision drift — 9 sequential drops at 1-2cm-each-error compounds. Last cube may drift outside its grid slot. Spacing 0.10m gives 5cm margin — should hold.",
+    "Pallet too small for 3x3 + spacing — verify pallet xy ≥ 3*spacing + cube_size = 0.35m. Used 0.45m for safety.",
+    "drop_targets dict missing some cube — falls through to DEST_PATH (pallet bbox center), all unmapped cubes pile up at center.",
+    "Conveyor not wide enough — Cube_1 starts at x=-2.7, conveyor [-3, +3] = 6m. Within bound."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)",
+  "verified_status": "build-spec-2026-04-XX; form-gate ✓; function-gate ✓ (multi-cube cube_paths + Mode A 3-strike fix)",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "obstacles": [
@@ -110,6 +205,15 @@
       0.0,
       0.0,
       0.75
+    ]
+  },
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
     ]
   }
 }

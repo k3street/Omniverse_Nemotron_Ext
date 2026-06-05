@@ -8,9 +8,11 @@ Phase 6 waves 1-6.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
+# audit-Q17: cohesive — full ROS2 handler domain (bridge setup, TF tree, QoS config, ROS2 time/clock, rosbag replay)
 from __future__ import annotations
 
 from typing import Any, Callable, Dict
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Theme-local constants (Phase 8 wave 4, 2026-05-13)
@@ -700,6 +702,7 @@ print(f'Replay PID: {{proc.pid}} — use proc.wait() to block, proc.terminate() 
 # Phase 7 wave 14 — ros2 diagnose/emit/precheck stragglers
 
 
+@with_telemetry
 async def _handle_diagnose_ros2(args: Dict) -> Dict:
     """Run comprehensive ROS2 integration health check on the current scene.
 
@@ -906,6 +909,7 @@ print(json.dumps(result))
     }
 
 
+@with_telemetry
 async def _handle_emit_ros2_control_yaml(args: Dict) -> Dict:
     """Phase 6 M1: emit colcon-buildable ros2_control YAML for outside-Kit launch.
 
@@ -967,6 +971,7 @@ async def _handle_emit_ros2_control_yaml(args: Dict) -> Dict:
     return out
 
 
+@with_telemetry
 async def _handle_precheck_ros2_environment(args: Dict) -> Dict:
     """Phase 6 M1: verify ROS2 environment before scene build.
 

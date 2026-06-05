@@ -15,7 +15,15 @@ from ..models import ValidationFinding
 
 
 class SensorCompletenessValidator(ValidationRule):
+    """Validator that checks sensor wiring completeness.
+
+    Detects Camera prims without a ``RenderProduct``, LiDAR/RTX sensors with
+    no OmniGraph reader, and IMU/ContactSensor prims not parented to a physics
+    body.
+    """
+
     def __init__(self):
+        """Initialise sensor-completeness rule metadata."""
         super().__init__()
         self.rule_id = "sensor.completeness"
         self.pack = "sensor_completeness"

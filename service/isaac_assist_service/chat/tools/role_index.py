@@ -13,6 +13,7 @@ class RoleIndex:
     """Inverted index from role_id (and constrained class) to template_id list."""
 
     def __init__(self) -> None:
+        """Initialise empty role-id and class-name inverted indices."""
         self._role_to_templates: Dict[str, List[str]] = {}
         self._class_to_templates: Dict[str, List[str]] = {}
 

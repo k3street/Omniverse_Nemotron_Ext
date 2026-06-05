@@ -392,6 +392,7 @@ class ArenaBenchmarkRunner:
     """Deterministic head-to-head comparator for Arena benchmark results."""
 
     def __init__(self, scenarios: Optional[List[ArenaScenarioSpec]] = None) -> None:
+        """Initialise with an optional scenario list; falls back to the module-level defaults."""
         self._scenarios: List[ArenaScenarioSpec] = scenarios if scenarios is not None else ARENA_SCENARIOS
         self._scenario_map: Dict[str, ArenaScenarioSpec] = {s.scenario_id: s for s in self._scenarios}
 

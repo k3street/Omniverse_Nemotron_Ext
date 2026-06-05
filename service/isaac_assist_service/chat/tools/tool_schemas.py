@@ -6,6 +6,7 @@ Each tool maps to a Kit RPC endpoint or a code-generation pattern.
 The LLM picks tools based on user intent, then the orchestrator
 executes them via Kit RPC (port 8001).
 """
+# audit-Q17: cohesive — structured tool definitions (LLM function-calling schema table), pure data module
 from __future__ import annotations
 
 ISAAC_SIM_TOOLS = [

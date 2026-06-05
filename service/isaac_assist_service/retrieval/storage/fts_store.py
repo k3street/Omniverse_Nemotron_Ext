@@ -18,6 +18,7 @@ DB_PATH = os.path.join(WORKSPACE_DIR, "rag_index.db")
 class FTSStore:
     """FTS5-backed document chunk store with version-scoped BM25 search."""
     def __init__(self):
+        """Open (or create) the SQLite database and initialise the FTS5 virtual table."""
         os.makedirs(WORKSPACE_DIR, exist_ok=True)
         self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row

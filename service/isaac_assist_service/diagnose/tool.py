@@ -47,6 +47,12 @@ from .schema import (
 
 # Lazy import to avoid circular dependency (tool_executor → diagnose → tool_executor)
 async def _execute_tool_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Lazy-import wrapper around ``tool_executor.execute_tool_call``.
+
+    The late import breaks the circular dependency between ``diagnose`` and
+    ``chat.tools.tool_executor``.  All diagnostics call this instead of
+    importing ``execute_tool_call`` at module level.
+    """
     from service.isaac_assist_service.chat.tools.tool_executor import execute_tool_call
     return await execute_tool_call(name, args)
 
@@ -505,6 +511,7 @@ async def _handle_multi_robot(cycles: List[Dict[str, Any]],
             cj_args = cycles[j]
             # Build axis-aligned corridor as bbox between pick and drop
             def _corridor(c):
+                """Build an axis-aligned bounding corridor between pick and drop poses."""
                 pp = c.get("pick_pose")
                 dp = c.get("drop_pose")
                 if not pp or not dp:

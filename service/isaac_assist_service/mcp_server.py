@@ -345,6 +345,7 @@ async def run_sse(server: MCPServer, host: str, port: int) -> None:
     pending_responses: asyncio.Queue = asyncio.Queue()
 
     async def handle_sse(request: web.Request) -> web.StreamResponse:
+        """Open an SSE stream, forward queued MCP responses, and keep-alive with pings."""
         resp = web.StreamResponse(
             status=200,
             headers={
@@ -371,6 +372,7 @@ async def run_sse(server: MCPServer, host: str, port: int) -> None:
         return resp
 
     async def handle_post(request: web.Request) -> web.Response:
+        """Accept a JSON-RPC MCP request, dispatch it, and push the response to the SSE queue."""
         try:
             body = await request.json()
         except json.JSONDecodeError:
@@ -383,6 +385,7 @@ async def run_sse(server: MCPServer, host: str, port: int) -> None:
         return web.json_response({"status": "accepted"})
 
     async def handle_health(request: web.Request) -> web.Response:
+        """Return a trivial ``{"status": "ok"}`` JSON response for liveness checks."""
         return web.json_response({"status": "ok", "server": "isaac-assist-mcp", "version": "1.0.0"})
 
     app = web.Application()
@@ -408,6 +411,7 @@ async def run_sse(server: MCPServer, host: str, port: int) -> None:
 # ---------------------------------------------------------------------------
 
 def main():
+    """Parse CLI arguments and launch the MCP server over stdio or SSE transport."""
     parser = argparse.ArgumentParser(description="Isaac Assist MCP Server")
     parser.add_argument("--transport", choices=["stdio", "sse"], default="sse")
     parser.add_argument("--host", default="127.0.0.1")

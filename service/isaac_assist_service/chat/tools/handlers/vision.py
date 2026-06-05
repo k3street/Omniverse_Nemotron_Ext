@@ -8,9 +8,12 @@ Phase 6 waves 1-14.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
+# audit-Q17: cohesive — full vision/rendering handler domain (viewport camera, attention maps, semantic labels, render mode, video capture)
 from __future__ import annotations
 
 from typing import Any, Callable, Dict
+
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Theme-local constants (Phase 8 wave 4, 2026-05-13)
@@ -554,6 +557,7 @@ def _parse_last_json_line(output: str):
     return None
 
 
+@with_telemetry
 async def _handle_capture_viewport(args: Dict) -> Dict:
     """Capture the current viewport and return a base64-encoded PNG image.
 
@@ -590,6 +594,7 @@ def _get_viewport_cache():
     return _VIEWPORT_CACHE
 
 
+@with_telemetry
 async def _handle_viewport_cache_stats(args: Dict) -> Dict[str, Any]:
     """Return Phase 77 ViewportHashCache stats (hits, misses, evictions, etc.).
 
@@ -617,6 +622,7 @@ async def _handle_viewport_cache_stats(args: Dict) -> Dict[str, Any]:
     }
 
 
+@with_telemetry
 async def _handle_capture_camera_image(args: Dict) -> Dict:
     """Render a single frame from the named camera and return base64 PNG."""
     from .. import kit_tools
@@ -699,7 +705,18 @@ else:
     return parsed
 
 
+@with_telemetry
 async def _handle_inspect_camera(args: Dict) -> Dict:
+    """Execute an inspect_camera query against a camera prim via Kit RPC.
+
+    Args:
+        args: Dict containing:
+            - camera_path (str): USD path to the camera prim.
+
+    Returns:
+        Dict with focal_length, horizontal_aperture, clipping_range and other
+        camera attributes as reported by the Kit-side inspector.
+    """
     from .. import kit_tools
     from .sensors import _gen_inspect_camera
     camera_path = args["camera_path"]
@@ -707,6 +724,7 @@ async def _handle_inspect_camera(args: Dict) -> Dict:
     return await kit_tools.queue_exec_patch(code, f"Inspect camera at {camera_path}")
 
 
+@with_telemetry
 async def _handle_pixel_to_world(args: Dict) -> Dict:
     """Project a viewport pixel through the camera + depth buffer to world."""
     from .. import kit_tools
@@ -789,6 +807,7 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"pixel_to_world {camera}@({x},{y})")
 
 
+@with_telemetry
 async def _handle_list_lights(args: Dict) -> Dict:
     """Enumerate all UsdLux light prims in the current stage via Kit RPC."""
     from .. import kit_tools
@@ -837,6 +856,7 @@ print(json.dumps({{
     return await kit_tools.queue_exec_patch(code, "List all UsdLux light prims in the stage")
 
 
+@with_telemetry
 async def _handle_get_light_properties(args: Dict) -> Dict:
     """Read the full attribute set of a single light prim."""
     from .. import kit_tools
@@ -895,6 +915,7 @@ else:
     return await kit_tools.queue_exec_patch(code, f"Read light properties for {light_path}")
 
 
+@with_telemetry
 async def _handle_list_cameras(args: Dict) -> Dict:
     """Walk the stage and return all UsdGeom.Camera prims with type info."""
     from .. import kit_tools
@@ -934,6 +955,7 @@ print(json.dumps({'cameras': cameras, 'count': len(cameras)}))
     return parsed
 
 
+@with_telemetry
 async def _handle_get_camera_params(args: Dict) -> Dict:
     """Read all cinematographic attributes from a UsdGeom.Camera prim."""
     from .. import kit_tools
@@ -997,6 +1019,7 @@ else:
     return parsed
 
 
+@with_telemetry
 async def _handle_get_render_config(args: Dict) -> Dict:
     """Read current renderer mode, SPP, max bounces, and viewport resolution.
 
@@ -1061,6 +1084,7 @@ except Exception as e:
     }
 
 
+@with_telemetry
 async def _handle_get_timeline_state(args: Dict) -> Dict:
     """Return current timeline cursor + start/end + fps + play state."""
     from .. import kit_tools
@@ -1113,6 +1137,7 @@ except Exception as e:
     }
 
 
+@with_telemetry
 async def _handle_list_keyframes(args: Dict) -> Dict:
     """Read every authored TimeSample on a single attribute."""
     from .. import kit_tools
@@ -1202,12 +1227,14 @@ async def _handle_list_keyframes(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_get_viewport_camera(args: Dict) -> Dict:
     """Return the active viewport's current camera path and resolution."""
     from .. import kit_tools
     code = """\
 import json
 import omni.kit.viewport.utility as _vpu
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 vp_api = _vpu.get_active_viewport()
 cam_path = None
@@ -1231,6 +1258,7 @@ print(json.dumps({"camera_path": cam_path, "viewport_id": viewport_id, "resoluti
     return await kit_tools.queue_exec_patch(code, "Read active viewport camera")
 
 
+@with_telemetry
 async def _handle_vision_detect_objects(args: Dict) -> Dict:
     """Capture the viewport and detect objects via the Gemini vision provider.
 
@@ -1257,6 +1285,7 @@ async def _handle_vision_detect_objects(args: Dict) -> Dict:
     return {"detections": detections, "count": len(detections), "model": vp.model}
 
 
+@with_telemetry
 async def _handle_vision_bounding_boxes(args: Dict) -> Dict:
     """Capture the viewport and return VLM-predicted bounding boxes for all objects.
 
@@ -1279,6 +1308,7 @@ async def _handle_vision_bounding_boxes(args: Dict) -> Dict:
     return {"bounding_boxes": boxes, "count": len(boxes), "model": vp.model}
 
 
+@with_telemetry
 async def _handle_vision_plan_trajectory(args: Dict) -> Dict:
     """Capture the viewport and ask the VLM to plan a visual trajectory for a task.
 
@@ -1305,6 +1335,7 @@ async def _handle_vision_plan_trajectory(args: Dict) -> Dict:
     return {"trajectory": points, "num_points": len(points), "model": vp.model}
 
 
+@with_telemetry
 async def _handle_vision_analyze_scene(args: Dict) -> Dict:
     """Capture the viewport and answer an open-ended question about the scene.
 

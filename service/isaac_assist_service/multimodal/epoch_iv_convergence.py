@@ -10,6 +10,14 @@ from typing import Any, Dict
 
 
 def run_epoch_iv_convergence() -> Dict[str, Any]:
+    """Run the Epoch IV convergence smoke-test with synthetic cycle-time data.
+
+    Feeds a decreasing delta sequence into :class:`GapLog` and checks that
+    ``mean_delta < 0.5`` (the pass threshold for Phase 58 convergence).
+
+    Returns:
+        dict: ``{mean_delta, max_delta, convergence_ok}`` result dict.
+    """
     from .gap_log import GapLog
     from .gap_analyzer import analyze_dimension
 

@@ -112,6 +112,7 @@ class LinuxReleaseValidator:
         require_signed: bool = False,
         allowed_archs: Optional[List[LinuxArch]] = None,
     ) -> None:
+        """Initialise the validator with signing requirement and allowed architecture list."""
         self.require_signed = require_signed
         self.allowed_archs: List[LinuxArch] = (
             allowed_archs if allowed_archs is not None else list(_DEFAULT_ALLOWED_ARCHS)
@@ -261,6 +262,7 @@ def expected_package_formats_for_distro(distro: LinuxDistro) -> List[PackageForm
 
 
 def _artifact_to_dict(art: LinuxBinaryArtifact) -> Dict[str, Any]:
+    """Serialise a :class:`LinuxBinaryArtifact` to a JSON-safe dict."""
     return {
         "name": art.name,
         "arch": art.arch,
@@ -276,6 +278,7 @@ def _artifact_to_dict(art: LinuxBinaryArtifact) -> Dict[str, Any]:
 
 
 def _artifact_from_dict(d: Dict[str, Any]) -> LinuxBinaryArtifact:
+    """Deserialise a :class:`LinuxBinaryArtifact` from a plain dict."""
     return LinuxBinaryArtifact(
         name=d["name"],
         arch=d["arch"],

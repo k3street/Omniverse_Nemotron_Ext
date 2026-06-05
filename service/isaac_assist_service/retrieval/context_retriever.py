@@ -25,6 +25,7 @@ _store: Optional[FTSStore] = None
 
 
 def _get_store() -> FTSStore:
+    """Return the module-level singleton :class:`FTSStore`, creating it on first call."""
     global _store
     if _store is None:
         _store = FTSStore()

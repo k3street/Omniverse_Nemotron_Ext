@@ -78,7 +78,7 @@
     "Surface gripper + parallel gripper coexist on same hand. Pickup mechanism depends on which activates first.",
     "Bin at +0.6m \u2014 within Franka reach without gantry travel needed for canonical demo."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "verified_status": "stable_fail; passes=0 n=15 wilson_lower=0.0; was form-gate-pending; demoted 2026-05-15",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "sensor_path": "/World/PickSensor",
@@ -92,5 +92,15 @@
       -0.4,
       0.75
     ]
+  },
+  "verified_wilson_lower": 0.0,
+  "verified_runs": {
+    "passes": 0,
+    "n": 15,
+    "z": 1.96,
+    "lower": 0.0,
+    "upper": 0.2039,
+    "evidence_date": "2026-05-15",
+    "evidence_source": "workspace/baselines aggregate"
   }
 }

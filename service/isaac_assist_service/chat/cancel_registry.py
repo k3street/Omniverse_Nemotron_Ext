@@ -22,6 +22,7 @@ def request_cancel(session_id: str) -> None:
 
 
 def is_cancelled(session_id: str) -> bool:
+    """Return True if a cancel has been requested for this session."""
     return session_id in _cancelled
 
 

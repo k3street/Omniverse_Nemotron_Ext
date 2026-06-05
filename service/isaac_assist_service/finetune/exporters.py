@@ -21,6 +21,7 @@ class FinetuneExporter:
     """Exports the KnowledgeBase to different LLM fine-tuning structures."""
     
     def __init__(self, kb: KnowledgeBase, output_dir: str = "workspace/finetune_exports"):
+        """Initialise the exporter with a KnowledgeBase and output directory (created if absent)."""
         self.kb = kb
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)

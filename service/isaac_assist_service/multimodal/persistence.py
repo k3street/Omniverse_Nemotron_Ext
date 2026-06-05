@@ -110,6 +110,7 @@ class RevisionConflictError(Exception):
     """
     def __init__(self, session_id: str, expected: int, actual: int,
                  current_spec: Optional[LayoutSpec] = None):
+        """Store conflict details and delegate to Exception.__init__ with a descriptive message."""
         self.session_id = session_id
         self.expected = expected
         self.actual = actual

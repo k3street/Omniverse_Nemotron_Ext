@@ -53,6 +53,7 @@ class TurnDiff:
 
     @property
     def total_changes(self) -> int:
+        """Return the total number of prim-level changes (added + removed + modified)."""
         return len(self.added) + len(self.removed) + len(self.modified)
 
     def paths_under(self, prefix: str) -> List[str]:

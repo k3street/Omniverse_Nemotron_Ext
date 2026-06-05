@@ -51,6 +51,7 @@ _store: Optional[MultimodalStore] = None
 
 
 def get_store() -> MultimodalStore:
+    """Return the process-wide singleton :class:`MultimodalStore`, creating it on first call."""
     global _store
     if _store is None:
         _store = MultimodalStore()
@@ -59,6 +60,7 @@ def get_store() -> MultimodalStore:
 
 # Default preview output directory — kept under workspace/ which is gitignored.
 def _preview_path(session_id: str) -> Path:
+    """Return the PNG preview file path for a session under ``workspace/previews/``."""
     base = DEFAULT_DB_PATH.parent / "previews"
     return base / f"{session_id}.png"
 
@@ -103,11 +105,26 @@ class RejectCanvasRequest(BaseModel):
 
 
 class BuildRequest(BaseModel):
+    """Request body for the canvas ``/build`` endpoint.
+
+    Attributes:
+        template_id: Optional canonical template to instantiate.
+        force_freeform: When True, skip template lookup and generate a freeform canvas.
+    """
+
     template_id: Optional[str] = None
     force_freeform: bool = False
 
 
 class ClientErrorReport(BaseModel):
+    """Error report submitted by the UI client for server-side logging.
+
+    Attributes:
+        message: Human-readable error description.
+        stack: Optional JavaScript / Python stack trace string.
+        context: Optional extra key/value pairs for diagnostics.
+    """
+
     message: str
     stack: Optional[str] = None
     context: Optional[Dict[str, Any]] = None

@@ -12,6 +12,7 @@ The bridge itself runs OUTSIDE Kit (in main host Python) and pushes attr
 updates via Kit RPC. This avoids in-Kit threading lifecycle issues called
 out by the silent-success-audit lessons.
 """
+# audit-Q17: cohesive — full Modbus/OPC-UA/MQTT industrial bridge subsystem (attach, detach, diagnose for all three protocols) stays together by design
 from __future__ import annotations
 
 import asyncio
@@ -31,10 +32,12 @@ _BRIDGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _make_id() -> str:
+    """Generate a 12-hex-char random bridge identifier."""
     return uuid.uuid4().hex[:12]
 
 
 def _bridge_path(bridge_id: str, suffix: str) -> Path:
+    """Return the path for a bridge artefact file (*.pid, *.log, *.py)."""
     return _BRIDGE_DIR / f"{bridge_id}.{suffix}"
 
 
@@ -105,6 +108,18 @@ while True:
 
 def _spawn_modbus_subprocess(host: str, port: int, register_map: Dict[str, int],
                                rate_hz: float, mode: str = "client") -> Dict[str, Any]:
+    """Write the Modbus worker script and launch it as a detached subprocess.
+
+    Args:
+        host: Modbus server IP/hostname
+        port: TCP port (default 502)
+        register_map: mapping of USD attr path → holding-register address
+        rate_hz: polling frequency in Hz
+        mode: "client" (read from server) or "server" (mock, NYI)
+
+    Returns:
+        {bridge_id, pid, log_path, worker_path}
+    """
     bridge_id = _make_id()
     worker_path = _bridge_path(bridge_id, "py")
     pid_path = _bridge_path(bridge_id, "pid")
@@ -360,11 +375,12 @@ async def _handle_modbus_tcp_bridge_detach(args: Dict[str, Any]) -> Dict[str, An
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         return {"already_dead": True, "pid": pid}
-    # Wait up to 5s
+    # Wait up to 5s for the SIGTERM to take effect. Use asyncio.sleep so
+    # the event loop isn't blocked while other handlers run.
     for _ in range(50):
         try:
             os.kill(pid, 0)
-            time.sleep(0.1)
+            await asyncio.sleep(0.1)
         except ProcessLookupError:
             return {"ok": True, "pid": pid, "method": "SIGTERM"}
     # Force-kill
@@ -442,6 +458,16 @@ asyncio.run(_run())
 
 
 def _spawn_opcua_subprocess(url: str, node_map: Dict[str, str], rate_hz: float) -> Dict[str, Any]:
+    """Write the OPC-UA worker script and launch it as a detached subprocess.
+
+    Args:
+        url: OPC-UA server endpoint (``opc.tcp://host:4840``)
+        node_map: mapping of USD attr path → OPC-UA node identifier string
+        rate_hz: polling frequency in Hz
+
+    Returns:
+        {bridge_id, pid, log_path, worker_path}
+    """
     bridge_id = _make_id()
     worker_path = _bridge_path(bridge_id, "py")
     pid_path = _bridge_path(bridge_id, "pid")
@@ -599,6 +625,18 @@ client.disconnect()
 
 def _spawn_mqtt_subprocess(host: str, port: int, topic_map: Dict[str, str],
                              username: Optional[str], password: Optional[str]) -> Dict[str, Any]:
+    """Write the MQTT worker script and launch it as a detached subprocess.
+
+    Args:
+        host: MQTT broker hostname/IP
+        port: broker port (default 1883)
+        topic_map: mapping of USD attr path → MQTT topic string
+        username: optional broker username
+        password: optional broker password
+
+    Returns:
+        {bridge_id, pid, log_path, worker_path}
+    """
     bridge_id = _make_id()
     worker_path = _bridge_path(bridge_id, "py")
     pid_path = _bridge_path(bridge_id, "pid")

@@ -10,6 +10,7 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 from __future__ import annotations
 
 from typing import Any, Callable, Dict
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +40,19 @@ def _arena_env_id(scene_type: str, robot_asset: str, task: str) -> str:
 
 
 def _gen_create_arena(args: Dict) -> str:
+    """Generate code to compose and register an Isaac Lab Arena environment.
+
+    Args:
+        args: Dict containing:
+            - scene_type (str): Arena scene identifier (e.g. "tabletop").
+            - robot_asset (str): Nucleus asset path for the robot.
+            - task (str): Task identifier (e.g. "pick_and_place").
+            - num_envs (int, optional): Number of parallel environments (default 64).
+            - env_spacing (float, optional): Grid spacing in metres (default 2.5).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     scene_type = args["scene_type"]
     robot_asset = args["robot_asset"]
     task = args["task"]
@@ -103,6 +117,16 @@ def _gen_create_arena(args: Dict) -> str:
 
 
 def _gen_create_arena_variant(args: Dict) -> str:
+    """Generate code to create a robot-swapped variant of an existing Arena env.
+
+    Args:
+        args: Dict containing:
+            - base_env_id (str): Gymnasium ID of the base environment.
+            - robot_asset (str): Nucleus asset path for the replacement robot.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     base_env_id = args["base_env_id"]
     robot_asset = args["robot_asset"]
 
@@ -146,6 +170,18 @@ def _gen_create_arena_variant(args: Dict) -> str:
 
 
 def _gen_run_arena_benchmark(args: Dict) -> str:
+    """Generate code to launch an Arena benchmark subprocess and write results JSON.
+
+    Args:
+        args: Dict containing:
+            - env_id (str): Gymnasium environment ID to benchmark.
+            - num_episodes (int, optional): Episodes to evaluate (default 100).
+            - metrics (list, optional): Metric names to collect (default success_rate + episode_length).
+            - checkpoint (str, optional): Policy checkpoint path; None runs random policy.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     env_id = args["env_id"]
     num_episodes = args.get("num_episodes", 100)
     metrics = args.get("metrics", ["success_rate", "episode_length"])
@@ -206,6 +242,7 @@ def _gen_run_arena_benchmark(args: Dict) -> str:
 # Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
 
 
+@with_telemetry
 async def _handle_arena_leaderboard(args: Dict) -> Dict:
     """Format a leaderboard table from benchmark results."""
     results = args.get("results", [])

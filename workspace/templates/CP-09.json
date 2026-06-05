@@ -14,8 +14,8 @@
     "compute_stack_placement",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six column-tower specifics for CP-09 (extends CP-01 + CP-08 \u2014 orientation rule, CPU dynamics, sleepThreshold, rubber-on-cube, drop_targets dict pattern all inherited):\n1) Tower base = 0.10x0.10x0.05m flat platform at [0, -0.4, 0.775]. Smaller xy footprint than CP-08's pallet \u2014 column stack stays inside footprint without requiring xy precision.\n2) compute_stack_placement(target='/World/TowerBase', pattern='column', n_items=5, cube_size=0.05, anchor='top') yields 5 positions all at xy=(0, -0.4), z = 0.825 + i*0.05 for i=0..4 \u2192 z \u2208 {0.825, 0.875, 0.925, 0.975, 1.025}.\n3) Tallest cube center at z=1.025 (top at z=1.05). Robot base at z=0.75 \u2192 reach to top cube is sqrt(0.4^2 + 0.275^2) \u2248 0.49m horizontal-equivalent at z+0.275m. Within Franka's 0.85m reach.\n4) cuRobo handler's _compute_h1 was extended (this commit) to consider all DROP_TARGETS z-values. EE_INITIAL_HEIGHT auto = max(source_z, max_drop_z) + 0.20 = 1.025 + 0.20 = 1.225m. EE clears all 5 targets during transit.\n5) 5 cubes on conveyor at x \u2208 [-2.0, -1.7, -1.4, -1.1, -0.8], y=0.4 \u2014 all OUTSIDE robot's 0.70m reach so belt has visible work between picks.\n6) Conveyor 4m wide (vs CP-01's 3m) to accommodate 5 cubes at 0.30m spacing. Same belt mechanics + materials as CP-01.",
-  "code": "# DomeLight + Ground + parent Xform + table\n# Ground catches cubes that miss drop target or fall off conveyor end.\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka \u2014 same pose as CP-01\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Wider conveyor (4m vs 3m) for 5 cubes\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[4.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 5 cubes outside reach, 0.30m apart\nfor i, x in enumerate([-2.0, -1.7, -1.4, -1.1, -0.8]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(5)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(5)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Tower base \u2014 flat platform 0.15x0.15x0.05m\n# 0.10x0.10cm was too narrow for ~5cm drop precision drift.\n# 0.15x0.15 gives 5cm safety margin around 5cm cube.\ncreate_prim(prim_path=\"/World/TowerBase\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.075, 0.075, 0.025])\napply_api_schema(prim_path=\"/World/TowerBase\", schema_name=\"PhysicsCollisionAPI\")\n\n# Pick sensor\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with drop_targets dict \u2014 column stack at xy=(0, -0.4),\n# z increases by cube_size=0.05 per cube. Computed via:\n#   compute_stack_placement(target='/World/TowerBase', pattern='column',\n#                            n_items=5, cube_size=0.05, anchor='top')\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(5)],\n    destination_path=\"/World/TowerBase\",\n    drop_targets={\n        \"/World/Cube_1\": [0.0, -0.4, 0.825],\n        \"/World/Cube_2\": [0.0, -0.4, 0.875],\n        \"/World/Cube_3\": [0.0, -0.4, 0.925],\n        \"/World/Cube_4\": [0.0, -0.4, 0.975],\n        \"/World/Cube_5\": [0.0, -0.4, 1.025],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/TowerBase\"],\n)",
+  "thoughts": "Six column-tower specifics for CP-09 (extends CP-01 + CP-08 — orientation rule, CPU dynamics, sleepThreshold, rubber-on-cube, drop_targets dict pattern all inherited):\n1) Tower base = 0.10x0.10x0.05m flat platform at [0, -0.4, 0.775]. Smaller xy footprint than CP-08's pallet — column stack stays inside footprint without requiring xy precision.\n2) compute_stack_placement(target='/World/TowerBase', pattern='column', n_items=5, cube_size=0.05, anchor='top') yields 5 positions all at xy=(0, -0.4), z = 0.825 + i*0.05 for i=0..4 → z ∈ {0.825, 0.875, 0.925, 0.975, 1.025}.\n3) Tallest cube center at z=1.025 (top at z=1.05). Robot base at z=0.75 → reach to top cube is sqrt(0.4^2 + 0.275^2) ≈ 0.49m horizontal-equivalent at z+0.275m. Within Franka's 0.85m reach.\n4) cuRobo handler's _compute_h1 was extended (this commit) to consider all DROP_TARGETS z-values. EE_INITIAL_HEIGHT auto = max(source_z, max_drop_z) + 0.20 = 1.025 + 0.20 = 1.225m. EE clears all 5 targets during transit.\n5) 5 cubes on conveyor at x ∈ [-2.0, -1.7, -1.4, -1.1, -0.8], y=0.4 — all OUTSIDE robot's 0.70m reach so belt has visible work between picks.\n6) Conveyor 4m wide (vs CP-01's 3m) to accommodate 5 cubes at 0.30m spacing. Same belt mechanics + materials as CP-01.",
+  "code": "# DomeLight + Ground + parent Xform + table\n# Ground catches cubes that miss drop target or fall off conveyor end.\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka — same pose as CP-01\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Wider conveyor (4m vs 3m) for 5 cubes\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[4.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 5 cubes outside reach, 0.30m apart\nfor i, x in enumerate([-2.0, -1.7, -1.4, -1.1, -0.8]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(5)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(5)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Tower base — flat platform 0.15x0.15x0.05m\n# 0.10x0.10cm was too narrow for ~5cm drop precision drift.\n# 0.15x0.15 gives 5cm safety margin around 5cm cube.\ncreate_prim(prim_path=\"/World/TowerBase\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.075, 0.075, 0.025])\napply_api_schema(prim_path=\"/World/TowerBase\", schema_name=\"PhysicsCollisionAPI\")\n\n# Pick sensor\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with drop_targets dict — column stack at xy=(0, -0.4),\n# z increases by cube_size=0.05 per cube. Computed via:\n#   compute_stack_placement(target='/World/TowerBase', pattern='column',\n#                            n_items=5, cube_size=0.05, anchor='top')\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(5)],\n    destination_path=\"/World/TowerBase\",\n    drop_targets={\n        \"/World/Cube_1\": [0.0, -0.4, 0.825],\n        \"/World/Cube_2\": [0.0, -0.4, 0.875],\n        \"/World/Cube_3\": [0.0, -0.4, 0.925],\n        \"/World/Cube_4\": [0.0, -0.4, 0.975],\n        \"/World/Cube_5\": [0.0, -0.4, 1.025],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/TowerBase\"],\n)",
   "settle_state": {
     "cubes": {
       "/World/Cube_1": [
@@ -71,14 +71,104 @@
   },
   "extends": "CP-08",
   "extension_notes": "CP-09 reuses CP-08's pattern (compute_stack_placement + drop_targets dict + cuRobo) but switches pattern from grid_2x2 to column. Stress-tests vertical motion: tallest drop at z=1.025m, EE_INITIAL_HEIGHT clears at 1.225m. _compute_h1 in cuRobo handler must consider all DROP_TARGETS z (extended in this commit). Future variants: Graduated Tower with decreasing-size cubes (CP-N: needs per-cube cube_size), Pinwheel layer (CP-N: needs new pattern in compute_stack_placement).",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "has_stacking": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:stack.column"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "primary_destination": {
+      "constraints": ["platform", "pallet"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 5,
+      "param_name": "n_cubes",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.4, 0.78],
+      "size": [4.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "primary_destination": {
+      "path": "/World/TowerBase",
+      "position": [0, -0.4, 0.775],
+      "scale": [0.075, 0.075, 0.025]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.4, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [-2.0, 0.4, 0.835], "drop_target": [0.0, -0.4, 0.825]},
+      {"path": "/World/Cube_2", "position": [-1.7, 0.4, 0.835], "drop_target": [0.0, -0.4, 0.875]},
+      {"path": "/World/Cube_3", "position": [-1.4, 0.4, 0.835], "drop_target": [0.0, -0.4, 0.925]},
+      {"path": "/World/Cube_4", "position": [-1.1, 0.4, 0.835], "drop_target": [0.0, -0.4, 0.975]},
+      {"path": "/World/Cube_5", "position": [-0.8, 0.4, 0.835], "drop_target": [0.0, -0.4, 1.025]}
+    ]
+  },
+  "code_template": "# DomeLight + Ground + parent Xform + table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[4].path}}, prim_type=\"Cube\", position={{workpieces[4].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[4].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\nfor path in [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_prim(prim_path={{primary_destination.path}}, prim_type=\"Cube\", position={{primary_destination.position}}, scale={{primary_destination.scale}})\napply_api_schema(prim_path={{primary_destination.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}],\n    destination_path={{primary_destination.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{workpieces[0].drop_target}},\n        {{workpieces[1].path}}: {{workpieces[1].drop_target}},\n        {{workpieces[2].path}}: {{workpieces[2].drop_target}},\n        {{workpieces[3].path}}: {{workpieces[3].drop_target}},\n        {{workpieces[4].path}}: {{workpieces[4].drop_target}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{primary_destination.path}}],\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{input_conveyor.path}}",
+        "place_path": "{{primary_destination.path}}",
+        "robot_kind": "{{primary_robot.class}}"
+      }
+    ],
+    "cube_path": "{{workpieces[0].path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{workpieces[0].path}}",
+    "target_path": "{{primary_destination.path}}",
+    "duration_s": 180,
+    "xy_tolerance": 0.1
+  },
   "failure_modes": [
-    "EE_INITIAL_HEIGHT not clearing tallest target \u2014 h1 computed only from sources or single drop_target, not all DROP_TARGETS. Verify _compute_h1 in cuRobo handler iterates DROP_TARGETS.values() (fixed in this commit).",
-    "Cube N landing on top of N-1 with collision before grip release \u2014 happens if drop z too tight to physical cube_size. Use exactly cube_size spacing (0.05m); +5mm gives bounce.",
-    "Tower instability \u2014 cubes are 5cm rubber on 5cm rubber. After 3-4 layers, slight misalignment cumulates and stack tips. CP-09 verifies form-gate only; sustained tower stability is a function-gate concern needing physics tuning.",
-    "Robot can't reach z=1.025m from base at z=0.75 \u2014 Franka's reach is ~0.85m sphere; 1.025-0.75=0.275m vertical at xy=(0,-0.4) \u2192 0.49m total radius which is well within 0.85m. Should reach. If reach fails: lower TowerBase or scale tower height.",
-    "drop_targets list-form (instead of dict) \u2014 cube i goes to drop_targets[i] BY ORDER in source_paths, NOT by cube_path. Use dict form for robustness against source_paths reordering."
+    "EE_INITIAL_HEIGHT not clearing tallest target — h1 computed only from sources or single drop_target, not all DROP_TARGETS. Verify _compute_h1 in cuRobo handler iterates DROP_TARGETS.values() (fixed in this commit).",
+    "Cube N landing on top of N-1 with collision before grip release — happens if drop z too tight to physical cube_size. Use exactly cube_size spacing (0.05m); +5mm gives bounce.",
+    "Tower instability — cubes are 5cm rubber on 5cm rubber. After 3-4 layers, slight misalignment cumulates and stack tips. CP-09 verifies form-gate only; sustained tower stability is a function-gate concern needing physics tuning.",
+    "Robot can't reach z=1.025m from base at z=0.75 — Franka's reach is ~0.85m sphere; 1.025-0.75=0.275m vertical at xy=(0,-0.4) → 0.49m total radius which is well within 0.85m. Should reach. If reach fails: lower TowerBase or scale tower height.",
+    "drop_targets list-form (instead of dict) — cube i goes to drop_targets[i] BY ORDER in source_paths, NOT by cube_path. Use dict form for robustness against source_paths reordering."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tolerance=0.10 stack-precision slack)",
+  "verified_status": "build-spec-2026-04-XX; form-gate ✓; function-gate ✓ (multi-cube cube_paths + xy_tolerance=0.10 stack-precision slack)",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "obstacles": [
@@ -89,6 +179,15 @@
       0.0,
       0.0,
       0.75
+    ]
+  },
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
     ]
   }
 }

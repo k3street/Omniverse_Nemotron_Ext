@@ -42,6 +42,8 @@ _kb = KnowledgeBase()
 
 # Define the data contract matching 10_CHAT_UX.md
 class ChatMessageRequest(BaseModel):
+    """Request body for the POST /message endpoint."""
+
     session_id: str
     message: str
     attachments: Optional[List[str]] = []
@@ -49,6 +51,8 @@ class ChatMessageRequest(BaseModel):
 
 
 class ResetSessionRequest(BaseModel):
+    """Request body for the POST /reset endpoint."""
+
     session_id: str = "default_session"
 
 
@@ -146,6 +150,7 @@ async def stream_session(session_id: str):
     q = session_trace.subscribe(session_id)
 
     async def gen():
+        """Async generator that yields SSE-formatted event strings."""
         try:
             yield "event: connected\ndata: {}\n\n"
             while True:
@@ -174,6 +179,8 @@ async def stream_session(session_id: str):
 
 
 class CancelRequest(BaseModel):
+    """Request body for the POST /cancel endpoint."""
+
     session_id: str = "default_session"
 
 
@@ -190,6 +197,8 @@ async def cancel_turn(req: CancelRequest):
 
 
 class UndoRequest(BaseModel):
+    """Request body for the POST /undo endpoint."""
+
     session_id: str = "default_session"
     steps: int = 1
 
@@ -226,6 +235,8 @@ async def undo_chat_turn(req: UndoRequest):
 
 
 class ClearChatRequest(BaseModel):
+    """Request body for the POST /clear_chat endpoint."""
+
     session_id: str = "default_session"
 
 
@@ -241,6 +252,8 @@ async def clear_chat(req: ClearChatRequest):
 
 
 class LogExecutionRequest(BaseModel):
+    """Request body for the POST /log_execution endpoint."""
+
     session_id: str = "default_session"
     code: str
     success: bool
@@ -350,6 +363,8 @@ async def compact_knowledge():
 
 
 class ExportSceneRequest(BaseModel):
+    """Request body for the POST /export_scene endpoint."""
+
     session_id: str = "default_session"
     scene_name: str = "exported_scene"
 
@@ -393,6 +408,8 @@ async def download_scene_file(filepath: str):
 # ── Pipeline Planning ────────────────────────────────────────────────────
 
 class PipelinePlanRequest(BaseModel):
+    """Request body for the POST /pipeline/plan endpoint."""
+
     prompt: str
     session_id: str = "default_session"
 

@@ -144,11 +144,29 @@ class StageWriteLockQueue:
     """Minimal serialized queue — mirrors the spec's StageWriteLock pattern."""
 
     def __init__(self) -> None:
+        """Initialise the queue with an empty pending list and an asyncio lock."""
         self._lock = _asyncio.Lock()
         self._pending: list = []
         self._counter = 0
 
     async def submit(self, code: str, description: str, priority: int) -> Dict[str, Any]:
+        """Queue a patch for Kit execution and return queue metadata.
+
+        The patch is inserted into the priority-sorted pending list while the
+        lock is held, then forwarded to kit_tools.queue_exec_patch.  The entry
+        is removed from the pending list once execution completes.
+
+        Args:
+            code: Python source to execute inside Kit.
+            description: Human-readable label for audit and tracing.
+            priority: Higher values run first (sort key = -priority).
+
+        Returns:
+            Dict with keys:
+                - queued (bool): Whether Kit accepted the patch.
+                - priority (int): The priority passed in.
+                - queue_depth (int): Snapshot of queue length at submit time.
+        """
         from .. import kit_tools  # noqa: PLC0415
         self._counter += 1
         patch = LockedPatch(
@@ -174,6 +192,7 @@ class StageWriteLockQueue:
         }
 
     def pending(self) -> int:
+        """Return the number of patches currently in the queue."""
         return len(self._pending)
 
 
@@ -301,6 +320,46 @@ _WORKFLOW_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "default_params": {
             "max_hypothesis_iterations": 3,
         },
+    },
+    # Phase 34 — assemble_pick_place_cell (workflow_template_pick_place.py)
+    "assemble_pick_place_cell": {
+        "description": "Build a pick-place cell from scratch: robot + workpiece + destination",
+        "phases": [
+            {"name": "load_template",    "checkpoint": True,  "error_fix": False},
+            {"name": "place_objects",    "checkpoint": False, "error_fix": True},
+            {"name": "teach_grasp_pose", "checkpoint": True,  "error_fix": False},
+            {"name": "setup_controller", "checkpoint": False, "error_fix": True},
+            {"name": "smoke_test",       "checkpoint": True,  "error_fix": True},
+        ],
+        "default_params": {
+            "robot_class": "franka_panda",
+            "workpiece_class": "cube_small",
+            "destination_class": "bin",
+        },
+    },
+    # Phase 35 — validate_robot_import (workflow_template_validate_robot.py)
+    "validate_robot_import": {
+        "description": "Import robot + verify articulation + check collision meshes",
+        "phases": [
+            {"name": "import_robot",          "checkpoint": False, "error_fix": True},
+            {"name": "verify_articulation",   "checkpoint": True,  "error_fix": True},
+            {"name": "check_collision_meshes","checkpoint": False, "error_fix": True},
+            {"name": "test_motion",           "checkpoint": True,  "error_fix": False},
+        ],
+        "default_params": {"robot_name": "franka_panda"},
+    },
+    # Phase 36 — generate_sdg_dataset (workflow_template_sdg.py)
+    "generate_sdg_dataset": {
+        "description": "Synthetic data pipeline: scene → DR ranges → render → export",
+        "phases": [
+            {"name": "configure_scene",     "checkpoint": True,  "error_fix": False},
+            {"name": "configure_dr_ranges", "checkpoint": True,  "error_fix": False},
+            {"name": "preview_render",      "checkpoint": True,  "error_fix": True},
+            {"name": "generate_dataset",    "checkpoint": False, "error_fix": False},
+            {"name": "validate_annotations","checkpoint": True,  "error_fix": True},
+            {"name": "export",              "checkpoint": True,  "error_fix": False},
+        ],
+        "default_params": {"num_samples": 1000, "writer_format": "coco"},
     },
 }
 

@@ -8,7 +8,9 @@ from ..registry import CitedFailure, PatchIssue, PatchValidatorRule, Severity, r
 
 
 def _adapt(legacy_fn):
+    """Convert legacy checker output to registry PatchIssue instances."""
     def _wrap(code: str) -> List[PatchIssue]:
+        """Delegate to legacy checker and adapt its issues."""
         out = []
         for issue in legacy_fn(code):
             out.append(PatchIssue(
@@ -21,17 +23,22 @@ def _adapt(legacy_fn):
 
 @register
 class DeprecatedCoreUtilsRule(PatchValidatorRule):
+    """Warn when patches import deprecated omni.isaac.core utilities."""
+
     rule_id = "deprecated_core_utils"
     severity = Severity.WARNING
     fix_hint = "omni.isaac.core utilities are deprecated in Isaac Sim 5.1+ — use isaacsim.core instead."
 
     def check(self, code: str, ast_tree: Optional[_ast.AST] = None) -> List[PatchIssue]:
+        """Check for omni.isaac.core import paths that moved to isaacsim.core."""
         from ...patch_validator import _check_deprecated_core_utils
         return _adapt(_check_deprecated_core_utils)(code)
 
 
 @register
 class IsAOnAPISchemaRule(PatchValidatorRule):
+    """Reject IsA() calls on API schemas that must use HasAPI() instead."""
+
     rule_id = "usd_isa_on_api_schema"
     severity = Severity.ERROR
     fix_hint = (
@@ -51,16 +58,20 @@ class IsAOnAPISchemaRule(PatchValidatorRule):
     ]
 
     def check(self, code: str, ast_tree: Optional[_ast.AST] = None) -> List[PatchIssue]:
+        """Check for prim.IsA(<ApiSchema>) patterns that should be prim.HasAPI(...)."""
         from ...patch_validator import _check_isa_on_api_schema
         return _adapt(_check_isa_on_api_schema)(code)
 
 
 @register
 class CreateAttributeSignatureRule(PatchValidatorRule):
+    """Ensure CreateAttribute() uses Sdf.ValueTypeNames constants, not raw strings."""
+
     rule_id = "usd_create_attr_signature"
     severity = Severity.ERROR
     fix_hint = "Use Sdf.ValueTypeNames.Float, Sdf.ValueTypeNames.Double3, etc."
 
     def check(self, code: str, ast_tree: Optional[_ast.AST] = None) -> List[PatchIssue]:
+        """Check for string literals where Sdf.ValueTypeNames.* is required."""
         from ...patch_validator import _check_create_attribute_signature
         return _adapt(_check_create_attribute_signature)(code)

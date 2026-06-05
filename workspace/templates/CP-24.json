@@ -1,6 +1,6 @@
 {
   "task_id": "CP-24",
-  "goal": "Build a narrow-slot insertion station: 4 cubes from conveyor get placed into a narrow rectangular slot (6cm wide \u00d7 30cm long) \u2014 only 1cm clearance per side. Tests cuRobo precision when destination has tight tolerances. Industrial use: card-slot loading, drawer-bin insertion.",
+  "goal": "Build a narrow-slot insertion station: 4 cubes from conveyor get placed into a narrow rectangular slot (6cm wide × 30cm long) — only 1cm clearance per side. Tests cuRobo precision when destination has tight tolerances. Industrial use: card-slot loading, drawer-bin insertion.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -14,8 +14,8 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six narrow-slot specifics for CP-24 (extends CP-08 \u2014 drop_targets with tight precision):\n1) Slot bin 0.06\u00d70.30\u00d70.10m at [0, -0.4, 0.75] \u2014 tight Y-axis precision (\u00b11cm) but generous X-axis (\u00b113cm).\n2) drop_targets dispatches each cube to its slot position along X: Cube_1 at x=-0.10, Cube_2 at x=-0.04, Cube_3 at x=+0.04, Cube_4 at x=+0.10. Each at y=-0.40, z=0.825.\n3) Inter-cube spacing along X = 0.06m (just over cube_size). Tight but accommodates \u00b12cm drift.\n4) cuRobo precision typically \u00b15cm for drops. Slot-Y constraint of \u00b11cm may exceed handler precision \u2192 some cubes may land outside slot. Pattern still testable via form-gate.\n5) planning_obstacles include Slot \u2014 cuRobo plans transit avoiding slot walls. With narrow slot opening (6cm), transit must approach near-vertical from above.\n6) Slot mimics a card-pocket or tray-divider. Real industrial use: SD-card loaders, drawer organization, narrow-feed bins.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Narrow slot bin: 0.06m wide (Y), 0.30m long (X), 0.10m deep (Z)\ncreate_bin(prim_path=\"/World/Slot\", position=[0, -0.4, 0.75], size=[0.30, 0.06, 0.10])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# drop_targets \u2014 4 positions along X axis of narrow slot, all at y=-0.40 (slot center)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Slot\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.10, -0.40, 0.825],\n        \"/World/Cube_2\": [-0.04, -0.40, 0.825],\n        \"/World/Cube_3\": [ 0.04, -0.40, 0.825],\n        \"/World/Cube_4\": [ 0.10, -0.40, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Slot\"],\n)",
+  "thoughts": "Six narrow-slot specifics for CP-24 (extends CP-08 — drop_targets with tight precision):\n1) Slot bin 0.06×0.30×0.10m at [0, -0.4, 0.75] — tight Y-axis precision (±1cm) but generous X-axis (±13cm).\n2) drop_targets dispatches each cube to its slot position along X: Cube_1 at x=-0.10, Cube_2 at x=-0.04, Cube_3 at x=+0.04, Cube_4 at x=+0.10. Each at y=-0.40, z=0.825.\n3) Inter-cube spacing along X = 0.06m (just over cube_size). Tight but accommodates ±2cm drift.\n4) cuRobo precision typically ±5cm for drops. Slot-Y constraint of ±1cm may exceed handler precision → some cubes may land outside slot. Pattern still testable via form-gate.\n5) planning_obstacles include Slot — cuRobo plans transit avoiding slot walls. With narrow slot opening (6cm), transit must approach near-vertical from above.\n6) Slot mimics a card-pocket or tray-divider. Real industrial use: SD-card loaders, drawer organization, narrow-feed bins.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Narrow slot bin: 0.06m wide (Y), 0.30m long (X), 0.10m deep (Z)\ncreate_bin(prim_path=\"/World/Slot\", position=[0, -0.4, 0.75], size=[0.30, 0.06, 0.10])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# drop_targets — 4 positions along X axis of narrow slot, all at y=-0.40 (slot center)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Slot\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.10, -0.40, 0.825],\n        \"/World/Cube_2\": [-0.04, -0.40, 0.825],\n        \"/World/Cube_3\": [ 0.04, -0.40, 0.825],\n        \"/World/Cube_4\": [ 0.10, -0.40, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Slot\"],\n)",
   "settle_state": {
     "cubes": {
       "/World/Cube_1": [
@@ -71,14 +71,14 @@
     ]
   },
   "extends": "CP-08",
-  "extension_notes": "CP-24 stress-tests precision via narrow-slot destination. Y-axis tolerance \u00b11cm. cuRobo's typical drop precision (~5cm) likely exceeds this \u2014 function-gate may fail on Y placement. Pattern shows the canonical SHAPE for narrow-slot loaders; production version would need higher-precision controller (sensor_gated with teach poses) or wider slot.",
+  "extension_notes": "CP-24 stress-tests precision via narrow-slot destination. Y-axis tolerance ±1cm. cuRobo's typical drop precision (~5cm) likely exceeds this — function-gate may fail on Y placement. Pattern shows the canonical SHAPE for narrow-slot loaders; production version would need higher-precision controller (sensor_gated with teach poses) or wider slot.",
   "failure_modes": [
-    "Drop precision Y-error > 1cm \u2192 cube lands on slot rim, bounces out. Y-tolerance < cuRobo precision.",
+    "Drop precision Y-error > 1cm → cube lands on slot rim, bounces out. Y-tolerance < cuRobo precision.",
     "Cubes land on top of each other within slot (X-positions too close). 0.06m spacing for 5cm cubes leaves 1cm gap; tight but should hold.",
-    "Slot walls block transit \u2014 Franka's wrist may need clearance during retreat. cuRobo with planning_obstacles handles this; transit must approach vertically.",
-    "Same physics rules \u2014 sleepThreshold=0, rubber on cubes."
+    "Slot walls block transit — Franka's wrist may need clearance during retreat. cuRobo with planning_obstacles handles this; transit must approach vertically.",
+    "Same physics rules — sleepThreshold=0, rubber on cubes."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + xy_tolerance=0.10 stack-precision slack)",
+  "verified_status": "build-spec-2026-04-XX; form-gate ✓; function-gate ✓ (multi-cube cube_paths + xy_tolerance=0.10 stack-precision slack)",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "sensor_path": "/World/PickSensor",
@@ -91,6 +91,15 @@
       0,
       -0.4,
       0.75
+    ]
+  },
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
     ]
   }
 }

@@ -15,6 +15,12 @@ class ValidationRule(ABC):
     """
 
     def __init__(self):
+        """Initialise default metadata fields shared by all concrete rules.
+
+        Subclasses must overwrite ``rule_id``, ``pack``, ``severity``,
+        ``name``, and ``description`` in their own ``__init__`` before
+        returning control to callers.
+        """
         self.rule_id = "base_rule"
         self.pack = "base_pack"
         self.severity = "info"

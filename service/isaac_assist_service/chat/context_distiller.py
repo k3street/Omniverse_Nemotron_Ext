@@ -15,6 +15,7 @@ Two-stage pipeline:
   Stage 2 (orchestrator — main LLM):
       receive compact system prompt + slim tool list → generate response
 """
+# audit-Q17: cohesive — context distillation pipeline (tool selection, rule filtering, history compression, scene filtering) is a single algorithm
 from __future__ import annotations
 
 import logging
@@ -343,19 +344,23 @@ class ConversationKnowledge:
     last_compressed_turn: int = 0                              # turn when last compressed
 
     def record_action(self, action: str):
+        """Append an action summary, keeping only the last 8 entries."""
         self.recent_actions.append(action)
         if len(self.recent_actions) > 8:
             self.recent_actions = self.recent_actions[-8:]
 
     def record_robot(self, path: str):
+        """Add a robot prim path if not already tracked."""
         if path not in self.robots:
             self.robots.append(path)
 
     def record_topic(self, topic: str):
+        """Add a ROS2 topic name if not already tracked."""
         if topic not in self.ros2_topics:
             self.ros2_topics.append(topic)
 
     def to_context_string(self) -> str:
+        """Render known session state as a compact multi-line context string."""
         parts = []
         if self.robots:
             parts.append(f"Robots in scene: {', '.join(self.robots)}")

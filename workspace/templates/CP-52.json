@@ -83,7 +83,7 @@
     "Sensor B at x=+0.2 \u2014 cubes belt-flow past A's sensor at -0.2 first. B picks AFTER A.",
     "Same physics gotchas as CP-07."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "verified_status": "draft; passes=12 n=20 wilson_lower=0.3866; was form-gate-pending; demoted 2026-05-15",
   "diagnose_args": {
     "cycles": [
       {
@@ -117,5 +117,15 @@
       0,
       0.75
     ]
+  },
+  "verified_wilson_lower": 0.3866,
+  "verified_runs": {
+    "passes": 12,
+    "n": 20,
+    "z": 1.96,
+    "lower": 0.3866,
+    "upper": 0.7812,
+    "evidence_date": "2026-05-15",
+    "evidence_source": "workspace/baselines aggregate"
   }
 }

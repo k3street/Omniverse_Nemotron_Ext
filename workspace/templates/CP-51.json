@@ -63,7 +63,7 @@
     "Bin at sqrt(0.7^2+0.7^2)=0.99m from FrankaB \u2014 at reach LIMIT. May fail planning. Move closer if needed.",
     "Same physics gotchas as CP-02."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending",
+  "verified_status": "draft; passes=12 n=27 wilson_lower=0.2759; was form-gate-pending; demoted 2026-05-15",
   "diagnose_args": {
     "cycles": [
       {
@@ -107,5 +107,15 @@
       0,
       0.75
     ]
+  },
+  "verified_wilson_lower": 0.2759,
+  "verified_runs": {
+    "passes": 12,
+    "n": 27,
+    "z": 1.96,
+    "lower": 0.2759,
+    "upper": 0.6269,
+    "evidence_date": "2026-05-15",
+    "evidence_source": "workspace/baselines aggregate"
   }
 }

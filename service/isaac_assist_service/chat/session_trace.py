@@ -68,6 +68,7 @@ def unsubscribe(session_id: str, q: "asyncio.Queue") -> None:
 
 
 def _trace_path(session_id: str) -> Path:
+    """Return the JSONL trace file path for a session, sanitising the session ID for use as a filename."""
     _TRACE_ROOT.mkdir(parents=True, exist_ok=True)
     safe = "".join(c if c.isalnum() or c in "_-." else "_" for c in session_id)
     return _TRACE_ROOT / f"{safe}.jsonl"

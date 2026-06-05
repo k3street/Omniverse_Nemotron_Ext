@@ -16,7 +16,15 @@ from ..models import ValidationFinding, FixSuggestion, ProposedChange
 
 
 class MaterialPhysicsMismatchValidator(ValidationRule):
+    """Validator that detects material and physics schema mismatches.
+
+    Catches dynamic rigid bodies with no collision approximation, visual-only
+    meshes in physics scenes, deformable bodies with conflicting
+    ``PhysicsCollisionAPI``, and dynamic bodies using triangle-mesh collision.
+    """
+
     def __init__(self):
+        """Initialise material-physics mismatch rule metadata."""
         super().__init__()
         self.rule_id = "material_physics.mismatch"
         self.pack = "material_physics"
@@ -173,9 +181,25 @@ class MaterialPhysicsMismatchValidator(ValidationRule):
         return findings
 
     def auto_fixable(self) -> bool:
+        """Return True — collision and approximation findings have auto-fixes."""
         return True
 
     def suggest_fix(self, finding: ValidationFinding):
+        """Produce structured fix suggestions for fixable material-physics findings.
+
+        Handles:
+        - ``material_physics.visual_only_mesh`` — adds ``PhysicsCollisionAPI``
+        - ``material_physics.no_collision_approx`` / ``triangle_mesh_dynamic``
+          — sets ``physics:approximation`` to ``"convexHull"``
+        - ``material_physics.deformable_collision_conflict`` — removes
+          ``PhysicsCollisionAPI``
+
+        Args:
+            finding (ValidationFinding): The finding to fix.
+
+        Returns:
+            FixSuggestion | None: Structured change set or None.
+        """
         if finding.rule_id == "material_physics.visual_only_mesh":
             return FixSuggestion(
                 description=f"Add CollisionAPI to '{finding.prim_path}'",

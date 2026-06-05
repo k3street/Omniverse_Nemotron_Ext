@@ -31,6 +31,10 @@ _template_cache: Dict[str, Dict] = {}
 
 
 def _get_collection():
+    """Return the ChromaDB collection, creating and indexing it on first call.
+
+    Returns None if chromadb is not installed (retrieval silently disabled).
+    """
     global _client, _collection
     if _collection is not None:
         return _collection
@@ -101,6 +105,10 @@ def _build_index() -> None:
 
 
 def _load_template(task_id: str) -> Optional[Dict]:
+    """Load a template dict by task_id, using the in-memory cache first.
+
+    Returns None if the template file does not exist or fails to parse.
+    """
     if task_id in _template_cache:
         return _template_cache[task_id]
     p = _TEMPLATES_DIR / f"{task_id}.json"
@@ -207,6 +215,11 @@ def retrieve_templates_with_scores(query: str, top_k: int = 3) -> List[Dict]:
 
 
 def rebuild_index() -> None:
+    """Drop and fully rebuild the ChromaDB template collection from disk.
+
+    Clears the in-memory cache so subsequent calls re-embed all templates.
+    No-op if chromadb is unavailable.
+    """
     global _collection, _client, _template_cache
     col = _get_collection()
     if col is None:

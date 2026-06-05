@@ -1,0 +1,361 @@
+"""Validate that `scripts/qa/post_migration_health_check.py` correctly
+classifies positive and negative fixtures for each check.
+
+This is Fas 0 V1 from `docs/qa/PATH_TO_100PCT.md`: we can't run a 100%
+audit without a 100%-correct audit script. Each check has a positive
+fixture (must flag) and a negative fixture (must not flag).
+
+The fixtures live in `tests/qa_audit_fixtures/`. Each fixture is plain
+Python that the audit-script's AST walker reads directly.
+"""
+from __future__ import annotations
+
+import ast
+import importlib.util
+import sys
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.l0
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FIXTURES_DIR = REPO_ROOT / "tests" / "qa_audit_fixtures"
+AUDIT_SCRIPT = REPO_ROOT / "scripts" / "qa" / "post_migration_health_check.py"
+
+
+@pytest.fixture(scope="module")
+def audit_module():
+    """Load the audit script as a module to call its check functions."""
+    spec = importlib.util.spec_from_file_location("audit_module", AUDIT_SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _parse_fixture(name: str) -> ast.AST:
+    return ast.parse((FIXTURES_DIR / name).read_text(), filename=name)
+
+
+# ---------------------------------------------------------------------------
+# Q21 Section 19 honesty — positive fixture must flag, negative must not
+# ---------------------------------------------------------------------------
+
+def test_section_19_positive_flags_expected_violations(audit_module):
+    """Positive fixture has 4 declared violations.
+
+    Audit must flag ≥4 hits and they must reside in the positive fixture.
+    """
+    # Patch HANDLERS_ROOT to point at the fixtures dir so the check scans it
+    import types
+    audit_module.HANDLERS_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_section_19_honesty()
+    positive_hits = [h for h in hits if "section_19_positive" in h["file"]]
+
+    # Expected violations from the fixture:
+    # 1. _handle_bare_return_none — return None at line 12
+    # 2. _handle_implicit_return — fall-through
+    # 3. _handle_return_constant_none — return None at line 24
+    # 4. _handle_mixed_with_nested — nested helper has bare return (MUST NOT flag)
+    handler_names = {h["handler"] for h in positive_hits}
+
+    assert "_handle_bare_return_none" in handler_names
+    assert "_handle_implicit_return" in handler_names
+    assert "_handle_return_constant_none" in handler_names
+
+    # CRITICAL: the nested-scope handler must NOT be flagged
+    nested_hit = next(
+        (h for h in positive_hits if h["handler"] == "_handle_mixed_with_nested"),
+        None,
+    )
+    assert nested_hit is None, (
+        "_handle_mixed_with_nested has a bare return INSIDE a nested helper; "
+        "audit must not flag that as a handler-level honesty hole. Got: "
+        f"{nested_hit}"
+    )
+
+
+def test_section_19_negative_yields_zero_hits(audit_module):
+    """Negative fixture has zero violations — audit must produce zero hits there."""
+    audit_module.HANDLERS_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_section_19_honesty()
+    negative_hits = [h for h in hits if "section_19_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero hits in negative fixture, got {len(negative_hits)}: "
+        f"{negative_hits}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Q3 datetime.utcnow — positive fixture has known hits, negative has none
+# ---------------------------------------------------------------------------
+
+def test_q3_utcnow_positive(audit_module):
+    """Positive fixture has 3 utcnow() call sites."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_utcnow()
+    positive_hits = [h for h in hits if "deprecation_positive" in h["file"]]
+
+    # 3 calls: use_utcnow (1), use_utcnow_twice (2) = 3 total
+    assert len(positive_hits) == 3, (
+        f"Expected 3 utcnow hits in positive fixture, got {len(positive_hits)}"
+    )
+
+
+def test_q3_utcnow_negative(audit_module):
+    """Negative fixture uses datetime.now(timezone.utc); zero hits."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_utcnow()
+    negative_hits = [h for h in hits if "deprecation_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero utcnow hits in negative fixture, got {len(negative_hits)}: "
+        f"{negative_hits}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Q4 asyncio.get_event_loop — positive (1 hit outside run_stdio), negative (0)
+# ---------------------------------------------------------------------------
+
+def test_q4_get_event_loop_positive(audit_module):
+    """Positive fixture has 1 call outside run_stdio + 1 inside (whitelisted)."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_get_event_loop()
+    positive_hits = [h for h in hits if "deprecation_positive" in h["file"]]
+
+    # Only the call in use_get_event_loop should be flagged.
+    # The call inside run_stdio() is whitelisted.
+    assert len(positive_hits) == 1, (
+        f"Expected 1 get_event_loop hit (outside run_stdio), got {len(positive_hits)}"
+    )
+
+
+def test_q4_get_event_loop_negative(audit_module):
+    """Negative fixture uses get_running_loop; zero hits."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_get_event_loop()
+    negative_hits = [h for h in hits if "deprecation_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero get_event_loop hits in negative fixture, got {len(negative_hits)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Q21b silent-failure — positive has 2 hits, negative has 0
+# ---------------------------------------------------------------------------
+
+def test_q21b_silent_failure_positive(audit_module):
+    """Positive fixture has 2 silent-failure returns."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_silent_failures()
+    positive_hits = [h for h in hits if "silent_failure_positive" in h["file"]]
+
+    assert len(positive_hits) == 2, (
+        f"Expected 2 silent-failure hits in positive fixture, got {len(positive_hits)}: "
+        f"{positive_hits}"
+    )
+
+
+def test_q21b_silent_failure_negative(audit_module):
+    """Negative fixture uses error/output/reason/message/**err — zero hits."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_silent_failures()
+    negative_hits = [h for h in hits if "silent_failure_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero silent-failure hits in negative fixture, got {len(negative_hits)}: "
+        f"{negative_hits}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Q9 + Q10 Security checks
+# ---------------------------------------------------------------------------
+
+def test_q9_eval_exec_positive(audit_module):
+    """Positive fixture has 1 eval + 1 exec call."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_eval_exec()
+    positive_hits = [h for h in hits if "security_positive" in h["file"]]
+
+    assert len(positive_hits) == 2, (
+        f"Expected 2 eval/exec hits in positive fixture, got {len(positive_hits)}: "
+        f"{positive_hits}"
+    )
+    calls = {h["call"] for h in positive_hits}
+    assert calls == {"eval", "exec"}, f"Expected both eval+exec, got {calls}"
+
+
+def test_q9_eval_exec_negative(audit_module):
+    """Negative fixture: ast.literal_eval + shadowed name — zero hits."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_eval_exec()
+    negative_hits = [h for h in hits if "security_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero eval/exec hits in negative fixture, got {negative_hits}"
+    )
+
+
+def test_q10_shell_true_positive(audit_module):
+    """Positive fixture has 2 shell=True calls."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_shell_true()
+    positive_hits = [h for h in hits if "security_positive" in h["file"]]
+
+    assert len(positive_hits) == 2, (
+        f"Expected 2 shell=True hits in positive fixture, got {len(positive_hits)}: "
+        f"{positive_hits}"
+    )
+
+
+def test_q10_shell_true_negative(audit_module):
+    """Negative: list-form + shell=False — zero hits."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_shell_true()
+    negative_hits = [h for h in hits if "security_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero shell=True hits in negative fixture, got {negative_hits}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Q12 Blocking I/O in async
+# ---------------------------------------------------------------------------
+
+def test_q12_blocking_io_positive(audit_module):
+    """Positive fixture has 3 blocking calls (time.sleep, requests.get, open)."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_blocking_io_in_async()
+    positive_hits = [h for h in hits if "blocking_io_positive" in h["file"]]
+
+    assert len(positive_hits) == 3, (
+        f"Expected 3 blocking-I/O hits in positive fixture, got {len(positive_hits)}: "
+        f"{positive_hits}"
+    )
+    calls = {h["call"] for h in positive_hits}
+    assert calls == {"time.sleep", "requests.get", "open"}, (
+        f"Expected time.sleep + requests.get + open, got {calls}"
+    )
+
+
+def test_q12_blocking_io_negative(audit_module):
+    """Negative: asyncio.sleep + aiohttp + sync-helpers — zero hits in async fns."""
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+
+    hits = audit_module.check_no_blocking_io_in_async()
+    negative_hits = [h for h in hits if "blocking_io_negative" in h["file"]]
+
+    assert negative_hits == [], (
+        f"Expected zero blocking-I/O hits in negative fixture, got {negative_hits}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Q14 Schema drift — binding-pattern recognition
+# ---------------------------------------------------------------------------
+
+def test_noqa_suppresses_all_check_types(audit_module):
+    """`# noqa: audit-QX` on a line must suppress check QX for that line.
+
+    The noqa fixture mirrors the positive fixtures but with suppression
+    comments — audit must produce zero hits in it across Q3, Q9, Q10, Q12.
+    """
+    audit_module.SERVICE_ROOT = FIXTURES_DIR
+    audit_module._NOQA_CACHE.clear()  # cache busts since SERVICE_ROOT changed
+
+    # Q3 — utcnow
+    utcnow_hits = [
+        h for h in audit_module.check_no_utcnow()
+        if "noqa_suppression" in h["file"]
+    ]
+    assert utcnow_hits == [], f"Q3 should respect noqa, got {utcnow_hits}"
+
+    # Q9 — eval/exec
+    eval_hits = [
+        h for h in audit_module.check_no_eval_exec()
+        if "noqa_suppression" in h["file"]
+    ]
+    assert eval_hits == [], f"Q9 should respect noqa, got {eval_hits}"
+
+    # Q10 — shell=True
+    shell_hits = [
+        h for h in audit_module.check_no_shell_true()
+        if "noqa_suppression" in h["file"]
+    ]
+    assert shell_hits == [], f"Q10 should respect noqa, got {shell_hits}"
+
+    # Q12 — blocking I/O
+    block_hits = [
+        h for h in audit_module.check_no_blocking_io_in_async()
+        if "noqa_suppression" in h["file"]
+    ]
+    assert block_hits == [], f"Q12 should respect noqa, got {block_hits}"
+
+
+def test_q14_binding_pattern_recognition():
+    """The Q14 audit must recognise all 6 binding patterns.
+
+    Reads schema_drift_negative.py via AST + regex like the real check
+    and asserts each pattern's name appears in the `defined` set.
+    """
+    import ast
+    import re
+
+    src = (FIXTURES_DIR / "schema_drift_negative.py").read_text()
+    tree = ast.parse(src)
+
+    defined = set()
+    alias_pattern = re.compile(
+        r'(?:codegen|data|handlers|_REGISTRY|_HANDLERS)\["(\w+)"\]\s*=\s*'
+        r'(?:_handle_|_gen_|handle_)\w+'
+    )
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("_handle_"):
+                defined.add(node.name[len("_handle_"):])
+            elif node.name.startswith("_gen_"):
+                defined.add(node.name[len("_gen_"):])
+            elif node.name.startswith("handle_"):
+                defined.add(node.name[len("handle_"):])
+        if isinstance(node, ast.Compare):
+            if (
+                isinstance(node.left, ast.Name)
+                and node.left.id in ("tool_name", "name")
+                and len(node.ops) == 1
+                and isinstance(node.ops[0], ast.Eq)
+                and len(node.comparators) == 1
+                and isinstance(node.comparators[0], ast.Constant)
+                and isinstance(node.comparators[0].value, str)
+            ):
+                defined.add(node.comparators[0].value)
+    defined.update(alias_pattern.findall(src))
+
+    expected = {
+        "pattern_one",       # _handle_*
+        "pattern_two",       # _gen_*
+        "pattern_three",     # handle_*
+        "pattern_four",      # if tool_name ==
+        "alias_pattern_five",  # codegen["X"] = _gen_*
+        "alias_pattern_six",   # data["X"] = _handle_*
+    }
+    missing = expected - defined
+    assert not missing, f"Q14 missed binding patterns: {missing}"

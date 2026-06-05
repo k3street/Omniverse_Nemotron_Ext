@@ -70,6 +70,7 @@ class ControllerAttrSet(BaseModel):
         the namespace). Missing optional fields default to None / 'ok' / 0.
         """
         def _g(short: str):
+            """Lookup a controller attribute by short name, accepting both ``ctrl:`` and bare prefixes."""
             return attrs.get(f"ctrl:{short}", attrs.get(short))
         adapter = _g("adapter")
         if adapter is None:

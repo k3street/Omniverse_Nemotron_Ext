@@ -18,6 +18,7 @@ class SourceRegistry:
     """
 
     def __init__(self):
+        """Populate the default list of Isaac Sim documentation sources."""
         self.sources = [
             {
                 "source_id": "nvidia_isaac_sim_5_1",

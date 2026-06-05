@@ -1,6 +1,6 @@
 {
   "task_id": "CP-79",
-  "goal": "UR10 builtin pick-place mirroring the standalone ur10_pick_up.py geometry as closely as possible \u2014 cube at +X +Y on a pedestal (matches standalone home pose's natural reach direction). If THIS doesn't deliver, the controller stack is the issue, not geometry. Diagnostic complement to CP-78.",
+  "goal": "UR10 builtin pick-place mirroring the standalone ur10_pick_up.py geometry as closely as possible — cube at +X +Y on a pedestal (matches standalone home pose's natural reach direction). If THIS doesn't deliver, the controller stack is the issue, not geometry. Diagnostic complement to CP-78.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -13,7 +13,7 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "CP-79 mirrors the geometry of standalone ur10_pick_up.py:\n1) Cube at world (+0.6, +0.4, 0.975) on a pedestal \u2014 +X +Y direction matches the natural reach of the standalone home pose [-\u03c0/2, -\u03c0/2, -\u03c0/2, -\u03c0/2, \u03c0/2, 0] which puts EE at relative (+1.05, -0.74, +0.21).\n2) Bin at (+0.6, -0.4, 0.75) \u2014 same +X side, just the other +/-Y direction.\n3) UR10 base at (0, 0, 0.75) \u2014 table-mounted, same as CP-78. Standalone has base at (0,0,0); we shift to (0,0,0.75) since our scene has a 0.75m table.\n4) Builtin handler uses the mirror home pose [\u03c0/2, -\u03c0/2, \u03c0/2, -\u03c0/2, -\u03c0/2, 0] by default. THAT'S WRONG for this scene \u2014 but the test is whether the controller stack itself can deliver if geometry+home are aligned.\n5) Expected outcome: with cube on +X side + standalone home pointing +X, RmpFlow's IK has the natural reach. Suction should engage if the controller stack works.\n6) If function-gate fails here too, the suction stack itself (not just home/geometry) has a deeper issue \u2014 likely the URDF ee_suction_link vs USD suction_cup frame mismatch is the bug, not configurable.",
+  "thoughts": "CP-79 mirrors the geometry of standalone ur10_pick_up.py:\n1) Cube at world (+0.6, +0.4, 0.975) on a pedestal — +X +Y direction matches the natural reach of the standalone home pose [-π/2, -π/2, -π/2, -π/2, π/2, 0] which puts EE at relative (+1.05, -0.74, +0.21).\n2) Bin at (+0.6, -0.4, 0.75) — same +X side, just the other +/-Y direction.\n3) UR10 base at (0, 0, 0.75) — table-mounted, same as CP-78. Standalone has base at (0,0,0); we shift to (0,0,0.75) since our scene has a 0.75m table.\n4) Builtin handler uses the mirror home pose [π/2, -π/2, π/2, -π/2, -π/2, 0] by default. THAT'S WRONG for this scene — but the test is whether the controller stack itself can deliver if geometry+home are aligned.\n5) Expected outcome: with cube on +X side + standalone home pointing +X, RmpFlow's IK has the natural reach. Suction should engage if the controller stack works.\n6) If function-gate fails here too, the suction stack itself (not just home/geometry) has a deeper issue — likely the URDF ee_suction_link vs USD suction_cup frame mismatch is the bug, not configurable.",
   "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\n# Pedestal at +X +Y (natural standalone-home reach direction)\ncreate_prim(prim_path=\"/World/Pedestal\", prim_type=\"Cube\", position=[0.6, 0.4, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal\", schema_name=\"PhysicsCollisionAPI\")\n\n# Cube on pedestal\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[0.6, 0.4, 0.975], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Bin at +X -Y\ncreate_bin(prim_path=\"/World/Bin\", position=[0.6, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
   "settle_state": {
     "cubes": {
@@ -42,13 +42,13 @@
     "duration_s": 180
   },
   "extends": "CP-78",
-  "extension_notes": "CP-79 mirrors CP-78 with cube at +X +Y instead of -X +Y, isolating geometry-vs-home-pose alignment. Builtin handler's mirror home pose [\u03c0/2, ...] points EE toward -X +Y, so this scene would need the ORIGINAL standalone home [-\u03c0/2, ...] for natural alignment. Diagnostic only \u2014 actual code change to flip home per-canonical is Sprint 4+.",
+  "extension_notes": "CP-79 mirrors CP-78 with cube at +X +Y instead of -X +Y, isolating geometry-vs-home-pose alignment. Builtin handler's mirror home pose [π/2, ...] points EE toward -X +Y, so this scene would need the ORIGINAL standalone home [-π/2, ...] for natural alignment. Diagnostic only — actual code change to flip home per-canonical is Sprint 4+.",
   "failure_modes": [
     "Same RmpFlow descent gap if the issue is the URDF ee_suction_link vs USD suction_cup frame mismatch (independent of home pose).",
-    "If function-gate fails here too, then the stack itself can't deliver from any geometry \u2014 strongly suggests the suction_cup never enters maxGripDistance regardless of pose.",
+    "If function-gate fails here too, then the stack itself can't deliver from any geometry — strongly suggests the suction_cup never enters maxGripDistance regardless of pose.",
     "Same UR10 init quirks as CP-75/CP-78."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 +X+Y pedestal \u2014 confirms raycast workaround works regardless of approach direction)",
+  "verified_status": "build-spec-2026-05-08; form-gate ✓; function-gate ✓ (UR10 +X+Y pedestal — confirms raycast workaround works regardless of approach direction)",
   "diagnose_args": {
     "robot_path": "/World/UR10",
     "obstacles": [
@@ -63,6 +63,14 @@
       0.6,
       -0.4,
       0.75
+    ]
+  },
+  "motion_controllers": {
+    "verified": [
+      "direct_joint"
+    ],
+    "untested": [
+      "curobo"
     ]
   }
 }

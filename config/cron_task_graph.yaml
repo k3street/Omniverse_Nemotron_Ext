@@ -1,0 +1,1456 @@
+metadata:
+  created_date: "2026-05-15"
+  generator: "Phase 4 synthesis"
+  version: "1.0"
+  source_research:
+    - "docs/research/2026-05-15-q1-flow-architecture.md"
+    - "docs/research/2026-05-15-q2-canonical-format.md"
+    - "docs/research/2026-05-15-q3-retrieval-quality.md"
+    - "docs/research/2026-05-15-q4-template-drift.md"
+    - "docs/research/2026-05-15-q5-gemini-integration.md"
+    - "docs/research/2026-05-15-q6-canonical-pipeline.md"
+    - "docs/research/2026-05-15-q7-task-graph.md"
+    - "docs/research/2026-05-15-q8-iterative-retrieval.md"
+    - "docs/research/2026-05-14-l-levels-discovery-audit.md"
+  parent_spec: "docs/specs/2026-05-15-canonical-flow-standardization-spec.md"
+  execution_plan: "docs/specs/2026-05-15-autonomous-execution-plan.md"
+  total_tasks: 82
+  critical_path_task_count: 11
+  estimated_total_wall_time_hours: 148
+  agent_class_legend:
+    sonnet: "Pure file edits / analysis; runs autonomously in cron."
+    opus: "Synthesis with cross-doc reasoning; reserved for review-author cycles."
+    kit-rpc-sonnet: "Sonnet that touches Kit RPC at 127.0.0.1:8001. Single-tenant; sequential gating required."
+    human-review: "Anton manual approval gate."
+  estimated_minutes_legend: [5, 15, 30, 60, 120, 360]
+  priority_tier_legend:
+    1: "Must-do, blocks everything downstream."
+    2: "High-leverage; do after Tier-1."
+    3: "Nice-to-have / opportunistic."
+  concurrency_rules:
+    - "Kit-rpc-sonnet tasks MUST be serialized (no concurrent direct_eval per MEMORY.md kit_concurrency feedback)."
+    - "Restart uvicorn (port 8000) after every tool_executor edit per MEMORY.md service_restart feedback."
+    - "Restart Kit every ~30 canonicals per MEMORY.md kit_restart_autonomous feedback."
+    - "Never run parallel ChromaDB writes (HNSW segfault risk) per Q6 §7.5 + MEMORY.md."
+  halt_criteria:
+    or_gate: true
+    description: "Cron halts when ANY of the following fires. OR-semantics."
+    criteria:
+      - id: "quality_hit_at_1"
+        description: "30-prompt retrieval benchmark hit@1 ≥ 0.75"
+        measurement_command: "python scripts/qa/run_retrieval_benchmark.py --baseline workspace/benchmarks/retrieval_30prompts_v1.jsonl --metric hit_at_1 --threshold 0.75"
+        source: "Q3 §8 + Q7 §5.1"
+      - id: "quantity_yrkesroll"
+        description: "50 yrkesroll canonicals migrated with intent + roles + function-gate ✓"
+        measurement_command: |
+          python -c '
+          import json, glob
+          cnt = sum(1 for f in glob.glob("workspace/templates/CP-NEW-*.json") + glob.glob("workspace/templates/TP-*.json") if "intent" in json.load(open(f)) and "function-gate ✓" in json.load(open(f)).get("verified_status", ""))
+          print(cnt)
+          ' >= 50
+        source: "Q6 §6 + Q7 §5.2"
+      - id: "time_6_week_cap"
+        description: "6-week safety cap from start_date"
+        measurement_command: "42-day calendar check from metadata.start_date_stamp"
+        source: "Research-spec §7 Q5 + Q7 §5.3"
+      - id: "user_stop"
+        description: "User issues 'stop' / 'pause' / 'halt' via cron_state.user_signal"
+        source: "MEMORY feedback_dont_pause_in_autonomous_mode (implies explicit stop required)"
+  approval_cadence_rules:
+    - id: "every_10_tasks"
+      pause_type: "informational"
+      description: "Mini-report every 10 completed tasks; loop continues unless user stops"
+      source: "Q7 §7 + research-spec §7 Q6"
+    - id: "before_kit_hard_failure_restart"
+      pause_type: "blocking"
+      description: "Pause once if Kit died unexpectedly; routine drift-restart is autonomous per MEMORY"
+      source: "MEMORY feedback_kit_restart_autonomous"
+    - id: "before_template_delete"
+      pause_type: "blocking"
+      description: "Any template delete needs explicit Anton OK"
+      source: "MEMORY feedback_confirm_destructive_actions"
+    - id: "before_git_push_remote"
+      pause_type: "blocking"
+      description: "Cron does NOT auto-push; pushes go to anton remote (not k3street)"
+      source: "MEMORY feedback_isaac_assist_push_target + feedback_isaac_assist_pr_workflow"
+    - id: "before_final_spec_commit"
+      pause_type: "blocking"
+      description: "t82 final synthesis spec needs human review before commit"
+      source: "Q7 §7"
+
+tracks:
+  A_drift_remediation:
+    description: "Q4 outputs — eliminate misleading state in 321-template corpus"
+    tasks: [t01, t02, t03, t04, t05, t06, t07, t08, t09]
+  B_schema_migration:
+    description: "Q2 outputs — move from 5/321 to ~110/321 role-based schema; install CI conformance gate"
+    tasks: [t10, t11, t12, t13, t14, t15, t16, t17, t18]
+  C_retrieval:
+    description: "Q3 + Q8 outputs — 30-prompt benchmark, structural-filter expansion, iterative retrieval (conditional)"
+    tasks: [t19, t20, t21, t22, t23, t24, t25, t80]
+  D_gemini:
+    description: "Q5 outputs — Gemini Flash stress-test; model swap; tool-surface bug surfacing"
+    tasks: [t26, t27, t28, t29, t30, t31, t32, t33, t34, t35, t36, t37, t38]
+  E_flow_architecture:
+    description: "Q1 outputs — scout pass, workflow auto-route, spec post-condition gate (feature-flagged)"
+    tasks: [t39, t40, t41, t42, t43, t44]
+  F_canonical_creation:
+    description: "Q6 outputs — yrkesroll Tier-1 promotions, Top-20 bulk, role-migration"
+    tasks: [t45, t46, t47, t48, t49, t50, t51, t52, t53, t54, t55, t56, t57, t58, t59, t60]
+  G_workflow_plumbing:
+    description: "L-levels audit — workflow template registration, integration test, L-level pilot"
+    tasks: [t61, t62, t63, t64, t65]
+  H_infrastructure:
+    description: "Cross-cutting cron + honesty + docs"
+    tasks: [t66, t67, t68, t69, t70, t71, t72, t73, t74, t75, t76, t77, t78, t79, t81, t82]
+
+tasks:
+  # ---------------------------------------------------------------------
+  # TRACK A — Drift remediation (Q4)
+  # ---------------------------------------------------------------------
+
+  - id: t01
+    title: "Strip deprecated fields from CP-01/02/07/08 templates"
+    agent_class: sonnet
+    inputs: [t10]
+    outputs:
+      - "workspace/templates/CP-01.json (no benchmark_vs_alternatives, verified_date, verified_metrics)"
+      - "workspace/templates/CP-02.json (no verified_date, verified_metrics; add extends:'CP-01')"
+      - "workspace/templates/CP-07.json (no cube_path, delivery)"
+      - "workspace/templates/CP-08.json (move compute_stack_placement_verified_2026_05_07 to extension_notes)"
+    verification: "python scripts/lint/lint_canonical_templates.py --strict"
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q4 §3.2 + Q2 §6.3"
+    track: A_drift_remediation
+
+  - id: t02
+    title: "Fix extends_notes typo in CP-NEW-multi-amr-corridor"
+    agent_class: sonnet
+    inputs: [t10]
+    outputs:
+      - "workspace/templates/CP-NEW-multi-amr-corridor.json (extends_notes → extension_notes)"
+    verification: "grep -l extends_notes workspace/templates/*.json must return empty"
+    estimated_minutes: 5
+    risk_level: low
+    priority_tier: 3
+    cron_safe: true
+    source: "Q2 §3 + Q4 §3.2"
+    track: A_drift_remediation
+
+  - id: t03
+    title: "Delete CP-NEW-peg-in-hole-single (strict subset of CP-58)"
+    agent_class: human-review
+    inputs: []
+    outputs:
+      - "workspace/templates/CP-NEW-peg-in-hole-single.json removed"
+      - "git commit: 'delete CP-NEW-peg-in-hole-single (subset of CP-58)'"
+    verification: "test ! -f workspace/templates/CP-NEW-peg-in-hole-single.json"
+    estimated_minutes: 5
+    risk_level: low
+    priority_tier: 3
+    cron_safe: false
+    source: "Q4 §5.2; human-review per confirm_destructive_actions MEMORY"
+    track: A_drift_remediation
+    approval_gate: "Anton must approve delete"
+
+  - id: t04
+    title: "Remap 30 ghost TP-* IDs in role_template_index.py to existing CP templates"
+    agent_class: sonnet
+    inputs: [t10]
+    outputs:
+      - "service/isaac_assist_service/multimodal/role_template_index.py (TP-* entries point to existing CP-XX)"
+      - "docs/research/2026-05-15-tp-remap-table.md (the mapping)"
+    verification: |
+      python -c '
+      from service.isaac_assist_service.multimodal.role_template_index import ROLE_TEMPLATE_INDEX
+      from pathlib import Path
+      for e in ROLE_TEMPLATE_INDEX:
+          assert Path(f"workspace/templates/{e.template_id}.json").exists(), f"Ghost: {e.template_id}"
+      '
+    estimated_minutes: 120
+    risk_level: high
+    priority_tier: 1
+    cron_safe: true
+    source: "Q3 §3 Category D, §6; Q4 §5.1"
+    track: A_drift_remediation
+    note: "Largest single-task lift in Track A. Q4 calls this 'highest-risk structural issue'."
+
+  - id: t05
+    title: "Mark CP-NEW-opcua-12conveyors / plc-conveyor / plc-fixture as plumbing-only"
+    agent_class: sonnet
+    inputs: [t10]
+    outputs:
+      - "3 templates with verified_status='plumbing-only (no pick-place delivery)' + settle_state: null"
+    verification: "for f in CP-NEW-opcua-12conveyors CP-NEW-plc-conveyor CP-NEW-plc-fixture; do grep -q 'plumbing-only' workspace/templates/$f.json || exit 1; done"
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q4 §4.5 Sub-group E2; Q6 §7 Risk 1"
+    track: A_drift_remediation
+
+  - id: t06
+    title: "Run fresh form-gate on CP-67 or downgrade its verified_status"
+    agent_class: kit-rpc-sonnet
+    inputs: [t30]
+    outputs:
+      - "workspace/templates/CP-67.json (updated verified_status)"
+    verification: "python scripts/qa/function_gate_suite.py --filter CP-67 --runs 3"
+    estimated_minutes: 30
+    risk_level: med
+    priority_tier: 3
+    cron_safe: true
+    source: "Q4 §5.3"
+    track: A_drift_remediation
+
+  - id: t07
+    title: "Form-gate 3 priority D2 templates (CP-22, CP-46, CP-51)"
+    agent_class: kit-rpc-sonnet
+    inputs: [t30]
+    outputs:
+      - "3 templates: verified_status updated with form-gate outcome"
+      - "workspace/baselines/form-gate-d2-priority.json"
+    verification: "python scripts/qa/function_gate_suite.py --filter 'CP-22 CP-46 CP-51' --form-gate-only"
+    estimated_minutes: 120
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q4 §6 'Minimum viable remediation' bullet 6"
+    track: A_drift_remediation
+
+  - id: t08
+    title: "Form-gate remaining D2 templates (CP-35,37,40,48,52,53,57,60,62,65,68,76)"
+    agent_class: kit-rpc-sonnet
+    inputs: [t07]
+    outputs:
+      - "12 templates: verified_status updated"
+      - "workspace/baselines/form-gate-d2-bulk.json"
+    verification: "python scripts/qa/function_gate_suite.py --filter '<12-list>' --form-gate-only"
+    estimated_minutes: 360
+    risk_level: med
+    priority_tier: 3
+    cron_safe: true
+    source: "Q4 §4.4 sub-group D2"
+    track: A_drift_remediation
+
+  - id: t09
+    title: "Sweep 102 never-run T2 templates via QA campaign"
+    agent_class: kit-rpc-sonnet
+    inputs: [t30]
+    outputs:
+      - "workspace/baselines/t2-never-run-sweep.json"
+      - "102 templates either confirmed-shippable or flagged for re-author"
+    verification: "find workspace/baselines/t2-never-run-sweep*.json -mmin -1440"
+    estimated_minutes: 360
+    risk_level: low
+    priority_tier: 3
+    cron_safe: true
+    source: "Q4 §4.1; ~15 agent-hours total — split into 15 sub-batches if needed"
+    track: A_drift_remediation
+
+  # ---------------------------------------------------------------------
+  # TRACK B — Schema migration (Q2)
+  # ---------------------------------------------------------------------
+
+  - id: t10
+    title: "Build scripts/lint/lint_canonical_templates.py (conformance gate)"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "scripts/lint/lint_canonical_templates.py (pseudocode in Q2 §5)"
+      - ".github/workflows/ci.yml updated to run --strict"
+    verification: "python scripts/lint/lint_canonical_templates.py --strict; echo $? (exit 0 expected)"
+    estimated_minutes: 120
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q2 §5 'Conformance Check Tool Specification'"
+    track: B_schema_migration
+    critical_path: true
+    note: "CRITICAL PATH — gates Track A + B downstream tasks."
+
+  - id: t11
+    title: "Run offline migration: add intent (pattern_hint+counts+features) to 104 CP-06..87 + CP-NEW templates"
+    agent_class: sonnet
+    inputs: [t10]
+    outputs:
+      - "scripts/migration/add_intent_mechanically.py"
+      - "104 templates with new intent field (no human review yet)"
+    verification: |
+      python -c 'import json,glob; cnt=sum(1 for f in glob.glob("workspace/templates/CP-*.json") if "intent" in json.load(open(f))); assert cnt>=109'
+    estimated_minutes: 120
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q2 §4.2 (mechanically-inferable fields); §6.4 row 'Phase 0'"
+    track: B_schema_migration
+
+  - id: t12
+    title: "Human-verify mechanically-assigned pattern_hint for 104 templates"
+    agent_class: human-review
+    inputs: [t11]
+    outputs:
+      - "0-15 corrections committed to templates"
+    verification: "git log --oneline workspace/templates/ --since='last 7 days' | wc -l"
+    estimated_minutes: 120
+    risk_level: med
+    priority_tier: 2
+    cron_safe: false
+    source: "Q2 §4.4 Phase 1"
+    track: B_schema_migration
+    approval_gate: "Anton spot-checks ~14 templates expected to need fixes"
+
+  - id: t13
+    title: "Fill settle_state in ~24 CP templates via existing extractor functions"
+    agent_class: sonnet
+    inputs: [t10]
+    outputs:
+      - "scripts/migration/fill_settle_state.py"
+      - "~24 templates with new settle_state field"
+    verification: "python scripts/lint/lint_canonical_templates.py --warn-roles 2>&1 | grep -c 'T5_MISSING_SETTLE_STATE' (must decrease)"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q2 §4.2 (i); §6.4 row 'Phase 0b'"
+    track: B_schema_migration
+
+  - id: t14
+    title: "Author roles + role_defaults for 22 CP-NEW templates"
+    agent_class: sonnet
+    inputs: [t11, t17]
+    outputs:
+      - "22 CP-NEW templates with roles + role_defaults populated"
+    verification: |
+      python -c 'import json,glob; cnt=sum(1 for f in glob.glob("workspace/templates/CP-NEW-*.json") if "roles" in json.load(open(f))); assert cnt==22'
+    estimated_minutes: 360
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q2 §4.4 Phase 2"
+    track: B_schema_migration
+
+  - id: t15
+    title: "Author roles + role_defaults for CP-06..87 (82 templates)"
+    agent_class: sonnet
+    inputs: [t14]
+    outputs:
+      - "82 CP-numeric templates with roles populated"
+    verification: "python scripts/lint/lint_canonical_templates.py --warn-roles; R1_MISSING_INTENT count must approach 0"
+    estimated_minutes: 360
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q2 §4.4 Phase 2 (~78 person-hours estimate); split into 5 batches of ~16"
+    track: B_schema_migration
+
+  - id: t16
+    title: "Generate code_template for 104 templates via {{role.field}} substitution"
+    agent_class: sonnet
+    inputs: [t15]
+    outputs:
+      - "104 templates with code_template field"
+    verification: "pytest tests/test_role_template_equivalence.py -k 'CP-' (must pass for all 104)"
+    estimated_minutes: 360
+    risk_level: high
+    priority_tier: 2
+    cron_safe: true
+    source: "Q2 §4.4 Phase 3"
+    track: B_schema_migration
+
+  - id: t17
+    title: "Extend test_role_template_equivalence.py to parametrize over all role-bearing templates"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "tests/test_role_template_equivalence.py (parametrize beyond CP-01..05)"
+    verification: "pytest tests/test_role_template_equivalence.py --collect-only | wc -l > 5"
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §7 Risk 4 + Q2 §6.2"
+    track: B_schema_migration
+    note: "MUST land before t14 → t15 → t16 to detect regressions."
+
+  - id: t18
+    title: "Wire lint + equivalence test into CI as commit gate"
+    agent_class: sonnet
+    inputs: [t10, t17]
+    outputs:
+      - ".github/workflows/ci.yml (lint + pytest steps)"
+    verification: "gh workflow view CI shows lint_canonical_templates step"
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q2 §5 'Gate integration'"
+    track: B_schema_migration
+
+  # ---------------------------------------------------------------------
+  # TRACK C — Retrieval benchmark + iterative retrieval (Q3 + Q8)
+  # ---------------------------------------------------------------------
+
+  - id: t19
+    title: "Build 30-prompt retrieval benchmark with ground-truth labels"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "workspace/benchmarks/retrieval_30prompts_v1.jsonl (30 rows: prompt, ground_truth, expected_mode)"
+      - "scripts/qa/run_retrieval_benchmark.py (pseudocode in Q3 §8)"
+    verification: "wc -l workspace/benchmarks/retrieval_30prompts_v1.jsonl (must equal 30)"
+    estimated_minutes: 120
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q3 §8 + Q3 §9 + Q8 §10.4"
+    track: C_retrieval
+    critical_path: true
+    note: "CRITICAL PATH — Track C anchor."
+
+  - id: t20
+    title: "Run retrieval benchmark on current similarity-only path; record hit@1, hit@3, mode_accuracy"
+    agent_class: sonnet
+    inputs: [t19]
+    outputs:
+      - "workspace/baselines/retrieval-baseline-30prompts-v1.json"
+    verification: "python scripts/qa/run_retrieval_benchmark.py --baseline (file exists with hit_at_1 key)"
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q3 §2b + §9"
+    track: C_retrieval
+    critical_path: true
+
+  - id: t21
+    title: "Add evaluate_candidates tool + iterative_retriever.py (Q8 §8 — gated on Phase 2 outcome)"
+    agent_class: sonnet
+    inputs: [t20]
+    outputs:
+      - "service/isaac_assist_service/chat/tools/iterative_retriever.py (~250 LOC per Q8 §8.1)"
+      - "service/isaac_assist_service/chat/orchestrator.py (env-gated ITERATIVE_RETRIEVAL wrap, ~50 LOC)"
+      - "tests/test_iterative_retriever.py (~150 LOC, per Q8 §8.1)"
+    verification: "pytest tests/test_iterative_retriever.py"
+    estimated_minutes: 360
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q3 §4 + Q8 §1-§8"
+    track: C_retrieval
+    note: "RESTART uvicorn after this lands. Conditional on t20 outcome per Q8 §10.4."
+
+  - id: t22
+    title: "A/B test: iterative retrieval vs single-shot on 30 prompts"
+    agent_class: sonnet
+    inputs: [t21]
+    outputs:
+      - "workspace/baselines/retrieval-iterative-vs-single.json"
+      - "docs/research/2026-05-XX-iterative-retrieval-ab-results.md"
+    verification: "grep delta_hit_at_1 workspace/baselines/retrieval-iterative-vs-single*.json"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q3 §4 + Q8 §7"
+    track: C_retrieval
+
+  - id: t23
+    title: "Wire RoleRetriever as pre-filter in orchestrator (after ghost-corpus fix)"
+    agent_class: sonnet
+    inputs: [t04]
+    outputs:
+      - "service/isaac_assist_service/chat/orchestrator.py (role-hint extraction + pre-filter block)"
+      - "service/isaac_assist_service/chat/tools/role_retriever.py (any minor wiring fixes)"
+    verification: "pytest tests/test_role_based_templates.py -k integration"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q3 §6 'Recommended wiring order' Step 1+3+4"
+    track: C_retrieval
+    note: "RESTART uvicorn after this lands."
+
+  - id: t24
+    title: "Validate intent corpus for CP-06..30 (post t11+t12)"
+    agent_class: sonnet
+    inputs: [t11, t12]
+    outputs:
+      - "Verification that 25 CP templates have intent field"
+    verification: |
+      python -c 'import json; [exit(1) for f in [f"workspace/templates/CP-{i:02d}.json" for i in range(6,31)] if "intent" not in json.load(open(f))]'
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q3 §9 'Immediate improvements' bullet 3"
+    track: C_retrieval
+
+  - id: t25
+    title: "Enable MULTIMODAL_TEXT_INTENT=on after intent corpus has ≥30 templates"
+    agent_class: human-review
+    inputs: [t24, t22]
+    outputs:
+      - ".env or config/feature_flags.yaml entry"
+    verification: "grep MULTIMODAL_TEXT_INTENT .env (must show on)"
+    estimated_minutes: 5
+    risk_level: med
+    priority_tier: 2
+    cron_safe: false
+    source: "Q3 §9 'Unlock MULTIMODAL_TEXT_INTENT=on'"
+    track: C_retrieval
+    approval_gate: "Anton flips the production env flag"
+
+  # ---------------------------------------------------------------------
+  # TRACK D — Gemini integration (Q5)
+  # ---------------------------------------------------------------------
+
+  - id: t26
+    title: "Set up .env.local with LLM_MODE=cloud + GEMINI_API_KEY + CLOUD_MODEL_NAME=gemini-2.5-flash"
+    agent_class: human-review
+    inputs: []
+    outputs:
+      - ".env.local (with secrets — NOT committed)"
+    verification: |
+      python -c 'from service.isaac_assist_service.chat.provider_factory import get_default_provider; print(type(get_default_provider()))'
+    estimated_minutes: 15
+    risk_level: low
+    priority_tier: 1
+    cron_safe: false
+    source: "Q5 §2 'What needs to be done' row 1"
+    track: D_gemini
+    critical_path: true
+    approval_gate: "Anton provides Gemini API key"
+
+  - id: t27
+    title: "Smoke-test 3 trivial prompts (G-01, G-02, CW-01) with Gemini Flash backend"
+    agent_class: kit-rpc-sonnet
+    inputs: [t26, t30]
+    outputs:
+      - "workspace/baselines/gemini_smoke.json (3 prompts, success status)"
+    verification: "grep success workspace/baselines/gemini_smoke*.json"
+    estimated_minutes: 30
+    risk_level: high
+    priority_tier: 1
+    cron_safe: true
+    source: "Q5 §5 Day 1"
+    track: D_gemini
+
+  - id: t28
+    title: "Full 30-prompt Gemini baseline run"
+    agent_class: kit-rpc-sonnet
+    inputs: [t27]
+    outputs:
+      - "workspace/baselines/flash_baseline_run1.jsonl"
+    verification: "wc -l workspace/baselines/flash_baseline_run1.jsonl (must equal 30)"
+    estimated_minutes: 120
+    risk_level: med
+    priority_tier: 1
+    cron_safe: true
+    source: "Q5 §5 Day 2; cost ~$0.57"
+    track: D_gemini
+
+  - id: t29
+    title: "Analyze flash_baseline_run1 — categorize failures into A/B/C/D"
+    agent_class: opus
+    inputs: [t28]
+    outputs:
+      - "docs/research/2026-05-XX-flash-failure-analysis.md"
+      - "docs/research/2026-05-XX-tool-surface-bug-list.md (Cat A+B)"
+    verification: "grep -c 'category: A' docs/research/2026-05-XX-flash-failure-analysis.md"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q5 §5 Day 3"
+    track: D_gemini
+    note: "Opus synthesis required — cross-doc reasoning over Q5 §6 stress dimensions + Q5 §9 predicted bugs."
+
+  - id: t30
+    title: "Verify kit_supervisor.py + cron infrastructure is healthy"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "audit report: docs/research/2026-05-XX-kit-supervisor-audit.md"
+    verification: "python scripts/qa/kit_supervisor.py --health-check"
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Spec 2 §18 Kit Supervisor; MEMORY kit_restart_autonomous"
+    track: D_gemini
+    critical_path: true
+    note: "Anchors all kit-rpc-sonnet tasks. Must pass before t06/t07/t08/t27 etc."
+
+  - id: t31
+    title: "Fix 3-5 highest-confidence tool-surface bugs from t29"
+    agent_class: sonnet
+    inputs: [t29]
+    outputs:
+      - "tool_schemas.py edits (pattern annotations, description rewrites)"
+      - "tool_executor.py error-message edits"
+    verification: "pytest tests/ -k 'schema' (must still pass)"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 1
+    cron_safe: true
+    source: "Q5 §5 Day 4"
+    track: D_gemini
+    note: "RESTART uvicorn after edits."
+
+  - id: t32
+    title: "Re-run failing subset of flash_baseline after t31 fixes"
+    agent_class: kit-rpc-sonnet
+    inputs: [t31]
+    outputs:
+      - "workspace/baselines/flash_baseline_run2.jsonl"
+    verification: "diff workspace/baselines/flash_baseline_run{1,2}.jsonl"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q5 §5 Day 4"
+    track: D_gemini
+
+  - id: t33
+    title: "Full corpus re-run with all fixes (Day 5)"
+    agent_class: kit-rpc-sonnet
+    inputs: [t32]
+    outputs:
+      - "workspace/baselines/flash_run_final_old_model.jsonl"
+    verification: "grep success_rate workspace/baselines/flash_run_final_old_model.jsonl"
+    estimated_minutes: 120
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q5 §5 Day 5"
+    track: D_gemini
+
+  - id: t34
+    title: "Round-2 tool-surface fixes (3-5 more bugs)"
+    agent_class: sonnet
+    inputs: [t33]
+    outputs:
+      - "tool_schemas.py + tool_executor.py round-2 edits"
+    verification: "pytest tests/ -k 'schema or surface'"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q5 §5 Day 6"
+    track: D_gemini
+    note: "RESTART uvicorn."
+
+  - id: t35
+    title: "Run model swap protocol on Day 7 (~2026-05-22): control run + new model"
+    agent_class: kit-rpc-sonnet
+    inputs: [t33]
+    outputs:
+      - "workspace/baselines/flash_new_model_run1.jsonl"
+      - "workspace/baselines/flash_control_run.jsonl"
+    verification: "ls workspace/baselines/flash_*.jsonl (must have both files)"
+    estimated_minutes: 120
+    risk_level: med
+    priority_tier: 1
+    cron_safe: true
+    source: "Q5 §7 protocol Step 1-5"
+    track: D_gemini
+
+  - id: t36
+    title: "Three-way attribution analysis (Δ_harness vs Δ_model)"
+    agent_class: opus
+    inputs: [t35]
+    outputs:
+      - "docs/research/2026-05-XX-gemini-attribution-results.md"
+    verification: "grep delta_harness docs/research/2026-05-XX-gemini-attribution-results.md"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q5 §7.2 'Attribution logic'"
+    track: D_gemini
+
+  - id: t37
+    title: "Final Day-10 corpus run with best model + all patches"
+    agent_class: kit-rpc-sonnet
+    inputs: [t36, t34]
+    outputs:
+      - "workspace/baselines/flash_final_full_corpus.jsonl"
+      - "docs/research/2026-05-XX-gemini-final-findings.md"
+    verification: "grep success_rate workspace/baselines/flash_final_full_corpus.jsonl"
+    estimated_minutes: 120
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q5 §5 Day 10"
+    track: D_gemini
+
+  - id: t38
+    title: "Build scripts/qa/tool_audit_flash.py (Claude-isms scanner)"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "scripts/qa/tool_audit_flash.py (~100 LOC)"
+      - "docs/research/2026-05-XX-tool-audit-flash-report.md"
+    verification: "python scripts/qa/tool_audit_flash.py --json | jq .total_warnings"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q5 §2 + §3.1-3.3"
+    track: D_gemini
+
+  # ---------------------------------------------------------------------
+  # TRACK E — Flow architecture (Q1)
+  # ---------------------------------------------------------------------
+
+  - id: t39
+    title: "Add explicit scout pass for scene_diagnose intent (Q1 §5.1)"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "service/isaac_assist_service/chat/orchestrator.py (+80 LOC scout-mode gate)"
+      - "service/isaac_assist_service/chat/context_distiller.py (+20 LOC hint)"
+      - "tests/test_scout_pass.py"
+    verification: "pytest tests/test_scout_pass.py"
+    estimated_minutes: 120
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q1 §5.1"
+    track: E_flow_architecture
+    note: "RESTART uvicorn after edit."
+
+  - id: t40
+    title: "Auto-route patch_request × complex to start_workflow when keyword heuristic matches"
+    agent_class: sonnet
+    inputs: [t41]
+    outputs:
+      - "service/isaac_assist_service/chat/orchestrator.py (+50 LOC)"
+      - "service/isaac_assist_service/chat/intent_router.py (+10 LOC)"
+      - "tests/test_workflow_auto_route.py"
+    verification: "pytest tests/test_workflow_auto_route.py"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q1 §5.2"
+    track: E_flow_architecture
+    note: "RESTART uvicorn after edit."
+
+  - id: t41
+    title: "Register Phase 34/35/36 workflow templates in _WORKFLOW_TEMPLATES"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "service/isaac_assist_service/chat/_state.py (or workflow.py): expanded _WORKFLOW_TEMPLATES"
+      - "tests/test_workflow_template_registration.py"
+    verification: |
+      python -c 'from service.isaac_assist_service.chat.workflow import _WORKFLOW_TEMPLATES; assert len(_WORKFLOW_TEMPLATES)>3'
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "L-levels audit §3(b); Q1 §2 Mode C"
+    track: E_flow_architecture
+    critical_path: true
+    note: "CRITICAL PATH — unblocks workflow auto-route. RESTART uvicorn."
+
+  - id: t42
+    title: "Enforce spec post-conditions in tool loop (mandatory step gate, feature-flagged)"
+    agent_class: sonnet
+    inputs: [t41]
+    outputs:
+      - "service/isaac_assist_service/chat/orchestrator.py (+100 LOC step tracker)"
+      - "service/isaac_assist_service/chat/spec_generator.py (+30 LOC)"
+      - "tests/test_spec_step_gate.py"
+    verification: "pytest tests/test_spec_step_gate.py"
+    estimated_minutes: 120
+    risk_level: high
+    priority_tier: 3
+    cron_safe: true
+    source: "Q1 §5.3 — flagged 'Risk: Medium' due to loop risk"
+    track: E_flow_architecture
+    note: "RESTART uvicorn. Risk is medium-high; gate behind SPEC_STEP_GATE=off env flag."
+
+  - id: t43
+    title: "Write end-to-end test_flow_routing.py covering all intent×complexity buckets"
+    agent_class: sonnet
+    inputs: [t39, t40]
+    outputs:
+      - "tests/test_flow_routing.py (24-bucket coverage)"
+    verification: "pytest tests/test_flow_routing.py -v"
+    estimated_minutes: 120
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q1 §2 Mode E"
+    track: E_flow_architecture
+
+  - id: t44
+    title: "Replace implicit if/elif routing with explicit routing table in orchestrator"
+    agent_class: opus
+    inputs: [t43]
+    outputs:
+      - "service/isaac_assist_service/chat/flow_router.py (new module)"
+      - "service/isaac_assist_service/chat/orchestrator.py (uses flow_router)"
+    verification: "pytest tests/test_flow_routing.py + grep flow_router orchestrator.py"
+    estimated_minutes: 360
+    risk_level: high
+    priority_tier: 3
+    cron_safe: true
+    source: "Q1 §4 + §8"
+    track: E_flow_architecture
+    note: "Major refactor; opus synthesis required. RESTART uvicorn. Opportunistic."
+
+  # ---------------------------------------------------------------------
+  # TRACK F — Canonical creation (Q6)
+  # ---------------------------------------------------------------------
+
+  - id: t45
+    title: "Build canonical_draft_job.py 4-stage pipeline (Q6 §8 pseudocode)"
+    agent_class: sonnet
+    inputs: [t10]
+    outputs:
+      - "scripts/qa/canonical_draft_job.py (Stage 1-4 + _file_for_review)"
+      - "docs/review/pending/.gitkeep"
+    verification: "python scripts/qa/canonical_draft_job.py --help"
+    estimated_minutes: 360
+    risk_level: med
+    priority_tier: 1
+    cron_safe: true
+    source: "Q6 §8"
+    track: F_canonical_creation
+    critical_path: true
+    note: "CRITICAL PATH — Track F anchor."
+
+  - id: t46
+    title: "Promote CP-NEW-inspect-reject: add roles, run function-gate"
+    agent_class: kit-rpc-sonnet
+    inputs: [t45, t30]
+    outputs:
+      - "workspace/templates/CP-NEW-inspect-reject.json (verified_status function-gate ✓)"
+    verification: "python scripts/qa/function_gate_suite.py --filter CP-NEW-inspect-reject --runs 5 --threshold 3"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §5 Tier 1 #1"
+    track: F_canonical_creation
+
+  - id: t47
+    title: "Promote CP-NEW-defect-sdg: fix material_path, add roles, function-gate"
+    agent_class: kit-rpc-sonnet
+    inputs: [t45, t30]
+    outputs:
+      - "workspace/templates/CP-NEW-defect-sdg.json (verified)"
+    verification: "python scripts/qa/function_gate_suite.py --filter CP-NEW-defect-sdg --runs 5"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §5 Tier 1 #2"
+    track: F_canonical_creation
+
+  - id: t48
+    title: "Promote CP-NEW-dr-curriculum"
+    agent_class: kit-rpc-sonnet
+    inputs: [t45, t30]
+    outputs:
+      - "workspace/templates/CP-NEW-dr-curriculum.json (verified)"
+    verification: "function_gate_suite --filter CP-NEW-dr-curriculum --runs 5"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §5 Tier 1 #3"
+    track: F_canonical_creation
+
+  - id: t49
+    title: "Promote CP-NEW-y-merge-singulation"
+    agent_class: kit-rpc-sonnet
+    inputs: [t45, t30]
+    outputs:
+      - "workspace/templates/CP-NEW-y-merge-singulation.json (verified)"
+    verification: "function_gate_suite --filter CP-NEW-y-merge-singulation --runs 5"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §5 Tier 1 #4"
+    track: F_canonical_creation
+
+  - id: t50
+    title: "Promote CP-NEW-3station-oee: add metric emission"
+    agent_class: kit-rpc-sonnet
+    inputs: [t45, t30]
+    outputs:
+      - "workspace/templates/CP-NEW-3station-oee.json (verified)"
+    verification: "function_gate_suite --filter CP-NEW-3station-oee --runs 5"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §5 Tier 1 #5"
+    track: F_canonical_creation
+
+  - id: t51
+    title: "Promote CP-NEW-controller-shootout-cp"
+    agent_class: kit-rpc-sonnet
+    inputs: [t45, t30]
+    outputs:
+      - "workspace/templates/CP-NEW-controller-shootout-cp.json (verified)"
+    verification: "function_gate_suite --filter CP-NEW-controller-shootout-cp --runs 5"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §5 Tier 1 #6"
+    track: F_canonical_creation
+
+  - id: t52
+    title: "Promote CP-NEW-multi-cam-triangulation"
+    agent_class: kit-rpc-sonnet
+    inputs: [t45, t30]
+    outputs:
+      - "workspace/templates/CP-NEW-multi-cam-triangulation.json (verified)"
+    verification: "function_gate_suite --filter CP-NEW-multi-cam-triangulation --runs 5"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §5 Tier 1 #7"
+    track: F_canonical_creation
+
+  - id: t53
+    title: "Promote CP-NEW-rl-clone-env: fix clone_envs API"
+    agent_class: kit-rpc-sonnet
+    inputs: [t50]
+    outputs:
+      - "workspace/templates/CP-NEW-rl-clone-env.json (verified or downgrade)"
+    verification: "function_gate_suite --filter CP-NEW-rl-clone-env --runs 5"
+    estimated_minutes: 120
+    risk_level: high
+    priority_tier: 3
+    cron_safe: true
+    source: "Q6 §5 Tier 2 #8 (RSL-RL may not be installed)"
+    track: F_canonical_creation
+
+  - id: t54
+    title: "Promote CP-NEW-sim2real-gap: fix rosbag path"
+    agent_class: kit-rpc-sonnet
+    inputs: [t50]
+    outputs:
+      - "workspace/templates/CP-NEW-sim2real-gap.json"
+    verification: "function_gate_suite --filter CP-NEW-sim2real-gap --runs 5"
+    estimated_minutes: 60
+    risk_level: high
+    priority_tier: 3
+    cron_safe: true
+    source: "Q6 §5 Tier 2 #9"
+    track: F_canonical_creation
+
+  - id: t55
+    title: "Promote CP-NEW-multi-amr-corridor (after t02 typo fix)"
+    agent_class: kit-rpc-sonnet
+    inputs: [t02]
+    outputs:
+      - "workspace/templates/CP-NEW-multi-amr-corridor.json"
+    verification: "function_gate_suite --filter CP-NEW-multi-amr-corridor --runs 5"
+    estimated_minutes: 120
+    risk_level: high
+    priority_tier: 3
+    cron_safe: true
+    source: "Q6 §5 Tier 2 #10"
+    track: F_canonical_creation
+
+  - id: t56
+    title: "Bulk-draft top-20 yrkesroll canonicals via canonical_draft_job (Stage 1 only)"
+    agent_class: sonnet
+    inputs: [t45]
+    outputs:
+      - "docs/review/pending/yrkesroll_top20_drafts_*.json (~20 draft files)"
+    verification: "ls docs/review/pending/yrkesroll_top20_*.json | wc -l"
+    estimated_minutes: 360
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §4 + §5 Tier 1-2"
+    track: F_canonical_creation
+
+  - id: t57
+    title: "Sequentially Kit-verify top-20 yrkesroll drafts (4 batches of ~5, Kit restart between)"
+    agent_class: kit-rpc-sonnet
+    inputs: [t56]
+    outputs:
+      - "~10-12 yrkesroll templates promoted to function-gate ✓"
+      - "~8-10 filed for human-review in docs/review/pending/"
+    verification: "grep -c 'function-gate ✓' workspace/templates/CP-NEW-*.json"
+    estimated_minutes: 360
+    risk_level: high
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §4 + §6"
+    track: F_canonical_creation
+    note: "Kit restart embedded in cron loop every ~30 canonicals per MEMORY."
+
+  - id: t58
+    title: "Apply role-migration (Stage 3) to all newly-verified yrkesroll templates"
+    agent_class: sonnet
+    inputs: [t57, t14]
+    outputs:
+      - "verified templates now have intent + roles + role_defaults + code_template"
+    verification: "pytest tests/test_role_template_equivalence.py -k CP-NEW"
+    estimated_minutes: 120
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §4 Step 7"
+    track: F_canonical_creation
+
+  - id: t59
+    title: "Re-index ChromaDB after role-migration wave (single-process write)"
+    agent_class: sonnet
+    inputs: [t58]
+    outputs:
+      - "workspace/tool_index/* (updated isaac_assist_templates collection)"
+    verification: "python -m scripts.qa.add_templates_from_tasks --verify-count"
+    estimated_minutes: 30
+    risk_level: high
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §7 Risk 5; MEMORY ChromaDB warning"
+    track: F_canonical_creation
+    note: "Single-process; acquire file lock. Never fan out."
+
+  - id: t60
+    title: "Implement precheck_template_assets() per Phase 78c (asset dependency manifest)"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "service/isaac_assist_service/chat/tools/handlers/asset_precheck.py"
+      - "service/isaac_assist_service/chat/tools/handlers/asset_mock_fallbacks.py"
+    verification: "pytest tests/test_asset_precheck.py"
+    estimated_minutes: 360
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §4 Step 3; Q6 §7 Risk 3"
+    track: F_canonical_creation
+    note: "Specs IA_FULL_SPEC_2026-05-10.md line 5679. Unblocks Tier 4 yrkesroll later."
+
+  # ---------------------------------------------------------------------
+  # TRACK G — Workflow plumbing (L-levels audit)
+  # ---------------------------------------------------------------------
+
+  - id: t61
+    title: "Audit Phase 34/35/36 template data structures vs _WORKFLOW_TEMPLATES schema"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "docs/research/2026-05-XX-workflow-template-audit.md"
+    verification: "grep -l 'Phase 3[456]' service/isaac_assist_service/chat/*.py"
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "L-levels audit §3(b)"
+    track: G_workflow_plumbing
+
+  - id: t62
+    title: "End-to-end test: prompt → orchestrator → workflow_auto_route → start_workflow → completion"
+    agent_class: sonnet
+    inputs: [t41, t40]
+    outputs:
+      - "tests/test_workflow_end_to_end.py"
+    verification: "pytest tests/test_workflow_end_to_end.py"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 2
+    cron_safe: true
+    source: "L-levels audit §3 'Missing tests' bullet 4"
+    track: G_workflow_plumbing
+
+  - id: t63
+    title: "Pilot: annotate 20 tools with x-action-level (L1|L2|L3) per Phase 18b"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "service/isaac_assist_service/chat/tool_schemas.py (20 sample annotations)"
+      - "docs/research/2026-05-XX-l-levels-pilot-results.md"
+    verification: "grep -c 'x-action-level' service/isaac_assist_service/chat/tool_schemas.py (must be ≥20)"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 3
+    cron_safe: true
+    source: "L-levels audit 'L1/L2/L3 tool annotation 0/416 deferred'"
+    track: G_workflow_plumbing
+
+  - id: t64
+    title: "Design doc: whether/how to route on tool L-level at orchestrator"
+    agent_class: opus
+    inputs: [t63]
+    outputs:
+      - "docs/specs/2026-05-XX-l-levels-router-design.md"
+    verification: "test -s docs/specs/2026-05-XX-l-levels-router-design.md"
+    estimated_minutes: 120
+    risk_level: low
+    priority_tier: 3
+    cron_safe: true
+    source: "L-levels audit §3(c)"
+    track: G_workflow_plumbing
+
+  - id: t65
+    title: "Unify the 2 hand-wired verifiers + feature-dispatched verifiers"
+    agent_class: sonnet
+    inputs: [t61]
+    outputs:
+      - "service/isaac_assist_service/chat/verifiers/registry.py"
+      - "tests/test_verifier_registry.py"
+    verification: "pytest tests/test_verifier_registry.py"
+    estimated_minutes: 120
+    risk_level: med
+    priority_tier: 3
+    cron_safe: true
+    source: "L-levels audit gaps 'Verifier registry'"
+    track: G_workflow_plumbing
+    note: "RESTART uvicorn."
+
+  # ---------------------------------------------------------------------
+  # TRACK H — Cross-cutting infrastructure
+  # ---------------------------------------------------------------------
+
+  - id: t66
+    title: "Materialize this task graph as config/cron_task_graph.yaml (machine-parseable)"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "config/cron_task_graph.yaml (THIS FILE — already in repo as deliverable)"
+    verification: |
+      python -c 'import yaml; yaml.safe_load(open("config/cron_task_graph.yaml"))'
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Research-spec §4"
+    track: H_infrastructure
+
+  - id: t67
+    title: "Build cron dispatcher that reads task graph + dispatches Sonnet agents respecting dependencies"
+    agent_class: sonnet
+    inputs: [t66]
+    outputs:
+      - "scripts/qa/cron_dispatcher.py"
+      - "scripts/qa/cron_state_store.py (SQLite or JSONL)"
+    verification: "python scripts/qa/cron_dispatcher.py --dry-run"
+    estimated_minutes: 360
+    risk_level: med
+    priority_tier: 1
+    cron_safe: true
+    source: "Research-spec context; Spec 2 §18 Kit Supervisor"
+    track: H_infrastructure
+    critical_path: true
+    note: "CRITICAL PATH — anchors autonomous loop."
+
+  - id: t68
+    title: "Build cron failure-recovery decision tree (retry → re-author → escalate)"
+    agent_class: sonnet
+    inputs: [t67]
+    outputs:
+      - "scripts/qa/cron_recovery.py (handles retry-N, re-author, escalate)"
+    verification: "pytest tests/test_cron_recovery.py"
+    estimated_minutes: 60
+    risk_level: med
+    priority_tier: 1
+    cron_safe: true
+    source: "Q7 §6 failure-recovery rules; this YAML's halt_criteria"
+    track: H_infrastructure
+
+  - id: t69
+    title: "Mini-report generator: every 10 completed tasks, write report + ping user"
+    agent_class: sonnet
+    inputs: [t67]
+    outputs:
+      - "scripts/qa/cron_mini_report.py"
+      - "docs/cron/reports/.gitkeep"
+    verification: "python scripts/qa/cron_mini_report.py --tail 10"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q7 §7; MEMORY dont_pause_in_autonomous_mode"
+    track: H_infrastructure
+
+  - id: t70
+    title: "Integrate Kit restart into cron dispatcher (every ~30 kit-touching tasks)"
+    agent_class: sonnet
+    inputs: [t67, t30]
+    outputs:
+      - "scripts/qa/cron_dispatcher.py (with kit-restart hook)"
+    verification: "grep _restart_kit scripts/qa/cron_dispatcher.py"
+    estimated_minutes: 30
+    risk_level: med
+    priority_tier: 1
+    cron_safe: true
+    source: "MEMORY kit_restart_autonomous; Q6 §6"
+    track: H_infrastructure
+
+  - id: t71
+    title: "Add uvicorn restart hook after any tool_executor edit"
+    agent_class: sonnet
+    inputs: [t67]
+    outputs:
+      - "scripts/qa/cron_dispatcher.py (post-edit hook + lockfile)"
+    verification: "grep _restart_uvicorn scripts/qa/cron_dispatcher.py"
+    estimated_minutes: 30
+    risk_level: high
+    priority_tier: 1
+    cron_safe: true
+    source: "MEMORY service_restart — direct_eval silently tests stale code without restart"
+    track: H_infrastructure
+
+  - id: t72
+    title: "Read-only dashboard listing docs/review/pending items + categorize by reason"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "scripts/qa/review_queue_dashboard.py"
+      - "docs/review/INDEX.md (live-generated)"
+    verification: "python scripts/qa/review_queue_dashboard.py --markdown > /tmp/r && grep pending /tmp/r"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §8 _file_for_review pattern"
+    track: H_infrastructure
+
+  - id: t73
+    title: "Define honesty-check schema: each task output must declare success/fail/partial + cite verification"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "docs/cron/honesty_schema.md"
+      - "scripts/qa/cron_honesty_check.py"
+    verification: "python scripts/qa/cron_honesty_check.py --self-test"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "MEMORY feedback_diligence_no_false_positives; Q4 §7 'Honesty notes'"
+    track: H_infrastructure
+
+  - id: t74
+    title: "Wire post-commit hook for ChromaDB indexing (with file lock)"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - ".git/hooks/post-commit (chromadb reindex w/ flock)"
+      - "scripts/qa/safe_reindex.py"
+    verification: "test -x .git/hooks/post-commit && grep flock .git/hooks/post-commit"
+    estimated_minutes: 60
+    risk_level: high
+    priority_tier: 2
+    cron_safe: true
+    source: "Q6 §7 Risk 5; MEMORY ChromaDB warning"
+    track: H_infrastructure
+
+  - id: t75
+    title: "Add regression test: parallel direct_eval against same Kit must fail-fast or serialize"
+    agent_class: sonnet
+    inputs: [t67]
+    outputs:
+      - "tests/test_kit_concurrency_guard.py"
+    verification: "pytest tests/test_kit_concurrency_guard.py"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 2
+    cron_safe: true
+    source: "MEMORY kit_concurrency"
+    track: H_infrastructure
+
+  - id: t76
+    title: "Materialize Q2 §3 CanonicalTemplate interface as TypeScript .d.ts for tooling"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "service/isaac_assist_service/multimodal/canonical_template.d.ts"
+    verification: "tsc --noEmit service/isaac_assist_service/multimodal/canonical_template.d.ts"
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 3
+    cron_safe: true
+    source: "Q2 §3"
+    track: H_infrastructure
+
+  - id: t77
+    title: "Build docs/research/INDEX.md indexing all Q1-Q8 research outputs + cross-refs"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "docs/research/INDEX.md"
+    verification: "test -s docs/research/INDEX.md"
+    estimated_minutes: 30
+    risk_level: low
+    priority_tier: 3
+    cron_safe: true
+    source: "Research-spec §4"
+    track: H_infrastructure
+
+  - id: t78
+    title: "Implement halting criteria check in cron dispatcher (hit@1 ≥ 0.75 OR 50 yrkesroll OR 6-week)"
+    agent_class: sonnet
+    inputs: [t67, t19]
+    outputs:
+      - "scripts/qa/cron_halting.py"
+    verification: "python scripts/qa/cron_halting.py --check (returns continue|halt + reason)"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q7 §5; this YAML halt_criteria block"
+    track: H_infrastructure
+    critical_path: true
+
+  - id: t79
+    title: "Snapshot full template-corpus state pre-migration (rollback safety net)"
+    agent_class: sonnet
+    inputs: []
+    outputs:
+      - "workspace/baselines/templates_corpus_snapshot_2026-05-XX.tar.gz"
+    verification: "tar tzf workspace/baselines/templates_corpus_snapshot_*.tar.gz | wc -l (must be 321)"
+    estimated_minutes: 5
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q4 §6 + Q2 §6 — backup before bulk migration"
+    track: H_infrastructure
+
+  - id: t80
+    title: "Q8 iterative-retrieval design integration notes"
+    agent_class: opus
+    inputs: [t22]
+    outputs:
+      - "docs/research/2026-05-XX-q8-integration-notes.md"
+    verification: "test -s docs/research/2026-05-XX-q8-integration-notes.md"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 3
+    cron_safe: true
+    source: "Q8 §1-§10"
+    track: H_infrastructure
+
+  - id: t81
+    title: "Add per-task metrics capture to cron dispatcher (sonnet/opus/gemini/kit metrics)"
+    agent_class: sonnet
+    inputs: [t67]
+    outputs:
+      - "scripts/qa/cron_metrics.py"
+      - "docs/cron/metrics/.gitkeep"
+    verification: "python scripts/qa/cron_metrics.py --summary --last 24h"
+    estimated_minutes: 60
+    risk_level: low
+    priority_tier: 1
+    cron_safe: true
+    source: "Q7 §8 resource budget tracking"
+    track: H_infrastructure
+
+  - id: t82
+    title: "Write final spec close-out from accumulated learnings (Opus + human-review)"
+    agent_class: opus
+    inputs: [t36, t22, t57, t41]
+    outputs:
+      - "docs/specs/2026-05-XX-final-canonical-flow-results.md"
+    verification: "wc -l docs/specs/2026-05-XX-final-canonical-flow-results.md (must be > 500)"
+    estimated_minutes: 360
+    risk_level: low
+    priority_tier: 1
+    cron_safe: false
+    source: "Research-spec §4 'final spec'; formal close-out"
+    track: H_infrastructure
+    critical_path: true
+    approval_gate: "Anton reviews close-out spec before commit"
+
+# ---------------------------------------------------------------------
+# Critical-path tasks (11)
+# ---------------------------------------------------------------------
+critical_path:
+  - t10  # lint_canonical_templates.py
+  - t19  # 30-prompt benchmark
+  - t20  # measure current hit@1 baseline
+  - t26  # Gemini env setup
+  - t30  # Kit supervisor health-check
+  - t41  # Register Phase 34/35/36 workflow templates
+  - t45  # canonical_draft_job.py 4-stage pipeline
+  - t66  # cron_task_graph.yaml in repo (this file)
+  - t67  # cron dispatcher
+  - t78  # halting criteria
+  - t82  # final synthesis spec
+
+# ---------------------------------------------------------------------
+# First-week cron ramp (the first 10 tasks)
+# ---------------------------------------------------------------------
+first_week_ramp:
+  - day: 1
+    task: t79
+    rationale: "Rollback safety net before any bulk migration. Cheap (5 min)."
+  - day: 1
+    task: t30
+    rationale: "Anchor Kit-RPC track; everything Kit-touching needs this."
+  - day: 1
+    task: t10
+    rationale: "Gates Tracks A + B downstream tasks. Critical-path #1."
+  - day: 2
+    task: t19
+    rationale: "Critical-path #2. Pure-file, parallel with Kit work."
+  - day: 2
+    task: t20
+    rationale: "Immediate use of t19; produces first number Anton will care about."
+  - day: 2
+    task: t66
+    rationale: "Materialize this plan into machine-readable form."
+  - day: 3
+    task: t67
+    rationale: "Cron dispatcher anchors autonomous loop. Critical-path #9."
+  - day: 3
+    task: t71
+    rationale: "uvicorn restart hook prevents stale-code bug per MEMORY."
+  - day: 3
+    task: t26
+    rationale: "Unblocks Track D (manual; Anton sets .env.local)."
+  - day: 4
+    task: t11
+    rationale: "First mass migration. Track B's first big lift. Mechanical, additive, low-risk."
+
+# ---------------------------------------------------------------------
+# Validation: dependency edges, agent classes, cron_safe rules
+# ---------------------------------------------------------------------
+validation:
+  rules:
+    - "Every dependency edge in task.inputs must point to an existing task ID."
+    - "Every task with cron_safe=true and agent_class=kit-rpc-sonnet must have at least one input (t30 or a Kit-bound predecessor)."
+    - "Every task with agent_class=human-review must have cron_safe=false."
+    - "Every Opus task must have agent_class=opus."
+    - "All task IDs follow pattern t\\d{2}."
+    - "Total task count must equal 82."
+    - "Critical path must contain exactly 11 IDs."
+  run_check: |
+    python -c '
+    import yaml
+    data = yaml.safe_load(open("config/cron_task_graph.yaml"))
+    tasks_by_id = {t["id"]: t for t in data["tasks"]}
+    errors = []
+    for t in data["tasks"]:
+        for dep in t.get("inputs", []):
+            if dep not in tasks_by_id:
+                errors.append(f"Dangling dep: {t[\"id\"]} -> {dep}")
+        if t["agent_class"] == "human-review" and t.get("cron_safe", True):
+            errors.append(f"{t[\"id\"]}: human-review must be cron_safe=false")
+    if errors:
+        print("\\n".join(errors)); exit(1)
+    assert len(data["tasks"]) == 82, f"Expected 82 tasks, got {len(data[\"tasks\"])}"
+    assert len(data["critical_path"]) == 11
+    print("OK: all 82 tasks consistent; 11 critical-path; deps valid")
+    '

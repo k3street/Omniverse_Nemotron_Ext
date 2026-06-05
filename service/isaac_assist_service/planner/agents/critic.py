@@ -142,6 +142,7 @@ class CriticAgent(AgentBase):
         quality_threshold: float = QUALITY_PASS,
         timeout: int = 120,
     ) -> None:
+        """Initialise the critic with model, minimum quality threshold, and request timeout."""
         self.model              = model
         self.quality_threshold  = quality_threshold
         self.timeout            = timeout

@@ -21,6 +21,7 @@ outputs/
 workspace/*
 !workspace/knowledge/
 !workspace/templates/
+!workspace/benchmarks/
 
 # Runtime state (not source)
 service/workspace/
@@ -28,6 +29,7 @@ logs/
 
 # Brainstorming notes (local only)
 brainstorm/
+.local-research/
 
 # IDEs
 .idea/

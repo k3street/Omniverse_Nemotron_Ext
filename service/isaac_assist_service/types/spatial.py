@@ -204,6 +204,7 @@ class Bbox3(BaseModel):
 
     @model_validator(mode="after")
     def _check_ordering(self) -> "Bbox3":
+        """Validate that min ≤ max component-wise; raises ValueError otherwise."""
         if (
             self.min.x > self.max.x
             or self.min.y > self.max.y

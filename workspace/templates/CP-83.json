@@ -1,6 +1,6 @@
 {
   "task_id": "CP-83",
-  "goal": "UR10 cuRobo TWO-cube static-pickup pick-place. Extends CP-78/79 pedestal pattern to cuRobo handler \u2014 both cubes on pedestals, both delivered to bin sequentially. Validates raycast\u2192FixedJoint workaround in cuRobo handler scales to multi-cube SOURCE_PATHS.",
+  "goal": "UR10 cuRobo TWO-cube static-pickup pick-place. Extends CP-78/79 pedestal pattern to cuRobo handler — both cubes on pedestals, both delivered to bin sequentially. Validates raycast→FixedJoint workaround in cuRobo handler scales to multi-cube SOURCE_PATHS.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -57,7 +57,7 @@
     "Raycast workaround for cuRobo uses S['picked_path'] which is sensor-driven; for sensor-less canonicals, _cube_to_pick() falls back to base proximity.",
     "Same UR10 init quirks as CP-69."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 cuRobo two-cube pedestal \u2014 Cube_1 delivered to bin via raycast workaround)",
+  "verified_status": "build-spec-2026-05-08; form-gate ✓; function-gate ✓ (UR10 cuRobo two-cube pedestal — Cube_1 delivered to bin via raycast workaround)",
   "diagnose_args": {
     "robot_path": "/World/UR10",
     "obstacles": [
@@ -73,6 +73,15 @@
       0.5,
       -0.4,
       0.75
+    ]
+  },
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
     ]
   }
 }

@@ -95,6 +95,7 @@ class RegisterMapEntry:
     description: str = ""
 
     def __post_init__(self) -> None:
+        """Validate that the register address is non-negative."""
         if self.address < 0:
             raise ValueError(f"Register address must be >= 0, got {self.address!r}")
 
@@ -167,6 +168,7 @@ class IndustrialBridge:
     }
 
     def __init__(self, config: BridgeConfig, dry_run: bool = True) -> None:
+        """Initialise the bridge in disconnected state with the given config."""
         self._config = config
         self._dry_run = dry_run
         self._state: BridgeState = "disconnected"
@@ -241,6 +243,7 @@ class IndustrialBridge:
     # Register I/O                                                         #
     # ------------------------------------------------------------------ #
     def _lookup(self, name: str) -> RegisterMapEntry:
+        """Return the :class:`RegisterMapEntry` with the given name, or raise ``KeyError``."""
         for entry in self._config.register_map:
             if entry.name == name:
                 return entry

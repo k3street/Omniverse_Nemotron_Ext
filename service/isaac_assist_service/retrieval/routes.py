@@ -19,6 +19,7 @@ _SPECS_PATH = Path(__file__).resolve().parents[2] / "workspace" / "knowledge" / 
 
 @functools.lru_cache(maxsize=1)
 def _load_specs() -> List[Dict]:
+    """Load sensor product specs from the JSONL file; returns an empty list when absent."""
     specs = []
     if _SPECS_PATH.exists():
         for line in _SPECS_PATH.read_text().splitlines():
@@ -77,6 +78,7 @@ def lookup_product_spec(product_name: str = Query(..., description="Product name
 
 @router.get("/sources")
 def list_sources():
+    """Return all enabled documentation sources from the source registry."""
     return {"sources": registry.get_sources()}
 
 @router.post("/query")

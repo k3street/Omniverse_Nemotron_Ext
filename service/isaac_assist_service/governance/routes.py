@@ -30,9 +30,21 @@ redactor = SecretRedactor(config)
 audit_logger = AuditLogger(config.audit_log_path)
 
 class EvaluationRequest(BaseModel):
+    """Request body for the ``/evaluate`` governance endpoint.
+
+    Attributes:
+        actions: List of :class:`PatchAction` objects to evaluate for risk.
+    """
+
     actions: List[PatchAction]
 
 class AuditRequest(BaseModel):
+    """Request body for the ``/audit`` governance endpoint.
+
+    Attributes:
+        entry: The :class:`AuditEntry` to append to the audit log.
+    """
+
     entry: AuditEntry
 
 @router.post("/evaluate")
@@ -84,6 +96,12 @@ async def get_audit_logs(limit: int = 100, event_type: str = None):
     return {"status": "success", "logs": entries}
 
 class TextRedactRequest(BaseModel):
+    """Request body for the ``/redact`` governance endpoint.
+
+    Attributes:
+        text: Raw string whose credential patterns should be scrubbed.
+    """
+
     text: str
 
 @router.post("/redact")

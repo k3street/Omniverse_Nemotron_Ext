@@ -16,7 +16,15 @@ from ..models import ValidationFinding
 
 
 class ROSBridgeReadinessValidator(ValidationRule):
+    """Validator that checks ROS2 bridge wiring health.
+
+    Detects missing clock publisher, absent ``ROS2Context`` node, duplicate
+    topic publishers, and frame_id sprawl.  Skips checks when no OmniGraph
+    data is present or when no ROS2 nodes are found.
+    """
+
     def __init__(self):
+        """Initialise ROS2 bridge readiness rule metadata."""
         super().__init__()
         self.rule_id = "ros_bridge.readiness"
         self.pack = "ros_bridge_readiness"

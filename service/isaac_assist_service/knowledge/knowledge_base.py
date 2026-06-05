@@ -74,6 +74,11 @@ class KnowledgeBase:
       root-cause and applied fix.
     """
     def __init__(self, storage_dir: str = "workspace/knowledge"):
+        """Initialise the knowledge base, creating the storage directory if absent.
+
+        Args:
+            storage_dir: Directory where version-scoped JSONL files are stored.
+        """
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         # In-memory set of known error signatures to prevent duplicates

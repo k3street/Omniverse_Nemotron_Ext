@@ -10,9 +10,12 @@ Phase 6 waves 1-9.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
+# audit-Q17: cohesive — full diagnostics handler domain (debug-draw, physics health, singularity, joint-effort, OmniGraph, preflight, clearance, collision viz)
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Phase 14 + 16 (2026-05-13): migrated from tool_executor.py.
@@ -489,6 +492,19 @@ _VRAM_PER_ENV_MB = {
 
 
 def _gen_debug_draw(args: Dict) -> str:
+    """Generate code to draw debug primitives (points, lines, spheres) in the viewport.
+
+    Args:
+        args: Dict containing:
+            - draw_type (str): 'points', 'lines', or 'spheres'.
+            - points (list): Point coordinates [[x,y,z], ...].
+            - color (list, optional): RGBA colour (default [1,0,0,1]).
+            - size (float, optional): Point/sphere size (default 5).
+            - lifetime (float, optional): Seconds before auto-clear; 0 = persistent.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     draw_type = args["draw_type"]
     points = args["points"]
     color = args.get("color", [1, 0, 0, 1])
@@ -1854,6 +1870,17 @@ print(f'[visualize_forces] drew arrows for {{ART_PATH}} at scale={{SCALE}} (upda
 
 
 def _gen_highlight_prim(args: Dict) -> str:
+    """Generate code to draw a bounding-box wireframe around a prim for a short duration.
+
+    Args:
+        args: Dict containing:
+            - prim_path (str): USD path to highlight.
+            - color (list, optional): [r, g, b] outline colour (default yellow [1,1,0]).
+            - duration (float, optional): Seconds before the outline clears (default 2.0).
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     prim_path = args["prim_path"]
     color = args.get("color", [1.0, 1.0, 0.0])
     duration = float(args.get("duration", 2.0))
@@ -1923,6 +1950,16 @@ else:
 
 
 def _gen_sim_control(args: Dict) -> str:
+    """Generate code to control simulation playback (play/pause/stop/step/reset).
+
+    Args:
+        args: Dict containing:
+            - action (str): One of play | pause | stop | step | reset.
+            - step_count (int, optional): Number of frames to advance when action='step'.
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     action = args["action"]
     if action == "play":
         return "import omni.timeline\nomni.timeline.get_timeline_interface().play()"
@@ -2074,6 +2111,15 @@ print(json.dumps({{'prim_scope': '{prim_scope}', 'prim_count': count, 'truncated
 
 
 def _gen_enable_extension(args: Dict) -> str:
+    """Generate code to enable a Kit extension by ID with post-enable verification.
+
+    Args:
+        args: Dict containing:
+            - ext_id (str): Kit extension identifier (e.g. 'isaacsim.robot.policy.franka').
+
+    Returns:
+        Python source string for execution inside Kit.
+    """
     ext_id = args["ext_id"]
     # set_extension_enabled_immediate returns False for unknown ext ids
     # (and the try/except used to swallow the signal). Post-check
@@ -2434,6 +2480,7 @@ print("ZMQ stream configured on tcp://127.0.0.1:{pub_port}")
 # Phase 7 wave 10 — diagnostic data-handlers (check, diagnose, get_console/active, compare_sim_real, hardware_compat)
 
 
+@with_telemetry
 async def _handle_check_collision_mesh(args: Dict) -> Dict:
     """Analyze a USD mesh prim's collision quality (DATA handler)."""
     from .. import kit_tools  # noqa: PLC0415
@@ -2463,6 +2510,7 @@ async def _handle_check_collision_mesh(args: Dict) -> Dict:
     return {"success": False, "error": "Failed to parse collision-mesh response", "raw_output": output[:500]}
 
 
+@with_telemetry
 async def _handle_check_collisions(args: Dict) -> Dict:
     """Validate collision meshes on a prim via Kit RPC."""
     from .. import kit_tools  # noqa: PLC0415
@@ -2524,6 +2572,7 @@ else:
     return {"success": False, "type": "data", "error": result.get("output", "Failed to check collisions")}
 
 
+@with_telemetry
 async def _handle_check_teleop_hardware(args: Dict) -> Dict:
     """Look up a teleop device in the known-devices table and probe local availability."""
     from pathlib import Path  # noqa: PLC0415
@@ -2566,6 +2615,7 @@ async def _handle_check_teleop_hardware(args: Dict) -> Dict:
     return result
 
 
+@with_telemetry
 async def _handle_check_tf_health(args: Dict) -> Dict:
     """Diagnose ROS2 TF tree health by introspecting the bridge in-Kit."""
     from .. import kit_tools  # noqa: PLC0415
@@ -2644,6 +2694,7 @@ else:
     return await kit_tools.queue_exec_patch(code, "Read TF tree health for Nav2 diagnostics")
 
 
+@with_telemetry
 async def _handle_check_vram_headroom(args: Dict) -> Dict:
     """Estimate VRAM cost vs available, return warnings + suggestions."""
     # Phase 8 wave 18 — _detect_local_vram_gb now in _shared,
@@ -2727,6 +2778,7 @@ async def _handle_check_vram_headroom(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_compare_sim_real_video(args: Dict) -> Dict:
     """Compare sim and real videos using vision LLM."""
     from pathlib import Path  # noqa: PLC0415
@@ -2755,6 +2807,7 @@ async def _handle_compare_sim_real_video(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_console_error_autodetect(args: Dict) -> Dict:
     """Check for new console errors since a given timestamp."""
     from .. import kit_tools  # noqa: PLC0415
@@ -2797,6 +2850,7 @@ async def _handle_console_error_autodetect(args: Dict) -> Dict:
     return result
 
 
+@with_telemetry
 async def _handle_diagnose_domain_gap(args: Dict) -> Dict:
     """Compare synthetic vs real image datasets to diagnose domain gap.
 
@@ -2912,6 +2966,7 @@ else:
     return {"success": bool(result.get("success", False)), "type": "data", "queued": result.get("queued", False)}
 
 
+@with_telemetry
 async def _handle_diagnose_performance(args: Dict) -> Dict:
     """Collect PhysX stats, timing, and GPU memory, then analyze for bottlenecks."""
     from .. import kit_tools  # noqa: PLC0415
@@ -3021,6 +3076,7 @@ print(json.dumps(results))
     return {"type": "data", "queued": True, **kit_result}
 
 
+@with_telemetry
 async def _handle_diagnose_physics_error(args: Dict) -> Dict:
     """Pattern-match against known PhysX errors and return diagnosis."""
     import re as _re  # noqa: PLC0415
@@ -3083,6 +3139,7 @@ async def _handle_diagnose_physics_error(args: Dict) -> Dict:
 # _handle_diagnose_ros2 moved to handlers/ros2.py (Phase 7 wave 14).
 
 
+@with_telemetry
 async def _handle_diagnose_whole_body(args: Dict) -> Dict:
     """Diagnostic checklist for humanoid balance/coordination during arm motion."""
     articulation_path = args["articulation_path"]
@@ -3141,6 +3198,7 @@ async def _handle_diagnose_whole_body(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_get_active_state(args: Dict) -> Dict:
     """Return prim.IsActive() (active/deactivated state)."""
     from .. import kit_tools  # noqa: PLC0415
@@ -3170,7 +3228,19 @@ print(json.dumps(result, default=str))
     return await kit_tools.queue_exec_patch(code, f"get_active_state {prim_path}")
 
 
+@with_telemetry
 async def _handle_get_console_errors(args: Dict) -> Dict:
+    """Return recent Kit console log entries at or above a minimum severity level.
+
+    Args:
+        args: Dict containing:
+            - min_level (str, optional): Minimum severity to include —
+              verbose | info | warning | error | fatal (default 'warning').
+            - last_n (int, optional): Maximum entries to return (default 50).
+
+    Returns:
+        Dict with keys errors (list) and total_count (int).
+    """
     from .. import kit_tools  # noqa: PLC0415
     ctx = await kit_tools.get_stage_context(full=False)
     logs = ctx.get("recent_logs", [])
@@ -3182,6 +3252,7 @@ async def _handle_get_console_errors(args: Dict) -> Dict:
     return {"errors": filtered[-last_n:], "total_count": len(filtered)}
 
 
+@with_telemetry
 async def _handle_get_debug_info(args: Dict) -> Dict:
     """Return perf metrics via Kit RPC /context fallback."""
     from .. import kit_tools  # noqa: PLC0415
@@ -3193,6 +3264,7 @@ async def _handle_get_debug_info(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_hardware_compatibility_check(args: Dict) -> Dict:
     """Run hardware and software compatibility probe."""
     from .. import kit_tools  # noqa: PLC0415
@@ -3302,7 +3374,21 @@ async def _handle_hardware_compatibility_check(args: Dict) -> Dict:
 # Phase 7 wave 14 — validate/verify/measure/trace/proactive stragglers
 
 
+@with_telemetry
 async def _handle_measure_distance(args: Dict) -> Dict:
+    """Measure the world-space distance between two prims via Kit RPC.
+
+    Raises RuntimeError (surfaced in the result) when either prim path is
+    invalid rather than silently returning 0.0.
+
+    Args:
+        args: Dict containing:
+            - prim_a (str): USD path to the first prim.
+            - prim_b (str): USD path to the second prim.
+
+    Returns:
+        Dict with keys distance_m (float), prim_a, prim_b (or error string).
+    """
     prim_a = args["prim_a"]
     prim_b = args["prim_b"]
     # UsdGeom.Xformable(invalid_prim).ComputeLocalToWorldTransform(0) silently
@@ -3337,6 +3423,7 @@ print(json.dumps({{'prim_a': {prim_a!r}, 'prim_b': {prim_b!r}, 'distance_m': dis
     return await kit_tools.queue_exec_patch(code, f"Measure distance {prim_a} ↔ {prim_b}")
 
 
+@with_telemetry
 async def _handle_measure_sim_real_gap(args: Dict) -> Dict:
     """Compare sim and real trajectories to quantify the gap."""
     from .. import tool_executor as _te  # noqa: PLC0415
@@ -3419,6 +3506,7 @@ async def _handle_measure_sim_real_gap(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_proactive_check(args: Dict) -> Dict:
     """Run the proactive agent for a scene-state trigger.
 
@@ -3430,7 +3518,7 @@ async def _handle_proactive_check(args: Dict) -> Dict:
     import os  # noqa: PLC0415
     import logging  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
-    _PROACTIVE_TRIGGER_PLAYBOOKS = _te._PROACTIVE_TRIGGER_PLAYBOOKS
+    # _PROACTIVE_TRIGGER_PLAYBOOKS lives in this module (migrated Phase 8 wave 27).
     DATA_HANDLERS = _te.DATA_HANDLERS
     _logger = logging.getLogger(_te.__name__)
 
@@ -3494,6 +3582,7 @@ async def _handle_proactive_check(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_simulate_traversal_check(args: Dict) -> Dict:
     """Play the timeline and verify that a cube reaches the target bin (function-gate).
 
@@ -4024,6 +4113,7 @@ else:
     return await kit_tools.queue_exec_patch(code, "simulate_traversal_check", timeout=_scaled_timeout)
 
 
+@with_telemetry
 async def _handle_trace_config(args: Dict) -> Dict:
     """Parse IsaacLab @configclass files to trace parameter resolution chain."""
     import ast  # noqa: PLC0415
@@ -4134,6 +4224,7 @@ async def _handle_trace_config(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_validate_annotations(args: Dict) -> Dict:
     """Cross-check SDG annotations for common quality issues.
 
@@ -4216,6 +4307,7 @@ else:
     return {"success": bool(result.get("success", False)), "type": "data", "queued": result.get("queued", False)}
 
 
+@with_telemetry
 async def _handle_validate_calibration(args: Dict) -> Dict:
     """Validate a calibration result on a held-out test trajectory.
 
@@ -4321,6 +4413,7 @@ async def _handle_validate_calibration(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_validate_scene_blueprint(args: Dict) -> Dict:
     """Validate a scene blueprint before building. Checks for overlaps, floating objects, bad scales, and missing fields."""
     blueprint = args.get("blueprint", {})
@@ -4441,6 +4534,7 @@ async def _handle_validate_scene_blueprint(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_validate_semantic_labels(args: Dict) -> Dict:
     """Lint every Semantics.SemanticsAPI annotation on the current stage."""
     from .. import kit_tools  # noqa: PLC0415
@@ -4563,6 +4657,7 @@ except Exception as e:
     }
 
 
+@with_telemetry
 async def _handle_validate_teleop_demo(args: Dict) -> Dict:
     """Validate an HDF5 teleop file against the robomimic schema."""
     from ._shared import _open_hdf5_safely  # noqa: PLC0415
@@ -4648,6 +4743,7 @@ async def _handle_validate_teleop_demo(args: Dict) -> Dict:
     }
 
 
+@with_telemetry
 async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
     """Verify a pick-place pipeline is physically executable.
 
@@ -4678,9 +4774,8 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
                    canonical_instantiator turns it on for hard-instantiate.
     """
     from .. import kit_tools  # noqa: PLC0415
-    from .. import tool_executor as _te  # noqa: PLC0415
-    _ROBOT_REACH_M = _te._ROBOT_REACH_M
-    # _augment_verify_with_feasibility migrated to module body (Phase 8 wave 27).
+    # Early-exit guard: validate args before any lazy imports.
+    # _ROBOT_REACH_M lives in handlers.resolve (migrated Phase 8 wave 27).
     stages = args.get("stages")
     if not stages:
         # Allow a single-stage shorthand
@@ -4691,6 +4786,7 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
                        "reach_m": args.get("reach_m")}]
     if not stages:
         return {"error": "verify_pickplace_pipeline requires 'stages' (list of {robot_path,pick_path,place_path}) or single robot_path+pick_path+place_path"}
+    from .resolve import _ROBOT_REACH_M  # noqa: PLC0415
 
     cube_path = args.get("cube_path", "") or ""
     footprint_bounds = args.get("footprint_bounds")  # optional [[xmin,ymin],[xmax,ymax]]
@@ -4994,6 +5090,7 @@ print(json.dumps(out))
 # Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
 
 
+@with_telemetry
 async def _handle_list_extensions(args: Dict) -> Dict:
     """List Kit extensions registered with the extension manager."""
     from .. import kit_tools
@@ -5041,6 +5138,7 @@ print(json.dumps({{"extensions": out, "total": len(out)}}))
 # Phase 9 follow-up — _handle_fix_error migrated from tool_executor.py (2026-05-13)
 
 
+@with_telemetry
 def _handle_fix_error(args: Dict) -> str:
     """Generate a fix code patch for a known physics/USD error pattern."""
     error_text = args.get("error_text", "")

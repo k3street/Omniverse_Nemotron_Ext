@@ -19,6 +19,7 @@ class PolicyEngine:
     """Evaluates the risk level of operations proposed by the Planner."""
 
     def __init__(self, config: GovernanceConfig = None):
+        """Initialise the engine with a :class:`GovernanceConfig` (defaults to a fresh instance)."""
         self.config = config or GovernanceConfig()
 
     def evaluate_action(self, action: PatchAction) -> Tuple[str, List[str]]:

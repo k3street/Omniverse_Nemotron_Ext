@@ -37,5 +37,14 @@
     "Cycle time measurement is post-run (parse ctrl:cycles_attempted * ctrl:cubes_delivered / duration)",
     "Function-gate uses cube_paths (any cube delivered counts)"
   ],
-  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (47s); ready for N=5"
+  "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (47s); ready for N=5",
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
+    ]
+  }
 }

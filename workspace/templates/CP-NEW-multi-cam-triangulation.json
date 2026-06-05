@@ -14,7 +14,7 @@
   "thoughts": [
     "3 cameras: front-top, left-side, right-side. Each emits images + depth.",
     "Triangulation post-process (offline) fuses 3 views to compute world-frame cube center with sub-cm precision.",
-    "Pick-place runs concurrently \u2014 robot needs perception to decide which cube to pick.",
+    "Pick-place runs concurrently — robot needs perception to decide which cube to pick.",
     "For V0: 1 cube; cameras log frames; post-processing is offline; pick-place still uses USD-direct cube_position.",
     "Function-gate: standard pick-place delivery. Multi-camera artifact = perception data files."
   ],
@@ -27,11 +27,20 @@
   },
   "diagnose_args": null,
   "extends": "phase9-yrkesroll-#11",
-  "extension_notes": "Perception canonical. Multi-camera scene scaffold. Triangulation fusion is offline post-processing \u2014 not invoked from canonical itself.",
+  "extension_notes": "Perception canonical. Multi-camera scene scaffold. Triangulation fusion is offline post-processing — not invoked from canonical itself.",
   "failure_modes": [
     "Cameras at occlusion-prone angles miss cube during transit (left/right cams may see only robot arm)",
     "configure_camera signature varies; some Isaac Sim builds expect target_path or rotation instead of look_at",
-    "Pick-place uses USD direct lookup, not vision triangulation \u2014 gate doesn't validate triangulation output"
+    "Pick-place uses USD direct lookup, not vision triangulation — gate doesn't validate triangulation output"
   ],
-  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (21s); 3-camera scene"
+  "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (21s); 3-camera scene",
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
+    ]
+  }
 }

@@ -185,6 +185,7 @@ class AssemblyConstraintRuntime:
     """
 
     def __init__(self, dry_run: bool = True) -> None:
+        """Initialise the solver; when dry_run=True Kit/PhysX calls are replaced by heuristics."""
         self._dry_run = dry_run
         self._constraints: Dict[str, AssemblyConstraint] = {}
 
@@ -380,6 +381,7 @@ class AssemblyConstraintRuntime:
         c: AssemblyConstraint,
         prim_positions: Dict[str, Tuple[float, float, float]],
     ) -> ConstraintEvaluation:
+        """Evaluate a ``distance_between`` constraint using Euclidean distance."""
         pos_a = self._get_position(c.target_a, prim_positions)
         pos_b = self._get_position(c.target_b, prim_positions)
 
@@ -416,6 +418,7 @@ class AssemblyConstraintRuntime:
         c: AssemblyConstraint,
         prim_positions: Dict[str, Tuple[float, float, float]],
     ) -> ConstraintEvaluation:
+        """Evaluate a ``concentric`` constraint; satisfied when separation < tolerance."""
         pos_a = self._get_position(c.target_a, prim_positions)
         pos_b = self._get_position(c.target_b, prim_positions)
 
@@ -450,6 +453,7 @@ class AssemblyConstraintRuntime:
         c: AssemblyConstraint,
         prim_positions: Dict[str, Tuple[float, float, float]],
     ) -> ConstraintEvaluation:
+        """Evaluate a ``fixed_offset`` constraint; checks that actual delta matches expected offset."""
         pos_a = self._get_position(c.target_a, prim_positions)
         pos_b = self._get_position(c.target_b, prim_positions)
 

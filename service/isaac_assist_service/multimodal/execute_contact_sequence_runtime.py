@@ -113,6 +113,7 @@ class ContactSequencePlan:
         steps: list[ContactStep],
         abort_on_failure: bool = True,
     ) -> None:
+        """Initialise the runtime with a list of contact steps and abort behaviour."""
         self._steps: list[ContactStep] = list(steps)
         self.abort_on_failure = abort_on_failure
         self._results: dict[int, ContactStepResult] = {}
@@ -221,6 +222,7 @@ class ContactSequenceRuntime:
     """
 
     def __init__(self, dry_run: bool = True) -> None:
+        """Initialise the evaluator; when dry_run=True Kit RPC calls are skipped."""
         self.dry_run = dry_run
 
     # ------------------------------------------------------------------

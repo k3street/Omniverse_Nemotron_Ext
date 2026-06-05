@@ -140,8 +140,10 @@ def honesty_checked(
             be ABSENT after the operation (use for delete/remove handlers).
     """
     def _deco(gen_fn: Callable[[Dict], str]) -> Callable[[Dict], str]:
+        """Decorator factory — wraps a code-generator with pre/post check snippets."""
         @functools.wraps(gen_fn)
         def wrapper(args: Dict) -> str:
+            """Inject pre-condition + post-condition Kit snippets around the wrapped gen_fn output."""
             tool_name = gen_fn.__name__.removeprefix("_gen_")
             pre_blocks = []
             for key in require_prim_paths:

@@ -28,6 +28,7 @@ ros2_control bridge.
 Per docs/specs/2026-05-11-contact-rich-manipulation-spec.md §5.1 (CRM-A2),
 §5.2 (CRM-B1), §5.3 (CRM-B2), §5.4 (CRM-B3), and §5.5 (CRM-C4).
 """
+# audit-Q17: cohesive — full CRM compliance handler suite (admittance, impedance, set-params, release, trajectory-with-compliance) stays together by design
 from __future__ import annotations
 
 import threading
@@ -36,6 +37,7 @@ from typing import Any, Callable, Dict, List, Optional
 from service.isaac_assist_service.multimodal.types import (
     COMPLIANCE_MODE_ENUM,
 )
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +116,7 @@ def _admittance_step(
 # Handler
 
 
+@with_telemetry
 async def _handle_setup_admittance_controller(
     args: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -336,6 +339,7 @@ def _impedance_torque(
 # Impedance handler
 
 
+@with_telemetry
 async def _handle_setup_impedance_controller(
     args: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -497,6 +501,7 @@ async def setup_impedance_controller(
 # set_compliance_params handler (CRM-B2)
 
 
+@with_telemetry
 async def _handle_set_compliance_params(
     args: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -636,6 +641,7 @@ async def set_compliance_params(
 # release_compliance handler (CRM-B3)
 
 
+@with_telemetry
 async def _handle_release_compliance(
     args: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -828,6 +834,7 @@ def _build_handoff_mismatch_warning(
     )
 
 
+@with_telemetry
 async def _handle_follow_trajectory_with_compliance(
     args: Dict[str, Any],
 ) -> Dict[str, Any]:

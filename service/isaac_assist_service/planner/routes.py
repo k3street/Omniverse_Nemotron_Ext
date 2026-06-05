@@ -70,6 +70,17 @@ async def generate_plan(
 
 
 class PlanOutcomeRequest(BaseModel):
+    """Request body for the ``/{plan_id}/apply`` planner endpoint.
+
+    Attributes:
+        plan_id: UUID of the plan whose outcome is being recorded.
+        success: True when all steps executed without error.
+        error_output: Captured stderr / exception text on failure.
+        code: Final code block produced by the coder agent.
+        user_message: Original user message that triggered the plan.
+        steps: List of step dicts describing what was attempted.
+    """
+
     plan_id: str
     success: bool
     error_output: str = ""

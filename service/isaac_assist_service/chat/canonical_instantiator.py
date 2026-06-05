@@ -430,6 +430,7 @@ def substitute_role_placeholders(
         return code_template
 
     def _indexed(m):
+        """Substitute ``{{role[N].field}}`` placeholders from a list-typed role spec."""
         role, idx_str, field = m.group(1), m.group(2), m.group(3)
         spec = role_defaults.get(role)
         if not isinstance(spec, list):
@@ -443,6 +444,7 @@ def substitute_role_placeholders(
         return _format_for_code(entry[field])
 
     def _dotted(m):
+        """Substitute ``{{role.field}}`` placeholders from a dict-typed role spec."""
         role, field = m.group(1), m.group(2)
         spec = role_defaults.get(role)
         if not isinstance(spec, dict) or field not in spec:
@@ -513,7 +515,9 @@ async def execute_template_canonical(
     captured: List[tuple] = []  # list of (tool_name, kwargs)
 
     def _make_capturer(tool_name: str):
+        """Return a no-op callable that records calls into ``captured`` instead of executing them."""
         def _capture(**kwargs):
+            """Record a sandboxed tool call without executing it."""
             captured.append((tool_name, dict(kwargs)))
         return _capture
 
@@ -522,9 +526,13 @@ async def execute_template_canonical(
     for name in tool_names:
         sandbox[name] = _make_capturer(name)
 
-    # Capture phase — exec the code in sandbox, intercept calls into `captured`
+    # Capture phase — exec the code in sandbox, intercept calls into `captured`.
+    # Intentional: canonical templates ship Python code that must be executed
+    # to discover the tool-call sequence. Sandbox restricts builtins to
+    # _SAFE_BUILTINS and replaces every tool name with a capturer that records
+    # rather than invokes. No untrusted user input reaches this exec.
     try:
-        exec(compile(code, f"<{task_id}>", "exec"), sandbox)
+        exec(compile(code, f"<{task_id}>", "exec"), sandbox)  # noqa: audit-Q9
     except Exception as e:
         logger.warning(f"[CanonicalInst] {task_id} sandbox exec failed: {e}")
         return {

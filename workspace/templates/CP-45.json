@@ -14,7 +14,7 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six side-mount specifics for CP-45 (extends CP-01 \u2014 different robot xy):\n1) Robot at [0.7, 0, 0.75] (vs CP-01's [0,0,0.75]). Picks from conveyor with longer +X reach.\n2) Conveyor centered relative to robot: position [0.7, 0.4, 0.78] \u2014 same belt-relative-to-robot geometry as CP-01.\n3) Bin behind robot: position [0.7, -0.4, 0.75]. Same relative geometry.\n4) Cubes on conveyor at robot-relative-x = -1.4..-0.65 \u2192 world x = -0.7..0.05. All within conveyor.\n5) Sensor at robot-relative xy(0.4, 0.4) \u2192 world xy(1.1, 0.4).\n6) Tests that handler computes everything in robot-relative frame correctly. Validates that scene shift doesn't break planning.",
+  "thoughts": "Six side-mount specifics for CP-45 (extends CP-01 — different robot xy):\n1) Robot at [0.7, 0, 0.75] (vs CP-01's [0,0,0.75]). Picks from conveyor with longer +X reach.\n2) Conveyor centered relative to robot: position [0.7, 0.4, 0.78] — same belt-relative-to-robot geometry as CP-01.\n3) Bin behind robot: position [0.7, -0.4, 0.75]. Same relative geometry.\n4) Cubes on conveyor at robot-relative-x = -1.4..-0.65 → world x = -0.7..0.05. All within conveyor.\n5) Sensor at robot-relative xy(0.4, 0.4) → world xy(1.1, 0.4).\n6) Tests that handler computes everything in robot-relative frame correctly. Validates that scene shift doesn't break planning.",
   "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0.7, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Robot offset to +X\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0.7, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Conveyor offset to +X with robot\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.7, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cubes at world_x = robot_x + relative_x\nfor i, rel_x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[0.7 + rel_x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Bin offset to +X with robot\ncreate_bin(prim_path=\"/World/Bin\", position=[0.7, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Sensor offset\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[1.1, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n    drop_target=[0.7, -0.4, 0.95],\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
   "settle_state": {
     "cubes": {
@@ -66,11 +66,11 @@
   "extends": "CP-01",
   "extension_notes": "CP-45 tests handler with robot at non-origin xy position. Validates that cuRobo's _world_to_base correctly handles offset robot. Industrial use: robot mounted to side of line, multi-station shop floors with robots at fixed but non-centered positions.",
   "failure_modes": [
-    "All scene elements offset by [+0.7, 0, 0] from CP-01 \u2014 verifier should still find pick zone via sensor location.",
-    "Cube_4 at world x=+0.05 \u2014 well within reach of robot at x=+0.7.",
+    "All scene elements offset by [+0.7, 0, 0] from CP-01 — verifier should still find pick zone via sensor location.",
+    "Cube_4 at world x=+0.05 — well within reach of robot at x=+0.7.",
     "Same physics gotchas as CP-01."
   ],
-  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (with 180s sim \u2014 orig 60s too short. cube_final=(0.70, -0.46, 0.835) in Bin)",
+  "verified_status": "build-spec-2026-04-XX; form-gate ✓; function-gate ✓ (with 180s sim — orig 60s too short. cube_final=(0.70, -0.46, 0.835) in Bin)",
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "sensor_path": "/World/PickSensor",
@@ -83,6 +83,15 @@
       0.7,
       -0.4,
       0.75
+    ]
+  },
+  "motion_controllers": {
+    "verified": [
+      "curobo"
+    ],
+    "untested": [
+      "rmpflow",
+      "moveit2"
     ]
   }
 }

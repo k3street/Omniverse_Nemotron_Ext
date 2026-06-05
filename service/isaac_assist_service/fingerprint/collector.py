@@ -27,7 +27,13 @@ def run_shell(cmd: str) -> str:
         str: Stripped stdout, or ``""`` on failure.
     """
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=2)
+        # shell=True is intentional: all 4 in-tree callers pass hard-coded
+        # strings containing pipes (`nvidia-smi ... | head -n 1`,
+        # `nvcc --version | grep release | awk ...`). No user input reaches
+        # this function — `cmd` is always a literal in the calling module.
+        result = subprocess.run(  # noqa: audit-Q10
+            cmd, shell=True, capture_output=True, text=True, timeout=2
+        )
         return result.stdout.strip()
     except Exception:
         return ""

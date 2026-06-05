@@ -53,6 +53,16 @@ logger = logging.getLogger(__name__)
 
 
 class SpecStep(TypedDict):
+    """A single step within a :class:`StructuredSpec` plan.
+
+    Attributes:
+        n: 1-indexed position in the plan.
+        action: Short imperative sentence describing what this step does.
+        expected_tool: Tool name to call, or ``"reply"`` / ``"reasoning"`` for
+            non-tool sentinel steps.
+        post_condition: Predicate that should hold true after this step succeeds.
+    """
+
     n: int                # 1-indexed step number
     action: str           # short imperative — what this step does
     expected_tool: str    # tool name OR "reply"/"reasoning" for non-tool steps
@@ -60,6 +70,16 @@ class SpecStep(TypedDict):
 
 
 class StructuredSpec(TypedDict):
+    """Full structured plan produced by the spec-generator for complex requests.
+
+    Attributes:
+        goal: One-sentence description of what the user wants to achieve.
+        steps: Ordered list of :class:`SpecStep` objects.
+        components: Scene / stage elements that must exist when the goal is met.
+        success_criteria: Human-readable list of observable success conditions.
+        reasoning: One-line justification of the plan, for telemetry / debug.
+    """
+
     goal: str
     steps: list[SpecStep]
     components: list[str]      # things that must exist when goal is met

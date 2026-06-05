@@ -64,6 +64,7 @@ class RateChannel:
     description: str = ""
 
     def __post_init__(self) -> None:
+        """Validate that the channel rate is strictly positive."""
         if self.hz <= 0:
             raise ValueError(f"RateChannel '{self.name}': hz must be > 0, got {self.hz}")
 
@@ -109,6 +110,7 @@ class MultiRateConfig:
     _BUILTIN_DESCRIPTIONS: Dict[str, str] = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        """Populate the immutable ``_BUILTIN_DESCRIPTIONS`` lookup for built-in channel names."""
         object.__setattr__(
             self,
             "_BUILTIN_DESCRIPTIONS",

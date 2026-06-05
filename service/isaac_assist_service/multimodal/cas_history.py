@@ -16,6 +16,16 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class LayoutSpecRevision:
+    """A single immutable revision of a LayoutSpec stored in the CAS history.
+
+    Attributes:
+        revision_hash: Content-addressed SHA-style hash identifying this revision.
+        parent_hash: Hash of the preceding revision, or ``None`` for the initial commit.
+        spec_json: JSON-serialised layout spec at this revision.
+        timestamp: ISO-8601 timestamp string of when this revision was created.
+        author: Identity that created this revision (``"user"`` by default).
+    """
+
     revision_hash: str
     parent_hash: Optional[str]
     spec_json: str

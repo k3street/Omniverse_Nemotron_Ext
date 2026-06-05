@@ -42,6 +42,8 @@ async def run_convergence() -> Dict[str, Any]:
 
     # 1. Instantiate (dry_run)
     class _SpecObj:
+        """Minimal spec-like object used to drive the convergence instantiation dry run."""
+
         objects = spec_dict["objects"]
     inst_result = await instantiate(_SpecObj(), template_id="convergence", dry_run=True)
 

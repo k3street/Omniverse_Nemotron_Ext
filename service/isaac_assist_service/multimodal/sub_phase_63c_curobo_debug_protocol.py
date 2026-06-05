@@ -5,6 +5,7 @@ registry for cuRobo motion-planning failures, organised by robot family.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phase 63c.
 """
+# audit-Q17: cohesive — Phase 63c per-robot-family cuRobo debug protocol (checklist, failure classifier, fixup registry)
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -148,6 +148,18 @@ def freeze_baseline(
 
 
 def _load_snapshot(scenario_id: str, baselines_dir: Path) -> BaselineSnapshot:
+    """Load a persisted :class:`BaselineSnapshot` for ``scenario_id``.
+
+    Args:
+        scenario_id: Identifier used as the JSON filename stem.
+        baselines_dir: Directory that contains baseline JSON files.
+
+    Returns:
+        BaselineSnapshot: Deserialised snapshot model.
+
+    Raises:
+        FileNotFoundError: When no file named ``{scenario_id}.json`` exists.
+    """
     target = baselines_dir / f"{scenario_id}.json"
     if not target.exists():
         raise FileNotFoundError(

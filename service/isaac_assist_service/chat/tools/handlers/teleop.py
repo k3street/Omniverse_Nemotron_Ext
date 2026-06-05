@@ -8,10 +8,12 @@ Phase 6 waves 1-7.
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
+# audit-Q17: cohesive — full teleop handler domain (VR/glove/keyboard session, controller mapping, demo recording, safety/watchdog, mapping export)
 from __future__ import annotations
 
 import json
 from typing import Any, Callable, Dict, List, Optional
+from service.isaac_assist_service.observability.handler_telemetry import with_telemetry
 
 # ---------------------------------------------------------------------------
 # Theme-local constants (Phase 8 wave 4, 2026-05-13)
@@ -850,6 +852,7 @@ def _gen_generate_teleop_watchdog_script(args: Dict) -> str:
 # Phase 7 wave 16 — final data-handler stragglers (COMPLETES data-handler migration)
 
 
+@with_telemetry
 async def _handle_summarize_teleop_session(args: Dict) -> Dict:
     """Summarize duration and per-joint statistics for an HDF5 teleop session."""
     from ._shared import _open_hdf5_safely
