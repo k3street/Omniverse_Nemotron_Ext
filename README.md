@@ -323,7 +323,9 @@ through Kit RPC, then calls the same observation flow. `cosmos/propose` accepts
 already-structured observations. The backend
 converts the observation into a reviewable `LayoutSpec` proposal.
 The floor-plan UI remains the correction/confirmation surface, and the final
-build still goes through the Isaac Sim 5.1 or 6.0 version-aware harness. See
+build goes through `POST /api/v1/canvas/{session_id}/build`. Builds default to
+`dry_run=true`, returning resolved assets and generated Kit code for review;
+set `dry_run=false` only when ready to queue the patch into live Isaac Sim. See
 [Cosmos 3 to Floor-Plan Flow](docs/architecture/cosmos3-floor-plan-flow.md).
 
 For scale-out, Isaac Assist treats DGX Spark, Brev, and

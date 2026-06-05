@@ -44,6 +44,7 @@ from ...multimodal.persistence import (
     RevisionConflictError,
 )
 from ...multimodal.asset_resolution import resolve_layout_assets
+from ...multimodal.instantiator import instantiate
 from ...multimodal.ratify import ratify, RatifyResult, resolve_compliance
 from ...multimodal.types import Position, Size
 
@@ -231,6 +232,7 @@ async def _handle_apply_layout_spec_to_scene(args: Dict[str, Any]) -> Dict[str, 
     if not session_id:
         return {"error": "session_id required"}
     force_freeform = bool(args.get("force_freeform", False))
+    dry_run = bool(args.get("dry_run", True))
 
     store = _get_store()
     spec = store.get_latest(session_id)
@@ -311,10 +313,21 @@ async def _handle_apply_layout_spec_to_scene(args: Dict[str, Any]) -> Dict[str, 
             "diagnostics": list(compliance.diagnostics),
         }
         payload["next_step"] = (
-            "ratified ok — caller should invoke canonical-pipeline build via "
-            "the existing hard-instantiate path; role-based substitution "
-            "lands in Block 1B"
+            "ratified ok — instantiation result is attached; review generated_code "
+            "when dry_run=true or inspect build_id when dry_run=false"
         )
+        instantiation = await instantiate(
+            spec,
+            template_id=args.get("template_id"),
+            dry_run=dry_run,
+        )
+        payload["instantiation"] = {
+            "status": instantiation.status,
+            "message": instantiation.message,
+            "build_id": instantiation.build_id,
+            "dry_run": dry_run,
+            "generated_code": instantiation.generated_code if dry_run else None,
+        }
     elif result.status == "needs_choice":
         payload["ambiguous_roles"] = [
             {"role": a.role_name,

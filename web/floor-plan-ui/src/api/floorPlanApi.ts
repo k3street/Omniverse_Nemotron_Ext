@@ -45,7 +45,7 @@ export interface CanvasApi {
     patch(sessionId: string, spec: LayoutSpec, parentRevision: number): Promise<PatchSuccessResponse>;
     commit(sessionId: string): Promise<{ committed: true; revision: number }>;
     previewRender(sessionId: string): Promise<{ rendered: true; path: string; revision: number }>;
-    build(sessionId: string, opts?: { template_id?: string; force_freeform?: boolean }): Promise<unknown>;
+    build(sessionId: string, opts?: { template_id?: string; force_freeform?: boolean; dry_run?: boolean }): Promise<unknown>;
     cosmosObserve(sessionId: string, req: CosmosObserveRequest): Promise<CosmosObserveResponse>;
     cosmosObserveViewport(
         sessionId: string,

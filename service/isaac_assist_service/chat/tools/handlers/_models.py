@@ -3830,6 +3830,7 @@ class ApplyLayoutSpecToSceneArgs(BaseModel):
     session_id: str = Field(..., description="Multimodal session ID.")
     template_id: Optional[str] = Field(None, description="Optional canonical template ID to ratify against. If absent, similarity gate picks.")
     force_freeform: Optional[bool] = Field(None, description="Skip canonical ratify and fall to T5 free-form. Default: false.")
+    dry_run: Optional[bool] = Field(None, description="Generate Kit code without executing by default. Set false only when ready to mutate Isaac Sim.")
 
 
 class QueryLayoutMetricArgs(BaseModel):

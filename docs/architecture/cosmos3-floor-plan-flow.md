@@ -87,7 +87,10 @@ That also preserves version coexistence:
 
 - Cosmos integration is version-agnostic.
 - Floor-plan and backend validation are version-agnostic.
-- Only the final execution harness selects Isaac Sim 5.1 or Isaac Sim 6.0 code.
+- The build route resolves reviewed object classes to USD references or
+  primitive fallbacks, then returns generated Kit code with `dry_run=true`.
+- Live mutation is opt-in with `dry_run=false`, so the final execution harness
+  can still select Isaac Sim 5.1 or Isaac Sim 6.0 code deliberately.
 
 ## Suggested Cosmos Reasoner Prompt Contract
 

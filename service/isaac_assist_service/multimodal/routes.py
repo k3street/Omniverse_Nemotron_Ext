@@ -44,6 +44,7 @@ from .cosmos3_runtime import (
     build_cosmos3_reasoner,
 )
 from .asset_resolution import resolve_layout_assets
+from .instantiator import instantiate
 from .ratify import ratify
 from .render import render_layout_spec_to_file
 from .types import LayoutSpec
@@ -120,10 +121,12 @@ class BuildRequest(BaseModel):
     Attributes:
         template_id: Optional canonical template to instantiate.
         force_freeform: When True, skip template lookup and generate a freeform canvas.
+        dry_run: When True, return generated Kit code without mutating Isaac Sim.
     """
 
     template_id: Optional[str] = None
     force_freeform: bool = False
+    dry_run: bool = True
 
 
 class CosmosProposalRequest(BaseModel):
@@ -620,6 +623,18 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
         payload["bindings"] = {
             role: {"object_id": b.object_id, "source": b.source}
             for role, b in result.bindings.items()
+        }
+        instantiation = await instantiate(
+            spec,
+            template_id=body.template_id,
+            dry_run=body.dry_run,
+        )
+        payload["instantiation"] = {
+            "status": instantiation.status,
+            "message": instantiation.message,
+            "build_id": instantiation.build_id,
+            "dry_run": body.dry_run,
+            "generated_code": instantiation.generated_code if body.dry_run else None,
         }
     elif result.status == "needs_choice":
         payload["ambiguous_roles"] = [

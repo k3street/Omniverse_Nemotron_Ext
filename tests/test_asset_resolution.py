@@ -136,6 +136,57 @@ def test_build_route_returns_asset_resolution_summary(tmp_path):
         assert response["asset_resolutions"]
         assert response["asset_resolutions"][0]["object_class"] == "franka_panda"
         assert response["asset_resolutions"][0]["usd_ref"].endswith("franka.usd")
+        assert response["instantiation"]["status"] == "dry_run"
+        assert response["instantiation"]["dry_run"] is True
+        assert "AddReference('Isaac/" in response["instantiation"]["generated_code"]
+    finally:
+        routes._store.close()
+        routes._store = old_store
+
+
+def test_build_route_can_request_live_instantiation(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import routes
+    from service.isaac_assist_service.multimodal.cosmos3_adapter import (
+        CosmosObjectProposal,
+        CosmosSceneObservation,
+    )
+    from service.isaac_assist_service.multimodal.instantiator import InstantiateResult
+    from service.isaac_assist_service.multimodal.persistence import MultimodalStore
+
+    calls = {}
+
+    async def fake_instantiate(spec, template_id=None, dry_run=False):
+        calls["dry_run"] = dry_run
+        calls["template_id"] = template_id
+        return InstantiateResult(
+            status="ok",
+            build_id="build-123",
+            generated_code="should not be returned for live builds",
+        )
+
+    old_store = routes._store
+    routes._store = MultimodalStore(tmp_path / "state.db")
+    monkeypatch.setattr(routes, "instantiate", fake_instantiate)
+    try:
+        proposal = routes.CosmosProposalRequest(
+            observation=CosmosSceneObservation(
+                objects=[CosmosObjectProposal(label="franka panda")],
+            ),
+            parent_revision=0,
+        )
+        asyncio.run(routes.propose_canvas_from_cosmos("live_build", proposal))
+
+        response = asyncio.run(
+            routes.build_canvas(
+                "live_build",
+                routes.BuildRequest(template_id="pick_place", dry_run=False),
+            )
+        )
+
+        assert calls == {"dry_run": False, "template_id": "pick_place"}
+        assert response["instantiation"]["status"] == "ok"
+        assert response["instantiation"]["build_id"] == "build-123"
+        assert response["instantiation"]["generated_code"] is None
     finally:
         routes._store.close()
         routes._store = old_store

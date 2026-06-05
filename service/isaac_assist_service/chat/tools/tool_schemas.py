@@ -9555,8 +9555,9 @@ ISAAC_SIM_TOOLS = [
             "description": (
                 "Apply (ratify) the current LayoutSpec for a session against a canonical template; "
                 "returns ratify status (ok / needs_choice / rejected) with bindings, diagnostics, "
-                "and ambiguous-role candidates. When force_freeform=True, skips ratification and "
-                "falls to free-form (T5) planning."
+                "ambiguous-role candidates, asset resolutions, and instantiation output. "
+                "Default dry_run=True returns generated Kit code without mutating Isaac Sim. "
+                "When force_freeform=True, skips ratification and falls to free-form (T5) planning."
             ),
             "parameters": {
                 "type": "object",
@@ -9569,6 +9570,10 @@ ISAAC_SIM_TOOLS = [
                     "force_freeform": {
                         "type": "boolean",
                         "description": "Skip canonical ratify and fall to T5 free-form. Default: false.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Generate Kit code without executing by default. Set false only when ready to mutate Isaac Sim.",
                     },
                 },
                 "required": ["session_id"],
