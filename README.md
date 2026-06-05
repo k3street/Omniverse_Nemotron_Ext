@@ -22,9 +22,10 @@
 4. [LiveKit Voice Infrastructure (Optional)](#4-livekit-voice-infrastructure-optional)
 5. [Running the Omniverse Extension](#5-running-the-omniverse-extension)
 6. [Verify Everything Is Connected](#6-verify-everything-is-connected)
-7. [Configuration Reference](#7-configuration-reference)
-8. [Feature Modules](#8-feature-modules)
-9. [Contributing Data & Helping Train the Model](#9-contributing-data--helping-train-the-model)
+7. [GUI Smoke Test](#7-gui-smoke-test)
+8. [Configuration Reference](#8-configuration-reference)
+9. [Feature Modules](#9-feature-modules)
+10. [Contributing Data & Helping Train the Model](#10-contributing-data--helping-train-the-model)
 
 ---
 
@@ -54,6 +55,8 @@ Omniverse_Nemotron_Ext/
 │       ├── main.py             # App entry point
 │       ├── .env.example        # Configuration template
 │       └── ...                 # Feature modules (chat, analysis, planner, etc.)
+├── web/
+│   └── floor-plan-ui/      # React + Konva multimodal canvas GUI
 ├── infra/
 │   └── livekit/            # Self-hosted LiveKit voice stack (Docker Compose)
 ├── scripts/                # Utility scripts (doc scraping, data curation)
@@ -100,8 +103,16 @@ cp service/isaac_assist_service/.env.example service/isaac_assist_service/.env
 #### Pull the local model (if using `LLM_MODE=local`)
 
 ```bash
-ollama pull qwen3.5:35b
+ollama pull qwen3.6:latest
 ```
+
+Known-good local Ollama models on the development machine include:
+
+| Model | Use |
+|---|---|
+| `qwen3.6:latest` | Default local Isaac Assist chat model |
+| `nemotron3:33b` | NVIDIA-flavored local coding/reasoning fallback |
+| `deepseek-r1:32b` | Deliberate reasoning / audit fallback |
 
 ### 3.3 Start the service
 
@@ -156,7 +167,12 @@ docker compose down
 
 ### 5.1 Using the launch script (recommended)
 
-The `launch_isaac.sh` script configures the correct ROS2 environment and registers the extension folder automatically.
+The `launch_isaac.sh` script configures the correct ROS2 environment and registers the extension folder automatically. It selects the matching extension harness for the detected Isaac Sim runtime:
+
+| Runtime | Extension path | Notes |
+|---|---|---|
+| Isaac Sim 5.1 | `exts/isaac_5.1` | Legacy-compatible harness; `KIT_RPC_PORT` can override the default `8001` when co-running with another Kit instance. |
+| Isaac Sim 6.0 | `exts/isaac_6.0` | Current active harness for Isaac Sim 6.0 / Isaac Lab 3 workflows. |
 
 ```bash
 # Launch Isaac Sim with an empty scene
@@ -164,6 +180,9 @@ The `launch_isaac.sh` script configures the correct ROS2 environment and registe
 
 # Launch Isaac Sim and open a specific USD file
 ./launch_isaac.sh /path/to/scene.usd
+
+# Launch Isaac Sim 6.0 with Isaac Assist via the desktop-friendly wrapper
+./launch_isaac_assist_desktop.sh
 ```
 
 To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` in your `.env` file or export it before launching:
@@ -213,7 +232,48 @@ Once Isaac Sim is open and the extension is enabled, the **Isaac Assist** panel 
 
 ---
 
-## 7. Configuration Reference
+## 7. GUI Smoke Test
+
+Use this after large merges to verify the visible experience, not just the unit-test layer.
+
+### Floor-plan canvas GUI
+
+```bash
+cd web/floor-plan-ui
+npm install
+npm run dev -- --host 127.0.0.1
+```
+
+Open `http://127.0.0.1:5173?session=default_session` and confirm these major surfaces render:
+
+- Header: `Isaac Assist · Floor Plan` and `multimodal canvas v1.0`
+- Left tool rail and object palette
+- Konva canvas viewport with grid, objects, reach/agency overlays, and snap-guide support
+- Properties / layers side panel
+- Agent confirmation bar
+- Bottom chat ribbon and status bar with revision/session/save state
+
+For automated checks, run:
+
+```bash
+cd web/floor-plan-ui
+npm run build
+npm test
+```
+
+### Isaac Sim extension GUI
+
+1. Start the service with `./launch_service.sh local`.
+2. Start Isaac Sim with `./launch_isaac_assist_desktop.sh`.
+3. Verify the **Isaac Assist AI** window opens from the Isaac Sim menu/extension.
+4. Use the model selector to choose a local model such as `qwen3.6:latest`.
+5. Ask for a simple scene change, then confirm the transcript shows tool activity rather than a plain text-only answer.
+
+The Isaac Sim GUI test requires a live Kit process and GPU. If Kit is not running, keep the verification to the floor-plan GUI plus the backend/unit gates.
+
+---
+
+## 8. Configuration Reference
 
 Configuration is loaded in priority order (later files override earlier ones):
 
@@ -259,7 +319,7 @@ ASSETS_ROOT_PATH=https://omniverse-content-production.s3-us-west-2.amazonaws.com
 
 ---
 
-## 8. Feature Modules
+## 9. Feature Modules
 
 The FastAPI service exposes the following REST API modules, all prefixed under `/api/v1/`:
 
@@ -279,9 +339,19 @@ The FastAPI service exposes the following REST API modules, all prefixed under `
 
 Full interactive documentation: **`http://localhost:8000/docs`**
 
+### Recent merged capabilities
+
+The current `master` includes the PR 115-117 integration wave:
+
+- Canonical backlog and template expansion for industrial, ROS2, GR00T, Isaac Lab, safety, SDG, and manipulation workflows.
+- Role-based canonical template repairs and sandbox-safety validation for capture-time failures.
+- Extended canonical linting, including enum/nested validation and `--validate-sandbox`.
+- Coexistence protection for Isaac Sim 5.1 and 6.0 extension harnesses.
+- Floor-plan GUI build/test baseline pinned to Vite/Vitest versions that work on Node 18.
+
 ---
 
-## 9. Contributing Data & Helping Train the Model
+## 10. Contributing Data & Helping Train the Model
 
 Isaac Assist uses a **version-aware knowledge base** to ground the LLM in verified, working code patterns for each Isaac Sim release. Community contributions to this knowledge base directly improve the quality of generated code for everyone — and can ultimately feed into a fine-tuned model purpose-built for Isaac Sim development.
 
@@ -292,7 +362,7 @@ The knowledge base lives in `workspace/knowledge/` and consists of:
 | File | Purpose |
 |---|---|
 | `code_patterns_5.1.0.jsonl` | Verified code snippets for Isaac Sim 5.1 |
-| `code_patterns_6.0.0.jsonl` | Verified code snippets for Isaac Sim 6.0 *(coming soon)* |
+| `code_patterns_6.0.0.jsonl` | Verified code snippets for Isaac Sim 6.0 / Isaac Lab 3 |
 | `knowledge_5.1.0.jsonl` | Indexed documentation chunks |
 
 When a user asks the LLM to perform an action, the system automatically retrieves relevant patterns for the active Isaac Sim version and injects them into the prompt. This means the LLM sees **working, tested code** rather than hallucinating outdated Kit commands.

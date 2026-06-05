@@ -3,14 +3,17 @@
 Multimodal canvas SPA for Isaac Assist — Block 1A.3 scaffold per
 `docs/specs/2026-05-08-multimodal-foundation-spec.md` §9.5.
 
-## Status: scaffold only
+## Status
 
-This is a Vite + React + Konva starter that wires against the canvas REST
-API in `service/isaac_assist_service/multimodal/routes.py`. The skeleton
-proves the plumbing works (loads `LayoutSpec`, renders objects with
-agency-tier colors and reach circles, shows status bar). Interactive
-editing — drag-drop palette, smart guides, snap markers, dimension lines,
-persistent chat input ribbon — is the next session's work.
+This is a Vite + React + Konva canvas UI that wires against the canvas REST
+API in `service/isaac_assist_service/multimodal/routes.py`. It now renders
+the full work surface: tool rail, palette, Konva canvas viewport, properties
+panel, confirm bar, chat ribbon, status bar, keyboard affordances, WAL restore,
+debounced patch sync, and SSE agent-update handling.
+
+The GUI remains a development surface for the multimodal canvas, not the
+primary Isaac Sim viewport. Use it to inspect and edit layout specs before
+handoff to the Isaac Assist extension/Kit RPC path.
 
 ## Dev
 
@@ -23,6 +26,24 @@ npm run dev    # → http://localhost:5173 with proxy to FastAPI :8000
 Open the browser tab via the chat extension's `👁 Modes → Open canvas
 editor`, or directly at `http://localhost:5173?session=default_session`
 during development.
+
+## GUI smoke checklist
+
+After large merges, run the app and visually confirm these surfaces:
+
+- Header: `Isaac Assist · Floor Plan` and `multimodal canvas v1.0`
+- Left toolbar and object palette
+- Konva viewport with grid, layout objects, reach/agency overlays, and guide support
+- Properties/layers panel
+- Agent confirmation bar
+- Bottom chat ribbon and revision/session/save status bar
+
+Then run the non-visual gates:
+
+```bash
+npm run build
+npm test
+```
 
 ## Build
 
@@ -46,24 +67,17 @@ Visual tokens and class colors mirror
 Kit canvas-mirror panel render identically. Update both when the design
 tokens change.
 
-## What's pending (next session)
+## What's pending
 
-Per spec §11.3 (button/control inventory) — the components below need
-implementation. The scaffold above renders STATIC layouts; nothing in the
-UI mutates state yet.
+Per spec §11.3, these richer editing controls still need completion or deeper
+runtime wiring:
 
-- [ ] Object palette (drag from sidebar; spec §11.3.3)
-- [ ] Multi-select + transformer handles (Konva `Transformer` widget)
-- [ ] Smart guides + snap markers (spec §6.3 — five marker types)
 - [ ] Dimension lines + constraint indicators (spec §6.4)
-- [ ] Properties / Layers / Constraints right dock (spec §11.3.4)
-- [ ] Floating confirm bar for agent-proposed states (spec §5.7)
 - [ ] Custom robot silhouettes (32×32 SVG per robot class; spec §12.6)
 - [ ] Motion vocabulary tokens (spec §12.7)
-- [ ] Persistent chat input ribbon at bottom (spec §11.2)
-- [ ] Zustand store with command-pattern undo/redo (spec §2.3)
-- [ ] localStorage write-ahead log + sendBeacon on beforeunload (spec §13.4)
-- [ ] SSE listener for `canvas/proposed` etc events from backend
+- [ ] Deeper Properties / Layers / Constraints editing coverage (spec §11.3.4)
+- [ ] Full backend round-trip hardening for `canvas/proposed` and conflict resolution
+- [ ] Playwright screenshot regression suite for fixed-seed layouts
 
 ## Backend dependencies
 
@@ -75,4 +89,4 @@ This SPA assumes the multimodal foundation is running:
 - `service/isaac_assist_service/chat/tools/multimodal_handlers.py`
   registered into `tool_executor.py`
 
-All landed in commits on `feat/multimodal-foundation` branch.
+These modules are now on `master`.
