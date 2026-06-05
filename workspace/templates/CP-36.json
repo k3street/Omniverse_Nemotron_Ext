@@ -94,5 +94,85 @@
       "rmpflow",
       "moveit2"
     ]
-  }
+  },
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "destination_kind": "shelf",
+      "n_robot_stations": 1,
+      "has_stacking": false,
+      "uses_conveyor_transport": true,
+      "n_handoffs": 0
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:destination.two_tier_shelf"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "shelf_bottom": {
+      "constraints": ["fixture"],
+      "expected_count": 1,
+      "required": true
+    },
+    "shelf_top": {
+      "constraints": ["fixture"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 4,
+      "param_name": "n_cubes",
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.4, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "shelf_bottom": {
+      "path": "/World/ShelfBottom",
+      "position": [0, -0.4, 0.775],
+      "scale": [0.10, 0.05, 0.025]
+    },
+    "shelf_top": {
+      "path": "/World/ShelfTop",
+      "position": [0, -0.4, 0.95],
+      "scale": [0.10, 0.05, 0.025]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.4, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [-1.4, 0.4, 0.835], "drop_target": [-0.05, -0.4, 0.825]},
+      {"path": "/World/Cube_2", "position": [-1.15, 0.4, 0.835], "drop_target": [0.05, -0.4, 0.825]},
+      {"path": "/World/Cube_3", "position": [-0.9, 0.4, 0.835], "drop_target": [-0.05, -0.4, 1.000]},
+      {"path": "/World/Cube_4", "position": [-0.65, 0.4, 0.835], "drop_target": [0.05, -0.4, 1.000]}
+    ]
+  },
+  "code_template": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# 2-level shelf — 2 platforms stacked vertically\n# Bottom platform at z=0.80 (top), top platform at z=0.975 (top)\ncreate_prim(prim_path={{shelf_bottom.path}}, prim_type=\"Cube\", position={{shelf_bottom.position}}, scale={{shelf_bottom.scale}})\napply_api_schema(prim_path={{shelf_bottom.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{shelf_top.path}},    prim_type=\"Cube\", position={{shelf_top.position}},  scale={{shelf_top.scale}})\napply_api_schema(prim_path={{shelf_top.path}},    schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\n# drop_targets — 2 to bottom shelf top z=0.825, 2 to top shelf top z=1.000\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    destination_path={{shelf_bottom.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{workpieces[0].drop_target}},\n        {{workpieces[1].path}}: {{workpieces[1].drop_target}},\n        {{workpieces[2].path}}: {{workpieces[2].drop_target}},\n        {{workpieces[3].path}}: {{workpieces[3].drop_target}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{shelf_bottom.path}}, {{shelf_top.path}}],\n)"
 }

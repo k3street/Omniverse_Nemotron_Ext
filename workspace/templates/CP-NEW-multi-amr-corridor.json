@@ -28,5 +28,74 @@
     "navigate_to without ROS2 nav2 may use simple Vector-to-goal (collision unaware)",
     "AMR fleet coordination \u2014 without claim mutex, AMRs may collide in narrow corridor"
   ],
-  "verified_status": "build-spec-2026-05-10; BUILD_OK 21/21 with target_position+drive_type+wheel_radius+wheel_base args; no simulate_args (AMR nav not cube delivery)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK 21/21 with target_position+drive_type+wheel_radius+wheel_base args; no simulate_args (AMR nav not cube delivery)",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 3,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:robot.mobile.amr",
+      "isaac:topology.multi_amr_fleet",
+      "isaac:coordination.collision_avoidance",
+      "isaac:topology.corridor_navigation",
+      "isaac:coordination.moving_obstacle"
+    ]
+  },
+  "roles": {
+    "amr_fleet": {
+      "constraints": [
+        "wheeled_robot"
+      ],
+      "min": 3,
+      "max": 3,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "amr_fleet": [
+      {
+        "path": "/World/Carter_1",
+        "position": [
+          -2.0,
+          0,
+          0.1
+        ],
+        "target": [
+          2.0,
+          0,
+          0.1
+        ]
+      },
+      {
+        "path": "/World/Carter_2",
+        "position": [
+          -0.5,
+          0,
+          0.1
+        ],
+        "target": [
+          -2.0,
+          0,
+          0.1
+        ]
+      },
+      {
+        "path": "/World/Carter_3",
+        "position": [
+          1.0,
+          0,
+          0.1
+        ],
+        "target": [
+          2.0,
+          0.3,
+          0.1
+        ]
+      }
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/CorridorL\", prim_type=\"Cube\", position=[0, -1.0, 0.50], scale=[5.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/CorridorL\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/CorridorR\", prim_type=\"Cube\", position=[0, 1.0, 0.50], scale=[5.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/CorridorR\", schema_name=\"PhysicsCollisionAPI\")\n\n{{#each amr_fleet}}\ncreate_wheeled_robot(\n    robot_path={{this.path}},\n    position={{this.position}},\n    drive_type=\"differential\",\n    wheel_radius=0.14,\n    wheel_base=0.5)\n{{/each}}\n\nregister_moving_obstacle(robot_path={{amr_fleet[0].path}}, obstacle_path={{amr_fleet[1].path}})\nregister_moving_obstacle(robot_path={{amr_fleet[0].path}}, obstacle_path={{amr_fleet[2].path}})\nregister_moving_obstacle(robot_path={{amr_fleet[1].path}}, obstacle_path={{amr_fleet[0].path}})\nregister_moving_obstacle(robot_path={{amr_fleet[1].path}}, obstacle_path={{amr_fleet[2].path}})\nregister_moving_obstacle(robot_path={{amr_fleet[2].path}}, obstacle_path={{amr_fleet[0].path}})\nregister_moving_obstacle(robot_path={{amr_fleet[2].path}}, obstacle_path={{amr_fleet[1].path}})\n\nnavigate_to(robot_path={{amr_fleet[0].path}}, target_position={{amr_fleet[0].target}})\nnavigate_to(robot_path={{amr_fleet[1].path}}, target_position={{amr_fleet[1].target}})\nnavigate_to(robot_path={{amr_fleet[2].path}}, target_position={{amr_fleet[2].target}})"
 }

@@ -48,14 +48,25 @@ PatternHint = Literal[
     "sort",         # success: workpiece in correct-class destination
     "reorient",     # success: workpiece in destination AND oriented
     "navigate",     # success: mobile platform at goal pose
+    "insert",       # success: peg/part seated in hole (force-threshold or assembly-constraint active)
+    "train",        # success: training loop running / dataset exported / gap metric produced
+    "other",        # long-tail novel pattern; structural_tags provide retrieval discrimination
 ]
 """
 Closed enum. Discriminates by simulation success-criterion shape, NOT by
 surface task description. CP-04 (constraint) is `pick_place` — the bounded
 footprint is a structural feature, not a distinct pattern.
 
-`"custom"` is deliberately rejected. Once a catch-all exists it becomes the
-dumping ground; classification slips back into regex-family fragility.
+Round 12 additions (2026-05-16):
+  `insert`  — promoted from novel_pattern; ≥3 templates share force/compliance
+              insertion success criterion.
+  `train`   — promoted from novel_pattern; ≥3 templates share training-loop /
+              dataset-export / gap-measurement success criterion.
+  `other`   — explicit catch-all for ≤2-template clusters.  Intentionally NOT
+              named `custom` — `other` signals "unclassified, pending promotion"
+              whereas `custom` implies permanent exception.  When ≥3 `other`
+              templates share a clear success-criterion shape, promote to a new
+              named value (minor version bump + extractor update required).
 """
 
 

@@ -1,0 +1,152 @@
+{
+  "task_id": "CP-NEW-palletizer-layer-stack",
+  "goal": "Build a 2x3 layer-stack palletizer: a UR10 robot picks uniform 0.10m boxes from an infeed conveyor and places them in a 2-column × 3-row grid on a 0.70×0.50m pallet behind the robot. Six drop-target positions are pre-computed using the grid_2x3 pattern geometry (pallet centre ± col/row offsets) and passed to setup_pick_place_controller as a drop_targets dict; a proximity sensor at the pick point triggers each pick cycle. Exercises UR10 reach envelope, grid placement math, and cuRobo multi-target drop_targets dispatch for industrial palletizing.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "compute_stack_placement",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-palletizer-layer-stack:\n\n1) Robot and reach geometry: UR10 (reach ~1.3m) mounted on a 0.75m table (effective tool height ~1.6m from floor). Robot base at [0, 0, 0.75]. Pallet at [0, -0.55, 0.775] — centre 0.55m behind robot base. Grid spans ±0.15m in X and 0 to +0.40m in Y from pallet centre. Maximum horizontal distance from robot base to far pallet corner ≈ sqrt(0.15^2 + (0.55+0.20)^2) ≈ 0.76m — well inside 1.3m reach. Conveyor in front at y=+0.45, belt top at z=0.805; boxes are 0.10m cubes so box top at z=0.905, box centre at z=0.855.\n\n2) Grid layout: compute_stack_placement(target='/World/Pallet', pattern='grid_2x3', n_items=6, cube_size=0.10, spacing=0.12, anchor='top') yields positions at pallet_top_z=0.825 + 0.10/2 = 0.875 with xy offsets: col 0 at x=-0.12, col 1 at x=+0.12; row 0 at y=-0.51, row 1 at y=-0.55, row 2 at y=-0.59 (rows separated by 0.04m gap between 0.10m-wide boxes). The 6 drop targets are pre-computed at canonical-author time and baked into drop_targets dict — no runtime tool composition needed.\n\n3) Conveyor and box placement: Infeed conveyor 3m long at y=0.45, surface_velocity=[0.15, 0, 0]. 6 boxes placed at x in [-1.6, -1.3, -1.0, -0.7, -0.4, -0.1], all outside robot's 0.65m front reach so conveyor has travel distance before pick. Belt top = 0.78+0.025=0.805; box centre z=0.855. Proximity sensor at [0.35, 0.45, 0.855] fires when a box enters the pick window.\n\n4) Physics: CPU dynamics (enable_gpu_dynamics=False, broadphase_type=MBP) for determinism. Box mass default 1 kg; rubber material reduces sliding on pallet. sleepThreshold=0.0 keeps boxes simulated through settle phase.\n\n5) cuRobo motion planner handles UR10 naturally; EE_INITIAL_HEIGHT = max(box_on_belt_z, max_drop_z) + 0.20 = 0.875 + 0.20 = 1.075m. All drop targets at identical z=0.875 (single-layer stack), so transit height is constant. Future extension: two-layer version raises drop z by one box height (0.10m) for layer 2.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Robot table / base platform\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics scene: CPU dynamics for determinism ───────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── UR10 robot ────────────────────────────────────────────────────────────────\n# UR10 has ~1.3m reach. Mounted on 0.75m table. Pallet 0.55m behind at y=-0.55.\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Infeed conveyor ───────────────────────────────────────────────────────────\n# 3m long conveyor in front of robot; belt top at z = 0.78+0.025 = 0.805.\n# slow belt (0.15 m/s) to allow reliable picks.\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.45, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\n# ── 6 uniform boxes (0.10m cubes) ────────────────────────────────────────────\n# All outside robot reach (<0.65m front) so conveyor transport is meaningful.\n# Box centre z = belt_top(0.805) + box_size/2(0.05) = 0.855.\nbox_paths = [f\"/World/Box_{i+1}\" for i in range(6)]\nbox_x_positions = [-1.6, -1.3, -1.0, -0.7, -0.4, -0.1]\n\nfor i, (path, x) in enumerate(zip(box_paths, box_x_positions)):\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.45, 0.855], size=0.10)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=box_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in box_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Pallet (0.70×0.50×0.05m platform) ────────────────────────────────────────\n# scale=[0.35, 0.25, 0.025] because USD Cube is 2m unit → half-extents.\n# Pallet top z = 0.775 + 0.025 = 0.800.\ncreate_prim(\n    prim_path=\"/World/Pallet\",\n    prim_type=\"Cube\",\n    position=[0, -0.55, 0.775],\n    scale=[0.35, 0.25, 0.025],\n)\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Pick proximity sensor ─────────────────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.35, 0.45, 0.855],\n    size=[0.12, 0.12, 0.12],\n)\n\n# ── Pre-computed 2x3 grid drop targets ───────────────────────────────────────\n# compute_stack_placement(target='/World/Pallet', pattern='grid_2x3',\n#   n_items=6, cube_size=0.10, spacing=0.12, anchor='top')\n# → pallet_top_z = 0.800; drop_z = 0.800 + 0.10/2 = 0.875\n# Grid: 2 cols (x = -0.12, +0.12 from pallet centre x=0)\n#        3 rows (y = -0.47, -0.55, -0.63 from pallet centre y=-0.55 + row offsets)\n# Row offsets from pallet centre: row0=+0.08, row1=0.00, row2=-0.08\n# Effective y positions: row0=-0.47, row1=-0.55, row2=-0.63\ndrop_targets = {\n    \"/World/Box_1\": [-0.12, -0.47, 0.875],\n    \"/World/Box_2\": [ 0.12, -0.47, 0.875],\n    \"/World/Box_3\": [-0.12, -0.55, 0.875],\n    \"/World/Box_4\": [ 0.12, -0.55, 0.875],\n    \"/World/Box_5\": [-0.12, -0.63, 0.875],\n    \"/World/Box_6\": [ 0.12, -0.63, 0.875],\n}\n\n# ── cuRobo pick-place controller ──────────────────────────────────────────────\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=box_paths,\n    destination_path=\"/World/Pallet\",\n    drop_targets=drop_targets,\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Pallet\"],\n)",
+  "settle_state": {
+    "boxes": {
+      "/World/Box_1": [-1.6, 0.45, 0.855],
+      "/World/Box_2": [-1.3, 0.45, 0.855],
+      "/World/Box_3": [-1.0, 0.45, 0.855],
+      "/World/Box_4": [-0.7, 0.45, 0.855],
+      "/World/Box_5": [-0.4, 0.45, 0.855],
+      "/World/Box_6": [-0.1, 0.45, 0.855]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.15, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Pallet",
+        "robot_kind": "ur10"
+      }
+    ],
+    "cube_path": "/World/Box_1"
+  },
+  "simulate_args": {
+    "target_path": "/World/Pallet",
+    "cube_paths": [
+      "/World/Box_1",
+      "/World/Box_2",
+      "/World/Box_3",
+      "/World/Box_4",
+      "/World/Box_5",
+      "/World/Box_6"
+    ],
+    "duration_s": 240,
+    "xy_tolerance": 0.08
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": ["/World/Pallet", "/World/ConveyorBelt"],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "UR10 URDF not found in robot_wizard registry — robot_name='ur10' must match the registered asset key; if it fails, try 'UR10' (capitalised) or confirm the UR10 USD is on Nucleus.",
+    "Box overshoots pick sensor due to belt velocity — pick sensor at x=0.35 only fires for boxes near pick range; if belt is too fast, Box_6 (x=-0.1) may pass before pick sequence starts. Reduce surface_velocity to 0.10 m/s if misses occur.",
+    "Grid slot overlap collision — 0.10m boxes placed at 0.12m col-spacing leaves only 0.02m clearance. If PhysX broadphase reports contact at settle, increase spacing to 0.14m (re-run compute_stack_placement with spacing=0.14).",
+    "EE_INITIAL_HEIGHT insufficient for boxes near pallet edge — drop targets all at z=0.875; EE clears at 1.075m. If cuRobo generates colliding paths, verify _compute_h1 considers all DROP_TARGETS.values() (inherited from CP-09 handler fix).",
+    "Pallet collision mesh too thin — pallet scale=[0.35, 0.25, 0.025] gives 0.05m thick slab. If boxes fall through at high drop speed, increase z-scale to 0.05 (0.10m thick slab) and adjust pallet position z down by 0.025m."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "has_stacking": false,
+      "has_grid_placement": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:placement.grid_2x3",
+      "isaac:robot.ur10",
+      "isaac:industry.palletizing"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["ur10", "ur5e", "franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "longer_reach_preferred"
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "primary_destination": {
+      "constraints": ["platform", "pallet"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube", "box"],
+      "min": 1,
+      "max": 6,
+      "param_name": "n_boxes",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.45, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.15, 0, 0]
+    },
+    "primary_destination": {
+      "path": "/World/Pallet",
+      "position": [0, -0.55, 0.775],
+      "scale": [0.35, 0.25, 0.025]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.35, 0.45, 0.855],
+      "size": [0.12, 0.12, 0.12]
+    },
+    "workpieces": [
+      {"path": "/World/Box_1", "position": [-1.6, 0.45, 0.855], "drop_target": [-0.12, -0.47, 0.875]},
+      {"path": "/World/Box_2", "position": [-1.3, 0.45, 0.855], "drop_target": [ 0.12, -0.47, 0.875]},
+      {"path": "/World/Box_3", "position": [-1.0, 0.45, 0.855], "drop_target": [-0.12, -0.55, 0.875]},
+      {"path": "/World/Box_4", "position": [-0.7, 0.45, 0.855], "drop_target": [ 0.12, -0.55, 0.875]},
+      {"path": "/World/Box_5", "position": [-0.4, 0.45, 0.855], "drop_target": [-0.12, -0.63, 0.875]},
+      {"path": "/World/Box_6", "position": [-0.1, 0.45, 0.855], "drop_target": [ 0.12, -0.63, 0.875]}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\nbox_paths = [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}]\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.10)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.10)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.10)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.10)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[4].path}}, prim_type=\"Cube\", position={{workpieces[4].position}}, size=0.10)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[4].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[5].path}}, prim_type=\"Cube\", position={{workpieces[5].position}}, size=0.10)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[5].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=box_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in box_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_prim(\n    prim_path={{primary_destination.path}},\n    prim_type=\"Cube\",\n    position={{primary_destination.position}},\n    scale={{primary_destination.scale}},\n)\napply_api_schema(prim_path={{primary_destination.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(\n    sensor_path={{pick_sensor.path}},\n    position={{pick_sensor.position}},\n    size={{pick_sensor.size}},\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=box_paths,\n    destination_path={{primary_destination.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{workpieces[0].drop_target}},\n        {{workpieces[1].path}}: {{workpieces[1].drop_target}},\n        {{workpieces[2].path}}: {{workpieces[2].drop_target}},\n        {{workpieces[3].path}}: {{workpieces[3].drop_target}},\n        {{workpieces[4].path}}: {{workpieces[4].drop_target}},\n        {{workpieces[5].path}}: {{workpieces[5].drop_target}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{primary_destination.path}}],\n)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16-patched-r-a-fix; form-gate ⏳ (schema-OK); function-gate ⏳"
+}

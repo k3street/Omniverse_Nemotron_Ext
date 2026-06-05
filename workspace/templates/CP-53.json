@@ -126,5 +126,10 @@
     "upper": 0.6345,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "Producer/consumer bounded buffer with 2 Frankas; pick_place pattern partial but bounded-buffer role not in schema",
+    "added_date": "2026-05-15"
   }
 }

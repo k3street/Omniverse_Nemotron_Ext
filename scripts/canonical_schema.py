@@ -111,13 +111,35 @@ ROLE_CORE_TRIO = ["roles", "role_defaults", "code_template"]
 # ── Value validators ─────────────────────────────────────────────────────────
 
 # intent.pattern_hint valid values (from types.py PatternHint enum)
-VALID_PATTERN_HINTS = {"pick_place", "sort", "reorient", "navigate"}
+#
+# Round 12 additions (2026-05-16):
+#   "insert"    — force/compliance-based peg-in-hole or assembly-constraint insertion;
+#                 success criterion: peg seated in hole (force threshold / constraint active)
+#   "train"     — RL training scaffold, SDG pipeline, or sim-to-real measurement;
+#                 success criterion: training loop running / dataset exported / gap measured
+#   "other"     — catch-all for long-tail novel patterns (≤2 templates per cluster);
+#                 structural_tags provide the discriminating signal at retrieval time
+#
+# When a future round accumulates ≥3 "other" templates sharing a clear success-criterion
+# shape, promote them to a named enum value (minor version bump, extractor update required).
+VALID_PATTERN_HINTS = {
+    "pick_place",  # success: workpiece in destination, at rest
+    "sort",        # success: workpiece in correct-class destination
+    "reorient",    # success: workpiece in destination AND oriented
+    "navigate",    # success: mobile platform at goal pose
+    "insert",      # success: peg/part seated in hole (force-threshold or assembly-constraint)
+    "train",       # success: training loop running / dataset exported / gap metric produced
+    "other",       # long-tail; structural_tags discriminate at retrieval time
+}
 
 # intent.structural_features.destination_kind valid values
 VALID_DESTINATION_KINDS = {"single_bin", "n_bins_routed", "shelf", "fixture"}
 
 # intent.structural_features.routing_axis valid values
-VALID_ROUTING_AXES = {"color", "size", "shape", "label"}
+# Added 2026-05-15: semantic_class for inspect-and-reject patterns where
+# routing decision is based on a classifier output (good vs defective,
+# defect-type categories, etc.) rather than a raw geometric property.
+VALID_ROUTING_AXES = {"color", "size", "shape", "label", "semantic_class"}
 
 # verified_status is free-text (not enum-constrained) — the values are too diverse.
 # We do not validate its content, only its presence (for T1).

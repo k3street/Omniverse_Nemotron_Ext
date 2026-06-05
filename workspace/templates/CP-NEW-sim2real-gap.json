@@ -29,5 +29,11 @@
     "compare_sim_real_video requires camera frames to be timestamp-aligned \u2014 sim camera capture rate must match real",
     "joint_pos_rmse computation assumes joint name parity between sim Franka and real Franka URDF"
   ],
-  "verified_status": "build-spec-2026-05-10; BUILD_OK 17/18; 1 error on replay_rosbag (needs real rosbag asset)"
+  "verified_status": "build-spec-2026-05-10; BUILD_OK 17/18; 1 error on replay_rosbag (needs real rosbag asset)",
+  "migration_deferred": {
+    "reason": "train_pattern_diagnostic_only",
+    "details": "pattern_hint=train is now valid (R12). However, this is a measurement/diagnostic task (replay_rosbag + measure_sim_real_gap), not a training scaffold with a delivery criterion. simulate_args is null. No role-based migration is possible: the success criterion is a JSON gap-metric file, not cube-at-destination. Unmigratable until a diagnostic/measurement template schema is defined.",
+    "added_date": "2026-05-15",
+    "updated_date": "2026-05-16"
+  }
 }

@@ -51,7 +51,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="Single-spot resistance welding on sheet-metal panels.",
     ),
     RoleTemplateEntry(
-        template_id="CP-02",  # multi-station assembly line — industrial multi-robot workflow
+        template_id="CP-02",  # multi-station assembly line — industrial multi-robot workflow [REVIEW]
         role="welder",
         sub_role="mig_welder",
         robot_class="kuka_kr16",
@@ -60,7 +60,7 @@ ROLE_TEMPLATE_INDEX: list[RoleTemplateEntry] = [
         notes="MIG welding for structural steel frames.",
     ),
     RoleTemplateEntry(
-        template_id="CP-24",  # narrow-slot insertion — precision placement analog
+        template_id="CP-24",  # narrow-slot insertion — precision placement analog [REVIEW]
         role="welder",
         sub_role="tig_welder",
         robot_class="yaskawa_gp8",

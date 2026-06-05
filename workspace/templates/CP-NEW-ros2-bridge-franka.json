@@ -1,0 +1,83 @@
+{
+  "task_id": "CP-NEW-ros2-bridge-franka",
+  "goal": "Bring up the Isaac Sim ROS2 bridge for a Franka Panda arm: publish joint states on /joint_states at 60 Hz, subscribe joint position commands on /joint_commands, synchronize the simulation clock on /clock via configure_ros2_time. Verify the bridge is live by calling ros2_list_topics and confirming all three topics are active, then ros2_subscribe_once on /joint_states and checking the 7 joint names are present. Exercises Phase 10 setup_ros2_bridge + configure_ros2_time + emit_ros2_control_yaml end-to-end with no motion planner — pure ROS2 middleware integration.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "setup_ros2_bridge",
+    "configure_ros2_time",
+    "emit_ros2_control_yaml",
+    "ros2_list_topics",
+    "ros2_subscribe_once",
+    "diagnose_ros2"
+  ],
+  "thoughts": "Design rationale for CP-NEW-ros2-bridge-franka:\n\n1) Bridge scope: The canonical targets the most common ROS2 bridge bring-up pattern — Franka arm publishing joint states for MoveIt2 / Nav2 consumers while accepting joint position commands. This maps directly to backlog entry ros2-bridge-setup-franka-001 (tier 1, no blockers).\n\n2) Topic layout:\n   - /joint_states  → sensor_msgs/JointState published from Isaac Sim articulation at 60 Hz.\n   - /joint_commands → sensor_msgs/JointState subscribed by Isaac Sim; positions written to drive targets.\n   - /clock          → rosgraph_msgs/Clock; configure_ros2_time(use_sim_time=True) enables /clock.\n   ROS2 standard: joint_names must match URDF link names exactly. Franka URDF joint names: panda_joint1..panda_joint7.\n\n3) emit_ros2_control_yaml: Generates the ros2_control hardware-interface description YAML that downstream MoveIt2 or ros2_control node needs to load the compat layer. Not strictly required for bridge validation but completes the bring-up story and is low-cost.\n\n4) Validation strategy: ros2_list_topics returns the set of active topics after bridge start. ros2_subscribe_once /joint_states confirms we can receive one JointState message with 7 joint names present. diagnose_ros2 as the final plumbing health check. No cube delivery — this is a bridge-validation canonical, not a motion canonical.\n\n5) Physics config: CPU dynamics, no GPU — bridge validation does not require GPU physics. Franka is mounted at [0, 0, 0.75] on a 0.75 m table. No conveyor, no workpieces needed.\n\n6) settle_state: The bridge has no physical settle to wait for; the settle_state captures the expected initial joint configuration (home pose) and confirms the bridge is up within 2s.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot mount table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics — bridge validation does not need GPU physics ───────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka Panda arm ──────────────────────────────────────────────────────────\n# Mounted at z=0.75 (table top). robot_wizard loads the USD + registers\n# articulation so the bridge can discover joint names automatically.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── ROS2 sim clock ────────────────────────────────────────────────────────────\n# Must be configured BEFORE bridge start so downstream nodes receive /clock\n# from t=0. use_sim_time=True publishes rosgraph_msgs/Clock.\nconfigure_ros2_time(\n    mode=\"sim_time\",\n)\n\n# ── ROS2 bridge: joint_states publisher + joint_commands subscriber ───────────\n# profile=\"franka_moveit2\" wires joint_states publisher + joint_commands\n# subscriber + TF + ROS2 clock node in one call (Phase 10 single-call API).\nsetup_ros2_bridge(\n    profile=\"franka_moveit2\",\n    robot_path=\"/World/Franka\",\n)\n\n# ── Emit ros2_control hardware interface YAML ────────────────────────────────\n# Produces the ros2_control <robot> YAML block needed by MoveIt2 and\n# ros2_control node. Written to /tmp/franka_ros2_control.yaml by default.\n# controller_type selects the hardware plugin category.\nemit_ros2_control_yaml(\n    robot_path=\"/World/Franka\",\n    output_path=\"/tmp/franka_ros2_control.yaml\",\n    controller_type=\"joint_trajectory_controller\",\n    joint_states_topic=\"/joint_states\",\n    joint_commands_topic=\"/joint_commands\",\n    update_rate_hz=100,\n)\n\n# ── Bridge validation ─────────────────────────────────────────────────────────\n# 1. List all active ROS2 topics — confirm /joint_states, /joint_commands,\n#    and /clock are present after bridge startup.\nactive_topics = ros2_list_topics()\nexpected_topics = {\"/joint_states\", \"/joint_commands\", \"/clock\"}\nmissing = expected_topics - set(active_topics)\nif missing:\n    raise RuntimeError(f\"ROS2 bridge validation failed: missing topics {missing}\")\n\n# 2. Subscribe once to /joint_states and verify 7 Franka joint names are present.\n# Timeout 5.0s: bridge typically delivers first message within 0.1s.\njoint_msg = ros2_subscribe_once(topic=\"/joint_states\", timeout_s=5.0)\nfranka_joints = [\n    \"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n    \"panda_joint5\", \"panda_joint6\", \"panda_joint7\",\n]\nmsg_names = set(joint_msg.get(\"name\", []))\nmissing_joints = [j for j in franka_joints if j not in msg_names]\nif missing_joints:\n    raise RuntimeError(f\"JointState message missing joints: {missing_joints}\")\n\n# 3. Full plumbing health check.\ndiagnose_ros2(\n    robot_path=\"/World/Franka\",\n    expected_topics=[\"/joint_states\", \"/joint_commands\", \"/clock\"],\n    check_qos=True,\n)",
+  "settle_state": {
+    "bridge_topics": ["/joint_states", "/joint_commands", "/clock"],
+    "expected_joint_count": 7,
+    "joint_names": [
+      "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+      "panda_joint5", "panda_joint6", "panda_joint7"
+    ],
+    "home_pose_rad": [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]
+  },
+  "verify_args": {
+    "stages": []
+  },
+  "simulate_args": null,
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "expected_topics": ["/joint_states", "/joint_commands", "/clock"]
+  },
+  "verified_status": "drafted-2026-05-16-patched-r-a-fix; form-gate ⏳ (schema-OK); function-gate ⏳",
+  "failure_modes": [
+    "ROS2 environment not sourced / rclpy not importable — setup_ros2_bridge raises ImportError; check 'source /opt/ros/humble/setup.bash' before launching Kit",
+    "ROS2 daemon not running — ros2_list_topics returns empty list; restart with 'ros2 daemon start'",
+    "robot_wizard fails to load Franka USD (Nucleus path not mounted) — bridge has no articulation to discover joints from; joint_states topic publishes 0 joints",
+    "configure_ros2_time called after setup_ros2_bridge — /clock messages arrive with timestamp=0 for first N messages; always call configure_ros2_time first",
+    "QoS mismatch: bridge publishes RELIABLE, subscriber expects BEST_EFFORT — message not received; check diagnose_ros2 qos_warnings field",
+    "emit_ros2_control_yaml output_path not writable — YAML not written but bridge still functions; downstream MoveIt2 will not load the controller"
+  ],
+  "extends": "phase10-ros2-bridge",
+  "extension_notes": "First ros2-bridge-category canonical in the CP-NEW series. Covers the base bring-up pattern: single-arm joint-state/command ROS2 bridge with sim-clock sync and ros2_control YAML emission. No motion planner involved — pure middleware integration. Pairs with ros2-moveit2-franka-001 (future) which adds MoveIt2 planning on top of this bring-up.",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:bridge.ros2",
+      "isaac:integration.joint_state_command",
+      "isaac:topology.single_station",
+      "isaac:topology.ros2_bridge_validation",
+      "isaac:robot.fixed_base.arm"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["ros2_control", "moveit2"]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    }
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nconfigure_ros2_time(\n    mode=\"sim_time\",\n)\n\nsetup_ros2_bridge(\n    profile=\"franka_moveit2\",\n    robot_path={{primary_robot.path}},\n)\n\nemit_ros2_control_yaml(\n    robot_path={{primary_robot.path}},\n    output_path=\"/tmp/franka_ros2_control.yaml\",\n    controller_type=\"joint_trajectory_controller\",\n    joint_states_topic=\"/joint_states\",\n    joint_commands_topic=\"/joint_commands\",\n    update_rate_hz=100,\n)\n\nactive_topics = ros2_list_topics()\nexpected_topics = {\"/joint_states\", \"/joint_commands\", \"/clock\"}\nmissing = expected_topics - set(active_topics)\nif missing:\n    raise RuntimeError(f\"ROS2 bridge validation failed: missing topics {missing}\")\n\njoint_msg = ros2_subscribe_once(topic=\"/joint_states\", timeout_s=5.0)\nfranka_joints = [\n    \"panda_joint1\", \"panda_joint2\", \"panda_joint3\", \"panda_joint4\",\n    \"panda_joint5\", \"panda_joint6\", \"panda_joint7\",\n]\nmsg_names = set(joint_msg.get(\"name\", []))\nmissing_joints = [j for j in franka_joints if j not in msg_names]\nif missing_joints:\n    raise RuntimeError(f\"JointState message missing joints: {missing_joints}\")\n\ndiagnose_ros2(\n    robot_path={{primary_robot.path}},\n    expected_topics=[\"/joint_states\", \"/joint_commands\", \"/clock\"],\n    check_qos=True,\n)"
+}

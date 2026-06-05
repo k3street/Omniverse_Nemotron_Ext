@@ -44,12 +44,84 @@
     "OEE script is offline-only; not invoked from canonical setup",
     "cube_paths may need each station's specific 3 cubes if 'any bin' semantics not implemented"
   ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 3,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.multi_station",
+      "isaac:oee.3station_serial"
+    ]
+  },
+  "roles": {
+    "robot_a": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    },
+    "robot_b": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    },
+    "robot_c": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "bin_a": {"constraints": ["bin"], "expected_count": 1, "required": true},
+    "bin_b": {"constraints": ["bin"], "expected_count": 1, "required": true},
+    "bin_c": {"constraints": ["bin"], "expected_count": 1, "required": true},
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 3,
+      "max": 12,
+      "param_name": "n_cubes",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "robot_a": {"path": "/World/FrankaA", "class": "franka_panda", "position": [-1.5, 0, 0.75], "orientation": [0.7071068, 0, 0, 0.7071068]},
+    "robot_b": {"path": "/World/FrankaB", "class": "franka_panda", "position": [0.0, 0, 0.75], "orientation": [0.7071068, 0, 0, 0.7071068]},
+    "robot_c": {"path": "/World/FrankaC", "class": "franka_panda", "position": [1.5, 0, 0.75], "orientation": [0.7071068, 0, 0, 0.7071068]},
+    "input_conveyor": {"path": "/World/ConveyorBelt", "position": [0.0, 0.4, 0.78], "size": [5.0, 0.4, 0.05], "surface_velocity": [0.2, 0, 0]},
+    "bin_a": {"path": "/World/BinA", "position": [-1.5, -0.5, 0.75], "size": [0.3, 0.3, 0.15]},
+    "bin_b": {"path": "/World/BinB", "position": [0.0, -0.5, 0.75], "size": [0.3, 0.3, 0.15]},
+    "bin_c": {"path": "/World/BinC", "position": [1.5, -0.5, 0.75], "size": [0.3, 0.3, 0.15]},
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [-2.5, 0.4, 0.835]},
+      {"path": "/World/Cube_2", "position": [-2.2, 0.4, 0.835]},
+      {"path": "/World/Cube_3", "position": [-1.9, 0.4, 0.835]},
+      {"path": "/World/Cube_4", "position": [-1.6, 0.4, 0.835]},
+      {"path": "/World/Cube_5", "position": [-1.3, 0.4, 0.835]},
+      {"path": "/World/Cube_6", "position": [-1.0, 0.4, 0.835]},
+      {"path": "/World/Cube_7", "position": [-0.7000000000000002, 0.4, 0.835]},
+      {"path": "/World/Cube_8", "position": [-0.3999999999999999, 0.4, 0.835]},
+      {"path": "/World/Cube_9", "position": [-0.10000000000000009, 0.4, 0.835]}
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[3.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(robot_name={{robot_a.class}}, dest_path={{robot_a.path}}, position={{robot_a.position}}, orientation={{robot_a.orientation}})\nrobot_wizard(robot_name={{robot_b.class}}, dest_path={{robot_b.path}}, position={{robot_b.position}}, orientation={{robot_b.orientation}})\nrobot_wizard(robot_name={{robot_c.class}}, dest_path={{robot_c.path}}, position={{robot_c.position}}, orientation={{robot_c.orientation}})\n\ncreate_conveyor(prim_path={{input_conveyor.path}}, position={{input_conveyor.position}}, size={{input_conveyor.size}}, surface_velocity={{input_conveyor.surface_velocity}})\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"): apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"): apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"): apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"): apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[4].path}}, prim_type=\"Cube\", position={{workpieces[4].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"): apply_api_schema(prim_path={{workpieces[4].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[5].path}}, prim_type=\"Cube\", position={{workpieces[5].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"): apply_api_schema(prim_path={{workpieces[5].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[6].path}}, prim_type=\"Cube\", position={{workpieces[6].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"): apply_api_schema(prim_path={{workpieces[6].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[7].path}}, prim_type=\"Cube\", position={{workpieces[7].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"): apply_api_schema(prim_path={{workpieces[7].path}}, schema_name=api)\ncreate_prim(prim_path={{workpieces[8].path}}, prim_type=\"Cube\", position={{workpieces[8].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"): apply_api_schema(prim_path={{workpieces[8].path}}, schema_name=api)\n\ncreate_bin(prim_path={{bin_a.path}}, position={{bin_a.position}}, size={{bin_a.size}})\nadd_proximity_sensor(sensor_path=\"/World/SensorA\", position=[-1.5, 0.4, 0.835], size=[0.06, 0.06, 0.06])\ncreate_bin(prim_path={{bin_b.path}}, position={{bin_b.position}}, size={{bin_b.size}})\nadd_proximity_sensor(sensor_path=\"/World/SensorB\", position=[0.0, 0.4, 0.835], size=[0.06, 0.06, 0.06])\ncreate_bin(prim_path={{bin_c.path}}, position={{bin_c.position}}, size={{bin_c.size}})\nadd_proximity_sensor(sensor_path=\"/World/SensorC\", position=[1.5, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(robot_path={{robot_a.path}}, target_source=\"curobo\", sensor_path=\"/World/SensorA\", belt_path={{input_conveyor.path}}, source_paths=[{{workpieces[0].path}}, {{workpieces[3].path}}, {{workpieces[6].path}}], destination_path={{bin_a.path}}, planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{bin_a.path}}])\nsetup_pick_place_controller(robot_path={{robot_b.path}}, target_source=\"curobo\", sensor_path=\"/World/SensorB\", belt_path={{input_conveyor.path}}, source_paths=[{{workpieces[1].path}}, {{workpieces[4].path}}, {{workpieces[7].path}}], destination_path={{bin_b.path}}, planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{bin_b.path}}])\nsetup_pick_place_controller(robot_path={{robot_c.path}}, target_source=\"curobo\", sensor_path=\"/World/SensorC\", belt_path={{input_conveyor.path}}, source_paths=[{{workpieces[2].path}}, {{workpieces[5].path}}, {{workpieces[8].path}}], destination_path={{bin_c.path}}, planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{bin_c.path}}])",
+  "simulate_args_template": {
+    "cube_paths": ["{{workpieces[0].path}}", "{{workpieces[1].path}}", "{{workpieces[2].path}}", "{{workpieces[3].path}}", "{{workpieces[4].path}}", "{{workpieces[5].path}}", "{{workpieces[6].path}}", "{{workpieces[7].path}}", "{{workpieces[8].path}}"],
+    "target_path": "{{bin_a.path}}",
+    "duration_s": 240
+  },
   "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (90s); 3 Frankas + 9 cubes",
   "motion_controllers": {
-    "verified": [
-      "curobo"
-    ],
+    "verified": [],
     "untested": [
+      "curobo",
       "rmpflow",
       "moveit2"
     ]

@@ -64,5 +64,10 @@
       -0.3,
       0.75
     ]
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "UR10 single-cube color-routing; sort pattern fits but UR10 articulation-link bug makes delivery unreliable; zero QA runs",
+    "added_date": "2026-05-15"
   }
 }

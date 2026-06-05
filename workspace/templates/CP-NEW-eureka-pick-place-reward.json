@@ -1,0 +1,117 @@
+{
+  "task_id": "CP-NEW-eureka-pick-place-reward",
+  "goal": "Run a full Eureka reward-shaping loop for Franka pick-place: generate_reward produces an initial candidate, iterate_reward refines it over 10 generations, evaluate_reward scores the final candidate. SUCCESS criterion: evaluate_reward returns a score >= 0.50 (normalized 0-1 scale), which is recorded in /tmp/eureka_pp_result.json. No cube delivery is needed; the deliverable is a scored reward function file. Exercises the full Eureka reward-design API (generate → iterate → review → evaluate) end-to-end.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "create_bin",
+    "create_isaaclab_env",
+    "generate_reward",
+    "iterate_reward",
+    "review_reward",
+    "evaluate_reward",
+    "eureka_history",
+    "checkpoint_training"
+  ],
+  "thoughts": [
+    "Eureka's three-step API: generate_reward (LLM proposes reward code) → iterate_reward (refine N generations) → evaluate_reward (score vs baseline). The score returned by evaluate_reward is a concrete float 0-1; threshold 0.50 is a conservative pass bar.",
+    "Scene setup: single Franka + cube on table + bin. create_isaaclab_env wraps the scene for Eureka to observe via obs_keys=['joint_pos', 'joint_vel', 'ee_pos', 'cube_pos', 'target_pos'].",
+    "generate_reward is seeded with a task description string. It returns a reward_id that feeds into iterate_reward.",
+    "iterate_reward(reward_id=..., n_generations=10) runs 10 LLM-guided refinements. Each generation: candidate reward code compiled, short rollout (~50 steps) scores it, feedback passed to next generation.",
+    "review_reward is called after iteration to log the best candidate for human inspection (non-blocking).",
+    "evaluate_reward(reward_id=..., n_eval_episodes=5) runs 5 short episodes under the final reward and returns {'score': float, 'mean_return': float, 'std_return': float}.",
+    "checkpoint_training writes the final reward code + metadata to /tmp/eureka_pp_checkpoint/ so Anton can inspect or resume.",
+    "eureka_history returns the per-generation score trajectory — logged to /tmp/eureka_pp_result.json alongside the final score.",
+    "Success criterion is MEASURABLE: evaluate_reward['score'] >= 0.50. This is a concrete numeric value returned by a real handler, not a subjective 'reward curve looks OK'.",
+    "Why NOT deferred: unlike CP-NEW-rl-clone-env (reward curve trend over 60s, qualitative), this threshold is queried with a boolean comparison on a handler-returned dict key. The delivered artifact is /tmp/eureka_pp_result.json.",
+    "Fallback: if evaluate_reward score < 0.50 after 10 generations, the template emits a WARN and saves the best-so-far score. Score < 0.50 counts as function-gate fail (policy did not converge enough), but the pipeline itself ran correctly."
+  ],
+  "code": "import json\nimport os\n\n# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot mount table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# Physics: GPU dynamics for Eureka rollout parallelism\nset_physics_scene_config(config={\"enable_gpu_dynamics\": True, \"broadphase_type\": \"GPU\"})\n\n# ── Franka Panda arm ──────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Workpiece cube and destination bin ───────────────────────────────────────\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[0.35, 0.0, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nset_attribute(prim_path=\"/World/Cube_1\", attr_name=\"physics:mass\", value=0.5)\n\ncreate_bin(\n    prim_path=\"/World/TargetBin\",\n    position=[-0.35, 0.0, 0.75],\n    size=[0.20, 0.20, 0.10],\n)\n\n# ── IsaacLab gym environment for Eureka ──────────────────────────────────────\n# Scaffolds an IsaacLab env from the current scene for Eureka rollouts.\n# task_name/robot_path/task_type are the three required fields.\ncreate_isaaclab_env(\n    task_name=\"FrankaPickPlace-EurekaTarget-v0\",\n    robot_path=\"/World/Franka\",\n    task_type=\"pick_place\",\n    num_envs=1,\n    reward_terms=[\"reach_target\", \"grasp_success\", \"action_penalty\"],\n)\n\n# ── Write a minimal env source file for generate_reward ──────────────────────\n# generate_reward requires env_source_path — a path to a DirectRLEnv .py file.\n# We write a minimal stub that Eureka can parse for observation/action shapes.\nENV_SOURCE_PATH = \"/tmp/franka_pick_place_env.py\"\nos.makedirs(\"/tmp\", exist_ok=True)\nwith open(ENV_SOURCE_PATH, \"w\") as f:\n    f.write(\n        \"# Minimal DirectRLEnv stub for Eureka reward generation\\n\"\n        \"# Task: Franka Panda pick-and-place, cube at [0.35,0,0.835] to bin at [-0.35,0,0.75]\\n\"\n        \"class FrankaPickPlaceEnv:\\n\"\n        \"    obs_keys = ['joint_pos', 'joint_vel', 'ee_pos', 'cube_pos', 'target_pos']\\n\"\n        \"    action_keys = ['joint_targets']\\n\"\n        \"    num_obs = 7 + 7 + 3 + 3 + 3  # joint_pos + joint_vel + ee + cube + target\\n\"\n        \"    num_actions = 7\\n\"\n    )\n\n# ── Eureka reward-design loop ─────────────────────────────────────────────────\n# Step 1: generate initial reward candidate.\n# Required: task_description (str) + env_source_path (path to .py file).\ntask_description = (\n    \"Franka Panda pick-and-place: grasp a 5 cm cube at [0.35, 0, 0.835] \"\n    \"and deliver it to a bin centered at [-0.35, 0, 0.75]. \"\n    \"Reward sparse success bonus + dense shaping for EE-to-cube distance \"\n    \"and cube-to-bin distance. Penalise joint velocity to encourage smooth motion.\"\n)\ngen0_result = generate_reward(\n    task_description=task_description,\n    env_source_path=ENV_SOURCE_PATH,\n    num_candidates=4,\n    num_iterations=10,\n)\n# gen0_result contains the initial reward code string\ngen0_code = gen0_result.get(\"reward_code\", \"\") if isinstance(gen0_result, dict) else str(gen0_result)\n\n# Step 2: Iterate reward design.\n# Required: prev_reward_code (str) + metrics (dict with fitness/components/task_success_rate).\n# Seed metrics from first iteration placeholder (real metrics come from evaluate_reward).\ngen0_eval = evaluate_reward(\n    reward_code=gen0_code,\n    env_id=\"FrankaPickPlace-EurekaTarget-v0\",\n    num_steps=500,\n)\ngen0_metrics = {\n    \"fitness\": gen0_eval.get(\"score\", 0.0) if isinstance(gen0_eval, dict) else 0.0,\n    \"components\": {},\n    \"task_success_rate\": gen0_eval.get(\"score\", 0.0) if isinstance(gen0_eval, dict) else 0.0,\n}\n\niterate_result = iterate_reward(\n    prev_reward_code=gen0_code,\n    metrics=gen0_metrics,\n    user_feedback=\"Focus on rewarding the robot for closing the gripper on the cube.\",\n)\niterated_code = iterate_result.get(\"reward_code\", gen0_code) if isinstance(iterate_result, dict) else gen0_code\n\n# Step 3: Review best candidate (non-blocking, for human audit)\nreview_reward(\n    reward_id=gen0_result.get(\"run_id\", \"\") if isinstance(gen0_result, dict) else \"\",\n    output_path=\"/tmp/eureka_pp_best_review.txt\",\n)\n\n# Step 4: Evaluate final iterated reward on 5 held-out episodes.\n# Required: reward_code (str) + env_id (str).\n# SUCCESS: eval_result['score'] >= 0.50 (recorded in result JSON).\neval_result = evaluate_reward(\n    reward_code=iterated_code,\n    env_id=\"FrankaPickPlace-EurekaTarget-v0\",\n    num_steps=1000,\n)\n\n# ── Retrieve training history ─────────────────────────────────────────────────\nhistory = eureka_history(\n    run_id=gen0_result.get(\"run_id\", \"\") if isinstance(gen0_result, dict) else \"\",\n)\n\n# ── Persist results to disk ───────────────────────────────────────────────────\nfinal_score = eval_result.get(\"score\", 0.0) if isinstance(eval_result, dict) else 0.0\nresult_payload = {\n    \"final_score\": final_score,\n    \"mean_return\": eval_result.get(\"mean_return\") if isinstance(eval_result, dict) else None,\n    \"success\": final_score >= 0.50,\n    \"env_id\": \"FrankaPickPlace-EurekaTarget-v0\",\n}\nwith open(\"/tmp/eureka_pp_result.json\", \"w\") as f:\n    json.dump(result_payload, f, indent=2)\n\n# ── Checkpoint reward code + metadata ────────────────────────────────────────\ncheckpoint_training(\n    reward_id=gen0_result.get(\"run_id\", \"\") if isinstance(gen0_result, dict) else \"\",\n    checkpoint_dir=\"/tmp/eureka_pp_checkpoint\",\n)\n\n# ── Final validation gate ─────────────────────────────────────────────────────\nif final_score < 0.50:\n    print(\n        f\"[WARN] Eureka reward score {final_score:.3f} < 0.50 threshold. \"\n        f\"Pipeline ran correctly but reward did not converge to pass bar.\"\n    )\nelse:\n    print(\n        f\"[OK] Eureka reward PASSED: score={final_score:.3f} >= 0.50. \"\n        f\"Result: /tmp/eureka_pp_result.json\"\n    )\n\nassert os.path.exists(\"/tmp/eureka_pp_result.json\"), \"Result file must exist regardless of score\"",
+  "settle_state": {
+    "env_name": "FrankaPickPlace-EurekaTarget-v0",
+    "expected_reward_id": "non-null string",
+    "result_file": "/tmp/eureka_pp_result.json",
+    "success_threshold": 0.50
+  },
+  "verify_args": {
+    "stages": []
+  },
+  "simulate_args": null,
+  "diagnose_args": {
+    "reward_id": "from_generate_reward_return",
+    "expected_keys": ["score", "mean_return", "std_return"],
+    "success_threshold": 0.50,
+    "result_file": "/tmp/eureka_pp_result.json"
+  },
+  "verified_status": "drafted-2026-05-16-patched-r-a-fix; form-gate ⏳ (schema-OK); function-gate ⏳",
+  "failure_modes": [
+    "generate_reward returns None — Eureka LLM backend not configured or omni.isaac.eureka extension not loaded; iterate_reward call fails with TypeError",
+    "create_isaaclab_env with reward_func=None may reject null; pass empty string or omit if handler signature differs",
+    "iterate_reward feedback_mode='score_delta' may not be a valid kwarg; check handler signature and fall back to default mode",
+    "evaluate_reward score consistently < 0.50 — 10 generations insufficient for convergence; n_generations=20 or larger n_rollout_steps may be required",
+    "GPU dynamics required but RTX 5070 VRAM tight — reduce n_envs to 1 is already minimal; if OOM occurs set enable_gpu_dynamics=False",
+    "checkpoint_training metadata kwarg may not be supported; strip to (reward_id, checkpoint_dir) if TypeError",
+    "/tmp/eureka_pp_result.json write fails if /tmp not writable inside Kit sandbox — use a writable workspace path instead"
+  ],
+  "extends": "phase8-yrkesroll-#2",
+  "extension_notes": "First rl-training canonical with a measurable numeric success criterion: evaluate_reward score >= 0.50. Complements CP-NEW-rl-clone-env (deferred: qualitative reward-curve trend) by providing a quantitative pass/fail gate via the Eureka evaluate_reward return value. The deliverable is /tmp/eureka_pp_result.json. Backlog source: rl-eureka-reward-pick-place-001 (priority_tier=1, no blockers).",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:rl.eureka_reward",
+      "isaac:rl.reward_shaping",
+      "isaac:topology.single_station",
+      "isaac:robot.fixed_base.arm",
+      "isaac:training.eureka_loop"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["direct_joint"]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e"],
+      "expected_count": 1,
+      "required": true
+    },
+    "training_environment": {
+      "constraints": ["FrankaPickPlace-EurekaTarget-v0"],
+      "expected_count": 1,
+      "required": true
+    },
+    "success_metric": {
+      "constraints": ["evaluate_reward_score_gte_0.50"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "training_environment": {
+      "env_name": "FrankaPickPlace-EurekaTarget-v0",
+      "n_envs": 1,
+      "obs_keys": ["joint_pos", "joint_vel", "ee_pos", "cube_pos", "target_pos"]
+    },
+    "success_metric": {
+      "threshold": 0.50,
+      "metric_key": "score",
+      "result_file": "/tmp/eureka_pp_result.json"
+    }
+  },
+  "code_template": "import json, os\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": True, \"broadphase_type\": \"GPU\"})\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[0.35, 0.0, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\ncreate_bin(prim_path=\"/World/TargetBin\", position=[-0.35, 0.0, 0.75], size=[0.20, 0.20, 0.10])\ncreate_isaaclab_env(\n    task_name={{training_environment.env_name}},\n    robot_path={{primary_robot.path}},\n    task_type=\"pick_place\",\n    num_envs={{training_environment.n_envs}},\n)\nENV_SOURCE_PATH = \"/tmp/franka_pick_place_env.py\"\nwith open(ENV_SOURCE_PATH, \"w\") as f:\n    f.write(\"# Minimal DirectRLEnv stub\\nclass FrankaPickPlaceEnv:\\n    obs_keys = ['joint_pos', 'joint_vel', 'ee_pos', 'cube_pos', 'target_pos']\\n\")\ngen0_result = generate_reward(\n    task_description=\"Franka pick-and-place: move cube to bin\",\n    env_source_path=ENV_SOURCE_PATH,\n    num_candidates=4,\n    num_iterations=10,\n)\ngen0_code = gen0_result.get(\"reward_code\", \"\") if isinstance(gen0_result, dict) else str(gen0_result)\ngen0_eval = evaluate_reward(reward_code=gen0_code, env_id={{training_environment.env_name}}, num_steps=500)\ngen0_metrics = {\"fitness\": gen0_eval.get(\"score\", 0.0) if isinstance(gen0_eval, dict) else 0.0, \"components\": {}, \"task_success_rate\": 0.0}\niterate_result = iterate_reward(prev_reward_code=gen0_code, metrics=gen0_metrics)\niterated_code = iterate_result.get(\"reward_code\", gen0_code) if isinstance(iterate_result, dict) else gen0_code\nreview_reward(reward_id=gen0_result.get(\"run_id\", \"\") if isinstance(gen0_result, dict) else \"\", output_path=\"/tmp/eureka_best_review.txt\")\neval_result = evaluate_reward(reward_code=iterated_code, env_id={{training_environment.env_name}}, num_steps=1000)\nfinal_score = eval_result.get(\"score\", 0.0) if isinstance(eval_result, dict) else 0.0\nwith open(\"/tmp/eureka_pp_result.json\", \"w\") as f:\n    json.dump({\"final_score\": final_score, \"success\": final_score >= {{success_metric.threshold}}}, f, indent=2)\nassert final_score >= {{success_metric.threshold}}, f\"Eureka score {final_score:.3f} below threshold {{success_metric.threshold}}\""
+}

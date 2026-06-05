@@ -86,5 +86,155 @@
       -0.3,
       0.75
     ]
-  }
+  },
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.ur10",
+      "isaac:execution.cortex_behavior_tree",
+      "isaac:transport.conveyor",
+      "isaac:topology.single_station",
+      "isaac:robot.import_asset_library"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "ur10"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "output_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "pick_sensor": {
+      "constraints": [
+        "proximity_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": [
+        "cube"
+      ],
+      "min": 4,
+      "max": 4,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "UR10",
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "robot_family": "ur10"
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [
+        -0.5,
+        0.4,
+        0.78
+      ],
+      "size": [
+        2.5,
+        0.4,
+        0.05
+      ],
+      "surface_velocity": [
+        0.2,
+        0,
+        0
+      ]
+    },
+    "output_bin": {
+      "path": "/World/Bin",
+      "position": [
+        0.5,
+        -0.3,
+        0.75
+      ],
+      "size": [
+        0.3,
+        0.3,
+        0.15
+      ],
+      "drop_target": [
+        0.5,
+        -0.3,
+        0.95
+      ]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [
+        0.0,
+        0.4,
+        0.835
+      ],
+      "size": [
+        0.06,
+        0.06,
+        0.06
+      ]
+    },
+    "workpieces": [
+      {
+        "path": "/World/Cube_1",
+        "position": [
+          -1.6,
+          0.4,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_2",
+        "position": [
+          -1.4,
+          0.4,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_3",
+        "position": [
+          -1.2,
+          0.4,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_4",
+        "position": [
+          -1.0,
+          0.4,
+          0.835
+        ]
+      }
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 base on table\nimport_robot(file_path={{primary_robot.class}}, format=\"asset_library\", dest_path={{primary_robot.path}})\nteleport_prim(prim_path={{primary_robot.path}}, position={{primary_robot.position}})\n\n# Active conveyor (v=0.2 m/s)\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\n# 4 cubes upstream of pick zone\n{{#each workpieces}}\ncreate_prim(prim_path={{this.path}}, prim_type=\"Cube\", position={{this.position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{this.path}}, schema_name=api)\n{{/each}}\n\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n{{#each workpieces}}\napply_physics_material(prim_path={{this.path}}, material_name=\"rubber\")\n{{/each}}\n\n# Output bin\ncreate_bin(prim_path={{output_bin.path}}, position={{output_bin.position}}, size={{output_bin.size}})\n\n# Pick sensor at conveyor pick zone\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\n# UR10 cuRobo controller\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    robot_family={{primary_robot.robot_family}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    destination_path={{output_bin.path}},\n    drop_target={{output_bin.drop_target}},\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{output_bin.path}}],\n)"
 }

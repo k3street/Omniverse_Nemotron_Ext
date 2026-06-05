@@ -1,0 +1,27 @@
+{
+  "benchmark": "retrieval_30prompts_struct_filter",
+  "date": "2026-05-15",
+  "patch": "round3-template-cache-fix",
+  "note": "Structural-filter-first path (MULTIMODAL_TEXT_INTENT=on) is wired in orchestrator.py, not in test_retrieval_benchmark.py. The benchmark test calls retrieve_templates_with_scores directly, so env flag has no effect on hit@1 scores below. The table below measures embedding-only retrieval (identical with or without flag), as confirmed by two identical benchmark runs.",
+  "embedding_only_baseline": {
+    "hit_at_1": 0.833,
+    "hit_at_3": 0.933,
+    "mode_accuracy": 0.700,
+    "hard_instantiate_rate": 0.167
+  },
+  "structural_filter_direct_measurement": {
+    "description": "filter_templates_by_intent called directly against persistent ChromaDB index after fix, broad pick_place intent (no count/feature constraints)",
+    "cache_size_before_fix": 0,
+    "cache_size_after_fix": 321,
+    "filter_result_count": 8,
+    "filter_result_ids": ["CP-01", "CP-02", "CP-03", "CP-04", "CP-05", "CP-09", "CP-10", "CP-11"],
+    "cp01_returned": true,
+    "coverage": "8/321 templates have intent fields (CP-01..05, CP-09..11)"
+  },
+  "interpretation": "At 8/321 coverage the structural filter operates on a tiny fraction of the corpus. Embedding-only hit@1 is unchanged because: (a) the benchmark prompts that target CP-01..05/09..11 already retrieve them via embedding alone; (b) the structural filter is only engaged by the orchestrator's MULTIMODAL_TEXT_INTENT path, not the benchmark test. The fix unblocks future Track B expansion: as more templates gain intent fields, the structural filter will engage and improve ranking precision. Without the fix, the filter was a guaranteed silent no-op on all production restarts.",
+  "what_this_unblocks": [
+    "filter_templates_by_intent now returns correct candidates on persistent-index load (production-realistic path)",
+    "MULTIMODAL_TEXT_INTENT=on path in orchestrator.py now functions correctly on service restarts",
+    "Future intent field expansion to remaining 313 templates will immediately benefit retrieval quality"
+  ]
+}

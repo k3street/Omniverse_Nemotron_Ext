@@ -48,7 +48,21 @@ logger = logging.getLogger(__name__)
 #: Match keywords → pattern_hint. Order matters: more specific patterns first.
 #: All matching is case-insensitive; word-boundary regexes prevent
 #: "navigation" from matching "navigate".
+#:
+#: Conservative policy: false positives are worse than misses.  A miss
+#: falls through to pick_place (the broadest default); a false positive
+#: assigns the wrong success criterion to a template.  Regexes are kept
+#: narrow and word-boundary-anchored.
 _PATTERN_RULES: List[tuple] = [
+    # insert: peg-in-hole / force-torque / assembly-constraint insertion tasks.
+    # Keyword "insert" alone is narrow enough; "peg.*hole" catches the array form.
+    # "tactile.*insert" would also fire on "insert" — covered by the same rule.
+    ("insert", re.compile(r"\b(peg.{0,10}hole|hole.{0,10}insert|insertion\s+task|force.{0,15}insert|tactile.{0,15}insert)\b", re.I)),
+    # train: RL training scaffold, SDG pipeline, sim-to-real gap measurement.
+    # "sdg" alone is safe — no other pattern uses it.
+    # "rl.*train|train.*rl" catches "RL training scaffold".
+    # "sim.to.real" / "sim2real" catches gap-measurement templates.
+    ("train", re.compile(r"\b(rl\s+train|train.*rl|rl.games|rsl.rl|isaac.?lab\s+env|sdg\s+pipeline|sim.to.real|sim2real|clone_envs|parallel.*env)\b", re.I)),
     # reorient: flip / upright / orient
     ("reorient", re.compile(r"\b(reorient|flip|upright|tip\s+over|stand\s+up|rotate.*correct)\b", re.I)),
     # sort: routing by color/class/label
@@ -242,7 +256,7 @@ LLM_INTENT_JSON_SCHEMA: Dict[str, Any] = {
     "properties": {
         "pattern_hint": {
             "type": "string",
-            "enum": ["pick_place", "sort", "reorient", "navigate"],
+            "enum": ["pick_place", "sort", "reorient", "navigate", "insert", "train", "other"],
         },
         "counts": {
             "type": "object",
@@ -298,6 +312,11 @@ schema. Use only these patterns:
 - sort: workpiece routed to class-specific destination
 - reorient: workpiece picked and oriented (e.g. upright) at destination
 - navigate: mobile platform driven to goal pose
+- insert: peg or part inserted into hole with force/compliance control
+  (success = peg seated / assembly constraint active)
+- train: RL training scaffold, SDG pipeline, or sim-to-real gap measurement
+  (success = training loop running / dataset exported / gap metric produced)
+- other: novel task that does not fit any of the above patterns
 
 Output ONLY the JSON object. No prose, no markdown."""
 

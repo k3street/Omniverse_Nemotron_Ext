@@ -109,5 +109,10 @@
     "upper": 0.4047,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
+  },
+  "migration_deferred": {
+    "reason": "draft",
+    "details": "6-cube precision palletizer using compute_stack_placement; pick_place pattern fits but compute_stack_placement integration not verified; zero QA runs",
+    "added_date": "2026-05-15"
   }
 }

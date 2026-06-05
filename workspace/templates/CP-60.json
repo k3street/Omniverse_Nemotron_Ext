@@ -83,5 +83,57 @@
     "upper": 0.2153,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
-  }
+  },
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:topology.recirculation_loop",
+      "isaac:transport.conveyor",
+      "isaac:topology.no_robot",
+      "isaac:transport.closed_loop"
+    ]
+  },
+  "roles": {
+    "loop": {
+      "constraints": [
+        "recirculation_loop"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "test_cube": {
+      "constraints": [
+        "cube"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "loop": {
+      "path": "/World/Loop",
+      "center": [
+        0,
+        0,
+        0.78
+      ],
+      "length": 2.0,
+      "width": 0.6,
+      "velocity": 0.2
+    },
+    "test_cube": {
+      "path": "/World/Cube_1",
+      "position": [
+        0,
+        0.3,
+        0.835
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Recirculation loop\ncreate_recirculation_loop(\n    loop_path={{loop.path}},\n    center={{loop.center}},\n    length={{loop.length}},\n    width={{loop.width}},\n    velocity={{loop.velocity}},\n)\n\n# Test cube on Top segment\ncreate_prim(prim_path={{test_cube.path}}, prim_type=\"Cube\", position={{test_cube.position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{test_cube.path}}, schema_name=api)\nbulk_set_attribute(prim_paths=[{{test_cube.path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path={{test_cube.path}}, material_name=\"rubber\")"
 }

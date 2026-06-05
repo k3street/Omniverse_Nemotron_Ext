@@ -38,6 +38,52 @@
     "Verify_args is loose (mobile robots aren't pick-place); form-gate skip."
   ],
   "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713",
+  "intent": {
+    "pattern_hint": "navigate",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:robot.mobile.wheeled",
+      "isaac:topology.nav_only",
+      "isaac:nav.nav2"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["carter", "nova_carter"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Carter",
+      "class": "carter",
+      "position": [0, 0, 0.10],
+      "orientation": [1, 0, 0, 0]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Carter (NVIDIA AMR) wheeled robot\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nsetup_nav_robot(\n    robot_path={{primary_robot.path}},\n    occupancy_map=\"\",\n    nav_topic=\"/goal_pose\",\n    odom_topic=\"/odom\",\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{primary_robot.path}}",
+        "place_path": "{{primary_robot.path}}",
+        "robot_kind": "wheeled"
+      }
+    ],
+    "cube_path": "{{primary_robot.path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{primary_robot.path}}",
+    "target_path": "{{primary_robot.path}}",
+    "duration_s": 180
+  },
   "diagnose_args": {
     "robot_path": "/World/Carter",
     "robot_base": [

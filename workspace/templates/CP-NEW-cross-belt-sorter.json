@@ -41,5 +41,51 @@
     "Belt-on-belt physics may launch cubes vertically (PhysX surfaceVelocity stack)",
     "8 chutes with target_path=Chute_1: gate only checks Chute_1; multi-cube semantics give success if ANY cube reaches there"
   ],
-  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (no robot scene, cubes fall through belt-to-belt junctions)"
+  "verified_status": "build-spec-2026-05-10; build OK, gate stable_fail (no robot scene, cubes fall through belt-to-belt junctions)",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:topology.cross_belt_sorter",
+      "isaac:transport.conveyor",
+      "isaac:topology.no_robot",
+      "isaac:routing.vision_label_divert",
+      "isaac:topology.postal_sortation"
+    ]
+  },
+  "roles": {
+    "main_belt": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "main_belt": {
+      "path": "/World/MainBelt",
+      "position": [
+        0,
+        0.4,
+        0.78
+      ],
+      "size": [
+        4.0,
+        0.3,
+        0.05
+      ],
+      "surface_velocity": [
+        0.3,
+        0,
+        0
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_conveyor(\n    prim_path={{main_belt.path}},\n    position={{main_belt.position}},\n    size={{main_belt.size}},\n    surface_velocity={{main_belt.surface_velocity}},\n)\n\nfor i in range(8):\n    x = -1.5 + i*0.45\n    create_conveyor(\n        prim_path=f\"/World/CrossBelt_{i+1}\",\n        position=[x, 0.4, 0.79],\n        size=[0.20, 0.15, 0.04],\n        surface_velocity=[0, (1 if i%2==0 else -1) * 0.30, 0],\n    )\n    side = -0.65 if i%2==0 else 0.85 if i%2==1 else 0\n    create_bin(prim_path=f\"/World/Chute_{i+1}\", position=[x, side, 0.70], size=[0.25, 0.15, 0.10])\n\nfor i in range(8):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-2.0 + i*0.30, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_semantic_label(prim_path=path, label=f\"label_{i+1}\")\n    bulk_set_attribute(prim_paths=[path], attr=\"physxRigidBody:sleepThreshold\", value=0.0)"
 }

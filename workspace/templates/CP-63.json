@@ -45,6 +45,64 @@
     "Grasp sampler attrs are metadata only \u2014 actual grasp synthesis requires runtime tooling."
   ],
   "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:sdg.grasp_pose_sampler"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 1,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "workpieces": [
+      {
+        "path": "/World/TargetCube",
+        "position": [0.4, 0, 0.835]
+      }
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n# Single target object\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path={{workpieces[0].path}}, material_name=\"rubber\")\n\n# Grasp-pose sampler\nsetup_grasp_pose_sampler(\n    sampler_path=\"/World/GraspSampler\",\n    target_path={{workpieces[0].path}},\n    n_samples=100,\n    sampling_mode=\"antipodal\",\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{workpieces[0].path}}",
+        "place_path": "{{workpieces[0].path}}",
+        "robot_kind": "{{primary_robot.class}}"
+      }
+    ],
+    "cube_path": "{{workpieces[0].path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{workpieces[0].path}}",
+    "target_path": "{{workpieces[0].path}}",
+    "duration_s": 180
+  },
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "robot_base": [

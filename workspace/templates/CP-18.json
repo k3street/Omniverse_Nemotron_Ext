@@ -73,6 +73,118 @@
   },
   "extends": "CP-17",
   "extension_notes": "CP-18 demonstrates the fall-through behavior of color_routing: when a cube's semantic class isn't in the routing dict (or has no semantic class at all), the controller routes to destination_path. Useful for binary inspection (good/reject) or any 'default + exceptions' pattern. Future: use add_vision_classifier_gate (when render-flush is fixed) to dynamically tag cubes upstream of the pick station instead of pre-tagging.",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "uses_conveyor_transport": true,
+      "routing_axis": "semantic_class",
+      "has_stacking": false,
+      "has_fallthrough": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:routing.inspect_reject"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "good_workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 4,
+      "param_name": "n_good_cubes",
+      "unordered": true
+    },
+    "defective_workpiece": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true
+    },
+    "accept_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "reject_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.4, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.4, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "good_workpieces": [
+      {"path": "/World/Cube_g1", "position": [-1.4, 0.4, 0.835], "material_path": "/World/Materials/Green"},
+      {"path": "/World/Cube_g2", "position": [-1.1, 0.4, 0.835], "material_path": "/World/Materials/Green"},
+      {"path": "/World/Cube_g3", "position": [-0.5, 0.4, 0.835], "material_path": "/World/Materials/Green"},
+      {"path": "/World/Cube_g4", "position": [-0.2, 0.4, 0.835], "material_path": "/World/Materials/Green"}
+    ],
+    "defective_workpiece": {
+      "path": "/World/Cube_bad",
+      "position": [-0.8, 0.4, 0.835],
+      "material_path": "/World/Materials/Red"
+    },
+    "accept_destination": {
+      "path": "/World/GoodBin",
+      "position": [0.3, -0.4, 0.75],
+      "size": [0.25, 0.25, 0.15],
+      "material_path": "/World/Materials/Green",
+      "routing_key": "good"
+    },
+    "reject_destination": {
+      "path": "/World/RejectBin",
+      "position": [-0.3, -0.4, 0.75],
+      "size": [0.25, 0.25, 0.15],
+      "material_path": "/World/Materials/Red"
+    }
+  },
+  "code_template": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_material(material_path=\"/World/Materials/Green\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 1.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Red\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\n\ncreate_prim(prim_path={{good_workpieces[0].path}}, prim_type=\"Cube\", position={{good_workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{good_workpieces[0].path}}, schema_name=api)\nassign_material(prim_path={{good_workpieces[0].path}}, material_path={{good_workpieces[0].material_path}})\nset_semantic_label(prim_path={{good_workpieces[0].path}}, class_name={{accept_destination.routing_key}}, semantic_type=\"class\")\n\ncreate_prim(prim_path={{good_workpieces[1].path}}, prim_type=\"Cube\", position={{good_workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{good_workpieces[1].path}}, schema_name=api)\nassign_material(prim_path={{good_workpieces[1].path}}, material_path={{good_workpieces[1].material_path}})\nset_semantic_label(prim_path={{good_workpieces[1].path}}, class_name={{accept_destination.routing_key}}, semantic_type=\"class\")\n\ncreate_prim(prim_path={{good_workpieces[2].path}}, prim_type=\"Cube\", position={{good_workpieces[2].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{good_workpieces[2].path}}, schema_name=api)\nassign_material(prim_path={{good_workpieces[2].path}}, material_path={{good_workpieces[2].material_path}})\nset_semantic_label(prim_path={{good_workpieces[2].path}}, class_name={{accept_destination.routing_key}}, semantic_type=\"class\")\n\ncreate_prim(prim_path={{good_workpieces[3].path}}, prim_type=\"Cube\", position={{good_workpieces[3].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{good_workpieces[3].path}}, schema_name=api)\nassign_material(prim_path={{good_workpieces[3].path}}, material_path={{good_workpieces[3].material_path}})\nset_semantic_label(prim_path={{good_workpieces[3].path}}, class_name={{accept_destination.routing_key}}, semantic_type=\"class\")\n\ncreate_prim(prim_path={{defective_workpiece.path}}, prim_type=\"Cube\", position={{defective_workpiece.position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{defective_workpiece.path}}, schema_name=api)\nassign_material(prim_path={{defective_workpiece.path}}, material_path={{defective_workpiece.material_path}})\n\nbulk_set_attribute(\n    prim_paths=[{{good_workpieces[0].path}}, {{good_workpieces[1].path}}, {{good_workpieces[2].path}}, {{good_workpieces[3].path}}, {{defective_workpiece.path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\nfor path in [{{good_workpieces[0].path}}, {{good_workpieces[1].path}}, {{good_workpieces[2].path}}, {{good_workpieces[3].path}}, {{defective_workpiece.path}}]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path={{accept_destination.path}}, position={{accept_destination.position}}, size={{accept_destination.size}})\ncreate_bin(prim_path={{reject_destination.path}}, position={{reject_destination.position}}, size={{reject_destination.size}})\nassign_material(prim_path={{accept_destination.path}}, material_path={{accept_destination.material_path}})\nassign_material(prim_path={{reject_destination.path}}, material_path={{reject_destination.material_path}})\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{good_workpieces[0].path}}, {{good_workpieces[1].path}}, {{good_workpieces[2].path}}, {{good_workpieces[3].path}}, {{defective_workpiece.path}}],\n    destination_path={{reject_destination.path}},\n    color_routing={\n        {{accept_destination.routing_key}}: {{accept_destination.path}},\n    },\n    drop_target=[-0.3, -0.4, 0.95],\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{accept_destination.path}}, {{reject_destination.path}}],\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{input_conveyor.path}}",
+        "place_path": "{{accept_destination.path}}",
+        "robot_kind": "{{primary_robot.class}}"
+      }
+    ],
+    "cube_path": "{{good_workpieces[0].path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{good_workpieces[0].path}}",
+    "target_path": "{{accept_destination.path}}",
+    "duration_s": 180
+  },
   "failure_modes": [
     "Bad cube has Semantics_color or Semantics_colour applied accidentally — set_semantic_label MUST not be called for the bad cube. Checked at canonical-author time.",
     "color_routing match key mismatch (e.g. 'Good' instead of 'good') — handler lowercases cube's class_name before lookup but exact match preferred.",

@@ -76,5 +76,10 @@
       -0.4,
       0.75
     ]
+  },
+  "migration_deferred": {
+    "reason": "blocked",
+    "details": "NVIDIA PickPlaceController + ParallelGripper grip fails \u2014 cube never transported to bin; FixedJoint mechanism missing from our SingleArticulation integration",
+    "added_date": "2026-05-15"
   }
 }

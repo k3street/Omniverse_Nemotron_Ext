@@ -56,7 +56,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-palletizer-layer-stack.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-palletizer-mixed-sku-002
   source: ONET
@@ -122,7 +124,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-kit-prep-operator.json
+  drafted_date: '2026-05-16'
 
 - id: yrkesroll-kit-prep-vision-gate-002
   source: ONET
@@ -456,7 +460,9 @@
   motion_controller_preference: none
   pattern_hint: sort
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-barcode-scanner-divert.json
+  drafted_date: '2026-05-16'
 
 - id: yrkesroll-gripper-vacuum-pick-001
   source: industrial-asset
@@ -559,7 +565,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-assembly-line-4robot-handoff.json
+  drafted_date: "2026-05-16"
 
 - id: industrial-kitting-station-6sku-001
   source: industrial-asset
@@ -610,7 +618,10 @@
   motion_controller_preference: curobo
   pattern_hint: reorient
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-heap-zone-unstack.json
+  drafted_date: "2026-05-16"
+  drafted_by: A8
 
 - id: industrial-sortation-sbend-001
   source: industrial-asset
@@ -1083,7 +1094,9 @@
   motion_controller_preference: direct_joint
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-turn-faucet.json
+  drafted_date: "2026-05-16"
 
 - id: research-oxe-sweep-into-dustpan-001
   source: RT-X
@@ -1121,7 +1134,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_id: CP-NEW-eureka-pick-place-reward
+  drafted_date: "2026-05-16"
+  drafted_by: A7
+  success_criterion: "evaluate_reward score >= 0.50 (numeric float from handler return dict)"
 
 - id: rl-eureka-locomotion-reward-001
   source: retrieval-miss
@@ -1549,7 +1566,9 @@
   motion_controller_preference: ros2_control
   pattern_hint: other
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-ros2-bridge-franka.json
+  drafted_date: "2026-05-16"
 
 - id: ros2-moveit2-franka-001
   source: retrieval-miss

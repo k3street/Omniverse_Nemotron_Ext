@@ -132,5 +132,266 @@
     "upper": 0.9566,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
-  }
+  },
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 2,
+      "n_handoffs": 1,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:topology.kit_tray_relay",
+      "isaac:topology.dual_robot",
+      "isaac:coordination.handoff_signal",
+      "isaac:coordination.mutex",
+      "isaac:workpiece.kit_tray",
+      "isaac:transport.conveyor"
+    ]
+  },
+  "roles": {
+    "robot_a": {
+      "constraints": [
+        "franka_panda"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "robot_b": {
+      "constraints": [
+        "franka_panda"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "kit_tray": {
+      "constraints": [
+        "kit_tray"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "handoff_bridge": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "output_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "sensor_a": {
+      "constraints": [
+        "proximity_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "sensor_b": {
+      "constraints": [
+        "proximity_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": [
+        "cube"
+      ],
+      "min": 4,
+      "max": 4,
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "robot_a": {
+      "path": "/World/FrankaA",
+      "class": "franka_panda",
+      "position": [
+        -0.6,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "robot_b": {
+      "path": "/World/FrankaB",
+      "class": "franka_panda",
+      "position": [
+        0.6,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [
+        -0.6,
+        0.4,
+        0.78
+      ],
+      "size": [
+        3.0,
+        0.4,
+        0.05
+      ],
+      "surface_velocity": [
+        0.2,
+        0,
+        0
+      ]
+    },
+    "kit_tray": {
+      "path": "/World/KitTray",
+      "position": [
+        0,
+        -0.3,
+        0.775
+      ],
+      "tray_size": [
+        0.3,
+        0.3,
+        0.05
+      ],
+      "slot_layout": "grid_2x2",
+      "slot_size": 0.05,
+      "slot_spacing": 0.1
+    },
+    "handoff_bridge": {
+      "path": "/World/HandoffBridge",
+      "position": [
+        0,
+        -0.3,
+        0.81
+      ],
+      "size": [
+        0.4,
+        0.3,
+        0.02
+      ],
+      "surface_velocity": [
+        0.001,
+        0,
+        0
+      ]
+    },
+    "output_bin": {
+      "path": "/World/OutBin",
+      "position": [
+        0.6,
+        -0.5,
+        0.75
+      ],
+      "size": [
+        0.3,
+        0.3,
+        0.15
+      ]
+    },
+    "sensor_a": {
+      "path": "/World/SensorA",
+      "position": [
+        -0.2,
+        0.4,
+        0.835
+      ],
+      "size": [
+        0.06,
+        0.06,
+        0.06
+      ]
+    },
+    "sensor_b": {
+      "path": "/World/SensorB",
+      "position": [
+        0.0,
+        -0.3,
+        0.85
+      ],
+      "size": [
+        0.06,
+        0.06,
+        0.06
+      ]
+    },
+    "workpieces": [
+      {
+        "path": "/World/Cube_1",
+        "position": [
+          -1.7,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.05,
+          -0.35,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_2",
+        "position": [
+          -1.4,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.05,
+          -0.35,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_3",
+        "position": [
+          -1.1,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.05,
+          -0.25,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_4",
+        "position": [
+          -0.8,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.05,
+          -0.25,
+          0.825
+        ]
+      }
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{robot_a.class}},\n    dest_path={{robot_a.path}},\n    position={{robot_a.position}},\n    orientation={{robot_a.orientation}},\n)\nrobot_wizard(\n    robot_name={{robot_b.class}},\n    dest_path={{robot_b.path}},\n    position={{robot_b.position}},\n    orientation={{robot_b.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\n{{#each workpieces}}\ncreate_prim(prim_path={{this.path}}, prim_type=\"Cube\", position={{this.position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{this.path}}, schema_name=api)\n{{/each}}\n\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n{{#each workpieces}}\napply_physics_material(prim_path={{this.path}}, material_name=\"rubber\")\n{{/each}}\n\n# Kit tray (handoff station)\ncreate_kit_tray(\n    tray_path={{kit_tray.path}},\n    position={{kit_tray.position}},\n    tray_size={{kit_tray.tray_size}},\n    slot_layout={{kit_tray.slot_layout}},\n    slot_size={{kit_tray.slot_size}},\n    slot_spacing={{kit_tray.slot_spacing}},\n)\n\n# Stationary surface (verifier bridge)\ncreate_conveyor(\n    prim_path={{handoff_bridge.path}},\n    position={{handoff_bridge.position}},\n    size={{handoff_bridge.size}},\n    surface_velocity={{handoff_bridge.surface_velocity}},\n)\n\n# Handoff signal\nsetup_robot_handoff_signal(\n    handoff_path=\"/World/Handoff\",\n    position=[0, -0.3, 0.825],\n    robot_a={{robot_a.path}},\n    robot_b={{robot_b.path}},\n)\n\n# Mutex on handoff station\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/HandoffMutex\",\n    resource_path={{kit_tray.path}},\n    robots=[{{robot_a.path}}, {{robot_b.path}}],\n)\n\n# Output bin\ncreate_bin(prim_path={{output_bin.path}}, position={{output_bin.position}}, size={{output_bin.size}})\n\nadd_proximity_sensor(sensor_path={{sensor_a.path}}, position={{sensor_a.position}}, size={{sensor_a.size}})\nadd_proximity_sensor(sensor_path={{sensor_b.path}}, position={{sensor_b.position}}, size={{sensor_b.size}})\n\n# Robot A \u2014 fills kit tray with cubes\nsetup_pick_place_controller(\n    robot_path={{robot_a.path}},\n    target_source=\"curobo\",\n    sensor_path={{sensor_a.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    destination_path={{kit_tray.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{workpieces[0].drop_target}},\n        {{workpieces[1].path}}: {{workpieces[1].drop_target}},\n        {{workpieces[2].path}}: {{workpieces[2].drop_target}},\n        {{workpieces[3].path}}: {{workpieces[3].drop_target}},\n    },\n    mutex_path=\"/World/HandoffMutex\",\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{kit_tray.path}}, {{handoff_bridge.path}}, {{output_bin.path}}],\n)\n\n# Robot B \u2014 picks cubes from tray and places at OutBin\nsetup_pick_place_controller(\n    robot_path={{robot_b.path}},\n    target_source=\"curobo\",\n    sensor_path={{sensor_b.path}},\n    belt_path={{handoff_bridge.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    destination_path={{output_bin.path}},\n    mutex_path=\"/World/HandoffMutex\",\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{kit_tray.path}}, {{handoff_bridge.path}}, {{output_bin.path}}],\n)"
 }

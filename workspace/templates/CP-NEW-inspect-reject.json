@@ -38,12 +38,114 @@
     "color_routing dispatch needs class-label registry; rolls back to destination_path if classifier errors",
     "Red cube (Cube_3) reach RejectBin: not validated by gate (gate only checks PassBin); need separate test for reject path"
   ],
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "routing_axis": "semantic_class",
+      "uses_conveyor_transport": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:vision.inspect_and_reject"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "pass_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "reject_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "inspect_camera": {
+      "constraints": ["camera"],
+      "expected_count": 1,
+      "required": true
+    },
+    "pick_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 8,
+      "param_name": "n_cubes",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.4, 0.78],
+      "size": [2.5, 0.3, 0.05],
+      "surface_velocity": [0.15, 0, 0]
+    },
+    "pass_bin": {
+      "path": "/World/PassBin",
+      "position": [0.5, -0.4, 0.75],
+      "size": [0.30, 0.30, 0.15]
+    },
+    "reject_bin": {
+      "path": "/World/RejectBin",
+      "position": [-0.5, -0.4, 0.75],
+      "size": [0.30, 0.30, 0.15]
+    },
+    "inspect_camera": {
+      "path": "/World/InspectCamera",
+      "position": [0, 0.4, 1.20],
+      "look_at": [0, 0.4, 0.78],
+      "fov": 60
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.4, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [-1.0, 0.4, 0.835], "color": "green"},
+      {"path": "/World/Cube_2", "position": [-0.8, 0.4, 0.835], "color": "green"},
+      {"path": "/World/Cube_3", "position": [-0.6, 0.4, 0.835], "color": "red"},
+      {"path": "/World/Cube_4", "position": [-0.3999999999999999, 0.4, 0.835], "color": "green"},
+      {"path": "/World/Cube_5", "position": [-0.19999999999999996, 0.4, 0.835], "color": "green"}
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\ncreate_material(material_name=\"mat_green_1\", color=\"green\")\nassign_material(prim_path={{workpieces[0].path}}, material_name=\"mat_green_1\")\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\ncreate_material(material_name=\"mat_green_2\", color=\"green\")\nassign_material(prim_path={{workpieces[1].path}}, material_name=\"mat_green_2\")\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\ncreate_material(material_name=\"mat_red_3\", color=\"red\")\nassign_material(prim_path={{workpieces[2].path}}, material_name=\"mat_red_3\")\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\ncreate_material(material_name=\"mat_green_4\", color=\"green\")\nassign_material(prim_path={{workpieces[3].path}}, material_name=\"mat_green_4\")\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[4].path}}, prim_type=\"Cube\", position={{workpieces[4].position}}, size=0.05)\ncreate_material(material_name=\"mat_green_5\", color=\"green\")\nassign_material(prim_path={{workpieces[4].path}}, material_name=\"mat_green_5\")\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[4].path}}, schema_name=api)\n\ncreate_bin(prim_path={{pass_bin.path}}, position={{pass_bin.position}}, size={{pass_bin.size}})\ncreate_bin(prim_path={{reject_bin.path}}, position={{reject_bin.position}}, size={{reject_bin.size}})\n\nconfigure_camera(\n    camera_path={{inspect_camera.path}},\n    position={{inspect_camera.position}},\n    look_at={{inspect_camera.look_at}},\n    fov={{inspect_camera.fov}},\n)\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}],\n    destination_path={{pass_bin.path}},\n    color_routing={\"green\": {{pass_bin.path}}, \"red\": {{reject_bin.path}}},\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{pass_bin.path}}, {{reject_bin.path}}],\n)",
+  "simulate_args_template": {
+    "cube_paths": ["{{workpieces[0].path}}", "{{workpieces[1].path}}", "{{workpieces[3].path}}", "{{workpieces[4].path}}"],
+    "target_path": "{{pass_bin.path}}",
+    "duration_s": 180
+  },
   "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (52s); vision-gated routing",
   "motion_controllers": {
-    "verified": [
-      "curobo"
-    ],
+    "verified": [],
     "untested": [
+      "curobo",
       "rmpflow",
       "moveit2"
     ]

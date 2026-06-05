@@ -124,6 +124,346 @@
   },
   "extends": "CP-10",
   "extension_notes": "CP-25 demonstrates high-density single-layer palletizing. 16 cubes on 0.40×0.40m pallet ≈ 25% area coverage by cubes (16 × 25cm² / 1600cm² = 25%). Tighter spacing than CP-10's 0.10m. Function-gate likely partial — drop precision drift accumulates across 16 placements, last cubes may not fit.",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "has_stacking": false
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:stack.grid_4x4"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "input_conveyor": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "primary_destination": {
+      "constraints": [
+        "platform",
+        "pallet"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": [
+        "cube"
+      ],
+      "min": 1,
+      "max": 16,
+      "param_name": "n_cubes",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [
+        0.0,
+        0.4,
+        0.78
+      ],
+      "size": [
+        4.0,
+        0.4,
+        0.05
+      ],
+      "surface_velocity": [
+        0.2,
+        0,
+        0
+      ]
+    },
+    "primary_destination": {
+      "path": "/World/Pallet",
+      "position": [
+        0,
+        -0.4,
+        0.775
+      ],
+      "scale": [
+        0.2,
+        0.2,
+        0.025
+      ]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [
+        0.4,
+        0.4,
+        0.835
+      ],
+      "size": [
+        0.06,
+        0.06,
+        0.06
+      ]
+    },
+    "workpieces": [
+      {
+        "path": "/World/Cube_1",
+        "position": [
+          -1.5,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.105,
+          -0.505,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_2",
+        "position": [
+          -1.3,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.035,
+          -0.505,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_3",
+        "position": [
+          -1.1,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.035,
+          -0.505,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_4",
+        "position": [
+          -0.8999999999999999,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.105,
+          -0.505,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_5",
+        "position": [
+          -0.7,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.105,
+          -0.435,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_6",
+        "position": [
+          -0.5,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.035,
+          -0.435,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_7",
+        "position": [
+          -0.2999999999999998,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.035,
+          -0.435,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_8",
+        "position": [
+          -0.09999999999999987,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.105,
+          -0.435,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_9",
+        "position": [
+          0.10000000000000009,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.105,
+          -0.365,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_10",
+        "position": [
+          0.30000000000000004,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.035,
+          -0.365,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_11",
+        "position": [
+          0.5,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.035,
+          -0.365,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_12",
+        "position": [
+          0.7000000000000002,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.105,
+          -0.365,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_13",
+        "position": [
+          0.9000000000000004,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.105,
+          -0.295,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_14",
+        "position": [
+          1.1,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          -0.035,
+          -0.295,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_15",
+        "position": [
+          1.3000000000000003,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.035,
+          -0.295,
+          0.825
+        ]
+      },
+      {
+        "path": "/World/Cube_16",
+        "position": [
+          1.5,
+          0.4,
+          0.835
+        ],
+        "drop_target": [
+          0.105,
+          -0.295,
+          0.825
+        ]
+      }
+    ]
+  },
+  "code_template": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\n{{#each workpieces}}\ncreate_prim(prim_path={{this.path}}, prim_type=\"Cube\", position={{this.position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{this.path}}, schema_name=api)\n{{/each}}\n\nbulk_set_attribute(\n    prim_paths=[\n{{#each workpieces}}\n        {{this.path}},\n{{/each}}\n    ],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\nfor path in [\n{{#each workpieces}}\n        {{this.path}},\n{{/each}}\n    ]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_prim(prim_path={{primary_destination.path}}, prim_type=\"Cube\", position={{primary_destination.position}}, scale={{primary_destination.scale}})\napply_api_schema(prim_path={{primary_destination.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[\n{{#each workpieces}}\n        {{this.path}},\n{{/each}}\n    ],\n    destination_path={{primary_destination.path}},\n    drop_targets={\n{{#each workpieces}}\n        {{this.path}}: {{this.drop_target}},\n{{/each}}\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{primary_destination.path}}],\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{input_conveyor.path}}",
+        "place_path": "{{primary_destination.path}}",
+        "robot_kind": "{{primary_robot.class}}"
+      }
+    ],
+    "cube_path": "{{workpieces[0].path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{workpieces[0].path}}",
+    "target_path": "{{primary_destination.path}}",
+    "duration_s": 360
+  },
   "failure_modes": [
     "Drop precision drift (~5cm) > spacing (7cm) → last placed cube collides with previous. Reduce spacing or reduce cube count.",
     "Belt has 16 cubes — pile-up on conveyor tail end if robot can't pick fast enough.",

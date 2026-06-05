@@ -106,5 +106,132 @@
     "upper": 0.495,
     "evidence_date": "2026-05-15",
     "evidence_source": "workspace/baselines aggregate"
-  }
+  },
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:topology.heap_singulation",
+      "isaac:robot.fixed_base.arm",
+      "isaac:workpiece.heap_zone",
+      "isaac:transport.heap_surface",
+      "isaac:topology.single_station"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "ur5e"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "heap_zone": {
+      "constraints": [
+        "heap"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "heap_surface": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "output_bin": {
+      "constraints": [
+        "bin"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "pick_sensor": {
+      "constraints": [
+        "proximity_sensor"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "heap_zone": {
+      "path": "/World/CubeHeap",
+      "center": [
+        0.4,
+        0.3,
+        0.835
+      ],
+      "radius": 0.1,
+      "n_items": 5,
+      "item_size": 0.05
+    },
+    "heap_surface": {
+      "path": "/World/HeapSurface",
+      "position": [
+        0.4,
+        0.3,
+        0.78
+      ],
+      "size": [
+        0.3,
+        0.3,
+        0.05
+      ],
+      "surface_velocity": [
+        0.001,
+        0,
+        0
+      ]
+    },
+    "output_bin": {
+      "path": "/World/Bin",
+      "position": [
+        0,
+        -0.4,
+        0.75
+      ],
+      "size": [
+        0.3,
+        0.3,
+        0.15
+      ]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [
+        0.4,
+        0.3,
+        0.85
+      ],
+      "size": [
+        0.1,
+        0.1,
+        0.06
+      ]
+    }
+  },
+  "code_template": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n# Heap of items\ncreate_heap_zone(\n    heap_path={{heap_zone.path}},\n    center={{heap_zone.center}},\n    radius={{heap_zone.radius}},\n    n_items={{heap_zone.n_items}},\n    item_size={{heap_zone.item_size}},\n)\n\n# Stationary work surface under heap (verifier needs bridge)\ncreate_conveyor(\n    prim_path={{heap_surface.path}},\n    position={{heap_surface.position}},\n    size={{heap_surface.size}},\n    surface_velocity={{heap_surface.surface_velocity}},\n)\n\nbulk_set_attribute(\n    prim_paths=[\"/World/CubeHeap/Item_1\", \"/World/CubeHeap/Item_2\", \"/World/CubeHeap/Item_3\", \"/World/CubeHeap/Item_4\", \"/World/CubeHeap/Item_5\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [\"/World/CubeHeap/Item_1\", \"/World/CubeHeap/Item_2\", \"/World/CubeHeap/Item_3\", \"/World/CubeHeap/Item_4\", \"/World/CubeHeap/Item_5\"]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path={{output_bin.path}}, position={{output_bin.position}}, size={{output_bin.size}})\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{heap_surface.path}},\n    source_paths=[\"/World/CubeHeap/Item_1\", \"/World/CubeHeap/Item_2\", \"/World/CubeHeap/Item_3\", \"/World/CubeHeap/Item_4\", \"/World/CubeHeap/Item_5\"],\n    destination_path={{output_bin.path}},\n    planning_obstacles=[\"/World/Table\", {{heap_surface.path}}, {{output_bin.path}}],\n)"
 }
