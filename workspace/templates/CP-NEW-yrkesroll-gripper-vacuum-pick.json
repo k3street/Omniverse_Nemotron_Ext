@@ -1,0 +1,215 @@
+{
+  "task_id": "CP-NEW-yrkesroll-gripper-vacuum-pick",
+  "goal": "Yrkesroll: Gripper operator / packaging-line operator (ONET SOC 51-9111, Packaging and Filling Machine Operators and Tenders). A Franka Panda fitted with an OgnSurfaceGripper (vacuum suction cup) picks four MIXED-SIZE cube items (0.05, 0.06, 0.07, 0.05 m edge — i.e. mixed-SKU random items) one at a time from a slow infeed conveyor and drops each into an outfeed bin alongside the line, running at production cadence (one item every ~12 s sim-time). The differentiator vs other vacuum/pick-place canonicals is SIZE-VARIANCE handling: each item's top surface sits at a different world-z, so the controller must read each cube's per-item top-z via get_world_transform and adapt the vacuum-approach height per-pick rather than using a single fixed approach. Exercises surface_gripper for vacuum end-effector, define_grasp_pose per-item with item-specific gripper_offset to land on the centre of each top face, setup_pick_place_controller with curobo + per-item drop_targets, and a conveyor as the infeed source (uses_conveyor_transport=true). Distinct from CP-NEW-label-applicator-pose (single thin label, ±2mm tight pose tolerance, fixture destination) and CP-NEW-yrkesroll-packer-box-seal (parallel-jaw pack 3 items + lid-seal phase, no vacuum, no size-variance).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "surface_gripper",
+    "define_grasp_pose",
+    "create_conveyor",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "set_semantic_label",
+    "setup_pick_place_controller",
+    "get_world_transform",
+    "add_proximity_sensor"
+  ],
+  "thoughts": "Design rationale for CP-NEW-yrkesroll-gripper-vacuum-pick:\n\n1) Yrkesroll framing — Packaging and Filling Machine Operators and Tenders, ONET SOC 51-9111. This persona is a dedicated gripper-station operator on a packaging line who monitors a vacuum-pickup robot handling a stream of mixed-SKU items. ONET 51-9111 is the correct match (rather than 53-7064 Packers and Packagers, Hand) because the workflow is MACHINE-TENDING — the human operator supervises an automated vacuum-cup station, not packs by hand. The robot stands in for the vacuum end-effector itself; the operator's role is observability + parameter tuning of the gripper station.\n\n2) Distinctiveness vs neighbours:\n   - vs CP-NEW-label-applicator-pose (A79): A79 picks ONE thin 2mm label and lands it on a fixed workpiece with ±2mm position / ±2° orientation tight tolerance — pose-critical. This template handles FOUR mixed-size cubes at production cadence with LOOSE xy tolerance (~0.06m) into a wide bin; success is throughput, not pose precision.\n   - vs CP-NEW-yrkesroll-packer-box-seal (A88): A88 uses parallel-jaw (no vacuum), packs 3 known-size items into walled-box cells, and adds a lid-seal phase. This template is single-phase vacuum pick-and-drop with mixed cube sizes, no walls/lid.\n   - vs CP-NEW-vacuum-gripper-sheet-pick (A23): A23 picks IDENTICAL thin flat sheets from a stack into a 3-slot tray. This template picks MIXED-SIZE cubes (different top-z per item) from a CONVEYOR (moving source) into a single bin.\n\n3) Topology — single station: Franka at [0, 0, 0.75] on a 1.0×0.6m work table. Infeed conveyor /World/InfeedConveyor running along +y at [0.50, 0.0, 0.75] (4-cell belt, length 0.8m, belt-top z=0.78). Outfeed bin /World/OutfeedBin at [-0.45, 0.0, 0.78] (0.30×0.30×0.08m, simple open-top container). Items rest on belt at y-positions {-0.30, -0.10, 0.10, 0.30} so they enter the pick zone sequentially as belt advances. All scene elements within Franka 0.85m reach (max horizontal 0.50m).\n\n4) Mixed-size items — four cubes with edge sizes [0.05, 0.06, 0.07, 0.05] m (representative SKU mix: small/medium/large/small). Each is a Cube prim with scale=[edge/2]*3. Item top-z = belt_top(0.78) + edge (since cube centre is at belt_top + edge/2, top is at +edge above centre = belt_top + edge). So top_z values: 0.83, 0.84, 0.85, 0.83 m. Vacuum approach pose for each item must clear that item's top_z by a uniform 0.05m approach margin → per-item approach_height baseline = top_z + 0.05.\n\n5) Vacuum gripper — surface_gripper on /World/Franka/panda_hand with grip_threshold=0.010 m (10 mm proximity tolerance, generous enough to seal on any of the three cube sizes without per-SKU recalibration), force_limit=60.0 N (lifts mixed cubes up to ~0.5 kg comfortably), torque_limit=30.0 N·m. graph_path=/World/Franka/SuctionGraph. This is the canonical setting for a real-world vacuum end-effector handling mixed-SKU light goods.\n\n6) Per-item define_grasp_pose with item-specific gripper_offset — KEY DIFFERENTIATION FROM A79/A23. For each Item_i, define_grasp_pose is called with gripper_offset = [0, 0, edge_i/2 + 0.001] so the suction cup contacts the centre of the top face (1mm above the geometric top) regardless of cube size. approach_direction = [0, 0, -1] (top-down vertical descent). Without per-item offsets, the gripper would either crash into a tall cube or hover above a short cube and fail to seal.\n\n7) setup_pick_place_controller — single call with target_source='curobo', source_paths=[/World/Item_1..Item_4], destination_path=/World/OutfeedBin. drop_targets pin each item to a distinct landing spot inside the bin (4-quadrant layout): /World/Item_1 → [-0.50, -0.05, 0.82], /World/Item_2 → [-0.50, 0.05, 0.82], /World/Item_3 → [-0.40, -0.05, 0.82], /World/Item_4 → [-0.40, 0.05, 0.82]. Drop z (0.82) = bin_floor_top(0.78) + 0.04 settled-cube clearance — items of different sizes still settle inside the bin because the bin walls (0.04m tall) accept items up to 0.07m edge. planning_obstacles include the table, conveyor, and bin walls.\n\n8) Why curobo not RmpFlow — mixed-size items mean each pick has different approach-height + the EE must traverse over the conveyor's running belt geometry without clipping. cuRobo's collision-aware Cartesian planner handles the variable approach trajectory per-item. RmpFlow lacks runtime obstacle awareness for the conveyor and would risk EE-belt collision on transit.\n\n9) Conveyor source vs static-bin source — uses_conveyor_transport=true is the structural-tag distinguisher. Real packaging-line gripper-operator stations always pick from a moving conveyor (not a static feeder bin). The conveyor is created via create_conveyor with width=0.20m, length=0.80m, belt_velocity=0.02 m/s (slow, gives the gripper time to engage). Items have light damping so they don't slide on the belt before the pick triggers.\n\n10) Arrival sensor — /World/BinArrivalSensor inside the outfeed bin at [-0.45, 0.0, 0.82], size [0.28, 0.28, 0.06] (slightly smaller than bin interior so only fully-dropped items trigger). Confirms each item lands.\n\n11) Physics — CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) for determinism. Item masses scaled by volume: 0.05m → 0.10kg, 0.06m → 0.17kg, 0.07m → 0.27kg (consistent ~800 kg/m³ density). rubber material on items (high friction → stable on belt). sleepThreshold=0.0 keeps all items active during the run.\n\n12) Failure modes (see failure_modes block): vacuum loses seal on a slightly-tilted top face (belt vibration); gripper crashes into a tall cube when per-item offsets are not applied; cube ejected from belt before pick fires (conveyor too fast); drop-release timing race where the gripper opens before the EE is over the bin (item drops outside bin).\n\n13) Verification — verify_args.stages records the single pick-place phase with /World/InfeedConveyor as pick_path and /World/OutfeedBin as place_path. simulate_args.cube_paths lists all 4 items. settle_state records final bin landing positions.\n\n14) ONET SOC 51-9111 placement — explicit in role_defaults.operator_role with title 'Packaging Line / Gripper-Station Operator', responsibilities {monitor_vacuum_seal, tune_per_sku_offsets, intervene_on_drop, log_throughput}. This canonical is the yrkesroll-exemplar for gripper-station observability tasks in the future evaluation suite.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Work table (1.0 x 0.6 x 0.75m) ─────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.3, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for determinism ────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm (single station, all elements within 0.85m reach) ─────────────\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Vacuum gripper (surface_gripper on panda_hand) ────────────────────────────\n# grip_threshold=0.010m: 10mm proximity, generous across mixed-SKU edge sizes.\n# force_limit=60N: lifts heaviest item (0.07m cube ~0.27kg) with safety margin.\nsurface_gripper(\n    robot_path=\"/World/Franka\",\n    ee_link=\"/World/Franka/panda_hand\",\n    grip_threshold=0.010,\n    force_limit=60.0,\n    torque_limit=30.0,\n    graph_path=\"/World/Franka/SuctionGraph\",\n)\n\n# ── Infeed conveyor (slow belt along +y, length 0.80m) ───────────────────────\n# belt_top z = 0.78 (table_top 0.75 + belt half-thickness 0.03).\n# belt_velocity 0.02 m/s: ~12s for an item to traverse the pick zone — matches\n# production cadence for vacuum pick stations.\ncreate_conveyor(\n    prim_path=\"/World/InfeedConveyor\",\n    position=[0.50, 0.0, 0.75],\n    size=[0.20, 0.80, 0.05],\n    surface_velocity=[0.0, 0.02, 0.0],\n)\n\n# ── Four mixed-size cube items on belt ───────────────────────────────────────\n# Edge sizes [0.05, 0.06, 0.07, 0.05] m (mixed SKU). Densities ~800 kg/m^3 →\n# masses [0.10, 0.17, 0.27, 0.10] kg. Top-z varies per item (key differentiator).\nitem_paths = [\"/World/Item_1\", \"/World/Item_2\", \"/World/Item_3\", \"/World/Item_4\"]\nitem_edges = [0.05, 0.06, 0.07, 0.05]\nitem_masses = [0.10, 0.17, 0.27, 0.10]\nitem_labels = [\"sku_small_a\", \"sku_medium\", \"sku_large\", \"sku_small_b\"]\nitem_y_positions = [-0.30, -0.10, 0.10, 0.30]\n\nfor path, edge, mass, label, y in zip(item_paths, item_edges, item_masses, item_labels, item_y_positions):\n    centre_z = 0.78 + edge / 2  # belt top + half-edge so cube rests on belt\n    create_prim(\n        prim_path=path,\n        prim_type=\"Cube\",\n        position=[0.50, y, centre_z],\n        scale=[edge / 2, edge / 2, edge / 2],\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_attribute(prim_path=path, attr_name=\"physics:mass\", value=mass)\n    set_semantic_label(prim_path=path, label=label, class_name=\"mixed_sku_item\")\n\nbulk_set_attribute(\n    prim_paths=item_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=item_paths,\n    attr=\"physxRigidBody:linearDamping\",\n    value=0.5,\n)\nfor path in item_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Per-item define_grasp_pose with size-specific gripper_offset (KEY) ───────\n# Each cube's top face is at centre_z + edge/2. Vacuum cup contacts the centre\n# of the top face: gripper_offset = [0, 0, edge/2 + 0.001] (1mm above top).\n# Without per-item offsets the gripper would either crash into a tall cube or\n# hover over a short cube and fail to seal — this is the mixed-SKU adaptation.\nfor path, edge in zip(item_paths, item_edges):\n    define_grasp_pose(\n        robot_path=\"/World/Franka\",\n        object_path=path,\n        gripper_offset=[0.0, 0.0, edge / 2 + 0.001],\n        approach_direction=[0.0, 0.0, -1.0],\n    )\n\n# ── Outfeed bin (single open-top bin for all 4 items) ─────────────────────────\n# 0.30 x 0.30 x 0.08m. Wall height 0.08m clears even the 0.07m item.\ncreate_bin(\n    prim_path=\"/World/OutfeedBin\",\n    position=[-0.45, 0.0, 0.78],\n    size=[0.30, 0.30, 0.08],\n)\n\n# ── Arrival sensor inside outfeed bin ────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/BinArrivalSensor\",\n    position=[-0.45, 0.0, 0.82],\n    size=[0.28, 0.28, 0.06],\n)\n\n# ── Pick-place controller: single phase, 4 items, per-item drop targets ──────\n# 4-quadrant landing layout inside the 0.30x0.30 bin (cell centres 0.10m apart).\n# Drop z = bin_floor_top(0.78) + 0.04m settled clearance. Each item settles to\n# its own size; bin walls 0.08m tall accept items up to 0.07m edge.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    robot_family=\"franka\",\n    source_paths=item_paths,\n    destination_path=\"/World/OutfeedBin\",\n    drop_targets={\n        \"/World/Item_1\": [-0.50, -0.05, 0.82],\n        \"/World/Item_2\": [-0.50,  0.05, 0.82],\n        \"/World/Item_3\": [-0.40, -0.05, 0.82],\n        \"/World/Item_4\": [-0.40,  0.05, 0.82],\n    },\n    approach_height=0.08,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/InfeedConveyor\",\n        \"/World/OutfeedBin\",\n    ],\n    sensor_path=\"/World/BinArrivalSensor\",\n)\n\n# ── Post-run verification: read each item's settled world transform ──────────\nfor path in item_paths:\n    get_world_transform(prim_path=path)",
+  "settle_state": {
+    "items_landed_in_bin": {
+      "/World/Item_1": [-0.50, -0.05, 0.81],
+      "/World/Item_2": [-0.50,  0.05, 0.815],
+      "/World/Item_3": [-0.40, -0.05, 0.82],
+      "/World/Item_4": [-0.40,  0.05, 0.81]
+    },
+    "conveyor_running": true,
+    "bin_static": {
+      "/World/OutfeedBin": {
+        "position": [-0.45, 0.0, 0.78],
+        "size": [0.30, 0.30, 0.08]
+      }
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    },
+    "operator_observability_signals": {
+      "n_items_picked": 4,
+      "vacuum_seal_failures": 0,
+      "drops_outside_bin": 0,
+      "throughput_items_per_min": 5
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/InfeedConveyor",
+        "place_path": "/World/OutfeedBin",
+        "robot_kind": "franka",
+        "gripper_type": "surface_gripper"
+      }
+    ],
+    "item_paths": [
+      "/World/Item_1",
+      "/World/Item_2",
+      "/World/Item_3",
+      "/World/Item_4"
+    ],
+    "item_edges": [0.05, 0.06, 0.07, 0.05],
+    "expected_in_bin": [
+      "/World/Item_1",
+      "/World/Item_2",
+      "/World/Item_3",
+      "/World/Item_4"
+    ]
+  },
+  "simulate_args": {
+    "target_path": "/World/OutfeedBin",
+    "cube_paths": [
+      "/World/Item_1",
+      "/World/Item_2",
+      "/World/Item_3",
+      "/World/Item_4"
+    ],
+    "duration_s": 180,
+    "xy_tolerance": 0.06
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Table",
+      "/World/InfeedConveyor",
+      "/World/OutfeedBin"
+    ],
+    "sensor_path": "/World/BinArrivalSensor",
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "Vacuum loses suction on tilted top face — belt vibration / slight cube tilt on the moving conveyor means the cube's top face is not perfectly horizontal at the moment the vacuum cup contacts. OgnSurfaceGripper uses AABB proximity (not surface normal), so it CAN still seal on a tilted face, but the lifted cube hangs at an angle and may slip free during transit. Mitigation: linearDamping=0.5 already added to dampen pre-pick wobble; if slippage observed, lower belt_velocity to 0.01 m/s (slower → less vibration) or add a settle-step pause (sim_control step_count=30) before each pick.",
+    "Per-item gripper_offset mismatch causes crash or no-seal — KEY MIXED-SKU FAILURE MODE. If define_grasp_pose is called once with a fixed offset (e.g. for the 0.05m item) and applied to all 4 items, the gripper approaches the 0.07m item 20mm too low (crash into the side) and the 0.06m item 10mm too low (crash). Conversely, a fixed offset tuned for the 0.07m item hovers 20mm above the 0.05m item's top — outside grip_threshold=0.010 — and seal never engages. Mitigation: this template explicitly calls define_grasp_pose ONCE PER ITEM with its own gripper_offset. Do not collapse the loop into a single call.",
+    "Cube ejected from belt before pick fires — conveyor at belt_velocity=0.02 m/s carries an item past the pick zone (Franka workspace ~0.4m radius centred on robot) in ~20s. If the pick-place controller queues all 4 items and processes them sequentially, the 4th item (y=+0.30) starts at y=+0.30 and the belt carries it OFF the +y end of the conveyor (belt_length=0.80m → +y endpoint at y=+0.40) before the controller reaches it (estimated cycle time ~12s × 3 prior items = 36s; item exits at 5s belt-time). Mitigation: either stop belt during pick (set belt_velocity=0 between picks) or shorten conveyor placement so all items start in the workspace.",
+    "Drop-release timing race — gripper open signal goes low ~0.2s before the EE reaches the centre of its drop_target. With belt_velocity nonzero the EE is still tracking; the cube drops 0.2s × any-residual-EE-velocity earlier than the bin centre, landing on the edge or outside. Mitigation: setup_pick_place_controller with curobo enforces a stop-at-waypoint before opening; ensure target_source='curobo' (not 'native_spline' which has a softer release).",
+    "Mixed-size items overlap in bin — drop_targets are 0.10m apart in x and 0.10m apart in y. The 0.07m item plus the adjacent 0.05m item have centres 0.10m apart but half-edges 0.035 + 0.025 = 0.060m, leaving only 0.040m of clearance. If items roll during settle they can stack. Mitigation: bin walls retain them; xy_tolerance in simulate_args is set to 0.06m (loose enough to count a partly-stacked item as 'in bin').",
+    "Conveyor obstacle in cuRobo plan — /World/InfeedConveyor is in planning_obstacles. cuRobo treats it as a static collision shape. The EE must approach a cube SITTING ON the conveyor, so the descent path passes within ~0.01m of the conveyor surface. Mitigation: approach_height=0.08m gives clearance for the EE to reach the cube top from above; if cuRobo IK fails with 'no collision-free plan', reduce approach_height to 0.06 (cuRobo can handle tighter approaches; this also reduces cycle time by ~0.3s)."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": true,
+      "has_stacking": false,
+      "has_runtime_candidate_discovery": false,
+      "gripper_type": "surface_gripper",
+      "has_mixed_sku_sizes": true,
+      "has_per_item_grasp_offsets": true,
+      "n_items": 4
+    },
+    "structural_tags": [
+      "isaac:yrkesroll.gripper_operator",
+      "isaac:industry.vacuum_pick_mixed_sku",
+      "isaac:end_effector.vacuum",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka",
+      "isaac:topology.single_station",
+      "isaac:gripper.surface_gripper",
+      "isaac:gripper.vacuum_cup",
+      "isaac:source.conveyor",
+      "isaac:destination.single_bin",
+      "isaac:workpiece.mixed_size_cube",
+      "isaac:operation.production_cadence",
+      "isaac:onet.51_9111"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "franka", "ur5e"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "surface_gripper_compatible"
+    },
+    "infeed_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "slow_belt_pick_station"
+    },
+    "outfeed_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "single_open_top_bin"
+    },
+    "arrival_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "items": {
+      "constraints": ["cube", "mixed_sku_item"],
+      "min": 2,
+      "max": 4,
+      "param_name": "n_items",
+      "unordered": false,
+      "note": "Mixed-size cubes — edge length varies per item; gripper_offset MUST be adapted per item."
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "family": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "infeed_conveyor": {
+      "path": "/World/InfeedConveyor",
+      "position": [0.50, 0.0, 0.75],
+      "size": [0.20, 0.80, 0.05],
+      "surface_velocity": [0.0, 0.02, 0.0]
+    },
+    "outfeed_bin": {
+      "path": "/World/OutfeedBin",
+      "position": [-0.45, 0.0, 0.78],
+      "size": [0.30, 0.30, 0.08]
+    },
+    "arrival_sensor": {
+      "path": "/World/BinArrivalSensor",
+      "position": [-0.45, 0.0, 0.82],
+      "size": [0.28, 0.28, 0.06]
+    },
+    "items": [
+      {"path": "/World/Item_1", "edge_m": 0.05, "mass_kg": 0.10, "label": "sku_small_a",  "belt_y": -0.30, "drop_target": [-0.50, -0.05, 0.82]},
+      {"path": "/World/Item_2", "edge_m": 0.06, "mass_kg": 0.17, "label": "sku_medium",   "belt_y": -0.10, "drop_target": [-0.50,  0.05, 0.82]},
+      {"path": "/World/Item_3", "edge_m": 0.07, "mass_kg": 0.27, "label": "sku_large",    "belt_y":  0.10, "drop_target": [-0.40, -0.05, 0.82]},
+      {"path": "/World/Item_4", "edge_m": 0.05, "mass_kg": 0.10, "label": "sku_small_b",  "belt_y":  0.30, "drop_target": [-0.40,  0.05, 0.82]}
+    ],
+    "operator_role": {
+      "yrkesroll": "gripper_operator",
+      "title": "Packaging Line / Gripper-Station Operator",
+      "onet_soc": "51-9111",
+      "onet_soc_title": "Packaging and Filling Machine Operators and Tenders",
+      "onet_soc_note": "51-9111 is the correct ONET match for a human operator tending an automated vacuum-cup pick station on a packaging line. Adjacent code 53-7064 (Packers and Packagers, Hand) covers hand-pack workflows and is used by CP-NEW-yrkesroll-packer-box-seal; 51-9111 here because the workflow is machine-tending, not hand-pack.",
+      "workstation": "vacuum_pick_station",
+      "responsibilities": [
+        "monitor_vacuum_seal_per_pick",
+        "tune_per_sku_gripper_offset",
+        "intervene_on_drop_or_seal_loss",
+        "log_throughput_and_failure_rate"
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.3, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nsurface_gripper(\n    robot_path={{primary_robot.path}},\n    ee_link=\"{{primary_robot.path}}/panda_hand\",\n    grip_threshold=0.010,\n    force_limit=60.0,\n    torque_limit=30.0,\n    graph_path=\"{{primary_robot.path}}/SuctionGraph\",\n)\n\ncreate_conveyor(\n    prim_path={{infeed_conveyor.path}},\n    position={{infeed_conveyor.position}},\n    size={{infeed_conveyor.size}},\n    surface_velocity={{infeed_conveyor.surface_velocity}},\n)\n\nitem_paths = [{{items[0].path}}, {{items[1].path}}, {{items[2].path}}, {{items[3].path}}]\nitem_edges = [{{items[0].edge_m}}, {{items[1].edge_m}}, {{items[2].edge_m}}, {{items[3].edge_m}}]\nitem_masses = [{{items[0].mass_kg}}, {{items[1].mass_kg}}, {{items[2].mass_kg}}, {{items[3].mass_kg}}]\nitem_labels = [{{items[0].label}}, {{items[1].label}}, {{items[2].label}}, {{items[3].label}}]\nitem_y_positions = [{{items[0].belt_y}}, {{items[1].belt_y}}, {{items[2].belt_y}}, {{items[3].belt_y}}]\n\nfor path, edge, mass, label, y in zip(item_paths, item_edges, item_masses, item_labels, item_y_positions):\n    centre_z = 0.78 + edge / 2\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[0.50, y, centre_z], scale=[edge/2, edge/2, edge/2])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_attribute(prim_path=path, attr_name=\"physics:mass\", value=mass)\n    set_semantic_label(prim_path=path, label=label, class_name=\"mixed_sku_item\")\n\nbulk_set_attribute(prim_paths=item_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=item_paths, attr=\"physxRigidBody:linearDamping\", value=0.5)\nfor path in item_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\nfor path, edge in zip(item_paths, item_edges):\n    define_grasp_pose(\n        robot_path={{primary_robot.path}},\n        object_path=path,\n        gripper_offset=[0.0, 0.0, edge / 2 + 0.001],\n        approach_direction=[0.0, 0.0, -1.0],\n    )\n\ncreate_bin(\n    prim_path={{outfeed_bin.path}},\n    position={{outfeed_bin.position}},\n    size={{outfeed_bin.size}},\n)\n\nadd_proximity_sensor(\n    sensor_path={{arrival_sensor.path}},\n    position={{arrival_sensor.position}},\n    size={{arrival_sensor.size}},\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    robot_family={{primary_robot.family}},\n    source_paths=item_paths,\n    destination_path={{outfeed_bin.path}},\n    drop_targets={\n        {{items[0].path}}: {{items[0].drop_target}},\n        {{items[1].path}}: {{items[1].drop_target}},\n        {{items[2].path}}: {{items[2].drop_target}},\n        {{items[3].path}}: {{items[3].drop_target}},\n    },\n    approach_height=0.08,\n    planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{outfeed_bin.path}}],\n    sensor_path={{arrival_sensor.path}},\n)\n\nfor path in item_paths:\n    get_world_transform(prim_path=path)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ⏳; function-gate ⏳ Kit RPC"
+}

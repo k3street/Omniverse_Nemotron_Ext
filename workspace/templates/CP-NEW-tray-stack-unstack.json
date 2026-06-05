@@ -1,0 +1,170 @@
+{
+  "task_id": "CP-NEW-tray-stack-unstack",
+  "goal": "Tray destacking with z-adaptive pick height: a UR10 arm iteratively picks the topmost flat tray (0.30 × 0.30 × 0.03 m) from a 5-tray source column and transfers it to a destination fixture pad on the opposite side of the workspace, rebuilding a smaller destination stack as trays accumulate. Each pick cycle queries get_world_transform on the source-column children to find the current top-of-stack Z, then commands the robot to descend to that exact height — preventing the common failure mode of the gripper reaching into empty air on later picks once trays have been removed. setup_pick_place_controller (cuRobo) handles motion; success requires ≥3 of 5 trays moved with mass-conservation (source_count + destination_count = 5) and orientation preserved (no flips).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "define_grasp_pose",
+    "setup_pick_place_controller",
+    "get_world_transform",
+    "count_prims_under_path",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute"
+  ],
+  "thoughts": "Design rationale for CP-NEW-tray-stack-unstack:\n\n1) Tray geometry: 0.30 × 0.30 × 0.03 m flat slabs (USD Cube with scale=[0.15, 0.15, 0.015] because Cube unit-cube has half-extents). 5 trays at the source column, stacked along Z with vertical spacing = tray thickness (0.03 m). Source column anchor at world XY = (0.50, 0.0). Bottom tray centre Z = 0.78 + 0.015 = 0.795 m (resting on robot table top at z=0.78). Tray k centre Z = 0.795 + k · 0.03 for k=0..4 → [0.795, 0.825, 0.855, 0.885, 0.915]. Top tray (Tray_4) at z=0.915.\n\n2) Destination fixture: a 0.40 × 0.40 × 0.02 m pad at world XY = (-0.50, 0.0), pad top at z = 0.78 + 0.02 = 0.80. Destination tray k (k=0..4) centre Z = 0.80 + 0.015 + k · 0.03 = [0.815, 0.845, 0.875, 0.905, 0.935]. This is a fixture (specific destination location) not a routed multi-bin sort, so destination_kind=\"fixture\" and routing_axis=null.\n\n3) Robot and reach: UR10 mounted on a 0.75 m table at world (0.0, 0.0, 0.75). UR10 reach ≈ 1.30 m. Source column at (0.50, 0.0) → lateral 0.50 m from base. Destination at (-0.50, 0.0) → lateral 0.50 m. Top of source at z=0.915, top of destination stack at z=0.935 — both well within UR10 vertical envelope (base z=0.75, tool reach up to z≈1.95). Transit height = 1.05 m (clears highest tray by 0.10 m).\n\n4) Z-adaptive pick height: setup_pick_place_controller is given source_paths in top-down order (Tray_4 → Tray_0). However, the static template cannot encode the per-cycle z-refresh — the runtime executor must call get_world_transform(prim_path=tray_path) before each pick and pass the refreshed centroid as the pick target. The drop_targets dict baked into setup_pick_place_controller maps each tray to its destination stack slot, so each pick lifts the source-column top to a deterministic destination slot. This avoids the classic empty-air failure: descending to a stale z value after earlier picks have lowered the source-column top.\n\n5) Mass conservation: count_prims_under_path(parent='/World/SourceColumn') + count_prims_under_path(parent='/World/DestinationPad') must equal 5 at verify time. A tray that fell off the side of either pad (off-table) counts against the conservation check. Orientation preservation: each tray's world-Z axis dot-product with up-vector should remain > 0.95 (no flip) — verified via get_world_transform quaternion-to-up-axis projection.\n\n6) Grasp pose: define_grasp_pose with top-down orientation (gripper quaternion [0.7071, 0, 0.7071, 0] = wrist pointing -Z) and grip width ≈ 0.04 m (clamps the tray's thin edge). Tray rim is 0.03 m thick so parallel-jaw fingers must close to grip the side. Alternative: surface-grip from above (suction); for UR10 default end-effector use the parallel-jaw approach.\n\n7) Physics: CPU dynamics (enable_gpu_dynamics=False, broadphase_type=MBP) for stable column simulation. sleepThreshold=0.0 so trays settle fully before first pick. Each tray has rubber physics material to reduce inter-tray sliding when the gripper lifts the top tray (avoids dragging the second-from-top tray sideways). Tray collision: PhysicsRigidBodyAPI + PhysicsCollisionAPI + PhysicsMassAPI; mass 0.5 kg per tray (light).\n\n8) Failure tolerance: partial completion (3/5 trays moved) is acceptable per the backlog acceptance criteria. The cuRobo controller may abort mid-cycle if IK fails for a particular tray (e.g., destination stack at k=4 reaches z=0.935 — near UR10 wrist-down singularity zone). The verify stage tolerates min_items_delivered=3.",
+  "code": "# ── Scene skeleton ───────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Robot table platform (z=0.78 top surface) ────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0.0, 0.0, 0.39], scale=[1.2, 0.6, 0.39])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic column settle ────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── UR10 arm centred on the table ─────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0.0, 0.0, 0.78],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Source column: 5 trays stacked on table top at (0.50, 0.0) ──────────────────\n# Tray dimensions: 0.30 × 0.30 × 0.03 m (scale=[0.15, 0.15, 0.015] for unit cube).\n# Tray k centre Z = 0.795 + k * 0.03; k = 0 (bottom) .. 4 (top).\ncreate_prim(prim_path=\"/World/SourceColumn\", prim_type=\"Xform\")\nsource_tray_paths = [f\"/World/SourceColumn/Tray_{k}\" for k in range(5)]\nfor k, path in enumerate(source_tray_paths):\n    z = 0.795 + k * 0.03\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[0.50, 0.0, z], scale=[0.15, 0.15, 0.015])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_attribute(prim_path=path, attr_name=\"physics:mass\", value=0.5)\n\nbulk_set_attribute(\n    prim_paths=source_tray_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in source_tray_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Destination fixture pad at (-0.50, 0.0) ─────────────────────────────────\n# Pad 0.40 × 0.40 × 0.02 m thick; pad top z = 0.78 + 0.02 = 0.80.\ncreate_prim(\n    prim_path=\"/World/DestinationPad\",\n    prim_type=\"Cube\",\n    position=[-0.50, 0.0, 0.79],\n    scale=[0.20, 0.20, 0.01],\n)\napply_api_schema(prim_path=\"/World/DestinationPad\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Destination stack slot z-targets ────────────────────────────────────────\n# Destination tray j centre Z = 0.815 + j * 0.03 for j = 0..4 (bottom to top).\n# Pick order: Tray_4 first (top of source) → placed at destination j=0 (bottom of destination).\n# Tray_3 → j=1, Tray_2 → j=2, Tray_1 → j=3, Tray_0 → j=4.\ndrop_targets = {\n    \"/World/SourceColumn/Tray_4\": [-0.50, 0.0, 0.815],\n    \"/World/SourceColumn/Tray_3\": [-0.50, 0.0, 0.845],\n    \"/World/SourceColumn/Tray_2\": [-0.50, 0.0, 0.875],\n    \"/World/SourceColumn/Tray_1\": [-0.50, 0.0, 0.905],\n    \"/World/SourceColumn/Tray_0\": [-0.50, 0.0, 0.935],\n}\n\n# Top-down ordered source list (top of column first)\nordered_sources = [\n    \"/World/SourceColumn/Tray_4\",\n    \"/World/SourceColumn/Tray_3\",\n    \"/World/SourceColumn/Tray_2\",\n    \"/World/SourceColumn/Tray_1\",\n    \"/World/SourceColumn/Tray_0\",\n]\n\n# ── Top-down grasp pose (gripper wrist pointing -Z) ────────────────────────────\ndefine_grasp_pose(\n    robot_path=\"/World/UR10\",\n    object_path=\"/World/SourceColumn/Tray_4\",\n    gripper_offset=[0, 0, 0.05],\n    approach_direction=[0, 0, -1],\n)\n\n# ── cuRobo pick-place controller ──────────────────────────────────────────────\n# Runtime executor MUST call get_world_transform on the source tray before each pick\n# cycle to refresh the descent z-target (z-adaptive pick height). The static\n# drop_targets dict is fixed at author time; per-pick source pose is queried live.\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    robot_family=\"ur10\",\n    source_paths=ordered_sources,\n    destination_path=\"/World/DestinationPad\",\n    drop_targets=drop_targets,\n    planning_obstacles=[\"/World/Table\", \"/World/DestinationPad\"],\n    grip_style=\"fixed_joint\",\n)\n\n# ── Mass-conservation probe (used by verify) ─────────────────────────────────────\n# At sim end, count_prims_under_path on both parents must sum to 5.\n# get_world_transform on each tray returns the orientation for flip detection.\ncount_prims_under_path(parent_path=\"/World/SourceColumn\")\ncount_prims_under_path(parent_path=\"/World/DestinationPad\")\nfor _path in ordered_sources:\n    get_world_transform(prim_path=_path)",
+  "settle_state": {
+    "source_column": {
+      "/World/SourceColumn/Tray_0": [0.50, 0.0, 0.795],
+      "/World/SourceColumn/Tray_1": [0.50, 0.0, 0.825],
+      "/World/SourceColumn/Tray_2": [0.50, 0.0, 0.855],
+      "/World/SourceColumn/Tray_3": [0.50, 0.0, 0.885],
+      "/World/SourceColumn/Tray_4": [0.50, 0.0, 0.915]
+    },
+    "destination_pad": {
+      "/World/DestinationPad": [-0.50, 0.0, 0.79]
+    },
+    "robot": {
+      "/World/UR10": "home_pose"
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/SourceColumn",
+        "place_path": "/World/DestinationPad",
+        "robot_kind": "ur10",
+        "source_paths": [
+          "/World/SourceColumn/Tray_0",
+          "/World/SourceColumn/Tray_1",
+          "/World/SourceColumn/Tray_2",
+          "/World/SourceColumn/Tray_3",
+          "/World/SourceColumn/Tray_4"
+        ]
+      }
+    ],
+    "source_parent": "/World/SourceColumn",
+    "destination_parent": "/World/DestinationPad",
+    "total_trays": 5,
+    "min_trays_moved": 3,
+    "z_spacing_tolerance": 0.01,
+    "tray_thickness": 0.03,
+    "up_axis_dot_tolerance": 0.95
+  },
+  "simulate_args": {
+    "target_path": "/World/DestinationPad",
+    "cube_paths": [
+      "/World/SourceColumn/Tray_0",
+      "/World/SourceColumn/Tray_1",
+      "/World/SourceColumn/Tray_2",
+      "/World/SourceColumn/Tray_3",
+      "/World/SourceColumn/Tray_4"
+    ],
+    "n_items_total": 5,
+    "min_items_delivered": 3,
+    "duration_s": 300,
+    "xy_tolerance": 0.10
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": ["/World/Table", "/World/DestinationPad", "/World/SourceColumn"],
+    "robot_base": [0.0, 0.0, 0.78],
+    "source_parent": "/World/SourceColumn",
+    "destination_parent": "/World/DestinationPad"
+  },
+  "failure_modes": [
+    "Z-adaptive pick height not refreshed by executor — the static drop_targets dict commits the pick controller to a fixed source-z for each tray, but after Tray_4 is removed the new top is Tray_3 at z=0.885, not z=0.915. If the runtime executor does not call get_world_transform between picks the gripper will descend into empty air on cycle 2. Mitigation: executor must invoke get_world_transform(prim_path=source_paths[k]) before each cycle and patch the controller's pick-target z; this canonical assumes the runtime supports per-cycle pose refresh (cuRobo target_source=\"curobo\" supports live source-prim tracking).",
+    "Tray slip during transport — parallel-jaw gripper on 0.03 m thin tray edge may lose grip under acceleration. Mitigation: grip_width=0.04 m clamps tightly; rubber physics material increases friction; transit speed should be kept moderate (cuRobo default acceleration limits are sufficient).",
+    "Destination stack tilts as trays accumulate — at j=4 the destination stack reaches z=0.935 (centre), about 0.135 m above the pad. Small XY placement errors (±0.02 m) compound and the upper trays may tilt or slide off. Mitigation: xy_tolerance=0.10 in simulate_args allows for accumulated drift; partial completion (≥3 trays) is acceptable.",
+    "Collision mesh too thin on trays — 0.015 m half-extent collision boxes may tunnel through the pad at high drop velocity. Mitigation: cuRobo drop motion is interpolated (no free-fall); rubber material reduces post-contact bounce. If tunnelling observed, increase tray scale-z to 0.02 m (thickness 0.04 m) and adjust z-spacings by +0.005 m per tray.",
+    "UR10 wrist singularity near destination top — placing Tray_0 at z=0.935 may hit a wrist-down singularity if the robot base is too close. UR10 base at (0.0, 0.0, 0.78) gives 0.50 m horizontal reach to destination, well clear of the 0.15 m no-go inner-radius. If IK fails for j=4 the controller skips that cycle (partial-complete is OK).",
+    "Tray flip during pick — if the gripper grabs an off-centre edge, the tray may rotate about the grip axis during lift. Mitigation: grasp_offset=[0, 0, 0.05] commands the EE to descend to tray-centre + 0.05 m, ensuring jaw centred on tray X-Y centre before close. up_axis_dot_tolerance=0.95 in verify_args catches any flipped tray (Z-axis dot up < 0.95 → fail orientation check)."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "routing_axis": null,
+      "uses_conveyor_transport": false,
+      "has_stacking": true,
+      "has_unstacking": true,
+      "n_iterations": 5
+    },
+    "structural_tags": [
+      "isaac:industrial.tray_handling",
+      "isaac:operation.stack",
+      "isaac:operation.unstack",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:placement.column_stack",
+      "isaac:robot.ur10",
+      "isaac:sensor.world_transform_z_adaptive"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["ur10", "ur5e", "franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "reach_preferred"
+    },
+    "source_column": {
+      "constraints": ["xform_parent"],
+      "expected_count": 1,
+      "required": true
+    },
+    "destination_fixture": {
+      "constraints": ["platform", "pallet", "pad"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["tray", "cube", "flat_slab"],
+      "min": 3,
+      "max": 8,
+      "param_name": "n_trays",
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10",
+      "position": [0.0, 0.0, 0.78],
+      "orientation": [1, 0, 0, 0]
+    },
+    "source_column": {
+      "path": "/World/SourceColumn",
+      "anchor_xy": [0.50, 0.0],
+      "bottom_z": 0.795,
+      "z_spacing": 0.03,
+      "n_trays": 5
+    },
+    "destination_fixture": {
+      "path": "/World/DestinationPad",
+      "position": [-0.50, 0.0, 0.79],
+      "scale": [0.20, 0.20, 0.01],
+      "top_z": 0.80
+    },
+    "workpieces": [
+      {"path": "/World/SourceColumn/Tray_0", "position": [0.50, 0.0, 0.795], "drop_target": [-0.50, 0.0, 0.935]},
+      {"path": "/World/SourceColumn/Tray_1", "position": [0.50, 0.0, 0.825], "drop_target": [-0.50, 0.0, 0.905]},
+      {"path": "/World/SourceColumn/Tray_2", "position": [0.50, 0.0, 0.855], "drop_target": [-0.50, 0.0, 0.875]},
+      {"path": "/World/SourceColumn/Tray_3", "position": [0.50, 0.0, 0.885], "drop_target": [-0.50, 0.0, 0.845]},
+      {"path": "/World/SourceColumn/Tray_4", "position": [0.50, 0.0, 0.915], "drop_target": [-0.50, 0.0, 0.815]}
+    ]
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0.0, 0.0, 0.39], scale=[1.2, 0.6, 0.39])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(prim_path={{source_column.path}}, prim_type=\"Xform\")\nsource_tray_paths = [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}]\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, scale=[0.15, 0.15, 0.015])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[0].path}}, attr_name=\"physics:mass\", value=0.5)\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, scale=[0.15, 0.15, 0.015])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[1].path}}, attr_name=\"physics:mass\", value=0.5)\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, scale=[0.15, 0.15, 0.015])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[2].path}}, attr_name=\"physics:mass\", value=0.5)\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, scale=[0.15, 0.15, 0.015])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[3].path}}, attr_name=\"physics:mass\", value=0.5)\ncreate_prim(prim_path={{workpieces[4].path}}, prim_type=\"Cube\", position={{workpieces[4].position}}, scale=[0.15, 0.15, 0.015])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[4].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[4].path}}, attr_name=\"physics:mass\", value=0.5)\n\nbulk_set_attribute(prim_paths=source_tray_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor path in source_tray_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_prim(\n    prim_path={{destination_fixture.path}},\n    prim_type=\"Cube\",\n    position={{destination_fixture.position}},\n    scale={{destination_fixture.scale}},\n)\napply_api_schema(prim_path={{destination_fixture.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ndefine_grasp_pose(\n    robot_path={{primary_robot.path}},\n    object_path={{workpieces[4].path}},\n    gripper_offset=[0, 0, 0.05],\n    approach_direction=[0, 0, -1],\n)\n\nordered_sources = [{{workpieces[4].path}}, {{workpieces[3].path}}, {{workpieces[2].path}}, {{workpieces[1].path}}, {{workpieces[0].path}}]\ndrop_targets = {\n    {{workpieces[4].path}}: {{workpieces[4].drop_target}},\n    {{workpieces[3].path}}: {{workpieces[3].drop_target}},\n    {{workpieces[2].path}}: {{workpieces[2].drop_target}},\n    {{workpieces[1].path}}: {{workpieces[1].drop_target}},\n    {{workpieces[0].path}}: {{workpieces[0].drop_target}},\n}\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    robot_family={{primary_robot.class}},\n    source_paths=ordered_sources,\n    destination_path={{destination_fixture.path}},\n    drop_targets=drop_targets,\n    planning_obstacles=[\"/World/Table\", {{destination_fixture.path}}],\n    grip_style=\"fixed_joint\",\n)\n\ncount_prims_under_path(parent_path={{source_column.path}})\ncount_prims_under_path(parent_path={{destination_fixture.path}})\nfor _path in ordered_sources:\n    get_world_transform(prim_path=_path)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16-a82; pattern_hint=pick_place; destination_kind=fixture; structural_tags include isaac:industrial.tray_handling + isaac:operation.{stack,unstack}; form-gate ⏳; function-gate ⏳ (requires runtime z-adaptive pick-height refresh via get_world_transform between pick cycles)"
+}

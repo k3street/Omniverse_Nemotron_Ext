@@ -1,0 +1,165 @@
+{
+  "task_id": "CP-NEW-sdg-class-balance-rebalance",
+  "goal": "Run a class-balanced Synthetic Data Generation (SDG) render batch on a scene with three workpiece classes (red_box, blue_box, green_box) and validate that each class is represented to a target minimum per frame. Scene: 3x3 grid of 9 boxes on a table (3 red, 3 blue, 3 green) under a randomized DomeLight + overhead camera. configure_coco_yolo_writer registers a per-class category map. create_sdg_pipeline builds the render product with rgb + bounding_box_2d annotators. enforce_class_balance(min_per_class=1, classes=['red_box','blue_box','green_box']) requires each frame to contain at least one instance of each class, re-randomizing the scene up to max_retries=8 times when occlusion drops a class. export_dataset(num_frames=90) writes the balanced 90-frame batch. validate_annotations cross-checks the COCO output: bounding boxes within image bounds, no zero-area boxes, no missing declared classes. SUCCESS: validate_annotations reports zero missing-class issues across the validated samples AND /tmp/sdg_class_balance/ contains 90 frames + annotations. Exercises create_prim, set_attribute (per-class DisplayColor), scatter_on_surface (initial pose randomization across the table), set_semantic_label (×3 classes), configure_coco_yolo_writer, create_sdg_pipeline, enforce_class_balance, preview_sdg, export_dataset, validate_annotations, benchmark_sdg. Realizes sdg-class-balance-rebalance-001 (sdg category, tier-1-locally-runnable).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_semantic_label",
+    "set_physics_scene_config",
+    "set_camera_look_at",
+    "scatter_on_surface",
+    "add_domain_randomizer",
+    "configure_coco_yolo_writer",
+    "create_sdg_pipeline",
+    "enforce_class_balance",
+    "preview_sdg",
+    "benchmark_sdg",
+    "export_dataset",
+    "validate_annotations"
+  ],
+  "thoughts": [
+    "Pattern: other (SDG class-balance enforcement — no robot motion, no pick-place delivery criterion, success is annotation distribution shape).",
+    "Three-class scene rationale: red_box, blue_box, green_box. Three classes is the smallest non-trivial case that exercises the class-balance retry loop — a two-class scene degenerates to coin-flip rejection, and four+ classes confound the retry budget. The 3x3 grid (9 boxes, 3 per class) keeps the geometry budget cheap but creates realistic occlusion potential when DR pose-jitter is applied.",
+    "Per-class semantic labels assigned with set_semantic_label(class_name='red_box' | 'blue_box' | 'green_box'). The class labels must match exactly the strings passed to enforce_class_balance.classes and configure_coco_yolo_writer.categories — a typo here silently drops the class from the COCO category map without raising.",
+    "DisplayColor authoring (set_attribute primvars:displayColor) is sufficient to differentiate classes visually. Real workpieces would use OmniPBR materials, but for class-balance validation the renderer only needs each class to be visually distinguishable from the others — the labels (not the colors) drive the classifier.",
+    "scatter_on_surface is used ONCE to spread the 9 boxes over the table surface (with spacing=0.10 to prevent overlap). After the initial scatter, add_domain_randomizer(type='pose', target='/World/Box_.*') applies per-frame jitter so the class distribution varies frame-to-frame — this is what creates the occasional missing-class frame that enforce_class_balance must catch and retry.",
+    "configure_coco_yolo_writer(categories=['red_box','blue_box','green_box'], format='coco') builds a shared category map. categories list order determines the COCO category_id assignment (1, 2, 3) — this matters for downstream YOLOv8 / Detectron2 ingestion.",
+    "create_sdg_pipeline(annotators=['rgb','bounding_box_2d'], output_format='coco', num_frames=90) registers the pipeline. 90 frames = 3 (classes) × 30 (per-class minimum target before quotient/retry slack). enforce_class_balance ensures each frame has ≥1 instance of each class, so the resulting dataset has ≥90 per-class instances even before counting overlapping appearances.",
+    "enforce_class_balance(min_per_class=1, max_retries=8, classes=['red_box','blue_box','green_box'], write_partial_on_fail=False). write_partial_on_fail=False means a frame that still has a missing class after 8 retries is DROPPED entirely — strict mode. This is correct for class-balanced training data, where partial frames poison the distribution. The cost is fewer output frames if the retry budget is too low.",
+    "preview_sdg(num_samples=6) generates a 2x3 visual grid so the operator can confirm all three classes are co-present in preview frames before committing the full 90-frame run.",
+    "benchmark_sdg(num_frames=20, annotators=['rgb','bounding_box_2d']) measures FPS so the operator can estimate wall-clock cost of class-balanced runs (which are slower than unconstrained SDG due to retry overhead).",
+    "validate_annotations(num_samples=30) reads back the written COCO annotations and confirms (a) bounding boxes within image bounds, (b) no zero-area boxes, (c) no missing declared classes. The third check is the class-balance gate: if the writer dropped annotations for any of the three classes in any validated frame, this surfaces as a class-balance violation.",
+    "Distinct from CP-NEW-scene-sdg-full-pipeline (single-class 'cube', no class-balance enforcement, 200 frames). Distinct from CP-NEW-defect-sdg (defect classification, 20 cubes, no COCO writer). This canonical is the ONLY one that exercises enforce_class_balance + validate_annotations together as a quality gate on a multi-class SDG run.",
+    "motion_controllers: none — pure data generation, no arm motion in this workflow.",
+    "BLOCKER: omni.replicator extension must be enabled. enforce_class_balance + validate_annotations are part of feat/addendum-phase7B-sdg-* — handlers must be present in the running build. If missing, the calls return a 'tool not registered' error and the canonical fails at the form-gate."
+  ],
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Table surface ──────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── 9 boxes: 3 red + 3 blue + 3 green, arranged in a 3x3 grid on the table ────\n_classes = [\n    (\"red_box\",   [0.85, 0.10, 0.10]),\n    (\"blue_box\",  [0.10, 0.20, 0.85]),\n    (\"green_box\", [0.15, 0.75, 0.20]),\n]\nfor c_idx, (class_name, color) in enumerate(_classes):\n    for i in range(3):\n        path = f\"/World/Box_{class_name}_{i+1}\"\n        col = i\n        row = c_idx\n        create_prim(\n            prim_path=path,\n            prim_type=\"Cube\",\n            position=[col * 0.18 - 0.18, row * 0.20 - 0.20, 0.81],\n            size=0.07,\n        )\n        for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\"):\n            apply_api_schema(prim_path=path, schema_name=api)\n        # Per-class DisplayColor — visually distinguishes classes\n        set_attribute(prim_path=path, attr_name=\"primvars:displayColor\", value=[color])\n        # Semantic label — drives COCO / YOLO class id\n        set_semantic_label(prim_path=path, class_name=class_name)\n\n# ── Initial pose scatter across the table surface ────────────────────────────\n# Spreads the 9 boxes with Poisson spacing so they don't visually overlap on f0\nscatter_on_surface(\n    source_prims=[\n        \"/World/Box_red_box_1\", \"/World/Box_red_box_2\", \"/World/Box_red_box_3\",\n        \"/World/Box_blue_box_1\", \"/World/Box_blue_box_2\", \"/World/Box_blue_box_3\",\n        \"/World/Box_green_box_1\", \"/World/Box_green_box_2\", \"/World/Box_green_box_3\",\n    ],\n    target_mesh=\"/World/Table\",\n    count=9,\n    spacing=0.10,\n    normal_align=False,\n    penetration_check=True,\n    seed=42,\n)\n\n# ── SDG camera (overhead nadir, slight tilt for realistic occlusion) ───────────\n# Explicit create_prim + set_camera_look_at: configure_camera only mutates lens\n# intrinsics (focal_length / aperture / clipping_range) and does NOT accept\n# position or look_at. An earlier draft passed those kwargs to configure_camera\n# where they were silently absorbed by extra='allow' and orphaned the camera at\n# world origin. Camera intrinsics are left at Replicator viewport defaults\n# (focal_length=24mm, aperture=20.955mm), which suffice for 1280x720 SDG runs.\ncreate_prim(\n    prim_path=\"/World/SdgCamera\",\n    prim_type=\"Camera\",\n    position=[0, 0, 1.65],\n)\nset_camera_look_at(\n    camera_path=\"/World/SdgCamera\",\n    target=[0, 0, 0.75],\n    up=[0, 1, 0],\n)\n\n# ── Per-frame pose jitter — this is what causes occasional missing classes ───\nadd_domain_randomizer(\n    target=\"/World/Box_.*\",\n    randomizer_type=\"pose\",\n    params={\"min_angle\": -0.4, \"max_angle\": 0.4, \"surface_prim\": \"/World/Table\"},\n)\n\n# ── DomeLight intensity randomization (photometric variance) ──────────────────\nadd_domain_randomizer(\n    target=\"/World/DomeLight\",\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": 500.0, \"intensity_max\": 2000.0},\n)\n\n# ── Configure COCO writer with 3-class category map ───────────────────────────\nconfigure_coco_yolo_writer(\n    output_dir=\"/tmp/sdg_class_balance\",\n    cameras=[\"/World/SdgCamera\"],\n    format=\"coco\",\n    categories=[\"red_box\", \"blue_box\", \"green_box\"],\n)\n\n# ── Create SDG pipeline ───────────────────────────────────────────────────────\ncreate_sdg_pipeline(\n    annotators=[\"bounding_box_2d\", \"instance_segmentation\"],\n    output_format=\"coco\",\n    num_frames=90,\n    output_dir=\"/tmp/sdg_class_balance\",\n    camera_position=[0, 0, 1.65],\n    camera_look_at=[0, 0, 0.75],\n    resolution=[1280, 720],\n)\n\n# ── Enforce class balance: each frame must contain ≥1 of each class ──────────\n# write_partial_on_fail=False → drop frames that still miss a class after retries\nenforce_class_balance(\n    min_per_class=1,\n    max_retries=8,\n    classes=[\"red_box\", \"blue_box\", \"green_box\"],\n    write_partial_on_fail=False,\n)\n\n# ── Visual preview: confirm all 3 classes co-present in preview frames ───────\npreview_sdg(num_samples=6)\n\n# ── Throughput benchmark (class-balanced runs are slower due to retries) ──────\nbenchmark_sdg(\n    num_frames=20,\n    annotators=[\"bounding_box_2d\", \"instance_segmentation\"],\n    resolution=[1280, 720],\n)\n\n# ── Full export: 90 class-balanced annotated frames ──────────────────────────\nexport_dataset(\n    output_dir=\"/tmp/sdg_class_balance\",\n    num_frames=90,\n    step_batch=10,\n)\n\n# ── Validate output: confirm bounding boxes valid, no missing classes ────────\nvalidate_annotations(num_samples=30)",
+  "settle_state": null,
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": {
+    "expected_output_dir": "/tmp/sdg_class_balance",
+    "expected_min_frames": 60,
+    "expected_target_frames": 90,
+    "expected_coco_classes": ["red_box", "blue_box", "green_box"],
+    "expected_annotation_file": "/tmp/sdg_class_balance/annotations/instances.json",
+    "class_balance_min_per_class": 1,
+    "class_balance_max_retries": 8,
+    "class_balance_strict_mode": true,
+    "validate_annotations_num_samples": 30,
+    "expected_missing_class_violations": 0
+  },
+  "verified_status": "drafted-2026-05-16-A72; form-gate-schema TBD; function-gate BLOCKED (requires omni.replicator extension + handlers for enforce_class_balance + validate_annotations + configure_coco_yolo_writer + benchmark_sdg)",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "failure_modes": [
+    "omni.replicator not enabled: enable_extension('omni.replicator.core') must be called before create_sdg_pipeline; handler may auto-enable but Kit must have been launched with extension available",
+    "scatter_on_surface spacing=0.10 vs 9 boxes on a 1.0x0.7m table: if the surface area cannot fit 9 placements at 0.10m Poisson spacing, scatter_on_surface returns fewer placements and unplaced boxes remain stacked at origin — reduce spacing to 0.08 or shrink box count to 6 if scatter under-delivers",
+    "set_semantic_label class_name typo: the strings passed to set_semantic_label MUST EXACTLY MATCH the categories list passed to configure_coco_yolo_writer and enforce_class_balance.classes. A 'red_boxes' vs 'red_box' mismatch silently drops the class from the COCO output without raising — enforce_class_balance will then retry on every frame and ultimately drop them all when write_partial_on_fail=False",
+    "enforce_class_balance with write_partial_on_fail=False and max_retries=8: on heavily-occluded scenes the retry budget may be exhausted on every frame, resulting in zero output frames. If observed, raise max_retries to 16 or set write_partial_on_fail=True and analyze the partial frames",
+    "add_domain_randomizer type='pose' surface_prim='/World/Table': Table must have PhysicsCollisionAPI so PhysX can report its surface; missing API causes pose jitter to project boxes through the table and fall off-camera, guaranteeing missing classes",
+    "configure_coco_yolo_writer cameras=['/World/SdgCamera']: camera prim must exist before writer config. The explicit create_prim(prim_type='Camera') + set_camera_look_at sequence above creates and orients the camera; a mistyped path between create_prim and configure_coco_yolo_writer.cameras causes the writer to attach to no camera and produce zero frames. Earlier drafts used configure_camera(position=..., look_at=...) which silently absorbed those kwargs via extra='allow' and orphaned the camera at world origin — fixed.",
+    "create_sdg_pipeline annotator order ['bounding_box_2d','instance_segmentation']: instance_segmentation requires PhysX or render-time identity buffers; on headless Kit without GPU instance ID resolution this may fall back to 2D bbox only — validate_annotations will then report missing instance masks",
+    "export_dataset step_batch=10: if Kit render product is not ready the step loop stalls; ensure preview_sdg completed at least one frame before export. Class-balanced runs are 2-4x slower than unconstrained — wall-clock cost may exceed expectations",
+    "validate_annotations num_samples=30 > frames-written: if export_dataset produced fewer than 30 valid frames (due to retry exhaustion), validate_annotations caps to actual count and reports a lower sample size; this is INFO, not failure",
+    "Output dir /tmp/sdg_class_balance must be writable; on shared servers /tmp may be small (≈100 frames at 1280x720 ≈ 30 MB) — use workspace/sdg_output/ if /tmp fills",
+    "benchmark_sdg must be called AFTER create_sdg_pipeline (pipeline must exist); calling it before pipeline registration returns 'no active pipeline' error"
+  ],
+  "extends": "sdg-category / CP-NEW-scene-sdg-full-pipeline",
+  "extension_notes": "First canonical in library to use enforce_class_balance + validate_annotations together as a quality gate. CP-NEW-scene-sdg-full-pipeline is single-class ('cube') and does not enforce balance. CP-NEW-defect-sdg is multi-class but uses unconstrained random sampling. This template adds the strict class-quota retry loop and the post-write annotation audit as a packaged workflow. Backlog source: sdg-class-balance-rebalance-001 (priority_tier=2, category=sdg, tier=tier-1-locally-runnable, blockers=[]). Note: backlog goal mentions 500 per-class instances; this template targets a leaner 90-frame smoke-batch (≥30 per class via min_per_class=1) — scale num_frames to 500 + min_per_class=1 for the full target, but smoke-test at 90 first.",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "n_dr_axes": 2,
+      "uses_sdg_pipeline": true,
+      "sdg_output_format": "coco",
+      "sdg_n_frames": 90,
+      "n_object_classes": 3,
+      "class_balance_enforced": true,
+      "class_balance_strict": true,
+      "uses_annotation_validation": true
+    },
+    "structural_tags": [
+      "isaac:sdg.class_balance",
+      "isaac:sdg.rebalance",
+      "isaac:sdg.coco_writer",
+      "isaac:sdg.annotation_validation",
+      "isaac:sdg.multi_class",
+      "isaac:sdg.n_classes_3",
+      "isaac:sdg.n_frames_90",
+      "isaac:sdg.strict_quota",
+      "isaac:dr.lighting",
+      "isaac:dr.pose_jitter",
+      "isaac:dr.2_axes",
+      "isaac:topology.no_robot",
+      "isaac:training.object_detection"
+    ]
+  },
+  "roles": {
+    "class_a_workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 6,
+      "param_name": "n_class_a",
+      "unordered": true
+    },
+    "class_b_workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 6,
+      "param_name": "n_class_b",
+      "unordered": true
+    },
+    "class_c_workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 6,
+      "param_name": "n_class_c",
+      "unordered": true
+    },
+    "sdg_camera": {
+      "constraints": ["camera"],
+      "expected_count": 1,
+      "required": true
+    },
+    "scatter_surface": {
+      "constraints": ["mesh", "surface"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "class_a_workpieces": [
+      {"path": "/World/Box_red_box_1", "class_name": "red_box", "color": [0.85, 0.10, 0.10]},
+      {"path": "/World/Box_red_box_2", "class_name": "red_box", "color": [0.85, 0.10, 0.10]},
+      {"path": "/World/Box_red_box_3", "class_name": "red_box", "color": [0.85, 0.10, 0.10]}
+    ],
+    "class_b_workpieces": [
+      {"path": "/World/Box_blue_box_1", "class_name": "blue_box", "color": [0.10, 0.20, 0.85]},
+      {"path": "/World/Box_blue_box_2", "class_name": "blue_box", "color": [0.10, 0.20, 0.85]},
+      {"path": "/World/Box_blue_box_3", "class_name": "blue_box", "color": [0.10, 0.20, 0.85]}
+    ],
+    "class_c_workpieces": [
+      {"path": "/World/Box_green_box_1", "class_name": "green_box", "color": [0.15, 0.75, 0.20]},
+      {"path": "/World/Box_green_box_2", "class_name": "green_box", "color": [0.15, 0.75, 0.20]},
+      {"path": "/World/Box_green_box_3", "class_name": "green_box", "color": [0.15, 0.75, 0.20]}
+    ],
+    "sdg_camera": {
+      "path": "/World/SdgCamera",
+      "position": [0, 0, 1.65],
+      "look_at": [0, 0, 0.75]
+    },
+    "scatter_surface": {
+      "path": "/World/Table",
+      "spacing": 0.10
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path={{scatter_surface.path}}, prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.7, 0.375])\napply_api_schema(prim_path={{scatter_surface.path}}, schema_name=\"PhysicsCollisionAPI\")\n\n_class_groups = [\n    (\"red_box\",   {{class_a_workpieces}}),\n    (\"blue_box\",  {{class_b_workpieces}}),\n    (\"green_box\", {{class_c_workpieces}}),\n]\nfor c_idx, (class_name, group) in enumerate(_class_groups):\n    for i, wp in enumerate(group):\n        path = wp[\"path\"]\n        col = i\n        row = c_idx\n        create_prim(prim_path=path, prim_type=\"Cube\", position=[col*0.18-0.18, row*0.20-0.20, 0.81], size=0.07)\n        for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\"):\n            apply_api_schema(prim_path=path, schema_name=api)\n        set_attribute(prim_path=path, attr_name=\"primvars:displayColor\", value=[wp[\"color\"]])\n        set_semantic_label(prim_path=path, class_name=class_name)\n\nscatter_on_surface(\n    source_prims=[wp[\"path\"] for group in ({{class_a_workpieces}}, {{class_b_workpieces}}, {{class_c_workpieces}}) for wp in group],\n    target_mesh={{scatter_surface.path}},\n    count=9,\n    spacing={{scatter_surface.spacing}},\n    normal_align=False,\n    penetration_check=True,\n    seed=42,\n)\n\ncreate_prim(\n    prim_path={{sdg_camera.path}},\n    prim_type=\"Camera\",\n    position={{sdg_camera.position}},\n)\nset_camera_look_at(\n    camera_path={{sdg_camera.path}},\n    target={{sdg_camera.look_at}},\n    up=[0, 1, 0],\n)\n\nadd_domain_randomizer(\n    target=\"/World/Box_.*\",\n    randomizer_type=\"pose\",\n    params={\"min_angle\": -0.4, \"max_angle\": 0.4, \"surface_prim\": {{scatter_surface.path}}},\n)\nadd_domain_randomizer(\n    target=\"/World/DomeLight\",\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": 500.0, \"intensity_max\": 2000.0},\n)\n\nconfigure_coco_yolo_writer(\n    output_dir=\"/tmp/sdg_class_balance\",\n    cameras=[{{sdg_camera.path}}],\n    format=\"coco\",\n    categories=[\"red_box\", \"blue_box\", \"green_box\"],\n)\n\ncreate_sdg_pipeline(\n    annotators=[\"bounding_box_2d\", \"instance_segmentation\"],\n    output_format=\"coco\",\n    num_frames=90,\n    output_dir=\"/tmp/sdg_class_balance\",\n    camera_position={{sdg_camera.position}},\n    camera_look_at={{sdg_camera.look_at}},\n    resolution=[1280, 720],\n)\n\nenforce_class_balance(\n    min_per_class=1,\n    max_retries=8,\n    classes=[\"red_box\", \"blue_box\", \"green_box\"],\n    write_partial_on_fail=False,\n)\n\npreview_sdg(num_samples=6)\n\nbenchmark_sdg(\n    num_frames=20,\n    annotators=[\"bounding_box_2d\", \"instance_segmentation\"],\n    resolution=[1280, 720],\n)\n\nexport_dataset(\n    output_dir=\"/tmp/sdg_class_balance\",\n    num_frames=90,\n    step_batch=10,\n)\n\nvalidate_annotations(num_samples=30)"
+}

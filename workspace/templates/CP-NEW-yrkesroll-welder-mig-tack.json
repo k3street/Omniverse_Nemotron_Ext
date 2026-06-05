@@ -1,0 +1,249 @@
+{
+  "task_id": "CP-NEW-yrkesroll-welder-mig-tack",
+  "goal": "Yrkesroll: MIG welder (ONET SOC 51-4121, Welders, Cutters, Solderers, and Brazers). A UR10 holds a welding torch (cylinder tool attached to the gripper via pick_place pickup from a torch stand) and performs FOUR discrete tack welds along the seam between two metal sheet halves (Cube prims placed edge-to-edge on a workpiece fixture). Each tack = move_to_pose above tack location → dwell stationary for ~0.5 s of sim-time → spawn a small visual marker Cube (the 'fused-spot' representation) at the tack position → advance to next tack location. No arc/fusion physics: the dwell + marker-spawn pair is the structural representation of a tack weld. Realises backlog item yrkesroll-welder-mig-tack-001. Distinct from CP-NEW-welder-seam-track (CONTINUOUS impedance-compliant seam follow with vision correction along a curved weld pass) by the DISCRETE-DWELL pattern: stationary tack-hold-advance instead of continuous trajectory traversal, no impedance/admittance compliance, no vision_plan_trajectory correction loop.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "set_semantic_label",
+    "define_grasp_pose",
+    "setup_pick_place_controller",
+    "move_to_pose",
+    "sim_control",
+    "get_world_transform"
+  ],
+  "thoughts": "Design rationale for CP-NEW-yrkesroll-welder-mig-tack:\n\n1) Yrkesroll framing — MIG welder per ONET SOC 51-4121 (Welders, Cutters, Solderers, and Brazers) per backlog entry yrkesroll-welder-mig-tack-001. The backlog calls for a 4-point tack-weld trajectory; this template ships the DISCRETE rendering (move → dwell → marker → repeat) rather than the continuous follow-trajectory rendering shipped by CP-NEW-welder-seam-track (yrkesroll-welder-seam-track-002). Tack welding is a real industrial pre-step before full seam welding — short stationary welds that fixture two sheets together so the full seam pass can run without the sheets shifting. Modelling it as a distinct discrete pattern keeps the seam-track canonical's continuous-compliance semantics clean and gives downstream retrieval a clean discriminator (isaac:gesture.tack_weld + isaac:gesture.discrete_dwell vs isaac:topology.seam_tracking + isaac:motion.compliant_follow).\n\n2) DISCRETE vs CONTINUOUS — the critical discriminator from CP-NEW-welder-seam-track:\n   - A28 (seam-track): single follow_trajectory_with_compliance call traversing 4 waypoints continuously with impedance compliance + Z-softness for torch contact pressure; vision_plan_trajectory corrects path mid-flight. The robot is moving the WHOLE time.\n   - A95 (tack): 4 separate move_to_pose calls, each followed by sim_control(action='step', step_count=30) for a ~0.5 s stationary dwell during which a marker Cube is spawned. No compliance controller, no vision correction, no Z-softness. The robot is STATIONARY during each tack and moves only between tacks.\n   The semantic tags isaac:gesture.tack_weld and isaac:gesture.discrete_dwell encode this discrimination at retrieval time.\n\n3) Topology — single station on a 1.0×0.8×0.75m work table at origin. UR10 at [0, 0, 0.75]. Workpiece fixture (a flat Cube clamp) at [0.50, 0.0, 0.78] holding two thin sheet halves (Cube prims, scale [0.10, 0.20, 0.005]) edge-to-edge along the x-axis, with a small 0.003m gap between them — that gap IS the seam to be tacked. Sheet left at [0.45, 0.0, 0.785] (x = 0.40 .. 0.50 edge); sheet right at [0.55, 0.0, 0.785] (x = 0.50 .. 0.60 edge); seam centre at x=0.50. Torch stand at [0.20, 0.30, 0.80] (a flat platform holding the welding torch cylinder so the robot can pick it up). All within UR10 1.3m reach envelope.\n\n4) Welding torch — a Cylinder prim representing the MIG torch tip. Length 0.12 m, radius 0.015 m, vertical axis, stashed on the torch stand at [0.20, 0.30, 0.86] (centre z = stand_top + tool_length/2). Mass 0.30 kg (light enough for parallel-jaw side grip on the torch handle). define_grasp_pose installed: approach_direction = [-1, 0, 0] (gripper approaches from -x side, picking the torch in vertical orientation), gripper_offset = [0, 0, 0]. The torch is treated as a regular liftable rigid body; once picked up the gripper carries it through the 4 tack-pose move_to_pose calls. After the final tack the torch is NOT returned to the stand (the work-cycle ends with the torch held aloft; future-variant could include a return-to-stand phase).\n\n5) Four tack positions — along the seam (y-axis, since seam runs in y-direction at x=0.50, between the two sheets which span y = -0.10 .. +0.10). Tack pitch chosen so the four spots are evenly distributed along the seam length: y = -0.075, -0.025, +0.025, +0.075 (4 spots, 0.05 m centre-to-centre, leaving 0.025 m clearance at each seam end). Tack pose: position [0.50, y_tack, 0.835] (torch tip ~0.025 m above seam surface to leave standoff for the simulated 'arc'); orientation [0.0, 0.7071068, 0.0, 0.7071068] (torch pointing straight down with the standard top-down approach quaternion used throughout the repo).\n\n6) Discrete-dwell pattern in code — for each of the 4 tacks:\n   (a) move_to_pose(target_position=[0.50, y_tack, 0.835], target_orientation=...) — sends the UR10 to the tack pose.\n   (b) sim_control(action='step', step_count=30) — 30 sim-steps @ 60 Hz = ~0.5 s stationary dwell. This is where the 'arc' would heat metal. No physics happens; the dwell is structural.\n   (c) create_prim(prim_path=f'/World/TackMarker_{i}', prim_type='Cube', position=[0.50, y_tack, 0.788], size=0.006) — spawn the 'fused-spot' marker at the tack location, slightly above the sheet top (z=0.7875) so it sits visibly proud. Marker is a static visual cube, no rigid body, no collision.\n   (d) set_attribute(prim_path=..., attr_name='primvars:displayColor', value=[[0.95, 0.6, 0.05]]) — orange-yellow fused-metal colour.\n   The marker spawn is what gives downstream tools (verify_args / vision_analyze_scene at scenario level) a structural signal that a tack 'happened'.\n\n7) Setup pick-place for torch pickup — a single setup_pick_place_controller call brings the torch from the stand to the first tack pose. source_paths=[/World/Torch], destination_path=/World/Sheet_Left (anchor for the first tack-approach), drop_targets={/World/Torch: [0.50, -0.075, 0.835]} (= first tack pose). After this call the robot is at tack 1 with torch held. The remaining 3 tacks use move_to_pose only (no controller re-bind needed — the gripper stays closed on the torch).\n\n8) Physics — CPU deterministic (enable_gpu_dynamics=False, broadphase_type=MBP). Two sheets have PhysicsRigidBodyAPI + PhysicsCollisionAPI + low mass (0.20 kg each) + 'metal' physics material for high friction-on-fixture; they could shift slightly during torch contact in a real weld but here they are static-by-mass (the robot does not contact them — tack pose is 0.025 m above the surface). Fixture has PhysicsCollisionAPI only, no RigidBodyAPI (static obstacle). Torch has full rigid-body schemas so it can be picked up. TackMarker prims have NO rigid-body schemas (visual-only).\n\n9) Semantic labels — Sheet_Left + Sheet_Right tagged 'metal_sheet' (class='workpiece_sheet'); Torch tagged 'mig_torch' (class='welding_tool'); each TackMarker_N tagged 'tack_weld_spot' (class='weld_spot'). The class='weld_spot' label is the semantic signal a scenario-profile vision_analyze_scene call would key off to count tacks.\n\n10) Distinct structural tags from CP-NEW-welder-seam-track:\n   - isaac:yrkesroll.welder (shared — both are welder yrkesrolls)\n   - isaac:industry.mig_welding (NEW — distinct from seam_tracking; MIG-specific)\n   - isaac:gesture.tack_weld (NEW — primary discriminator; spot-style discrete weld)\n   - isaac:gesture.discrete_dwell (NEW — secondary discriminator; stationary-hold pattern)\n   - isaac:operation.spot_weld_sequence (NEW — emphasises the 4-spot multi-marker sequence)\n   - isaac:robot.ur10, isaac:robot.fixed_base.arm, isaac:topology.single_station (shared shape)\n   ABSENT: isaac:compliance.impedance, isaac:motion.compliant_follow, isaac:motion.vision_corrected, isaac:topology.seam_tracking, isaac:sensor.vision_plan — these are seam-track-only.\n\n11) Verification — verify_args.stages has a single stage (the torch pickup pick-place); the 4 tack moves are not pick-places so they live in simulate_args via duration_s budget. simulate_args.tack_count=4, simulate_args.target_path=/World/Sheet_Left (the seam anchor); simulate_args.marker_path_prefix='/World/TackMarker_' enables a counting check. diagnose_args includes the fixture + both sheets + the torch stand as obstacles.\n\n12) Failure modes (specific to discrete-dwell pattern, not seam-track):\n   - Tack position drift: cuRobo IK lands the torch tip 5-10 mm off the seam centre x=0.50. Mitigation: tighten position tolerance via explicit motion-planner xy_tolerance, OR add a post-move get_world_transform check that re-issues move_to_pose if drift > 5 mm.\n   - Dwell too short to 'fuse': if sim_control step_count is reduced below ~10, the marker spawn may happen before the simulated dwell completes — downstream vision counters might see the marker but miss the dwell semantics. Mitigation: keep step_count=30 (= 0.5 s) as a structural floor; any scenario-profile that wants longer dwell should override at instance-build time.\n   - Torch lifts during dwell (gravity gap): if the gripper attach is loose, gravity pulls the 0.30 kg torch downward during the 0.5 s stationary dwell, causing the tack-pose torch position to drift by 1-2 mm. Mitigation: set Franka/UR10 parallel-jaw force_grasp parameter when picking, or upgrade to surface_gripper tool for guaranteed attach. Not exercised here.\n   - Seam misalignment: if the two sheets are placed with the seam gap >0.005 m (vs designed 0.003 m), the tack markers spawn correctly but the 'tacked' shape does not match the programmed seam — sheets could still shift under the robot. Mitigation: tighten sheet placement tolerance OR add a PhysicsFixedJoint between Sheet_Left and the fixture at build time.\n   - Marker spawn placed below sheet top: if marker z is set to sheet centre (0.785) instead of slightly above (0.788), the marker visual interpenetrates the sheet and renders incorrectly. Mitigation: z_marker = z_sheet_top + marker_size/2 + 0.001 clearance.\n\n13) Comparison to siblings:\n   - vs CP-NEW-welder-seam-track (A28): A28 = continuous compliant follow + vision; A95 = discrete dwell + marker spawn. Different motion controller stack, different gesture tags.\n   - vs CP-NEW-yrkesroll-machinist-cnc-load (A74): both are yrkesroll templates with operator_role metadata; CNC is a multi-phase pick-place + door-cycle, A95 is single-phase pick + multi-move dwell-spot sequence.\n   - vs CP-NEW-yrkesroll-packer-box-seal (A88): A88 = two pick-place phases (pack + lid); A95 = one pick-place phase + 4 move_to_pose tacks. Different structural-features signature (has_seal_phase vs n_tack_spots).\n\n14) motion_controllers: untested = curobo (used by setup_pick_place_controller target_source) + rmpflow (default move_to_pose planner). No compliance controllers needed.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Robot work table (1.0 × 0.8 × 0.75m)\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics scene: CPU dynamics for determinism ───────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── UR10 robot at table edge ──────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Workpiece fixture (flat clamp platform) ───────────────────────────────────\n# Top z = 0.78. Sheets rest at z = 0.785 (centre, 0.005m thick).\ncreate_prim(\n    prim_path=\"/World/WorkpieceFixture\",\n    prim_type=\"Cube\",\n    position=[0.50, 0.0, 0.78],\n    scale=[0.20, 0.25, 0.01],\n)\napply_api_schema(prim_path=\"/World/WorkpieceFixture\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/WorkpieceFixture\", attr_name=\"primvars:displayColor\", value=[[0.30, 0.30, 0.35]])\n\n# ── Two metal sheet halves — seam between them at x=0.50, running in y ────────\n# Sheet_Left: x = 0.40 .. 0.50 (centre x=0.45), span y = -0.10 .. +0.10.\n# Sheet_Right: x = 0.50 .. 0.60 (centre x=0.55), span y = -0.10 .. +0.10.\n# Thickness 0.005m → centre z = 0.785 (sheet bottom = 0.7825, sheet top = 0.7875).\n# The 0.003m gap modelled by setting sheet centres 0.10 apart instead of 0.0975 — the\n# nominal 0.10 gap-centre-to-centre with 0.10 scale gives edges meeting at 0.50 exactly;\n# we offset by 0.0015 on each side to leave a 0.003m air gap (the seam).\ncreate_prim(\n    prim_path=\"/World/Sheet_Left\",\n    prim_type=\"Cube\",\n    position=[0.4485, 0.0, 0.785],\n    scale=[0.10, 0.20, 0.005],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Sheet_Left\", schema_name=api)\nset_attribute(prim_path=\"/World/Sheet_Left\", attr_name=\"physics:mass\", value=0.20)\napply_physics_material(prim_path=\"/World/Sheet_Left\", material_name=\"metal\")\nset_attribute(prim_path=\"/World/Sheet_Left\", attr_name=\"primvars:displayColor\", value=[[0.65, 0.65, 0.70]])\nset_semantic_label(prim_path=\"/World/Sheet_Left\", label=\"metal_sheet\", class_name=\"workpiece_sheet\")\n\ncreate_prim(\n    prim_path=\"/World/Sheet_Right\",\n    prim_type=\"Cube\",\n    position=[0.5515, 0.0, 0.785],\n    scale=[0.10, 0.20, 0.005],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Sheet_Right\", schema_name=api)\nset_attribute(prim_path=\"/World/Sheet_Right\", attr_name=\"physics:mass\", value=0.20)\napply_physics_material(prim_path=\"/World/Sheet_Right\", material_name=\"metal\")\nset_attribute(prim_path=\"/World/Sheet_Right\", attr_name=\"primvars:displayColor\", value=[[0.65, 0.65, 0.70]])\nset_semantic_label(prim_path=\"/World/Sheet_Right\", label=\"metal_sheet\", class_name=\"workpiece_sheet\")\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Sheet_Left\", \"/World/Sheet_Right\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# ── Torch stand (flat platform holding the MIG torch) ─────────────────────────\ncreate_prim(\n    prim_path=\"/World/TorchStand\",\n    prim_type=\"Cube\",\n    position=[0.20, 0.30, 0.78],\n    scale=[0.08, 0.08, 0.01],\n)\napply_api_schema(prim_path=\"/World/TorchStand\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/TorchStand\", attr_name=\"primvars:displayColor\", value=[[0.25, 0.25, 0.30]])\n\n# ── MIG welding torch (cylinder tool, picked up by the robot) ─────────────────\n# Vertical cylinder, length 0.12m, radius 0.015m. Centre z = stand_top(0.79) + 0.06 = 0.85.\ncreate_prim(\n    prim_path=\"/World/Torch\",\n    prim_type=\"Cylinder\",\n    position=[0.20, 0.30, 0.85],\n    scale=[0.015, 0.015, 0.06],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Torch\", schema_name=api)\nset_attribute(prim_path=\"/World/Torch\", attr_name=\"physics:mass\", value=0.30)\nset_attribute(prim_path=\"/World/Torch\", attr_name=\"primvars:displayColor\", value=[[0.85, 0.80, 0.20]])\nset_semantic_label(prim_path=\"/World/Torch\", label=\"mig_torch\", class_name=\"welding_tool\")\n\n# Top-down approach grasp pose for the torch handle (cylinder is vertical).\ndefine_grasp_pose(\n    robot_path=\"/World/UR10\",\n    object_path=\"/World/Torch\",\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0],\n)\n\n# ── PHASE 1: pick the torch from the stand and bring it to tack-1 pose ────────\n# Tack 1 pose: [0.50, -0.075, 0.835] — first of four spots along the seam.\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    robot_family=\"ur10\",\n    source_paths=[\"/World/Torch\"],\n    destination_path=\"/World/Sheet_Left\",\n    drop_targets={\n        \"/World/Torch\": [0.50, -0.075, 0.835],\n    },\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/TorchStand\",\n        \"/World/WorkpieceFixture\",\n        \"/World/Sheet_Left\",\n        \"/World/Sheet_Right\",\n    ],\n)\n\n# Verify torch reached tack-1 pose.\nget_world_transform(prim_path=\"/World/Torch\")\n\n# ── PHASE 2: discrete-dwell sequence — 4 tack welds along the seam ────────────\n# For each tack: (a) move_to_pose to tack location, (b) dwell for ~0.5s sim-time,\n# (c) spawn visual marker representing the fused spot, (d) advance to next.\n\n# Tack 1 (already at this pose from phase 1) — dwell + marker only.\nsim_control(action=\"step\", step_count=30)\ncreate_prim(\n    prim_path=\"/World/TackMarker_1\",\n    prim_type=\"Cube\",\n    position=[0.50, -0.075, 0.788],\n    size=0.006,\n)\nset_attribute(prim_path=\"/World/TackMarker_1\", attr_name=\"primvars:displayColor\", value=[[0.95, 0.60, 0.05]])\nset_semantic_label(prim_path=\"/World/TackMarker_1\", label=\"tack_weld_spot\", class_name=\"weld_spot\")\n\n# Tack 2.\nmove_to_pose(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.50, -0.025, 0.835],\n    target_orientation=[0.0, 0.7071068, 0.0, 0.7071068],\n)\nsim_control(action=\"step\", step_count=30)\ncreate_prim(\n    prim_path=\"/World/TackMarker_2\",\n    prim_type=\"Cube\",\n    position=[0.50, -0.025, 0.788],\n    size=0.006,\n)\nset_attribute(prim_path=\"/World/TackMarker_2\", attr_name=\"primvars:displayColor\", value=[[0.95, 0.60, 0.05]])\nset_semantic_label(prim_path=\"/World/TackMarker_2\", label=\"tack_weld_spot\", class_name=\"weld_spot\")\n\n# Tack 3.\nmove_to_pose(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.50, 0.025, 0.835],\n    target_orientation=[0.0, 0.7071068, 0.0, 0.7071068],\n)\nsim_control(action=\"step\", step_count=30)\ncreate_prim(\n    prim_path=\"/World/TackMarker_3\",\n    prim_type=\"Cube\",\n    position=[0.50, 0.025, 0.788],\n    size=0.006,\n)\nset_attribute(prim_path=\"/World/TackMarker_3\", attr_name=\"primvars:displayColor\", value=[[0.95, 0.60, 0.05]])\nset_semantic_label(prim_path=\"/World/TackMarker_3\", label=\"tack_weld_spot\", class_name=\"weld_spot\")\n\n# Tack 4.\nmove_to_pose(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.50, 0.075, 0.835],\n    target_orientation=[0.0, 0.7071068, 0.0, 0.7071068],\n)\nsim_control(action=\"step\", step_count=30)\ncreate_prim(\n    prim_path=\"/World/TackMarker_4\",\n    prim_type=\"Cube\",\n    position=[0.50, 0.075, 0.788],\n    size=0.006,\n)\nset_attribute(prim_path=\"/World/TackMarker_4\", attr_name=\"primvars:displayColor\", value=[[0.95, 0.60, 0.05]])\nset_semantic_label(prim_path=\"/World/TackMarker_4\", label=\"tack_weld_spot\", class_name=\"weld_spot\")\n\n# Final verification — torch should be at tack-4 pose, all 4 markers present.\nget_world_transform(prim_path=\"/World/Torch\")",
+  "settle_state": {
+    "torch_final_pos": [0.50, 0.075, 0.835],
+    "tack_markers": {
+      "/World/TackMarker_1": [0.50, -0.075, 0.788],
+      "/World/TackMarker_2": [0.50, -0.025, 0.788],
+      "/World/TackMarker_3": [0.50, 0.025, 0.788],
+      "/World/TackMarker_4": [0.50, 0.075, 0.788]
+    },
+    "sheets_static": {
+      "/World/Sheet_Left": [0.4485, 0.0, 0.785],
+      "/World/Sheet_Right": [0.5515, 0.0, 0.785]
+    },
+    "phase_sequence": [
+      "pick_torch_to_tack_1",
+      "dwell_tack_1",
+      "move_tack_2",
+      "dwell_tack_2",
+      "move_tack_3",
+      "dwell_tack_3",
+      "move_tack_4",
+      "dwell_tack_4"
+    ]
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/Torch",
+        "place_path": "/World/Sheet_Left",
+        "robot_kind": "ur10"
+      }
+    ],
+    "cube_path": "/World/Torch",
+    "torch_path": "/World/Torch",
+    "tack_markers": [
+      "/World/TackMarker_1",
+      "/World/TackMarker_2",
+      "/World/TackMarker_3",
+      "/World/TackMarker_4"
+    ],
+    "expected_tack_count": 4
+  },
+  "simulate_args": {
+    "target_path": "/World/Sheet_Left",
+    "cube_path": "/World/Torch",
+    "duration_s": 120,
+    "tack_count": 4,
+    "marker_path_prefix": "/World/TackMarker_",
+    "expected_dwell_steps_per_tack": 30,
+    "xy_tolerance": 0.02
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/Table",
+      "/World/WorkpieceFixture",
+      "/World/Sheet_Left",
+      "/World/Sheet_Right",
+      "/World/TorchStand"
+    ],
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "Tack position drift — cuRobo IK lands the torch tip 5-10 mm off seam centre x=0.50. The discrete-dwell pattern has no compliance to absorb position error (unlike A28 seam-track which has Z-soft impedance). Mitigation: tighten move_to_pose tolerance via planner xy_tolerance arg, OR add a get_world_transform check after each move_to_pose and re-issue move_to_pose with corrected target if drift > 5 mm.",
+    "Dwell time too short to 'fuse' — if sim_control(action='step', step_count=N) is reduced below ~10, the marker spawn may happen effectively in parallel with the torch arrival, breaking the dwell-then-spawn semantic ordering. The 0.5 s dwell at step_count=30 is the structural floor. Downstream scenario-profile verifiers that check expected_dwell_steps_per_tack will mark the canonical as semantically incomplete if step_count is lowered.",
+    "Torch lifts during dwell (gravity gap) — if the gripper-torch attach is loose, gravity pulls the 0.30 kg torch downward during the 0.5 s stationary dwell, drifting the tack-pose torch position by 1-2 mm. The torch is a regular rigid body picked by parallel-jaw grip (not a fixed-joint attach). Mitigation: increase parallel-jaw grip force when picking, or upgrade to surface_gripper for a guaranteed kinematic attach. Not exercised here.",
+    "Seam misalignment — sheets placed with seam gap >0.005 m (vs designed 0.003 m) shifts the actual joint location away from x=0.50. The 4 tack markers spawn at the programmed pose, but they no longer span the real seam. Mitigation: tighten sheet-placement role_defaults tolerance OR add PhysicsFixedJoint between each Sheet_{Left,Right} and the WorkpieceFixture so the sheets cannot shift after build.",
+    "Marker spawn placed below sheet top — sheet top z=0.7875, marker centre z=0.788, marker size 0.006 → marker bottom = 0.785 (= sheet centre = 0.0005 m below sheet top). If marker size grows to 0.010 the bottom interpenetrates the sheet. Mitigation: keep z_marker = z_sheet_top + marker_size/2 + 0.001 clearance.",
+    "DISCRETE vs CONTINUOUS confusion at retrieval — A28 (CP-NEW-welder-seam-track) and A95 (this template) both implement ONET SOC 51-4121 welder yrkesroll; an embedding-based retriever might collapse them. The structural_tags isaac:gesture.tack_weld + isaac:gesture.discrete_dwell are the primary discriminators against isaac:topology.seam_tracking + isaac:motion.compliant_follow. If a user asks for 'tack welds' or 'spot welds', the gesture.tack_weld tag must win; if they ask for 'seam follow' or 'continuous weld', the topology.seam_tracking tag wins.",
+    "No PhysicsCollisionAPI on Torch when picked — once the torch is grasped, cuRobo by default does NOT update the torch's collision body to follow the gripper, so the torch-cylinder geometry is checked against itself at the pre-pick pose and against the new tack pose during planning, which can trigger spurious collision rejection. Mitigation handled by setup_pick_place_controller's attach-payload-as-end-effector mechanism (target_source='curobo' enables it). If using a different motion stack this must be wired explicitly.",
+    "Sheet rigid-body settle disturbs seam — sheets have RigidBodyAPI + low mass (0.20 kg) and rest on the fixture by gravity. During the ~0.5 s dwell steps the sheets are not actively held; if the fixture has imperfect contact friction the sheets may shift by 1-3 mm under their own weight in the dwell window, drifting the seam under the parked torch. Mitigation: add PhysicsFixedJoint between each sheet and the fixture, OR raise sleepThreshold so sheets stop simulating after the build phase."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "n_tack_spots": 4,
+      "uses_discrete_dwell": true,
+      "n_pick_place_phases": 1,
+      "n_move_to_pose_calls": 3,
+      "n_dwell_calls": 4
+    },
+    "structural_tags": [
+      "isaac:yrkesroll.welder",
+      "isaac:industry.mig_welding",
+      "isaac:gesture.tack_weld",
+      "isaac:gesture.discrete_dwell",
+      "isaac:operation.spot_weld_sequence",
+      "isaac:robot.ur10",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:assembly.weld_seam"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["ur10", "ur10e", "ur5e", "franka_panda"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpiece_fixture": {
+      "constraints": ["cube", "platform"],
+      "expected_count": 1,
+      "required": true
+    },
+    "sheet_left": {
+      "constraints": ["cube", "thin_plate"],
+      "expected_count": 1,
+      "required": true
+    },
+    "sheet_right": {
+      "constraints": ["cube", "thin_plate"],
+      "expected_count": 1,
+      "required": true
+    },
+    "torch_stand": {
+      "constraints": ["cube", "platform"],
+      "expected_count": 1,
+      "required": true
+    },
+    "torch": {
+      "constraints": ["cylinder"],
+      "expected_count": 1,
+      "required": true
+    },
+    "tack_markers": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 8,
+      "param_name": "n_tacks",
+      "unordered": false,
+      "note": "Spawned at runtime, one per tack pose. Default 4 spots evenly distributed along the seam."
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10",
+      "family": "ur10",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "workpiece_fixture": {
+      "path": "/World/WorkpieceFixture",
+      "position": [0.50, 0.0, 0.78],
+      "scale": [0.20, 0.25, 0.01]
+    },
+    "sheet_left": {
+      "path": "/World/Sheet_Left",
+      "position": [0.4485, 0.0, 0.785],
+      "scale": [0.10, 0.20, 0.005],
+      "mass": 0.20,
+      "material": "metal",
+      "label": "metal_sheet"
+    },
+    "sheet_right": {
+      "path": "/World/Sheet_Right",
+      "position": [0.5515, 0.0, 0.785],
+      "scale": [0.10, 0.20, 0.005],
+      "mass": 0.20,
+      "material": "metal",
+      "label": "metal_sheet"
+    },
+    "torch_stand": {
+      "path": "/World/TorchStand",
+      "position": [0.20, 0.30, 0.78],
+      "scale": [0.08, 0.08, 0.01]
+    },
+    "torch": {
+      "path": "/World/Torch",
+      "position": [0.20, 0.30, 0.85],
+      "scale": [0.015, 0.015, 0.06],
+      "mass": 0.30,
+      "label": "mig_torch",
+      "approach_direction": [0, 0, -1]
+    },
+    "tack_poses": [
+      {"index": 1, "position": [0.50, -0.075, 0.835], "marker_path": "/World/TackMarker_1", "marker_position": [0.50, -0.075, 0.788]},
+      {"index": 2, "position": [0.50, -0.025, 0.835], "marker_path": "/World/TackMarker_2", "marker_position": [0.50, -0.025, 0.788]},
+      {"index": 3, "position": [0.50,  0.025, 0.835], "marker_path": "/World/TackMarker_3", "marker_position": [0.50,  0.025, 0.788]},
+      {"index": 4, "position": [0.50,  0.075, 0.835], "marker_path": "/World/TackMarker_4", "marker_position": [0.50,  0.075, 0.788]}
+    ],
+    "tack_markers": [
+      {"path": "/World/TackMarker_1", "position": [0.50, -0.075, 0.788], "size": 0.006, "color": [0.95, 0.60, 0.05], "label": "tack_weld_spot"},
+      {"path": "/World/TackMarker_2", "position": [0.50, -0.025, 0.788], "size": 0.006, "color": [0.95, 0.60, 0.05], "label": "tack_weld_spot"},
+      {"path": "/World/TackMarker_3", "position": [0.50,  0.025, 0.788], "size": 0.006, "color": [0.95, 0.60, 0.05], "label": "tack_weld_spot"},
+      {"path": "/World/TackMarker_4", "position": [0.50,  0.075, 0.788], "size": 0.006, "color": [0.95, 0.60, 0.05], "label": "tack_weld_spot"}
+    ],
+    "tack_orientation": [0.0, 0.7071068, 0.0, 0.7071068],
+    "dwell_step_count": 30,
+    "marker_size": 0.006,
+    "marker_color": [0.95, 0.60, 0.05],
+    "operator_role": {
+      "yrkesroll": "welder",
+      "title": "MIG Welder (Tack-Weld Specialist)",
+      "onet_soc": "51-4121",
+      "onet_soc_title": "Welders, Cutters, Solderers, and Brazers",
+      "onet_soc_note": "51-4121 is the direct ONET match for manual MIG/MAG/TIG welding including tack-weld pre-fixturing before full seam welding. Adjacent code 51-4122 (Welding, Soldering, and Brazing Machine Setters, Operators, and Tenders) applies to automated welding-machine tending and is preferred when the workflow is machine-operator-centric rather than hands-on torch work; 51-4121 used here for the hands-on tack-weld workflow with robot assist.",
+      "workstation": "mig_welding_cell",
+      "responsibilities": [
+        "pickup_torch",
+        "position_torch_above_seam",
+        "tack_weld_short_holds",
+        "advance_along_seam"
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.4, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_prim(prim_path={{workpiece_fixture.path}}, prim_type=\"Cube\", position={{workpiece_fixture.position}}, scale={{workpiece_fixture.scale}})\napply_api_schema(prim_path={{workpiece_fixture.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{sheet_left.path}}, prim_type=\"Cube\", position={{sheet_left.position}}, scale={{sheet_left.scale}})\napply_api_schema(prim_path={{sheet_left.path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{sheet_left.path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{sheet_left.path}}, schema_name=\"PhysicsMassAPI\")\nset_attribute(prim_path={{sheet_left.path}}, attr_name=\"physics:mass\", value={{sheet_left.mass}})\napply_physics_material(prim_path={{sheet_left.path}}, material_name={{sheet_left.material}})\nset_semantic_label(prim_path={{sheet_left.path}}, label={{sheet_left.label}}, class_name=\"workpiece_sheet\")\ncreate_prim(prim_path={{sheet_right.path}}, prim_type=\"Cube\", position={{sheet_right.position}}, scale={{sheet_right.scale}})\napply_api_schema(prim_path={{sheet_right.path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{sheet_right.path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{sheet_right.path}}, schema_name=\"PhysicsMassAPI\")\nset_attribute(prim_path={{sheet_right.path}}, attr_name=\"physics:mass\", value={{sheet_right.mass}})\napply_physics_material(prim_path={{sheet_right.path}}, material_name={{sheet_right.material}})\nset_semantic_label(prim_path={{sheet_right.path}}, label={{sheet_right.label}}, class_name=\"workpiece_sheet\")\nbulk_set_attribute(prim_paths=[{{sheet_left.path}}, {{sheet_right.path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\ncreate_prim(prim_path={{torch_stand.path}}, prim_type=\"Cube\", position={{torch_stand.position}}, scale={{torch_stand.scale}})\napply_api_schema(prim_path={{torch_stand.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{torch.path}}, prim_type=\"Cylinder\", position={{torch.position}}, scale={{torch.scale}})\napply_api_schema(prim_path={{torch.path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{torch.path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{torch.path}}, schema_name=\"PhysicsMassAPI\")\nset_attribute(prim_path={{torch.path}}, attr_name=\"physics:mass\", value={{torch.mass}})\nset_semantic_label(prim_path={{torch.path}}, label={{torch.label}}, class_name=\"welding_tool\")\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{torch.path}}, approach_direction={{torch.approach_direction}}, gripper_offset=[0, 0, 0])\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", robot_family={{primary_robot.family}}, source_paths=[{{torch.path}}], destination_path={{sheet_left.path}}, drop_targets={ {{torch.path}}: {{tack_poses[0].position}} }, planning_obstacles=[\"/World/Table\", {{torch_stand.path}}, {{workpiece_fixture.path}}, {{sheet_left.path}}, {{sheet_right.path}}])\nget_world_transform(prim_path={{torch.path}})\nsim_control(action=\"step\", step_count={{dwell_step_count}})\ncreate_prim(prim_path={{tack_poses[0].marker_path}}, prim_type=\"Cube\", position={{tack_poses[0].marker_position}}, size={{marker_size}})\nset_semantic_label(prim_path={{tack_poses[0].marker_path}}, label=\"tack_weld_spot\", class_name=\"weld_spot\")\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position={{tack_poses[1].position}}, target_orientation={{tack_orientation}})\nsim_control(action=\"step\", step_count={{dwell_step_count}})\ncreate_prim(prim_path={{tack_poses[1].marker_path}}, prim_type=\"Cube\", position={{tack_poses[1].marker_position}}, size={{marker_size}})\nset_semantic_label(prim_path={{tack_poses[1].marker_path}}, label=\"tack_weld_spot\", class_name=\"weld_spot\")\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position={{tack_poses[2].position}}, target_orientation={{tack_orientation}})\nsim_control(action=\"step\", step_count={{dwell_step_count}})\ncreate_prim(prim_path={{tack_poses[2].marker_path}}, prim_type=\"Cube\", position={{tack_poses[2].marker_position}}, size={{marker_size}})\nset_semantic_label(prim_path={{tack_poses[2].marker_path}}, label=\"tack_weld_spot\", class_name=\"weld_spot\")\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position={{tack_poses[3].position}}, target_orientation={{tack_orientation}})\nsim_control(action=\"step\", step_count={{dwell_step_count}})\ncreate_prim(prim_path={{tack_poses[3].marker_path}}, prim_type=\"Cube\", position={{tack_poses[3].marker_position}}, size={{marker_size}})\nset_semantic_label(prim_path={{tack_poses[3].marker_path}}, label=\"tack_weld_spot\", class_name=\"weld_spot\")\nget_world_transform(prim_path={{torch.path}})",
+  "simulate_args_template": {
+    "target_path": "{{sheet_left.path}}",
+    "cube_path": "{{torch.path}}",
+    "duration_s": 120,
+    "tack_count": 4,
+    "marker_path_prefix": "/World/TackMarker_",
+    "expected_dwell_steps_per_tack": "{{dwell_step_count}}",
+    "xy_tolerance": 0.02
+  },
+  "extends": "yrkesroll-welder-mig-tack-001",
+  "extension_notes": "Implements ONET SOC 51-4121 MIG welder yrkesroll via the DISCRETE-DWELL pattern (4 stationary tack welds along a seam between two metal sheets) — distinct from sibling CP-NEW-welder-seam-track which implements the CONTINUOUS impedance-compliant seam-follow pattern for the same ONET code. Backlog item yrkesroll-welder-mig-tack-001 calls for record_waypoints + follow_trajectory_with_compliance; this template ships the simpler discrete-move + dwell + marker-spawn rendering that matches the user's pattern_hint='other' classification (tack welding = pause + spark + pause = neither pick_place nor continuous trajectory). Discriminator tags: isaac:gesture.tack_weld + isaac:gesture.discrete_dwell vs A28's isaac:topology.seam_tracking + isaac:motion.compliant_follow. Real arc/fusion physics are not modelled: each dwell-then-marker-spawn pair is the structural representation of a tack. Failure modes call out the lack of compliance vs A28 — tack position drift cannot be absorbed by Z-soft impedance here.",
+  "verified_status": "drafted-2026-05-16; form-gate-schema pending; function-gate pending",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow"],
+    "failed": {}
+  }
+}

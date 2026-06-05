@@ -1,0 +1,187 @@
+{
+  "task_id": "CP-NEW-roco-bimanual-assembly",
+  "goal": "RoCo Challenge bimanual hold-and-fasten assembly: two Franka arms cooperate at a shared workbench. LEFT arm (/World/FrankaLeft) picks a workpiece (Cube_workpiece, 0.06m) from an infeed pad on its side of the table and holds it stationary at the table center (held_pose). RIGHT arm (/World/FrankaRight) picks a smaller fastener (Cube_fastener, 0.03m) from its side and places it on top of the held workpiece (final stacked target). Both arms operate in a shared X-axis reach corridor — setup_robot_claim_mutex serialises access to the center hold-zone and check_collisions pre-flight diagnoses each articulation for collision-mesh validity. First bimanual (2-arm) canonical; establishes the dual-Franka shape for the RoCo research line. pattern_hint=pick_place (success: fastener cube on top of held workpiece at center within tolerance).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "bulk_set_attribute",
+    "apply_physics_material",
+    "robot_wizard",
+    "define_grasp_pose",
+    "setup_robot_claim_mutex",
+    "check_collisions",
+    "get_world_transform",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for first bimanual (dual-Franka) canonical:\n\n1) Topology: two Franka arms mounted at opposite long edges of a shared workbench, facing inward. LEFT at x=-0.55, y=0, z=0.75 (oriented to face +X). RIGHT at x=+0.55, y=0, z=0.75 (oriented to face -X). Franka reach ~0.85m; shared workspace at table center (x=0). Each robot can reach 0.55m past its own base before saturating — center is at the limit for both arms but reachable.\n\n2) Workbench: shared table 1.6m long (X) × 0.6m deep (Y) × 0.75m tall, centered at origin. Long axis aligned with X so both arms have full lateral reach into shared center.\n\n3) LEFT arm infeed: pad at (-0.40, -0.15, 0.785) holds the workpiece (0.06m Cube). LEFT robot picks it up and brings it to held_pose at (0.00, 0.00, 0.85) — slightly above table surface, centred on workbench long-axis.\n\n4) RIGHT arm infeed: pad at (+0.40, +0.15, 0.785) holds the fastener (0.03m smaller Cube). RIGHT robot picks it up and places it on top of the held workpiece. Final fastener position: (0.00, 0.00, 0.85+0.03+0.015) ≈ (0, 0, 0.895) — stacked on workpiece top face.\n\n5) Coordination strategy: setup_robot_claim_mutex on /World/MutexHoldZone with resource_path=/World/HoldZoneMarker, robots=[FrankaLeft, FrankaRight]. LEFT acquires first (holds workpiece), RIGHT must wait for placed-signal then acquires for fastener placement. NOTE per memory `kit-concurrency`: Kit RPC is single-tenant; exec_sync cannot parallelise the two articulations. The mutex is advisory at canonical-build time — the orchestrator runs the two controllers sequentially (LEFT pick first, then RIGHT pick) inside the single Kit session.\n\n6) check_collisions on both /World/FrankaLeft and /World/FrankaRight as a pre-flight diagnose pass — confirms each articulation has valid collision meshes before pick-place install. Used as a structural diagnostic, not a runtime guard.\n\n7) Define grasp poses for both arms: define_grasp_pose(robot_path=FrankaLeft, object_path=Cube_workpiece, approach_direction=[0,0,-1]) for top-down workpiece grasp. define_grasp_pose(robot_path=FrankaRight, object_path=Cube_fastener, approach_direction=[0,0,-1]) for top-down fastener grasp.\n\n8) Two setup_pick_place_controller calls — one per arm. Both use target_source='curobo' for GPU-accelerated collision-aware planning with the OPPOSITE arm + table listed in planning_obstacles. This is the key bimanual guarantee: each arm's planner treats the other arm as a static obstacle (snapshot at install time — does NOT update during runtime motion, so a coordinated waltz where both arms move simultaneously is NOT supported; serial execution is required).\n\n9) get_world_transform on both arm bases used for diagnostic asymmetry check — if reach distances differ by >5cm, the workspace is mis-set and one arm cannot reach center.\n\n10) Physics: CPU dynamics (broadphase MBP, gpu_dynamics=False) for determinism. Rubber material on both cubes for grip stability. Workpiece mass 0.3 kg, fastener 0.05 kg.\n\n11) Function-gate semantics: simulate_args target_path = held_pose marker prim at (0, 0, 0.895); cube_path = /World/Cube_fastener. Success = fastener at held_pose within xy_tolerance=0.05m after duration_s=120 (LEFT pick: ~30s, RIGHT pick: ~30s, settle: ~10s, planner margin: ~50s).\n\n12) Failure modes captured: shared-workspace collision risk, single-tenant Kit RPC parallelism limitation, workspace asymmetry, LEFT-arm grip pressure (too tight prevents fastener stacking), reach-margin tightness at center.\n\n13) Research-tier canonical (RoboArena/RoCo source) — yrkesroll is N/A. structural_tags identify it for retrieval via isaac:research.roco + isaac:topology.bimanual + isaac:coordination.dual_arm + isaac:robot.dual_franka.\n\n14) Both arms are same robot class (franka_panda) but with distinct USD paths and yaw orientations — the LEFT/RIGHT distinction is baked into orientation and role disambiguator, not robot_name. motion_controllers.untested=['curobo'] since this is the first dual-Franka cuRobo install — verification pending.",
+  "code": "# ── Scene skeleton ─────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for determinism ─────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Shared workbench (1.6m × 0.6m × 0.75m) ────────────────────────────────────\n# Long axis along X. Both arms mounted on opposite long edges of the table top.\ncreate_prim(\n    prim_path=\"/World/Workbench\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.375],\n    scale=[0.8, 0.3, 0.375],\n)\napply_api_schema(prim_path=\"/World/Workbench\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── LEFT Franka arm — picks workpiece, holds at center ───────────────────────\n# Mounted at x=-0.55, faces +X (yaw=-90deg → quaternion [0.7071068, 0, 0, -0.7071068]).\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaLeft\",\n    position=[-0.55, 0, 0.75],\n    orientation=[0.7071068, 0, 0, -0.7071068],\n)\n\n# ── RIGHT Franka arm — picks fastener, places on top of held workpiece ──────\n# Mounted at x=+0.55, faces -X (yaw=+90deg → quaternion [0.7071068, 0, 0, 0.7071068]).\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaRight\",\n    position=[0.55, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Pre-flight collision-mesh validation on both articulations ──────────────\n# Confirms each Franka has valid CollisionAPI + mesh children before pick-place install.\ncheck_collisions(prim_path=\"/World/FrankaLeft\")\ncheck_collisions(prim_path=\"/World/FrankaRight\")\n\n# ── Diagnostic asymmetry check: world transforms of both arm bases ──────────\n# If |left_x| != |right_x| or z differs, workspace is mis-set.\nget_world_transform(prim_path=\"/World/FrankaLeft\")\nget_world_transform(prim_path=\"/World/FrankaRight\")\n\n# ── Infeed pads (visual + collision anchors for the two cubes) ──────────────\ncreate_prim(\n    prim_path=\"/World/InfeedLeft\",\n    prim_type=\"Cube\",\n    position=[-0.40, -0.15, 0.785],\n    scale=[0.06, 0.06, 0.02],\n)\napply_api_schema(prim_path=\"/World/InfeedLeft\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(\n    prim_path=\"/World/InfeedRight\",\n    prim_type=\"Cube\",\n    position=[0.40, 0.15, 0.785],\n    scale=[0.04, 0.04, 0.02],\n)\napply_api_schema(prim_path=\"/World/InfeedRight\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Hold-zone marker at table center — destination for LEFT, anchor for RIGHT\n# Static fixture prim that marks the held_pose; not used as a physical bin.\ncreate_prim(\n    prim_path=\"/World/HoldZoneMarker\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.78],\n    scale=[0.08, 0.08, 0.005],\n)\napply_api_schema(prim_path=\"/World/HoldZoneMarker\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Workpiece — 0.06m cube, mass 0.3 kg ──────────────────────────────────────\ncreate_prim(\n    prim_path=\"/World/Cube_workpiece\",\n    prim_type=\"Cube\",\n    position=[-0.40, -0.15, 0.825],\n    size=0.06,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_workpiece\", schema_name=api)\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_workpiece\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nset_attribute(prim_path=\"/World/Cube_workpiece\", attr_name=\"physics:mass\", value=0.3)\napply_physics_material(prim_path=\"/World/Cube_workpiece\", material_name=\"rubber\")\n\n# ── Fastener — 0.03m smaller cube, mass 0.05 kg ──────────────────────────────\ncreate_prim(\n    prim_path=\"/World/Cube_fastener\",\n    prim_type=\"Cube\",\n    position=[0.40, 0.15, 0.815],\n    size=0.03,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_fastener\", schema_name=api)\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_fastener\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nset_attribute(prim_path=\"/World/Cube_fastener\", attr_name=\"physics:mass\", value=0.05)\napply_physics_material(prim_path=\"/World/Cube_fastener\", material_name=\"rubber\")\n\n# ── Grasp poses for both arms (top-down approach) ────────────────────────────\ndefine_grasp_pose(\n    robot_path=\"/World/FrankaLeft\",\n    object_path=\"/World/Cube_workpiece\",\n    approach_direction=[0, 0, -1],\n)\ndefine_grasp_pose(\n    robot_path=\"/World/FrankaRight\",\n    object_path=\"/World/Cube_fastener\",\n    approach_direction=[0, 0, -1],\n)\n\n# ── Claim-mutex on shared center hold-zone ───────────────────────────────────\n# Advisory: serialises LEFT and RIGHT access to the workbench center. Kit RPC\n# is single-tenant (see memory `kit-concurrency`) — the orchestrator runs LEFT\n# pick-place first, then RIGHT pick-place sequentially in the same session.\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/MutexHoldZone\",\n    resource_path=\"/World/HoldZoneMarker\",\n    robots=[\"/World/FrankaLeft\", \"/World/FrankaRight\"],\n)\n\n# ── Pick-place controllers — one per arm, each treats the OPPOSITE arm as obstacle\n# LEFT picks workpiece from InfeedLeft, places at HoldZoneMarker (centre).\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaLeft\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/Cube_workpiece\"],\n    destination_path=\"/World/HoldZoneMarker\",\n    planning_obstacles=[\n        \"/World/Workbench\",\n        \"/World/FrankaRight\",\n        \"/World/InfeedRight\",\n    ],\n)\n\n# RIGHT picks fastener from InfeedRight, places on top of HoldZoneMarker\n# (where workpiece will be sitting after LEFT completes its place).\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaRight\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/Cube_fastener\"],\n    destination_path=\"/World/HoldZoneMarker\",\n    planning_obstacles=[\n        \"/World/Workbench\",\n        \"/World/FrankaLeft\",\n        \"/World/InfeedLeft\",\n        \"/World/Cube_workpiece\",\n    ],\n)",
+  "settle_state": {
+    "workpiece": {
+      "/World/Cube_workpiece": [-0.40, -0.15, 0.825]
+    },
+    "fastener": {
+      "/World/Cube_fastener": [0.40, 0.15, 0.815]
+    },
+    "hold_zone_center": [0, 0, 0.78],
+    "robots_home": ["/World/FrankaLeft", "/World/FrankaRight"]
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/FrankaLeft",
+        "pick_path": "/World/Cube_workpiece",
+        "place_path": "/World/HoldZoneMarker",
+        "robot_kind": "franka_panda",
+        "arm_role": "holder"
+      },
+      {
+        "robot_path": "/World/FrankaRight",
+        "pick_path": "/World/Cube_fastener",
+        "place_path": "/World/HoldZoneMarker",
+        "robot_kind": "franka_panda",
+        "arm_role": "fastener_placer"
+      }
+    ],
+    "cube_path": "/World/Cube_fastener",
+    "dual_arm": true,
+    "primary_target_cube": "/World/Cube_fastener",
+    "held_cube": "/World/Cube_workpiece"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_fastener",
+    "cube_paths": ["/World/Cube_workpiece", "/World/Cube_fastener"],
+    "target_path": "/World/HoldZoneMarker",
+    "duration_s": 120,
+    "xy_tolerance": 0.05
+  },
+  "diagnose_args": {
+    "robots": ["/World/FrankaLeft", "/World/FrankaRight"],
+    "workpiece_path": "/World/Cube_workpiece",
+    "fastener_path": "/World/Cube_fastener",
+    "hold_zone_path": "/World/HoldZoneMarker",
+    "mutex_path": "/World/MutexHoldZone",
+    "workbench_path": "/World/Workbench"
+  },
+  "extends": "research-roco-bimanual-assembly-001",
+  "extension_notes": "First dual-Franka (bimanual) canonical. Realises the RoCo Challenge (AAAI 2026) hold-and-fasten cooperation pattern in Isaac Sim. Per memory `kit-concurrency`, the two articulations are NOT executed in parallel — Kit RPC is single-tenant and exec_sync would race on stage state. The two setup_pick_place_controller installs run sequentially: LEFT first (holds workpiece at center), then RIGHT (places fastener on top of held workpiece). The claim-mutex marker is advisory; runtime arbitration would require a hand-written orchestrator that polls mutex:claimed_by between stage transitions.",
+  "failure_modes": [
+    "Shared-workspace collision: both arms attempting to enter the center hold-zone simultaneously would collide. Mitigated by setup_robot_claim_mutex AND by single-tenant Kit RPC — but cuRobo planning_obstacles snapshot the OPPOSITE arm at install time only; if that snapshot misses the arm's eventual reach pose, runtime collision can still occur. Workaround: re-install RIGHT's controller after LEFT has parked at hold_pose to refresh the obstacle snapshot.",
+    "Single-tenant Kit RPC parallelism (memory `kit-concurrency`): exec_sync cannot drive two articulations concurrently. The two setup_pick_place_controller calls each install a physics-step callback, but Kit's stage-state mutex serialises them — LEFT runs to completion before RIGHT starts. Any 'true bimanual waltz' (both arms moving simultaneously) requires a multi-tenant Kit deployment or a single combined-controller scaffolded over both articulations, neither of which exists today.",
+    "Workspace asymmetry: if LEFT.x != -RIGHT.x or LEFT.z != RIGHT.z, one arm cannot reach center. Diagnostic get_world_transform call surfaces this; if asymmetric, move the asymmetric arm closer to center (reduce |x| by the mismatch) and verify Franka reach (0.55m to center is at the edge of nominal 0.85m max reach).",
+    "LEFT-arm grip too tight on workpiece: if LEFT closes gripper hard with rubber-on-rubber friction, workpiece can deform or pop out when RIGHT presses fastener down. Mitigation: use grip_style='friction' or lower drive gains on LEFT's gripper joints; for production-honesty, switch to grip_style='fixed_joint' which holds workpiece rigidly during fastener-place phase.",
+    "Reach margin at center: both arms must reach to x=0 from x=±0.55. Effective reach = 0.55m horizontal + 0.10m vertical = 0.56m euclidean — well within Franka 0.85m max but tight on yaw orientations. If IK fails on either arm, move bases to x=±0.50 (reduces reach to 0.51m).",
+    "cuRobo planning_obstacles is a SNAPSHOT — if LEFT is moving when RIGHT's controller installs, RIGHT sees a stale LEFT-pose obstacle and can plan through the actual LEFT geometry. Sequential install (LEFT finishes pick-place fully, then RIGHT installs) avoids this. The single-tenant constraint actually helps here.",
+    "Fastener stacking precision: 0.03m fastener on top of 0.06m workpiece (top surface at z=0.855 after LEFT places it) requires drop accuracy better than 0.015m to avoid fastener rolling off. xy_tolerance=0.05m in simulate_args is the function-gate criterion but actual fastener stability requires tighter placement (~0.01m); cuRobo typical accuracy is 0.005-0.01m so this is on the edge."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 2,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_claim_mutex": true,
+      "is_bimanual": true,
+      "is_dual_arm_same_class": true,
+      "has_held_pose_coordination": true,
+      "shared_workspace": true,
+      "n_workpieces": 2,
+      "stacking_depth": 2
+    },
+    "structural_tags": [
+      "isaac:research.roco",
+      "isaac:topology.bimanual",
+      "isaac:topology.dual_arm",
+      "isaac:coordination.dual_arm",
+      "isaac:coordination.claim_mutex",
+      "isaac:coordination.hold_and_fasten",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka_panda",
+      "isaac:robot.dual_franka",
+      "isaac:research.aaai2026",
+      "isaac:industry.assembly"
+    ]
+  },
+  "roles": {
+    "holder_arm": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "left_side_workpiece_holder"
+    },
+    "fastener_arm": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "right_side_fastener_placer"
+    },
+    "workpiece": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "larger_workpiece_to_be_held"
+    },
+    "fastener": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_fastener_to_be_stacked"
+    },
+    "hold_zone": {
+      "constraints": ["fixture", "marker"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "shared_workspace_center"
+    },
+    "workbench": {
+      "constraints": ["table", "platform"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "holder_arm": {
+      "path": "/World/FrankaLeft",
+      "class": "franka_panda",
+      "position": [-0.55, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, -0.7071068]
+    },
+    "fastener_arm": {
+      "path": "/World/FrankaRight",
+      "class": "franka_panda",
+      "position": [0.55, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "workpiece": {
+      "path": "/World/Cube_workpiece",
+      "position": [-0.40, -0.15, 0.825],
+      "size": 0.06,
+      "mass_kg": 0.3
+    },
+    "fastener": {
+      "path": "/World/Cube_fastener",
+      "position": [0.40, 0.15, 0.815],
+      "size": 0.03,
+      "mass_kg": 0.05
+    },
+    "hold_zone": {
+      "path": "/World/HoldZoneMarker",
+      "position": [0, 0, 0.78],
+      "scale": [0.08, 0.08, 0.005]
+    },
+    "workbench": {
+      "path": "/World/Workbench",
+      "position": [0, 0, 0.375],
+      "scale": [0.8, 0.3, 0.375]
+    }
+  },
+  "code_template": "# ── Scene skeleton ─────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path={{workbench.path}}, prim_type=\"Cube\", position={{workbench.position}}, scale={{workbench.scale}})\napply_api_schema(prim_path={{workbench.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(robot_name={{holder_arm.class}}, dest_path={{holder_arm.path}}, position={{holder_arm.position}}, orientation={{holder_arm.orientation}})\nrobot_wizard(robot_name={{fastener_arm.class}}, dest_path={{fastener_arm.path}}, position={{fastener_arm.position}}, orientation={{fastener_arm.orientation}})\n\ncheck_collisions(prim_path={{holder_arm.path}})\ncheck_collisions(prim_path={{fastener_arm.path}})\nget_world_transform(prim_path={{holder_arm.path}})\nget_world_transform(prim_path={{fastener_arm.path}})\n\ncreate_prim(prim_path=\"/World/InfeedLeft\", prim_type=\"Cube\", position=[-0.40, -0.15, 0.785], scale=[0.06, 0.06, 0.02])\napply_api_schema(prim_path=\"/World/InfeedLeft\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/InfeedRight\", prim_type=\"Cube\", position=[0.40, 0.15, 0.785], scale=[0.04, 0.04, 0.02])\napply_api_schema(prim_path=\"/World/InfeedRight\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path={{hold_zone.path}}, prim_type=\"Cube\", position={{hold_zone.position}}, scale={{hold_zone.scale}})\napply_api_schema(prim_path={{hold_zone.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path={{workpiece.path}}, prim_type=\"Cube\", position={{workpiece.position}}, size={{workpiece.size}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpiece.path}}, schema_name=api)\nbulk_set_attribute(prim_paths=[{{workpiece.path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"physics:mass\", value={{workpiece.mass_kg}})\napply_physics_material(prim_path={{workpiece.path}}, material_name=\"rubber\")\n\ncreate_prim(prim_path={{fastener.path}}, prim_type=\"Cube\", position={{fastener.position}}, size={{fastener.size}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{fastener.path}}, schema_name=api)\nbulk_set_attribute(prim_paths=[{{fastener.path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nset_attribute(prim_path={{fastener.path}}, attr_name=\"physics:mass\", value={{fastener.mass_kg}})\napply_physics_material(prim_path={{fastener.path}}, material_name=\"rubber\")\n\ndefine_grasp_pose(robot_path={{holder_arm.path}}, object_path={{workpiece.path}}, approach_direction=[0, 0, -1])\ndefine_grasp_pose(robot_path={{fastener_arm.path}}, object_path={{fastener.path}}, approach_direction=[0, 0, -1])\n\nsetup_robot_claim_mutex(mutex_path=\"/World/MutexHoldZone\", resource_path={{hold_zone.path}}, robots=[{{holder_arm.path}}, {{fastener_arm.path}}])\n\nsetup_pick_place_controller(robot_path={{holder_arm.path}}, target_source=\"curobo\", source_paths=[{{workpiece.path}}], destination_path={{hold_zone.path}}, planning_obstacles=[{{workbench.path}}, {{fastener_arm.path}}, \"/World/InfeedRight\"])\nsetup_pick_place_controller(robot_path={{fastener_arm.path}}, target_source=\"curobo\", source_paths=[{{fastener.path}}], destination_path={{hold_zone.path}}, planning_obstacles=[{{workbench.path}}, {{holder_arm.path}}, \"/World/InfeedLeft\", {{workpiece.path}}])",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; first-bimanual-canonical; form-gate-schema ⏳ (awaiting lint); function-gate ⏳ (single-tenant Kit RPC limits true parallelism — sequential exec only)"
+}

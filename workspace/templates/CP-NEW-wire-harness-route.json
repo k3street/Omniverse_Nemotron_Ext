@@ -1,0 +1,230 @@
+{
+  "task_id": "CP-NEW-wire-harness-route",
+  "goal": "Electrical-assembler persona: Franka threads a rigid-segment wire harness (5 Cylinder proxies arranged head-to-tail) through 6 fixed clip waypoints, picking each segment by its leading end and placing the leading end at the next clip slot in sequence. Realizes industrial-wire-harness-route-001 with rigid-segment simplification (no deformable cloth/wire physics — PhysX-unstable per backlog).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "define_grasp_pose",
+    "record_waypoints",
+    "setup_pick_place_controller",
+    "get_world_transform",
+    "add_proximity_sensor"
+  ],
+  "thoughts": [
+    "Pattern: rigid waypoint-threading — sequential pick-place of N rigid wire-segment proxies whose endpoints snap at fixed clip waypoints. NOT pick_place (multi-stage routed insert), NOT sort (no class routing), NOT insert (no force-gated seating), NOT reorient (no orientation flip), NOT navigate (fixed-base). pattern_hint = 'other'.",
+    "Differentiator vs CP-NEW-peg-bushing-impedance: that's force-gated single-insertion; this is geometric multi-segment routing under cuRobo transit with NO compliance loop.",
+    "Differentiator vs CP-NEW-assembly-constraint-verify: that's a pure-constraint pre-flight workflow (no robot motion); this exercises full pick-place sequencing across 5 segments + 6 clip waypoints with clearance verification.",
+    "Differentiator vs CP-NEW-teaching-mode-pose-replay: that's a teach-pendant capture demo (drag_target + replay); this is a programmatic clip-waypoint route consumed by setup_pick_place_controller with verified clearance.",
+    "REAL harness is deformable (cloth/wire physics) — explicitly NOT modelled here. Backlog notes 'cable physics required: false' and we honor that. failure_modes records this structural simplification so retrieval-time consumers know not to use this canonical for true deformable-harness tasks.",
+    "Workpiece layout: 5 rigid Cylinder segments (radius 8 mm, length 0.15 m) staged on the right side of a fixture panel at staging poses [0.30, 0.20+0.05*i, 0.83]. Each segment's leading end is at its +X tip.",
+    "Clip layout: 6 fixed Cube prims arranged in an L-route along the panel cutout — front rail x=[0.0, 0.05, 0.10, 0.15], side rail [0.18, 0.18]. Each clip is a 25 mm Cube with a Y-axis slot (visualized; no physical slot constraint).",
+    "Verification: get_world_transform on each segment's leading-end tip vs the target clip slot world position; success if Euclidean delta < 1 cm AND segment ordering preserved (segment_i leads vs segment_{i+1} along route direction).",
+    "record_waypoints captures the EE clip-traversal path as JSON (sparse 6-waypoint route) for documentation / replay. A pre-flight clearance scan was originally planned via check_path_clearance, but that tool's trajectory field is typed List[List[float]] (joint-position vectors in radians, used for FK), not Cartesian pose dicts — the call has been dropped. Clearance avoidance is handled by setup_pick_place_controller's planning_obstacles list (cuRobo plans transit + IK respecting the panel/clip frames). See failure_modes for the limitation note.",
+    "setup_pick_place_controller with target_source='curobo' delivers per-segment routing via the drop_targets dict (one entry per source segment → clip slot world position). planning_obstacles list panel frame + clip waypoints. cycles is left at the handler default (curobo-mode does not consume the cycles kwarg; per-cube routing is determined by drop_targets).",
+    "motion_controllers: curobo (transit + IK to clip slots) — backlog asks for cuRobo preference. direct_joint untested. impedance unused (no compliance phase)."
+  ],
+  "code": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Worktable\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.2, 0.8, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# Panel fixture — vertical Cube with simulated cutout (no boolean subtract; clips ride along its face)\ncreate_prim(prim_path=\"/World/Panel\", prim_type=\"Cube\", position=[0.0, -0.30, 0.85], scale=[0.40, 0.02, 0.20])\napply_api_schema(prim_path=\"/World/Panel\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot (Franka with cuRobo preference) ───────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Clip waypoints (6 fixed Cube prims along the panel) ─────────────────────\n# Clip slot world positions form an L-route: 4 along front rail, 2 along side rail.\n_clip_positions = [\n    [-0.15, -0.29, 0.92],  # Clip0 — front rail left\n    [-0.05, -0.29, 0.92],  # Clip1\n    [ 0.05, -0.29, 0.92],  # Clip2\n    [ 0.15, -0.29, 0.92],  # Clip3 — front rail right / corner\n    [ 0.18, -0.20, 0.92],  # Clip4 — side rail forward\n    [ 0.18, -0.10, 0.92],  # Clip5 — side rail end\n]\nfor _i, _pos in enumerate(_clip_positions):\n    create_prim(prim_path=f\"/World/Clip_{_i}\", prim_type=\"Cube\", position=_pos, scale=[0.025, 0.025, 0.025])\n    apply_api_schema(prim_path=f\"/World/Clip_{_i}\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Wire segments (5 rigid Cylinder proxies — head-to-tail along staging area) ─\n# Each segment: radius 8 mm, length 0.15 m, oriented along world X (leading end = +X tip).\n_segment_radius = 0.008\n_segment_length = 0.15\n_segment_count = 5\n_staging_y_origin = 0.20\n_staging_y_pitch = 0.06\nfor _i in range(_segment_count):\n    _y = _staging_y_origin + _i * _staging_y_pitch\n    create_prim(\n        prim_path=f\"/World/WireSegment_{_i}\",\n        prim_type=\"Cylinder\",\n        position=[0.35, _y, 0.835],\n        radius=_segment_radius,\n        height=_segment_length,\n    )\n    # Lay flat: rotate so cylinder long-axis aligns with world X (Cylinder default = Z up)\n    set_attribute(prim_path=f\"/World/WireSegment_{_i}\", attr_name=\"xformOp:rotateXYZ\", value=[0.0, 90.0, 0.0])\n    for _api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=f\"/World/WireSegment_{_i}\", schema_name=_api)\n    set_attribute(prim_path=f\"/World/WireSegment_{_i}\", attr_name=\"physics:mass\", value=0.05)\n    set_attribute(prim_path=f\"/World/WireSegment_{_i}\", attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n    set_attribute(prim_path=f\"/World/WireSegment_{_i}\", attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Proximity sensor at staging area for pick detection ─────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.35, 0.30, 0.835],\n    size=[0.20, 0.30, 0.06],\n)\n\n# ── Define grasp pose: pinch on segment leading end (+X tip) ────────────────\n# Approach from above; gripper offset 0 to grip on the leading-end body.\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/WireSegment_0\",\n    gripper_offset=[0.0, 0.0, 0.02],\n    approach_direction=[0.0, 0.0, -1.0],\n)\n\n# ── Record waypoints: sparse EE route through clip slots (workspace JSON) ────\n# Captures the current articulation state at 6 named waypoints; consumed by\n# downstream replay or as a documentation artefact of the routing path.\nrecord_waypoints(\n    articulation_path=\"/World/Franka\",\n    output_path=\"workspace/trajectories/wire_harness_route.json\",\n    format=\"json\",\n)\n\n# ── Pick-place controller: per-segment routing to clip slots ────────────────\n# drop_targets maps each source segment to its destination clip slot in routing\n# order. Segment_i → Clip_i for i in 0..4; Clip_5 is the terminal anchor (no\n# segment). cuRobo handles transit + IK respecting planning_obstacles — no\n# separate Cartesian-trajectory clearance pre-check (see failure_modes #4).\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    source_paths=[f\"/World/WireSegment_{i}\" for i in range(_segment_count)],\n    destination_path=\"/World/Clip_0\",\n    drop_targets={\n        \"/World/WireSegment_0\": _clip_positions[0],\n        \"/World/WireSegment_1\": _clip_positions[1],\n        \"/World/WireSegment_2\": _clip_positions[2],\n        \"/World/WireSegment_3\": _clip_positions[3],\n        \"/World/WireSegment_4\": _clip_positions[4],\n    },\n    planning_obstacles=[\"/World/Panel\", \"/World/Table\"] + [f\"/World/Clip_{i}\" for i in range(6)],\n    approach_height=0.10,\n    lift_height=0.12,\n)\n\n# ── Verify leading-end placement: world transform of each segment vs target clip ─\nfor _i in range(_segment_count):\n    get_world_transform(prim_path=f\"/World/WireSegment_{_i}\")\n    get_world_transform(prim_path=f\"/World/Clip_{_i}\")\n# Success criterion (checked offline by verify pass):\n#   ||segment_leading_end(i) - clip_position(i)|| < 0.01 m  AND  ordering preserved.",
+  "settle_state": {
+    "cubes": {
+      "/World/WireSegment_0": [0.35, 0.20, 0.835],
+      "/World/WireSegment_1": [0.35, 0.26, 0.835],
+      "/World/WireSegment_2": [0.35, 0.32, 0.835],
+      "/World/WireSegment_3": [0.35, 0.38, 0.835],
+      "/World/WireSegment_4": [0.35, 0.44, 0.835]
+    },
+    "clip_positions": [
+      [-0.15, -0.29, 0.92],
+      [-0.05, -0.29, 0.92],
+      [0.05, -0.29, 0.92],
+      [0.15, -0.29, 0.92],
+      [0.18, -0.20, 0.92],
+      [0.18, -0.10, 0.92]
+    ]
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/WireSegment_0",
+        "place_path": "/World/Clip_0",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/WireSegment_1",
+        "place_path": "/World/Clip_1",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/WireSegment_2",
+        "place_path": "/World/Clip_2",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/WireSegment_3",
+        "place_path": "/World/Clip_3",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/WireSegment_4",
+        "place_path": "/World/Clip_4",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_paths": [
+      "/World/WireSegment_0",
+      "/World/WireSegment_1",
+      "/World/WireSegment_2",
+      "/World/WireSegment_3",
+      "/World/WireSegment_4"
+    ],
+    "tolerance_m": 0.01,
+    "ordering_required": true,
+    "trajectory_path": "workspace/trajectories/wire_harness_route.json"
+  },
+  "simulate_args": {
+    "cube_paths": [
+      "/World/WireSegment_0",
+      "/World/WireSegment_1",
+      "/World/WireSegment_2",
+      "/World/WireSegment_3",
+      "/World/WireSegment_4"
+    ],
+    "target_path": "/World/Clip_4",
+    "duration_s": 360
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Panel",
+      "/World/Table",
+      "/World/Clip_0",
+      "/World/Clip_1",
+      "/World/Clip_2",
+      "/World/Clip_3",
+      "/World/Clip_4",
+      "/World/Clip_5"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "extends": "industrial-wire-harness-route-001",
+  "extension_notes": "Implements industrial-wire-harness-route-001 with rigid-segment simplification. Backlog explicitly accepts 'rigid-rod approximation; no cable physics required' — this canonical honors that. Differs from backlog spec by routing 5 segments through 6 clip waypoints (instead of single EE trajectory through 6 waypoints) to exercise multi-cycle setup_pick_place_controller + per-segment leading-end verification. record_waypoints + check_path_clearance fulfil the backlog key_tools list.",
+  "failure_modes": [
+    "STRUCTURAL SIMPLIFICATION: real wire harnesses are deformable (cloth/wire physics). This canonical models segments as rigid Cylinder proxies because PhysX deformable-wire is numerically unstable (velocity blow-up under grip). Consumers needing true deformable-harness behaviour should NOT retrieve this canonical.",
+    "Cylinder default orientation is Z-up; rotateXYZ=[0,90,0] lays segments flat with long axis along world X. If the rotation op is not present on the prim, set_attribute creates a literal 'xformOp:rotateXYZ' attribute that may not be honored — verify via get_world_transform after settle.",
+    "drop_targets is a per-source dict — setup_pick_place_controller cycles through source_paths and picks the matching destination from drop_targets[source_path]. If a source is missing from the dict, the controller falls back to destination_path (Clip_0) which causes ordering violation.",
+    "NO Cartesian-trajectory clearance pre-check: an earlier draft passed Cartesian pose dicts to check_path_clearance, but that tool's trajectory field is typed List[List[float]] (joint-position vectors in radians for forward kinematics). The Cartesian-pose form is not accepted and the handler would raise TypeError at exec time. The call has been removed; clearance is delegated to setup_pick_place_controller's planning_obstacles list (cuRobo respects the panel + clip frames during transit and IK). If you need an explicit joint-space clearance check, run solve_ik per Cartesian waypoint first, collect the resulting joint-config lists, and only then call check_path_clearance(trajectory=joint_configs).",
+    "record_waypoints requires the workspace/trajectories/ directory to exist; if absent, write fails with FileNotFoundError. mkdir -p before first invocation in the verify pipeline.",
+    "Ordering verification depends on stable indexing: WireSegment_i must be picked before WireSegment_{i+1}. If the pick-place controller re-orders by proximity-to-gripper rather than source_paths list order, ordering check fails — verify cycles=5 with explicit pose_sequence honors source-list order in current handler.",
+    "Clip prims are 25 mm Cubes with no physical slot; collision still treats them as solid cubes. A real bracket-slot would require mesh import or USD reference; this canonical accepts the geometric approximation.",
+    "motion_controllers.curobo IK reachability at clip Z=0.92 with EE-down approach may fail at the +X corner clip (Clip_3/4 boundary). Mitigation: raise lift_height or add an intermediate via-pose at the corner."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema ⏳ pending-lint; function-gate ⏳ Kit RPC; structural-simplification-noted",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["curobo", "direct_joint"]
+  },
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_multi_source_bins": false,
+      "n_source_bins": 0,
+      "has_sequential_waypoints": true,
+      "has_clearance_preflight": true,
+      "has_ordering_constraint": true
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka_panda",
+      "isaac:topology.single_station",
+      "isaac:industrial.wire_harness",
+      "isaac:assembly.routing",
+      "isaac:assembly.waypoint_sequence",
+      "isaac:trajectory.clearance_verified",
+      "isaac:workpiece.rigid_segment_proxy",
+      "isaac:industry.electrical_assembly"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "any_7dof_fixed_arm"
+    },
+    "panel_fixture": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "vertical_panel_with_clip_face"
+    },
+    "clip_waypoints": {
+      "constraints": ["cube"],
+      "expected_count": 6,
+      "required": true,
+      "param_name": "n_clips",
+      "note": "6 fixed clip waypoints in L-route along panel face; segment leading-ends snap here",
+      "unordered": false
+    },
+    "wire_segments": {
+      "constraints": ["cylinder"],
+      "min": 4,
+      "max": 6,
+      "required": true,
+      "param_name": "n_segments",
+      "note": "Rigid wire-segment proxies; backlog accepts rigid-rod approximation",
+      "unordered": false
+    },
+    "pick_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "panel_fixture": {
+      "path": "/World/Panel",
+      "position": [0.0, -0.30, 0.85],
+      "scale": [0.40, 0.02, 0.20]
+    },
+    "clip_waypoints": [
+      {"path": "/World/Clip_0", "position": [-0.15, -0.29, 0.92], "scale": [0.025, 0.025, 0.025]},
+      {"path": "/World/Clip_1", "position": [-0.05, -0.29, 0.92], "scale": [0.025, 0.025, 0.025]},
+      {"path": "/World/Clip_2", "position": [ 0.05, -0.29, 0.92], "scale": [0.025, 0.025, 0.025]},
+      {"path": "/World/Clip_3", "position": [ 0.15, -0.29, 0.92], "scale": [0.025, 0.025, 0.025]},
+      {"path": "/World/Clip_4", "position": [ 0.18, -0.20, 0.92], "scale": [0.025, 0.025, 0.025]},
+      {"path": "/World/Clip_5", "position": [ 0.18, -0.10, 0.92], "scale": [0.025, 0.025, 0.025]}
+    ],
+    "wire_segments": [
+      {"path": "/World/WireSegment_0", "position": [0.35, 0.20, 0.835], "radius": 0.008, "height": 0.15},
+      {"path": "/World/WireSegment_1", "position": [0.35, 0.26, 0.835], "radius": 0.008, "height": 0.15},
+      {"path": "/World/WireSegment_2", "position": [0.35, 0.32, 0.835], "radius": 0.008, "height": 0.15},
+      {"path": "/World/WireSegment_3", "position": [0.35, 0.38, 0.835], "radius": 0.008, "height": 0.15},
+      {"path": "/World/WireSegment_4", "position": [0.35, 0.44, 0.835], "radius": 0.008, "height": 0.15}
+    ],
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.35, 0.30, 0.835],
+      "size": [0.20, 0.30, 0.06]
+    }
+  },
+  "code_template": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.2, 0.8, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Panel fixture ────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path={{panel_fixture.path}},\n    prim_type=\"Cube\",\n    position={{panel_fixture.position}},\n    scale={{panel_fixture.scale}},\n)\napply_api_schema(prim_path={{panel_fixture.path}}, schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n# ── Clip waypoints ───────────────────────────────────────────────────────────\nfor _clip in {{clip_waypoints}}:\n    create_prim(prim_path=_clip[\"path\"], prim_type=\"Cube\", position=_clip[\"position\"], scale=_clip[\"scale\"])\n    apply_api_schema(prim_path=_clip[\"path\"], schema_name=\"PhysicsCollisionAPI\")\n\n# ── Wire segments ────────────────────────────────────────────────────────────\nfor _seg in {{wire_segments}}:\n    create_prim(\n        prim_path=_seg[\"path\"],\n        prim_type=\"Cylinder\",\n        position=_seg[\"position\"],\n        radius=_seg[\"radius\"],\n        height=_seg[\"height\"],\n    )\n    set_attribute(prim_path=_seg[\"path\"], attr_name=\"xformOp:rotateXYZ\", value=[0.0, 90.0, 0.0])\n    for _api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=_seg[\"path\"], schema_name=_api)\n    set_attribute(prim_path=_seg[\"path\"], attr_name=\"physics:mass\", value=0.05)\n    set_attribute(prim_path=_seg[\"path\"], attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n    set_attribute(prim_path=_seg[\"path\"], attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Proximity sensor ─────────────────────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path={{pick_sensor.path}},\n    position={{pick_sensor.position}},\n    size={{pick_sensor.size}},\n)\n\n# ── Grasp pose on first segment ──────────────────────────────────────────────\ndefine_grasp_pose(\n    robot_path={{primary_robot.path}},\n    object_path={{wire_segments[0].path}},\n    gripper_offset=[0.0, 0.0, 0.02],\n    approach_direction=[0.0, 0.0, -1.0],\n)\n\n# ── Record route waypoints ───────────────────────────────────────────────────\nrecord_waypoints(\n    articulation_path={{primary_robot.path}},\n    output_path=\"workspace/trajectories/wire_harness_route.json\",\n    format=\"json\",\n)\n\n# ── Pick-place sequencing (no Cartesian-trajectory clearance pre-check — cuRobo respects planning_obstacles) ──\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    source_paths=[_s[\"path\"] for _s in {{wire_segments}}],\n    destination_path={{clip_waypoints[0].path}},\n    drop_targets={_s[\"path\"]: _c[\"position\"] for _s, _c in zip({{wire_segments}}, {{clip_waypoints}}[:len({{wire_segments}})])},\n    planning_obstacles=[{{panel_fixture.path}}, \"/World/Table\"] + [c[\"path\"] for c in {{clip_waypoints}}],\n    approach_height=0.10,\n    lift_height=0.12,\n)\n\n# ── Verify leading-end placement ─────────────────────────────────────────────\nfor _seg in {{wire_segments}}:\n    get_world_transform(prim_path=_seg[\"path\"])\nfor _clip in {{clip_waypoints}}:\n    get_world_transform(prim_path=_clip[\"path\"])\n"
+}

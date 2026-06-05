@@ -1,0 +1,214 @@
+{
+  "task_id": "CP-NEW-yrkesroll-inspector-reject-divert",
+  "goal": "Yrkesroll: Visual inspector (ONET SOC 51-9061, Inspectors/Testers/Sorters/Samplers/Weighers — surface-defect / label-integrity inspection lane variant). A Franka arm picks cubes one at a time off an infeed conveyor in front of an overhead inspection camera. add_vision_classifier_gate classifies each cube as 'pass' (intact blue label) or 'reject' (visible red defect mark) using semantic class labels routed to the classifier. Pass items go to GoodBin; reject items go to RejectBin. Four cubes arrive: three blue-labelled 'good' parts and one red-marked 'defect' part. Exercises the vision-classifier-as-gate pattern + 2-bin pass/reject routing on the SEMANTIC axis (defect class), which is the foundational visual-inspection workflow. Distinct from CP-NEW-yrkesroll-quality-tech-fixture-gauge (raycast laser-displacement GAUGE measuring physical height — dimensional defect) by using a vision classifier as the discrimination modality (semantic defect — surface mark / colour anomaly / label integrity), which a quality-tech-gauge canonical explicitly cannot detect. Distinct from CP-NEW-kit-prep-vision-gate (vision-gate verifies completeness — was every slot filled — not pass/reject of individual workpieces) and CP-NEW-barcode-scanner-divert (sensor=barcode reader returning SKU string, not vision classifier; 3 lanes not 2).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "create_material",
+    "assign_material",
+    "set_camera_look_at",
+    "set_camera_params",
+    "add_vision_classifier_gate",
+    "set_semantic_label",
+    "setup_pick_place_controller",
+    "get_world_transform"
+  ],
+  "thoughts": "Design rationale for CP-NEW-yrkesroll-inspector-reject-divert:\n\n1) Yrkesroll framing — Visual inspector (ONET SOC 51-9061, Inspectors/Testers/Sorters/Samplers/Weighers) per backlog entry yrkesroll-inspector-reject-divert-001 (pattern_hint=sort). Role represents the human's intent: visually examine each arriving part for surface defects or label damage and divert defective items to the reject lane. The actual handling is performed by a Franka arm standing in for the inspector's pick-and-place motions; the overhead camera + vision classifier stand in for the human's eyes + cognitive defect-recognition.\n\n2) DIFFERENTIATION FROM A78 (CP-NEW-yrkesroll-quality-tech-fixture-gauge) — this is the crucial design axis at retrieval time. A78 uses raycast as a laser-displacement GAUGE measuring physical Z-height of the part (dimensional out-of-tolerance → reject). A87 uses VISION CLASSIFICATION on a SEMANTIC defect (surface red-mark vs intact blue label → reject). A quality-tech-gauge canonical can ONLY detect dimensional defects; a visual-inspector canonical can detect semantic / appearance defects that a gauge cannot. Both use 2-bin pass/reject + sort pattern + Franka pick-place, but the SENSOR modality and the FAILURE-CLASS being detected are orthogonal. Both share yrkesroll-axis (inspector vs quality-tech) under the broader ONET 51-9061 family.\n\n3) Topology — single inspection station: infeed conveyor in front (y=+0.40), overhead inspection camera at z=1.30 pointing down at conveyor pick zone [0.0, 0.40, 0.78], GoodBin behind-left (x=-0.35, y=-0.45), RejectBin behind-right (x=+0.35, y=-0.45). Franka at [0,0,0.75] on a 0.75m table; all geometry within Franka's ~0.85m reach.\n\n4) Four cubes arrive on the conveyor in fixed order: Cube_1 (good, blue label), Cube_2 (good, blue label), Cube_3 (REJECT, red defect mark), Cube_4 (good, blue label). Cubes all 0.05m. Visual differentiation is via material colour assigned to the cube surface (blue for good, red for defect). Semantic labels are pre-assigned ('pass_part' vs 'reject_part') so the vision classifier has ground truth; in production the labels would be the classifier output.\n\n5) Vision-classifier gate — add_vision_classifier_gate(cube_paths=[Cube_1..Cube_4], class_labels=['pass_part', 'reject_part'], camera_path=/World/InspectCamera, destination_map={'pass_part': '/World/GoodBin', 'reject_part': '/World/RejectBin'}). The gate captures the viewport, runs vision_detect_objects against the labels, and returns a cube→destination dict suitable for setup_pick_place_controller's color_routing argument. This is the canonical exemplar for sensor=vision_classifier sort (vs sensor=raycast_gauge in A78, vs sensor=barcode_reader in CP-NEW-barcode-scanner-divert).\n\n6) Overhead camera — placed at [0.0, 0.40, 1.30] directly above the conveyor pick zone, looking straight down via set_camera_look_at(target=[0.0, 0.40, 0.78]). focal_length=18mm gives wide FOV covering the full 0.30m belt width plus ~0.40m belt length so all 4 cubes are visible in one capture frame. configure_camera() creates and parameterises the camera prim; set_camera_params() refines focal length; set_camera_look_at() orients gaze.\n\n7) Pick-place sequencing — PHASE 1: add_vision_classifier_gate runs once, returning the routing decision per cube. PHASE 2: setup_pick_place_controller is dispatched ONCE with source_paths=[all 4 cubes] and color_routing built from the gate result. The controller picks each cube in order, looks up its class in color_routing, and routes to the matching bin. PHASE 3: get_world_transform on each cube to verify it reached the expected bin. This matches CP-NEW-inspect-reject (predecessor draft) and CP-48 (color-routing precedent) wiring.\n\n8) Why 2 bins not 3 — visual inspection routing is binary pass/reject by definition (defective parts go to disposition; non-defective parts continue downstream). Adding a 'rework' lane is a scenario-profile extension; the foundational template enforces the simplest discriminating routing axis (semantic_class: pass vs reject).\n\n9) Physics: CPU deterministic (enable_gpu_dynamics=False, MBP broadphase) for determinism. sleepThreshold=0.0 on parts; rubber material for stable friction on the moving belt during the brief camera capture window.\n\n10) Distinct structural tags: isaac:yrkesroll.inspector (new yrkesroll-axis tag tying to ONET SOC 51-9061 — visual inspection variant; distinct from isaac:yrkesroll.quality_tech in A78 which is dimensional inspection), isaac:industry.visual_inspection (distinct from isaac:industry.quality_inspection in A78), isaac:routing.pass_reject_2lane (shared with A78 — same routing topology), isaac:sensor.vision_classifier (distinct from isaac:sensor.gauge_raycast in A78), isaac:vision.inspect_and_reject, isaac:robot.franka.\n\n11) Verification — verify_args.stages encodes the single multi-pick stage with routed_bins=[GoodBin, RejectBin]; simulate_args.routed_target_paths = [GoodBin, RejectBin]; per_bin_expected = {good: 3, reject: 1}. Choosing per_bin_expected gives the simulator a counted check that the canonical correctly routes 3 pass cubes to GoodBin and 1 reject cube to RejectBin.\n\n12) Motion-controller honesty — verified=[]; untested=['curobo', 'rmpflow']; failed={}. Smoke test pending — function-gate runs after form-gate lint passes.",
+  "code": "# -- Scene skeleton --------------------------------------------------------\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# -- Physics: CPU deterministic --------------------------------------------\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# -- Robot table -----------------------------------------------------------\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.2, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# -- Franka arm ------------------------------------------------------------\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# -- Infeed inspection conveyor (front, y=+0.40) ---------------------------\n# Belt top z = 0.78 + 0.025 = 0.805; cube centre z = 0.805 + 0.025 = 0.830.\ncreate_conveyor(\n    prim_path=\"/World/InspectionBelt\",\n    position=[0.0, 0.40, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.08, 0, 0],\n)\n\n# -- Materials: blue=intact-label (good), red=defect-mark (reject) ---------\ncreate_material(material_path=\"/World/Materials/LabelBlue\",  shader_type=\"OmniPBR\", diffuse_color=[0.10, 0.25, 0.95])\ncreate_material(material_path=\"/World/Materials/DefectRed\", shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.10, 0.10])\n\n# -- Destination bins (behind robot, y=-0.45) ------------------------------\n# Within Franka 0.85m reach: max horizontal = sqrt(0.35^2 + 0.45^2) = 0.57m.\ncreate_bin(prim_path=\"/World/GoodBin\",   position=[-0.35, -0.45, 0.75], size=[0.25, 0.25, 0.12])\ncreate_bin(prim_path=\"/World/RejectBin\", position=[ 0.35, -0.45, 0.75], size=[0.25, 0.25, 0.12])\n\n# -- 4 cubes on belt: 3 good (blue label) + 1 reject (red defect mark) -----\n# Spacing 0.20m; belt velocity 0.08 m/s -> ~2.5s gap between cubes at pick zone.\n_cube_specs = [\n    {\"path\": \"/World/Cube_1\", \"x\": -0.60, \"label\": \"pass_part\",   \"material\": \"/World/Materials/LabelBlue\"},\n    {\"path\": \"/World/Cube_2\", \"x\": -0.40, \"label\": \"pass_part\",   \"material\": \"/World/Materials/LabelBlue\"},\n    {\"path\": \"/World/Cube_3\", \"x\": -0.20, \"label\": \"reject_part\", \"material\": \"/World/Materials/DefectRed\"},\n    {\"path\": \"/World/Cube_4\", \"x\":  0.00, \"label\": \"pass_part\",   \"material\": \"/World/Materials/LabelBlue\"},\n]\ncube_paths = []\nfor spec in _cube_specs:\n    p = spec[\"path\"]\n    cube_paths.append(p)\n    create_prim(prim_path=p, prim_type=\"Cube\", position=[spec[\"x\"], 0.40, 0.830], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=p, schema_name=api)\n    assign_material(prim_path=p, material_path=spec[\"material\"])\n    set_semantic_label(prim_path=p, class_name=spec[\"label\"])\n    apply_physics_material(prim_path=p, material_name=\"rubber\")\n\nbulk_set_attribute(prim_paths=cube_paths, attr=\"physics:mass\", value=0.25)\nbulk_set_attribute(prim_paths=cube_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\n\n# -- Overhead inspection camera --------------------------------------------\n# Nadir view of conveyor pick zone at z=1.30; wide FOV covers all 4 cubes.\ncreate_prim(prim_path=\"/World/InspectCamera\", prim_type=\"Camera\")\nset_camera_params(\n    camera_path=\"/World/InspectCamera\",\n    params={\"focal_length\": 18.0, \"horizontal_aperture\": 20.955},\n)\nset_camera_look_at(\n    camera_path=\"/World/InspectCamera\",\n    target=[0.0, 0.40, 0.78],\n    eye=[0.0, 0.40, 1.30],\n)\n\n# -- PHASE 1: vision-classifier gate ---------------------------------------\n# Captures viewport from /World/InspectCamera, runs vision_detect_objects with\n# the two semantic class labels, and returns a cube->destination dict shaped\n# for setup_pick_place_controller's color_routing argument.\nadd_vision_classifier_gate(\n    cube_paths=cube_paths,\n    class_labels=[\"pass_part\", \"reject_part\"],\n    camera_path=\"/World/InspectCamera\",\n    destination_map={\n        \"pass_part\":   \"/World/GoodBin\",\n        \"reject_part\": \"/World/RejectBin\",\n    },\n)\n\n# -- PHASE 2: pick-place with semantic-class routing -----------------------\n# color_routing keys are the semantic class labels emitted by the vision gate.\n# Items classified pass_part -> GoodBin; reject_part -> RejectBin.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=cube_paths,\n    destination_path=\"/World/GoodBin\",\n    color_routing={\n        \"pass_part\":   \"/World/GoodBin\",\n        \"reject_part\": \"/World/RejectBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/InspectionBelt\",\n                        \"/World/GoodBin\", \"/World/RejectBin\"],\n)\n\n# -- PHASE 3: verify routing -----------------------------------------------\nfor p in cube_paths:\n    get_world_transform(prim_path=p)",
+  "settle_state": {
+    "cubes_initial": {
+      "/World/Cube_1": [-0.60, 0.40, 0.830],
+      "/World/Cube_2": [-0.40, 0.40, 0.830],
+      "/World/Cube_3": [-0.20, 0.40, 0.830],
+      "/World/Cube_4": [ 0.00, 0.40, 0.830]
+    },
+    "expected_routing": {
+      "/World/Cube_1": "/World/GoodBin",
+      "/World/Cube_2": "/World/GoodBin",
+      "/World/Cube_3": "/World/RejectBin",
+      "/World/Cube_4": "/World/GoodBin"
+    },
+    "camera": {
+      "/World/InspectCamera": [0.0, 0.40, 1.30],
+      "look_at": [0.0, 0.40, 0.78],
+      "focal_length": 18.0
+    },
+    "conveyors": {
+      "/World/InspectionBelt": [0.08, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/InspectionBelt",
+        "place_path": "/World/GoodBin",
+        "robot_kind": "franka_panda",
+        "routed_bins": ["/World/GoodBin", "/World/RejectBin"]
+      }
+    ],
+    "cube_paths": ["/World/Cube_1", "/World/Cube_2", "/World/Cube_3", "/World/Cube_4"],
+    "camera_path": "/World/InspectCamera",
+    "class_routing": {
+      "pass_part":   "/World/GoodBin",
+      "reject_part": "/World/RejectBin"
+    }
+  },
+  "simulate_args": {
+    "target_path": "/World/GoodBin",
+    "routed_target_paths": ["/World/GoodBin", "/World/RejectBin"],
+    "cube_paths": ["/World/Cube_1", "/World/Cube_2", "/World/Cube_3", "/World/Cube_4"],
+    "duration_s": 240,
+    "xy_tolerance": 0.10,
+    "per_bin_expected": {"good": 3, "reject": 1}
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Table",
+      "/World/InspectionBelt",
+      "/World/InspectCamera",
+      "/World/GoodBin",
+      "/World/RejectBin"
+    ],
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "add_vision_classifier_gate returns low-confidence classification for the red defect cube — if the classifier confidence threshold is too low, a defect-marked cube can be misrouted to GoodBin (false positive: defective product reaches downstream). Mitigation: enforce a min_confidence threshold inside the gate handler, or fall back to set_semantic_label ground truth when confidence < threshold. Real-world QA failure mode: insufficient training data on rare defects shrinks the rejection rate at the cost of escapes.",
+    "Defect not in classifier training distribution — vision classifier was trained on a fixed defect taxonomy (red mark / missing label / colour anomaly). Novel defects (cracks, scratches, wrong-shape) classify as pass_part because no reject_part visual pattern matches. Mitigation: scenario-profile may add a fall-through 'unknown' class routed to a Manual Review bin (3rd lane); foundational canonical does not include this.",
+    "Inspector role confused with quality-tech-gauge at retrieval — both canonicals share yrkesroll-axis ONET 51-9061 + 2-bin pass/reject routing + Franka pick-place. The discriminating structural_tag is isaac:sensor.vision_classifier (A87) vs isaac:sensor.gauge_raycast (A78). Retrieval MUST honour the sensor-modality tag, else the wrong canonical may be picked for a user prompt that says 'measure dimensions' (A78) vs 'check for surface defects' (A87).",
+    "Lighting changes affect classifier reliability — overhead DomeLight intensity 1000.0 is the baseline; if scenario varies dome intensity in a DR pass the vision classifier may misread defect colour. Mitigation: pin DomeLight intensity for canonical-build, allow scenario_profile to vary it later and observe classifier degradation. This canonical does NOT add a domain-randomizer; that is a scenario-profile extension.",
+    "Vision-classifier viewport capture race — add_vision_classifier_gate captures the current viewport. If the camera viewport was not yet committed to /World/InspectCamera when the gate fires, capture returns the default camera view (no cubes visible) and classifier emits an empty result. Mitigation: configure_camera + set_camera_look_at are dispatched BEFORE add_vision_classifier_gate so the viewport is bound to the inspection camera before capture. Verify by checking the gate result returns non-empty cube_to_destination.",
+    "Cube colour signal too weak for vision classifier — class_labels=['pass_part', 'reject_part'] are abstract; the classifier needs a visual cue (blue vs red surface). Materials must be applied (assign_material) BEFORE the gate runs so the cube surface colour is rendered. If a cube has no material assigned its default grey makes it ambiguous to the classifier. Mitigation: every cube has assign_material(mat_label_blue OR mat_defect_red) before the gate is dispatched.",
+    "color_routing requires the routing key to match the class label emitted by the gate — if add_vision_classifier_gate returns 'PassPart' (mixed case) but color_routing key is 'pass_part' (lowercase), the lookup misses and the cube falls through to destination_path (/World/GoodBin) — which silently routes the defective cube to the good bin. Mitigation: both labels normalised to snake_case lowercase; gate handler enforces label canonicalisation."
+  ],
+  "intent": {
+    "pattern_hint": "sort",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "n_bins_routed",
+      "routing_axis": "semantic_class",
+      "uses_conveyor_transport": true,
+      "uses_vision_classifier": true,
+      "uses_overhead_camera": true,
+      "n_destination_bins": 2,
+      "n_workpieces": 4
+    },
+    "structural_tags": [
+      "isaac:industry.visual_inspection",
+      "isaac:yrkesroll.inspector",
+      "isaac:sensor.vision_classifier",
+      "isaac:routing.pass_reject_2lane",
+      "isaac:vision.inspect_and_reject",
+      "isaac:robot.franka",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:transport.conveyor",
+      "isaac:placement.multi_bin"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "short_reach_ok"
+    },
+    "infeed_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "inspect_camera": {
+      "constraints": ["camera"],
+      "expected_count": 1,
+      "required": true
+    },
+    "good_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "reject_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 8,
+      "param_name": "n_cubes",
+      "unordered": false,
+      "note": "Mix of pass + reject; at least one of each required for meaningful routing test"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "infeed_conveyor": {
+      "path": "/World/InspectionBelt",
+      "position": [0.0, 0.40, 0.78],
+      "size": [1.5, 0.30, 0.05],
+      "surface_velocity": [0.08, 0, 0]
+    },
+    "inspect_camera": {
+      "path": "/World/InspectCamera",
+      "position": [0.0, 0.40, 1.30],
+      "target": [0.0, 0.40, 0.78],
+      "fov": 60,
+      "focal_length": 18.0
+    },
+    "good_bin":   {"path": "/World/GoodBin",   "position": [-0.35, -0.45, 0.75], "size": [0.25, 0.25, 0.12], "routing_key": "pass_part"},
+    "reject_bin": {"path": "/World/RejectBin", "position": [ 0.35, -0.45, 0.75], "size": [0.25, 0.25, 0.12], "routing_key": "reject_part"},
+    "workpieces": [
+      {"path": "/World/Cube_1", "position": [-0.60, 0.40, 0.830], "label": "pass_part",   "material": "/World/Materials/LabelBlue",  "color": "blue", "mass": 0.25},
+      {"path": "/World/Cube_2", "position": [-0.40, 0.40, 0.830], "label": "pass_part",   "material": "/World/Materials/LabelBlue",  "color": "blue", "mass": 0.25},
+      {"path": "/World/Cube_3", "position": [-0.20, 0.40, 0.830], "label": "reject_part", "material": "/World/Materials/DefectRed",  "color": "red",  "mass": 0.25},
+      {"path": "/World/Cube_4", "position": [ 0.00, 0.40, 0.830], "label": "pass_part",   "material": "/World/Materials/LabelBlue",  "color": "blue", "mass": 0.25}
+    ],
+    "operator_role": {
+      "yrkesroll": "inspector",
+      "title": "Visual Inspector / Quality Control Inspector",
+      "onet_soc": "51-9061",
+      "onet_soc_title": "Inspectors, Testers, Sorters, Samplers, and Weighers",
+      "onet_soc_note": "51-9061 is the ONET match for hands-on visual inspection of surface defects and label integrity (semantic / appearance discrimination). This is the SAME parent role as A78 (yrkesroll-quality-tech-fixture-gauge) but a distinct work variant: A78 measures dimensions via gauge, A87 inspects appearance via vision. Both legitimately fall under 51-9061; the discrimination at retrieval is via structural_tags isaac:yrkesroll.inspector vs isaac:yrkesroll.quality_tech and isaac:sensor.vision_classifier vs isaac:sensor.gauge_raycast.",
+      "workstation": "visual_inspection_station",
+      "responsibilities": [
+        "inspect_surface_for_defects",
+        "verify_label_integrity",
+        "classify_pass_or_reject",
+        "route_pass_parts_to_release",
+        "divert_reject_parts_for_disposition"
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.2, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\ncreate_conveyor(\n    prim_path={{infeed_conveyor.path}},\n    position={{infeed_conveyor.position}},\n    size={{infeed_conveyor.size}},\n    surface_velocity={{infeed_conveyor.surface_velocity}},\n)\ncreate_material(material_path=\"/World/Materials/LabelBlue\",  shader_type=\"OmniPBR\", diffuse_color=[0.10, 0.25, 0.95])\ncreate_material(material_path=\"/World/Materials/DefectRed\", shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.10, 0.10])\ncreate_bin(prim_path={{good_bin.path}},   position={{good_bin.position}},   size={{good_bin.size}})\ncreate_bin(prim_path={{reject_bin.path}}, position={{reject_bin.position}}, size={{reject_bin.size}})\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\napply_api_schema(prim_path={{workpieces[0].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[0].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[0].path}}, schema_name=\"PhysicsMassAPI\")\nassign_material(prim_path={{workpieces[0].path}}, material_path={{workpieces[0].material}})\nset_semantic_label(prim_path={{workpieces[0].path}}, class_name={{workpieces[0].label}})\napply_physics_material(prim_path={{workpieces[0].path}}, material_name=\"rubber\")\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\napply_api_schema(prim_path={{workpieces[1].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[1].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[1].path}}, schema_name=\"PhysicsMassAPI\")\nassign_material(prim_path={{workpieces[1].path}}, material_path={{workpieces[1].material}})\nset_semantic_label(prim_path={{workpieces[1].path}}, class_name={{workpieces[1].label}})\napply_physics_material(prim_path={{workpieces[1].path}}, material_name=\"rubber\")\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\napply_api_schema(prim_path={{workpieces[2].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[2].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[2].path}}, schema_name=\"PhysicsMassAPI\")\nassign_material(prim_path={{workpieces[2].path}}, material_path={{workpieces[2].material}})\nset_semantic_label(prim_path={{workpieces[2].path}}, class_name={{workpieces[2].label}})\napply_physics_material(prim_path={{workpieces[2].path}}, material_name=\"rubber\")\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\napply_api_schema(prim_path={{workpieces[3].path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpieces[3].path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpieces[3].path}}, schema_name=\"PhysicsMassAPI\")\nassign_material(prim_path={{workpieces[3].path}}, material_path={{workpieces[3].material}})\nset_semantic_label(prim_path={{workpieces[3].path}}, class_name={{workpieces[3].label}})\napply_physics_material(prim_path={{workpieces[3].path}}, material_name=\"rubber\")\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}], attr=\"physics:mass\", value=0.25)\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\ncreate_prim(prim_path={{inspect_camera.path}}, prim_type=\"Camera\")\nset_camera_params(\n    camera_path={{inspect_camera.path}},\n    params={\"focal_length\": {{inspect_camera.focal_length}}, \"horizontal_aperture\": 20.955},\n)\nset_camera_look_at(\n    camera_path={{inspect_camera.path}},\n    target={{inspect_camera.target}},\n    eye={{inspect_camera.position}},\n)\nadd_vision_classifier_gate(\n    cube_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    class_labels=[{{good_bin.routing_key}}, {{reject_bin.routing_key}}],\n    camera_path={{inspect_camera.path}},\n    destination_map={{{good_bin.routing_key}}: {{good_bin.path}}, {{reject_bin.routing_key}}: {{reject_bin.path}}},\n)\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}],\n    destination_path={{good_bin.path}},\n    color_routing={{{good_bin.routing_key}}: {{good_bin.path}}, {{reject_bin.routing_key}}: {{reject_bin.path}}},\n    planning_obstacles=[\"/World/Table\", {{infeed_conveyor.path}}, {{good_bin.path}}, {{reject_bin.path}}],\n)\nget_world_transform(prim_path={{workpieces[0].path}})\nget_world_transform(prim_path={{workpieces[1].path}})\nget_world_transform(prim_path={{workpieces[2].path}})\nget_world_transform(prim_path={{workpieces[3].path}})",
+  "simulate_args_template": {
+    "target_path": "{{good_bin.path}}",
+    "routed_target_paths": ["{{good_bin.path}}", "{{reject_bin.path}}"],
+    "cube_paths": ["{{workpieces[0].path}}", "{{workpieces[1].path}}", "{{workpieces[2].path}}", "{{workpieces[3].path}}"],
+    "duration_s": 240,
+    "xy_tolerance": 0.10
+  },
+  "verified_status": "build-spec-2026-05-16; form-gate pending; function-gate pending",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow"],
+    "failed": {}
+  },
+  "extends": "CP-NEW-yrkesroll-quality-tech-fixture-gauge",
+  "extension_notes": "Sister canonical to CP-NEW-yrkesroll-quality-tech-fixture-gauge (A78). Same ONET SOC 51-9061 parent role, same 2-bin pass/reject routing topology, same Franka pick-place mechanics. DISTINCT sensor modality: vision_classifier (A87) vs gauge_raycast (A78); DISTINCT defect class detected: semantic/appearance defect (A87) vs dimensional out-of-tolerance (A78). Retrieval discrimination via structural_tags isaac:sensor.vision_classifier vs isaac:sensor.gauge_raycast and isaac:yrkesroll.inspector vs isaac:yrkesroll.quality_tech. Scenario-profile extensions: add a 3rd 'manual review' lane for low-confidence classifications, add domain-randomizer for lighting/colour DR pass, swap defect-marker material for label-occlusion (tape) for label-integrity inspection variant."
+}

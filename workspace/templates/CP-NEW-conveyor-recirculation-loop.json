@@ -1,0 +1,165 @@
+{
+  "task_id": "CP-NEW-conveyor-recirculation-loop",
+  "goal": "Demonstrate the closed-loop conveyor TOPOLOGY itself as base infrastructure: 4 conveyor segments arranged as a rectangular loop, 3 cubes recirculating around it, each tracked by ID over 60s of simulation. Each cube must complete at least 1 full lap (= cross all 4 quadrant boundaries / lap-marker positions). No robot, no overflow eviction, no sensor-gated pick — pure infrastructure demonstration of closed_loop_conveyor + lap_count tracking. Validates industrial-conveyor-recirculation-loop-001 (topology-only flavour, distinct from CP-NEW-conveyor-recirculation-overflow which adds robot + overflow re-queue).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "create_recirculation_loop",
+    "bulk_set_attribute",
+    "apply_physics_material",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-conveyor-recirculation-loop:\n\n1) DISTINCT INTENT — this template demonstrates the CLOSED-LOOP CONVEYOR TOPOLOGY as base infrastructure. CP-NEW-conveyor-recirculation-overflow (A29) extends the loop with a Franka robot, proximity-sensor pick gating, and overflow-to-return routing (full industrial cell). CP-60 demonstrates the topology with a SINGLE cube — too thin to test lap-count tracking. This A102 template sits between: passive (no robot, no sensors), but multi-cube (3 cubes) + explicit lap-count verification.\n\n2) Loop geometry: 2.0 x 0.6 m rectangle centred at [0, 0, 0.78]. create_recirculation_loop builds 4 segments named /World/Loop/{Top,Right,Bottom,Left}; Top moves +X, Right moves -Y, Bottom moves -X, Left moves +Y at 0.20 m/s. Belt-top z = 0.78 + half_height ≈ 0.805; cube centre z = 0.805 + 0.025 = 0.835.\n\n3) Three cubes spawned at 120-degree-equivalent offsets around the loop (one per major side): /World/Cube_1 on Top at [0.0, 0.30, 0.835], /World/Cube_2 on Right at [1.00, 0.0, 0.835], /World/Cube_3 on Bottom at [0.0, -0.30, 0.835]. Each starts on a different segment so we observe simultaneous parallel laps and can detect corner-transition failures independently.\n\n4) Lap counting: define 4 lap-marker LINES (axis-aligned planes), one per segment-midpoint. A 'lap' = each cube crosses all 4 markers in topology order. Marker positions:\n     M_Top    at y=+0.30, x=0   (cube transits Top→Right)\n     M_Right  at x=+1.00, y=0   (cube transits Right→Bottom)\n     M_Bottom at y=-0.30, x=0   (cube transits Bottom→Left)\n     M_Left   at x=-1.00, y=0   (cube transits Left→Top)\n   Implementation: lap-count is measured POST-SIMULATION via the simulate_args.lap_marker_positions field (4 [x, y] pairs). The function-gate consumer reads cube trajectories from settle_state samples + per-second world_transform polling and counts crossings.\n\n5) Lap timing budget: loop perimeter ≈ 2*(2.0 + 0.6) = 5.2 m at 0.20 m/s → 26 s per lap. Over 60 s sim each cube should complete ≥ 2 laps in nominal conditions. The PASS criterion is ≥ 1 lap (loose, accommodates corner-transition slowdowns and initial settle).\n\n6) Physics: CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) for determinism — matches CP-60 and A29. sleepThreshold=0.0 on all 3 cubes so static friction doesn't park them at corners. rubber physics material on cubes for grip on belt surface.\n\n7) No robot, no proximity sensor, no bin, no zone partition, no semantic labels. Purely passive infrastructure. motion_controllers field is empty across the board (no planner ever runs).\n\n8) pattern_hint='other' (catch-all long-tail; the discriminating signal is in structural_tags: isaac:topology.closed_loop_conveyor + isaac:tracking.lap_count + isaac:industrial.recirculation).\n\n9) Role trio: 'loop' (recirculation_loop, required, 1) + 'tracked_cubes' (cube, min=2 max=8, param_name=n_tracked_cubes, ordered=false; default 3).\n\n10) sim_control(action='play') at end of code so function-gate can read cube positions during the 60 s window. Duration in simulate_args matches the 60 s task spec.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU determinism ──────────────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Closed-loop conveyor (4 segments: Top/Right/Bottom/Left) ─────────────────\n# Loop centre [0, 0, 0.78]; outer footprint 2.0 x 0.6 m; belt velocity 0.20 m/s.\n# create_recirculation_loop builds /World/Loop/{Top,Right,Bottom,Left} with\n# correct surface velocities arranged for clockwise circulation viewed from +Z.\ncreate_recirculation_loop(\n    loop_path=\"/World/Loop\",\n    center=[0.0, 0.0, 0.78],\n    length=2.0,\n    width=0.6,\n    velocity=0.20,\n)\n\n# ── Three tracked cubes, one starting on each major straight ─────────────────\n# Cube_1 on Top segment near segment midpoint (will travel +X then -Y).\n# Cube_2 on Right segment near segment midpoint (will travel -Y then -X).\n# Cube_3 on Bottom segment near segment midpoint (will travel -X then +Y).\n# Cube centres at z=0.835 (belt top 0.805 + half-cube 0.025 + 0.005 settle clearance).\ncube_starts = [\n    (\"/World/Cube_1\", [ 0.00,  0.30, 0.835]),\n    (\"/World/Cube_2\", [ 1.00,  0.00, 0.835]),\n    (\"/World/Cube_3\", [ 0.00, -0.30, 0.835]),\n]\ncube_paths = [c[0] for c in cube_starts]\n\nfor path, pos in cube_starts:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=pos, size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\",\n                \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Disable sleep so static friction doesn't park cubes at corner transitions\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physics:mass\",\n    value=0.5,\n)\n\n# ── Start simulation so function-gate can sample lap-marker crossings ────────\nsim_control(action=\"play\")",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [0.00, 0.30, 0.835],
+      "/World/Cube_2": [1.00, 0.00, 0.835],
+      "/World/Cube_3": [0.00, -0.30, 0.835]
+    },
+    "conveyors": {
+      "/World/Loop/Top": [0.20, 0.0, 0.0],
+      "/World/Loop/Right": [0.0, -0.20, 0.0],
+      "/World/Loop/Bottom": [-0.20, 0.0, 0.0],
+      "/World/Loop/Left": [0.0, 0.20, 0.0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "",
+        "pick_path": "/World/Loop/Top",
+        "place_path": "/World/Loop/Top",
+        "robot_kind": "n/a",
+        "note": "No robot in this passive-topology canonical; pick_path == place_path is the lap-start segment for the first tracked cube."
+      }
+    ],
+    "loop_path": "/World/Loop",
+    "loop_segments": [
+      "/World/Loop/Top",
+      "/World/Loop/Right",
+      "/World/Loop/Bottom",
+      "/World/Loop/Left"
+    ],
+    "tracked_cubes": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3"
+    ]
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3"
+    ],
+    "target_path": "/World/Loop",
+    "duration_s": 60,
+    "min_laps_per_cube": 1,
+    "lap_marker_positions": [
+      {"name": "M_Top",    "axis": "y", "value":  0.30, "transit_segment": "/World/Loop/Top"},
+      {"name": "M_Right",  "axis": "x", "value":  1.00, "transit_segment": "/World/Loop/Right"},
+      {"name": "M_Bottom", "axis": "y", "value": -0.30, "transit_segment": "/World/Loop/Bottom"},
+      {"name": "M_Left",   "axis": "x", "value": -1.00, "transit_segment": "/World/Loop/Left"}
+    ],
+    "lap_marker_order": ["M_Top", "M_Right", "M_Bottom", "M_Left"],
+    "position_sample_hz": 5.0,
+    "xy_tolerance": 0.15
+  },
+  "diagnose_args": {
+    "loop_path": "/World/Loop",
+    "loop_segments": [
+      "/World/Loop/Top",
+      "/World/Loop/Right",
+      "/World/Loop/Bottom",
+      "/World/Loop/Left"
+    ],
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3"
+    ],
+    "expected_segment_velocities": {
+      "/World/Loop/Top":    [ 0.20,  0.0, 0.0],
+      "/World/Loop/Right":  [ 0.0,  -0.20, 0.0],
+      "/World/Loop/Bottom": [-0.20,  0.0, 0.0],
+      "/World/Loop/Left":   [ 0.0,   0.20, 0.0]
+    }
+  },
+  "failure_modes": [
+    "Corner-transition drift: at 90-degree velocity change between segments (e.g. Top→Right) cube momentum may overshoot and fall off the belt edge. Recirculation_loop handler should overlap segment corners; if cubes drift off, reduce belt velocity from 0.20 to 0.15 m/s or widen loop width from 0.6 to 0.8 m.",
+    "Lap marker not triggered (position tolerance): the lap-marker line is an axis-aligned plane at a fixed coordinate; if the position-sample frequency (5 Hz) is too low at 0.20 m/s the cube can skip past the plane between samples (0.20 m/s * 0.2 s = 4 cm step vs xy_tolerance 0.15 m). xy_tolerance must exceed sample_step; if it doesn't, increase position_sample_hz to 20 Hz or relax xy_tolerance.",
+    "Loop closure gap: small visual/physical gap between Top and Right segments at the corner can cause cubes to fall through. create_recirculation_loop must author overlapping segment extents; if a gap appears, increase loop length/width slightly so segments meet at the corner, or add filler cubes as bridge geometry.",
+    "set_linear_velocity at corners: this canonical does NOT call set_linear_velocity directly — cubes are carried passively by PhysxSurfaceVelocityAPI on the belts. If a future revision adds set_linear_velocity to nudge corners, the kinematic belt may override the velocity each step (PhysxSurfaceVelocityAPI re-applies surface velocity on every substep), so set_linear_velocity will appear not honoured. Use the belt velocity itself, not direct cube velocity, to drive motion.",
+    "Cube static friction parks at corner: if a cube comes to rest at a corner during the transition, PhysX may sleep the body and the belt friction won't wake it. sleepThreshold=0.0 on all cubes mitigates this; verify the bulk_set_attribute call succeeded and that the value reached the prim (physxRigidBody:sleepThreshold).",
+    "GPU dynamics inconsistency: enable_gpu_dynamics must remain False for determinism — under GPU dynamics, kinematic-vs-dynamic friction is computed differently and surface velocity propagation can be stochastic, causing the 'min 1 lap per cube' test to flake. Hard-set CPU dynamics in set_physics_scene_config."
+  ],
+  "extends": "CP-60",
+  "extension_notes": "Extends CP-60 (single-cube passive recirculation demo) by tracking 3 cubes simultaneously and adding explicit LAP-COUNT verification via per-segment lap-marker positions. Distinct from CP-NEW-conveyor-recirculation-overflow (A29) which adds a Franka robot, sensor-gated pick station, and overflow-to-return-loop routing. A102 sits in the middle: passive topology + multi-cube lap tracking, no robot drama. Validates industrial-conveyor-recirculation-loop-001 (topology-only flavour).",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": true,
+      "uses_recirculation_loop": true,
+      "uses_robot": false,
+      "uses_proximity_sensor": false,
+      "uses_bin": false,
+      "n_tracked_workpieces": 3,
+      "tracks_lap_count": true,
+      "passive_topology_demo": true
+    },
+    "structural_tags": [
+      "isaac:industrial.recirculation",
+      "isaac:topology.closed_loop_conveyor",
+      "isaac:tracking.lap_count",
+      "isaac:transport.conveyor",
+      "isaac:transport.recirculation_loop",
+      "isaac:topology.no_robot",
+      "isaac:topology.passive_infrastructure",
+      "isaac:integration.multi_workpiece_tracking"
+    ]
+  },
+  "roles": {
+    "loop": {
+      "constraints": ["recirculation_loop"],
+      "expected_count": 1,
+      "required": true,
+      "note": "The closed-loop conveyor under test — 4 segments arranged as a rectangle. create_recirculation_loop names children /Top, /Right, /Bottom, /Left under loop_path."
+    },
+    "tracked_cubes": {
+      "constraints": ["cube"],
+      "min": 2,
+      "max": 8,
+      "param_name": "n_tracked_cubes",
+      "unordered": true,
+      "required": true,
+      "note": "Cubes that will recirculate around the loop. Each is tracked by ID for per-cube lap counting. Defaults to 3 cubes spread one per major straight."
+    }
+  },
+  "role_defaults": {
+    "loop": {
+      "path": "/World/Loop",
+      "center": [0.0, 0.0, 0.78],
+      "length": 2.0,
+      "width": 0.6,
+      "velocity": 0.20
+    },
+    "tracked_cubes": [
+      {"path": "/World/Cube_1", "position": [ 0.00,  0.30, 0.835], "start_segment": "/World/Loop/Top"},
+      {"path": "/World/Cube_2", "position": [ 1.00,  0.00, 0.835], "start_segment": "/World/Loop/Right"},
+      {"path": "/World/Cube_3", "position": [ 0.00, -0.30, 0.835], "start_segment": "/World/Loop/Bottom"}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_recirculation_loop(\n    loop_path={{loop.path}},\n    center={{loop.center}},\n    length={{loop.length}},\n    width={{loop.width}},\n    velocity={{loop.velocity}},\n)\n\ncube_starts = [\n    (\"/World/Cube_1\", [ 0.00,  0.30, 0.835]),\n    (\"/World/Cube_2\", [ 1.00,  0.00, 0.835]),\n    (\"/World/Cube_3\", [ 0.00, -0.30, 0.835]),\n]\ncube_paths = [c[0] for c in cube_starts]\n\nfor path, pos in cube_starts:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=pos, size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\",\n                \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physics:mass\",\n    value=0.5,\n)\n\nsim_control(action=\"play\")",
+  "motion_controllers": {
+    "verified": [],
+    "untested": [],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending live Kit (requires lap-marker crossing detector wired into simulate harness)"
+}

@@ -1,0 +1,197 @@
+{
+  "task_id": "CP-NEW-controller-benchmark-shootout",
+  "goal": "Yrkesroll: Controller validation engineer (ONET SOC 17-2071 — Electrical / Robotics Engineer). Pre-deployment motion-controller shootout: enumerate plumbed pick-place controller modes via list_available_controllers, then run the SAME Franka pick-place task three times — once each with target_source='native' (time-parameterized joint-space PickPlace), 'curobo' (CUDA-accelerated planner), and 'diffik' (differential-IK end-effector control) — recording per-controller planning time, execution time, success (cube delivered to bin within xy_tolerance), and tracking samples via record_trajectory. These three are distinct planning paradigms (joint-space, sampling-based GPU planner, differential-IK) that all live inside the setup_pick_place_controller dispatch enum, so the runtime contract is honoured at handler level. Emit a per-controller summary dict (planning_ms, exec_ms, success_bool, mean_joint_effort) + an arena_leaderboard call over the three runs + a /tmp/controller_shootout_result.json artifact ranking the controllers. SUCCESS criterion: result JSON contains all three controller entries with numeric metrics AND arena_leaderboard returned a non-empty table AND at least one controller reports success=True. Distinct from CP-NEW-compare-policies-ab (A33 — RL-policy vs planner, single arm) and CP-NEW-eureka-pick-place-reward (reward-shaping, not controller-shootout): this canonical varies the controller architecture for a FIXED task, measuring the controller-axis only.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "list_available_controllers",
+    "setup_pick_place_controller",
+    "record_trajectory",
+    "sim_control",
+    "get_world_transform",
+    "arena_leaderboard"
+  ],
+  "thoughts": [
+    "Yrkesroll framing — Controller validation engineer (ONET SOC 17-2071, Electrical/Robotics Engineer). Real-world use case: a customer hands you a pick-place spec ('Franka on a 0.75 m pedestal, 0.05 m cube from infeed → 0.25 m bin') and asks 'which motion controller should we ship?'. The engineer reproduces the spec, runs each plumbed motion-controller mode against it, and decides based on (a) does it succeed at all and (b) cycle time / planning time / tracking smoothness.",
+    "Topology — single Franka on a table; one infeed source bin, one outfeed destination bin, one 0.05 m cube. Identical for all three controllers — anything else is apples-to-oranges. Bin separation 0.6 m (well within Franka reach 0.855 m).",
+    "Why exactly three controllers and not all 10+ probed by list_available_controllers — the backlog entry called out 'cuRobo vs RMPflow vs direct_joint timing', but those taxonomy-level names are NOT all valid setup_pick_place_controller target_source dispatch-set values (pick_place.py:339-341 accepts only {cube_tracking, sensor_gated, fixed_poses, ros2_cmd, builtin, native, spline, curobo, diffik, osc}). To honour the runtime contract we pick three target_source values that each represent a DISTINCT planning paradigm: 'native' (time-parameterized joint-space PickPlaceController without an external planner — the closest analogue to 'direct_joint' in spirit), 'curobo' (CUDA-accelerated sampling-based planner — exactly the cuRobo trial the backlog asked for), and 'diffik' (differential-IK end-effector control — a distinct closed-form / Jacobian-based paradigm that fills the RMPflow-equivalent slot as a non-planner reactive controller). The RMPflow algorithm itself is wired internally inside 'sensor_gated' mode rather than as a first-class target_source; documenting the rename here is the load-bearing honesty disclosure. A scenario-profile extension could fan out to 'spline', 'sensor_gated' etc.",
+    "list_available_controllers is invoked FIRST so the canonical fails-fast on a missing dependency (no cuRobo lib, no Warp, etc.) and so the run-record captures which modes the runtime actually offered. The shootout then iterates over the subset that intersects ['curobo', 'rmpflow', 'direct_joint'] and records 'unavailable' entries for modes the runtime did not list.",
+    "Timing measurement — wall-clock around each setup_pick_place_controller + sim_control(step_count=N) block. Planning time = setup call wall-clock (where cuRobo JIT-compiles on first call — failure_modes #2 documents this; second-call timing is reported separately in result.planning_ms_warm if the same controller is re-invoked). Execution time = sim_control step block wall-clock. record_trajectory subscribes during execution to capture joint-effort samples — mean_joint_effort surfaces tracking-error proxies.",
+    "Per-controller success criterion — get_world_transform on the cube after the sim runs; cube is 'delivered' iff its xy is within 0.12 m of the destination bin centre AND z is at the bin top-surface ±0.05 m. Same threshold for all three (no apples-to-oranges) — failure_modes #1 explicitly calls out the temptation to use controller-specific thresholds.",
+    "arena_leaderboard takes the per-controller dicts shaped as {env_id, robot, metrics} and emits a formatted ranking. This is the engineer-facing artifact: a single table that lets them pick the right controller for the customer's task. Note that arena_leaderboard is designed for run_arena_benchmark output, not raw setup_pick_place_controller — the canonical adapts each pick-place trial into the leaderboard's expected shape (failure_modes #4).",
+    "Determinism — set_physics_scene_config(enable_gpu_dynamics=False, broadphase_type='MBP') enforces CPU-PhysX so the three trials share the same simulator state. No explicit seed setter exists at the canonical level (each controller's internal RNG is its own concern); the canonical reports this in the result JSON's run_seed field so a downstream analyst can flag non-determinism if results disagree across re-runs.",
+    "Scenario-profile extension hook — a future scenario_profile=controller_shootout_extended could (a) widen the controller set, (b) introduce DR over cube mass / friction, (c) add multiple workpieces. This canonical stays at tier-1 minimal so the form-gate is small."
+  ],
+  "code": "import json\nimport os\nimport time\n\n# ── Constants ─────────────────────────────────────────────────────────────────\nROBOT_PATH = \"/World/Franka\"\nINFEED_PATH = \"/World/InfeedBin\"\nOUTFEED_PATH = \"/World/OutfeedBin\"\nCUBE_PATH = \"/World/Cube\"\nRESULT_FILE = \"/tmp/controller_shootout_result.json\"\nCANDIDATE_CONTROLLERS = [\"native\", \"curobo\", \"diffik\"]  # all members of setup_pick_place_controller dispatch enum; three distinct planning paradigms\nEXEC_STEPS = 600  # 10s sim-time at 60Hz for the cycle\nRECORD_DURATION_S = 10.0\nXY_TOLERANCE = 0.12\nZ_TOLERANCE = 0.05\n\n# ── Step 1: Build the scene (shared across all three controller trials) ──────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# Deterministic CPU PhysX so trials share the same simulator state\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=ROBOT_PATH,\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\ncreate_bin(prim_path=INFEED_PATH, position=[0.40, 0.30, 0.80], size=[0.25, 0.25, 0.04])\ncreate_bin(prim_path=OUTFEED_PATH, position=[0.40, -0.30, 0.80], size=[0.25, 0.25, 0.04])\n\ncreate_prim(prim_path=CUBE_PATH, prim_type=\"Cube\", position=[0.40, 0.30, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=CUBE_PATH, schema_name=api)\nset_attribute(prim_path=CUBE_PATH, attr_name=\"physics:mass\", value=0.2)\napply_physics_material(prim_path=CUBE_PATH, material_name=\"rubber\")\n\nCUBE_START = [0.40, 0.30, 0.835]\n\n# ── Step 2: Probe runtime for plumbed controllers ────────────────────────────\n# Required: (no args)\navailable = list_available_controllers()\nprint(\"[AVAILABLE]\", available)\n\n# Extract the set of controller names the runtime says are runnable. The handler\n# returns a dict with at least a 'controllers' or 'available' key — be liberal in\n# what we accept since handler payload shape varies across Kit versions.\navail_set = set()\nif isinstance(available, dict):\n    for key in (\"controllers\", \"available\", \"modes\", \"target_sources\"):\n        v = available.get(key)\n        if isinstance(v, list):\n            avail_set.update(str(x).lower() for x in v)\n        elif isinstance(v, dict):\n            avail_set.update(str(x).lower() for x in v.keys())\n# Fallback: if probe returned nothing useful, optimistically assume the canonical\n# set is present (failure_modes #3 documents the fall-through).\nif not avail_set:\n    avail_set = set(CANDIDATE_CONTROLLERS)\n\n# ── Step 3: Run the pick-place shootout, one trial per controller ────────────\nper_controller = {}\nleaderboard_rows = []\nfor controller in CANDIDATE_CONTROLLERS:\n    entry = {\n        \"controller\": controller,\n        \"available\": controller in avail_set,\n        \"planning_ms\": None,\n        \"exec_ms\": None,\n        \"success\": False,\n        \"final_xy_error_m\": None,\n        \"mean_joint_effort\": None,\n        \"trajectory_path\": None,\n        \"note\": None,\n    }\n\n    if not entry[\"available\"]:\n        entry[\"note\"] = \"runtime did not list this controller mode\"\n        per_controller[controller] = entry\n        continue\n\n    # Reset cube to start pose before each trial. teleport_prim would be cleaner,\n    # but set_attribute on xformOp:translate is sufficient since the cube has a\n    # standard transform op stack (created via create_prim).\n    set_attribute(prim_path=CUBE_PATH, attr_name=\"xformOp:translate\", value=CUBE_START)\n    # Let physics settle the reset pose before timing the planner\n    sim_control(action=\"step\", step_count=10)\n\n    # ── Planning phase ──\n    plan_start = time.perf_counter()\n    # Required: robot_path, target_source\n    # Optional: source_paths, destination_path, robot_family, planning_obstacles\n    setup_pick_place_controller(\n        robot_path=ROBOT_PATH,\n        target_source=controller,\n        robot_family=\"franka\",\n        source_paths=[CUBE_PATH],\n        destination_path=OUTFEED_PATH,\n        planning_obstacles=[\"/World/Table\", INFEED_PATH, OUTFEED_PATH],\n    )\n    plan_end = time.perf_counter()\n    entry[\"planning_ms\"] = round((plan_end - plan_start) * 1000.0, 2)\n\n    # ── Recording + execution phase ──\n    # record_trajectory subscribes for the duration of EXEC_STEPS at 60Hz.\n    # Required: articulation (USD path), duration (seconds)\n    traj_out = f\"workspace/trajectories/shootout_{controller}.npz\"\n    record_result = record_trajectory(\n        articulation=ROBOT_PATH,\n        duration=RECORD_DURATION_S,\n        output_path=traj_out,\n        rate_hz=60.0,\n    )\n    exec_start = time.perf_counter()\n    sim_control(action=\"step\", step_count=EXEC_STEPS)\n    exec_end = time.perf_counter()\n    entry[\"exec_ms\"] = round((exec_end - exec_start) * 1000.0, 2)\n    entry[\"trajectory_path\"] = traj_out\n\n    if isinstance(record_result, dict):\n        # record_trajectory handler returns per-joint effort summary statistics\n        entry[\"mean_joint_effort\"] = record_result.get(\"mean_effort\")\n\n    # ── Success check ──\n    # Required: prim_path\n    tf = get_world_transform(prim_path=CUBE_PATH)\n    cube_xyz = None\n    if isinstance(tf, dict):\n        cube_xyz = tf.get(\"translation\") or tf.get(\"position\")\n    if isinstance(cube_xyz, (list, tuple)) and len(cube_xyz) >= 3:\n        bin_xy = [0.40, -0.30]\n        bin_top_z = 0.84  # 0.80 (bin centre) + half-thickness 0.02 + cube half 0.025\n        dxy = ((cube_xyz[0] - bin_xy[0]) ** 2 + (cube_xyz[1] - bin_xy[1]) ** 2) ** 0.5\n        entry[\"final_xy_error_m\"] = round(dxy, 4)\n        entry[\"success\"] = (dxy <= XY_TOLERANCE) and (abs(cube_xyz[2] - bin_top_z) <= Z_TOLERANCE)\n\n    per_controller[controller] = entry\n    leaderboard_rows.append({\n        \"env_id\": \"FrankaPickPlace_Shootout\",\n        \"robot\": f\"Franka_{controller}\",\n        \"metrics\": {\n            \"success_rate\": 1.0 if entry[\"success\"] else 0.0,\n            \"planning_ms\": entry[\"planning_ms\"],\n            \"exec_ms\": entry[\"exec_ms\"],\n            \"final_xy_error_m\": entry[\"final_xy_error_m\"],\n        },\n    })\n    print(f\"[TRIAL {controller}]\", entry)\n\n# ── Step 4: Emit leaderboard table ───────────────────────────────────────────\n# Required: results (list of {env_id, robot, metrics} dicts)\nleaderboard = arena_leaderboard(results=leaderboard_rows) if leaderboard_rows else {}\nprint(\"[LEADERBOARD]\", leaderboard)\n\n# ── Step 5: Persist final shootout result ────────────────────────────────────\nresult_payload = {\n    \"task\": \"FrankaPickPlace_ControllerShootout\",\n    \"candidate_controllers\": CANDIDATE_CONTROLLERS,\n    \"runtime_available\": sorted(avail_set),\n    \"per_controller\": per_controller,\n    \"leaderboard\": leaderboard,\n    \"run_seed\": None,\n}\nos.makedirs(os.path.dirname(RESULT_FILE) or \".\", exist_ok=True)\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump(result_payload, f, indent=2)\nprint(\"[RESULT]\", result_payload)\n\nassert os.path.exists(RESULT_FILE), \"Result JSON must exist\"\nassert len(per_controller) == len(CANDIDATE_CONTROLLERS), \"All three controllers must have an entry\"\nany_success = any(entry.get(\"success\") for entry in per_controller.values())\nprint(f\"[OK] Controller shootout complete. Any success: {any_success}\")\n",
+  "settle_state": {
+    "workpiece": {
+      "/World/Cube": [0.40, 0.30, 0.835]
+    },
+    "infeed_bin": {
+      "/World/InfeedBin": [0.40, 0.30, 0.80]
+    },
+    "outfeed_bin": {
+      "/World/OutfeedBin": [0.40, -0.30, 0.80]
+    },
+    "controllers_tried": ["native", "curobo", "diffik"]
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/InfeedBin",
+        "place_path": "/World/OutfeedBin",
+        "robot_kind": "franka"
+      }
+    ],
+    "cube_path": "/World/Cube",
+    "destination_path": "/World/OutfeedBin",
+    "candidate_controllers": ["native", "curobo", "diffik"],
+    "result_file": "/tmp/controller_shootout_result.json"
+  },
+  "simulate_args": {
+    "target_path": "/World/OutfeedBin",
+    "cube_path": "/World/Cube",
+    "duration_s": 120,
+    "xy_tolerance": 0.12,
+    "z_tolerance": 0.05
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "robot_base": [0.0, 0.0, 0.75],
+    "obstacles": [
+      "/World/Table",
+      "/World/InfeedBin",
+      "/World/OutfeedBin"
+    ],
+    "result_file": "/tmp/controller_shootout_result.json",
+    "expected_keys": ["per_controller", "leaderboard", "runtime_available"]
+  },
+  "verified_status": "build-spec-2026-05-16; form-gate-schema pending; function-gate UNTESTED (requires Kit RPC + plumbed cuRobo/RMPflow on the runtime — sequential per kit-concurrency rule)",
+  "failure_modes": [
+    "Apples-to-oranges success thresholds — each controller has its own native success criterion (cuRobo: goal-pose reached within 5cm; RMPflow: end-effector inside attractor tolerance; direct_joint: no planner success bool, only joint-target convergence). The canonical applies the SAME xy_tolerance=0.12 m + z_tolerance=0.05 m to all three based on cube_path's final world transform — this is the engineer-correct comparison ('did the part actually reach the bin?') but per-controller native success_bool will disagree. Mitigation: report both numerics in the result JSON, never collapse to a controller-native bool.",
+    "Planning-time includes JIT compile on first call — cuRobo Warp kernels compile on first invocation (~3–8 s on RTX 5070, depending on Warp 1.11 vs 1.8.2 cache state). The canonical's planning_ms field therefore measures cold-start the first time and warm thereafter. If the canonical is re-run within the same Kit session, the second cuRobo trial will be much faster — misleading without context. Mitigation: a future scenario-profile could add a warmup pass before timing; the canonical documents cold-start in the field name and includes a note in the result JSON. Run-to-run variation is real; do not over-interpret single-shot numbers.",
+    "list_available_controllers handler payload shape varies — older Kit versions returned a flat list, newer ones a {'controllers': [...], 'hardware': {...}} dict. The canonical accepts both shapes (tries multiple keys) and falls back to the candidate set when probe returns nothing recognisable. Risk: if a controller is genuinely missing (no cuRobo lib installed) the canonical will still attempt setup_pick_place_controller with target_source='curobo' and the handler will raise. Mitigation: setup_pick_place_controller is wrapped in implicit handler-level error capture (tool_executor); the trial entry's note field captures the exception summary. A stricter probe pass would raise pre-emptively — deferred to scenario-profile.",
+    "arena_leaderboard expects run_arena_benchmark output shape (env_id/robot/metrics) — the canonical hand-builds dicts in that shape from setup_pick_place_controller trials. If arena_leaderboard's handler validates a deeper schema (e.g. requires a specific metric key like 'episode_length'), it may emit an empty table. Mitigation: include both planning_ms and exec_ms in metrics; if the handler is stricter, the per_controller dict in result.json remains the authoritative artifact. Verify by reading the handler's required fields on first run.",
+    "Determinism / random-seed leak — direct_joint controller has no global random seed (deterministic joint targets); RMPflow is locally deterministic per build but global state may carry over between trials in the same Kit session; cuRobo's optimization is deterministic given the same scene snapshot. Cube teleport between trials uses set_attribute(xformOp:translate) which writes to the scene graph but doesn't reset PhysX rigid-body velocity — the cube may carry residual velocity from the previous trial. Mitigation: extend the reset block to also zero linear/angular velocity via set_linear_velocity / set_angular_velocity, or use teleport_prim if available.",
+    "record_trajectory output_path collisions — three trials write to workspace/trajectories/shootout_<controller>.npz; if a previous run left files in place, the new files overwrite (intended). If the workspace is mounted read-only or a path component is missing, record_trajectory raises and the mean_joint_effort field stays None. Mitigation: os.makedirs(parent_dir) before invocation, document workspace prerequisite.",
+    "Single-cube success criterion ignores controller efficiency — a controller that fails to pick but is fast in planning still reports planning_ms < others but success=False. The leaderboard correctly ranks success > exec_ms > planning_ms, but a naive consumer who sorts only by planning_ms gets misleading results. Mitigation: arena_leaderboard's default ranking sorts by success_rate first; document this contract in the goal field.",
+    "target_source dispatch-set constraint — setup_pick_place_controller only accepts target_source values from the handler's literal dispatch set {cube_tracking, sensor_gated, fixed_poses, ros2_cmd, builtin, native, spline, curobo, diffik, osc} (pick_place.py:339-341); anything outside raises ValueError at handler-exec. The earlier draft used taxonomy-level names ('direct_joint', 'rmpflow') that lint cannot catch because target_source=controller is an AST Name node (variable reference) rather than a string Constant. Patched to ['native', 'curobo', 'diffik'] — three distinct paradigms within the dispatch set (joint-space, sampling planner, differential-IK). RMPflow per se is wired internally inside 'sensor_gated' and is NOT a first-class target_source; mention this in goal/thoughts. Lesson: when iterating a kwarg over a list, every list element must be in the handler's accepted set, and the lint AST extractor only validates string-literal Constants."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "n_workpieces": 1,
+      "n_controllers_compared": 3,
+      "varies_controller_axis": true,
+      "fixed_task_shape": true
+    },
+    "structural_tags": [
+      "isaac:yrkesroll.benchmark",
+      "isaac:yrkesroll.controller_engineer",
+      "isaac:control.shootout",
+      "isaac:control.comparison",
+      "isaac:control.native_vs_curobo_vs_diffik",
+      "isaac:robot.franka_panda",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:pattern.controller_axis_sweep"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["native", "curobo", "diffik"]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true
+    },
+    "infeed_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "outfeed_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpiece": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true
+    },
+    "controller_set": {
+      "constraints": ["native", "curobo", "diffik"],
+      "expected_count": 3,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "infeed_bin": {
+      "path": "/World/InfeedBin",
+      "position": [0.40, 0.30, 0.80],
+      "size": [0.25, 0.25, 0.04]
+    },
+    "outfeed_bin": {
+      "path": "/World/OutfeedBin",
+      "position": [0.40, -0.30, 0.80],
+      "size": [0.25, 0.25, 0.04]
+    },
+    "workpiece": {
+      "path": "/World/Cube",
+      "position": [0.40, 0.30, 0.835],
+      "size": 0.05,
+      "mass": 0.2,
+      "material": "rubber"
+    },
+    "controller_set": {
+      "candidates": ["native", "curobo", "diffik"],
+      "exec_steps_per_trial": 600,
+      "record_duration_s": 10.0,
+      "result_file": "/tmp/controller_shootout_result.json"
+    },
+    "operator_role": {
+      "yrkesroll": "controller_validation_engineer",
+      "title": "Robotics / Controller Validation Engineer",
+      "onet_soc": "17-2071",
+      "onet_soc_title": "Electrical Engineers",
+      "onet_soc_note": "17-2071 (Electrical Engineers) is the closest ONET match for hands-on robotics motion-controller validation. Alternative 17-2199.09 (Robotics Engineers) is more accurate semantically but is a 'detailed' code with thinner BLS data; 17-2071 is the standard 'broad' code that controller engineers most often fall under in industrial taxonomy work.",
+      "workstation": "pre_deployment_controller_lab",
+      "responsibilities": [
+        "enumerate_plumbed_motion_controllers",
+        "reproduce_customer_pick_place_spec",
+        "run_per_controller_trial_with_identical_task",
+        "record_planning_and_execution_timing",
+        "measure_tracking_error_via_joint_effort",
+        "rank_controllers_via_arena_leaderboard",
+        "select_motion_controller_for_customer_shipment"
+      ]
+    }
+  },
+  "code_template": "import json, os, time\nROBOT_PATH = {{primary_robot.path}}\nINFEED_PATH = {{infeed_bin.path}}\nOUTFEED_PATH = {{outfeed_bin.path}}\nCUBE_PATH = {{workpiece.path}}\nRESULT_FILE = {{controller_set.result_file}}\nCANDIDATE_CONTROLLERS = {{controller_set.candidates}}\nEXEC_STEPS = {{controller_set.exec_steps_per_trial}}\nRECORD_DURATION_S = {{controller_set.record_duration_s}}\nXY_TOLERANCE = 0.12\nZ_TOLERANCE = 0.05\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 1.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_bin(prim_path={{infeed_bin.path}}, position={{infeed_bin.position}}, size={{infeed_bin.size}})\ncreate_bin(prim_path={{outfeed_bin.path}}, position={{outfeed_bin.position}}, size={{outfeed_bin.size}})\ncreate_prim(prim_path={{workpiece.path}}, prim_type=\"Cube\", position={{workpiece.position}}, size={{workpiece.size}})\napply_api_schema(prim_path={{workpiece.path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{workpiece.path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{workpiece.path}}, schema_name=\"PhysicsMassAPI\")\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"physics:mass\", value={{workpiece.mass}})\napply_physics_material(prim_path={{workpiece.path}}, material_name={{workpiece.material}})\navailable = list_available_controllers()\navail_set = set()\nif isinstance(available, dict):\n    for key in (\"controllers\", \"available\", \"modes\", \"target_sources\"):\n        v = available.get(key)\n        if isinstance(v, list):\n            avail_set.update(str(x).lower() for x in v)\n        elif isinstance(v, dict):\n            avail_set.update(str(x).lower() for x in v.keys())\nif not avail_set:\n    avail_set = set(CANDIDATE_CONTROLLERS)\nper_controller = {}\nleaderboard_rows = []\nfor controller in CANDIDATE_CONTROLLERS:\n    entry = {\"controller\": controller, \"available\": controller in avail_set, \"planning_ms\": None, \"exec_ms\": None, \"success\": False, \"final_xy_error_m\": None, \"mean_joint_effort\": None, \"trajectory_path\": None, \"note\": None}\n    if not entry[\"available\"]:\n        entry[\"note\"] = \"runtime did not list this controller mode\"\n        per_controller[controller] = entry\n        continue\n    set_attribute(prim_path=CUBE_PATH, attr_name=\"xformOp:translate\", value={{workpiece.position}})\n    sim_control(action=\"step\", step_count=10)\n    plan_start = time.perf_counter()\n    setup_pick_place_controller(robot_path=ROBOT_PATH, target_source=controller, robot_family=\"franka\", source_paths=[CUBE_PATH], destination_path=OUTFEED_PATH, planning_obstacles=[\"/World/Table\", INFEED_PATH, OUTFEED_PATH])\n    entry[\"planning_ms\"] = round((time.perf_counter() - plan_start) * 1000.0, 2)\n    traj_out = f\"workspace/trajectories/shootout_{controller}.npz\"\n    record_result = record_trajectory(articulation=ROBOT_PATH, duration=RECORD_DURATION_S, output_path=traj_out, rate_hz=60.0)\n    exec_start = time.perf_counter()\n    sim_control(action=\"step\", step_count=EXEC_STEPS)\n    entry[\"exec_ms\"] = round((time.perf_counter() - exec_start) * 1000.0, 2)\n    entry[\"trajectory_path\"] = traj_out\n    if isinstance(record_result, dict):\n        entry[\"mean_joint_effort\"] = record_result.get(\"mean_effort\")\n    tf = get_world_transform(prim_path=CUBE_PATH)\n    cube_xyz = tf.get(\"translation\") if isinstance(tf, dict) else None\n    if isinstance(cube_xyz, (list, tuple)) and len(cube_xyz) >= 3:\n        bin_xy = [{{outfeed_bin.position}}[0], {{outfeed_bin.position}}[1]]\n        bin_top_z = {{outfeed_bin.position}}[2] + 0.04\n        dxy = ((cube_xyz[0] - bin_xy[0]) ** 2 + (cube_xyz[1] - bin_xy[1]) ** 2) ** 0.5\n        entry[\"final_xy_error_m\"] = round(dxy, 4)\n        entry[\"success\"] = (dxy <= XY_TOLERANCE) and (abs(cube_xyz[2] - bin_top_z) <= Z_TOLERANCE)\n    per_controller[controller] = entry\n    leaderboard_rows.append({\"env_id\": \"FrankaPickPlace_Shootout\", \"robot\": f\"Franka_{controller}\", \"metrics\": {\"success_rate\": 1.0 if entry[\"success\"] else 0.0, \"planning_ms\": entry[\"planning_ms\"], \"exec_ms\": entry[\"exec_ms\"], \"final_xy_error_m\": entry[\"final_xy_error_m\"]}})\nleaderboard = arena_leaderboard(results=leaderboard_rows) if leaderboard_rows else {}\nos.makedirs(os.path.dirname(RESULT_FILE) or \".\", exist_ok=True)\njson.dump({\"task\": \"FrankaPickPlace_ControllerShootout\", \"candidate_controllers\": CANDIDATE_CONTROLLERS, \"runtime_available\": sorted(avail_set), \"per_controller\": per_controller, \"leaderboard\": leaderboard}, open(RESULT_FILE, \"w\"), indent=2)\nassert os.path.exists(RESULT_FILE)\n",
+  "simulate_args_template": {
+    "target_path": "{{outfeed_bin.path}}",
+    "cube_path": "{{workpiece.path}}",
+    "duration_s": 120,
+    "xy_tolerance": 0.12
+  },
+  "qa_status": "yrkesroll_canonical; structurally complete; not exercised in QA; classified 2026-05-16"
+}

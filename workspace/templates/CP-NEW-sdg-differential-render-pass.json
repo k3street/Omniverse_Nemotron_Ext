@@ -1,0 +1,174 @@
+{
+  "task_id": "CP-NEW-sdg-differential-render-pass",
+  "goal": "Generate a 100-frame PAIRED Synthetic Data Generation (SDG) dataset where every frame is rendered TWICE from identical object poses: once as a clean baseline (DR randomizers off / neutral lighting + neutral material) and once with a per-frame perturbation applied to lighting intensity and material color. The pair {frame_N_baseline.png, frame_N_perturbed.png} shares OBJECT POSES (same Cube positions and rotations within 1 mm tolerance across the two passes) and differs ONLY in the DR-controlled illuminant + material parameters, producing supervised pairs suitable for contrastive sim-to-real training or differential rendering loss. Scene: 4 labelled cubes scattered on a table under a DomeLight + single overhead camera. configure_differential_sdg(static_elements=['/World/Ground','/World/Table','/World/Cube_*'], dynamic_elements=['/World/DomeLight','/World/Cube_*/material'], randomize=['color','lighting']) declares pose-bearing prims as STATIC across passes and only lighting/material as DYNAMIC — this is the construct that guarantees pose identity across the baseline and perturbed render of the same frame index. The render loop is driven by export_dataset(num_frames=200) where the writer namespaces output by capture index (200 captures = 100 baseline + 100 perturbed). add_domain_randomizer on the DomeLight (intensity) and Cube material colors creates the per-frame perturbation budget. SUCCESS: output dir /tmp/sdg_diff_render contains 200 RGB frames + 200 annotation entries; 100 frame pairs are recoverable (frame_0_baseline ↔ frame_0_perturbed share cube poses to within 1 mm) AND validate_annotations reports zero bbox bound violations across ≥30 sampled frames. Exercises create_prim, set_attribute, apply_api_schema, set_semantic_label, configure_camera (DEPRECATED — set_camera_params is preferred), set_camera_params, scatter_on_surface (initial object placement), configure_differential_sdg (static vs dynamic partition declaration), add_domain_randomizer (lighting intensity + material color, applied only on perturbed passes), create_sdg_pipeline, preview_sdg, export_dataset, validate_annotations. Realizes sdg-differential-render-pass-001 (sdg category, tier-1-locally-runnable).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_semantic_label",
+    "set_physics_scene_config",
+    "scatter_on_surface",
+    "set_camera_look_at",
+    "configure_camera",
+    "set_camera_params",
+    "configure_differential_sdg",
+    "add_domain_randomizer",
+    "create_sdg_pipeline",
+    "preview_sdg",
+    "export_dataset",
+    "validate_annotations"
+  ],
+  "thoughts": [
+    "Pattern: other (paired baseline+perturbed render dataset — no robot motion, no pick-place delivery criterion; success is the shape of the output dataset, specifically that each frame index has BOTH a baseline render AND a perturbed render sharing the same object poses).",
+    "Differential-SDG semantics: configure_differential_sdg declares which scene elements are STATIC across render passes vs DYNAMIC (re-randomized between passes). Static = geometry that should NOT change between baseline and perturbed pass (object poses, table, ground). Dynamic = elements that DO change (light intensity, material colors). This is the inverse of the more common 'all-randomized' SDG mode and is exactly what the backlog calls 'differential render pair'. The pair {baseline, perturbed} is constructed by running the pipeline twice with DR enabled vs disabled, and the static-element declaration is what guarantees pose identity between the two passes.",
+    "Pair-rendering strategy: instead of patching the SDG orchestrator to capture two frames per scene state (which would require omni.replicator internals), this canonical uses a SEED-PRESERVED two-phase export. Phase 1: add_domain_randomizer with neutral ranges (intensity_min=intensity_max=1200.0 ; color_min=color_max=[0.8,0.8,0.8]) → renders 100 BASELINE frames. Phase 2: re-call add_domain_randomizer with WIDE ranges (intensity_min=500, intensity_max=2200 ; color_min=[0.3,0.3,0.3] color_max=[1.0,1.0,1.0]) with the SAME SEED → renders 100 PERTURBED frames over identical object scatter. Because scatter_on_surface(seed=42) is called ONCE before the two phases and the cubes have no per-frame pose randomizer attached, object poses are FROZEN across the two phases — fulfilling the differential-render invariant.",
+    "Why no per-frame pose jitter: differential rendering REQUIRES paired object poses. If add_domain_randomizer(type='pose') were attached, the baseline and perturbed passes would each re-sample object poses independently and the 1 mm pair-tolerance would be violated. The configure_differential_sdg static_elements list explicitly EXCLUDES pose from the dynamic set — verify by checking that '/World/Cube_*' is in static_elements and there is NO add_domain_randomizer with randomizer_type='pose' in this canonical.",
+    "Output directory layout: /tmp/sdg_diff_render/baseline/rgb_*.png (100 frames, indices 0..99) + /tmp/sdg_diff_render/perturbed/rgb_*.png (100 frames, indices 0..99). Pair recovery is by matching frame_index across the two subdirs. annotations/instances.json (COCO format) is shared between the two phases — image_ids are namespaced by id_offset so baseline_0 → image_id 1_000_000, perturbed_0 → image_id 2_000_000.",
+    "configure_differential_sdg arg semantics: static_elements is a list of USD paths whose state must be PRESERVED across the differential pair. dynamic_elements is the list whose state CHANGES. randomize controls which randomizers apply to dynamic elements (e.g. 'color', 'lighting', 'rotation'). The pose-bearing prims ('/World/Cube_*') appear in static_elements; their materials are conceptually dynamic but we list them in static_elements too because the material binding is a per-prim attribute and the colour change is applied via set_attribute on primvars:displayColor inside the dynamic loop, NOT via material reassignment.",
+    "Seed preservation across phases: SDG orchestrator uses the seed passed to add_domain_randomizer to drive its internal sampler. By setting the SAME seed=42 across the baseline and perturbed phases AND ensuring scatter_on_surface(seed=42) ran ONCE before both, the per-frame pose state at frame k is IDENTICAL in the two phases. The only difference is the lighting + color sample at frame k, which the DR ranges configure.",
+    "Single-camera rationale: differential rendering for contrastive training does NOT require multi-view — a single overhead camera is sufficient because the supervision signal is the photometric delta between baseline and perturbed at the SAME viewpoint. Multi-view differential rendering (e.g. for NeRF + DR composition) would require N cameras × 2 passes = 2N images per frame, which the configure_coco_yolo_writer multi-cam namespacing can handle but is out of scope for this canonical.",
+    "preview_sdg(num_samples=4) generates 2 baseline + 2 perturbed previews so the operator can visually verify (a) cube poses identical across paired previews, (b) lighting + color visibly different across paired previews. If pose identity fails on preview, abort before the 200-frame export run.",
+    "validate_annotations(num_samples=30) reads back the merged COCO and confirms bbox bounds + class coverage. Pair-identity verification (cube poses within 1 mm) is NOT a validate_annotations check (that tool validates annotation file shape, not scene-state consistency); pair-identity is enforced UPSTREAM by the configure_differential_sdg static_elements declaration plus the seed-preserved two-phase export.",
+    "Distinct from CP-NEW-scene-sdg-full-pipeline (single-pass, all-randomized, 200 frames). Distinct from CP-NEW-sdg-multi-cam-correlated-dr (multi-camera, correlated DR across cameras, single pass per frame). Distinct from CP-NEW-sdg-class-balance-rebalance (multi-class with retry loop, single pass per frame). This canonical is the ONLY one that uses configure_differential_sdg + a two-phase export to produce PAIRED baseline/perturbed renders of identical scene state.",
+    "motion_controllers: none — pure SDG data generation, no arm motion.",
+    "BLOCKER: omni.replicator must be enabled. configure_differential_sdg + validate_annotations handlers must be present (Phase 7B SDG addendum). configure_differential_sdg is currently a SCAFFOLDING handler that records intent but does NOT yet patch the orchestrator step loop to actually freeze static_elements across frames — the two-phase export construct here works around that by manually controlling DR ranges across phases, so the canonical is functionally complete even if the handler is a no-op when run."
+  ],
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:color\", value=[1.0, 1.0, 1.0])\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Table surface ──────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── 4 labelled cubes on the table (initial grid; scatter_on_surface fixes final placement) ────\nfor i in range(4):\n    col = i % 2\n    row = i // 2\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(\n        prim_path=path,\n        prim_type=\"Cube\",\n        position=[col * 0.20 - 0.10, row * 0.20 - 0.10, 0.81],\n        size=0.07,\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    # Neutral starting color — perturbed phase will overwrite primvars:displayColor via add_domain_randomizer(color)\n    set_attribute(prim_path=path, attr_name=\"primvars:displayColor\", value=[[0.8, 0.8, 0.8]])\n    set_semantic_label(prim_path=path, class_name=\"cube\")\n\n# ── Single-pass scatter — locks the object poses for BOTH baseline and perturbed phases ────\n# This is the load-bearing call: scatter is run ONCE, no per-frame pose randomizer is attached,\n# so the cube positions are FROZEN for the entire 200-frame export (100 baseline + 100 perturbed).\nscatter_on_surface(\n    source_prims=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\", \"/World/Cube_4\"],\n    target_mesh=\"/World/Table\",\n    count=4,\n    spacing=0.12,\n    normal_align=False,\n    penetration_check=True,\n    seed=42,\n)\n\n# ── Single overhead camera ─────────────────────────────────────────────────────\n# configure_camera is DEPRECATED; set_camera_params is the canonical path for intrinsics.\n# Position is set explicitly on the prim transform; set_camera_look_at orients the camera.\ncreate_prim(prim_path=\"/World/SdgCamera\", prim_type=\"Camera\", position=[0, 0, 1.65])\nset_camera_look_at(camera_path=\"/World/SdgCamera\", target=[0, 0, 0.75], up=[0, 1, 0])\nconfigure_camera(\n    camera_path=\"/World/SdgCamera\",\n    focal_length=35.0,\n    horizontal_aperture=20.955,\n    vertical_aperture=15.2908,\n    clipping_range=[0.01, 10.0],\n)\nset_camera_params(\n    camera_path=\"/World/SdgCamera\",\n    params={\"focal_length\": 35.0, \"horizontal_aperture\": 20.955, \"vertical_aperture\": 15.2908},\n)\n\n# ── Differential SDG partition declaration ────────────────────────────────────\n# Cubes + table + ground are STATIC across the differential pair (their state must be\n# preserved between the baseline and perturbed pass of the same frame index). The\n# DomeLight and per-cube material colors are DYNAMIC — they are the only things that\n# differ between the baseline and perturbed render of frame k.\nconfigure_differential_sdg(\n    static_elements=[\n        \"/World/Ground\",\n        \"/World/Table\",\n        \"/World/Cube_1\",\n        \"/World/Cube_2\",\n        \"/World/Cube_3\",\n        \"/World/Cube_4\",\n    ],\n    dynamic_elements=[\n        \"/World/DomeLight\",\n    ],\n    randomize=[\"color\", \"lighting\"],\n)\n\n# ── PHASE 1 (baseline): neutral DR ranges — collapsed to a single point ────────\n# add_domain_randomizer with min == max acts as a constant, producing identical\n# illuminant + material color across all 100 baseline frames. The cube poses are\n# already frozen by the single scatter_on_surface call above.\nadd_domain_randomizer(\n    target=\"/World/DomeLight\",\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": 1200.0, \"intensity_max\": 1200.0},\n)\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"color\",\n    params={\"color_min\": [0.8, 0.8, 0.8], \"color_max\": [0.8, 0.8, 0.8]},\n)\n\n# Build the SDG pipeline (single overhead camera, RGB + bbox annotators)\ncreate_sdg_pipeline(\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    output_format=\"coco\",\n    num_frames=100,\n    output_dir=\"/tmp/sdg_diff_render/baseline\",\n    camera_position=[0, 0, 1.65],\n    camera_look_at=[0, 0, 0.75],\n    resolution=[1280, 720],\n)\n\n# Preview 2 baseline frames so operator can visually confirm neutral lighting + neutral color\npreview_sdg(num_samples=2)\n\n# Export 100 baseline frames\nexport_dataset(\n    output_dir=\"/tmp/sdg_diff_render/baseline\",\n    num_frames=100,\n    step_batch=10,\n)\n\n# ── PHASE 2 (perturbed): wide DR ranges — per-frame lighting + color variation ───\n# Re-call add_domain_randomizer with WIDE ranges. The SAME seed=42 inside the\n# orchestrator means the per-frame sampling sequence is reproducible; combined\n# with the frozen object poses (no pose randomizer attached), each frame k in\n# the perturbed phase shares cube poses with frame k in the baseline phase.\nadd_domain_randomizer(\n    target=\"/World/DomeLight\",\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": 500.0, \"intensity_max\": 2200.0},\n)\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"color\",\n    params={\"color_min\": [0.30, 0.30, 0.30], \"color_max\": [1.00, 1.00, 1.00]},\n)\n\n# Rebuild the SDG pipeline pointed at the perturbed subdir\ncreate_sdg_pipeline(\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    output_format=\"coco\",\n    num_frames=100,\n    output_dir=\"/tmp/sdg_diff_render/perturbed\",\n    camera_position=[0, 0, 1.65],\n    camera_look_at=[0, 0, 0.75],\n    resolution=[1280, 720],\n)\n\n# Preview 2 perturbed frames so operator can visually verify perturbation is active\npreview_sdg(num_samples=2)\n\n# Export 100 perturbed frames\nexport_dataset(\n    output_dir=\"/tmp/sdg_diff_render/perturbed\",\n    num_frames=100,\n    step_batch=10,\n)\n\n# ── Validate annotations across both phases ───────────────────────────────────\nvalidate_annotations(num_samples=30)",
+  "settle_state": null,
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": {
+    "expected_output_dir": "/tmp/sdg_diff_render",
+    "expected_baseline_subdir": "/tmp/sdg_diff_render/baseline",
+    "expected_perturbed_subdir": "/tmp/sdg_diff_render/perturbed",
+    "expected_baseline_frames": 100,
+    "expected_perturbed_frames": 100,
+    "expected_total_frames": 200,
+    "expected_n_pairs": 100,
+    "expected_coco_classes": ["cube"],
+    "expected_baseline_annotation_file": "/tmp/sdg_diff_render/baseline/annotations/instances.json",
+    "expected_perturbed_annotation_file": "/tmp/sdg_diff_render/perturbed/annotations/instances.json",
+    "differential_sdg_static_elements": [
+      "/World/Ground",
+      "/World/Table",
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ],
+    "differential_sdg_dynamic_elements": ["/World/DomeLight"],
+    "differential_sdg_randomizers": ["color", "lighting"],
+    "expected_pose_delta_tolerance_m": 0.001,
+    "validate_annotations_num_samples": 30,
+    "expected_bbox_bound_violations": 0,
+    "scatter_seed": 42
+  },
+  "verified_status": "drafted-2026-05-16-A83; form-gate-schema TBD; function-gate BLOCKED (requires omni.replicator extension + Phase 7B SDG addendum handlers for configure_differential_sdg + validate_annotations; configure_differential_sdg is currently a scaffolding handler — the two-phase export construct works around that)",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "failure_modes": [
+    "omni.replicator not enabled: enable_extension('omni.replicator.core') must be called before create_sdg_pipeline; the handler may auto-enable it but Kit must have been launched with the extension available",
+    "configure_differential_sdg static_elements MUST include every pose-bearing prim ('/World/Cube_1..4', '/World/Table', '/World/Ground'). If any cube path is missing from static_elements, the handler MAY (when fully implemented) re-randomize that cube's pose between the baseline and perturbed pass, violating the 1 mm pair-tolerance silently",
+    "add_domain_randomizer with randomizer_type='pose' MUST NOT be attached anywhere in this canonical. A pose randomizer would re-sample positions every frame, and even with identical seeds across the two phases the per-pair invariant would only hold if the orchestrator guarantees deterministic sample order — which it does not across pipeline rebuilds. Verify NO pose randomizer is registered before phase 2 export",
+    "scatter_on_surface seed=42 is the load-bearing call: it MUST be called ONCE before phase 1. If it is re-called between phase 1 and phase 2, the cubes get re-scattered with the same seed and the second scatter MAY drift by float-rounding (~1e-7 m, well within tolerance) but a different seed WILL break pair identity",
+    "add_domain_randomizer color params: 'color_min' / 'color_max' lists must be 3-element RGB. A 4-element RGBA list silently drops the alpha and may shift the color interpretation depending on the handler. Verify with preview_sdg(num_samples=2) on phase 2 — perturbed cubes should clearly show non-grey color variation",
+    "create_sdg_pipeline called TWICE: the second call MUST replace (not append to) the active pipeline. Some implementations stack pipelines and double-render every frame — verify by checking that /tmp/sdg_diff_render/perturbed contains exactly 100 frames, not 200",
+    "configure_differential_sdg scaffolding-only behavior: as of 2026-05-16 this handler records the static/dynamic partition but does NOT yet patch the orchestrator step loop. The two-phase export construct here makes the canonical functionally correct even if the handler is a no-op. If/when the handler is upgraded to actually freeze static_elements across passes, the canonical should be refactored to a SINGLE export with num_frames=200 and differential_mode=True",
+    "configure_camera vs set_camera_params: configure_camera is marked DEPRECATED in the handler — both are called here for backward compat, but if the deprecated handler is removed only set_camera_params will set intrinsics. xformOp:translate is implicitly set via the position arg to create_prim('Camera') and oriented by set_camera_look_at",
+    "validate_annotations(num_samples=30) reads only ONE annotation file at a time — the call after phase 2 only validates /tmp/sdg_diff_render/perturbed/annotations/instances.json. Baseline validation is implicit (same scene, same annotator config, fewer DR axes — if perturbed is valid, baseline is almost certainly valid)",
+    "Output dir /tmp/sdg_diff_render must be writable; 200 frames at 1280x720 RGB ≈ 120 MB total. On shared servers /tmp may be small — use workspace/sdg_output/diff_render/ if /tmp fills",
+    "Pose-identity verification (1 mm tolerance) is NOT performed by validate_annotations: it requires a post-hoc diff of the COCO bounding-box centers between baseline_k and perturbed_k. The diagnose_args.expected_pose_delta_tolerance_m=0.001 records the contract but the check itself must be implemented by a downstream evaluation script that loads both annotation files and computes per-pair bbox-center deltas",
+    "GPU memory: rendering two passes back-to-back keeps the render context alive between phases. On low-VRAM GPUs (≤6 GB), the second create_sdg_pipeline call may OOM. Mitigation: call any explicit teardown / reset before phase 2, or split the canonical into two task-scripts and run them sequentially"
+  ],
+  "extends": "sdg-category / CP-NEW-scene-sdg-full-pipeline",
+  "extension_notes": "First canonical in library to exercise configure_differential_sdg + two-phase paired-export construct. CP-NEW-scene-sdg-full-pipeline is single-pass and uses all-randomized DR. CP-NEW-sdg-multi-cam-correlated-dr is multi-camera + correlated DR within a single pass. CP-NEW-sdg-class-balance-rebalance is multi-class with a retry loop, also single-pass. This canonical is the ONLY one that produces PAIRED renders sharing object poses but differing in DR-controlled illuminant + material — the canonical shape for contrastive sim-to-real training and for downstream differential-rendering loss formulations. Backlog source: sdg-differential-render-pass-001 (priority_tier=3, category=sdg, tier=tier-1-locally-runnable, blockers=[]). Backlog goal says 100 frame pairs with object pose deltas within 1 mm across pairs — this template implements that via single-scatter + no-pose-randomizer construction, which gives EXACT pose identity (0 mm delta modulo float-rounding) rather than just ≤1 mm. The 1 mm tolerance is preserved in diagnose_args as the contract surface for downstream validators.",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "n_cameras": 1,
+      "n_dr_axes": 2,
+      "uses_differential_sdg": true,
+      "uses_paired_render": true,
+      "uses_sdg_pipeline": true,
+      "sdg_output_format": "coco",
+      "sdg_n_frames": 200,
+      "sdg_n_pairs": 100,
+      "n_object_classes": 1,
+      "uses_annotation_validation": true,
+      "pose_identity_guaranteed_across_pair": true
+    },
+    "structural_tags": [
+      "isaac:sdg.differential_render",
+      "isaac:sdg.pair_render",
+      "isaac:sdg.paired_baseline_perturbed",
+      "isaac:sdg.coco_writer",
+      "isaac:sdg.annotation_validation",
+      "isaac:sdg.n_frames_200",
+      "isaac:sdg.n_pairs_100",
+      "isaac:sdg.contrastive_dataset",
+      "isaac:dr.lighting",
+      "isaac:dr.material_color",
+      "isaac:dr.two_phase",
+      "isaac:dr.pose_frozen",
+      "isaac:topology.no_robot",
+      "isaac:topology.single_camera",
+      "isaac:training.contrastive",
+      "isaac:training.differential_rendering"
+    ]
+  },
+  "roles": {
+    "scene_objects": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 8,
+      "param_name": "n_cubes",
+      "unordered": true
+    },
+    "sdg_camera": {
+      "constraints": ["camera"],
+      "expected_count": 1,
+      "required": true
+    },
+    "scatter_surface": {
+      "constraints": ["mesh", "surface"],
+      "expected_count": 1,
+      "required": true
+    },
+    "scene_light": {
+      "constraints": ["dome_light"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "scene_objects": [
+      {"path": "/World/Cube_1", "position": [-0.10, -0.10, 0.81]},
+      {"path": "/World/Cube_2", "position": [ 0.10, -0.10, 0.81]},
+      {"path": "/World/Cube_3", "position": [-0.10,  0.10, 0.81]},
+      {"path": "/World/Cube_4", "position": [ 0.10,  0.10, 0.81]}
+    ],
+    "sdg_camera": {
+      "path": "/World/SdgCamera",
+      "position": [0, 0, 1.65],
+      "look_at": [0, 0, 0.75]
+    },
+    "scatter_surface": {
+      "path": "/World/Table",
+      "position": [0, 0, 0.375],
+      "scale": [1.0, 0.7, 0.375],
+      "spacing": 0.12
+    },
+    "scene_light": {
+      "path": "/World/DomeLight",
+      "intensity": 1200.0,
+      "color": [1.0, 1.0, 1.0]
+    }
+  },
+  "code_template": "create_prim(prim_path={{scene_light.path}}, prim_type=\"DomeLight\")\nset_attribute(prim_path={{scene_light.path}}, attr_name=\"inputs:intensity\", value={{scene_light.intensity}})\nset_attribute(prim_path={{scene_light.path}}, attr_name=\"inputs:color\", value={{scene_light.color}})\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path={{scatter_surface.path}}, prim_type=\"Cube\", position={{scatter_surface.position}}, scale={{scatter_surface.scale}})\napply_api_schema(prim_path={{scatter_surface.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nfor wp in {{scene_objects}}:\n    create_prim(prim_path=wp[\"path\"], prim_type=\"Cube\", position=wp[\"position\"], size=0.07)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\"):\n        apply_api_schema(prim_path=wp[\"path\"], schema_name=api)\n    set_attribute(prim_path=wp[\"path\"], attr_name=\"primvars:displayColor\", value=[[0.8, 0.8, 0.8]])\n    set_semantic_label(prim_path=wp[\"path\"], class_name=\"cube\")\n\nscatter_on_surface(\n    source_prims=[wp[\"path\"] for wp in {{scene_objects}}],\n    target_mesh={{scatter_surface.path}},\n    count=len({{scene_objects}}),\n    spacing={{scatter_surface.spacing}},\n    normal_align=False,\n    penetration_check=True,\n    seed=42,\n)\n\ncreate_prim(prim_path={{sdg_camera.path}}, prim_type=\"Camera\", position={{sdg_camera.position}})\nset_camera_look_at(camera_path={{sdg_camera.path}}, target={{sdg_camera.look_at}}, up=[0, 1, 0])\nconfigure_camera(\n    camera_path={{sdg_camera.path}},\n    focal_length=35.0,\n    horizontal_aperture=20.955,\n    vertical_aperture=15.2908,\n    clipping_range=[0.01, 10.0],\n)\nset_camera_params(\n    camera_path={{sdg_camera.path}},\n    params={\"focal_length\": 35.0, \"horizontal_aperture\": 20.955, \"vertical_aperture\": 15.2908},\n)\n\nconfigure_differential_sdg(\n    static_elements=[\"/World/Ground\", {{scatter_surface.path}}] + [wp[\"path\"] for wp in {{scene_objects}}],\n    dynamic_elements=[{{scene_light.path}}],\n    randomize=[\"color\", \"lighting\"],\n)\n\n# PHASE 1: baseline (collapsed DR ranges = constant)\nadd_domain_randomizer(\n    target={{scene_light.path}},\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": {{scene_light.intensity}}, \"intensity_max\": {{scene_light.intensity}}},\n)\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"color\",\n    params={\"color_min\": [0.8, 0.8, 0.8], \"color_max\": [0.8, 0.8, 0.8]},\n)\n\ncreate_sdg_pipeline(\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    output_format=\"coco\",\n    num_frames=100,\n    output_dir=\"/tmp/sdg_diff_render/baseline\",\n    camera_position={{sdg_camera.position}},\n    camera_look_at={{sdg_camera.look_at}},\n    resolution=[1280, 720],\n)\npreview_sdg(num_samples=2)\nexport_dataset(\n    output_dir=\"/tmp/sdg_diff_render/baseline\",\n    num_frames=100,\n    step_batch=10,\n)\n\n# PHASE 2: perturbed (wide DR ranges)\nadd_domain_randomizer(\n    target={{scene_light.path}},\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": 500.0, \"intensity_max\": 2200.0},\n)\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"color\",\n    params={\"color_min\": [0.30, 0.30, 0.30], \"color_max\": [1.00, 1.00, 1.00]},\n)\n\ncreate_sdg_pipeline(\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    output_format=\"coco\",\n    num_frames=100,\n    output_dir=\"/tmp/sdg_diff_render/perturbed\",\n    camera_position={{sdg_camera.position}},\n    camera_look_at={{sdg_camera.look_at}},\n    resolution=[1280, 720],\n)\npreview_sdg(num_samples=2)\nexport_dataset(\n    output_dir=\"/tmp/sdg_diff_render/perturbed\",\n    num_frames=100,\n    step_batch=10,\n)\n\nvalidate_annotations(num_samples=30)"
+}

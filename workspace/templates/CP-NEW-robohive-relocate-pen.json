@@ -1,0 +1,192 @@
+{
+  "task_id": "CP-NEW-robohive-relocate-pen",
+  "goal": "RoboHive ADROIT 'relocate-pen' Isaac-Sim parity scene (parallel-jaw approximation): a Franka arm picks an elongated cylindrical pen (radius 0.008 m, height 0.15 m) lying horizontally on a tabletop and places it at a target tabletop location with the long axis re-oriented from horizontal (+X) to vertical (+Z). The pen is modeled as a Cylinder primitive (cylindrical surface chosen for ADROIT-relocate fidelity; cube-substitution would lose the rolling/orientation-ambiguity failure modes). define_grasp_pose registers a side-approach grasp aligned with the cylinder's long axis so the parallel jaws close perpendicular to that axis (best friction contact). setup_pick_place_controller with target_source='curobo' drives the pick + transport + drop, then move_to_pose executes a wrist roll that brings the pen to vertical at the target XY. Success criterion (reorient pattern): (a) pen center within 0.05 m of target_position AND (b) pen long-axis aligned with +Z within ~5 deg (computed from get_world_transform on the pen). Failure modes documented include cylindrical instability (pen rolls during transport — small contact patch + low friction), grasp slip on the curved surface, 2-fold symmetry around long axis (which 'up' counts as correct — the success metric uses axis-direction-cosine, not absolute roll, so this is acceptable), and tight-tolerance target pose conflict with cuRobo approach direction.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "define_grasp_pose",
+    "setup_pick_place_controller",
+    "move_to_pose",
+    "get_world_transform"
+  ],
+  "thoughts": "Design rationale for CP-NEW-robohive-relocate-pen (RoboHive ADROIT relocate-pen Isaac parity, parallel-jaw substitution):\n\n1) Source benchmark: RoboHive's ADROIT relocate-pen task uses a 24-DOF dexterous hand picking a pen-shaped object and placing it at a target SE(3) pose. The ADROIT hand asset is Nucleus-only (asset_dependencies blocker in canonical_backlog.yaml entry research-robohive-relocate-pen-001), so this Isaac canonical substitutes the Franka parallel-jaw end-effector — preserving the elongated-workpiece reorient signature, dropping the dexterous-finger contact richness. The structural_tag isaac:research.robohive keeps the lineage; the failure_modes section explicitly documents the substitution boundary.\n\n2) Workpiece geometry: Cylinder primitive r=0.008 m, h=0.15 m. Pen-sized: 16 mm diameter, 150 mm length, aspect ratio ~9:1. Mass set to 0.012 kg (12 g, typical ballpoint pen). The Cylinder prim type (Usd.Cylinder) gives a curved collision surface — critical because rolling instability is a real failure mode that wouldn't appear if we substituted a square-cross-section box (which is the easy cube-fallback). isaac:workpiece.elongated structural_tag captures the aspect-ratio signature for retrieval.\n\n3) Scene layout: Franka at [0, 0, 0.75] on a 0.75 m table. Pen lies horizontally along world +X at table position [0.0, 0.40, 0.758] — long-axis horizontal, half-pen-length (0.075) in front of the Franka base, 0.008 m above table (cylinder radius). Target marker at [0.0, -0.40, 0.83] with long-axis vertical — this is target_position; the +0.072 lift above table accounts for half pen length when vertical (0.075) minus a 3 mm 'placed' settle.\n\n4) Initial orientation: pen long axis along world +X. Cylinder primitives default to long-axis along +Z, so to lie horizontally along +X we rotate -90 deg about Y: quaternion [w, x, y, z] = [0.7071, 0, -0.7071, 0] (cos(-45deg), 0, sin(-45deg), 0). When the pen settles, gravity holds it on its side along +X.\n\n5) Target orientation: pen long axis along world +Z (vertical, identity rotation for a Z-aligned Cylinder). Final quat = [1, 0, 0, 0]. The reorient delta is a -90 deg rotation about Y (inverse of the initial roll into vertical-up).\n\n6) Grasp definition: define_grasp_pose with approach_direction=[0, 0, -1] (top-down onto the lying pen). gripper_offset=[0, 0, 0.01] — only 10 mm hover because the pen is so thin (16 mm diameter) that the Franka fingers must close almost to contact. The grasp YAML written to workspace/grasp_poses/Pen.isaac_grasp is advisory for downstream rmpflow/cuRobo; the controller uses planning_obstacles + drop_targets for actual motion, but define_grasp_pose records the side-approach intent in the artefact set. Key cylindrical-grasp consideration: parallel jaws must close perpendicular to the pen's long axis (the +X axis at pick time) so the contact line runs along the pen's curve — this is the friction-maximising orientation. Franka's default gripper Y axis aligns with the finger-closure direction; we want gripper_Y perpendicular to world_X at the grasp, so the EE orientation at the pick pose has gripper_Z=-world_Z and gripper_Y=±world_Y. cuRobo's grasp solver picks this automatically when given the cylinder's principal axis via planning_obstacles (the Cylinder prim carries its xformOp:orient).\n\n7) Pick / transport / reorient / place: setup_pick_place_controller target_source='curobo' source_paths=['/World/Pen'] destination_path='/World/PenTarget' drop_targets={'/World/Pen': [0.0, -0.40, 0.83]} planning_obstacles=['/World/Table']. cuRobo transports the pen to the drop point while held by the gripper. Then move_to_pose(articulation_path='/World/Franka', target_position=[0.0, -0.40, 0.83], target_orientation=[0.7071, 0, 0.7071, 0], planner='rmpflow', robot_type='franka') executes the wrist roll: target_orientation [0.7071, 0, 0.7071, 0] is a +90 deg rotation about Y in the EE frame, which combined with the pen-held-in-grasp transform brings the pen long axis from +X (held by horizontal jaws) to +Z (vertical). After the reorient, the pen is at the target SE(3) pose. The controller's release phase (events 7-9) opens the gripper and lets the pen settle vertically.\n\n8) Why move_to_pose AFTER the controller (not as part of the transport): cuRobo's setup_pick_place_controller treats grasp orientation as fixed (held by the gripper) through the transport — it does not natively reorient the grasped part. We sequence (a) pick + transport with fixed grasp orientation via curobo, (b) explicit reorient with move_to_pose at the target XY, (c) gripper release (handled inside the controller's release phase, which the post-reorient pose triggers via the sensor or duration timeout). This is the same composition pattern as CP-NEW-bin-picking-with-flip but without the mid-air flip waypoint — the reorient happens at the drop location, not in transit.\n\n9) Why no proximity sensor: the success metric is a position+orientation check on the pen prim (read via get_world_transform), not a bin-arrival event. simulate_args.target_position and simulate_args.target_orientation_axis are evaluated post-place by the function-gate harness; no add_proximity_sensor is needed. This is a distinguishing 'open-tabletop relocate' shape vs the 'into-bin' shape that dominates the existing reorient templates.\n\n10) Physics: CPU dynamics (enable_gpu_dynamics=False, MBP broadphase) for deterministic settling. enable_ccd=True on the pen — small radius (8 mm) + grasp/release transitions benefit from continuous collision detection (a 16 mm cylinder can tunnel through a 10 mm gripper finger gap at high velocities). sleepThreshold=0.0 so PhysX does not freeze the pen mid-transport. apply_physics_material 'plastic' for the pen (typical pen-shell friction coefficient ~0.4 against the rubber gripper pads).\n\n11) Failure modes captured: (a) cylindrical instability — pen rolls on its side during transport if the controller imparts lateral acceleration; mitigation is to pre-grip firmly via define_grasp_pose's gripper_offset=[0,0,0.01] (close to surface) plus rubber finger material. (b) grasp slip on curved surface — finger contact patch on a 16 mm cylinder is ~2 mm wide line contact; Franka's 70 N grip force × friction coeff 0.4 gives 28 N hold, more than enough for 12 g pen × 9.81 = 0.12 N weight, but failure can occur if the gripper closes off-axis. (c) 2-fold symmetry — the pen has cylindrical symmetry around its long axis, so 'up' is ambiguous; success metric uses axis-direction cosine (dot product of pen long-axis with target_orientation_axis ≥ cos(5 deg) = 0.9962), not absolute quaternion comparison, which would falsely fail rolled-but-correct end-states. (d) target pose IK conflict — vertical pen at [0.0, -0.40, 0.83] places EE at z ≈ 0.83 + 0.10 (held pen extends 0.075 below gripper) ≈ 0.93, well within Franka reach but requires gripper pointing downward; if the reorient over-rotates, cuRobo may refuse the release pose. Mitigation is to chain a verification get_world_transform after the move_to_pose and fall back to a second move_to_pose with adjusted yaw.\n\n12) Why cuRobo + rmpflow mixed planner stack: cuRobo for the pick (collision-aware planning around the table obstacle), rmpflow for the reorient (single-pose target, no environment obstacles after the lift). Mixing planners across segments is the same honest pattern as CP-NEW-bin-picking-with-flip; both controllers are listed under motion_controllers.untested (no function-gate run yet).",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Tabletop platform ─────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.2, 0.8, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic cylindrical-roll behaviour ───────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Pen workpiece: thin cylinder lying horizontally along +X ────────────────\n# Cylinder default long-axis = +Z; to lie along +X we rotate -90 deg about Y.\n# quat [w, x, y, z] = [cos(-45deg), 0, sin(-45deg), 0] = [0.7071, 0, -0.7071, 0]\n# Pen rests on table at z = table_top (0.75) + cylinder radius (0.008) = 0.758.\ncreate_prim(\n    prim_path=\"/World/Pen\",\n    prim_type=\"Cylinder\",\n    position=[0.0, 0.40, 0.758],\n)\nset_attribute(prim_path=\"/World/Pen\", attr_name=\"radius\", value=0.008)\nset_attribute(prim_path=\"/World/Pen\", attr_name=\"height\", value=0.15)\nset_attribute(\n    prim_path=\"/World/Pen\",\n    attr_name=\"xformOp:orient\",\n    value=[0.7071, 0, -0.7071, 0],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Pen\", schema_name=api)\nset_attribute(prim_path=\"/World/Pen\", attr_name=\"physics:mass\", value=0.012)\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Pen\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/Pen\"],\n    attr=\"physxRigidBody:enableCCD\",\n    value=True,\n)\napply_physics_material(prim_path=\"/World/Pen\", material_name=\"plastic\")\n\n# ── Target marker (Xform with target pose; used as drop_target reference) ────\n# Vertical orientation at the target XY. Identity quat [1, 0, 0, 0] = pen along +Z.\ncreate_prim(\n    prim_path=\"/World/PenTarget\",\n    prim_type=\"Xform\",\n    position=[0.0, -0.40, 0.83],\n)\nset_attribute(\n    prim_path=\"/World/PenTarget\",\n    attr_name=\"xformOp:orient\",\n    value=[1.0, 0.0, 0.0, 0.0],\n)\n\n# ── Grasp pose: side approach perpendicular to pen long axis ────────────────\n# approach_direction=[0, 0, -1] (top-down onto lying pen). The parallel jaws\n# close along the EE Y axis, which at this approach is perpendicular to the\n# pen long axis (+X) — line contact along the cylinder curve, friction-max.\n# gripper_offset=[0, 0, 0.01] — 10 mm hover (pen is only 16 mm diameter).\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Pen\",\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0.01],\n)\n\n# ── Pick + transport: cuRobo carries the pen to target XY ───────────────────\n# drop_targets pin the pen drop at the target XY (above the marker); the\n# wrist orientation is locked by the grasp through transport — pen long-axis\n# stays along world +X until the explicit reorient step below.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/Pen\"],\n    destination_path=\"/World/PenTarget\",\n    drop_targets={\"/World/Pen\": [0.0, -0.40, 0.83]},\n    planning_obstacles=[\n        \"/World/Table\",\n    ],\n)\n\n# ── Diagnostic read: confirm pen is at target XY before reorient ────────────\nget_world_transform(prim_path=\"/World/Pen\")\n\n# ── Reorient: wrist roll to bring pen long-axis from +X to +Z ──────────────\n# target_orientation [0.7071, 0, 0.7071, 0] = quaternion (w=cos(45deg), 0,\n# y=sin(45deg), 0) = rotation +90 deg about world Y. Combined with the\n# grasp transform, this rotates the pen long-axis from +X to +Z (vertical).\n# planner='rmpflow' handles the in-air reorient — no obstacles in swept volume.\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[0.0, -0.40, 0.93],\n    target_orientation=[0.7071, 0.0, 0.7071, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n# ── Final orientation check: read pen pose post-reorient ────────────────────\n# The function-gate harness reads simulate_args.target_position_tolerance and\n# simulate_args.target_orientation_axis_tolerance_deg to enforce success:\n#   (a) pen XY within 0.05 m of [0.0, -0.40]\n#   (b) pen long-axis dot +Z >= cos(5 deg) = 0.9962\n# Both required for reorient pattern_hint.\nget_world_transform(prim_path=\"/World/Pen\")",
+  "settle_state": {
+    "table": {
+      "/World/Table": {
+        "position": [0, 0, 0.375],
+        "scale": [1.2, 0.8, 0.375]
+      }
+    },
+    "pen_initial": {
+      "/World/Pen": {
+        "position": [0.0, 0.40, 0.758],
+        "orientation": [0.7071, 0, -0.7071, 0],
+        "radius": 0.008,
+        "height": 0.15,
+        "mass_kg": 0.012,
+        "long_axis_world": [1, 0, 0]
+      }
+    },
+    "pen_final_expected": {
+      "/World/Pen": {
+        "position": [0.0, -0.40, 0.83],
+        "long_axis_world": [0, 0, 1],
+        "position_tolerance_m": 0.05,
+        "orientation_axis_tolerance_deg": 5.0
+      }
+    },
+    "target_marker": {
+      "/World/PenTarget": {
+        "position": [0.0, -0.40, 0.83],
+        "orientation": [1, 0, 0, 0]
+      }
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Pen",
+        "place_path": "/World/PenTarget",
+        "robot_kind": "franka",
+        "reorient_target_orientation": [0.7071, 0.0, 0.7071, 0.0]
+      }
+    ],
+    "cube_paths": [
+      "/World/Pen"
+    ],
+    "target_position_tolerance_m": 0.05,
+    "target_orientation_axis_tolerance_deg": 5.0,
+    "expected_final_long_axis": [0, 0, 1]
+  },
+  "simulate_args": {
+    "target_path": "/World/PenTarget",
+    "cube_path": "/World/Pen",
+    "cube_paths": [
+      "/World/Pen"
+    ],
+    "duration_s": 180,
+    "target_position": [0.0, -0.40, 0.83],
+    "target_position_tolerance_m": 0.05,
+    "target_orientation_axis": [0, 0, 1],
+    "target_orientation_axis_tolerance_deg": 5.0
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/Table"],
+    "robot_base": [0.0, 0.0, 0.75],
+    "pen_path": "/World/Pen",
+    "target_marker_path": "/World/PenTarget",
+    "reorient_waypoint": [0.0, -0.40, 0.93]
+  },
+  "failure_modes": [
+    "Pen rolls during transport (cylindrical instability) — a Cylinder lying on its side has a line contact with the table (and a curved contact with the gripper fingers); any lateral acceleration imparts angular momentum around the long axis. If the cuRobo trajectory takes a curved path, the pen can roll within the gripper and exit the friction cone. Mitigation: define_grasp_pose with small gripper_offset (10 mm) so jaws close near contact + 'plastic'/'rubber' physics material (mu ~0.4); also pre-pinch with bulk_set_attribute lowering sleepThreshold to 0 so PhysX continuously tracks micro-rolls rather than caching a stale settled pose. Detection: get_world_transform before reorient — if pen orientation has drifted >5 deg around its long axis, log a regrasp event.",
+    "Grasp slip on curved surface — Franka parallel-jaw line contact on a 16 mm cylinder is geometrically thin (~2 mm Hertzian patch even with rubber pads). Franka grip force 70 N × friction 0.4 = 28 N hold, vs pen weight 0.012 × 9.81 = 0.12 N, so static slip is unlikely. But if the gripper closes off-axis (jaws not perpendicular to pen long axis), the contact patch shrinks to near-zero and the pen squirts out laterally during lift. Mitigation: define_grasp_pose's approach_direction=[0,0,-1] + the Franka default gripper Y-axis alignment perpendicular to world X (the pen long axis at pick time) produces the friction-max orientation. If a function-gate run shows slip, fall back to apply_physics_material 'rubber' on the pen + lower gripper closure speed via setup_pick_place_controller events_dt[3] increase.",
+    "Target orientation axis ambiguity — the pen has continuous rotational symmetry around its long axis (2-fold symmetry from the parallel-jaw perspective: which way the 'top' of the pen points around the axis doesn't matter for grasp or placement). Success metric must therefore compare ONLY the long-axis direction cosine, not the absolute quaternion. The simulate_args field target_orientation_axis=[0,0,1] + target_orientation_axis_tolerance_deg=5.0 encodes this: harness computes pen.long_axis_world · [0,0,1] and asserts dot >= cos(5 deg) = 0.9962, ignoring rotation around the axis. Failure mode is if the harness mistakenly compares full quaternions and reports false negatives on visually-correct end-states.",
+    "Tight-tolerance target pose conflicts with cuRobo approach direction — when move_to_pose is called with target_orientation=[0.7071, 0, 0.7071, 0] (gripper pointing down and rolled 90 deg), rmpflow IK may fail if the Franka elbow is in an awkward configuration after the cuRobo transport (e.g. elbow-up vs elbow-down ambiguity). Mitigation: if move_to_pose returns IK failure, chain a second move_to_pose with target_position lifted 0.10 m + same orientation (gives more elbow room), then drop. Detection: get_world_transform after the reorient — if pen Z < 0.78 or orientation axis-dot < 0.99, log a failed reorient and re-attempt.",
+    "Cylinder primitive radius/height attrs ignored by set_attribute — some Isaac Sim versions create a Cylinder prim with default UsdGeom.Cylinder schema where the radius/height authoring uses 'inputs:radius'/'inputs:height' OmniGraph variants rather than the raw schema attributes. If the pen renders as the default 1.0 m radius (because set_attribute silently failed to author), the scene becomes geometrically wrong and the gripper cannot fit. Mitigation: verify post-creation by reading get_world_transform on the pen — the BBox extent should reflect ~0.016 m × 0.016 m × 0.15 m. Fallback: re-create with size in create_prim itself, or use scale=[0.008, 0.008, 0.075] in create_prim (Cylinder scale is half-extents).",
+    "Pen final position misses target XY by >0.05 m — if cuRobo's drop_target landing is dominated by the controller's release phase (events 7-9 open the gripper, the pen falls under gravity), the pen may bounce sideways on impact with the table. The target_position_tolerance_m=0.05 captures a 5 cm XY hit-box around the marker. Mitigation: lower release height (move_to_pose target_position z=0.93 leaves the pen 0.10 m above table; reduce to 0.85 for a softer release), or chain a second move_to_pose at z=0.81 (almost-touching-table) before the gripper opens. Detection: get_world_transform after settle — if pen XY > 0.05 m from target, log a missed-target event.",
+    "RoboHive ADROIT-substitution boundary — this canonical uses Franka parallel-jaw, NOT the 24-DOF ADROIT dexterous hand that the source benchmark requires (asset_dependencies: ADROIT_hand_USD is Nucleus-only, blocker tagged in canonical_backlog.yaml). The substitution preserves the elongated-workpiece reorient signature but loses (a) finger-rolling regrasps mid-transport, (b) multi-contact stability that the dexterous hand affords, (c) the actual ADROIT relocate-policy comparison. structural_tags include both isaac:research.robohive (lineage) and isaac:robot.fixed_base.arm (actual implementation) — retrieval surfaces this template for 'pen relocate' queries but the user should understand the simplification."
+  ],
+  "intent": {
+    "pattern_hint": "reorient",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "routing_axis": null,
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_midair_flip": false,
+      "has_orientation_check": true,
+      "requires_orientation_check": true,
+      "workpiece_aspect_ratio_elongated": true
+    },
+    "structural_tags": [
+      "isaac:research.robohive",
+      "isaac:manipulation.relocate",
+      "isaac:workpiece.elongated",
+      "isaac:workpiece.cylinder",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka",
+      "isaac:topology.single_station",
+      "isaac:grasp.define_grasp_pose",
+      "isaac:reorient.tabletop_no_bin",
+      "isaac:planner.mixed_curobo_rmpflow"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "franka"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "parallel_jaw_required"
+    },
+    "workpiece": {
+      "constraints": ["cylinder", "pen", "elongated"],
+      "expected_count": 1,
+      "required": true,
+      "param_name": "pen_geometry"
+    },
+    "target_marker": {
+      "constraints": ["xform", "marker", "target"],
+      "expected_count": 1,
+      "required": true
+    },
+    "table": {
+      "constraints": ["surface", "tabletop"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "workpiece": {
+      "path": "/World/Pen",
+      "kind": "cylinder",
+      "radius": 0.008,
+      "height": 0.15,
+      "mass_kg": 0.012,
+      "initial_position": [0.0, 0.40, 0.758],
+      "initial_orientation": [0.7071, 0, -0.7071, 0],
+      "final_long_axis_target": [0, 0, 1]
+    },
+    "target_marker": {
+      "path": "/World/PenTarget",
+      "position": [0.0, -0.40, 0.83],
+      "orientation": [1, 0, 0, 0]
+    },
+    "table": {
+      "path": "/World/Table",
+      "position": [0, 0, 0.375],
+      "scale": [1.2, 0.8, 0.375]
+    },
+    "reorient_waypoint": {
+      "position": [0.0, -0.40, 0.93],
+      "orientation": [0.7071, 0.0, 0.7071, 0.0]
+    }
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path={{table.path}}, prim_type=\"Cube\", position={{table.position}}, scale={{table.scale}})\napply_api_schema(prim_path={{table.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(\n    prim_path={{workpiece.path}},\n    prim_type=\"Cylinder\",\n    position={{workpiece.initial_position}},\n)\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"radius\", value={{workpiece.radius}})\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"height\", value={{workpiece.height}})\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"xformOp:orient\", value={{workpiece.initial_orientation}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpiece.path}}, schema_name=api)\nset_attribute(prim_path={{workpiece.path}}, attr_name=\"physics:mass\", value={{workpiece.mass_kg}})\n\nbulk_set_attribute(prim_paths=[{{workpiece.path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[{{workpiece.path}}], attr=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path={{workpiece.path}}, material_name=\"plastic\")\n\ncreate_prim(prim_path={{target_marker.path}}, prim_type=\"Xform\", position={{target_marker.position}})\nset_attribute(prim_path={{target_marker.path}}, attr_name=\"xformOp:orient\", value={{target_marker.orientation}})\n\ndefine_grasp_pose(\n    robot_path={{primary_robot.path}},\n    object_path={{workpiece.path}},\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0.01],\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpiece.path}}],\n    destination_path={{target_marker.path}},\n    drop_targets={{'{'}}{{workpiece.path}}: {{target_marker.position}}{{'}'}},\n    planning_obstacles=[{{table.path}}],\n)\n\nget_world_transform(prim_path={{workpiece.path}})\n\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position={{reorient_waypoint.position}},\n    target_orientation={{reorient_waypoint.orientation}},\n    planner=\"rmpflow\",\n    robot_type={{primary_robot.class}},\n)\n\nget_world_transform(prim_path={{workpiece.path}})",
+  "extends": "research-robohive-relocate-pen-001",
+  "extension_notes": "RoboHive ADROIT relocate-pen Isaac parity. SUBSTITUTION: Franka parallel-jaw replaces 24-DOF ADROIT dexterous hand (asset_dependencies ADROIT_hand_USD is Nucleus-only blocker per canonical_backlog.yaml). Preserves elongated-workpiece reorient signature + tabletop relocate shape; loses dexterous-finger contact richness. Future: when ADROIT_hand_USD becomes available, derive a CP-NEW-robohive-relocate-pen-adroit variant that swaps robot_wizard(franka) for the dexterous hand and replaces define_grasp_pose with a finger-rolling grasp script.",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo", "rmpflow"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16-A98; form-gate-schema ⏳; function-gate ⏳"
+}

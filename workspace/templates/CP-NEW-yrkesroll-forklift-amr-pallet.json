@@ -1,0 +1,232 @@
+{
+  "task_id": "CP-NEW-yrkesroll-forklift-amr-pallet",
+  "goal": "Autonomous forklift-AMR pallet delivery (yrkesroll: industrial-truck operator, ONET-SOC 53-7051). A wheeled-robot proxy ('Forklift') with a raised dummy 'Tines' Xform carries a Pallet slab loaded with 2 small workpiece cubes from a pickup zone at [2, 0, 0] to a drop zone at [-2, 1, 0], skirting one static obstacle column at [0, 0.5, 0.5]. Success: AMR within 0.10 m of drop-zone xy AND both items still riding on the tines. NO arm is present and NO handoff signal is exchanged — this canonical isolates the autonomous-navigation-with-payload axis distinct from A67 (arm-releases-cart-onto-AMR) and A90 (forklift-arrives-and-arm-depalletizes). Realizes yrkesroll-forklift-amr-pallet-001 (Phase 10 yrkesroll, pattern_hint=navigate).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "create_wheeled_robot",
+    "setup_nav_robot",
+    "navigate_to",
+    "register_moving_obstacle",
+    "get_world_transform",
+    "prim_exists"
+  ],
+  "thoughts": [
+    "Pattern hint=navigate. Success criterion is mobile-platform-at-goal-pose (the forklift AMR). Pallet+items-still-on-tines is a payload-integrity invariant layered on top of the navigate base — the canonical does NOT require any arm to pick from or place on the pallet.",
+    "Differentiation table (forklift/AMR family): A67 = arm RELEASES cart onto AMR, AMR navigates (success=AMR at goal, pattern=navigate); A90 = forklift ARRIVES with pallet, ARM depalletizes (success=items on outfeed, pattern=pick_place); A105 (this) = forklift AMR navigates pickup→drop WITH pallet (success=AMR at drop AND payload intact, pattern=navigate). No arm in A105. The discriminating feature vs A67 is payload composition (multi-item pallet vs single cart slab) and explicit obstacle avoidance; vs A90 the absence of arm/handoff and the autonomous-transit emphasis.",
+    "Yrkesroll framing: ONET-SOC 53-7051 (Industrial Truck and Tractor Operators) covers forklift operators in warehouses, factories, and shipping yards. The canonical models the autonomous-AMR variant of that role — the human operator is replaced by a path-planned wheeled robot moving palletized goods from receiving to staging. Structural tag isaac:yrkesroll.forklift_operator anchors this in the yrkesroll retrieval namespace.",
+    "Scene layout: pickup zone fixture at [2, 0, 0.025] (visual marker), drop zone fixture at [-2, 1, 0.025], static obstacle column at [0, 0.5, 0.5] (0.40×0.40×1.00 m). Travel vector from pickup→drop is (-4, +1, 0), magnitude ≈ 4.12 m. The obstacle is offset +0.5 m in y from the direct line, leaving a 0.5 m corridor on the y<0 side — wide enough for a 0.40 m wheel-base forklift to skirt. Documented as 'narrow corridor' failure-mode trigger.",
+    "Forklift proxy construction: create_wheeled_robot at /World/Forklift (drive=differential, wheel_radius=0.05, wheel_base=0.40 — wider than A90's 0.20 m to read as a larger pallet-class forklift). Initial position [2, 0, 0.05] above the pickup zone. A child Xform '/World/Forklift/Tines' at z=0.30 represents the raised forks at pallet-carry height (lower than A90's 0.45 to keep CoM stable for a longer transit). The pallet + items are PARENTED under /World/Forklift/Tines as USD children — when create_prim is called with prim_path under the Tines path, the prim inherits Tines' transform stack, so as the forklift navigates, the pallet and items move with it. This is the key topology difference from A67/A90 where the cart/pallet was statically co-placed at world coordinates (no parenting).",
+    "Pallet + items layout: Pallet at LOCAL position [0, 0, 0.025] under /World/Forklift/Tines (i.e. tines-relative), scale [0.30, 0.20, 0.025] — pallet top in tines-local is at z=0.05. The 2 items are at tines-local z=0.090 (pallet_top + cube_half=0.04), arranged in a 1×2 row at x ∈ {-0.08, +0.08}. As tines is offset [0,0,0.30] under Forklift, world-space pallet position when forklift is at [2,0,0.05] is [2, 0, 0.05+0.30+0.025] = [2, 0, 0.375]. Items at world z ≈ 0.44.",
+    "Static obstacle: a column Cube at [0, 0.5, 0.5] scale [0.40, 0.40, 1.0]. PhysicsCollisionAPI applied so the forklift cannot pass through it. The direct-line forklift path from [2,0] to [-2,1] passes very close to the obstacle (at x=0, y interpolated ≈ 0.25), but planner='astar' should route around it. We register_moving_obstacle on the forklift→obstacle pair so the runtime collision-avoidance polling (curobo:moving_obstacles attr) tracks it; the obstacle is static but the API still applies (a static obstacle is the degenerate case of a moving one).",
+    "Why no arm: the brief explicitly says 'NO ARM involvement; emphasis on the forklift's autonomous navigation with payload'. The function-gate is forklift-pose AND payload-on-tines; no manipulation occurs. This is the only yrkesroll-forklift canonical without an arm partner.",
+    "Function-gate criterion: after 90 s, /World/Forklift xy within 0.10 m of drop-zone [-2, 1] AND both /World/Forklift/Tines/Pallet/Item_{1,2} still have world-z > 0.35 (i.e. not fallen off the tines onto the ground). The xy_tolerance is set in simulate_args; the payload-integrity check is documented in extension_notes since simulate_args has no direct payload-integrity field. cube_paths lists both items so the simulator tracks their final positions.",
+    "Pose ack via get_world_transform: snapshot the forklift's pose after navigate_to is issued (start pose) so post-sim checks have a reference. prim_exists confirms the forklift articulation came into being (create_wheeled_robot can no-op silently on bare USD; A67/A90 both guard with this same check)."
+  ],
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Pickup-zone and drop-zone visual fixtures ────────────────────────────────\ncreate_prim(prim_path=\"/World/PickupZone\", prim_type=\"Cube\", position=[2, 0, 0.025], scale=[0.40, 0.40, 0.05])\ncreate_prim(prim_path=\"/World/DropZone\", prim_type=\"Cube\", position=[-2, 1, 0.025], scale=[0.40, 0.40, 0.05])\n\n# ── Static obstacle column blocking the direct path ─────────────────────────\ncreate_prim(prim_path=\"/World/Obstacle\", prim_type=\"Cube\", position=[0, 0.5, 0.5], scale=[0.40, 0.40, 1.0])\napply_api_schema(prim_path=\"/World/Obstacle\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Forklift AMR proxy — wheeled robot with raised tines Xform ──────────────\n# Nucleus forklift asset unavailable (blocker `nucleus_only_asset`, see A55 docs).\n# Differential-drive proxy with a 0.40 m wheel base reads as a pallet-class forklift.\ncreate_wheeled_robot(\n    robot_path=\"/World/Forklift\",\n    drive_type=\"differential\",\n    wheel_radius=0.05,\n    wheel_base=0.40,\n)\nset_attribute(prim_path=\"/World/Forklift\", attr_name=\"xformOp:translate\", value=[2, 0, 0.05])\n\nsetup_nav_robot(\n    robot_path=\"/World/Forklift\",\n    nav_topic=\"/forklift/cmd_vel\",\n    odom_topic=\"/forklift/odom\",\n)\n\n# Raised tines Xform — represents the forks at pallet-carry height (z=0.30).\n# Children of this Xform (Pallet, Items) ride with the forklift during navigation.\ncreate_prim(prim_path=\"/World/Forklift/Tines\", prim_type=\"Xform\", position=[0, 0, 0.30])\n\n# ── Pallet slab + 2 workpiece items, parented under /World/Forklift/Tines ──\n# All positions below are tines-local. World position when forklift starts at\n# [2,0,0.05]: pallet ≈ [2, 0, 0.375], items ≈ [2 ± 0.08, 0, 0.44].\ncreate_prim(\n    prim_path=\"/World/Forklift/Tines/Pallet\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.025],\n    scale=[0.30, 0.20, 0.025],\n)\napply_api_schema(prim_path=\"/World/Forklift/Tines/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Forklift/Tines/Pallet/Item_1\", prim_type=\"Cube\", position=[-0.08, 0, 0.065], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Forklift/Tines/Pallet/Item_1\", schema_name=api)\n\ncreate_prim(prim_path=\"/World/Forklift/Tines/Pallet/Item_2\", prim_type=\"Cube\", position=[0.08, 0, 0.065], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Forklift/Tines/Pallet/Item_2\", schema_name=api)\n\n# ── Runtime collision-avoidance registration ─────────────────────────────────\n# Static obstacle is the degenerate case of a moving one; register so the planner\n# polls its pose at runtime (curobo:moving_obstacles list on the forklift).\nregister_moving_obstacle(robot_path=\"/World/Forklift\", obstacle_path=\"/World/Obstacle\")\n\n# ── Pre-navigate sanity checks ───────────────────────────────────────────────\nprim_exists(prim_path=\"/World/Forklift\")\nget_world_transform(prim_path=\"/World/Forklift\")\n\n# ── Navigate pickup → drop, A* to route around the obstacle column ──────────\nnavigate_to(\n    robot_path=\"/World/Forklift\",\n    target_position=[-2.0, 1.0],\n    planner=\"astar\",\n)",
+  "settle_state": {
+    "forklift_start": {
+      "/World/Forklift": [2, 0, 0.05]
+    },
+    "pickup_zone": {
+      "/World/PickupZone": [2, 0, 0.025]
+    },
+    "drop_zone": {
+      "/World/DropZone": [-2, 1, 0.025]
+    },
+    "obstacle": {
+      "/World/Obstacle": [0, 0.5, 0.5]
+    },
+    "tines_local": {
+      "/World/Forklift/Tines": [0, 0, 0.30]
+    },
+    "pallet_local": {
+      "/World/Forklift/Tines/Pallet": [0, 0, 0.025]
+    },
+    "items_local": {
+      "/World/Forklift/Tines/Pallet/Item_1": [-0.08, 0, 0.065],
+      "/World/Forklift/Tines/Pallet/Item_2": [0.08, 0, 0.065]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Forklift",
+        "pick_path": "/World/PickupZone",
+        "place_path": "/World/DropZone",
+        "robot_kind": "wheeled"
+      }
+    ],
+    "cube_paths": [
+      "/World/Forklift/Tines/Pallet/Item_1",
+      "/World/Forklift/Tines/Pallet/Item_2"
+    ]
+  },
+  "simulate_args": {
+    "target_path": "/World/DropZone",
+    "cube_paths": [
+      "/World/Forklift/Tines/Pallet/Item_1",
+      "/World/Forklift/Tines/Pallet/Item_2"
+    ],
+    "duration_s": 90,
+    "xy_tolerance": 0.10
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Forklift",
+    "robot_base": [2.0, 0.0, 0.05],
+    "obstacles": ["/World/Obstacle"],
+    "pickup_zone_path": "/World/PickupZone",
+    "drop_zone_path": "/World/DropZone",
+    "payload_paths": [
+      "/World/Forklift/Tines/Pallet",
+      "/World/Forklift/Tines/Pallet/Item_1",
+      "/World/Forklift/Tines/Pallet/Item_2"
+    ]
+  },
+  "extends": "yrkesroll-forklift-amr-pallet-001",
+  "extension_notes": "First canonical to isolate the autonomous forklift-AMR navigation-with-payload axis WITHOUT an arm or handoff. Distinct from A67 (CP-NEW-cart-handoff-amr: arm releases cart, AMR departs; success=AMR-at-goal; no obstacle) and A90 (CP-NEW-forklift-handoff-arm: forklift arrives, arm depalletizes; success=items-on-outfeed; pick_place pattern). Key topological feature: pallet+items are USD-PARENTED under /World/Forklift/Tines (not statically co-placed), so the payload rigidly inherits the forklift's transform during navigate_to. Function-gate is forklift xy ± 0.10 m of [-2, 1] AND both items still have world-z > 0.35 (payload-integrity invariant — items did NOT fall off during transit). The payload-integrity check is not a built-in simulate_args field; consumers should read cube_paths final positions and apply the z-threshold themselves. Yrkesroll: ONET-SOC 53-7051 Industrial Truck and Tractor Operators. Nucleus forklift asset is blocked by `nucleus_only_asset` (A55 docs); wheeled-robot+Tines-Xform proxy is the locally-runnable workaround.",
+  "failure_modes": [
+    "Pallet and items ride by USD parenting only — no FixedJoint between the pallet and the wheeled robot. USD parenting carries rigid kinematic transform but does NOT couple physics rigid-body dynamics: each item under /World/Forklift/Tines/Pallet has its own PhysicsRigidBodyAPI and is therefore simulated as a free body that happens to start co-located on the pallet top. On sharp accelerations (start, stop, A* turn-in-place) the items can slide off. Mitigation: create_articulated_joint FixedJoint between each item and /World/Forklift/Tines/Pallet would lock them as a single body, but at the cost of dynamics realism. Documented; accepted at current geometry because the canonical uses gentle straight-line astar paths.",
+    "Tine-height drift if the forklift articulation flexes — the tines are a kinematic Xform (no joint, no actuator), so they hold their offset [0,0,0.30] rigidly relative to the forklift body. This is more robust than A90 where the platform was a free Xform child too, but if the user replaces the wheeled-robot proxy with a real forklift articulation that exposes a tines-prismatic-joint, the parenting topology breaks and the items must be re-anchored via FixedJoint to the tines link. Documented as the proxy→real-asset migration footnote.",
+    "navigate_to planner='astar' may plan THROUGH the obstacle on Kit fallback — astar requires an occupancy_map under the hood; if setup_nav_robot was not called with an occupancy_map argument (this canonical does not pass one), the planner may degrade to 'direct' silently and drive straight through /World/Obstacle. Mitigation: pre-compute an occupancy_map via generate_occupancy_map and pass it to setup_nav_robot. Documented; the register_moving_obstacle call is the runtime fallback that should still slow/stop the forklift on imminent contact even if the path planning regresses to direct.",
+    "Narrow-corridor squeeze drops payload — the obstacle column at [0, 0.5, 0.5] leaves a y<0 corridor about 0.5 m wide. The forklift wheel_base is 0.40 m, so the forklift fits but with only ±0.05 m lateral margin. Any wheel-skid or planner overshoot can scrape the obstacle, transmit a lateral impulse to the chassis, and shake an item off the pallet. Mitigation: widen the obstacle gap (move obstacle to y=0.7) or narrow the wheel_base (0.30 m). Documented; this is the failure-mode flag the brief asks for.",
+    "Payload-integrity check is not function-gated by simulate_args — simulate_args has xy_tolerance for forklift pose but no per-cube z-threshold. The 'items still on tines' criterion is documented in extension_notes and must be applied by the simulator consumer reading the cube_paths final positions. Mitigation: extend simulate_args schema to add `min_payload_z` or `payload_integrity` field; not done in this round to keep schema-stable.",
+    "register_moving_obstacle on a static obstacle is degenerate but valid — the API expects a path that may move at runtime; we pass /World/Obstacle which is static, so the runtime polling cost is wasted but the planner correctly treats it as collision-active. A future canonical could replace this with a true static obstacle declaration if generate_occupancy_map covers the bake-in path.",
+    "create_wheeled_robot at empty robot_path — Forklift is synthesized as a primitive Jetbot-like shape on Kit (semantic-only proxy, not visually accurate). The Nucleus forklift asset (warehouse_with_forklifts.usd, Environments/...) is the proper backing but is unavailable in this environment (blocker `nucleus_only_asset`). Documented across the forklift family (A55, A90, A105).",
+    "No yaw enforcement at drop pose — navigate_to target_position is [x,y] only; final yaw at the drop zone depends on the planner and may be anywhere in ±180°. For an autonomous-delivery yrkesroll this can matter (the pallet should face a specific receiving direction). Mitigation: append a setup_nav_robot yaw-control extension or a second navigate_to with a kicker offset. Documented; not enforced because the function-gate is pose-xy + payload-on-tines, both yaw-independent."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳; phase10-yrkesroll-forklift-operator; nucleus_only_asset-blocker-workaround=wheeled_robot_proxy",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": [
+      "direct_joint",
+      "moveit2"
+    ]
+  },
+  "intent": {
+    "pattern_hint": "navigate",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "n_workpieces": 2,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "uses_handoff_signal": false,
+      "uses_mobile_pallet_source": true,
+      "uses_static_obstacle": true,
+      "has_stacking": false
+    },
+    "structural_tags": [
+      "isaac:robot.mobile.wheeled",
+      "isaac:robot.mobile.forklift",
+      "isaac:topology.payload_navigation",
+      "isaac:topology.autonomous_forklift_transit",
+      "isaac:nav.astar_planner",
+      "isaac:nav.static_obstacle_avoidance",
+      "isaac:coordination.moving_obstacle",
+      "isaac:industry.amr_forklift",
+      "isaac:industry.warehouse_logistics",
+      "isaac:yrkesroll.forklift_operator",
+      "isaac:onet_soc.53_7051"
+    ]
+  },
+  "roles": {
+    "forklift": {
+      "constraints": [
+        "wheeled_robot",
+        "forklift",
+        "amr_forklift",
+        "carter"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "pallet": {
+      "constraints": [
+        "cube",
+        "slab",
+        "pallet",
+        "platform"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": [
+        "cube",
+        "box"
+      ],
+      "min": 1,
+      "max": 4,
+      "param_name": "n_items",
+      "unordered": false
+    },
+    "pickup_zone": {
+      "constraints": [
+        "static_cube",
+        "fixture"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "drop_zone": {
+      "constraints": [
+        "static_cube",
+        "fixture"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "obstacle": {
+      "constraints": [
+        "static_cube",
+        "column",
+        "obstacle"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "forklift": {
+      "path": "/World/Forklift",
+      "class": "wheeled_robot",
+      "drive_type": "differential",
+      "wheel_radius": 0.05,
+      "wheel_base": 0.40,
+      "start_position": [2, 0, 0.05],
+      "target_position": [-2.0, 1.0],
+      "tines_path": "/World/Forklift/Tines",
+      "tines_offset": [0, 0, 0.30],
+      "planner": "astar"
+    },
+    "pallet": {
+      "path": "/World/Forklift/Tines/Pallet",
+      "position": [0, 0, 0.025],
+      "scale": [0.30, 0.20, 0.025]
+    },
+    "workpieces": [
+      {"path": "/World/Forklift/Tines/Pallet/Item_1", "position": [-0.08, 0, 0.065], "size": 0.08},
+      {"path": "/World/Forklift/Tines/Pallet/Item_2", "position": [0.08, 0, 0.065], "size": 0.08}
+    ],
+    "pickup_zone": {
+      "path": "/World/PickupZone",
+      "position": [2, 0, 0.025],
+      "scale": [0.40, 0.40, 0.05]
+    },
+    "drop_zone": {
+      "path": "/World/DropZone",
+      "position": [-2, 1, 0.025],
+      "scale": [0.40, 0.40, 0.05]
+    },
+    "obstacle": {
+      "path": "/World/Obstacle",
+      "position": [0, 0.5, 0.5],
+      "scale": [0.40, 0.40, 1.0]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path={{pickup_zone.path}}, prim_type=\"Cube\", position={{pickup_zone.position}}, scale={{pickup_zone.scale}})\ncreate_prim(prim_path={{drop_zone.path}}, prim_type=\"Cube\", position={{drop_zone.position}}, scale={{drop_zone.scale}})\n\ncreate_prim(prim_path={{obstacle.path}}, prim_type=\"Cube\", position={{obstacle.position}}, scale={{obstacle.scale}})\napply_api_schema(prim_path={{obstacle.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_wheeled_robot(\n    robot_path={{forklift.path}},\n    drive_type={{forklift.drive_type}},\n    wheel_radius={{forklift.wheel_radius}},\n    wheel_base={{forklift.wheel_base}},\n)\nset_attribute(prim_path={{forklift.path}}, attr_name=\"xformOp:translate\", value={{forklift.start_position}})\n\nsetup_nav_robot(\n    robot_path={{forklift.path}},\n    nav_topic=\"/forklift/cmd_vel\",\n    odom_topic=\"/forklift/odom\",\n)\n\ncreate_prim(prim_path={{forklift.tines_path}}, prim_type=\"Xform\", position={{forklift.tines_offset}})\n\ncreate_prim(\n    prim_path={{pallet.path}},\n    prim_type=\"Cube\",\n    position={{pallet.position}},\n    scale={{pallet.scale}},\n)\napply_api_schema(prim_path={{pallet.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size={{workpieces[0].size}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size={{workpieces[1].size}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\n\nregister_moving_obstacle(robot_path={{forklift.path}}, obstacle_path={{obstacle.path}})\n\nprim_exists(prim_path={{forklift.path}})\nget_world_transform(prim_path={{forklift.path}})\n\nnavigate_to(\n    robot_path={{forklift.path}},\n    target_position={{forklift.target_position}},\n    planner={{forklift.planner}},\n)"
+}

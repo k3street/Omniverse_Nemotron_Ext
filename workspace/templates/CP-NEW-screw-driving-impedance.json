@@ -1,0 +1,184 @@
+{
+  "task_id": "CP-NEW-screw-driving-impedance",
+  "goal": "Industrial-assembler persona: Franka with a simulated driver bit drives an M3-M6 class cylindrical screw into a tapped plate using a CONTINUOUS HELICAL DESCENT (coupled Z-translation + Z-rotation under cartesian_impedance compliance). Z-force capped at 15 N to prevent stripping; wrist torque capped at ~1 N·m (M3-M6 fastener class). Success: screw.translate.z below the plate-top flush threshold AND get_joint_torques wrist sample reaches the torque cap within tolerance window. Realizes ONET SOC 51-9061 yrkesroll industrial-screw-driving-impedance-001.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "add_force_torque_sensor",
+    "setup_impedance_controller",
+    "set_compliance_params",
+    "follow_trajectory_with_compliance",
+    "get_joint_torques",
+    "get_world_transform",
+    "monitor_joint_effort"
+  ],
+  "thoughts": [
+    "Distinction from CP-NEW-bottle-cap-tighten: bottle-cap is pick→align→press→twist (linear descent THEN rotational seat as separate phases). Screw-driving is CONTINUOUS HELICAL DESCENT — translation and rotation are coupled along the screw axis through every waypoint, not separated into a press phase + a twist phase.",
+    "Distinction from CP-NEW-peg-bushing-impedance: peg-bushing terminates at force-cap with no rotation. Screw-driving terminates at torque-cap (wrist torque reaches M3-M6 fastener-class limit) AND z below flush.",
+    "Distinction from CP-NEW-assembly-constraint-verify: this canonical exercises live impedance + torque/force feedback through the entire helical descent, not pre-flight constraint validation.",
+    "Workpiece topology: tapped plate = solid Cube acting as plate body + a Cylinder negative-space proxy (placed inside the plate volume to represent the tapped hole — solid geometry only, no boolean subtraction). Screw = narrow + long Cylinder (M5 reference: radius=0.0025 m, height=0.025 m).",
+    "M3-M6 fastener class: typical seating torque 0.5-2.0 N·m. We pick 1.0 N·m as the torque cap (lower than bottle-cap's 2.0 N·m which targets finger-tight cap-on-bottle). Z-force cap 15 N (lower than bottle-cap 20 N) — reflects the smaller bit/screw contact patch and avoids cross-threading.",
+    "Compliance mode cartesian_impedance with COUPLED translational + rotational stiffness: Kx=[300,300,40] N/m (X/Y stiff for axis centering, Z very soft to allow descent under force-cap), Kr=[20,20,8] N·m/rad (X/Y rotational stiff to prevent tilt, Z rotational soft to allow the driver bit to slip as torque builds).",
+    "Helical trajectory: 6 waypoints from t=0 to t=1. Each waypoint decreases z by ~3 mm AND advances orientation by 90° around the screw Z-axis (≈ a 360° rotation per ~12 mm of descent, approximating an M5 thread pitch of 0.8 mm — coarse but enough to exercise the coupled motion). compliance_handoff_at=0.0 — the entire descent runs under compliance because every waypoint is contact-rich.",
+    "Trajectory waypoint dicts use 'pose' (position + orientation quaternion). Phase 63b accepts pose-only; cuRobo replan is gated so this is a pure compliance-controlled motion, not a planned cartesian path.",
+    "Success probes: get_world_transform(screw) — z must be ≤ plate_top_z - 0.005 (5 mm below flush); get_joint_torques(franka) — wrist7 torque sample must reach torque_threshold within ±20% (tolerance window prevents both under-driving and stripping); monitor_joint_effort streams wrist torque history for diagnostic timeline.",
+    "Force/torque sensor at panda_hand with threshold=15.0 N for Z-axis force cap; complements the joint-torque probe (the wrist joint torque is the seating signal, the F/T sensor is the safety cap).",
+    "setup_impedance_controller dry_run=True — no live torque-mode control without a ros2_control bridge; same risk as all CRM-B1 canonicals. follow_trajectory_with_compliance dry_run=True returns a plan dict.",
+    "motion_controllers: cartesian_impedance via follow_trajectory_with_compliance (helical descent, untested) + impedance via setup_impedance_controller (controller install, untested). No cuRobo — screw is pre-positioned at the hole entry, the helical descent is the entire motion."
+  ],
+  "code": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Worktable\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Tapped plate (plate body — solid Cube) ───────────────────────────────────\ncreate_prim(\n    prim_path=\"/World/TappedPlate\",\n    prim_type=\"Cube\",\n    position=[0, -0.25, 0.78],\n    scale=[0.08, 0.08, 0.012],\n)\napply_api_schema(prim_path=\"/World/TappedPlate\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/TappedPlate\", attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Tapped hole (negative-space proxy — narrow Cylinder co-located inside plate) ──\n# Solid geometry only; no boolean subtraction. This cylinder marks the hole\n# centerline and provides a contact target for the screw tip during descent.\ncreate_prim(\n    prim_path=\"/World/TappedHole\",\n    prim_type=\"Cylinder\",\n    position=[0, -0.25, 0.78],\n    radius=0.003,\n    height=0.024,\n)\napply_api_schema(prim_path=\"/World/TappedHole\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/TappedHole\", attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Screw (narrow + long Cylinder, dynamic, M5-class reference dimensions) ────\n# Initial pose: tip just above the hole entrance, axis aligned with world +Z.\ncreate_prim(\n    prim_path=\"/World/Screw\",\n    prim_type=\"Cylinder\",\n    position=[0, -0.25, 0.808],\n    radius=0.0025,\n    height=0.025,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Screw\", schema_name=api)\nset_attribute(prim_path=\"/World/Screw\", attr_name=\"physics:mass\", value=0.005)\n\napply_physics_material(prim_path=\"/World/Screw\", material_name=\"steel\")\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Screw\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/Screw\", \"/World/TappedHole\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\n# ── Force / torque sensor — 15 N Z-force cap, anti-strip safety ──────────────\nadd_force_torque_sensor(\n    sensor_path=\"/World/Franka/FtSensor\",\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=15.0,\n    noise_std=0.03,\n)\n\n# ── Impedance controller — coupled translational + rotational stiffness ──────\n# X/Y translational STIFF (centering); Z translational SOFT (descent under F-cap).\n# X/Y rotational STIFF (no tilt); Z rotational SOFT (driver bit slip as torque builds).\nsetup_impedance_controller(\n    robot_path=\"/World/Franka\",\n    target_frame=\"panda_hand\",\n    Kx=[300.0, 300.0, 40.0],\n    Kr=[20.0, 20.0, 8.0],\n    Dx=[30.0, 30.0, 6.0],\n    Dr=[2.5, 2.5, 1.2],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\n# ── Compliance params — explicit Cartesian stiffness for helical descent ─────\nset_compliance_params(\n    robot_path=\"/World/Franka\",\n    stiffness_xyz=[300.0, 300.0, 40.0],\n    damping_xyz=[30.0, 30.0, 6.0],\n    stiffness_rot=[20.0, 20.0, 8.0],\n    damping_rot=[2.5, 2.5, 1.2],\n    dry_run=True,\n)\n\n# ── Joint-effort monitor (records wrist torque history during descent) ───────\nmonitor_joint_effort(\n    articulation_path=\"/World/Franka\",\n    duration_seconds=30.0,\n)\n\n# ── Helical descent trajectory (6 waypoints, coupled Δz + Δrz per step) ──────\n# t=0 .. t=1, compliance_handoff_at=0.0 → entire trajectory under cartesian_impedance.\n# Each step: z decreases ~3 mm, orientation advances 90° about screw Z-axis.\n# Total descent ≈ 15 mm, total rotation ≈ 450° (~1.25 turns).\nfollow_trajectory_with_compliance(\n    trajectory=[\n        {\"pose\": {\"position\": [0, -0.25, 0.815], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.812], \"orientation\": [0.9239, 0.0, 0.0, 0.3827]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.809], \"orientation\": [0.7071, 0.0, 0.0, 0.7071]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.806], \"orientation\": [0.3827, 0.0, 0.0, 0.9239]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.803], \"orientation\": [0.0, 0.0, 0.0, 1.0]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.800], \"orientation\": [-0.3827, 0.0, 0.0, 0.9239]}}\n    ],\n    robot_path=\"/World/Franka\",\n    compliance_handoff_at=0.0,\n    compliance_controller=\"cartesian_impedance\",\n    timeout_s=30.0,\n    velocity_scaling=0.2,\n    dry_run=True,\n)\n\n# ── Success probes ───────────────────────────────────────────────────────────\nget_world_transform(prim_path=\"/World/Screw\")\nget_world_transform(prim_path=\"/World/TappedPlate\")\nget_joint_torques(articulation=\"/World/Franka\")",
+  "settle_state": {
+    "cubes": {
+      "/World/Screw": [0, -0.25, 0.808]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Screw",
+        "place_path": "/World/TappedHole",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Screw",
+    "expected_screw_z_max_m": 0.801,
+    "expected_flush_threshold_z_m": 0.786,
+    "expected_wrist_torque_target_nm": 1.0,
+    "expected_wrist_torque_tolerance_pct": 0.20,
+    "expected_z_force_cap_n": 15.0
+  },
+  "simulate_args": {
+    "cube_path": "/World/Screw",
+    "target_path": "/World/TappedHole",
+    "duration_s": 180
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/TappedPlate", "/World/Table"],
+    "robot_base": [0.0, 0.0, 0.75],
+    "screw_path": "/World/Screw",
+    "tapped_hole_path": "/World/TappedHole",
+    "tapped_plate_path": "/World/TappedPlate",
+    "ft_sensor_path": "/World/Franka/FtSensor"
+  },
+  "extends": "industrial-screw-driving-impedance-001",
+  "extension_notes": "Implements ONET SOC 51-9061 industrial-assembler persona (M3-M6 fastener class). Key differentiators from CP-NEW-bottle-cap-tighten: (1) CONTINUOUS HELICAL DESCENT — translation and rotation are coupled through every trajectory waypoint, not separated into a press phase + twist phase. (2) Lower force cap (15 N vs 20 N) and lower torque cap (~1 N·m vs 2 N·m) reflecting the smaller M3-M6 screw class. (3) compliance_handoff_at=0.0 — the entire trajectory runs under cartesian_impedance because every waypoint is contact-rich. (4) Compliance stiffness profile couples translational + rotational soft-axes (Z translation + Z rotation both soft for descent and driver-bit slip; X/Y rigid for centering). Tapped hole is a Cylinder negative-space proxy (no boolean subtraction) co-located inside the plate Cube. PhysX numerical instability during screw grip is a shared risk with all impedance canonicals.",
+  "failure_modes": [
+    "PhysX numerical instability: screw velocity spikes during Franka grip — 5 g screw mass + solver_position_iteration_count=16 + steel material partially mitigates; not eliminated.",
+    "Tapped hole is a solid Cylinder proxy (no boolean subtraction) — screw cannot enter the volume in PhysX; helical descent terminates on contact with the hole-top surface, not true thread engagement. Torque-stop signal is the F/T sensor + joint-torque probe, not mesh penetration.",
+    "setup_impedance_controller and set_compliance_params are dry_run=True — no live torque-mode control without a ros2_control bridge; production rollout requires setup_ros2_control_compat first.",
+    "follow_trajectory_with_compliance is Phase 63b — trajectory waypoint dicts must contain joint_positions OR pose; pose-only is accepted but cuRobo replan is gated. With compliance_handoff_at=0.0 the entire trajectory is treated as the compliant suffix; the bridge accepts this configuration but emits no handoff_mismatch_warning.",
+    "compliance_controller='cartesian_impedance' is enum-validated by COMPLIANCE_MODE_ENUM; fallback to 'admittance' loses the coupled translational+rotational stiffness profile and degrades to position-mode compliance.",
+    "M3-M6 torque-class assumption: 1.0 N·m cap is the midpoint of the 0.5-2.0 N·m range; M3 screws (recommended ≤ 0.6 N·m) will trip the cap before flush, M6 screws (recommended ≥ 1.5 N·m) will not reach the cap and read as 'under-seated'. Per-fastener-class tuning required for production.",
+    "monitor_joint_effort threshold_nm=1.0 mirrors the torque cap — if the controller observes wrist torque exceeding 1.0 N·m before the screw reaches flush, the operator interpretation is 'cross-thread' not 'seated'; ambiguity is resolved by combining the joint-torque sample with get_world_transform(screw).z below the flush threshold."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema ⏳ pending lint; function-gate ⏳ Kit RPC + ros2_control bridge",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["impedance", "cartesian_impedance"]
+  },
+  "intent": {
+    "pattern_hint": "insert",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_torque_limited_gesture": true,
+      "has_force_threshold": true,
+      "has_rotational_seat": true,
+      "has_helical_descent": true,
+      "fastener_class": "M3_M6"
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:topology.insertion",
+      "isaac:industrial.screw_driving",
+      "isaac:operation.fasten",
+      "isaac:assembly.force_gated",
+      "isaac:assembly.torque_gated",
+      "isaac:sensor.force_torque",
+      "isaac:compliance.impedance",
+      "isaac:compliance.cartesian_impedance",
+      "isaac:gesture.helical_descent",
+      "isaac:fastener.m3_m6"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "torque_mode_capable"
+    },
+    "tapped_plate": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "static_plate_body"
+    },
+    "tapped_hole": {
+      "constraints": ["cylinder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "narrow_cylinder_inside_plate"
+    },
+    "screw": {
+      "constraints": ["cylinder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "dynamic_narrow_long_cylinder"
+    },
+    "ft_sensor": {
+      "constraints": ["force_torque_sensor"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "tapped_plate": {
+      "path": "/World/TappedPlate",
+      "position": [0, -0.25, 0.78],
+      "scale": [0.08, 0.08, 0.012]
+    },
+    "tapped_hole": {
+      "path": "/World/TappedHole",
+      "position": [0, -0.25, 0.78],
+      "radius": 0.003,
+      "height": 0.024
+    },
+    "screw": {
+      "path": "/World/Screw",
+      "position": [0, -0.25, 0.808],
+      "radius": 0.0025,
+      "height": 0.025,
+      "mass_kg": 0.005
+    },
+    "ft_sensor": {
+      "path": "/World/Franka/FtSensor",
+      "parent_path": "/World/Franka/panda_hand",
+      "threshold": 15.0
+    },
+    "torque_cap_nm": 1.0,
+    "torque_tolerance_pct": 0.20,
+    "z_force_cap_n": 15.0,
+    "flush_threshold_offset_m": 0.005,
+    "helical_total_descent_m": 0.015,
+    "helical_total_rotation_deg": 450.0
+  },
+  "code_template": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n# ── Tapped plate + hole proxy ────────────────────────────────────────────────\ncreate_prim(\n    prim_path={{tapped_plate.path}},\n    prim_type=\"Cube\",\n    position={{tapped_plate.position}},\n    scale={{tapped_plate.scale}},\n)\napply_api_schema(prim_path={{tapped_plate.path}}, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path={{tapped_plate.path}}, attr_name=\"physics:approximation\", value=\"convexHull\")\n\ncreate_prim(\n    prim_path={{tapped_hole.path}},\n    prim_type=\"Cylinder\",\n    position={{tapped_hole.position}},\n    radius={{tapped_hole.radius}},\n    height={{tapped_hole.height}},\n)\napply_api_schema(prim_path={{tapped_hole.path}}, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path={{tapped_hole.path}}, attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Screw ────────────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path={{screw.path}},\n    prim_type=\"Cylinder\",\n    position={{screw.position}},\n    radius={{screw.radius}},\n    height={{screw.height}},\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{screw.path}}, schema_name=api)\nset_attribute(prim_path={{screw.path}}, attr_name=\"physics:mass\", value={{screw.mass_kg}})\napply_physics_material(prim_path={{screw.path}}, material_name=\"steel\")\nbulk_set_attribute(\n    prim_paths=[{{screw.path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[{{screw.path}}, {{tapped_hole.path}}],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\n# ── FT sensor ────────────────────────────────────────────────────────────────\nadd_force_torque_sensor(\n    sensor_path={{ft_sensor.path}},\n    parent_path={{ft_sensor.parent_path}},\n    threshold={{ft_sensor.threshold}},\n    noise_std=0.03,\n)\n\n# ── Impedance controller (coupled Kx + Kr soft-Z profile) ────────────────────\nsetup_impedance_controller(\n    robot_path={{primary_robot.path}},\n    target_frame=\"panda_hand\",\n    Kx=[300.0, 300.0, 40.0],\n    Kr=[20.0, 20.0, 8.0],\n    Dx=[30.0, 30.0, 6.0],\n    Dr=[2.5, 2.5, 1.2],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\nset_compliance_params(\n    robot_path={{primary_robot.path}},\n    stiffness_xyz=[300.0, 300.0, 40.0],\n    damping_xyz=[30.0, 30.0, 6.0],\n    stiffness_rot=[20.0, 20.0, 8.0],\n    damping_rot=[2.5, 2.5, 1.2],\n    dry_run=True,\n)\n\n# ── Joint-effort monitor (records wrist torque history) ──────────────────────\nmonitor_joint_effort(\n    articulation_path={{primary_robot.path}},\n    duration_seconds=30.0,\n)\n\n# ── Helical descent: coupled Δz + Δrz per waypoint, full trajectory compliant ─\nfollow_trajectory_with_compliance(\n    trajectory=[\n        {\"pose\": {\"position\": [0, -0.25, 0.815], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.812], \"orientation\": [0.9239, 0.0, 0.0, 0.3827]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.809], \"orientation\": [0.7071, 0.0, 0.0, 0.7071]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.806], \"orientation\": [0.3827, 0.0, 0.0, 0.9239]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.803], \"orientation\": [0.0, 0.0, 0.0, 1.0]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.800], \"orientation\": [-0.3827, 0.0, 0.0, 0.9239]}}\n    ],\n    robot_path={{primary_robot.path}},\n    compliance_handoff_at=0.0,\n    compliance_controller=\"cartesian_impedance\",\n    timeout_s=30.0,\n    velocity_scaling=0.2,\n    dry_run=True,\n)\n\n# ── Success probes ───────────────────────────────────────────────────────────\nget_world_transform(prim_path={{screw.path}})\nget_world_transform(prim_path={{tapped_plate.path}})\nget_joint_torques(articulation={{primary_robot.path}})"
+}
