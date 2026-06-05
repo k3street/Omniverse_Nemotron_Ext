@@ -35,6 +35,13 @@ export const CLASS_META: Record<string, ClassMeta> = {
         isRobotArm: true,
         reachRadiusM: 1.3,
     },
+    ur10: {
+        label: "UR10",
+        icon: "🦾",
+        defaultSize: { w: 0.30, h: 0.30 },
+        isRobotArm: true,
+        reachRadiusM: 1.3,
+    },
     kinova_gen3: {
         label: "Kinova Gen3",
         icon: "🦾",
@@ -68,6 +75,18 @@ export const CLASS_META: Record<string, ClassMeta> = {
         defaultSize: { w: 3.0, h: 0.4 },
         isRobotArm: false,
     },
+    conveyor_short: {
+        label: "Conveyor short",
+        icon: "📦",
+        defaultSize: { w: 1.5, h: 0.5 },
+        isRobotArm: false,
+    },
+    conveyor_long: {
+        label: "Conveyor long",
+        icon: "📦",
+        defaultSize: { w: 3.0, h: 0.5 },
+        isRobotArm: false,
+    },
     bin: {
         label: "Bin",
         icon: "🗑️",
@@ -81,10 +100,55 @@ export const CLASS_META: Record<string, ClassMeta> = {
         isRobotArm: false,
         rotationLocked: true,
     },
+    cube_small: {
+        label: "Cube small",
+        icon: "🧊",
+        defaultSize: { w: 0.05, h: 0.05 },
+        isRobotArm: false,
+        rotationLocked: true,
+    },
+    cube_medium: {
+        label: "Cube medium",
+        icon: "🧊",
+        defaultSize: { w: 0.05, h: 0.05 },
+        isRobotArm: false,
+        rotationLocked: true,
+    },
+    cube_large: {
+        label: "Cube large",
+        icon: "🧊",
+        defaultSize: { w: 0.08, h: 0.08 },
+        isRobotArm: false,
+        rotationLocked: true,
+    },
     table: {
         label: "Table",
         icon: "🪑",
         defaultSize: { w: 2.0, h: 1.0 },
+        isRobotArm: false,
+    },
+    table_small: {
+        label: "Table small",
+        icon: "🪑",
+        defaultSize: { w: 0.8, h: 0.6 },
+        isRobotArm: false,
+    },
+    table_medium: {
+        label: "Table medium",
+        icon: "🪑",
+        defaultSize: { w: 1.2, h: 0.8 },
+        isRobotArm: false,
+    },
+    table_large: {
+        label: "Table large",
+        icon: "🪑",
+        defaultSize: { w: 2.0, h: 1.0 },
+        isRobotArm: false,
+    },
+    shelf: {
+        label: "Shelf",
+        icon: "▤",
+        defaultSize: { w: 1.2, h: 0.4 },
         isRobotArm: false,
     },
     station_marker: {
@@ -99,10 +163,28 @@ export const CLASS_META: Record<string, ClassMeta> = {
         defaultSize: { w: 0.05, h: 0.05 },
         isRobotArm: false,
     },
+    camera_overhead: {
+        label: "Camera overhead",
+        icon: "📷",
+        defaultSize: { w: 0.10, h: 0.10 },
+        isRobotArm: false,
+    },
+    camera_side: {
+        label: "Camera side",
+        icon: "📷",
+        defaultSize: { w: 0.10, h: 0.10 },
+        isRobotArm: false,
+    },
     lidar_sensor: {
         label: "Lidar",
         icon: "📡",
         defaultSize: { w: 0.10, h: 0.10 },
+        isRobotArm: false,
+    },
+    rtx_lidar: {
+        label: "RTX Lidar",
+        icon: "📡",
+        defaultSize: { w: 0.08, h: 0.08 },
         isRobotArm: false,
     },
     ramp: {
@@ -117,7 +199,31 @@ export const CLASS_META: Record<string, ClassMeta> = {
         defaultSize: { w: 1.0, h: 0.05 },
         isRobotArm: false,
     },
+    obstacle_box: {
+        label: "Obstacle box",
+        icon: "□",
+        defaultSize: { w: 0.5, h: 0.5 },
+        isRobotArm: false,
+    },
+    groundplane: {
+        label: "Ground plane",
+        icon: "▭",
+        defaultSize: { w: 4.0, h: 4.0 },
+        isRobotArm: false,
+        rotationLocked: true,
+    },
+    distant_light: {
+        label: "Distant light",
+        icon: "☼",
+        defaultSize: { w: 0.08, h: 0.08 },
+        isRobotArm: false,
+        rotationLocked: true,
+    },
 };
+
+export const BUILD_ASSET_CLASSES = Object.keys(CLASS_META).sort((a, b) =>
+    CLASS_META[a].label.localeCompare(CLASS_META[b].label),
+);
 
 export const PALETTE_CATEGORIES: Array<{ name: string; classes: string[] }> = [
     {

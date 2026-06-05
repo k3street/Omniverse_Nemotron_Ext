@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { useFloorPlanStore } from "../store/floorPlanStore";
 import { TypedObject } from "../api/types";
+import { buildAssetOptions, assetResolutionFeedback } from "../canvas/assetResolver";
 import { CLASS_META } from "../canvas/objectClasses";
 
 const PANEL_BG = "#171A1E";
@@ -19,6 +20,7 @@ const TEXT = "#DDDDDD";
 const TEXT_DIM = "#8A8E92";
 const BORDER = "#2E3237";
 const ACCENT = "#76B900";
+const ASSET_OPTIONS = buildAssetOptions();
 
 export function PropertiesPanel() {
     const selectedIds = useFloorPlanStore((s) => s.selectedIds);
@@ -102,13 +104,16 @@ function SingleObjectEditor({ obj }: { obj: TypedObject }) {
     const resizeObject = useFloorPlanStore((s) => s.resizeObject);
     const rotateObject = useFloorPlanStore((s) => s.rotateObject);
     const deleteObjects = useFloorPlanStore((s) => s.deleteObjects);
-    const meta = CLASS_META[obj.class];
 
     return (
         <div style={{ padding: "8px 12px 16px", background: SECTION_BG }}>
-            <Field label="Class">
-                <span style={{ color: TEXT_DIM }}>{meta?.label ?? obj.class}</span>
-            </Field>
+            <AssetResolverReview obj={obj} />
+            <SelectField
+                label="Build asset"
+                value={obj.class}
+                options={ASSET_OPTIONS}
+                onCommit={(v) => v !== obj.class && setAttr(obj.id, "class", obj.class, v)}
+            />
             <TextField
                 label="Name"
                 value={obj.name}
@@ -153,7 +158,7 @@ function SingleObjectEditor({ obj }: { obj: TypedObject }) {
                     if (norm !== obj.rotation) rotateObject(obj.id, obj.rotation, norm);
                 }}
                 step={5}
-                disabled={meta?.rotationLocked}
+                disabled={CLASS_META[obj.class]?.rotationLocked}
             />
             <TextField
                 label="Color (hex)"
@@ -198,6 +203,33 @@ function SingleObjectEditor({ obj }: { obj: TypedObject }) {
                     Delete
                 </button>
             </Row>
+        </div>
+    );
+}
+
+function AssetResolverReview({ obj }: { obj: TypedObject }) {
+    const feedback = assetResolutionFeedback(obj);
+    if (feedback.source !== "cosmos") return null;
+    return (
+        <div
+            style={{
+                border: `1px solid ${feedback.needsReview ? "#5C4B1F" : BORDER}`,
+                background: feedback.needsReview ? "#241F13" : "#151A18",
+                borderRadius: 4,
+                padding: "8px",
+                marginBottom: 10,
+                lineHeight: 1.45,
+            }}
+        >
+            <div style={{ color: feedback.needsReview ? "#FFCC66" : ACCENT, fontSize: 11, fontWeight: 700 }}>
+                {feedback.needsReview ? "Review asset match" : "Cosmos asset match"}
+            </div>
+            <div style={{ color: TEXT, fontSize: 12, marginTop: 4 }}>{feedback.summary}</div>
+            <div style={{ color: TEXT_DIM, fontSize: 11, marginTop: 4 }}>
+                {feedback.assetHint && <KV k="hint" v={feedback.assetHint} />}
+                {feedback.confidence !== null && <KV k="confidence" v={`${Math.round(feedback.confidence * 100)}%`} />}
+                <KV k="class" v={feedback.selectedClass} />
+            </div>
         </div>
     );
 }
@@ -438,6 +470,45 @@ function TextField({
                     style={inputStyle}
                 />
             )}
+        </Field>
+    );
+}
+
+function SelectField({
+    label,
+    value,
+    options,
+    onCommit,
+}: {
+    label: string;
+    value: string;
+    options: Array<{ value: string; label: string }>;
+    onCommit: (v: string) => void;
+}) {
+    return (
+        <Field label={label}>
+            <select
+                value={value}
+                onChange={(e) => onCommit(e.target.value)}
+                style={{
+                    width: "100%",
+                    background: "#0F1216",
+                    border: `1px solid ${BORDER}`,
+                    borderRadius: 3,
+                    color: TEXT,
+                    fontSize: 12,
+                    padding: "5px 6px",
+                    outline: "none",
+                    fontFamily: "inherit",
+                }}
+            >
+                {!CLASS_META[value] && <option value={value}>{value}</option>}
+                {options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                        {option.label}
+                    </option>
+                ))}
+            </select>
         </Field>
     );
 }

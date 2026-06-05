@@ -36,7 +36,7 @@ After large merges, run the app and visually confirm these surfaces:
 - Header: `Isaac Assist · Floor Plan` and `multimodal canvas v1.0`
 - Left toolbar and object palette
 - Konva viewport with grid, layout objects, reach/agency overlays, and guide support
-- Properties/layers panel
+- Properties/layers panel, including Cosmos asset-match feedback and build-asset selector
 - Agent confirmation bar
 - Bottom chat ribbon, image import button, viewport import button, and revision/session/save status bar
 
