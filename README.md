@@ -251,7 +251,7 @@ Open `http://127.0.0.1:5173?session=default_session` and confirm these major sur
 - Konva canvas viewport with grid, objects, reach/agency overlays, and snap-guide support
 - Properties / layers side panel
 - Agent confirmation bar
-- Bottom chat ribbon and status bar with revision/session/save state
+- Bottom chat ribbon, image import button, viewport import button, and status bar with revision/session/save state
 
 For automated checks, run:
 
@@ -267,7 +267,8 @@ npm test
 2. Start Isaac Sim with `./launch_isaac_assist_desktop.sh`.
 3. Verify the **Isaac Assist AI** window opens from the Isaac Sim menu/extension.
 4. Use the model selector to choose a local model such as `qwen3.6:latest`.
-5. Ask for a simple scene change, then confirm the transcript shows tool activity rather than a plain text-only answer.
+5. Use **Modes -> Extract layout from scene** to capture the current viewport into a floor-plan proposal.
+6. Ask for a simple scene change, then confirm the transcript shows tool activity rather than a plain text-only answer.
 
 The Isaac Sim GUI test requires a live Kit process and GPU. If Kit is not running, keep the verification to the floor-plan GUI plus the backend/unit gates.
 

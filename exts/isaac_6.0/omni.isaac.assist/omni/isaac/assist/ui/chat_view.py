@@ -702,8 +702,25 @@ class ChatViewWindow(ui.Window):
         )
 
     def _modes_extract_from_scene(self):
-        logger.info("[Modes] extract-from-scene is staged; opening the canvas fallback")
-        self._modes_open_canvas()
+        self._add_assistant_bubble("Capturing viewport for floor-plan proposal...")
+
+        async def _run():
+            response = await self.service.observe_viewport_canvas()
+            if response.get("ok") and response.get("valid"):
+                objects = ((response.get("spec") or {}).get("objects") or [])
+                self._add_assistant_bubble(
+                    f"Viewport proposal ready with {len(objects)} proposed objects. Opening canvas."
+                )
+                self._modes_open_canvas()
+                return
+            error = response.get("error") or "unknown viewport import error"
+            self._add_assistant_bubble(f"Viewport import failed: {error}", error=True)
+
+        try:
+            asyncio.ensure_future(_run())
+        except Exception as e:
+            logger.warning(f"[Modes] viewport import dispatch failed: {e}")
+            self._add_assistant_bubble(f"Viewport import failed: {e}", error=True)
 
     def _modes_analyze_viewport(self):
         self._toggle_livekit()

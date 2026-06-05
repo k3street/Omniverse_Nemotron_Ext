@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import uuid
+from urllib.parse import quote
 
 try:
     import aiohttp
@@ -133,6 +134,47 @@ class AssistServiceClient:
                     return {"error": f"HTTP {resp.status}"}
         except Exception as e:
             return {"error": str(e)}
+
+    async def observe_viewport_canvas(
+        self,
+        prompt: str = "Reconstruct the current Isaac Sim viewport as a robotics floor plan.",
+        max_dim: int = 1280,
+    ) -> dict:
+        """Capture the live Kit viewport and seed a floor-plan proposal."""
+        if not HAS_AIOHTTP:
+            return {"ok": False, "error": "aiohttp missing"}
+
+        session_id = quote(self.session_id, safe="")
+        canvas_url = f"{self.base_url}/api/v1/canvas/{session_id}"
+        observe_url = f"{canvas_url}/cosmos/observe_viewport"
+        try:
+            async with aiohttp.ClientSession() as session:
+                parent_revision = 0
+                async with session.get(canvas_url) as resp:
+                    if resp.status == 200:
+                        current = await resp.json()
+                        parent_revision = int(current.get("revision") or 0)
+                    elif resp.status != 404:
+                        return {"ok": False, "error": f"canvas revision HTTP {resp.status}"}
+
+                payload = {
+                    "prompt": prompt,
+                    "max_dim": max_dim,
+                    "parent_revision": parent_revision,
+                }
+                timeout = aiohttp.ClientTimeout(total=120)
+                async with session.post(observe_url, json=payload, timeout=timeout) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        data["ok"] = True
+                        return data
+                    try:
+                        detail = await resp.text()
+                    except Exception:
+                        detail = ""
+                    return {"ok": False, "error": f"observe viewport HTTP {resp.status}: {detail}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     # ── SSE consumer ────────────────────────────────────────────────────
     def start_stream(self, on_event):

@@ -130,12 +130,12 @@ Ask the Reasoner to return JSON matching this shape:
 
 ## Follow-On Implementation Phases
 
-1. Add a Cosmos runtime provider that calls a local/NIM/vLLM Cosmos 3 Reasoner
+1. Done: add a Cosmos runtime provider that calls a local/NIM/vLLM Cosmos 3 Reasoner
    service and returns `CosmosSceneObservation`.
-2. Add floor-plan UI import action for screenshot/photo proposals.
+2. Done: add floor-plan UI import action for screenshot/photo proposals.
 3. Add asset resolver feedback in the properties panel so users can swap
    Cosmos guesses for available Isaac assets.
-4. Add viewport screenshot capture from the Isaac extension and send it through
+4. Done: add viewport screenshot capture from the Isaac extension and send it through
    the proposal route.
 5. Add generator-mode workflows for visual references and synthetic-data
    augmentation after a `LayoutSpec` is approved.

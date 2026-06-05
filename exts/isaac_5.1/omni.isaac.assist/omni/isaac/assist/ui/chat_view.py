@@ -692,15 +692,29 @@ class ChatViewWindow(ui.Window):
         """Read current 3D stage state, produce LayoutSpec via Kit RPC,
         open canvas editor with that as starting state.
 
-        Implementation: POST to /api/v1/canvas/{session_id}/sync_from_stage
-        when that endpoint lands; for now opens a blank canvas as fallback.
+        Implementation: POST to
+        /api/v1/canvas/{session_id}/cosmos/observe_viewport, which captures
+        the active viewport and turns it into a reviewable LayoutSpec.
         """
-        # Defer to canvas-open behavior until extract endpoint lands
-        logger.info(
-            "[Modes] extract-from-scene — not yet wired; falling back to "
-            "blank canvas"
-        )
-        self._modes_open_canvas()
+        self._add_assistant_bubble("Capturing viewport for floor-plan proposal...")
+
+        async def _run():
+            response = await self.service.observe_viewport_canvas()
+            if response.get("ok") and response.get("valid"):
+                objects = ((response.get("spec") or {}).get("objects") or [])
+                self._add_assistant_bubble(
+                    f"Viewport proposal ready with {len(objects)} proposed objects. Opening canvas."
+                )
+                self._modes_open_canvas()
+                return
+            error = response.get("error") or "unknown viewport import error"
+            self._add_assistant_bubble(f"Viewport import failed: {error}", error=True)
+
+        try:
+            asyncio.ensure_future(_run())
+        except Exception as e:
+            logger.warning(f"[Modes] viewport import dispatch failed: {e}")
+            self._add_assistant_bubble(f"Viewport import failed: {e}", error=True)
 
     def _modes_analyze_viewport(self):
         """Existing LiveKit vision-tools toggle — preserved verbatim per
