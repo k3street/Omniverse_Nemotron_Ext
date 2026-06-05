@@ -43,6 +43,7 @@ from .cosmos3_runtime import (
     CosmosRuntimeError,
     build_cosmos3_reasoner,
 )
+from .asset_resolution import resolve_layout_assets
 from .ratify import ratify
 from .render import render_layout_spec_to_file
 from .types import LayoutSpec
@@ -586,6 +587,7 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
 
     template = {"id": body.template_id or "<unspecified>"}
     result = ratify(template, spec)
+    asset_resolutions = resolve_layout_assets(spec.objects or [])
 
     payload = {
         "ratified": result.status == "ok",
@@ -602,6 +604,16 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
             for e in result.errors
         ],
         "revision": spec.revision,
+        "asset_resolutions": [
+            {
+                "object_id": item.object_id,
+                "object_class": item.object_class,
+                "usd_ref": item.usd_ref,
+                "source": item.source,
+                "needs_review": item.needs_review,
+            }
+            for item in asset_resolutions
+        ],
     }
 
     if result.status == "ok":

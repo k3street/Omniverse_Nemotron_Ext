@@ -17,6 +17,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from .asset_resolution import resolve_object_asset
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -308,10 +310,49 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         "distant_light": "DistantLight", "distantlight": "DistantLight",
         "sphere_light": "SphereLight", "spherelight": "SphereLight",
         "dome_light": "DomeLight", "domelight": "DomeLight",
+        "cube_small": "Cube", "cube_medium": "Cube", "cube_large": "Cube",
+        "table_small": "Cube", "table_medium": "Cube", "table_large": "Cube",
+        "bin": "Cube", "bin_large": "Cube", "shelf": "Cube",
+        "conveyor_short": "Cube", "conveyor_long": "Cube",
+        "wall": "Cube", "fence": "Cube", "obstacle_box": "Cube",
+        "obstacle_cylinder": "Cylinder",
+        "groundplane": "Plane",
+        "camera_overhead": "Camera", "camera_side": "Camera",
     }
+
+    def _obj_get(obj: Any, attr: str, default: Any = None) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(attr, default)
+        return getattr(obj, attr, default)
+
+    def _position3(value: Any) -> List[float]:
+        if hasattr(value, "x") and hasattr(value, "y"):
+            return [float(value.x), float(value.y), float(getattr(value, "z", 0.0))]
+        try:
+            seq = list(value)
+        except Exception:
+            seq = [0.0, 0.0, 0.0]
+        while len(seq) < 3:
+            seq.append(0.0)
+        return [float(seq[0]), float(seq[1]), float(seq[2])]
+
+    def _scale3(obj: Any, fallback: Any) -> List[float]:
+        size = _obj_get(obj, "size", None)
+        if hasattr(size, "w") and hasattr(size, "h"):
+            return [float(size.w), float(size.h), 1.0]
+        if isinstance(size, dict) and "w" in size and "h" in size:
+            return [float(size["w"]), float(size["h"]), 1.0]
+        try:
+            seq = list(fallback)
+        except Exception:
+            seq = [1.0, 1.0, 1.0]
+        while len(seq) < 3:
+            seq.append(1.0)
+        return [float(seq[0]), float(seq[1]), float(seq[2])]
 
     prims: List[Dict[str, Any]] = []
     for i, obj in enumerate(objects):
+        asset_resolution = resolve_object_asset(obj)
         if hasattr(obj, "object_class"):
             obj_class = getattr(obj, "object_class", "unknown") or "unknown"
             position = getattr(obj, "position", None) or [0.0, 0.0, 0.0]
@@ -325,9 +366,15 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
             scale = obj.get("scale", [1.0, 1.0, 1.0])
             asset_ref = obj.get("asset_path") or obj.get("asset_ref")
 
+        position = _position3(position)
+        scale = _scale3(obj, scale)
+
         normalized_class = _CLASS_NORMALIZER.get(
             str(obj_class).lower(), str(obj_class)
         )
+        if asset_resolution:
+            asset_ref = asset_resolution.usd_ref
+            normalized_class = "Reference"
         if normalized_class not in SUPPORTED_PRIM_CLASSES:
             if asset_ref:
                 normalized_class = "Reference"

@@ -43,6 +43,7 @@ from ...multimodal.persistence import (
     MultimodalStore,
     RevisionConflictError,
 )
+from ...multimodal.asset_resolution import resolve_layout_assets
 from ...multimodal.ratify import ratify, RatifyResult, resolve_compliance
 from ...multimodal.types import Position, Size
 
@@ -255,6 +256,7 @@ async def _handle_apply_layout_spec_to_scene(args: Dict[str, Any]) -> Dict[str, 
     # Ratify with a legacy template = trivially ok (no roles to bind).
     template = {"id": args.get("template_id", "<unspecified>")}
     result = ratify(template, spec)
+    asset_resolutions = resolve_layout_assets(spec.objects or [])
 
     payload = {
         "ratified": result.status == "ok",
@@ -271,6 +273,16 @@ async def _handle_apply_layout_spec_to_scene(args: Dict[str, Any]) -> Dict[str, 
             for e in result.errors
         ],
         "summary": _format_compact_summary(spec),
+        "asset_resolutions": [
+            {
+                "object_id": item.object_id,
+                "object_class": item.object_class,
+                "usd_ref": item.usd_ref,
+                "source": item.source,
+                "needs_review": item.needs_review,
+            }
+            for item in asset_resolutions
+        ],
     }
 
     if result.status == "ok":
