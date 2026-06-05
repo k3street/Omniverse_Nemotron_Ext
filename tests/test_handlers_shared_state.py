@@ -132,17 +132,22 @@ def test_shared_legacy_reexport_names_match_spec():
     )
 
 
-def test_shared_lazy_reexport_resolves_to_tool_executor():
-    """`from ._shared import _safe_robot_name` resolves to the live
-    implementation in `tool_executor.py` via PEP 562 __getattr__."""
-    from service.isaac_assist_service.chat.tools.handlers import _shared
-    from service.isaac_assist_service.chat.tools import tool_executor as te
+def test_shared_legacy_reexport_names_resolvable():
+    """Phase 14 (2026-05-13): the 9 _LEGACY_REEXPORT_NAMES are now physically
+    in _shared.py (no longer lazy-bridged through tool_executor.py). Each
+    name resolves to a callable.
 
-    # Use a name we know exists in tool_executor's module namespace.
-    # _wf_now_iso is one of the 9 legacy re-exports.
-    from_shared = _shared._wf_now_iso  # triggers __getattr__
-    from_te = te._wf_now_iso
-    assert from_shared is from_te
+    Pre-Phase-14 the contract was: `_shared._X` PEP 562 __getattr__ returned
+    `tool_executor._X`. Now the bodies live in _shared.py directly; the
+    PEP 562 bridge is preserved for back-compat but the canonical home
+    is _shared.
+    """
+    from service.isaac_assist_service.chat.tools.handlers import _shared
+    for name in ("_wf_now_iso", "_safe_robot_name", "_check_real_data_path",
+                 "_get_viewport_bytes", "_get_vision_provider",
+                 "_resolve_run_id", "_query_run_ipc", "_validate_env_id"):
+        fn = getattr(_shared, name)
+        assert callable(fn), f"_shared.{name} not callable"
 
 
 def test_shared_unknown_attribute_raises():

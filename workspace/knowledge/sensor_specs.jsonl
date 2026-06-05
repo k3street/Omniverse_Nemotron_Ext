@@ -18,10 +18,91 @@
 {"product": "ATI Gamma SI-130-10", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": [130, 130, 400], "torque_range_nm": [10, 10, 10], "resolution_force_n": 0.025, "resolution_torque_nm": 0.00125, "output_rate_hz": 7000, "interface": "EtherCAT", "manufacturer": "ATI Industrial Automation", "url": "https://www.ati-ia.com/products/ft/ft_models.aspx?id=Gamma"}
 {"product": "FLIR Blackfly S", "type": "camera", "subtype": "rgb", "fov_h": 0, "resolution": [2048, 1536], "fps": 75, "sensor_type": "CMOS", "pixel_size_um": 3.45, "interface": "GigE/USB3", "weight_g": 36, "manufacturer": "FLIR/Teledyne", "url": "https://www.flir.com/products/blackfly-s-gige/"}
 {"product": "Basler ace 2", "type": "camera", "subtype": "rgb", "fov_h": 0, "resolution": [2448, 2048], "fps": 50, "sensor_type": "CMOS", "pixel_size_um": 3.45, "interface": "GigE/USB3", "weight_g": 80, "manufacturer": "Basler", "url": "https://www.baslerweb.com/en/products/cameras/area-scan-cameras/ace2/"}
-{"product": "Velodyne VLP-16 (Isaac Sim)", "type": "lidar", "subtype": "rotating_lidar", "isaac_sim_config": "Velodyne_VLP16", "channels": 16, "fov_h": 360, "fov_v": 30, "range_m": [0.5, 100.0], "points_per_second": 300000, "rotation_rate_hz": 10, "manufacturer": "Velodyne", "notes": "Isaac Sim 5.1 RTX LiDAR config preset"}
-{"product": "HESAI XT32 (Isaac Sim)", "type": "lidar", "subtype": "rotating_lidar", "isaac_sim_config": "HESAI_XT32_SD10", "channels": 32, "fov_h": 360, "fov_v": 31, "range_m": [0.5, 120.0], "rotation_rate_hz": 10, "manufacturer": "HESAI", "notes": "Isaac Sim 5.1 RTX LiDAR config preset"}
-{"product": "Ouster OS1-64 (Isaac Sim)", "type": "lidar", "subtype": "rotating_lidar", "isaac_sim_config": "Ouster_OS1_64", "channels": 64, "fov_h": 360, "fov_v": 45, "range_m": [0.5, 120.0], "rotation_rate_hz": 20, "manufacturer": "Ouster", "notes": "Isaac Sim 5.1 RTX LiDAR config preset"}
-{"product": "SICK picoScan150 (Isaac Sim)", "type": "lidar", "subtype": "2d_lidar", "isaac_sim_config": "SICK_picoScan150", "channels": 1, "fov_h": 270, "range_m": [0.05, 25.0], "scan_rate_hz": 30, "manufacturer": "SICK", "variants": ["Normal_11", "Extended_47", "High_Density"], "notes": "Isaac Sim 5.1 RTX LiDAR config preset"}
-{"product": "Livox Mid-360 (Isaac Sim)", "type": "lidar", "subtype": "solid_state_lidar", "isaac_sim_config": "Livox_Mid_360", "channels": 1, "fov_h": 360, "fov_v": 59, "range_m": [0.1, 40.0], "manufacturer": "Livox", "notes": "Isaac Sim 5.1 RTX LiDAR config preset"}
-{"product": "Example Rotary LiDAR (Isaac Sim)", "type": "lidar", "subtype": "rotating_lidar", "isaac_sim_config": "Example_Rotary", "channels": 16, "fov_h": 360, "fov_v": 30, "range_m": [0.4, 100.0], "rotation_rate_hz": 10, "manufacturer": "NVIDIA", "notes": "Isaac Sim 5.1 built-in example rotary LiDAR preset"}
-{"product": "Example Solid State LiDAR (Isaac Sim)", "type": "lidar", "subtype": "solid_state_lidar", "isaac_sim_config": "Example_Solid_State", "channels": 1, "fov_h": 120, "fov_v": 30, "range_m": [0.4, 200.0], "manufacturer": "NVIDIA", "notes": "Isaac Sim 5.1 built-in example solid-state LiDAR preset"}
+{"product": "Cognex In-Sight 2800", "type": "camera", "subtype": "machine_vision", "resolution": [1280, 1024], "fps": 60, "range_mm": [50, 1500], "interface": "GigE", "manufacturer": "Cognex"}
+{"product": "Cognex In-Sight 9000", "type": "camera", "subtype": "machine_vision", "resolution": [2592, 1944], "fps": 14, "range_mm": [70, 2500], "interface": "GigE", "manufacturer": "Cognex"}
+{"product": "Cognex In-Sight D900", "type": "camera", "subtype": "deep_learning_vision", "resolution": [1920, 1200], "fps": 30, "range_mm": [80, 1200], "interface": "GigE", "manufacturer": "Cognex"}
+{"product": "Cognex DataMan 470", "type": "camera", "subtype": "code_reader", "resolution": [2048, 1536], "fps": 102, "range_mm": [70, 350], "interface": "GigE", "manufacturer": "Cognex"}
+{"product": "Cognex In-Sight 7000", "type": "camera", "subtype": "machine_vision", "resolution": [800, 600], "fps": 102, "range_mm": [50, 1500], "interface": "GigE", "manufacturer": "Cognex"}
+{"product": "Cognex DataMan 280", "type": "camera", "subtype": "code_reader", "resolution": [752, 480], "fps": 60, "range_mm": [50, 500], "interface": "GigE", "manufacturer": "Cognex"}
+{"product": "Cognex In-Sight 3D-L4000", "type": "camera", "subtype": "3d_vision", "resolution": [2048, 1536], "fps": 5, "range_mm": [350, 2000], "interface": "GigE", "manufacturer": "Cognex"}
+{"product": "Keyence CV-X100F", "type": "camera", "subtype": "machine_vision", "resolution": [4096, 3072], "fps": 30, "interface": "GigE", "manufacturer": "Keyence"}
+{"product": "Keyence CV-X200F", "type": "camera", "subtype": "machine_vision", "resolution": [3840, 2160], "fps": 60, "interface": "GigE", "manufacturer": "Keyence"}
+{"product": "Keyence IV3", "type": "camera", "subtype": "ai_vision", "resolution": [752, 480], "fps": 30, "interface": "GigE", "manufacturer": "Keyence"}
+{"product": "Keyence VS-3000", "type": "camera", "subtype": "3d_vision", "resolution": [1920, 1080], "fps": 20, "interface": "GigE", "manufacturer": "Keyence"}
+{"product": "Keyence XG-X1000", "type": "camera", "subtype": "high_speed_vision", "resolution": [1280, 1024], "fps": 1000, "interface": "GigE", "manufacturer": "Keyence"}
+{"product": "Keyence IM-7500", "type": "camera", "subtype": "instant_measurement", "resolution": [4096, 3000], "fps": 1, "interface": "GigE", "manufacturer": "Keyence"}
+{"product": "Basler ace2 R 1920-160c", "type": "camera", "subtype": "machine_vision", "resolution": [1920, 1200], "fps": 160, "interface": "GigE", "manufacturer": "Basler"}
+{"product": "Basler ace2 X 2440-75c", "type": "camera", "subtype": "machine_vision", "resolution": [2440, 2040], "fps": 75, "interface": "GigE", "manufacturer": "Basler"}
+{"product": "Basler dart M 1280-100c", "type": "camera", "subtype": "machine_vision_compact", "resolution": [1280, 960], "fps": 100, "interface": "GigE", "manufacturer": "Basler"}
+{"product": "Basler blaze-101", "type": "camera", "subtype": "tof_3d", "resolution": [640, 480], "fps": 30, "interface": "GigE", "manufacturer": "Basler"}
+{"product": "Basler ace2 R 5328-22c", "type": "camera", "subtype": "machine_vision_highres", "resolution": [5328, 4608], "fps": 22, "interface": "GigE", "manufacturer": "Basler"}
+{"product": "Basler pulse 1200-25c", "type": "camera", "subtype": "entry_level", "resolution": [1920, 1080], "fps": 25, "interface": "GigE", "manufacturer": "Basler"}
+{"product": "Basler racer 2 mono 5K", "type": "camera", "subtype": "line_scan", "resolution": [5120, 1], "fps": 80000, "interface": "GigE", "manufacturer": "Basler"}
+{"product": "FLIR Blackfly S BFS-PGE-200S6C", "type": "camera", "subtype": "machine_vision", "resolution": [5472, 3648], "fps": 18, "interface": "GigE", "manufacturer": "FLIR/Teledyne"}
+{"product": "FLIR Blackfly S BFS-PGE-04S2C", "type": "camera", "subtype": "machine_vision", "resolution": [720, 540], "fps": 522, "interface": "GigE", "manufacturer": "FLIR/Teledyne"}
+{"product": "FLIR Oryx ORX-10G-71S7C", "type": "camera", "subtype": "high_speed", "resolution": [3208, 2200], "fps": 30, "interface": "GigE", "manufacturer": "FLIR/Teledyne"}
+{"product": "FLIR Lepton 3.5", "type": "camera", "subtype": "thermal", "resolution": [160, 120], "fps": 9, "interface": "USB", "manufacturer": "FLIR/Teledyne"}
+{"product": "FLIR Boson 640", "type": "camera", "subtype": "thermal", "resolution": [640, 512], "fps": 60, "interface": "USB", "manufacturer": "FLIR/Teledyne"}
+{"product": "FLIR A400 GigE", "type": "camera", "subtype": "thermal_industrial", "resolution": [640, 480], "fps": 30, "interface": "GigE", "manufacturer": "FLIR/Teledyne"}
+{"product": "FLIR Ladybug6", "type": "camera", "subtype": "spherical_360", "resolution": [8000, 4000], "fps": 5, "interface": "GigE", "manufacturer": "FLIR/Teledyne"}
+{"product": "FLIR Bumblebee XB3", "type": "camera", "subtype": "stereo", "resolution": [1280, 960], "fps": 16, "interface": "GigE", "manufacturer": "FLIR/Teledyne"}
+{"product": "FLIR Grasshopper3", "type": "camera", "subtype": "research_camera", "resolution": [2448, 2048], "fps": 75, "interface": "GigE", "manufacturer": "FLIR/Teledyne"}
+{"product": "FLIR Chameleon3", "type": "camera", "subtype": "color_machine", "resolution": [2448, 2048], "fps": 8, "interface": "GigE", "manufacturer": "FLIR/Teledyne"}
+{"product": "Velodyne HDL-32E", "type": "lidar", "subtype": "rotating_lidar", "channels": 32, "range_m": [1.0, 100.0], "rotation_hz": 10, "manufacturer": "Velodyne"}
+{"product": "Velodyne VLS-128", "type": "lidar", "subtype": "rotating_lidar", "channels": 128, "range_m": [0.3, 245.0], "rotation_hz": 20, "manufacturer": "Velodyne"}
+{"product": "Velodyne Puck Hi-Res", "type": "lidar", "subtype": "rotating_lidar", "channels": 16, "range_m": [1.0, 100.0], "rotation_hz": 20, "manufacturer": "Velodyne"}
+{"product": "Velodyne Velarray M1600", "type": "lidar", "subtype": "rotating_lidar", "channels": 32, "range_m": [0.1, 30.0], "rotation_hz": 30, "manufacturer": "Velodyne"}
+{"product": "Ouster OS0-32", "type": "lidar", "subtype": "rotating_lidar", "channels": 32, "range_m": [0.3, 50.0], "rotation_hz": 20, "fov_v_deg": 90, "manufacturer": "Ouster"}
+{"product": "Ouster OS0-128", "type": "lidar", "subtype": "rotating_lidar", "channels": 128, "range_m": [0.3, 50.0], "rotation_hz": 20, "fov_v_deg": 90, "manufacturer": "Ouster"}
+{"product": "Ouster OS1-128", "type": "lidar", "subtype": "rotating_lidar", "channels": 128, "range_m": [0.3, 120.0], "rotation_hz": 20, "fov_v_deg": 45, "manufacturer": "Ouster"}
+{"product": "Ouster OS2-128", "type": "lidar", "subtype": "rotating_lidar", "channels": 128, "range_m": [1.0, 240.0], "rotation_hz": 20, "fov_v_deg": 22.5, "manufacturer": "Ouster"}
+{"product": "Hesai AT128", "type": "lidar", "subtype": "rotating_lidar", "channels": 128, "range_m": [0.3, 200.0], "rotation_hz": 10, "manufacturer": "Hesai"}
+{"product": "Hesai XT32", "type": "lidar", "subtype": "rotating_lidar", "channels": 32, "range_m": [0.05, 120.0], "rotation_hz": 20, "manufacturer": "Hesai"}
+{"product": "Hesai Pandar 128", "type": "lidar", "subtype": "rotating_lidar", "channels": 128, "range_m": [0.3, 200.0], "rotation_hz": 10, "manufacturer": "Hesai"}
+{"product": "Hesai QT128", "type": "lidar", "subtype": "rotating_lidar", "channels": 128, "range_m": [0.05, 50.0], "rotation_hz": 10, "manufacturer": "Hesai"}
+{"product": "Hesai AT512", "type": "lidar", "subtype": "rotating_lidar", "channels": 512, "range_m": [0.3, 300.0], "rotation_hz": 20, "manufacturer": "Hesai"}
+{"product": "SICK LMS511", "type": "lidar", "subtype": "2d_lidar", "channels": 1, "range_m": [0.7, 80.0], "scan_hz": 100, "manufacturer": "SICK"}
+{"product": "SICK LMS1xx", "type": "lidar", "subtype": "2d_lidar", "channels": 1, "range_m": [0.5, 20.0], "scan_hz": 50, "manufacturer": "SICK"}
+{"product": "SICK MRS6000", "type": "lidar", "subtype": "3d_lidar", "channels": 24, "range_m": [0.5, 200.0], "scan_hz": 20, "manufacturer": "SICK"}
+{"product": "SICK LD-MRS", "type": "lidar", "subtype": "3d_lidar", "channels": 4, "range_m": [0.5, 250.0], "scan_hz": 50, "manufacturer": "SICK"}
+{"product": "SICK nanoScan3", "type": "lidar", "subtype": "safety_2d_lidar", "channels": 1, "range_m": [0.05, 4.0], "scan_hz": 30, "manufacturer": "SICK"}
+{"product": "SICK microScan3", "type": "lidar", "subtype": "safety_2d_lidar", "channels": 1, "range_m": [0.1, 5.5], "scan_hz": 30, "manufacturer": "SICK"}
+{"product": "ATI Mini40", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 80, "torque_range_nm": 4, "units": "N/Nm", "manufacturer": "ATI Industrial Automation"}
+{"product": "ATI Nano17", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 50, "torque_range_nm": 0.5, "units": "N/Nm", "manufacturer": "ATI Industrial Automation"}
+{"product": "ATI Gamma", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 130, "torque_range_nm": 10, "units": "N/Nm", "manufacturer": "ATI Industrial Automation"}
+{"product": "ATI Delta", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 660, "torque_range_nm": 60, "units": "N/Nm", "manufacturer": "ATI Industrial Automation"}
+{"product": "ATI Theta", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 2500, "torque_range_nm": 400, "units": "N/Nm", "manufacturer": "ATI Industrial Automation"}
+{"product": "ATI Omega160", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 2500, "torque_range_nm": 400, "units": "N/Nm", "manufacturer": "ATI Industrial Automation"}
+{"product": "ATI Axia80", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 500, "torque_range_nm": 20, "units": "N/Nm", "manufacturer": "ATI Industrial Automation"}
+{"product": "Robotiq FT 300-S", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 300, "torque_range_nm": 30, "manufacturer": "Robotiq"}
+{"product": "Bota Systems Rokubi", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 200, "torque_range_nm": 10, "manufacturer": "Bota Systems"}
+{"product": "Bota Systems Medusa", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 1500, "torque_range_nm": 75, "manufacturer": "Bota Systems"}
+{"product": "Bota Systems SensONE", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 1000, "torque_range_nm": 50, "manufacturer": "Bota Systems"}
+{"product": "Bota Systems Bota PCB", "type": "force_torque_sensor", "subtype": "6dof_pcb", "force_range_n": 100, "torque_range_nm": 5, "manufacturer": "Bota Systems"}
+{"product": "OnRobot HEX-E QC", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 200, "torque_range_nm": 10, "manufacturer": "OnRobot"}
+{"product": "OnRobot HEX-H QC", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 200, "torque_range_nm": 20, "manufacturer": "OnRobot"}
+{"product": "Headwall Photonics NIR Hyperspectral", "type": "sensor", "subtype": "nir_hyperspectral", "manufacturer": "Headwall Photonics", "spectral_range_nm": [900, 1700], "channels": 256}
+{"product": "Spectral Engines NIRONE Sensor S2.0", "type": "sensor", "subtype": "nir_spectrometer", "manufacturer": "Spectral Engines", "spectral_range_nm": [1100, 2100]}
+{"product": "Texas Instruments DLP NIRscan Nano", "type": "sensor", "subtype": "nir_spectrometer", "manufacturer": "Texas Instruments", "spectral_range_nm": [900, 1700]}
+{"product": "HORIBA NIR-Quest", "type": "sensor", "subtype": "nir_grating", "manufacturer": "HORIBA", "spectral_range_nm": [900, 2500]}
+{"product": "Specim AisaFENIX", "type": "sensor", "subtype": "hyperspectral_imager", "manufacturer": "Specim", "spectral_range_nm": [380, 2500], "channels": 624}
+{"product": "Cubert UHD 285", "type": "sensor", "subtype": "hyperspectral_snapshot", "manufacturer": "Cubert", "spectral_range_nm": [450, 950], "channels": 125}
+{"product": "XIMEA MQ022HG-IM-SM4X4-VIS", "type": "sensor", "subtype": "hyperspectral_cmos", "manufacturer": "XIMEA", "spectral_range_nm": [470, 630], "channels": 16}
+{"product": "Optris Xi 400", "type": "sensor", "subtype": "thermal", "manufacturer": "Optris", "resolution": [382, 288], "fps": 80, "range_C": [-20, 900]}
+{"product": "Seek Thermal Compact Pro", "type": "sensor", "subtype": "thermal_handheld", "manufacturer": "Seek Thermal", "resolution": [320, 240], "fps": 15}
+{"product": "InfraTec VarioCAM HD", "type": "sensor", "subtype": "thermal_research", "manufacturer": "InfraTec", "resolution": [1024, 768], "fps": 240, "range_C": [-40, 2000]}
+{"product": "Microchip MTCH105", "type": "sensor", "subtype": "capacitive_proximity", "manufacturer": "Microchip", "range_mm": 30, "channels": 1}
+{"product": "Texas Instruments FDC2214", "type": "sensor", "subtype": "capacitive_4ch", "manufacturer": "Texas Instruments", "channels": 4, "resolution_bits": 28}
+{"product": "Cypress CapSense", "type": "sensor", "subtype": "capacitive_touch", "manufacturer": "Infineon Cypress", "channels": 16}
+{"product": "OMRON E3X-NA11", "type": "sensor", "subtype": "photogate_through_beam", "manufacturer": "OMRON", "range_m": 10.0, "response_ms": 0.5}
+{"product": "Banner LT3", "type": "sensor", "subtype": "photogate_retroreflective", "manufacturer": "Banner", "range_m": 5.0}
+{"product": "SICK W12", "type": "sensor", "subtype": "photogate_diffuse", "manufacturer": "SICK", "range_m": 2.0}
+{"product": "Allen-Bradley 42EF", "type": "sensor", "subtype": "photogate_dc", "manufacturer": "Allen-Bradley", "range_m": 4.0}
+{"product": "Pepperl+Fuchs UC500", "type": "sensor", "subtype": "ultrasonic", "manufacturer": "Pepperl+Fuchs", "range_mm": [60, 500]}
+{"product": "Banner T30U", "type": "sensor", "subtype": "ultrasonic", "manufacturer": "Banner", "range_mm": [100, 2000]}
+{"product": "MaxBotix MB1240", "type": "sensor", "subtype": "ultrasonic", "manufacturer": "MaxBotix", "range_mm": [200, 7650]}
+{"product": "ATI Axia80-M50", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 50, "torque_range_nm": 2, "manufacturer": "ATI Industrial Automation"}
+{"product": "ATI Mini85", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 200, "torque_range_nm": 10, "manufacturer": "ATI Industrial Automation"}
+{"product": "Schunk FT-AXIA80", "type": "force_torque_sensor", "subtype": "6dof_ft", "force_range_n": 500, "torque_range_nm": 20, "manufacturer": "Schunk"}
+{"product": "Kistler 9257B", "type": "force_torque_sensor", "subtype": "3dof_dynamometer", "force_range_n": 5000, "torque_range_nm": 0, "manufacturer": "Kistler"}
+{"product": "ME-Messsysteme K3D60", "type": "force_torque_sensor", "subtype": "3axis_force", "force_range_n": 5000, "manufacturer": "ME-Messsysteme"}

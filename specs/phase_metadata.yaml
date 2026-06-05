@@ -1,0 +1,1004 @@
+'1':
+  title: Audit duplicate handler names and ghost handlers
+  agent_type: opus-judgment
+  status: landed
+  note: audit
+'2':
+  title: Slot themed-module package
+  agent_type: opus-judgment
+  status: landed
+  note: skeleton
+2b:
+  title: Handler cross-reference audit + file-write-set matrix
+  agent_type: sonnet-mechanical
+  status: landed
+  note: audit
+'3':
+  title: Move scene-authoring handlers (lowest-coupling tier)
+  agent_type: opus-judgment
+  status: landed
+  note: handler moves
+'4':
+  title: 'CI gate: every tool resolves to a handler'
+  agent_type: sonnet-bounded
+  status: landed
+  note: pre-session CI gate
+'5':
+  title: Move physics handlers
+  agent_type: opus-judgment
+  status: landed
+  note: handler moves
+'6':
+  title: Move robot, sensor, SDG, training handlers
+  agent_type: opus-judgment
+  status: landed
+  note: handler moves
+'7':
+  title: Move ROS2, teleop, scene-blueprint, diagnostic, arena, vision handlers
+  agent_type: opus-judgment
+  status: landed
+  note: handler moves
+7b:
+  title: Isaac Sim 6.0 ROS2 extension-split adaptation
+  agent_type: opus-judgment
+  status: landed
+  note: ros2 split
+'8':
+  title: Extract shared utilities to `handlers/_shared.py`
+  agent_type: opus-judgment
+  status: landed
+  note: 29 waves done
+8b:
+  title: 'Determinism harness: seed derivation + content hash + tokens'
+  agent_type: sonnet-bounded
+  status: landed
+  note: determinism
+8c:
+  title: Shared typed primitives module
+  agent_type: sonnet-bounded
+  status: landed
+  note: typed primitives
+8d:
+  title: Stable-baseline taxonomy + multi-run regression harness
+  agent_type: opus-judgment
+  status: landed
+  note: baseline taxonomy
+'9':
+  title: 'Swap dispatch pattern: register-callbacks instead of inline assignment'
+  agent_type: opus-judgment
+  status: landed
+  note: dispatch swap
+'10':
+  title: Type-narrow handler signatures (Pydantic per-tool)
+  agent_type: opus-judgment
+  status: landed
+  note: Pydantic validation at dispatch
+'11':
+  title: Centralize patch validator as pluggable rule pipeline
+  agent_type: opus-judgment
+  status: landed
+  note: validator pipeline
+11b:
+  title: Generic constraint-violation framework
+  agent_type: sonnet-bounded
+  status: landed
+  note: ConstraintViolation
+11c:
+  title: Controller `ctrl:*` attribute namespace unification
+  agent_type: sonnet-bounded
+  status: landed
+  note: ctrl namespace
+'12':
+  title: Resolve cross-module circular imports introduced by decomposition
+  agent_type: sonnet-bounded
+  status: landed
+  note: no circular imports
+'13':
+  title: Archive `tool_executor.py` recovered-state block to forensics
+  agent_type: sonnet-mechanical
+  status: landed
+  note: recovered-state archive
+'14':
+  title: Re-route `tool_executor.py` to be the dispatch shim only
+  agent_type: sonnet-bounded
+  status: landed
+  note: <500 LOC tool_executor
+'15':
+  title: Move the workflow handlers to a stateful module
+  agent_type: opus-judgment
+  status: landed
+  note: workflow stateful
+'16':
+  title: Move resolve handlers + lookup handlers
+  agent_type: opus-judgment
+  status: landed
+  note: resolve stateful
+'17':
+  title: Pre-commit hooks for tools hygiene
+  agent_type: sonnet-mechanical
+  status: landed
+  note: pre-commit hooks
+17b:
+  title: 'Mandate-guard: forbidden-term CI scanner'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: mandate guard
+'18':
+  title: Document the new handler architecture
+  agent_type: sonnet-bounded
+  status: landed
+  note: architecture doc
+18b:
+  title: 'Tool taxonomy: annotate every tool with action level'
+  agent_type: sonnet-bounded
+  status: landed
+  note: action levels
+18c:
+  title: 'Honesty Charter: name the cross-cutting principle'
+  agent_type: opus-judgment
+  status: landed
+  note: honesty charter
+'19':
+  title: Implement Kit RPC execution path for `apply_layout_spec_to_scene`
+  agent_type: opus-runtime
+  status: scaffold
+  note: needs Kit RPC for per-class branching
+  gate: pytest tests/test_apply_layout_spec.py — all pass; dry_run returns generated_code with `omni.usd.get_context().get_stage()`
+  files:
+  - service/isaac_assist_service/multimodal/instantiator.py
+  - tests/test_apply_layout_spec.py
+  loc: 200
+  effort_min: 60
+  blocked_by:
+  - '9'
+  needs_runtime: Kit RPC for full per-class branching (dry_run scaffold landed)
+'20':
+  title: Role-based template refactor
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: role-based templates — pure logic
+  gate: pytest tests/test_role_based_templates.py — retrieve_with_roles returns role_based ahead of legacy
+  files:
+  - service/isaac_assist_service/chat/tools/role_retriever.py
+  - tests/test_role_based_templates.py
+  loc: 250
+  effort_min: 90
+  blocked_by:
+  - '19'
+'21':
+  title: 'Role library: scene-template index by role'
+  agent_type: sonnet-mechanical
+  status: scaffold
+  note: inverted index, data
+'22':
+  title: '`sync_from_stage` — round-trip Kit → LayoutSpec'
+  agent_type: opus-runtime
+  status: scaffold
+  note: needs Kit RPC list_prims
+  gate: 'pytest tests/test_sync_from_stage.py + Kit smoke: sync returns LayoutSpec.shape with classified prims'
+  files:
+  - service/isaac_assist_service/multimodal/sync_stage.py
+  - tests/test_sync_from_stage.py
+  loc: 400
+  effort_min: 180
+  blocked_by:
+  - '19'
+  needs_runtime: Kit RPC /list_prims
+'23':
+  title: Snap engine hardening
+  agent_type: TS-only
+  status: scaffold
+  note: snap.ts
+'24':
+  title: Agent confirm bar wired to workflow lifecycle
+  agent_type: TS-only
+  status: scaffold
+  note: ConfirmBar.vue
+24b:
+  title: Canvas SPA interactive editing parity
+  agent_type: TS-only
+  status: scaffold
+  note: revise UI
+'25':
+  title: 'Object palette: 17 → 60 classes'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: 60 class palette — data
+25b:
+  title: Object class metadata depth
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: user palette extensions
+  gate: pytest tests/test_sub_phase_25b_object_palette_user_extensions.py — user can register custom class beyond 60-palette
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_25b_object_palette_user_extensions.py
+  - tests/test_sub_phase_25b_object_palette_user_extensions.py
+  loc: 150
+  effort_min: 45
+  blocked_by:
+  - '25'
+  - '75'
+'26':
+  title: CAS-versioned LayoutSpec history with rollback
+  agent_type: sonnet-bounded
+  status: landed
+  note: CAS history
+'27':
+  title: LayoutSpec → scene blueprint round-trip
+  agent_type: sonnet-bounded
+  status: landed
+  note: spec↔blueprint round-trip
+'28':
+  title: 'Block 1B canonical templates: replace top 5 with role-based'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: 5 canonical templates — data
+'29':
+  title: 'Canvas mirror panel: live state-sync from Kit'
+  agent_type: TS-only
+  status: scaffold
+  note: MirrorPanel.vue
+'30':
+  title: Multimodal "force_freeform" path
+  agent_type: sonnet-mechanical
+  status: landed
+  note: freeform escape hatch
+'31':
+  title: 'Industrial expansion: ROS2 + OPC-UA bridge canonicals'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: industrial canonicals
+31b:
+  title: 'Industrial bridges full surface: Modbus, MQTT-Sparkplug, OpenPLC + lifecycle'
+  agent_type: opus-runtime
+  status: scaffold
+  note: bridge lifecycle — needs Modbus/OPC-UA
+'32':
+  title: 'Epoch II convergence test: 30-object canvas scene'
+  agent_type: sonnet-bounded
+  status: landed
+  note: Epoch II convergence test
+'33':
+  title: Generalize `start_workflow` / approve / reject / revise
+  agent_type: opus-judgment
+  status: landed
+  note: workflow engine typed transitions
+'34':
+  title: 'Workflow template: `assemble_pick_place_cell`'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: template data
+'35':
+  title: 'Workflow template: `validate_robot_import`'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: template data
+'36':
+  title: 'Workflow template: `generate_sdg_dataset`'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: template data
+'37':
+  title: 'Workflow lifecycle: chat-side timeline UI'
+  agent_type: sonnet-bounded
+  status: landed
+  note: chat timeline render
+'38':
+  title: 'Workflow lifecycle: SPA-side timeline UI'
+  agent_type: sonnet-bounded
+  status: landed
+  note: SPA payload shape
+'39':
+  title: SQLite checkpoint store
+  agent_type: sonnet-bounded
+  status: landed
+  note: SQLite store
+'40':
+  title: Workflow query API
+  agent_type: sonnet-bounded
+  status: landed
+  note: query API
+'41':
+  title: Workflow rollback via snapshot
+  agent_type: sonnet-bounded
+  status: landed
+  note: rollback logic
+'42':
+  title: 'Governance: high-risk patches trigger workflow auto-checkpoint'
+  agent_type: sonnet-bounded
+  status: landed
+  note: governance gate logic
+'43':
+  title: Workflow templates discoverable via `slash_command_discovery`
+  agent_type: sonnet-mechanical
+  status: landed
+  note: slash command export
+'44':
+  title: Epoch III convergence test
+  agent_type: sonnet-bounded
+  status: landed
+  note: Epoch III convergence
+'45':
+  title: Replace `CriticAgent.critique` with deterministic scoring + LLM feature extractor
+  agent_type: opus-judgment
+  status: landed
+  note: deterministic critic
+'46':
+  title: Deterministic-PM enforcement
+  agent_type: sonnet-bounded
+  status: landed
+  note: deterministic PM
+'47':
+  title: New patch validator rules from production failures
+  agent_type: sonnet-mechanical
+  status: landed
+  note: rule names list
+47b:
+  title: Honesty-decorator long-tail rollout
+  agent_type: opus-runtime
+  status: scaffold
+  note: silent-success rules — needs prod data
+  gate: pytest — 5 new rules registered in PatchValidatorRule registry
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_47b_patch_validator_silent_success.py
+  - service/isaac_assist_service/chat/tools/patch_validators/rules/silent_success.py
+  - tests/test_sub_phase_47b_patch_validator_silent_success.py
+  loc: 300
+  effort_min: 120
+  blocked_by:
+  - '11'
+  needs_runtime: production gap-log data to identify the right patterns
+'48':
+  title: 'Diagnose dimension: cycle time estimate'
+  agent_type: sonnet-bounded
+  status: landed
+  note: cycle time estimator
+'49':
+  title: 'Diagnose dimension: energy estimate'
+  agent_type: sonnet-bounded
+  status: landed
+  note: energy estimator
+49b:
+  title: Diagnose cache key includes stage revision
+  agent_type: sonnet-bounded
+  status: landed
+  note: cache key
+'50':
+  title: 'Diagnose dimension: sensor coverage score'
+  agent_type: sonnet-bounded
+  status: landed
+  note: sensor coverage
+'51':
+  title: 'Diagnose dimension: physics stability index'
+  agent_type: sonnet-bounded
+  status: landed
+  note: physics stability
+'52':
+  title: 'Diagnose dimension: workspace utilization'
+  agent_type: sonnet-bounded
+  status: landed
+  note: workspace utilization
+'53':
+  title: Dual analytical+simulation contract — **AVM-1 (Architecture-Validation Milestone 1)**
+  agent_type: opus-judgment
+  status: landed
+  note: AVM-1 dual contract
+'54':
+  title: Gap log
+  agent_type: sonnet-bounded
+  status: landed
+  note: gap log
+'55':
+  title: Gap analyzer
+  agent_type: sonnet-bounded
+  status: landed
+  note: gap analyzer
+'56':
+  title: Recalibration loop
+  agent_type: sonnet-bounded
+  status: landed
+  note: recalibration loop
+56b:
+  title: Bootstrap-CI confidence reporting under DR
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: recalibration log
+  gate: pytest tests/test_sub_phase_56b_recalibration_log.py — log writes ndjson, queryable by dimension
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_56b_recalibration_log.py
+  - tests/test_sub_phase_56b_recalibration_log.py
+  loc: 200
+  effort_min: 60
+  blocked_by:
+  - '56'
+56c:
+  title: Scenario-profile controller config
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: ctrl profile attr
+  gate: pytest — ctrl:profile attr added to controller schema; integrated with ctrl_namespace types
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_56c_ctrl_profile_attr.py
+  - service/isaac_assist_service/types/ctrl_namespace.py
+  - tests/test_sub_phase_56c_ctrl_profile_attr.py
+  loc: 150
+  effort_min: 45
+  blocked_by:
+  - 11c
+'57':
+  title: Patch validator runtime telemetry
+  agent_type: sonnet-bounded
+  status: landed
+  note: validator telemetry
+'58':
+  title: Epoch IV convergence test
+  agent_type: sonnet-bounded
+  status: landed
+  note: Epoch IV convergence
+'59':
+  title: 'SDG: `factory_under_uncertainty` DR preset'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: factory DR preset data
+'60':
+  title: 'SDG: 5 more presets'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: 5 DR presets data
+60b:
+  title: 'SDG: extreme domain randomization (EDR) preset'
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: preset edge cases
+  gate: pytest tests/test_sub_phase_60b_sdg_preset_edge_cases.py — edge-case preset list has ≥3 entries
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_60b_sdg_preset_edge_cases.py
+  - tests/test_sub_phase_60b_sdg_preset_edge_cases.py
+  loc: 150
+  effort_min: 45
+  blocked_by:
+  - '60'
+'61':
+  title: 'SDG: correlated DR for sensor-camera pairs'
+  agent_type: opus-judgment
+  status: scaffold
+  note: correlated DR — multivariate normal
+  gate: pytest — multivariate normal sampler produces correlation matrix matching spec ρ within 5%
+  files:
+  - service/isaac_assist_service/multimodal/sdg_correlated_dr.py
+  - tests/test_phase_61_sdg_correlated_dr.py
+  loc: 250
+  effort_min: 90
+  blocked_by:
+  - '59'
+  - '60'
+'62':
+  title: 'GR00T finetune pipeline: single-command invocation'
+  agent_type: opus-runtime
+  status: scaffold
+  note: GR00T weights needed
+62b:
+  title: GR00T N1.7 finetune + Mimic/Dreams blueprint integration
+  agent_type: opus-runtime
+  status: scaffold
+  note: GR00T evaluator harness
+'63':
+  title: '`execute_contact_sequence_plan` — N-step contact-sequence runtime'
+  agent_type: opus-runtime
+  status: scaffold
+  note: contact sequence runtime
+63b:
+  title: 'cuRoboV2 backend: B-spline trajectories + depth-fused TSDF + constrained planning'
+  agent_type: opus-runtime
+  status: scaffold
+  note: cuRobo V2
+63c:
+  title: Per-robot-family cuRobo debugging protocol
+  agent_type: opus-runtime
+  status: scaffold
+  note: pose estimation
+63d:
+  title: Multi-robot coordination runtime (handoff + mutex enforcement)
+  agent_type: opus-runtime
+  status: scaffold
+  note: telemetry runtime
+'64':
+  title: Eureka run state actually persisted
+  agent_type: opus-runtime
+  status: scaffold
+  note: Eureka workers
+'65':
+  title: Training run persistence
+  agent_type: sonnet-bounded
+  status: landed
+  note: SQLite training store
+'66':
+  title: 'Live spawn validation: `add_usd_reference` post-checks'
+  agent_type: opus-runtime
+  status: scaffold
+  note: USD reference validation
+'67':
+  title: 'Live spawn validation: `create_articulated_joint` post-checks'
+  agent_type: opus-runtime
+  status: scaffold
+  note: joint validation
+'68':
+  title: 'Live spawn validation: `apply_api_schema` post-checks'
+  agent_type: opus-runtime
+  status: scaffold
+  note: schema validation
+'69':
+  title: 'Live spawn validation: contact reachability'
+  agent_type: opus-runtime
+  status: scaffold
+  note: contact reachability
+'70':
+  title: '`assemble_robot` implementation'
+  agent_type: opus-judgment
+  status: scaffold
+  note: assemble_robot algorithm
+  gate: pytest tests/test_phase_70_assemble_robot.py — assembles 3-piece arm + base + gripper from typed config
+  files:
+  - service/isaac_assist_service/multimodal/assemble_robot.py
+  - tests/test_phase_70_assemble_robot.py
+  loc: 400
+  effort_min: 150
+  blocked_by:
+  - '20'
+70b:
+  title: '`create_behavior` rewrite for Isaac Sim 5.x'
+  agent_type: sonnet-mechanical
+  status: scaffold
+  note: subassembly library data
+  gate: pytest — 5+ canonical sub-assemblies registered (arm-base / wrist / gripper / sensor-mount / cart)
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_70b_robot_subassembly_library.py
+  - tests/test_sub_phase_70b_robot_subassembly_library.py
+  loc: 250
+  effort_min: 90
+  blocked_by:
+  - '70'
+70c:
+  title: Articulated DRAG controller (`setup_articulated_pull_controller`)
+  agent_type: opus-runtime
+  status: scaffold
+  note: DRAG controller
+70d:
+  title: 'Drop-target default: catalog-aware computation'
+  agent_type: sonnet-mechanical
+  status: scaffold
+  note: bin interior metadata
+  gate: pytest — bin metadata loader returns interior dimensions for 5+ bin SKUs
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_70d_bin_interior_metadata.py
+  - data/bin_interior_metadata.yaml
+  - tests/test_sub_phase_70d_bin_interior_metadata.py
+  loc: 200
+  effort_min: 60
+  blocked_by: []
+'71':
+  title: Yaskawa GP25 onboarding (production-grade demo)
+  agent_type: opus-runtime
+  status: scaffold
+  note: Yaskawa GP25 — needs Nucleus
+'72':
+  title: '`setup_assembly_constraint` runtime'
+  agent_type: opus-runtime
+  status: scaffold
+  note: assembly constraint runtime
+72b:
+  title: Contact-classification → joint-type inference
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: constraint violations
+  gate: pytest — ConstraintViolation subclass for assembly constraints; emits via Phase 11b channel
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_72b_assembly_constraint_violations.py
+  - tests/test_sub_phase_72b_assembly_constraint_violations.py
+  loc: 200
+  effort_min: 60
+  blocked_by:
+  - 11b
+72c:
+  title: '`validate_scene_blueprint` strengthening'
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: blueprint validator
+  gate: 'pytest — blueprint validator catches: 3 missing fields, 2 invalid object_class refs, AABB overlap'
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_72c_blueprint_validator.py
+  - tests/test_sub_phase_72c_blueprint_validator.py
+  loc: 350
+  effort_min: 120
+  blocked_by:
+  - 11b
+  - '27'
+'73':
+  title: Sensor catalog expansion to 100+ entries
+  agent_type: sonnet-mechanical
+  status: landed
+  note: sensor catalog 108 entries
+'74':
+  title: 'Sensor catalog query: structured filter'
+  agent_type: sonnet-bounded
+  status: landed
+  note: structured filter
+'75':
+  title: User-supplied object class registry
+  agent_type: sonnet-bounded
+  status: landed
+  note: user object class registry
+'76':
+  title: 'Vision tool handlers: real Gemini Vision'
+  agent_type: opus-runtime
+  status: scaffold
+  note: Gemini API
+'77':
+  title: 'Vision tool: viewport-hash cache'
+  agent_type: opus-runtime
+  status: scaffold
+  note: viewport hash cache — needs viewport
+'78':
+  title: IsaacLab arena leaderboard
+  agent_type: sonnet-bounded
+  status: landed
+  note: arena leaderboard JSON registry
+78b:
+  title: Yrkesroll (vocational-role) template audit + brick-stacking PhysX root cause
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: leaderboard uploader
+  gate: pytest — uploader posts JSON to a configured URL; handles 4xx/5xx with retry+backoff
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_78b_arena_leaderboard_uploader.py
+  - tests/test_sub_phase_78b_arena_leaderboard_uploader.py
+  loc: 200
+  effort_min: 60
+  blocked_by:
+  - '78'
+78c:
+  title: Asset-precheck + mock fallbacks per yrkesroll asset type
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: baseline freeze
+  gate: pytest — freeze + compare round-trip; delta report on stratified runs
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_78c_arena_baseline_freeze.py
+  - tests/test_sub_phase_78c_arena_baseline_freeze.py
+  loc: 200
+  effort_min: 60
+  blocked_by:
+  - '78'
+  - 8d
+'79':
+  title: 'Whole-body control: humanoid loco-manipulation'
+  agent_type: opus-runtime
+  status: scaffold
+  note: WBC — needs MuJoCo/IsaacLab GPU
+79b:
+  title: IsaacLab 2.3 G1 locomanipulation env + WBC integration
+  agent_type: opus-runtime
+  status: scaffold
+  note: WBC locomotion
+'80':
+  title: Surface gripper + suction modeling
+  agent_type: opus-runtime
+  status: scaffold
+  note: surface gripper physics
+80b:
+  title: Grasp-stability defaults + `grip_safe_mode` controller arg
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: suction array sensor
+  gate: pytest — suction array detects pickup signal from N suction cups in parallel
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_80b_suction_array_sensor.py
+  - tests/test_sub_phase_80b_suction_array_sensor.py
+  loc: 200
+  effort_min: 60
+  blocked_by: []
+80c:
+  title: Curved-belt + belt-junction primitives
+  agent_type: opus-runtime
+  status: scaffold
+  note: gripper force feedback
+'81':
+  title: 'Multi-rate physics: high-rate vision + low-rate planning'
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: multi-rate config
+81b:
+  title: 'Validation primitive pattern: routes and corridors'
+  agent_type: sonnet-bounded
+  status: landed
+  note: route validators
+  gate: pytest — RouteValidator subclass extends Phase 11b; catches inverted path direction + duplicate waypoints
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_81b_route_validators.py
+  - tests/test_sub_phase_81b_route_validators.py
+  loc: 250
+  effort_min: 90
+  blocked_by:
+  - 11b
+81c:
+  title: MoveIt 2 + cuMotion external execution bridge
+  agent_type: opus-runtime
+  status: scaffold
+  note: high-rate sensor pipe
+'82':
+  title: Epoch V convergence test
+  agent_type: sonnet-bounded
+  status: landed
+  note: Epoch V convergence
+  gate: pytest — 30-tool capability convergence (mock all runtime-blocked tools)
+  files:
+  - service/isaac_assist_service/multimodal/epoch_v_convergence.py
+  - tests/test_phase_82_epoch_v_convergence.py
+  loc: 300
+  effort_min: 90
+  blocked_by:
+  - '73'
+  - '74'
+  - '75'
+'83':
+  title: 'Governance: every overnight patch runs through policy_engine'
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: governance overnight
+  gate: pytest — policy_engine veto fires on synthetic high-risk patch in dry-run path
+  files:
+  - service/isaac_assist_service/multimodal/governance_overnight_patches.py
+  - tests/test_phase_83_governance_overnight_patches.py
+  loc: 200
+  effort_min: 60
+  blocked_by:
+  - '42'
+'84':
+  title: Per-session QA logging expansion
+  agent_type: sonnet-bounded
+  status: landed
+  note: QA logging buffer
+  gate: pytest — log writes ndjson; per-session ring buffer caps at 10k events
+  files:
+  - service/isaac_assist_service/multimodal/per_session_qa_logging.py
+  - tests/test_phase_84_per_session_qa_logging.py
+  loc: 250
+  effort_min: 90
+  blocked_by: []
+'85':
+  title: '`MCPResult` type discrimination'
+  agent_type: sonnet-bounded
+  status: landed
+  note: MCPResult dataclass
+  gate: pytest — MCPResult.kind Literal[...] discriminator; encoder/decoder round-trip
+  files:
+  - service/isaac_assist_service/multimodal/mcp_result_type_discrimination.py
+  - tests/test_phase_85_mcp_result_type_discrimination.py
+  loc: 200
+  effort_min: 60
+  blocked_by: []
+85b:
+  title: 'MCP advanced primitives: Sampling + Elicitation + stateless sessions'
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: streaming results
+  gate: pytest — chunked result emission; partial-then-final flow
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_85b_mcp_streaming_results.py
+  - tests/test_sub_phase_85b_mcp_streaming_results.py
+  loc: 250
+  effort_min: 90
+  blocked_by:
+  - '85'
+'86':
+  title: 'Settings exposure: every runtime knob via MCP'
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: settings registry
+  gate: 'pytest — settings registry: list_all, get(key), set(key, val) with type validation'
+  files:
+  - service/isaac_assist_service/multimodal/settings_exposure_mcp.py
+  - tests/test_phase_86_settings_exposure_mcp.py
+  loc: 250
+  effort_min: 90
+  blocked_by: []
+'87':
+  title: Stdio MCP shim hardening
+  agent_type: opus-runtime
+  status: scaffold
+  note: MCP client integration
+'88':
+  title: Linux pre-built binary CI pipeline
+  agent_type: opus-runtime
+  status: scaffold
+  note: Linux CI infra
+88b:
+  title: Production patch sandboxing for high-risk patches
+  agent_type: opus-runtime
+  status: scaffold
+  note: Windows MSYS2 CI
+'89':
+  title: ROCm + Intel Arc + DirectML smoke tests
+  agent_type: opus-runtime
+  status: scaffold
+  note: ROCm/Arc/DirectML hw
+'90':
+  title: 'Secret redactor: extended pattern set'
+  agent_type: sonnet-mechanical
+  status: landed
+  note: secret redactor 10 patterns
+'91':
+  title: Audit log retention enforcement
+  agent_type: sonnet-bounded
+  status: landed
+  note: audit log retention
+'92':
+  title: Workflow snapshot retention
+  agent_type: sonnet-bounded
+  status: landed
+  note: workflow snapshot retention
+  gate: pytest — retention policy applied to snapshot dir; archives old + deletes oldest
+  files:
+  - service/isaac_assist_service/multimodal/workflow_snapshot_retention.py
+  - tests/test_phase_92_workflow_snapshot_retention.py
+  loc: 200
+  effort_min: 45
+  blocked_by:
+  - '91'
+'93':
+  title: '`proactive_check` deepening'
+  agent_type: sonnet-bounded
+  status: landed
+  note: proactive check rules
+  gate: 'pytest — trigger ladder: scene_opened → robot_imported → console_error each emit expected tool list'
+  files:
+  - service/isaac_assist_service/multimodal/proactive_check_deepening.py
+  - tests/test_phase_93_proactive_check_deepening.py
+  loc: 250
+  effort_min: 90
+  blocked_by: []
+'94':
+  title: Knowledge base feedback loop
+  agent_type: sonnet-bounded
+  status: landed
+  note: KB feedback writer
+  gate: pytest — feedback append + KB index refresh
+  files:
+  - service/isaac_assist_service/multimodal/kb_feedback_loop.py
+  - tests/test_phase_94_kb_feedback_loop.py
+  loc: 200
+  effort_min: 60
+  blocked_by: []
+94b:
+  title: 'Data flywheel: auto-capture golden patterns + sim2real loop'
+  agent_type: sonnet-bounded
+  status: scaffold
+  note: KB freshness audit
+  gate: pytest — audit script reports stale > 90 days entries
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_94b_kb_freshness_audit.py
+  - tests/test_sub_phase_94b_kb_freshness_audit.py
+  loc: 150
+  effort_min: 45
+  blocked_by:
+  - '94'
+'95':
+  title: 'RAG: real NVIDIA docs scraping'
+  agent_type: opus-runtime
+  status: scaffold
+  note: NVIDIA docs scraping
+'96':
+  title: Quarterly audit of `tool_executor.py` size + ghost handlers
+  agent_type: sonnet-mechanical
+  status: scaffold
+  note: quarterly audit script
+  gate: scripts/quarterly_audit_tool_executor.py runs and produces report
+  files:
+  - service/isaac_assist_service/multimodal/quarterly_audit_tool_executor.py
+  - scripts/quarterly_audit.py
+  - tests/test_phase_96_quarterly_audit_tool_executor.py
+  loc: 200
+  effort_min: 60
+  blocked_by:
+  - '18'
+96b:
+  title: Spec-reality reconciliation workflow
+  agent_type: sonnet-mechanical
+  status: scaffold
+  note: ghost-handler ratchet
+  gate: scripts/ghost_handler_ratchet.py reports zero ghost handlers (every name has a body)
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_96b_gh_handler_ratchet.py
+  - scripts/ghost_handler_ratchet.py
+  - tests/test_sub_phase_96b_gh_handler_ratchet.py
+  loc: 150
+  effort_min: 45
+  blocked_by:
+  - '96'
+'97':
+  title: Performance regression CI
+  agent_type: opus-runtime
+  status: scaffold
+  note: perf regression benchmarks
+97b:
+  title: Fast-sweep CP-regression harness (N=1 over all canonicals)
+  agent_type: opus-runtime
+  status: scaffold
+  note: long-running benchmark
+'98':
+  title: Documentation polish
+  agent_type: sonnet-mechanical
+  status: scaffold
+  note: doc polish task
+  gate: docs/architecture/{handlers,honesty,mandate_boundary}.md all link to phase_metadata.yaml; spec_coverage.md regenerated
+  files:
+  - service/isaac_assist_service/multimodal/documentation_polish.py
+  - docs/architecture/handlers.md
+  - docs/spec_coverage.md
+  loc: 0
+  effort_min: 90
+  blocked_by:
+  - '18'
+'99':
+  title: Pick-hold-weld scenario end-to-end
+  agent_type: opus-runtime
+  status: scaffold
+  note: pick-hold-weld scenario
+'100':
+  title: 'Arena benchmark: hand-crafted vs IA-authored'
+  agent_type: opus-runtime
+  status: scaffold
+  note: arena benchmark suite
+'101':
+  title: 'Release: Linux pre-built binary'
+  agent_type: opus-runtime
+  status: scaffold
+  note: Linux binary release
+'102':
+  title: 'Release: macOS / Windows binaries'
+  agent_type: opus-runtime
+  status: scaffold
+  note: macOS/Windows release
+'103':
+  title: User-facing onboarding tutorial
+  agent_type: sonnet-mechanical
+  status: scaffold
+  note: onboarding tutorial markdown
+  gate: docs/tutorial/onboarding.md exists with 5+ guided steps + screenshots placeholders
+  files:
+  - service/isaac_assist_service/multimodal/onboarding_tutorial.py
+  - docs/tutorial/onboarding.md
+  loc: 50
+  effort_min: 60
+  blocked_by:
+  - '18'
+'104':
+  title: Telemetry opt-in
+  agent_type: sonnet-mechanical
+  status: landed
+  note: telemetry opt-in
+'105':
+  title: Public release announcement + demos
+  agent_type: sonnet-mechanical
+  status: scaffold
+  note: release announcement markdown
+  gate: docs/release/announcement_v1.md exists with intro/features/changelog/credits/install
+  files:
+  - service/isaac_assist_service/multimodal/public_release_announcement.py
+  - docs/release/announcement_v1.md
+  loc: 0
+  effort_min: 60
+  blocked_by: []
+'106':
+  title: Post-release retrospective + roadmap
+  agent_type: sonnet-mechanical
+  status: scaffold
+  note: retrospective template
+  gate: 'docs/retrospective/template.md exists with sections: shipped/skipped/blockers/learnings/next'
+  files:
+  - service/isaac_assist_service/multimodal/post_release_retrospective.py
+  - docs/retrospective/template.md
+  loc: 0
+  effort_min: 30
+  blocked_by: []

@@ -37,6 +37,7 @@ Per `specs/IA_FULL_SPEC_2026-05-10.md` Phase 8.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -416,6 +417,103 @@ def _resolve_from_legacy(name: str):
 
     return getattr(_te, name)
 
+
+
+# ---------------------------------------------------------------------------
+# Phase 14 (2026-05-13): physically moved from tool_executor.py.
+# These were in _LEGACY_REEXPORT_NAMES as lazy bridges; the bodies now live
+# here and consumers import via `from ._shared import _X`.
+
+from datetime import datetime as _wf_dt  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+from typing import Tuple as _Tuple  # noqa: E402
+
+async def _get_viewport_bytes() -> tuple:
+    """Capture the viewport and return (raw_bytes, mime_type)."""
+    result = await kit_tools.get_viewport_image(max_dim=1280)
+    b64 = result.get("image_b64") or result.get("data", "")
+    if not b64:
+        return None, None
+    import base64
+    return base64.b64decode(b64), "image/png"
+
+def _get_vision_provider():
+    from ..vision_gemini import GeminiVisionProvider
+    return GeminiVisionProvider()
+
+def _safe_robot_name(articulation_path: str) -> str:
+    """Derive a filesystem-safe slug from a USD path, e.g. '/World/Franka' -> 'franka'."""
+    name = articulation_path.rstrip("/").split("/")[-1] or "robot"
+    return "".join(c if c.isalnum() or c in "_-" else "_" for c in name).lower()
+
+def _check_real_data_path(path: str) -> Optional[str]:
+    """Return an error string if the real_data_path is unusable, else None."""
+    if not path:
+        return "real_data_path is required"
+    p = Path(path)
+    if not p.exists():
+        return f"real_data_path not found: {path}"
+    if p.suffix.lower() not in (".h5", ".hdf5"):
+        return f"real_data_path must be HDF5 (.h5/.hdf5), got {p.suffix}"
+    return None
+
+def _wf_now_iso() -> str:
+    return _wf_dt.utcnow().isoformat() + "Z"
+
+def _resolve_run_id(run_id: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Resolve a run_id (or None → most-recent active run) to its registry entry.
+
+    Returns (run_id, entry) or (None, None) if no matching run exists.
+    """
+    if not _RUN_REGISTRY:
+        return None, None
+    if run_id is None:
+        # Pick the most-recently-launched RUNNING (or PAUSED) run.
+        candidates = [
+            (rid, e) for rid, e in _RUN_REGISTRY.items()
+            if e.get("state") in ("running", "paused")
+        ]
+        if not candidates:
+            return None, None
+        # Newest by launch_time
+        candidates.sort(key=lambda kv: kv[1].get("launch_time", 0.0), reverse=True)
+        return candidates[0]
+    entry = _RUN_REGISTRY.get(run_id)
+    return (run_id, entry) if entry else (None, None)
+
+async def _query_run_ipc(entry: Dict[str, Any], request: Dict[str, Any]) -> Dict[str, Any]:
+    """Send an IPC request to a running launch_training subprocess.
+
+    Override in tests via monkeypatch. The real implementation talks to the
+    subprocess over its Unix socket (entry['ipc_socket']).
+    """
+    handler = entry.get("ipc_handler")
+    if handler is None:
+        raise RuntimeError(
+            "No IPC handler registered for this run — was it launched via launch_training?"
+        )
+    return await handler(request)
+
+def _validate_env_id(env_id: Any, num_envs: int) -> Optional[str]:
+    """Return an error message if env_id is invalid, else None."""
+    if not isinstance(env_id, int) or isinstance(env_id, bool):
+        return f"env_id must be an integer, got {type(env_id).__name__}"
+    if env_id < 0 or env_id >= num_envs:
+        return f"env_id {env_id} out of range [0, {num_envs})"
+    return None
+
+
+def _parse_last_json_line(output: str):
+    """Return the last well-formed JSON object printed in output, or None."""
+    import json as _json
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+    return None
 
 def __getattr__(name: str):  # PEP 562 module-level __getattr__
     """Lazy re-export for legacy-named utilities.

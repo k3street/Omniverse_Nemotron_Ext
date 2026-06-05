@@ -14,6 +14,27 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 # ---------------------------------------------------------------------------
+# Phase 14 + 16 (2026-05-13): migrated from tool_executor.py.
+
+_PP_CTRL_ATTRS = [
+    # (attr_name, usd_type_name_literal, default_value_literal)
+    ("ctrl:mode",            "Sdf.ValueTypeNames.String", '""'),
+    ("ctrl:phase",           "Sdf.ValueTypeNames.String", '"wait_sensor"'),
+    ("ctrl:cubes_delivered", "Sdf.ValueTypeNames.Int",    "0"),
+    ("ctrl:error_count",     "Sdf.ValueTypeNames.Int",    "0"),
+    ("ctrl:last_error",      "Sdf.ValueTypeNames.String", '""'),
+    ("ctrl:picked_path",     "Sdf.ValueTypeNames.String", '""'),
+    ("ctrl:tick_count",      "Sdf.ValueTypeNames.Int",    "0"),
+    # Phase 4 diagnostic counters (added 2026-05-10): incremented in
+    # cuRobo handler around _planner.plan_pose() calls. Lets probes
+    # distinguish "controller never planned" (plan_calls=0) from
+    # "controller tried but planner failed" (plan_calls>0, plan_fails>0).
+    ("ctrl:plan_calls",      "Sdf.ValueTypeNames.Int",    "0"),
+    ("ctrl:plan_fails",      "Sdf.ValueTypeNames.Int",    "0"),
+    ("ctrl:last_fail_goal",  "Sdf.ValueTypeNames.String", '""'),
+]
+
+# ---------------------------------------------------------------------------
 # Theme-local constants + helpers (Phase 8 wave 9, 2026-05-13)
 # Migrated from tool_executor.py — used only by handlers.pick_place.
 
