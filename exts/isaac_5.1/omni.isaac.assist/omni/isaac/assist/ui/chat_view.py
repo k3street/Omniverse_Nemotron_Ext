@@ -761,22 +761,23 @@ class ChatViewWindow(ui.Window):
                 style={"font_size": 11},
                 tooltip="Clear chat history (keeps stage and undo). Confirm required.",
             )
-            self.btn_livekit = ui.Button(
-                "Vision",
-                width=54,
-                height=22,
-                clicked_fn=self._toggle_livekit,
-                style={"font_size": 11},
-                tooltip="Toggle viewport vision stream",
-            )
+            # `👁 Modes` launcher — replaces the prior `Vision` toggle.
+            # Opens a popover with 5 input modalities (open canvas, upload
+            # sketch, voice, extract from scene, analyze viewport). The
+            # existing LiveKit-vision toggle behavior is preserved as one
+            # popover item ("Analyze current viewport").
+            # Per docs/specs/2026-05-08-multimodal-foundation-spec.md §11.4.
             self.btn_modes = ui.Button(
-                "Modes",
-                width=54,
+                "👁 Modes",
+                width=72,
                 height=22,
                 clicked_fn=self._open_modes_popup,
                 style={"font_size": 11},
                 tooltip="Input modes — canvas, sketch, voice, scene, vision",
             )
+            # Backward-compat alias for any existing references that still
+            # name btn_livekit (e.g., _toggle_livekit which mutates .text).
+            self.btn_livekit = self.btn_modes
             self.btn_model = ui.Button(
                 "M",
                 width=24,

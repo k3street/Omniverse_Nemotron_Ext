@@ -115,7 +115,6 @@ class KitRPCServer:
             return
 
         self._loop = asyncio.new_event_loop()
-        self._serve_task = None
         self._thread = threading.Thread(target=self._run, daemon=True, name="IsaacAssist-RPC")
         self._thread.start()
         _server_instance = self
@@ -123,29 +122,14 @@ class KitRPCServer:
 
     def stop(self) -> None:
         if self._loop and self._loop.is_running():
-            # Cancel the serve task so _runner.cleanup() runs inside the loop
-            def _cancel():
-                if self._serve_task and not self._serve_task.done():
-                    self._serve_task.cancel()
-            self._loop.call_soon_threadsafe(_cancel)
+            self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread:
-            self._thread.join(timeout=5)
-        # Remove the port file
-        try:
-            import os
-            os.unlink("/tmp/isaac_assist_rpc_port")
-        except Exception:
-            pass
+            self._thread.join(timeout=3)
         carb.log_warn("[IsaacAssist] Kit RPC server stopped")
 
     def _run(self) -> None:
         asyncio.set_event_loop(self._loop)
-        try:
-            self._loop.run_until_complete(self._serve())
-        except RuntimeError:
-            pass  # loop stopped before future completed — expected on shutdown
-        finally:
-            self._loop.close()
+        self._loop.run_until_complete(self._serve())
 
     async def _serve(self) -> None:
         from aiohttp import web
@@ -160,41 +144,16 @@ class KitRPCServer:
         app.router.add_post("/sim_control", self._handle_sim_control)
         app.router.add_post("/set_viewport_camera", self._handle_set_viewport_camera)
         app.router.add_get("/list_prims", self._handle_list_prims)
-        app.router.add_post("/check_placement", self._handle_check_placement)
-        # Kit Supervisor soft-reset endpoint (spec 2026-05-11 v2 section 5)
+        # Kit Supervisor soft-reset endpoint (spec 2026-05-11 v2 §5)
         app.router.add_post("/admin/reset_world", self._handle_reset_world)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
-
-        # Try the configured port first, then fall back to the next 9 ports
-        bound_port = None
-        for candidate in range(self.port, self.port + 10):
-            try:
-                site = web.TCPSite(self._runner, self.host, candidate,
-                                   reuse_address=True)
-                await site.start()
-                bound_port = candidate
-                break
-            except OSError:
-                carb.log_warn(f"[IsaacAssist] Port {candidate} in use, trying next...")
-
-        if bound_port is None:
-            carb.log_error("[IsaacAssist] Could not bind Kit RPC server on any port in range "
-                           f"{self.port}-{self.port + 9}. Kit RPC disabled.")
-            return
-
-        self.port = bound_port
-        # Write bound port to a well-known file so the FastAPI service can discover it
-        try:
-            with open("/tmp/isaac_assist_rpc_port", "w") as _pf:
-                _pf.write(str(bound_port))
-        except Exception:
-            pass
+        site = web.TCPSite(self._runner, self.host, self.port)
+        await site.start()
         carb.log_warn(f"[IsaacAssist] Kit RPC listening on http://{self.host}:{self.port}")
 
-        # Keep the server alive until cancelled
-        self._serve_task = asyncio.current_task()
+        # Keep the server alive until the event loop is stopped
         try:
             while True:
                 await asyncio.sleep(3600)
@@ -387,74 +346,18 @@ class KitRPCServer:
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
-    async def _handle_check_placement(self, request) -> "web.Response":
-        """
-        Test if a box at a given position collides with anything in the scene.
-        Uses PhysX overlap_box — no prim creation needed, runs in microseconds.
-        Requires PhysicsScene and existing objects with CollisionAPI.
-        """
-        from aiohttp import web
-        try:
-            data = await request.json()
-            half_extents = data["half_extents"]  # [x, y, z]
-            position = data["position"]          # [x, y, z]
-            rotation = data.get("rotation", [0, 0, 0, 1])  # quaternion xyzw
-
-            code = (
-                "import json\n"
-                "from omni.physx import get_physx_scene_query_interface\n"
-                "import carb\n"
-                "\n"
-                "_collisions = []\n"
-                "def _report_hit(hit):\n"
-                "    _collisions.append(str(hit.rigid_body))\n"
-                "    return True\n"
-                "\n"
-                "sq = get_physx_scene_query_interface()\n"
-                f"sq.overlap_box(\n"
-                f"    carb.Float3({half_extents[0]}, {half_extents[1]}, {half_extents[2]}),\n"
-                f"    carb.Float3({position[0]}, {position[1]}, {position[2]}),\n"
-                f"    carb.Float4({rotation[0]}, {rotation[1]}, {rotation[2]}, {rotation[3]}),\n"
-                f"    _report_hit\n"
-                f")\n"
-                "print(json.dumps({'collisions': _collisions, 'clear': len(_collisions) == 0}))"
-            )
-
-            result_holder = {"result": None, "event": threading.Event()}
-            _SYNC_EXEC_QUEUE.put((code, result_holder))
-
-            loop = asyncio.get_event_loop()
-            completed = await loop.run_in_executor(
-                None, lambda: result_holder["event"].wait(timeout=5)
-            )
-
-            if not completed or result_holder["result"] is None:
-                return web.json_response(
-                    {"collisions": [], "clear": True, "warning": "PhysX query timed out"},
-                )
-
-            # Parse the JSON output from the executed code
-            output = result_holder["result"].get("output", "").strip()
-            try:
-                parsed = json.loads(output)
-                return web.json_response(parsed)
-            except (json.JSONDecodeError, ValueError):
-                return web.json_response({"collisions": [], "clear": True, "raw_output": output})
-
-        except Exception as e:
-            return web.json_response({"error": str(e)}, status=500)
-
     async def _handle_reset_world(self, request) -> "web.Response":
-        """Kit Supervisor soft-reset (spec 2026-05-11 v2 section 5).
+        """Kit Supervisor soft-reset (spec 2026-05-11 v2 §5).
 
-        Body JSON:
-            flush_curobo: bool, default True
-            new_stage: bool, default True
-            gc_collect: bool, default True
-            timeout_s: float, default 30, logged only
+        Body (JSON):
+            flush_curobo: bool (default True) — clear cuRobo planner cache
+            new_stage:    bool (default True) — create fresh USD stage
+            gc_collect:   bool (default True) — run python gc.collect()
+            timeout_s:    float (default 30) — guard band; logged only
 
         Response:
-            {ok, duration_ms, actions_performed, errors}
+            { ok: bool, duration_ms: float,
+              actions_performed: list[str], errors: list[str] }
         """
         from aiohttp import web
         import time as _time
@@ -472,6 +375,8 @@ class KitRPCServer:
         actions: list = []
         errors: list = []
 
+        # 1) cuRobo cache flush — best-effort; handler stores cache on a
+        # module-level/builtins attribute named `_PLANNER_ATTR`.
         if flush_curobo:
             try:
                 import builtins as _b
@@ -489,6 +394,7 @@ class KitRPCServer:
             except Exception as e:
                 errors.append(f"curobo_flush:{type(e).__name__}:{e}")
 
+        # 2) new stage — preferred for state cleanup
         if new_stage:
             try:
                 import omni.usd
@@ -502,6 +408,7 @@ class KitRPCServer:
             except Exception as e:
                 errors.append(f"new_stage:{type(e).__name__}:{e}")
 
+        # 3) gc — clears python heap fragmentation
         if gc_collect:
             try:
                 import gc

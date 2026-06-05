@@ -23,7 +23,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from ..runtime_profiles import get_runtime_profile, prompt_runtime_rules
 from .tools.tool_schemas import ISAAC_SIM_TOOLS
 
 logger = logging.getLogger(__name__)
@@ -50,7 +49,6 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
         "ros2_subscribe_once", "ros2_publish", "ros2_publish_sequence",
         "ros2_list_services", "ros2_call_service",
         "ros2_list_nodes", "ros2_get_node_details",
-        "launch_rviz2", "stop_rviz2",
     ],
     "camera_viewport": [
         "create_prim", "set_viewport_camera", "capture_viewport",
@@ -73,9 +71,9 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
         "generate_scene_blueprint", "build_scene_from_blueprint",
         "catalog_search", "nucleus_browse", "download_asset",
     ],
-    "rl_training": ["create_isaaclab_env", "launch_training", "deploy_rl_policy", "stop_rl_policy"],
+    "rl_training": ["create_isaaclab_env", "launch_training"],
     "sdg": ["configure_sdg"],
-    "export": ["export_scene_package", "scene_workspace", "export_urdf"],
+    "export": ["export_scene_package"],
     "stage_analysis": ["run_stage_analysis"],
     "scripting": ["run_usd_script"],
 }
@@ -84,7 +82,7 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
 _KEYWORD_CATEGORIES: List[tuple] = [
     (re.compile(r"robot|franka|ur10|ur5|panda|carter|jetbot|nova|spot|anymal|cobotta", re.I),
      {"robot", "usd_core"}),
-    (re.compile(r"ros2?|omnigraph|graph|publish|subscribe|topic|/cmd_vel|/joint|twist|odom|rviz", re.I),
+    (re.compile(r"ros2?|omnigraph|graph|publish|subscribe|topic|/cmd_vel|/joint|twist|odom", re.I),
      {"omnigraph_ros2", "scripting"}),
     (re.compile(r"physics|rigid.?body|collision|collider|gravity|deform|cloth|soft|mass", re.I),
      {"physics", "usd_core"}),
@@ -110,14 +108,12 @@ _KEYWORD_CATEGORIES: List[tuple] = [
      {"scene_builder", "usd_core"}),
     (re.compile(r"nucleus|content.?library|browse.?asset|download.?asset|omniverse://|pull.?asset", re.I),
      {"scene_builder"}),
-    (re.compile(r"isaaclab|reinforcement|rl|train|gymnasium|walk|locomot|g1|h1|policy|checkpoint", re.I),
+    (re.compile(r"isaaclab|reinforcement|rl|train|gymnasium", re.I),
      {"rl_training"}),
     (re.compile(r"replicator|synth|dataset|annotator|sdg", re.I),
      {"sdg"}),
-    (re.compile(r"export|package|save.?scene|project.?files|workspace.?file|companion.?file", re.I),
+    (re.compile(r"export|package|save.?scene|project.?files", re.I),
      {"export"}),
-    (re.compile(r"urdf|xacro", re.I),
-     {"export", "robot"}),
     (re.compile(r"diagnos|validat|analyz|analyse|check.?error|what.?s.?wrong|stage.?analys|health.?check|scan.?scene", re.I),
      {"stage_analysis", "scene_query", "console"}),
     (re.compile(r"move|teleport|position|translate|scale|rotate|transform", re.I),
@@ -135,20 +131,6 @@ _KEYWORD_CATEGORIES: List[tuple] = [
     (re.compile(r"search|find|catalog|asset|library", re.I),
      {"scene_builder"}),
 ]
-
-# Pattern to detect poisoned assistant messages that are just intent JSON
-_INTENT_JSON_RE = re.compile(
-    r'^\s*\{[^{}]*"intent"\s*:\s*"[a-z_]+"[^{}]*\}\s*$', re.S
-)
-
-
-def _is_bare_intent_json(text: str) -> bool:
-    """Return True if text is just an intent classification echo (bug artifact)."""
-    text = text.strip()
-    if len(text) > 200:
-        return False
-    return bool(_INTENT_JSON_RE.match(text))
-
 
 # Intent → default tool categories (always included for that intent)
 _INTENT_CATEGORIES: Dict[str, Set[str]] = {
@@ -639,8 +621,6 @@ async def distill_context(
 
     if isaac_version:
         system += f"\nIsaac Sim version: {isaac_version}"
-    runtime_profile = get_runtime_profile(isaac_version or None)
-    system += f"\n\n{prompt_runtime_rules(runtime_profile)}"
 
     # Filtered scene context
     filtered_scene = filter_scene_context(scene_context, user_message, knowledge)
@@ -687,26 +667,10 @@ async def distill_context(
     for m in history[-4:]:
         if m.get("role") in ("user", "assistant") and m.get("content"):
             content = m["content"]
-            # Skip poisoned assistant messages that are just intent JSON
-            # (caused by a previous bug where the LLM echoed the classifier)
-            if m["role"] == "assistant" and _is_bare_intent_json(content):
-                logger.debug("[Distiller] Skipping poisoned intent-echo from history")
-                continue
             if len(content) > 800:
                 content = content[:800] + "..."
             recent_raw.append({"role": m["role"], "content": content})
-
-    # Ensure valid alternation (Anthropic requires user/assistant/user/...).
-    # After filtering poisoned assistant messages we may have consecutive
-    # user messages.  Merge them so the API doesn't reject the request.
-    merged_raw: List[Dict] = []
-    for m in recent_raw:
-        if merged_raw and merged_raw[-1]["role"] == m["role"]:
-            merged_raw[-1]["content"] += "\n" + m["content"]
-        else:
-            merged_raw.append(m)
-
-    messages.extend(merged_raw)
+    messages.extend(recent_raw)
     messages.append({"role": "user", "content": user_message})
 
     # ── 5. Estimate token count ──────────────────────────────────────────

@@ -168,8 +168,13 @@
 '21':
   title: 'Role library: scene-template index by role'
   agent_type: sonnet-mechanical
-  status: scaffold
+  status: landed
   note: inverted index, data
+  landed_date: '2026-05-13'
+  gate: pytest tests/test_phase_21_role_template_index.py — index lookup by role returns matching templates
+  files:
+  - service/isaac_assist_service/multimodal/role_template_index.py
+  - tests/test_phase_21_role_template_index.py
 '22':
   title: '`sync_from_stage` — round-trip Kit → LayoutSpec'
   agent_type: opus-runtime
@@ -207,7 +212,7 @@
 25b:
   title: Object class metadata depth
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: user palette extensions
   gate: pytest tests/test_sub_phase_25b_object_palette_user_extensions.py — user can register custom class beyond 60-palette
   files:
@@ -401,7 +406,7 @@
 56b:
   title: Bootstrap-CI confidence reporting under DR
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: recalibration log
   gate: pytest tests/test_sub_phase_56b_recalibration_log.py — log writes ndjson, queryable by dimension
   files:
@@ -414,7 +419,7 @@
 56c:
   title: Scenario-profile controller config
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: ctrl profile attr
   gate: pytest — ctrl:profile attr added to controller schema; integrated with ctrl_namespace types
   files:
@@ -448,7 +453,8 @@
 60b:
   title: 'SDG: extreme domain randomization (EDR) preset'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: preset edge cases
   gate: pytest tests/test_sub_phase_60b_sdg_preset_edge_cases.py — edge-case preset list has ≥3 entries
   files:
@@ -566,7 +572,8 @@
 70d:
   title: 'Drop-target default: catalog-aware computation'
   agent_type: sonnet-mechanical
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: bin interior metadata
   gate: pytest — bin metadata loader returns interior dimensions for 5+ bin SKUs
   files:
@@ -589,7 +596,8 @@
 72b:
   title: Contact-classification → joint-type inference
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: constraint violations
   gate: pytest — ConstraintViolation subclass for assembly constraints; emits via Phase 11b channel
   files:
@@ -602,7 +610,7 @@
 72c:
   title: '`validate_scene_blueprint` strengthening'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: blueprint validator
   gate: 'pytest — blueprint validator catches: 3 missing fields, 2 invalid object_class refs, AABB overlap'
   files:
@@ -646,7 +654,7 @@
 78b:
   title: Yrkesroll (vocational-role) template audit + brick-stacking PhysX root cause
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: leaderboard uploader
   gate: pytest — uploader posts JSON to a configured URL; handles 4xx/5xx with retry+backoff
   files:
@@ -659,7 +667,7 @@
 78c:
   title: Asset-precheck + mock fallbacks per yrkesroll asset type
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: baseline freeze
   gate: pytest — freeze + compare round-trip; delta report on stratified runs
   files:
@@ -688,7 +696,8 @@
 80b:
   title: Grasp-stability defaults + `grip_safe_mode` controller arg
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: suction array sensor
   gate: pytest — suction array detects pickup signal from N suction cups in parallel
   files:
@@ -705,7 +714,7 @@
 '81':
   title: 'Multi-rate physics: high-rate vision + low-rate planning'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: multi-rate config
 81b:
   title: 'Validation primitive pattern: routes and corridors'
@@ -743,7 +752,7 @@
 '83':
   title: 'Governance: every overnight patch runs through policy_engine'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
   note: governance overnight
   gate: pytest — policy_engine veto fires on synthetic high-risk patch in dry-run path
   files:
@@ -780,7 +789,8 @@
 85b:
   title: 'MCP advanced primitives: Sampling + Elicitation + stateless sessions'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: streaming results
   gate: pytest — chunked result emission; partial-then-final flow
   files:
@@ -873,7 +883,8 @@
 94b:
   title: 'Data flywheel: auto-capture golden patterns + sim2real loop'
   agent_type: sonnet-bounded
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: KB freshness audit
   gate: pytest — audit script reports stale > 90 days entries
   files:
@@ -891,9 +902,10 @@
 '96':
   title: Quarterly audit of `tool_executor.py` size + ghost handlers
   agent_type: sonnet-mechanical
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: quarterly audit script
-  gate: scripts/quarterly_audit_tool_executor.py runs and produces report
+  gate: scripts/quarterly_audit.py runs and produces report
   files:
   - service/isaac_assist_service/multimodal/quarterly_audit_tool_executor.py
   - scripts/quarterly_audit.py
@@ -905,14 +917,15 @@
 96b:
   title: Spec-reality reconciliation workflow
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: ghost-handler ratchet
-  gate: scripts/ghost_handler_ratchet.py reports zero ghost handlers (every name has a body)
+  status: landed
+  landed_date: '2026-05-13'
+  note: spec-reality reconciliation
+  gate: pytest tests/test_sub_phase_96b_spec_reality_reconciliation.py — reconciliation
+    detects unreferenced files and orphan spec lines
   files:
-  - service/isaac_assist_service/multimodal/sub_phase_96b_gh_handler_ratchet.py
-  - scripts/ghost_handler_ratchet.py
-  - tests/test_sub_phase_96b_gh_handler_ratchet.py
-  loc: 150
+  - service/isaac_assist_service/multimodal/sub_phase_96b_spec_reality_reconciliation.py
+  - tests/test_sub_phase_96b_spec_reality_reconciliation.py
+  loc: 220
   effort_min: 45
   blocked_by:
   - '96'
@@ -929,13 +942,12 @@
 '98':
   title: Documentation polish
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: doc polish task
-  gate: docs/architecture/{handlers,honesty,mandate_boundary}.md all link to phase_metadata.yaml; spec_coverage.md regenerated
+  status: landed
+  note: MarkdownPolisher linter + auto_fix; 7 rules; 23 pytest tests pass
+  gate: pytest tests/test_phase_98_documentation_polish.py -- all pass
   files:
   - service/isaac_assist_service/multimodal/documentation_polish.py
-  - docs/architecture/handlers.md
-  - docs/spec_coverage.md
+  - tests/test_phase_98_documentation_polish.py
   loc: 0
   effort_min: 90
   blocked_by:
@@ -963,13 +975,14 @@
 '103':
   title: User-facing onboarding tutorial
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: onboarding tutorial markdown
-  gate: docs/tutorial/onboarding.md exists with 5+ guided steps + screenshots placeholders
+  status: landed
+  note: onboarding tutorial markdown + state machine
+  gate: pytest tests/test_phase_103_onboarding_tutorial.py — 13 tests pass
   files:
   - service/isaac_assist_service/multimodal/onboarding_tutorial.py
-  - docs/tutorial/onboarding.md
-  loc: 50
+  - docs/onboarding_tutorial.md
+  - tests/test_phase_103_onboarding_tutorial.py
+  loc: 250
   effort_min: 60
   blocked_by:
   - '18'
@@ -981,7 +994,7 @@
 '105':
   title: Public release announcement + demos
   agent_type: sonnet-mechanical
-  status: scaffold
+  status: landed
   note: release announcement markdown
   gate: docs/release/announcement_v1.md exists with intro/features/changelog/credits/install
   files:
@@ -993,12 +1006,13 @@
 '106':
   title: Post-release retrospective + roadmap
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: retrospective template
-  gate: 'docs/retrospective/template.md exists with sections: shipped/skipped/blockers/learnings/next'
+  status: landed
+  note: retrospective template + builder + classify_priority
+  gate: pytest -- retrospective template renders, roadmap tier classifier deterministic
   files:
   - service/isaac_assist_service/multimodal/post_release_retrospective.py
-  - docs/retrospective/template.md
-  loc: 0
+  - docs/templates/retrospective_template.md
+  - tests/test_phase_106_post_release_retrospective.py
+  loc: 200
   effort_min: 30
   blocked_by: []

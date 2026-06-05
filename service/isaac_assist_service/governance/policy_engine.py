@@ -2,8 +2,8 @@ import logging
 import re
 from typing import List, Dict, Any, Tuple
 
-from ..planner.models import PatchAction
-from .models import GovernanceConfig
+from service.isaac_assist_service.planner.models import PatchAction
+from service.isaac_assist_service.governance.models import GovernanceConfig
 
 logger = logging.getLogger(__name__)
 

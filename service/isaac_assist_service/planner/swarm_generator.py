@@ -41,20 +41,10 @@ class SwarmPlanGenerator:
             "reference_apis": []
         }
 
-        # Select model based on LLM mode — cloud models when configured,
-        # local Ollama model otherwise.
-        mode = config.llm_mode.lower()
-        if mode in ("anthropic", "openai", "grok", "google"):
-            model_tag = config.cloud_model_name
-            logger.info(f"Swarm using cloud model: {model_tag} (mode={mode})")
-        else:
-            model_tag = config.local_model_name
-            logger.info(f"Swarm using local model: {model_tag}")
-
-        # Initialize core agents
-        coder  = CoderAgent(model_tag=model_tag)
+        # Initialize core agents leveraging the local Config framework
+        coder  = CoderAgent(model_tag=config.local_model_name)
         qa     = QAAgent(sim_mode="auto")
-        critic = CriticAgent(model=model_tag)
+        critic = CriticAgent()
         pm     = ProjectManagerAgent(
             coder=coder,
             qa=qa,

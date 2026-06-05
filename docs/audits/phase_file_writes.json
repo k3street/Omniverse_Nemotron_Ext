@@ -3,11 +3,38 @@
     ".github/workflows/ci.yml": [
       "4"
     ],
+    ".github/workflows/fast-sweep.yml": [
+      "97b"
+    ],
+    ".github/workflows/quarterly-spec-reconciliation.yml": [
+      "96b"
+    ],
+    "IA_FULL_SPEC_2026-05-10.md": [
+      "18c"
+    ],
+    "chat/canonical_instantiator.py": [
+      "8d",
+      "11c",
+      "78c"
+    ],
+    "chat/intent_router.py": [
+      "70c"
+    ],
+    "chat/orchestrator.py": [
+      "63c",
+      "94b"
+    ],
+    "chat/orchestrator.py:773-793": [
+      "85b"
+    ],
     "chat/slash_commands.py": [
       "43"
     ],
     "chat/snapshot_restore.py": [
       "41"
+    ],
+    "chat/tools/kit_tools.py": [
+      "88b"
     ],
     "chat/tools/kit_tools.py:queue_exec_patch": [
       "42"
@@ -27,12 +54,64 @@
     "chat/tools/patch_validators/rules/{rule_name}.py": [
       "11"
     ],
+    "chat/tools/queue_exec_honesty.py": [
+      "47b"
+    ],
+    "chat/tools/ros_mcp_tools.py": [
+      "7b"
+    ],
     "chat/turn_snapshot.py": [
       "41"
     ],
+    "data/asset_mock_registry.yaml": [
+      "78c"
+    ],
+    "data/baselines/_README.md": [
+      "8d"
+    ],
+    "data/bin_interior_metadata.yaml": [
+      "70d"
+    ],
+    "data/canonical_templates/*.json": [
+      "78c"
+    ],
+    "data/canonical_templates/brick_stacking*.json": [
+      "78b"
+    ],
+    "data/canonical_templates/drawer_open*.json": [
+      "78b"
+    ],
+    "data/canonical_templates/modbus_to_ros2_relay.json": [
+      "31b"
+    ],
+    "data/canonical_templates/mqtt_sparkplug_telemetry.json": [
+      "31b"
+    ],
+    "data/canonical_templates/openplc_handshake.json": [
+      "31b"
+    ],
+    "data/control_profiles.yaml": [
+      "56c"
+    ],
+    "data/curobo_robot_configs/{ur10,ur5e,ur3e,franka,fr3,gp25}.yaml": [
+      "63c"
+    ],
+    "data/dr/distractor_pool.yaml": [
+      "60b"
+    ],
     "data/object_classes.yaml": [
       "25",
+      "25b",
       "71"
+    ],
+    "data/object_classes_validator.py": [
+      "25b"
+    ],
+    "data/physics_defaults.yaml": [
+      "80b"
+    ],
+    "data/usd/robots/g1/": [
+      "79b"
     ],
     "data/usd/robots/yaskawa_gp25/source/meshes/": [
       "71"
@@ -43,26 +122,70 @@
     "data/usd/robots/yaskawa_gp25/yaskawa_gp25.usd": [
       "71"
     ],
+    "diagnose/cache.py": [
+      "49b"
+    ],
+    "diagnose/escalation.py": [
+      "56"
+    ],
     "diagnose/gap_log.py": [
+      "54",
+      "56b"
+    ],
+    "diagnose/gap_query.py": [
       "54"
     ],
     "diagnose/metrics.py": [
       "48"
     ],
     "diagnose/recalibrate.py": [
-      "56"
+      "56",
+      "56b"
+    ],
+    "diagnose/schema.py": [
+      "8c",
+      "56b",
+      "56c"
     ],
     "diagnose/schema.py:THRESHOLDS": [
       "48"
+    ],
+    "diagnose/sim_backend_mock.py": [
+      "8b"
     ],
     "diagnose/simulation_runner.py": [
       "53"
     ],
     "diagnose/tool.py": [
-      "48"
+      "48",
+      "49b"
+    ],
+    "docs/architecture/action_levels.md": [
+      "18b"
+    ],
+    "docs/architecture/honesty.md": [
+      "18c"
+    ],
+    "docs/architecture/mandate_boundary.md": [
+      "17b"
     ],
     "docs/audits/fork_divergence_template.md": [
       "0b"
+    ],
+    "docs/audits/handler_cross_refs.md": [
+      "2b"
+    ],
+    "docs/audits/honesty_inventory.md": [
+      "47b"
+    ],
+    "docs/audits/phase_file_writes.md": [
+      "2b"
+    ],
+    "docs/audits/spec_reconciliation_template.md": [
+      "96b"
+    ],
+    "docs/audits/yrkesroll_status_template.md": [
+      "78b"
     ],
     "docs/benchmarks/2026-05-{date}-arena.md": [
       "100"
@@ -79,6 +202,18 @@
     "docs/forensics/tool_executor_recovered_state_2026-05-10.md": [
       "13"
     ],
+    "docs/handlers/create_behavior.md": [
+      "70b"
+    ],
+    "docs/handlers/cumotion_moveit.md": [
+      "81c"
+    ],
+    "docs/handlers/motion_backends.md": [
+      "63b"
+    ],
+    "docs/handlers/validation_primitives.md": [
+      "81b"
+    ],
     "exts/isaac_6.0/.../canvas_mirror.py": [
       "29"
     ],
@@ -92,7 +227,8 @@
       "37"
     ],
     "governance/policy_engine.py": [
-      "42"
+      "42",
+      "88b"
     ],
     "handlers/_dispatch.py:register_all_handlers": [
       "33"
@@ -106,15 +242,92 @@
     "handlers/_state.py": [
       "8"
     ],
+    "handlers/articulated_pull.py": [
+      "70c"
+    ],
     "handlers/assembly_runtime.py": [
       "72"
     ],
+    "handlers/asset_mock_fallback.py": [
+      "78c"
+    ],
+    "handlers/asset_precheck.py": [
+      "78c"
+    ],
+    "handlers/blueprint_revise.py": [
+      "72c"
+    ],
+    "handlers/bridges.py": [
+      "31b"
+    ],
     "handlers/contact_sequence.py": [
-      "63"
+      "63",
+      "63b",
+      "63d",
+      "70d"
+    ],
+    "handlers/control_profiles.py": [
+      "56c"
+    ],
+    "handlers/conveyor_curved.py": [
+      "80c"
+    ],
+    "handlers/cumotion_moveit.py": [
+      "81c"
+    ],
+    "handlers/curobo_debug.py": [
+      "63c"
+    ],
+    "handlers/grip_stability.py": [
+      "80b"
+    ],
+    "handlers/groot_blueprints.py": [
+      "62b"
+    ],
+    "handlers/joint_inference.py": [
+      "72b"
+    ],
+    "handlers/locomanip.py": [
+      "79b"
+    ],
+    "handlers/motion_planning.py": [
+      "63b"
+    ],
+    "handlers/multi_rate.py": [
+      "63b"
+    ],
+    "handlers/multi_robot_coord.py": [
+      "63d"
+    ],
+    "handlers/robot.py": [
+      "11c",
+      "56c",
+      "63b",
+      "63c",
+      "63d",
+      "79b",
+      "80b"
+    ],
+    "handlers/robot.py:setup_pick_place_controller": [
+      "70d"
+    ],
+    "handlers/ros2.py": [
+      "7b",
+      "31b"
+    ],
+    "handlers/sdg.py": [
+      "60b"
+    ],
+    "handlers/sensors.py": [
+      "7b"
+    ],
+    "handlers/training.py": [
+      "62b"
     ],
     "handlers/workflow.py": [
       "15",
-      "39"
+      "39",
+      "94b"
     ],
     "handlers/workflow.py:WorkflowRecord": [
       "15"
@@ -125,14 +338,36 @@
     "handlers/workflow.py:register_workflow_template(WorkflowTemplate)": [
       "33"
     ],
+    "infra/ci/.github/workflows/test_isaac_5.1.yml": [
+      "7b"
+    ],
+    "mcp_server.py": [
+      "18b",
+      "85b"
+    ],
     "multimodal/blueprint_adapter.py": [
       "27"
     ],
     "multimodal/diff.py": [
       "26"
     ],
+    "multimodal/handlers.py": [
+      "25b"
+    ],
+    "multimodal/handlers.py:347-359": [
+      "8c",
+      "25b"
+    ],
+    "multimodal/render.py": [
+      "8b"
+    ],
     "multimodal/routes.py": [
+      "24b",
       "26"
+    ],
+    "multimodal/types.py": [
+      "8c",
+      "25b"
     ],
     "planner/agents/critic.py": [
       "45"
@@ -146,14 +381,44 @@
     "planner/agents/math_critic.py": [
       "45"
     ],
+    "planner/agents/sim_harness.py": [
+      "8b"
+    ],
     "scripts/analyze_gaps.py": [
       "55"
+    ],
+    "scripts/audit_dependency_drift.py": [
+      "96b"
     ],
     "scripts/audit_fork_divergence.py": [
       "0b"
     ],
+    "scripts/audit_handler_cross_refs.py": [
+      "2b"
+    ],
+    "scripts/audit_honesty_links.py": [
+      "18c"
+    ],
+    "scripts/audit_phase_completion.py": [
+      "96b"
+    ],
+    "scripts/audit_phase_file_writes.py": [
+      "2b"
+    ],
+    "scripts/audit_phase_overlap.py": [
+      "96b"
+    ],
+    "scripts/audit_spec_reconciliation.py": [
+      "96b"
+    ],
+    "scripts/audit_tool_levels.py": [
+      "18b"
+    ],
     "scripts/audit_tools.py": [
       "1"
+    ],
+    "scripts/audit_yrkesroll.py": [
+      "78b"
     ],
     "scripts/diag_imports.py": [
       "12"
@@ -161,14 +426,38 @@
     "scripts/gen_handler_models.py": [
       "10"
     ],
+    "scripts/honesty_inventory.py": [
+      "47b"
+    ],
     "scripts/lint/no_handler_in_dispatch.py": [
       "17"
     ],
     "scripts/lint/regen_models_check.py": [
       "17"
     ],
+    "scripts/lint_mandate.py": [
+      "17b"
+    ],
+    "scripts/qa/": [
+      "8d"
+    ],
+    "scripts/qa/diff_sweep.py": [
+      "97b"
+    ],
+    "scripts/qa/fast_sweep.py": [
+      "97b"
+    ],
+    "scripts/qa/impact_map.py": [
+      "97b"
+    ],
+    "scripts/qa/probe_ctrl_telemetry.py": [
+      "11c"
+    ],
     "scripts/regen_object_classes.py": [
       "25"
+    ],
+    "scripts/safe_batch.py": [
+      "2b"
     ],
     "service/isaac_assist_service/chat/tools/__init__.py": [
       "2"
@@ -235,6 +524,33 @@
       "3",
       "5"
     ],
+    "service/isaac_assist_service/compat/isaac_version.py": [
+      "7b"
+    ],
+    "service/isaac_assist_service/flywheel/__init__.py": [
+      "94b"
+    ],
+    "service/isaac_assist_service/flywheel/capture.py": [
+      "94b"
+    ],
+    "service/isaac_assist_service/flywheel/curate.py": [
+      "94b"
+    ],
+    "service/isaac_assist_service/flywheel/registry.py": [
+      "94b"
+    ],
+    "service/isaac_assist_service/flywheel/synthesise.py": [
+      "94b"
+    ],
+    "service/isaac_assist_service/mcp_advanced/elicitation.py": [
+      "85b"
+    ],
+    "service/isaac_assist_service/mcp_advanced/sampling.py": [
+      "85b"
+    ],
+    "service/isaac_assist_service/mcp_advanced/session_resumption.py": [
+      "85b"
+    ],
     "service/isaac_assist_service/multimodal/instantiator.py": [
       "19"
     ],
@@ -253,8 +569,63 @@
     "service/isaac_assist_service/multimodal/stage_to_spec.py": [
       "22"
     ],
+    "service/isaac_assist_service/qa/__init__.py": [
+      "8d"
+    ],
+    "service/isaac_assist_service/qa/baseline.py": [
+      "8d"
+    ],
+    "service/isaac_assist_service/qa/baseline_status.py": [
+      "8d"
+    ],
+    "service/isaac_assist_service/qa/regression.py": [
+      "8d"
+    ],
+    "service/isaac_assist_service/sandbox/__init__.py": [
+      "88b"
+    ],
+    "service/isaac_assist_service/sandbox/firecracker_runner.py": [
+      "88b"
+    ],
+    "service/isaac_assist_service/sandbox/gvisor_runner.py": [
+      "88b"
+    ],
+    "service/isaac_assist_service/sandbox/subprocess_seccomp.py": [
+      "88b"
+    ],
     "service/isaac_assist_service/training/persistence.py": [
       "65"
+    ],
+    "service/isaac_assist_service/types/__init__.py": [
+      "8c"
+    ],
+    "service/isaac_assist_service/types/ctrl_namespace.py": [
+      "11c"
+    ],
+    "service/isaac_assist_service/types/provenance.py": [
+      "8c"
+    ],
+    "service/isaac_assist_service/types/spatial.py": [
+      "8c"
+    ],
+    "service/isaac_assist_service/types/uncertainty.py": [
+      "8c",
+      "56b"
+    ],
+    "service/isaac_assist_service/types/violations.py": [
+      "11b"
+    ],
+    "service/isaac_assist_service/utils/bootstrap_ci.py": [
+      "56b"
+    ],
+    "service/isaac_assist_service/utils/determinism.py": [
+      "8b"
+    ],
+    "service/isaac_assist_service/validation/__init__.py": [
+      "81b"
+    ],
+    "service/isaac_assist_service/validation/routes.py": [
+      "81b"
     ],
     "service/isaac_assist_service/workflow/decorators.py": [
       "33"
@@ -271,23 +642,125 @@
     "tests/benchmark/arena_ia_vs_handcrafted.py": [
       "100"
     ],
+    "tests/blueprints/scale_30.yaml": [
+      "72c"
+    ],
+    "tests/e2e/canvas_interactive_parity.spec.ts": [
+      "24b"
+    ],
     "tests/fixtures/no_handler_tools.json": [
       "4"
+    ],
+    "tests/integration/test_brick_stacking_5_bricks.py": [
+      "78b"
+    ],
+    "tests/integration/test_bridge_lifecycle.py": [
+      "31b"
     ],
     "tests/integration/test_canvas_30_objects.py": [
       "32"
     ],
+    "tests/integration/test_create_behavior.py": [
+      "70b"
+    ],
+    "tests/integration/test_cumotion_moveit_franka.py": [
+      "81c"
+    ],
+    "tests/integration/test_curved_belt_recirculation.py": [
+      "80c"
+    ],
+    "tests/integration/test_drawer_open_pull.py": [
+      "70c"
+    ],
+    "tests/integration/test_drop_target_default.py": [
+      "70d"
+    ],
+    "tests/integration/test_g1_locomanip.py": [
+      "79b"
+    ],
+    "tests/integration/test_grasp_stability.py": [
+      "80b"
+    ],
+    "tests/integration/test_multi_robot_handoff.py": [
+      "63d"
+    ],
     "tests/integration/test_pick_hold_weld_e2e.py": [
       "99"
+    ],
+    "tests/integration/test_revolute_pull.py": [
+      "70c"
+    ],
+    "tests/test_asset_precheck.py": [
+      "78c"
+    ],
+    "tests/test_baseline_taxonomy.py": [
+      "8d"
+    ],
+    "tests/test_blueprint_validator_strength.py": [
+      "72c"
+    ],
+    "tests/test_bootstrap_ci.py": [
+      "56b"
     ],
     "tests/test_contact_sequence.py": [
       "63"
     ],
+    "tests/test_control_profiles.py": [
+      "56c"
+    ],
+    "tests/test_ctrl_namespace.py": [
+      "11c"
+    ],
+    "tests/test_curobo_per_robot.py": [
+      "63c"
+    ],
+    "tests/test_curobov2_pick_grasp.py": [
+      "63b"
+    ],
+    "tests/test_determinism.py": [
+      "8b"
+    ],
+    "tests/test_diagnose_cache_invalidation.py": [
+      "49b"
+    ],
+    "tests/test_flywheel.py": [
+      "94b"
+    ],
+    "tests/test_groot_n17_workflow.py": [
+      "62b"
+    ],
+    "tests/test_isaac_6_0_imports.py": [
+      "7b"
+    ],
+    "tests/test_joint_inference.py": [
+      "72b"
+    ],
+    "tests/test_lint_mandate.py": [
+      "17b"
+    ],
+    "tests/test_mcp_advanced.py": [
+      "85b"
+    ],
     "tests/test_no_circular_imports.py": [
       "12"
     ],
+    "tests/test_object_class_metadata.py": [
+      "25b"
+    ],
     "tests/test_pm_determinism.py": [
       "46"
+    ],
+    "tests/test_safe_batch.py": [
+      "2b"
+    ],
+    "tests/test_sandbox_routing.py": [
+      "88b"
+    ],
+    "tests/test_sdg_extreme_dr.py": [
+      "60b"
+    ],
+    "tests/test_shared_types.py": [
+      "8c"
     ],
     "tests/test_tool_audit.py": [
       "1"
@@ -295,18 +768,58 @@
     "tests/test_tool_audit.py::test_every_tool_resolves": [
       "4"
     ],
+    "tests/test_validation_routes.py": [
+      "81b"
+    ],
+    "tests/test_violations.py": [
+      "11b"
+    ],
     "tool_executor.py": [
       "6",
       "9",
       "13",
       "14",
-      "15"
+      "15",
+      "18b",
+      "47b",
+      "70b",
+      "70c",
+      "72b",
+      "72c",
+      "80b",
+      "80c",
+      "81b",
+      "81c"
     ],
     "tool_executor.py:215-224": [
       "59"
     ],
+    "tool_executor.py:35606+": [
+      "31b"
+    ],
+    "tool_schemas.py": [
+      "18b",
+      "72b",
+      "72c",
+      "81b"
+    ],
     "web/floor-plan-ui/src/App.tsx": [
       "38"
+    ],
+    "web/floor-plan-ui/src/canvas/": [
+      "24b"
+    ],
+    "web/floor-plan-ui/src/canvas/DimensionLines.tsx": [
+      "24b"
+    ],
+    "web/floor-plan-ui/src/canvas/MotionVocabularyTokens.tsx": [
+      "24b"
+    ],
+    "web/floor-plan-ui/src/canvas/ObjectInspector.tsx": [
+      "24b"
+    ],
+    "web/floor-plan-ui/src/canvas/SmartGuides.tsx": [
+      "24b"
     ],
     "web/floor-plan-ui/src/canvas/snap.test.ts": [
       "23"
@@ -323,8 +836,23 @@
     "web/floor-plan-ui/src/components/WorkflowTimelinePanel.tsx": [
       "38"
     ],
+    "web/floor-plan-ui/src/store/": [
+      "24b"
+    ],
     "web/floor-plan-ui/src/store/floorPlanStore.ts": [
       "24"
+    ],
+    "web/floor-plan-ui/src/store/historyMiddleware.ts": [
+      "24b"
+    ],
+    "web/floor-plan-ui/src/store/walMiddleware.ts": [
+      "24b"
+    ],
+    "workspace/diagnose_gaps/_corrections.yaml": [
+      "56"
+    ],
+    "workspace/sweeps/_index.json": [
+      "97b"
     ],
     "workspace/templates/CP-01.json": [
       "20"
@@ -337,7 +865,7 @@
         "scripts/audit_fork_divergence.py",
         "docs/audits/fork_divergence_template.md"
       ],
-      "line_start": 207,
+      "line_start": 264,
       "phase_id": "0b"
     },
     "1": {
@@ -349,7 +877,7 @@
         "docs/forensics/tool_audit_2026-05-10.md",
         "tests/test_tool_audit.py"
       ],
-      "line_start": 232,
+      "line_start": 378,
       "phase_id": "1"
     },
     "10": {
@@ -358,7 +886,7 @@
         "handlers/_models.py",
         "scripts/gen_handler_models.py"
       ],
-      "line_start": 796,
+      "line_start": 1383,
       "phase_id": "10"
     },
     "100": {
@@ -367,43 +895,43 @@
         "tests/benchmark/arena_ia_vs_handcrafted.py",
         "docs/benchmarks/2026-05-{date}-arena.md"
       ],
-      "line_start": 3382,
+      "line_start": 6981,
       "phase_id": "100"
     },
     "101": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3398,
+      "line_start": 6997,
       "phase_id": "101"
     },
     "102": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3411,
+      "line_start": 7010,
       "phase_id": "102"
     },
     "103": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3423,
+      "line_start": 7022,
       "phase_id": "103"
     },
     "104": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3439,
+      "line_start": 7038,
       "phase_id": "104"
     },
     "105": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3458,
+      "line_start": 7057,
       "phase_id": "105"
     },
     "106": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3471,
+      "line_start": 7070,
       "phase_id": "106"
     },
     "11": {
@@ -415,8 +943,30 @@
         "chat/tools/patch_validators/rules/{rule_name}.py",
         "chat/tools/patch_validators/registry.py"
       ],
-      "line_start": 867,
+      "line_start": 1454,
       "phase_id": "11"
+    },
+    "11b": {
+      "files_changes": [],
+      "files_new": [
+        "service/isaac_assist_service/types/violations.py",
+        "tests/test_violations.py"
+      ],
+      "line_start": 1546,
+      "phase_id": "11b"
+    },
+    "11c": {
+      "files_changes": [
+        "handlers/robot.py",
+        "scripts/qa/probe_ctrl_telemetry.py",
+        "chat/canonical_instantiator.py"
+      ],
+      "files_new": [
+        "service/isaac_assist_service/types/ctrl_namespace.py",
+        "tests/test_ctrl_namespace.py"
+      ],
+      "line_start": 1629,
+      "phase_id": "11c"
     },
     "12": {
       "files_changes": [],
@@ -424,7 +974,7 @@
         "tests/test_no_circular_imports.py",
         "scripts/diag_imports.py"
       ],
-      "line_start": 959,
+      "line_start": 1701,
       "phase_id": "12"
     },
     "13": {
@@ -434,7 +984,7 @@
       "files_new": [
         "docs/forensics/tool_executor_recovered_state_2026-05-10.md"
       ],
-      "line_start": 1000,
+      "line_start": 1742,
       "phase_id": "13"
     },
     "14": {
@@ -442,7 +992,7 @@
         "tool_executor.py"
       ],
       "files_new": [],
-      "line_start": 1056,
+      "line_start": 1798,
       "phase_id": "14"
     },
     "15": {
@@ -454,13 +1004,13 @@
         "handlers/workflow.py:WorkflowRecord",
         "handlers/workflow.py:WorkflowTemplate"
       ],
-      "line_start": 1094,
+      "line_start": 1836,
       "phase_id": "15"
     },
     "16": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 1177,
+      "line_start": 1919,
       "phase_id": "16"
     },
     "17": {
@@ -469,14 +1019,48 @@
         "scripts/lint/no_handler_in_dispatch.py",
         "scripts/lint/regen_models_check.py"
       ],
-      "line_start": 1204,
+      "line_start": 1946,
       "phase_id": "17"
+    },
+    "17b": {
+      "files_changes": [],
+      "files_new": [
+        "scripts/lint_mandate.py",
+        "tests/test_lint_mandate.py",
+        "docs/architecture/mandate_boundary.md"
+      ],
+      "line_start": 1981,
+      "phase_id": "17b"
     },
     "18": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 1239,
+      "line_start": 2063,
       "phase_id": "18"
+    },
+    "18b": {
+      "files_changes": [
+        "tool_schemas.py",
+        "tool_executor.py",
+        "mcp_server.py"
+      ],
+      "files_new": [
+        "scripts/audit_tool_levels.py",
+        "docs/architecture/action_levels.md"
+      ],
+      "line_start": 2104,
+      "phase_id": "18b"
+    },
+    "18c": {
+      "files_changes": [
+        "IA_FULL_SPEC_2026-05-10.md"
+      ],
+      "files_new": [
+        "docs/architecture/honesty.md",
+        "scripts/audit_honesty_links.py"
+      ],
+      "line_start": 2193,
+      "phase_id": "18c"
     },
     "19": {
       "files_changes": [
@@ -487,7 +1071,7 @@
         "service/isaac_assist_service/multimodal/instantiator.py",
         "service/isaac_assist_service/multimodal/instantiator_test.py"
       ],
-      "line_start": 1291,
+      "line_start": 2299,
       "phase_id": "19"
     },
     "2": {
@@ -512,7 +1096,7 @@
         "service/isaac_assist_service/chat/tools/handlers/vision.py",
         "service/isaac_assist_service/chat/tools/handlers/_dispatch.py"
       ],
-      "line_start": 308,
+      "line_start": 454,
       "phase_id": "2"
     },
     "20": {
@@ -521,7 +1105,7 @@
         "workspace/templates/CP-01.json"
       ],
       "files_new": [],
-      "line_start": 1384,
+      "line_start": 2392,
       "phase_id": "20"
     },
     "21": {
@@ -529,7 +1113,7 @@
       "files_new": [
         "service/isaac_assist_service/chat/tools/role_index.py"
       ],
-      "line_start": 1457,
+      "line_start": 2465,
       "phase_id": "21"
     },
     "22": {
@@ -537,7 +1121,7 @@
       "files_new": [
         "service/isaac_assist_service/multimodal/stage_to_spec.py"
       ],
-      "line_start": 1482,
+      "line_start": 2490,
       "phase_id": "22"
     },
     "23": {
@@ -547,7 +1131,7 @@
       "files_new": [
         "web/floor-plan-ui/src/canvas/snap.test.ts"
       ],
-      "line_start": 1544,
+      "line_start": 2552,
       "phase_id": "23"
     },
     "24": {
@@ -557,8 +1141,26 @@
         "service/isaac_assist_service/multimodal/routes.py"
       ],
       "files_new": [],
-      "line_start": 1580,
+      "line_start": 2588,
       "phase_id": "24"
+    },
+    "24b": {
+      "files_changes": [
+        "web/floor-plan-ui/src/canvas/",
+        "web/floor-plan-ui/src/store/",
+        "multimodal/routes.py"
+      ],
+      "files_new": [
+        "web/floor-plan-ui/src/canvas/SmartGuides.tsx",
+        "web/floor-plan-ui/src/canvas/DimensionLines.tsx",
+        "web/floor-plan-ui/src/canvas/MotionVocabularyTokens.tsx",
+        "web/floor-plan-ui/src/canvas/ObjectInspector.tsx",
+        "web/floor-plan-ui/src/store/historyMiddleware.ts",
+        "web/floor-plan-ui/src/store/walMiddleware.ts",
+        "tests/e2e/canvas_interactive_parity.spec.ts"
+      ],
+      "line_start": 2618,
+      "phase_id": "24b"
     },
     "25": {
       "files_changes": [],
@@ -567,8 +1169,22 @@
         "data/object_classes.yaml",
         "scripts/regen_object_classes.py"
       ],
-      "line_start": 1610,
+      "line_start": 2687,
       "phase_id": "25"
+    },
+    "25b": {
+      "files_changes": [
+        "data/object_classes.yaml",
+        "multimodal/handlers.py:347-359",
+        "multimodal/types.py",
+        "multimodal/handlers.py"
+      ],
+      "files_new": [
+        "data/object_classes_validator.py",
+        "tests/test_object_class_metadata.py"
+      ],
+      "line_start": 2752,
+      "phase_id": "25b"
     },
     "26": {
       "files_changes": [
@@ -578,7 +1194,7 @@
       "files_new": [
         "multimodal/diff.py"
       ],
-      "line_start": 1667,
+      "line_start": 2815,
       "phase_id": "26"
     },
     "27": {
@@ -586,13 +1202,13 @@
       "files_new": [
         "multimodal/blueprint_adapter.py"
       ],
-      "line_start": 1694,
+      "line_start": 2842,
       "phase_id": "27"
     },
     "28": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 1721,
+      "line_start": 2869,
       "phase_id": "28"
     },
     "29": {
@@ -602,35 +1218,63 @@
       "files_new": [
         "exts/isaac_6.0/.../stage_event_listener.py"
       ],
-      "line_start": 1739,
+      "line_start": 2887,
       "phase_id": "29"
+    },
+    "2b": {
+      "files_changes": [],
+      "files_new": [
+        "scripts/audit_handler_cross_refs.py",
+        "scripts/audit_phase_file_writes.py",
+        "scripts/safe_batch.py",
+        "docs/audits/handler_cross_refs.md",
+        "docs/audits/phase_file_writes.md",
+        "tests/test_safe_batch.py"
+      ],
+      "line_start": 545,
+      "phase_id": "2b"
     },
     "3": {
       "files_changes": [
         "service/isaac_assist_service/chat/tools/tool_executor.py"
       ],
       "files_new": [],
-      "line_start": 399,
+      "line_start": 648,
       "phase_id": "3"
     },
     "30": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 1763,
+      "line_start": 2911,
       "phase_id": "30"
     },
     "31": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 1782,
+      "line_start": 2930,
       "phase_id": "31"
+    },
+    "31b": {
+      "files_changes": [
+        "handlers/ros2.py",
+        "tool_executor.py:35606+"
+      ],
+      "files_new": [
+        "handlers/bridges.py",
+        "data/canonical_templates/modbus_to_ros2_relay.json",
+        "data/canonical_templates/mqtt_sparkplug_telemetry.json",
+        "data/canonical_templates/openplc_handshake.json",
+        "tests/integration/test_bridge_lifecycle.py"
+      ],
+      "line_start": 2959,
+      "phase_id": "31b"
     },
     "32": {
       "files_changes": [],
       "files_new": [
         "tests/integration/test_canvas_30_objects.py"
       ],
-      "line_start": 1811,
+      "line_start": 3039,
       "phase_id": "32"
     },
     "33": {
@@ -642,25 +1286,25 @@
         "service/isaac_assist_service/workflow/template_base.py",
         "service/isaac_assist_service/workflow/decorators.py"
       ],
-      "line_start": 1846,
+      "line_start": 3074,
       "phase_id": "33"
     },
     "34": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 1895,
+      "line_start": 3123,
       "phase_id": "34"
     },
     "35": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 1914,
+      "line_start": 3142,
       "phase_id": "35"
     },
     "36": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 1933,
+      "line_start": 3161,
       "phase_id": "36"
     },
     "37": {
@@ -670,7 +1314,7 @@
       "files_new": [
         "exts/isaac_6.0/.../ui/workflow_timeline.py"
       ],
-      "line_start": 1950,
+      "line_start": 3178,
       "phase_id": "37"
     },
     "38": {
@@ -680,7 +1324,7 @@
       "files_new": [
         "web/floor-plan-ui/src/components/WorkflowTimelinePanel.tsx"
       ],
-      "line_start": 1971,
+      "line_start": 3199,
       "phase_id": "38"
     },
     "39": {
@@ -691,7 +1335,7 @@
         "service/isaac_assist_service/workflow/persistence.py",
         "service/isaac_assist_service/workflow/migrations/0001_initial.sql"
       ],
-      "line_start": 1988,
+      "line_start": 3216,
       "phase_id": "39"
     },
     "4": {
@@ -702,13 +1346,13 @@
         "tests/test_tool_audit.py::test_every_tool_resolves",
         "tests/fixtures/no_handler_tools.json"
       ],
-      "line_start": 465,
+      "line_start": 714,
       "phase_id": "4"
     },
     "40": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2020,
+      "line_start": 3248,
       "phase_id": "40"
     },
     "41": {
@@ -718,7 +1362,7 @@
       "files_new": [
         "chat/snapshot_restore.py"
       ],
-      "line_start": 2037,
+      "line_start": 3265,
       "phase_id": "41"
     },
     "42": {
@@ -727,7 +1371,7 @@
         "chat/tools/kit_tools.py:queue_exec_patch"
       ],
       "files_new": [],
-      "line_start": 2067,
+      "line_start": 3295,
       "phase_id": "42"
     },
     "43": {
@@ -735,13 +1379,13 @@
         "chat/slash_commands.py"
       ],
       "files_new": [],
-      "line_start": 2094,
+      "line_start": 3322,
       "phase_id": "43"
     },
     "44": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2111,
+      "line_start": 3339,
       "phase_id": "44"
     },
     "45": {
@@ -753,7 +1397,7 @@
         "planner/agents/math_critic.py",
         "planner/agents/critic_calibration.py"
       ],
-      "line_start": 2140,
+      "line_start": 3368,
       "phase_id": "45"
     },
     "46": {
@@ -761,7 +1405,7 @@
       "files_new": [
         "tests/test_pm_determinism.py"
       ],
-      "line_start": 2222,
+      "line_start": 3450,
       "phase_id": "46"
     },
     "47": {
@@ -769,8 +1413,20 @@
         "chat/tools/patch_validators/rules/"
       ],
       "files_new": [],
-      "line_start": 2245,
+      "line_start": 3473,
       "phase_id": "47"
+    },
+    "47b": {
+      "files_changes": [
+        "tool_executor.py"
+      ],
+      "files_new": [
+        "scripts/honesty_inventory.py",
+        "chat/tools/queue_exec_honesty.py",
+        "docs/audits/honesty_inventory.md"
+      ],
+      "line_start": 3531,
+      "phase_id": "47b"
     },
     "48": {
       "files_changes": [
@@ -779,39 +1435,50 @@
         "diagnose/tool.py"
       ],
       "files_new": [],
-      "line_start": 2303,
+      "line_start": 3604,
       "phase_id": "48"
     },
     "49": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2347,
+      "line_start": 3648,
       "phase_id": "49"
+    },
+    "49b": {
+      "files_changes": [
+        "diagnose/cache.py",
+        "diagnose/tool.py"
+      ],
+      "files_new": [
+        "tests/test_diagnose_cache_invalidation.py"
+      ],
+      "line_start": 3667,
+      "phase_id": "49b"
     },
     "5": {
       "files_changes": [
         "service/isaac_assist_service/chat/tools/tool_executor.py"
       ],
       "files_new": [],
-      "line_start": 538,
+      "line_start": 787,
       "phase_id": "5"
     },
     "50": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2366,
+      "line_start": 3707,
       "phase_id": "50"
     },
     "51": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2391,
+      "line_start": 3732,
       "phase_id": "51"
     },
     "52": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2412,
+      "line_start": 3753,
       "phase_id": "52"
     },
     "53": {
@@ -819,15 +1486,16 @@
       "files_new": [
         "diagnose/simulation_runner.py"
       ],
-      "line_start": 2425,
+      "line_start": 3766,
       "phase_id": "53"
     },
     "54": {
       "files_changes": [],
       "files_new": [
-        "diagnose/gap_log.py"
+        "diagnose/gap_log.py",
+        "diagnose/gap_query.py"
       ],
-      "line_start": 2488,
+      "line_start": 3871,
       "phase_id": "54"
     },
     "55": {
@@ -836,27 +1504,56 @@
         "scripts/analyze_gaps.py",
         "docs/diagnose/gap_report_template.md"
       ],
-      "line_start": 2508,
+      "line_start": 3962,
       "phase_id": "55"
     },
     "56": {
       "files_changes": [],
       "files_new": [
+        "diagnose/recalibrate.py",
+        "workspace/diagnose_gaps/_corrections.yaml",
+        "diagnose/escalation.py"
+      ],
+      "line_start": 3979,
+      "phase_id": "56"
+    },
+    "56b": {
+      "files_changes": [
+        "service/isaac_assist_service/types/uncertainty.py",
+        "diagnose/schema.py",
+        "diagnose/gap_log.py",
         "diagnose/recalibrate.py"
       ],
-      "line_start": 2525,
-      "phase_id": "56"
+      "files_new": [
+        "service/isaac_assist_service/utils/bootstrap_ci.py",
+        "tests/test_bootstrap_ci.py"
+      ],
+      "line_start": 4103,
+      "phase_id": "56b"
+    },
+    "56c": {
+      "files_changes": [
+        "handlers/robot.py",
+        "diagnose/schema.py"
+      ],
+      "files_new": [
+        "handlers/control_profiles.py",
+        "data/control_profiles.yaml",
+        "tests/test_control_profiles.py"
+      ],
+      "line_start": 4194,
+      "phase_id": "56c"
     },
     "57": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2557,
+      "line_start": 4291,
       "phase_id": "57"
     },
     "58": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2571,
+      "line_start": 4305,
       "phase_id": "58"
     },
     "59": {
@@ -864,7 +1561,7 @@
         "tool_executor.py:215-224"
       ],
       "files_new": [],
-      "line_start": 2598,
+      "line_start": 4332,
       "phase_id": "59"
     },
     "6": {
@@ -872,26 +1569,47 @@
         "tool_executor.py"
       ],
       "files_new": [],
-      "line_start": 577,
+      "line_start": 826,
       "phase_id": "6"
     },
     "60": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2622,
+      "line_start": 4356,
       "phase_id": "60"
+    },
+    "60b": {
+      "files_changes": [
+        "handlers/sdg.py",
+        "data/dr/distractor_pool.yaml",
+        "tests/test_sdg_extreme_dr.py"
+      ],
+      "files_new": [],
+      "line_start": 4372,
+      "phase_id": "60b"
     },
     "61": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2638,
+      "line_start": 4433,
       "phase_id": "61"
     },
     "62": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2661,
+      "line_start": 4456,
       "phase_id": "62"
+    },
+    "62b": {
+      "files_changes": [
+        "handlers/training.py"
+      ],
+      "files_new": [
+        "handlers/groot_blueprints.py",
+        "tests/test_groot_n17_workflow.py"
+      ],
+      "line_start": 4476,
+      "phase_id": "62b"
     },
     "63": {
       "files_changes": [],
@@ -899,13 +1617,52 @@
         "handlers/contact_sequence.py",
         "tests/test_contact_sequence.py"
       ],
-      "line_start": 2681,
+      "line_start": 4534,
       "phase_id": "63"
+    },
+    "63b": {
+      "files_changes": [
+        "handlers/robot.py",
+        "handlers/contact_sequence.py",
+        "handlers/multi_rate.py"
+      ],
+      "files_new": [
+        "handlers/motion_planning.py",
+        "tests/test_curobov2_pick_grasp.py",
+        "docs/handlers/motion_backends.md"
+      ],
+      "line_start": 4577,
+      "phase_id": "63b"
+    },
+    "63c": {
+      "files_changes": [
+        "handlers/robot.py",
+        "chat/orchestrator.py"
+      ],
+      "files_new": [
+        "handlers/curobo_debug.py",
+        "data/curobo_robot_configs/{ur10,ur5e,ur3e,franka,fr3,gp25}.yaml",
+        "tests/test_curobo_per_robot.py"
+      ],
+      "line_start": 4669,
+      "phase_id": "63c"
+    },
+    "63d": {
+      "files_changes": [
+        "handlers/robot.py",
+        "handlers/contact_sequence.py"
+      ],
+      "files_new": [
+        "handlers/multi_robot_coord.py",
+        "tests/integration/test_multi_robot_handoff.py"
+      ],
+      "line_start": 4751,
+      "phase_id": "63d"
     },
     "64": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2724,
+      "line_start": 4831,
       "phase_id": "64"
     },
     "65": {
@@ -913,44 +1670,80 @@
       "files_new": [
         "service/isaac_assist_service/training/persistence.py"
       ],
-      "line_start": 2745,
+      "line_start": 4852,
       "phase_id": "65"
     },
     "66": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2759,
+      "line_start": 4866,
       "phase_id": "66"
     },
     "67": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2781,
+      "line_start": 4888,
       "phase_id": "67"
     },
     "68": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2798,
+      "line_start": 4905,
       "phase_id": "68"
     },
     "69": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2812,
+      "line_start": 4919,
       "phase_id": "69"
     },
     "7": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 617,
+      "line_start": 866,
       "phase_id": "7"
     },
     "70": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2827,
+      "line_start": 4934,
       "phase_id": "70"
+    },
+    "70b": {
+      "files_changes": [
+        "tool_executor.py"
+      ],
+      "files_new": [
+        "tests/integration/test_create_behavior.py",
+        "docs/handlers/create_behavior.md"
+      ],
+      "line_start": 4955,
+      "phase_id": "70b"
+    },
+    "70c": {
+      "files_changes": [
+        "tool_executor.py",
+        "chat/intent_router.py"
+      ],
+      "files_new": [
+        "handlers/articulated_pull.py",
+        "tests/integration/test_drawer_open_pull.py",
+        "tests/integration/test_revolute_pull.py"
+      ],
+      "line_start": 5051,
+      "phase_id": "70c"
+    },
+    "70d": {
+      "files_changes": [
+        "handlers/robot.py:setup_pick_place_controller",
+        "handlers/contact_sequence.py"
+      ],
+      "files_new": [
+        "data/bin_interior_metadata.yaml",
+        "tests/integration/test_drop_target_default.py"
+      ],
+      "line_start": 5140,
+      "phase_id": "70d"
     },
     "71": {
       "files_changes": [
@@ -961,7 +1754,7 @@
         "data/usd/robots/yaskawa_gp25/source/meshes/",
         "data/usd/robots/yaskawa_gp25/yaskawa_gp25.usd"
       ],
-      "line_start": 2848,
+      "line_start": 5221,
       "phase_id": "71"
     },
     "72": {
@@ -969,50 +1762,128 @@
       "files_new": [
         "handlers/assembly_runtime.py"
       ],
-      "line_start": 2880,
+      "line_start": 5253,
       "phase_id": "72"
+    },
+    "72b": {
+      "files_changes": [
+        "tool_executor.py",
+        "tool_schemas.py"
+      ],
+      "files_new": [
+        "handlers/joint_inference.py",
+        "tests/test_joint_inference.py"
+      ],
+      "line_start": 5275,
+      "phase_id": "72b"
+    },
+    "72c": {
+      "files_changes": [
+        "tool_executor.py",
+        "tool_schemas.py"
+      ],
+      "files_new": [
+        "handlers/blueprint_revise.py",
+        "tests/blueprints/scale_30.yaml",
+        "tests/test_blueprint_validator_strength.py"
+      ],
+      "line_start": 5388,
+      "phase_id": "72c"
     },
     "73": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2902,
+      "line_start": 5505,
       "phase_id": "73"
     },
     "74": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2924,
+      "line_start": 5527,
       "phase_id": "74"
     },
     "75": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2943,
+      "line_start": 5546,
       "phase_id": "75"
     },
     "76": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2957,
+      "line_start": 5560,
       "phase_id": "76"
     },
     "77": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2977,
+      "line_start": 5580,
       "phase_id": "77"
     },
     "78": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 2994,
+      "line_start": 5597,
       "phase_id": "78"
+    },
+    "78b": {
+      "files_changes": [
+        "data/canonical_templates/brick_stacking*.json",
+        "data/canonical_templates/drawer_open*.json"
+      ],
+      "files_new": [
+        "scripts/audit_yrkesroll.py",
+        "docs/audits/yrkesroll_status_template.md",
+        "tests/integration/test_brick_stacking_5_bricks.py"
+      ],
+      "line_start": 5612,
+      "phase_id": "78b"
+    },
+    "78c": {
+      "files_changes": [
+        "chat/canonical_instantiator.py",
+        "data/canonical_templates/*.json"
+      ],
+      "files_new": [
+        "handlers/asset_precheck.py",
+        "handlers/asset_mock_fallback.py",
+        "data/asset_mock_registry.yaml",
+        "tests/test_asset_precheck.py"
+      ],
+      "line_start": 5679,
+      "phase_id": "78c"
     },
     "79": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3009,
+      "line_start": 5777,
       "phase_id": "79"
+    },
+    "79b": {
+      "files_changes": [
+        "handlers/robot.py"
+      ],
+      "files_new": [
+        "handlers/locomanip.py",
+        "data/usd/robots/g1/",
+        "tests/integration/test_g1_locomanip.py"
+      ],
+      "line_start": 5795,
+      "phase_id": "79b"
+    },
+    "7b": {
+      "files_changes": [
+        "handlers/ros2.py",
+        "handlers/sensors.py",
+        "chat/tools/ros_mcp_tools.py",
+        "infra/ci/.github/workflows/test_isaac_5.1.yml"
+      ],
+      "files_new": [
+        "service/isaac_assist_service/compat/isaac_version.py",
+        "tests/test_isaac_6_0_imports.py"
+      ],
+      "line_start": 904,
+      "phase_id": "7b"
     },
     "8": {
       "files_changes": [],
@@ -1020,129 +1891,293 @@
         "handlers/_shared.py",
         "handlers/_state.py"
       ],
-      "line_start": 655,
+      "line_start": 1005,
       "phase_id": "8"
     },
     "80": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3027,
+      "line_start": 5860,
       "phase_id": "80"
+    },
+    "80b": {
+      "files_changes": [
+        "tool_executor.py",
+        "handlers/robot.py"
+      ],
+      "files_new": [
+        "data/physics_defaults.yaml",
+        "handlers/grip_stability.py",
+        "tests/integration/test_grasp_stability.py"
+      ],
+      "line_start": 5874,
+      "phase_id": "80b"
+    },
+    "80c": {
+      "files_changes": [
+        "tool_executor.py"
+      ],
+      "files_new": [
+        "handlers/conveyor_curved.py",
+        "tests/integration/test_curved_belt_recirculation.py"
+      ],
+      "line_start": 5965,
+      "phase_id": "80c"
     },
     "81": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3041,
+      "line_start": 6025,
       "phase_id": "81"
+    },
+    "81b": {
+      "files_changes": [
+        "tool_executor.py",
+        "tool_schemas.py"
+      ],
+      "files_new": [
+        "service/isaac_assist_service/validation/__init__.py",
+        "service/isaac_assist_service/validation/routes.py",
+        "tests/test_validation_routes.py",
+        "docs/handlers/validation_primitives.md"
+      ],
+      "line_start": 6091,
+      "phase_id": "81b"
+    },
+    "81c": {
+      "files_changes": [
+        "tool_executor.py"
+      ],
+      "files_new": [
+        "handlers/cumotion_moveit.py",
+        "tests/integration/test_cumotion_moveit_franka.py",
+        "docs/handlers/cumotion_moveit.md"
+      ],
+      "line_start": 6039,
+      "phase_id": "81c"
     },
     "82": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3055,
+      "line_start": 6204,
       "phase_id": "82"
     },
     "83": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3082,
+      "line_start": 6231,
       "phase_id": "83"
     },
     "84": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3110,
+      "line_start": 6259,
       "phase_id": "84"
     },
     "85": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3124,
+      "line_start": 6273,
       "phase_id": "85"
+    },
+    "85b": {
+      "files_changes": [
+        "mcp_server.py",
+        "chat/orchestrator.py:773-793"
+      ],
+      "files_new": [
+        "service/isaac_assist_service/mcp_advanced/sampling.py",
+        "service/isaac_assist_service/mcp_advanced/elicitation.py",
+        "service/isaac_assist_service/mcp_advanced/session_resumption.py",
+        "tests/test_mcp_advanced.py"
+      ],
+      "line_start": 6323,
+      "phase_id": "85b"
     },
     "86": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3140,
+      "line_start": 6289,
       "phase_id": "86"
     },
     "87": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3157,
+      "line_start": 6306,
       "phase_id": "87"
     },
     "88": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3174,
+      "line_start": 6392,
       "phase_id": "88"
+    },
+    "88b": {
+      "files_changes": [
+        "governance/policy_engine.py",
+        "chat/tools/kit_tools.py"
+      ],
+      "files_new": [
+        "service/isaac_assist_service/sandbox/__init__.py",
+        "service/isaac_assist_service/sandbox/subprocess_seccomp.py",
+        "service/isaac_assist_service/sandbox/firecracker_runner.py",
+        "service/isaac_assist_service/sandbox/gvisor_runner.py",
+        "tests/test_sandbox_routing.py"
+      ],
+      "line_start": 6409,
+      "phase_id": "88b"
     },
     "89": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3191,
+      "line_start": 6489,
       "phase_id": "89"
+    },
+    "8b": {
+      "files_changes": [
+        "planner/agents/sim_harness.py",
+        "multimodal/render.py",
+        "diagnose/sim_backend_mock.py"
+      ],
+      "files_new": [
+        "service/isaac_assist_service/utils/determinism.py",
+        "tests/test_determinism.py"
+      ],
+      "line_start": 1079,
+      "phase_id": "8b"
+    },
+    "8c": {
+      "files_changes": [],
+      "files_new": [
+        "service/isaac_assist_service/types/__init__.py",
+        "service/isaac_assist_service/types/spatial.py",
+        "service/isaac_assist_service/types/uncertainty.py",
+        "service/isaac_assist_service/types/provenance.py",
+        "tests/test_shared_types.py",
+        "multimodal/types.py",
+        "diagnose/schema.py",
+        "multimodal/handlers.py:347-359"
+      ],
+      "line_start": 1165,
+      "phase_id": "8c"
+    },
+    "8d": {
+      "files_changes": [
+        "chat/canonical_instantiator.py",
+        "scripts/qa/"
+      ],
+      "files_new": [
+        "service/isaac_assist_service/qa/__init__.py",
+        "service/isaac_assist_service/qa/baseline_status.py",
+        "service/isaac_assist_service/qa/regression.py",
+        "service/isaac_assist_service/qa/baseline.py",
+        "data/baselines/_README.md",
+        "tests/test_baseline_taxonomy.py"
+      ],
+      "line_start": 1232,
+      "phase_id": "8d"
     },
     "9": {
       "files_changes": [
         "tool_executor.py"
       ],
       "files_new": [],
-      "line_start": 729,
+      "line_start": 1316,
       "phase_id": "9"
     },
     "90": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3205,
+      "line_start": 6503,
       "phase_id": "90"
     },
     "91": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3221,
+      "line_start": 6519,
       "phase_id": "91"
     },
     "92": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3234,
+      "line_start": 6532,
       "phase_id": "92"
     },
     "93": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3247,
+      "line_start": 6545,
       "phase_id": "93"
     },
     "94": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3262,
+      "line_start": 6560,
       "phase_id": "94"
+    },
+    "94b": {
+      "files_changes": [
+        "chat/orchestrator.py",
+        "handlers/workflow.py"
+      ],
+      "files_new": [
+        "service/isaac_assist_service/flywheel/__init__.py",
+        "service/isaac_assist_service/flywheel/capture.py",
+        "service/isaac_assist_service/flywheel/curate.py",
+        "service/isaac_assist_service/flywheel/synthesise.py",
+        "service/isaac_assist_service/flywheel/registry.py",
+        "tests/test_flywheel.py"
+      ],
+      "line_start": 6576,
+      "phase_id": "94b"
     },
     "95": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3278,
+      "line_start": 6662,
       "phase_id": "95"
     },
     "96": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3294,
+      "line_start": 6678,
       "phase_id": "96"
+    },
+    "96b": {
+      "files_changes": [],
+      "files_new": [
+        "scripts/audit_spec_reconciliation.py",
+        "scripts/audit_phase_completion.py",
+        "scripts/audit_phase_overlap.py",
+        "scripts/audit_dependency_drift.py",
+        "docs/audits/spec_reconciliation_template.md",
+        ".github/workflows/quarterly-spec-reconciliation.yml"
+      ],
+      "line_start": 6692,
+      "phase_id": "96b"
     },
     "97": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3308,
+      "line_start": 6826,
       "phase_id": "97"
+    },
+    "97b": {
+      "files_changes": [],
+      "files_new": [
+        "scripts/qa/fast_sweep.py",
+        "scripts/qa/diff_sweep.py",
+        "scripts/qa/impact_map.py",
+        ".github/workflows/fast-sweep.yml",
+        "workspace/sweeps/_index.json"
+      ],
+      "line_start": 6840,
+      "phase_id": "97b"
     },
     "98": {
       "files_changes": [],
       "files_new": [],
-      "line_start": 3322,
+      "line_start": 6921,
       "phase_id": "98"
     },
     "99": {
@@ -1151,7 +2186,7 @@
         "tests/integration/test_pick_hold_weld_e2e.py",
         "docs/demos/pick_hold_weld.md"
       ],
-      "line_start": 3346,
+      "line_start": 6945,
       "phase_id": "99"
     }
   }

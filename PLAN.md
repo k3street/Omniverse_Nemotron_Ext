@@ -3,8 +3,7 @@
 **Author:** 10Things, Inc. — [www.10things.tech](http://www.10things.tech)  
 **Extension:** `omni.isaac.assist`  
 **Target:** Isaac Sim 5.1 / 6.0 on NVIDIA Omniverse  
-**Date:** April 2026  
-**Last Updated:** April 21, 2026
+**Date:** April 2026
 
 ---
 
@@ -49,31 +48,11 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | Golden code patterns (49 verified patterns + auto-capture pipeline) | ✅ Running |
 | Robot name normalization (alias mapping for 20+ robots) | ✅ Running |
 | Patch validator (12 regex rules for legacy API detection) | ✅ Running |
-| **G1 RL locomotion policy** — ONNX runner + Isaac Sim Kit script (`g1_onnx_runner.py`); position/velocity control via `ArticulationAction`; pre-trained checkpoint download helper | ✅ Running |
-| Context distiller (20 tool categories, smart tool pre-selection) | ✅ Running |
+| Context distiller (17 tool categories, smart tool pre-selection) | ✅ Running |
 | Per-tool call throttling (configurable limits per turn) | ✅ Running |
 | Secret redaction + audit trail (governance module) | ✅ Running |
 | Pipeline planner (multi-step plan generation + execution) | ✅ Running |
-| ROS2 bridge tools (13 live tools: topic pub/sub, service calls, node info via rosbridge) | ✅ Running |
-| ROS2 camera topics (4 cameras × 3 topics = 12 live via OmniGraph) | ✅ Running |
-| RViz2 auto-launch (topic discovery → config gen → process management) | ✅ Running |
-| RViz2 scene config persistence (scene-named .rviz files + TF fixed-frame auto-detect) | ✅ Running |
-| RTX LiDAR sensor creation — `IsaacSensorCreateRtxLidar` with config presets (VLP-16, XT32, OS1-64, picoScan150, Mid-360) | ✅ Running |
-| LiDAR sensor specs (7 presets in sensor_specs.jsonl with Isaac Sim config names) | ✅ Running |
-| `list_sensors` / `read_sensor_data` tools — enumerate and inspect all sensor prims | ✅ Running |
-| ROS2 bridge readiness validator — LiDAR-specific checks (fullScan, RenderProduct, frameId, TF publisher) | ✅ Running |
-| MCP server (auto-converts all tools to JSON-RPC 2.0 over SSE/stdio) | ✅ Running |
-| ROS2 Nav2 bridge profiles (UR10e, Jetbot, Franka, AMR) + map export + rosbag replay + TF health | ✅ Running |
-| **Isaac ROS Perception stack** — RT-DETR / YOLOv8 object detection, FoundationPose 6-DOF estimation, nvblox 3D ESDF | ✅ Running |
-| **Image segmentation stack** — UNet, Segformer, Segment Anything (SAM), SAM2 with live object tracking + nvblox output bridge | ✅ Running |
-| **cuMotion manipulation stack** — cuMotion planner, robot segmenter, ESDF visualizer, MoveIt 2 bridge, goal setter, object attachment, XRDF generator | ✅ Running |
-| **Localization stack** — occupancy grid localizer, grid-search trigger, pointcloud/laserscan → flatscan, visual global localization, Visual SLAM map build/load/localize/reset | ✅ Running |
-| **Gemini Robotics ER 1.6 bridge** — all 10 capabilities (detect, bbox, trajectory, grasp, gauge, fluid, OCR, segment, spatial) as ROS2 services + action | ✅ Running |
-| **cuRobo world collision management** — WorldConfig YAML gen, dynamic obstacle CRUD, sphere SDF queries, cache pre-allocation, WorldCollisionManagerNode | ✅ Running |
-| **MediaPipe body-pose teleop** — Se3MediaPipe → joint commands with omni.ui stay-in-frame 5×5 guidance grid | ✅ Running |
-| **LingBot-Map streaming 3D reconstruction** — GCTStream feed-forward model → PointCloud2 + PoseStamped + depth @ ~20 FPS; cuRobo mesh export script | ✅ Running |
-| **ROS2 node scaffolder** — generic colcon package generator (diff-drive, arm, sensor bridge, semantic segmentation, world collision manager node types) | ✅ Running |
-| **136 registered tool handlers** (87 DATA_HANDLERS + 49 CODE_GEN_HANDLERS) | ✅ Running |
+| ROS-MCP integration (11 ROS2 tool schemas via rosbridge) | ⚠️ Schemas only |
 
 ---
 
@@ -85,10 +64,10 @@ Complete natural-language control over every Isaac Sim capability — USD author
 |---|---|---|
 | **Viewport visual feedback** — show LLM what the user sees per turn | ⚠️ Tool-call only | LLM must call `capture_viewport` explicitly; not auto-injected per chat turn |
 | **Replicator / SDG** — synthetic data generation from chat | ⚠️ Basic only | Annotators + BasicWriter work; no domain randomization, no custom annotators |
-| **ROS2 bridge control** — topic pub/sub from chat | ✅ Working | 13 ROS2 tools fully connected via rosbridge WebSocket (port 9090); topic list/pub/sub/echo, service list/call, node list/details all functional |
+| **ROS2 bridge control** — topic pub/sub from chat | ⚠️ Schema only | Tool schemas defined but handlers are stubs (`None`); no actual ROS2 bridge code |
 | **Undo/redo narration** — LLM explains what it did, user can Ctrl+Z | ⚠️ Undo works | All mutations go through `omni.kit.commands` (Ctrl+Z); no per-action LLM narration |
 | **Fine-tune data capture** — every chat→action pair stored for training | ⚠️ Patches only | Code patches logged via `/log_execution`; tool-call chat→action pairs NOT captured |
-| **Stage Analyzer** — scene diagnosis & validation | ⚠️ 3/8 validators | `SchemaConsistencyRule`, `RobotMotionValidator`, and `ROSBridgeReadinessValidator` (with LiDAR checks) implemented; missing: import health, material/physics mismatch, articulation integrity, sensor completeness, IsaacLab sanity, performance warnings |
+| **Stage Analyzer** — scene diagnosis & validation | ⚠️ 1/8 validators | Only `SchemaConsistencyRule` implemented; missing: import health, material/physics mismatch, articulation integrity, sensor completeness, ROS bridge readiness, IsaacLab sanity, performance warnings |
 | **Knowledge base feedback loop** — learn from plan outcomes | ⚠️ Schema only | `knowledge_base.py` exists but `query_by_error_pattern()` returns `[]`; no negative memory; auto-capture not wired to plan outcomes |
 | **Source Registry / document retrieval** — real NVIDIA docs | ⚠️ Mock only | Only hardcoded mock doc in `index_mock_doc()`; no real web scraping, no actual NVIDIA docs loaded into FTS index |
 | **Environment fingerprint caching** — thread-safe system info | ⚠️ Brittle | Uses mutable `global` variable, not thread-safe under concurrent requests; no durable cache |
@@ -102,10 +81,6 @@ Complete natural-language control over every Isaac Sim capability — USD author
 |---|---|
 | **NL scene builder** — "build a kitchen with my robot" → full spatial layout from asset catalog | P0 |
 | **Asset catalog search** — fuzzy-match local/Nucleus assets by name, tag, type | ✅ Done |
-| **RViz2 integration** — auto-configured launch with topic discovery + scene-named configs | ✅ Done |
-| **G1 locomotion — Phase 1** — deploy `unitree_rl_gym` `motion.pt` checkpoint into Isaac Sim; wire joint commands via `isaacsim.robot.policy.examples` | P0 |
-| **G1 locomotion — Phase 2** — Isaac Lab 2.3 + PR #3242/#3440: G1+Inspire Hand teleop stack, joint retargeting, demo recording pipeline | P0 |
-| **G1 locomotion — Phase 3** — fine-tune GR00T N1.7 on collected teleop demos; ZMQ inference bridge; whole-body loco-manipulation policy eval | P1 |
 | **IsaacLab RL training** — env scaffolding, training launch, live metrics from chat | P0 |
 | **Motion planning (RMPflow/Lula)** — "move arm to this pose" via `isaacsim.robot_motion` | P0 |
 | **GPU-batched cloning** — replace naive clone loop with `isaacsim.core.cloner` | P0 |
@@ -122,13 +97,13 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | **Robot assembler** — "attach this gripper to the arm" via `isaacsim.robot_setup.assembler` | P1 |
 | **Gain tuner** — auto-tune articulation PD gains via `isaacsim.robot_setup.gain_tuner` | P1 |
 | **Occupancy map gen** — 2D walkable-area maps via `isaacsim.asset.gen.omap` | P1 |
-| **RL policy deployment** — load trained policies via `isaacsim.robot.policy.examples`; needed for G1 Phase 1 | P0 |
+| **RL policy deployment** — load trained policies via `isaacsim.robot.policy.examples` | P1 |
 | **URDF importer migration** — switch legacy `omni.isaac.urdf` to `isaacsim.asset.importer.urdf` | P1 |
 | **Replicator DR nodes** — use built-in DR OmniGraph nodes via `isaacsim.replicator.domain_randomization` | P1 |
 | **Manipulator abstractions** — gripper/end-effector wrappers via `isaacsim.robot.manipulators` | P1 |
 | **Eureka reward generation** — LLM-authored reward functions with iterative refinement | P2 |
-| **IsaacSimZMQ bridge** — ZMQ pub/sub for external process comms; required for GR00T N1.7 inference server↔Isaac Sim communication | P1 |
-| **GR00T N1.7 policy eval** — deploy VLA foundation policies, fine-tune on G1+Inspire demos, evaluate in sim. Note: no public G1+Inspire checkpoint exists; teleop data collection (Phase 2) is the prerequisite. N1.7 uses Cosmos-Reason2-2B backbone; inference needs 16GB+ VRAM; WBC repo still on N1.5/N1.6 | P1→P2 |
+| **IsaacSimZMQ bridge** — ZMQ pub/sub for external process comms | P2 |
+| **GR00T N1 policy eval** — deploy foundation policies and evaluate in sim | P2 |
 | **Grasp editor** — author grasp poses via `isaacsim.robot_setup.grasp_editor` | P2 |
 | **Camera inspector** — inspect/modify all camera properties via `isaacsim.util.camera_inspector` | P2 |
 | **Mesh merge utility** — combine meshes into one prim via `isaacsim.util.merge_mesh` | P2 |
@@ -139,47 +114,6 @@ Complete natural-language control over every Isaac Sim capability — USD author
 | **Surface gripper** — suction/magnetic gripper modeling via `isaacsim.robot.surface_gripper` | P2 |
 | **ROS2 TF viewer** — show transform tree in viewport via `isaacsim.ros2.tf_viewer` | P2 |
 | **IsaacAutomator cloud deploy** — one-click cloud launch of headless Isaac Sim | P3 |
-
-### ROS2 Autonomy Stack (Phase 9 — see detail section below)
-
-| Gap | Priority |
-|---|---|
-| **`check_scene_ready`** — inspect scene + ROS2 state and return structured readiness report (sim playing, robot present, drive graph wired, topics publishing, map available) | ✅ Done |
-| **`get_machine_specs`** — detect GPU/CPU/RAM/disk/ROS2 distro/arch; produce machine-aware install suggestions and sensor resolution recommendations | ✅ Done |
-| **`suggest_next_steps`** — combine scene_ready + machine_specs + topic list into ordered "what to do next" list | ✅ Done |
-| **`check_sensor_health`** — per-sensor Hz, encoding, range validity checks for camera/lidar/IMU/contact; returns health report with recommendations | ✅ Done |
-| **`launch_nav2`** — auto-generate Nav2 params YAML from scene state, launch `nav2_bringup`; prerequisite checks with actionable fix suggestions | ✅ Done |
-| **`launch_slam`** — detect sensor type → choose algorithm (slam_toolbox for 2D lidar, rtabmap for stereo/RGB-D) → launch with auto-generated params | ✅ Done |
-| **`launch_ros2_control`** — generate ros2_control YAML + `topic_based_ros2_control` plugin config for diff-drive / arm / humanoid controllers | P1 |
-| **`launch_gazebo`** — export scene as SDF, configure `ros_gz_bridge` for Isaac Sim ↔ Gazebo co-simulation | P3 |
-| **`list_launched` / `stop_launched` / `restart_launched`** — process registry for all Isaac Assist–managed ROS2 tool subprocesses | ✅ Done |
-| **`add_full_sensor_suite`** — one-command: add all sensors appropriate for robot type (cameras + lidar + IMU + odom + TF + clock) and wire OmniGraph | P1 |
-| **`slam_start` / `slam_stop` / `slam_status`** — SLAM lifecycle wrappers with sensor health gate, coverage monitoring, map save on stop | ✅ Done |
-| **`map_export`** — export current map in Nav2 format (pgm+yaml), PNG, ROS2 bag, Isaac Sim USD occupancy prim | ✅ Done |
-| **`nav2_goto`** — send Nav2 goal by coordinates, named location, relative offset, or vision description; monitor progress | ✅ Done |
-| **`nav2_waypoints`** — follow a sequence of waypoints / named location patrol loop | P2 |
-| **`save_location`** — save current `/odom` pose with a user-defined name for later `nav2_goto` use | ✅ Done |
-| **`classify_objects`** — Gemini Robotics-ER + Isaac Sim ground-truth segmentation; report what the robot's camera sees | P2 |
-| **`get_segmentation_map`** — semantic/instance/panoptic segmentation from Isaac Sim renderer; auto-add OmniGraph helper if not wired | P2 |
-| **`vision_command`** — NL vision-to-action: "move toward blue ball", "pick up the cube", "follow the person" → detect → 3D project → Nav2 goal | P2 |
-| **`label_scene_for_segmentation`** — auto-apply `SemanticLabel` API to all prims by name/type for ground-truth segmentation | P2 |
-| **`export_project_zip`** — full ROS2 project ZIP: scene_setup.py + launch files + Nav2/SLAM/ros2_control configs + maps + URDF + teleop scripts + package.xml | P1 |
-| **`scaffold_ros2_workspace`** — create a `colcon build`-ready `~/ros2_ws/src/<project>/` with all configs and launch files from current session | P2 |
-| **`connect_user_model`** — import user's own URDF/USD/MJCF from their project folder; auto-detect joints/sensors; watch for file changes; register in catalog | P2 |
-
-### Isaac ROS Perception & Manipulation Stack (Phase 10)
-
-| Tool group | Status |
-|---|---|
-| **Isaac ROS Perception** — `launch_object_detection` (RT-DETR/YOLOv8), `launch_pose_estimation` (FoundationPose), `launch_nvblox` (3D ESDF reconstruction) | ✅ Done |
-| **Segmentation** — `launch_unet_segmentation`, `launch_segformer`, `launch_segment_anything` (SAM), `launch_segment_anything2` (SAM2), `sam2_add_objects`, `sam2_remove_object`, `configure_segmentation_for_nvblox` | ✅ Done |
-| **cuMotion** — `launch_cumotion_planner`, `launch_robot_segmenter`, `launch_esdf_visualizer`, `launch_cumotion_moveit`, `launch_goal_setter`, `set_cumotion_target_pose`, `launch_object_attachment`, `attach_object`, `generate_xrdf` | ✅ Done |
-| **Localization** — `launch_occupancy_grid_localizer`, `trigger_grid_search_localization`, `launch_pointcloud_to_flatscan`, `launch_laserscan_to_flatscan`, `launch_visual_global_localization`, `trigger_visual_localization`, `build_visual_map`, `load_visual_slam_map`, `localize_in_visual_slam_map`, `reset_visual_slam`, `get_visual_slam_poses`, `set_visual_slam_pose` | ✅ Done |
-| **Gemini Robotics ER 1.6 bridge** — CMake colcon package with `GeminiQuery.srv` + `GeminiTask.action`; all 10 capabilities as ROS2 services + 1 action server; pixel-coord enrichment + annotated image save | ✅ Done |
-| **cuRobo world collision management** — `configure_curobo_world` (YAML gen), `add/remove/update/enable_world_obstacle` (CRUD), `query_sphere_collision` (GPU SDF), `launch_world_collision_manager` (TF-synced node + MarkerArray) | ✅ Done |
-| **MediaPipe body-pose teleop** — `launch_mediapipe_teleop` CODE_GEN → Kit Python script with `Se3MediaPipe` daemon thread + omni.ui 5×5 stay-in-frame grid | ✅ Done |
-| **LingBot-Map 3D reconstruction** — `launch_lingbot_map` scaffolds `lingbot_map_ros` ament_python package; GCTStream streaming inference → `/lingbot/pointcloud` + `/lingbot/camera_pose` + depth + conf; `export_lingbot_to_curobo.py` mesh exporter | ✅ Done |
-| **ROS2 node scaffolder** — `scaffold_ros2_node` with dispatch for diff-drive / arm / sensor-bridge / semantic-segmentation / world-collision-manager node types | ✅ Done |
 
 ---
 
@@ -401,11 +335,9 @@ Audit of all `isaacsim.*` extensions available vs. currently used.
 
 ### 4B — ROS2 Bridge
 
-- [x] **4B.1** Tool: `ros2_publish(topic, msg_type, data)` — publish to a ROS2 topic
-- [x] **4B.2** Tool: `ros2_subscribe(topic, msg_type)` — subscribe and show data in chat
-- [x] **4B.3** Tool: `ros2_list_topics()` — show active topics
-- [x] **4B.4** Tool: `launch_rviz2(extra_topics, fixed_frame)` — auto-discover topics, generate config (named after USD scene), launch RViz2 process
-- [x] **4B.5** Tool: `stop_rviz2()` — stop managed RViz2 instance (SIGTERM → SIGKILL)
+- [ ] **4B.1** Tool: `ros2_publish(topic, msg_type, data)` — publish to a ROS2 topic
+- [ ] **4B.2** Tool: `ros2_subscribe(topic, msg_type)` — subscribe and show data in chat
+- [ ] **4B.3** Tool: `ros2_list_topics()` — show active topics
 
 ### 4C — Camera & Viewport Control
 
@@ -638,67 +570,16 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
 - [ ] **7F.4** Tool: `zmq_list_connections()` — show active ZMQ links and throughput stats
 - [ ] **7F.5** User flow: "stream the lidar data over ZMQ to my Python training script" → auto-configures pub socket + topic
 
-### 7G — GR00T N1.7 Foundation Policy Integration (Tier 3)
+### 7G — GR00T N1 Foundation Policy Evaluation (Tier 3)
 
-**Goal:** Deploy NVIDIA GR00T N1.7 vision-language-action (VLA) foundation model in Isaac Sim for zero-shot inference, fine-tuning on custom demonstrations, and closed-loop evaluation. GR00T N1.7 uses a Cosmos-Reason2-2B VLM backbone (Qwen3-VL) + diffusion transformer action head, is cross-embodiment (bimanual, semi-humanoid, humanoid), and runs on DGX Spark (CUDA 13, Python 3.12).
-
-**Key refs:** [GitHub](https://github.com/NVIDIA/Isaac-GR00T) | [HuggingFace](https://huggingface.co/collections/nvidia/gr00t-n17) | [Paper](https://arxiv.org/abs/2503.14734)
-
-**Available checkpoints:**
-- `nvidia/GR00T-N1.7-3B` — base model (zero-shot on pretrain embodiments)
-- `nvidia/GR00T-N1.7-LIBERO` — finetuned Franka Panda (LIBERO benchmark)
-- `nvidia/GR00T-N1.7-DROID` — finetuned DROID dataset
-- `nvidia/GR00T-N1.7-SimplerEnv-Bridge` — finetuned WidowX
-- `nvidia/GR00T-N1.7-SimplerEnv-Fractal` — finetuned Google Robot
-
-**Hardware:** Inference: 16 GB+ VRAM (DGX Spark OK). Fine-tuning: 40 GB+ recommended (H100/L40).
+**Goal:** Deploy NVIDIA GR00T N1 foundation robot policies in Isaac Sim and benchmark them on custom scenes.
 
 #### Tasks
 
-- [ ] **7G.1** Tool: `groot_setup()` — install/verify GR00T N1.7 environment
-  - Clone repo with `--recurse-submodules`, `uv sync --python 3.12`
-  - Patch Triton for CUDA 13 (`scripts/patch_triton_cuda13.sh`)
-  - Verify with `import gr00t`
-  - DGX Spark uses `torchcodec` (aarch64 prebuilt wheel) as video backend
-- [ ] **7G.2** Tool: `load_groot_policy(model_id, embodiment_tag, device)` — download and initialize a GR00T policy
-  - Downloads from HuggingFace automatically (`nvidia/GR00T-N1.7-3B`, etc.)
-  - `embodiment_tag` determines modality config (state/action keys, normalization)
-  - Pretrain tags: `OXE_DROID_RELATIVE_EEF_RELATIVE_JOINT`, `LIBERO_PANDA`, `SIMPLER_ENV_WIDOWX`, `SIMPLER_ENV_GOOGLE`
-  - Custom robots use `NEW_EMBODIMENT` tag with custom `modality.json`
-  - Returns `Gr00tPolicy` instance ready for `get_action(obs)` calls
-- [ ] **7G.3** Tool: `groot_inference(model_id, dataset_path, embodiment_tag, traj_ids, action_horizon)` — open-loop inference
-  - Runs `standalone_inference_script.py` comparing predicted vs ground-truth actions
-  - Supports `--inference-mode pytorch` (default) or TensorRT for 2x+ speedup
-  - Generates MSE visualization at `/tmp/open_loop_eval/traj_{id}.jpeg`
-  - Zero-shot: use base model + pretrain tag; Finetuned: use checkpoint + posttrain tag
-- [ ] **7G.4** Tool: `groot_server(model_id, embodiment_tag, port, device)` — start GR00T policy server
-  - Launches `gr00t/eval/run_gr00t_server.py` as background process via ZMQ
-  - Server-client architecture: policy on GPU, lightweight client sends observations
-  - Isaac Sim connects as client via `PolicyClient(host, port)` for closed-loop control
-  - "start a GR00T policy server for the Franka on port 5555" → server running, ready for eval
-- [ ] **7G.5** Tool: `groot_eval_closed_loop(model_id, task, num_episodes, env_config)` — closed-loop simulation evaluation
-  - Connects to policy server (7G.4) as client, runs episodes in Isaac Sim
-  - Reports success rate, trajectory length, cumulative reward
-  - Supports LIBERO, SimplerEnv, DROID, and custom environments
-  - ReplayPolicy mode: `--dataset-path` without `--model-path` replays recorded actions for env verification
-- [ ] **7G.6** Tool: `groot_prepare_data(demo_path, embodiment_tag, modality_config)` — convert demonstrations to GR00T LeRobot format
-  - Converts teleop demonstrations (from 7C.3) to LeRobot v2 format with `modality.json`
-  - Required structure: `meta/` (info.json, episodes.jsonl, tasks.jsonl, modality.json), `data/`, `videos/`
-  - LeRobot v3→v2 conversion via `scripts/lerobot_conversion/convert_v3_to_v2.py`
-  - "convert my teleoperation recordings to GR00T training format" → dataset ready for finetuning
-- [ ] **7G.7** Tool: `finetune_groot(base_model, dataset_path, embodiment_tag, modality_config, num_steps, num_gpus)` — fine-tune on custom data
-  - Wraps `gr00t/experiment/launch_finetune.py` with Weights & Biases logging
-  - Single GPU: `CUDA_VISIBLE_DEVICES=0`, Multi-GPU: `torchrun --nproc_per_node=N`
-  - Key hyperparams: `--global-batch-size 32`, `--max-steps 2000`, `--state_dropout_prob 0.2`
-  - Custom embodiments use `NEW_EMBODIMENT` tag + modality config Python file
-  - "fine-tune GR00T on my 50 pick-and-place demos for the UR5e" → checkpoint saved
-- [ ] **7G.8** Tool: `groot_export(checkpoint_path, format)` — export finetuned model for deployment
-  - Exports to ONNX and TensorRT for accelerated inference
-  - N1.7 has improved full-pipeline export support
-  - "export my finetuned model to TensorRT for real-time deployment" → .engine file ready
-- [ ] **7G.9** Tool: `groot_compare(models, task, num_episodes)` — compare multiple policies
-  - Runs A/B evaluation between GR00T checkpoints, RL policies (Eureka), or cuRobo baselines
-  - "compare GR00T zero-shot vs my finetuned model on the pick-and-place task" → side-by-side metrics
+- [ ] **7G.1** Tool: `load_groot_policy(model_id, robot_path)` — download and attach a GR00T N1 checkpoint
+- [ ] **7G.2** Tool: `evaluate_groot(model_id, task, num_episodes)` — run zero-shot or fine-tuned policy, report metrics
+- [ ] **7G.3** Tool: `finetune_groot(model_id, demo_data, num_steps)` — fine-tune on user's teleop demonstrations (from 7C.3)
+- [ ] **7G.4** Comparison dashboard: "compare GR00T N1 vs my RL policy on the pick-and-place task"
 
 ### 7H — IsaacAutomator Cloud Deployment (Tier 3)
 
@@ -777,45 +658,6 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
 - [ ] **8B.5** IK solver integration: single-shot inverse kinematics without full trajectory planning
   - "what joint angles put the gripper at [0.5, 0, 0.3]?" → returns joint config
   - Useful for teleop target computation (feeds into Phase 7C)
-- [ ] **8B.6** Tool: `configure_curobo_robot(urdf_path, base_link, ee_link, joint_names, ...)` — generate cuRobo robot YAML config
-  - Creates the YAML file required by `CudaRobotGeneratorConfig` from a URDF
-  - Sets `kinematics` block: `urdf_path`, `base_link`, `ee_link`, `asset_root_path`
-  - Configures `cspace`: `joint_names`, `retract_config`, `null_space_weight`, `cspace_distance_weight`
-  - Supports `lock_joints` for fixed grippers, `extra_links` for attached objects
-  - Sets `max_jerk` (500) and `max_acceleration` (15) defaults
-  - Produces a ready-to-use YAML that `curobo_motion_plan` can consume as `robot_config`
-  - "I have a custom UR5e URDF, generate a cuRobo config for it" → YAML file written to workspace
-- [ ] **8B.7** Tool: `convert_urdf_to_curobo_usd(robot_config_path)` — convert URDF to cuRobo-compatible USD
-  - Wraps `curobo/examples/isaac_sim/utils/convert_urdf_to_usd.py`
-  - Reads the cuRobo robot YAML (from 8B.6) and converts the referenced URDF to USD
-  - Sets `usd_path` and `usd_robot_root` in the config automatically
-  - "convert my robot URDF to USD for cuRobo" → USD file + updated config YAML
-- [ ] **8B.8** Tool: `generate_collision_spheres(robot_config_path, articulation_path)` — generate collision sphere model
-  - Uses Lula Robot Description Editor API (`isaacsim.robot_setup.lula_util`) or cuRobo's sphere fitting
-  - Reads robot mesh from USD, fits collision spheres per link
-  - Populates `collision_link_names`, `collision_spheres`, `collision_sphere_buffer` in robot YAML
-  - Auto-generates `self_collision_ignore` for adjacent/kinematically-limited link pairs
-  - Sets `self_collision_buffer` per link (conservative for base, tight for EE)
-  - "generate collision spheres for my UR5e" → sphere YAML merged into robot config
-- [ ] **8B.9** Tool: `curobo_mpc_control(articulation_path, target_position, ...)` — reactive MPC via MPPI
-  - Uses `curobo.wrap.reacher.mpc` for 500Hz reactive control loop
-  - Tracks moving target poses with collision avoidance
-  - Lower trajectory quality than MotionGen but handles dynamic environments
-  - Safety: experimental, constraints as cost terms — must test in sim before real deployment
-  - "reactively follow this moving target while avoiding obstacles" → MPPI control loop
-- [ ] **8B.10** Tool: `curobo_ik_reachability(articulation_path, grid_center, grid_size, ...)` — batched IK reachability analysis
-  - Uses `curobo.wrap.reacher.ik_solver.IKSolver` with GPU batch solving
-  - Samples XYZ grid around a position, solves IK for all poses in parallel
-  - Returns reachability map: green (reachable) / red (unreachable) per grid cell
-  - Supports collision-aware mode (reads world from USD stage)
-  - Visualizes via `debug_draw` (8A.2) in viewport
-  - "show me the reachable workspace of the Franka" → colored point cloud in viewport
-- [ ] **8B.11** Tool: `curobo_multi_arm_plan(articulations, targets, robot_config)` — multi-arm motion planning
-  - Uses dual-arm cuRobo configs (e.g. `dual_ur10e.yml`) treating two arms as single kinematic chain
-  - Plans collision-free trajectories for both arms simultaneously
-  - Each arm has its own target pose + optional `extra_link` targets
-  - Experimental: open research area, lower success rate than single-arm
-  - "plan both UR10e arms to their respective targets without colliding" → coordinated trajectories
 
 ### 8C — Cortex Behaviors & Manipulation (Weeks 33–34)
 
@@ -1083,14 +925,12 @@ User types: "Create a 3D model from this image and place it at 0, 0, 1"
   - Replace `mock_findings` parameter with real `run_analysis()` call
   - Plan steps derived from actual validator findings (9A)
   - Each plan step references the specific finding it addresses
-- [x] **9E.5** Wire ROS2 tool execution handlers
-  - Connected `tool_executor.py` handlers to `ros_mcp_tools.py` for:
-    - `ros2_list_topics` / `ros2_get_topic_type` / `ros2_get_message_type`
-    - `ros2_subscribe_once` / `ros2_publish` / `ros2_publish_sequence`
-    - `ros2_list_services` / `ros2_call_service`
-    - `ros2_list_nodes` / `ros2_get_node_details`
-    - `launch_rviz2` / `stop_rviz2` (via `rviz_launcher.py`)
-  - Tested with rosbridge WebSocket at `127.0.0.1:9090`
+- [ ] **9E.5** Wire ROS2 tool execution handlers
+  - Connect `tool_executor.py` handlers to `ros_mcp_tools.py` for:
+    - `ros2_publish_topic` / `ros2_subscribe_topic`
+    - `ros2_call_service` / `ros2_list_topics` / `ros2_list_services`
+    - `ros2_get_topic_info` / `ros2_echo_topic`
+  - Test with rosbridge WebSocket at `127.0.0.1:9090`
 - [ ] **9E.6** Add integration tests (L1–L2)
   - L1: Service integration tests — start service, send chat, verify tool calls
   - L2: MCP server tests — verify tool schema registration and dispatch
@@ -1132,8 +972,6 @@ All tools are exposed to the LLM via structured function-calling schemas. The LL
 | `run_sdg` | 4A | Replicator |
 | `ros2_publish` | 4B | ROS2 |
 | `ros2_subscribe` | 4B | ROS2 |
-| `launch_rviz2` | 4B | ROS2 |
-| `stop_rviz2` | 4B | ROS2 |
 | `set_viewport_camera` | 4C | Viewport |
 | `create_render_product` | 4C | Viewport |
 | `list_all_prims` | 4D | Query |
@@ -1166,15 +1004,9 @@ All tools are exposed to the LLM via structured function-calling schemas. The LL
 | `start_zmq_bridge` | 7F | ZMQ Comms |
 | `zmq_publish` | 7F | ZMQ Comms |
 | `zmq_subscribe` | 7F | ZMQ Comms |
-| `load_groot_policy` | 7G | GR00T N1.7 |
-| `groot_inference` | 7G | GR00T N1.7 |
-| `groot_server` | 7G | GR00T N1.7 |
-| `groot_eval_closed_loop` | 7G | GR00T N1.7 |
-| `groot_prepare_data` | 7G | GR00T N1.7 |
-| `finetune_groot` | 7G | GR00T N1.7 |
-| `groot_export` | 7G | GR00T N1.7 |
-| `groot_compare` | 7G | GR00T N1.7 |
-| `groot_setup` | 7G | GR00T N1.7 |
+| `load_groot_policy` | 7G | GR00T N1 |
+| `evaluate_groot` | 7G | GR00T N1 |
+| `finetune_groot` | 7G | GR00T N1 |
 | `cloud_launch` | 7H | Cloud Deploy |
 | `cloud_status` | 7H | Cloud Deploy |
 | `cloud_download_results` | 7H | Cloud Deploy |
@@ -1190,12 +1022,6 @@ All tools are exposed to the LLM via structured function-calling schemas. The LL
 | `plan_trajectory` | 8B | Motion Planning |
 | `set_motion_policy` | 8B | Motion Planning |
 | `generate_robot_description` | 8B | Robot Setup |
-| `configure_curobo_robot` | 8B | cuRobo Config |
-| `convert_urdf_to_curobo_usd` | 8B | cuRobo Config |
-| `generate_collision_spheres` | 8B | cuRobo Config |
-| `curobo_mpc_control` | 8B | cuRobo MPC |
-| `curobo_ik_reachability` | 8B | cuRobo IK |
-| `curobo_multi_arm_plan` | 8B | cuRobo Multi-Arm |
 | `create_behavior` | 8C | Cortex / Behaviors |
 | `create_gripper` | 8C | Manipulation |
 | `grasp_object` | 8C | Manipulation |
@@ -1342,20 +1168,7 @@ User types: "attach the Robotiq 2F-85 gripper to the UR10 tool flange"
 → LLM: "Gripper attached. 8 DOF total (6 arm + 2 finger)."
 ```
 
-### Flow 10: "Launch RViz to see the robot's sensors"
-```
-User types: "launch rviz"
-→ LLM calls: launch_rviz2()  # fixed frame auto-detected from TF publisher parentPrim
-→ Internally: discovers active ROS2 topics via rosbridge
-→ Maps topics to RViz2 display types (Image, PointCloud2, LaserScan, TF, etc.)
-→ Queries Kit RPC for scene file name → "basic-office_nova_carter"
-→ Saves config: service/workspace/rviz_configs/basic-office_nova_carter_YYYYMMDD_HHMMSS.rviz
-→ Launches rviz2 subprocess with use_sim_time=true
-→ LLM: "RViz2 launched with scene-named config, fixed frame set to NovaCarter, and live scan/point cloud topics wired."
-→ User: "stop rviz" → LLM calls stop_rviz2() → process terminated
-```
-
-### Flow 11: "Show me what the overhead camera sees"
+### Flow 10: "Show me what the overhead camera sees"
 ```
 User types: "switch viewport to the overhead camera"
 → LLM calls: set_viewport_camera("/World/Cameras/overhead_cam")
@@ -1363,7 +1176,7 @@ User types: "switch viewport to the overhead camera"
 → LLM auto-captures and says: "Here's the overhead view. I can see 3 objects on the table."
 ```
 
-### Flow 12: "Build a house and put my robot in the kitchen"
+### Flow 11: "Build a house and put my robot in the kitchen"
 ```
 User types: "Build a house with a kitchen and put my Unitree G1 robot inside
             with a table, chairs, sink, and some kitchen items"
@@ -1401,7 +1214,7 @@ User types: "Build a house with a kitchen and put my Unitree G1 robot inside
 → LLM updates blueprint delta, re-validates, applies change
 ```
 
-### Flow 13: "Turn this photo into a 3D model"
+### Flow 12: "Turn this photo into a 3D model"
 ```
 User clicks 📎 → selects photo of a coffee mug from desktop
 User types: "Create a 3D model from this image and put it on the table"
@@ -1420,199 +1233,6 @@ User types: "Create a 3D model from this image and put it on the table"
 → User: "make it a bit bigger and add physics"
 → LLM adjusts scale + applies RigidBodyAPI + CollisionAPI
 ```
-
----
-
-## Phase 9 — ROS2 Autonomy Stack
-
-**Target:** Isaac Sim 5.1 on DGX Spark (aarch64) / ROS2 Jazzy  
-**Depends on:** Existing rosbridge MCP tools, Gemini Vision provider, Pipeline planner, Export system
-
-### Goal
-
-Extend Isaac Assist from "build and drive a robot in sim" to a full autonomy stack: SLAM mapping, Nav2 navigation, object classification, segmentation, vision-language commands, ros2_control, and Gazebo co-sim — all launchable from chat or MCP. The system checks scene readiness, detects machine capabilities, and exports complete ROS2 project packages.
-
-### Phase A — Scene Readiness & Machine-Aware Suggestions (P0)
-
-- **`check_scene_ready`**: Runs 11 checks (sim playing, robot present, drive graph, camera/lidar/IMU/odom/TF/clock topics, map, rosbridge). Returns structured JSON report with score, missing items, and `suggested_next_steps` array.
-- **`get_machine_specs`**: Detects GPU/VRAM, CPU, RAM, disk, ROS_DISTRO, architecture, Isaac Sim version, available ROS2 packages. Produces machine-aware install suggestions (e.g. "No slam_toolbox: `sudo apt install ros-${ROS_DISTRO}-slam-toolbox`").
-- **`suggest_next_steps`**: Combines the above + live topic list into an ordered 11-step recommendation ladder (sim not playing → no robot → no drive graph → no odom → … → Nav2 running → export ZIP).
-- **`check_sensor_health`**: Per-sensor Hz, encoding, range, and data validity checks for camera RGB/Depth/Segmentation, LiDAR 2D/3D, IMU, CameraInfo, Contact. Returns `healthy / warning / error` with fix hints.
-
-### Phase B — Launch Tools (P0–P1)
-
-All launched processes registered in `_LAUNCHED_PROCESSES` dict (`name, pid, config_path, launch_time, topics_used`) with `list_launched / stop_launched / restart_launched` management tools.
-
-- **`launch_rviz2`** *(already done)*: Auto-generates `.rviz` config from discovered topics, writes to `workspace/rviz_configs/<scene>.rviz`, launches subprocess.
-- **`launch_nav2`** (P0): Prerequisite check (odom + scan + TF + clock). Auto-generate Nav2 `params.yaml` from scene state (drive type, max speeds from DiffController, sensor topic auto-detect). Launches `ros2 launch nav2_bringup bringup_launch.py`.
-- **`launch_slam`** (P1): Sensor-aware algorithm selection: 2D LiDAR → `slam_toolbox`; 3D LiDAR / stereo / RGB-D → `rtabmap`. Machine-aware (RAM < 16 GB prefers slam_toolbox). Auto-generates params, monitors `/map` topic.
-- **`launch_ros2_control`** (P1): Generates `ros2_control` URDF tags + controller YAML using `topic_based_ros2_control` plugin. Supports `diff_drive_controller`, `joint_trajectory_controller`, `effort_controllers`.
-- **`launch_gazebo`** (P3): Export scene as SDF/URDF, configure `ros_gz_bridge` for co-simulation.
-
-### Phase C — Full Sensor Suite (P1)
-
-- **`add_full_sensor_suite`**: One-command sensor setup per robot type. Nova Carter: stereo cameras (front + rear), 2D LiDAR, IMU, odom, TF, clock → all OmniGraph nodes wired with `IsaacCreateRenderProduct`. Franka: wrist camera + gripper contact sensors.
-- Sensor-to-ROS2 matrix: 18 sensor types covered (RGB, Depth, CameraInfo, Semantic/Instance Segmentation, BBox 2D/3D, Depth PCL, 2D/3D LiDAR, IMU, Contact, GPS, Odom, Clock, JointState, TF).
-
-### Phase D — Mapping & Navigation (P1)
-
-- **`slam_start` / `slam_stop` / `slam_status`**: Sensor health gate before start. Coverage area monitoring during mapping. On stop: save map via `slam_toolbox/save_map` service → `workspace/maps/<scene>/map.pgm + map.yaml`.
-- **`map_export`**: Multi-format export: Nav2 pgm+yaml, PNG, ROS2 bag, Isaac Sim USD occupancy prim.
-- **`nav2_goto`** (P1): Send Nav2 goals by coordinates, named location, relative offset, or vision description. Monitors `/navigate_to_pose` action status. Publishes to `/goal_pose`.
-- **`nav2_waypoints`** (P2): Patrol sequence via `/follow_waypoints`. Named location support.
-- **`save_location`** (P2): Record current `/odom` pose under a user-defined name (e.g. "kitchen") for later use with `nav2_goto`.
-
-### Phase E — Perception & Classification (P2)
-
-- **`classify_objects`**: Gemini Robotics-ER zero-shot detection from viewport or robot camera topic. Overlaid with Isaac Sim ground-truth semantic labels.
-- **`get_segmentation_map`**: Returns semantic/instance/panoptic segmentation image + label map. Auto-adds `ROS2CameraHelper` OmniGraph node if not yet wired.
-- **`vision_command`**: NL vision-to-action pipeline: detect object → depth back-project pixel to 3D → TF to map frame → Nav2 goal. Supports "move toward", "pick up", "follow", "avoid", "go to nearest".
-- **`label_scene_for_segmentation`**: Auto-walk stage tree and apply `SemanticLabel` API by prim name/type.
-
-### Phase F — Export & Project Integration (P1–P2)
-
-- **`export_project_zip`** (P1): Full ROS2 project ZIP: `scene_setup.py`, launch files, Nav2/SLAM/ros2_control configs, maps, URDF, teleop script, patrol example, `package.xml`, `CMakeLists.txt`. Download via `GET /api/v1/chat/export_project_zip/download`.
-- **`scaffold_ros2_workspace`** (P2): Create `~/ros2_ws/src/<project>/` as a `colcon build`-ready ROS2 package with all generated launch files and configs.
-- **`connect_user_model`** (P2): Import user's URDF/USD/MJCF from their project folder. Auto-detect joints, drive type, sensor mount points. Watch file for changes. Register in catalog.
-
-### Phase G — Full Autonomy Pipeline Template (P1)
-
-8-phase pipeline template: `pipeline: Nova Carter autonomous navigation in a warehouse`
-
-| Phase | Name | Content |
-|---|---|---|
-| 1 | Scene Setup | Ground plane + warehouse environment |
-| 2 | Robot Import | Nova Carter with physics, no fixedBase |
-| 3 | Drive Graph | Diff drive OmniGraph + odom + clock |
-| 4 | Full Sensor Suite | Stereo cameras + LiDAR + IMU + TF |
-| 5 | Verify ROS2 | Topic health check, sensor health green |
-| 6 | Launch SLAM | slam_toolbox, drive around to map |
-| 7 | Launch Nav2 | Save map, bringup Nav2 with config |
-| 8 | Final Verify | Scene summary + topic list + next steps |
-
-`check_scene_ready` runs as a gate between phases. Failed gates provide actionable fix suggestions before retrying.
-
-### Dependencies
-
-```bash
-# Navigation
-sudo apt install ros-${ROS_DISTRO}-navigation2 ros-${ROS_DISTRO}-nav2-bringup
-# SLAM
-sudo apt install ros-${ROS_DISTRO}-slam-toolbox
-sudo apt install ros-${ROS_DISTRO}-rtabmap-ros    # stereo/RGB-D SLAM
-# Control
-sudo apt install ros-${ROS_DISTRO}-ros2-control ros-${ROS_DISTRO}-ros2-controllers
-# Vision message types
-sudo apt install ros-${ROS_DISTRO}-vision-msgs
-# Python (service)
-pip install psutil pyyaml
-```
-
-### Test Scenarios
-
-| # | Prompt | Tool |
-|---|--------|------|
-| T62 | "is the scene ready for navigation?" | `check_scene_ready` |
-| T63 | "what should I do next?" | `suggest_next_steps` + `get_machine_specs` |
-| T64 | "launch rviz2 with all available sensors" | `launch_rviz2` |
-| T65 | "start mapping this room" → drive → "save the map" | `slam_start / slam_stop / map_export` |
-| T66 | "launch navigation with the saved map" → "go to position 3, 2" | `launch_nav2` + `nav2_goto` |
-| T67 | "move toward the blue ball" | `vision_command` |
-| T68 | "show me the segmentation map from the robot's camera" | `get_segmentation_map` |
-| T69 | "export everything as a zip" | `export_project_zip` |
-| T70 | "load my robot from ~/my_project/robot.urdf" | `connect_user_model` |
-| T71 | "pipeline: Nova Carter autonomous navigation in a warehouse" | Full autonomy pipeline (8 phases) |
-| T72 | "check all sensor health" | `check_sensor_health` |
-
----
-
-## Phase 10 — Isaac ROS Perception, Manipulation & Advanced Reconstruction
-
-**Completed April 2026.** All tools listed below are implemented, registered, and have L0 pytest coverage in `tests/test_ros2_new_tools.py` (165 tests). TEST_SCENARIOS_UI.md entries T73–T84.
-
-### 10A — Isaac ROS Perception (3 tools)
-
-Generates ROS2 launch configs and `params.yaml` files under `workspace/scenes/<scene>/object_detection/` and starts managed subprocesses:
-
-- **`launch_object_detection`** — RT-DETR (`isaac_ros_rtdetr`) or YOLOv8 (`isaac_ros_yolov8`); publishes `vision_msgs/Detection2DArray` on `/detections`
-- **`launch_pose_estimation`** — FoundationPose (`isaac_ros_foundationpose`); publishes `geometry_msgs/PoseArray` + 3D bounding boxes; requires object mesh input
-- **`launch_nvblox`** — nvblox 3D ESDF reconstruction (`isaac_ros_nvblox`); publishes `/nvblox/mesh` + `/nvblox/distance_map_slice`; auto-enables blox section in cuRobo world config
-
-### 10B — Image Segmentation Stack (7 tools)
-
-All node-launch tools check `ros2 pkg prefix` for package existence before launching:
-
-- **`launch_unet_segmentation`** — `isaac_ros_unet`; outputs `/unet/colored_segmentation_mask`
-- **`launch_segformer`** — `isaac_ros_segformer`; outputs semantic mask + class IDs
-- **`launch_segment_anything`** — SAM v1 (`isaac_ros_segment_anything`); prompt-based segmentation
-- **`launch_segment_anything2`** — SAM2 (`isaac_ros_segment_anything2`); multi-object tracking with KV cache
-- **`sam2_add_objects`** — POST new object labels to running SAM2 node; persists across frames
-- **`sam2_remove_object`** — remove a tracked label from SAM2; clean stop without restarting node
-- **`configure_segmentation_for_nvblox`** — writes `nvblox_segmentation.yaml` mapping segmentation class IDs to nvblox freespace categories
-
-### 10C — cuMotion Manipulation Stack (9 tools)
-
-Full pipeline: XRDF → cuMotion planner → robot segmenter (remove self from nvblox) → MoveIt 2 bridge → goal setter → object attachment for pick-and-place:
-
-- **`generate_xrdf`** — generates `.xrdf` robot description from URDF; writes to `workspace/scenes/<scene>/xrdf/`
-- **`launch_cumotion_planner`** — `isaac_ros_cumotion`; requires world_config.yaml from cuRobo world tools
-- **`launch_robot_segmenter`** — masks robot links from nvblox ESDF to prevent self-collisions
-- **`launch_esdf_visualizer`** — publishes ESDF slice as `nav_msgs/OccupancyGrid` for RViz2
-- **`launch_cumotion_moveit`** — `isaac_ros_cumotion_moveit`; MoveIt 2 plugin for cuMotion planning
-- **`launch_goal_setter`** — interactive goal pose publisher with TF frame selection
-- **`set_cumotion_target_pose`** — programmatic goal pose injection `[x,y,z, qw,qx,qy,qz]`
-- **`launch_object_attachment`** — collision sphere attachment node for grasped objects
-- **`attach_object`** — runtime attach/detach; updates collision model in running planner
-
-### 10D — Localization Stack (12 tools)
-
-Covers grid-based 2D localization, scan converter pipeline, and Isaac ROS Visual SLAM:
-
-- **`launch_occupancy_grid_localizer`** / **`trigger_grid_search_localization`** — MCL-style 2D localization from pgm+yaml map
-- **`launch_pointcloud_to_flatscan`** / **`launch_laserscan_to_flatscan`** — 3D→2D scan converters for localization input
-- **`launch_visual_global_localization`** / **`trigger_visual_localization`** — image-retrieval global localization
-- **`build_visual_map`** / **`load_visual_slam_map`** / **`localize_in_visual_slam_map`** / **`reset_visual_slam`** / **`get_visual_slam_poses`** / **`set_visual_slam_pose`** — full Isaac ROS Visual SLAM map lifecycle
-
-### 10E — Gemini Robotics ER 1.6 Bridge (1 scaffolder → 10+ ROS2 services)
-
-`launch_gemini_robotics_bridge` generates a CMake colcon package `gemini_robotics_bridge`:
-- `srv/GeminiQuery.srv` — universal capability interface (one srv type, `capability` string field)
-- `action/GeminiTask.action` — long-running multi-step tasks with `status/progress/partial_result` feedback
-- `scripts/gemini_robotics_node.py` — subscribes to image topic, calls `google-genai` REST API at `temperature=0.1` with `response_mime_type: application/json`, enriches results with pixel coordinates (`_enrich_with_pixel_coords`)
-- Per-capability lambda services: `/gemini_robotics/detect_objects`, `/detect_bboxes`, `/plan_trajectory`, `/orchestrate`, `/plan_grasp`, `/read_gauge`, `/measure_fluid`, `/read_text`, `/segment_objects`, `/spatial_query`
-
-### 10F — cuRobo World Collision Management (7 tools)
-
-All tools read/write `workspace/scenes/<scene>/curobo/world_config.yaml`:
-- **`configure_curobo_world`** — generates both `world_config.yaml` (cuboids, meshes, blox, voxels) and `world_collision_config.yaml` (GPU buffer pre-allocation, activation distance, sweep flag); auto-enables blox section if nvblox is running
-- **`add/remove/update_obstacle_pose/enable_world_obstacle`** — zero-downtime CRUD; with pre-allocated cache (`cache_obb/cache_mesh`) no CUDA graph recompilation needed
-- **`query_sphere_collision`** — imports `curobo.geom.sdf.world.WorldPrimitiveCollision`, builds `[1,1,N,4]` tensor, returns signed distance per sphere (negative = free, positive = penetrating)
-- **`launch_world_collision_manager`** — starts `WorldCollisionManagerNode` scaffolded via `ros2_node_scaffolder`; TF listener for dynamic pose sync, `MarkerArray` publisher for RViz2, std_srvs/Trigger reload service
-
-### 10G — MediaPipe Body-Pose Teleop (CODE_GEN)
-
-`launch_mediapipe_teleop` generates a Kit Python script that:
-- Loads `Se3MediaPipe` + `WebcamPoseEstimator` from `platform_sdk` in a daemon thread
-- Maps `PoseSample` fields: `torso_forward→+x`, `-torso_lateral→+y`, `wrist_height→+z`, `shoulder_yaw→rot_z`, `right_hand_open>threshold→gripper`
-- Creates `omni.ui.Window` with: 5×5 position grid (dot colored green/yellow/red by distance from center), metric progress bars, hand open/close indicators, Start/Stop/E-Stop buttons
-- Subscribes to `omni.kit.app` update event for per-frame UI refresh without blocking sim loop
-
-### 10H — LingBot-Map Streaming 3D Reconstruction (1 scaffolder)
-
-`launch_lingbot_map` generates `lingbot_map_ros` ament_python package:
-- **Model**: `GCTStream` from `robbyant/lingbot-map-long` (HuggingFace, auto-downloaded); 9-D pose encoding → `_pose_enc_to_matrix()` → `PoseStamped`
-- **Node**: buffers incoming frames, runs `model.inference_streaming()`, publishes `/lingbot/pointcloud` (confidence-filtered `PointCloud2`), `/lingbot/camera_pose`, `/lingbot/depth` (float32), `/lingbot/conf`
-- **Export script**: `export_lingbot_to_curobo.py` — accumulates N frames, Open3D convex hull, writes `mesh` entry to `world_config.yaml` for cuMotion collision avoidance
-
-### 10I — Test Coverage
-
-`tests/test_ros2_new_tools.py` — 165 L0 tests:
-- Schema presence + handler registration for all 33 new tools
-- File scaffold + Python syntax validation for Gemini, LingBot-Map node/launch/srv/action scripts
-- YAML CRUD correctness for cuRobo obstacle operations
-- Code generation compile checks for MediaPipe teleop
-- Subprocess-stubbed dispatch tests for all DATA_HANDLER tools
-- Mocked curobo GPU import for sphere collision query shape validation
 
 ---
 

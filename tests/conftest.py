@@ -134,14 +134,17 @@ def fake_llm_response():
 
 @pytest.fixture()
 def mock_kit_rpc(monkeypatch):
-    """Patch kit_tools.queue_exec_patch + _get + _post so handlers run offline.
+    """Patches kit_tools HTTP calls so no running Kit server is needed.
 
-    Default behavior: queue_exec_patch returns a stub patch_id; tests that
-    need to inspect the generated script override queue_exec_patch with their
-    own monkeypatch.
+    Returns a dict of mock responses that tests can customize.
     """
     defaults = {
         "/health": {"ok": True},
+        "/context": {
+            "stage": {"prim_count": 42, "stage_url": "mock://stage.usd"},
+            "recent_logs": [],
+        },
+        "/capture": {"image_base64": "iVBOR..."},
         "/exec": {"queued": True, "patch_id": "test_patch_001"},
     }
 
@@ -151,13 +154,9 @@ def mock_kit_rpc(monkeypatch):
     async def fake_post(path, body):
         return defaults.get(path, {"error": f"Unknown path {path}"})
 
-    async def fake_queue(code, desc):
-        return {"queued": True, "patch_id": "test_patch_001"}
-
     import service.isaac_assist_service.chat.tools.kit_tools as kt
     monkeypatch.setattr(kt, "_get", fake_get)
     monkeypatch.setattr(kt, "_post", fake_post)
-    monkeypatch.setattr(kt, "queue_exec_patch", fake_queue, raising=False)
 
     return defaults
 

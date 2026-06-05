@@ -83,6 +83,34 @@ class ControllerAttrSet(BaseModel):
             profile=_g("profile") if _g("profile") is not None else None,
         )
 
+    def with_profile(self, profile_name: str) -> "ControllerAttrSet":
+        """Return a new (frozen) ControllerAttrSet with ``profile`` set to
+        *profile_name*.  All other fields are copied from *self* unchanged.
+
+        Usage::
+
+            base = ControllerAttrSet(adapter="curobo", phase="planning")
+            profiled = base.with_profile("high_precision")
+        """
+        return self.model_copy(update={"profile": profile_name})
+
+    def apply_profile(self, profile_dict: dict) -> "ControllerAttrSet":
+        """Return a new ControllerAttrSet with fields overridden from
+        *profile_dict*.
+
+        Only keys that correspond to ``ControllerAttrSet`` fields are applied;
+        unknown keys are silently ignored (forward-compat).  The ``profile``
+        key in *profile_dict*, if present, sets the ``profile`` field.
+
+        Usage::
+
+            preset = {"profile": "production_factory", "tick": 0, "status": "ok"}
+            updated = attrset.apply_profile(preset)
+        """
+        model_fields = set(self.__class__.model_fields.keys())
+        filtered = {k: v for k, v in profile_dict.items() if k in model_fields}
+        return self.model_copy(update=filtered)
+
     def validate_strict_adapter(self) -> None:
         """Raise ValueError if adapter is not one of the known AdapterToken values."""
         known = {"curobo", "builtin_pp", "spline", "constraint_pull"}

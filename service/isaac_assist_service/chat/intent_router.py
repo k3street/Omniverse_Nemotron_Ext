@@ -28,7 +28,6 @@ Intent = Literal[
     "physics_query",
     "console_review",
     "navigation",
-    "manipulation_task",
 ]
 
 
@@ -55,7 +54,6 @@ Classify the user message on THREE axes:
 - physics_query     : Asks about joint states, forces, velocities, rigid body data
 - console_review    : Asks about errors, warnings, or logs in the console
 - navigation        : Wants to select, move, focus on, or navigate to a prim
-- manipulation_task : Wants to pick, place, grasp, fold, or execute a physical manipulation task on the robot
 
 2. multi_step — true if the request has ≥2 linked actions with dependencies,
    conditionals ("if X exists"), sequencing ("then X, then Y"), or termination
@@ -104,8 +102,6 @@ INTENT_EXAMPLES = [
      "patch_request", True, "complex"),
     ("any errors in the console?", "console_review", False, "single"),
     ("select the robot arm", "navigation", False, "single"),
-    ("pick up the cube and place it on the table", "manipulation_task", True, "multi"),
-    ("grasp the red block", "manipulation_task", False, "single"),
 ]
 
 

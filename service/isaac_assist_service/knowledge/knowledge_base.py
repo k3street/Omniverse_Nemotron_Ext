@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timezone
 
-from ..config import config
+from service.isaac_assist_service.config import config
 
 logger = logging.getLogger(__name__)
 

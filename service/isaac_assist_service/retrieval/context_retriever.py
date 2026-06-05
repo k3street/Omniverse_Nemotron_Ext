@@ -16,10 +16,6 @@ import os
 import json
 from typing import List, Dict, Any, Optional
 
-from ..runtime_profiles import (
-    detect_isaac_version as _detect_profile_isaac_version,
-    get_runtime_profile,
-)
 from .storage.fts_store import FTSStore
 
 logger = logging.getLogger(__name__)
@@ -36,8 +32,11 @@ def _get_store() -> FTSStore:
 
 
 def detect_isaac_version() -> str:
-    """Detect Isaac Sim version from the active runtime profile."""
-    return _detect_profile_isaac_version()
+    """Detect Isaac Sim version from environment."""
+    isaac_path = os.environ.get("ISAAC_SIM_PATH", "")
+    if "6.0" in isaac_path:
+        return "6.0.0"
+    return "5.1.0"
 
 
 def retrieve_context(user_message: str, version: str = None, limit: int = 5) -> List[Dict[str, Any]]:
@@ -188,26 +187,23 @@ def save_pattern_from_success(
     if len(keywords) < 2:
         return False  # too generic to be useful
 
-    # Check for near-duplicate — only against OTHER auto-captured patterns.
-    # Curated patterns share broad keywords (robot, physics, etc.) and would
-    # block almost every auto-capture if included in the dedup check.
+    # Check for near-duplicate (keyword overlap OR similar title)
     existing = _load_patterns(version)
-    auto_existing = [p for p in existing if p.get("source") == "auto_captured"]
     new_kw_set = set(keywords)
     title_words = set(user_message.lower().split())
-    for p in auto_existing:
+    for p in existing:
         existing_kw_set = set(k.lower() for k in p.get("keywords", []))
-        # Keyword overlap: require 80% overlap to consider duplicate
+        # Keyword overlap check
         if existing_kw_set and new_kw_set:
             overlap = len(new_kw_set & existing_kw_set)
-            if overlap / max(len(new_kw_set), len(existing_kw_set)) > 0.8:
+            if overlap / max(len(new_kw_set), len(existing_kw_set)) > 0.5:
                 logger.info(f"[patterns] Skipping near-duplicate (keywords): {user_message[:60]}")
                 return False
-        # Title similarity: require 80% word overlap (catches exact re-runs / typos)
+        # Title similarity check — catch repeated prompts with minor typo variations
         existing_title_words = set(p.get("title", "").lower().split())
         if title_words and existing_title_words:
             title_overlap = len(title_words & existing_title_words)
-            if title_overlap / max(len(title_words), len(existing_title_words)) > 0.8:
+            if title_overlap / max(len(title_words), len(existing_title_words)) > 0.6:
                 logger.info(f"[patterns] Skipping near-duplicate (title): {user_message[:60]}")
                 return False
 
@@ -215,16 +211,12 @@ def save_pattern_from_success(
     if not title.endswith((".", "?", "!")):
         title = title.rstrip(",;: ")
 
-    profile = get_runtime_profile(version)
     pattern = {
         "title": title,
         "keywords": keywords,
         "code": code[:3000],
         "note": note,
         "source": "auto_captured",
-        "runtime_profiles": [profile.key],
-        "isaac_sim_versions": [profile.isaac_sim_version],
-        "isaac_lab_versions": [profile.isaac_lab_version],
     }
 
     pattern_file = os.path.join(PATTERNS_DIR, f"code_patterns_{version}.jsonl")

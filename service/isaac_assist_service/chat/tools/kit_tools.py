@@ -10,28 +10,14 @@ import json
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
-_KIT_RPC_DEFAULT = "http://127.0.0.1:8001"
-
-
-def _get_kit_rpc_base() -> str:
-    """Read the port the Kit RPC server actually bound to (written to /tmp at startup)."""
-    try:
-        with open("/tmp/isaac_assist_rpc_port") as f:
-            port = int(f.read().strip())
-            return f"http://127.0.0.1:{port}"
-    except Exception:
-        return _KIT_RPC_DEFAULT
-
-
-KIT_RPC_BASE = _KIT_RPC_DEFAULT  # kept for backward compat; _get_kit_rpc_base() used at call time
+KIT_RPC_BASE = "http://127.0.0.1:8001"
 
 
 async def _get(path: str, params: Dict = None) -> Dict[str, Any]:
-    base = _get_kit_rpc_base()
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{base}{path}", params=params, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            async with session.get(f"{KIT_RPC_BASE}{path}", params=params, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status != 200:
                     return {"error": f"Kit RPC {path} returned {resp.status}"}
                 return await resp.json()
@@ -41,11 +27,10 @@ async def _get(path: str, params: Dict = None) -> Dict[str, Any]:
 
 
 async def _post(path: str, body: Dict) -> Dict[str, Any]:
-    base = _get_kit_rpc_base()
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
-            async with session.post(f"{base}{path}", json=body, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            async with session.post(f"{KIT_RPC_BASE}{path}", json=body, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status != 200:
                     return {"error": f"Kit RPC {path} returned {resp.status}"}
                 return await resp.json()
@@ -67,16 +52,9 @@ async def get_stage_context(full: bool = False) -> Dict[str, Any]:
     return await _get("/context", params={"full": "true" if full else "false"})
 
 
-async def get_viewport_image(max_dim: int = 512) -> Dict[str, Any]:
-    """Capture the active viewport and return base64 PNG.
-
-    Default 512px: fits in 1-2 Anthropic vision tiles (~1700-3400 tokens as a
-    proper image block vs ~150 K+ tokens if the base64 leaks into text).
-    Hard-capped at 768px — higher resolutions rarely improve LLM scene
-    understanding and dramatically inflate context size.
-    """
-    capped = min(max_dim, 768)
-    return await _get("/capture", params={"max_dim": str(capped)})
+async def get_viewport_image(max_dim: int = 1280) -> Dict[str, Any]:
+    """Capture the active viewport and return base64 PNG."""
+    return await _get("/capture", params={"max_dim": str(max_dim)})
 
 
 async def queue_exec_patch(code: str, description: str = "", timeout: float = 600) -> Dict[str, Any]:
@@ -115,10 +93,9 @@ async def exec_sync(code: str, timeout: float = 600) -> Dict[str, Any]:
     """
     try:
         import aiohttp
-        base = _get_kit_rpc_base()
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{base}/exec_sync",
+                f"{KIT_RPC_BASE}/exec_sync",
                 json={"code": code, "timeout": timeout},
                 timeout=aiohttp.ClientTimeout(total=timeout + 5),
             ) as resp:

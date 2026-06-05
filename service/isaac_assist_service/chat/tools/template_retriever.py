@@ -19,8 +19,6 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from ...runtime_profiles import RuntimeProfile, get_runtime_profile, metadata_matches_profile
-
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parents[4] / "workspace" / "templates"
@@ -95,12 +93,7 @@ def _build_index() -> None:
             continue
         docs.append(doc)
         ids.append(tid)
-        metas.append({
-            "task_id": tid,
-            "runtime_profiles": ",".join(t.get("runtime_profiles", [])),
-            "isaac_sim_versions": ",".join(t.get("isaac_sim_versions", [])),
-            "version_scope": str(t.get("version_scope", "")),
-        })
+        metas.append({"task_id": tid})
         _template_cache[tid] = t
     if docs:
         _collection.add(documents=docs, ids=ids, metadatas=metas)
@@ -122,33 +115,7 @@ def _load_template(task_id: str) -> Optional[Dict]:
         return None
 
 
-def _profile_from_arg(profile: Optional[RuntimeProfile | str]) -> RuntimeProfile:
-    return profile if isinstance(profile, RuntimeProfile) else get_runtime_profile(profile)
-
-
-def _template_matches_profile(template: Dict, profile: RuntimeProfile) -> bool:
-    return metadata_matches_profile(template, profile, unscoped_default="5.1.0")
-
-
-def _runtime_scope_text(template: Dict) -> str:
-    profiles = template.get("runtime_profiles") or []
-    versions = template.get("isaac_sim_versions") or template.get("version_scope") or []
-    if isinstance(versions, str):
-        versions = [versions]
-    bits = []
-    if profiles:
-        bits.append("profiles=" + ",".join(profiles))
-    if versions:
-        bits.append("isaac_sim=" + ",".join(versions))
-    return "; ".join(bits) or "legacy-unscoped (5.1-only)"
-
-
-def retrieve_templates(
-    query: str,
-    top_k: int = 3,
-    min_score: float = 0.0,
-    profile: Optional[RuntimeProfile | str] = None,
-) -> List[Dict]:
+def retrieve_templates(query: str, top_k: int = 3, min_score: float = 0.0) -> List[Dict]:
     """Return top_k templates by semantic similarity to `query`.
 
     Each template is a dict with keys: task_id, goal, tools_used, thoughts,
@@ -157,24 +124,18 @@ def retrieve_templates(
     col = _get_collection()
     if col is None:
         return []
-    runtime_profile = _profile_from_arg(profile)
     try:
-        res = col.query(query_texts=[query], n_results=max(top_k * 4, top_k))
+        res = col.query(query_texts=[query], n_results=top_k)
         templates: List[Dict] = []
         for m in (res.get("metadatas") or [[]])[0]:
             tid = m.get("task_id")
             if not tid:
                 continue
             t = _load_template(tid)
-            if t and _template_matches_profile(t, runtime_profile):
+            if t:
                 templates.append(t)
-                if len(templates) >= top_k:
-                    break
-        logger.info(
-            f"[TemplateRetriever] {runtime_profile.key} '{query[:60]}' → "
-            f"{[t.get('task_id') for t in templates]}"
-        )
-        return templates[:top_k]
+        logger.info(f"[TemplateRetriever] '{query[:60]}' → {[t.get('task_id') for t in templates]}")
+        return templates
     except Exception as e:
         logger.warning(f"[TemplateRetriever] Retrieval failed: {e}")
         return []
@@ -187,7 +148,6 @@ def format_for_prompt(templates: List[Dict]) -> str:
     lines = ["# Reference workflows for similar tasks", ""]
     for t in templates:
         lines.append(f"## {t.get('task_id', '?')}: {t.get('goal', '')}")
-        lines.append(f"**Runtime scope**: {_runtime_scope_text(t)}")
         if t.get("thoughts"):
             lines.append(f"**Approach**: {t['thoughts']}")
         lines.append("**Tools**: " + ", ".join(t.get("tools_used", [])))
@@ -202,11 +162,7 @@ def format_for_prompt(templates: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def retrieve_templates_with_scores(
-    query: str,
-    top_k: int = 3,
-    profile: Optional[RuntimeProfile | str] = None,
-) -> List[Dict]:
+def retrieve_templates_with_scores(query: str, top_k: int = 3) -> List[Dict]:
     """Like retrieve_templates but each entry includes ChromaDB distance +
     a normalized similarity score in [0, 1] (1 = perfect match).
 
@@ -217,9 +173,8 @@ def retrieve_templates_with_scores(
     col = _get_collection()
     if col is None:
         return []
-    runtime_profile = _profile_from_arg(profile)
     try:
-        res = col.query(query_texts=[query], n_results=max(top_k * 4, top_k))
+        res = col.query(query_texts=[query], n_results=top_k)
         metas = (res.get("metadatas") or [[]])[0]
         dists = (res.get("distances") or [[1.0] * len(metas)])[0]
         out: List[Dict] = []
@@ -229,8 +184,6 @@ def retrieve_templates_with_scores(
                 continue
             t = _load_template(tid)
             if not t:
-                continue
-            if not _template_matches_profile(t, runtime_profile):
                 continue
             d = float(dists[i]) if i < len(dists) else 1.0
             # Normalize: ChromaDB default L2 distances on sentence-transformers
@@ -243,10 +196,8 @@ def retrieve_templates_with_scores(
                 "distance": d,
                 "similarity": similarity,
             })
-            if len(out) >= top_k:
-                break
         logger.info(
-            f"[TemplateRetriever] {runtime_profile.key} '{query[:60]}' → "
+            f"[TemplateRetriever] '{query[:60]}' → "
             + ", ".join(f"{x['task_id']}({x['similarity']:.2f})" for x in out)
         )
         return out

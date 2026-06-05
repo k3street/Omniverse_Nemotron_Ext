@@ -82,24 +82,13 @@ cp service/isaac_assist_service/.env.example service/isaac_assist_service/.env
 # Open .env and set your preferred LLM mode and API keys
 ```
 
-You can also keep machine-local overrides in repo-root `.env.local`:
-
-```bash
-cp .env.local.example .env.local
-```
-
-The launchers treat `.env`, `service/isaac_assist_service/.env`, and `.env.local`
-as optional. Missing `.env` files are fine; `.env.local` is the recommended place
-for per-machine paths such as `ISAAC_RUNTIME_PROFILE`, `ISAAC_SIM_ROOT`, and
-`ISAAC_LAB_ROOT`.
-
 #### Key settings in `.env`
 
 | Variable | Default | Description |
 |---|---|---|
 | `LLM_MODE` | `local` | `local` (Ollama), `anthropic` (Claude), `cloud` (Gemini), `openai`, or `grok` (xAI) |
 | `LOCAL_MODEL_NAME` | `qwen3.5:35b` | Model name as shown in `ollama list` |
-| `CLOUD_MODEL_NAME` | `claude-opus-4-7` | Cloud model identifier (used by all non-local modes) |
+| `CLOUD_MODEL_NAME` | `claude-opus-4-6` | Cloud model identifier (used by all non-local modes) |
 | `ANTHROPIC_API_KEY` | *(empty)* | Required when `LLM_MODE=anthropic` |
 | `API_KEY_GEMINI` | *(empty)* | Required when `LLM_MODE=cloud` |
 | `OPENAI_API_KEY` | *(empty)* | Required when `LLM_MODE=openai` |
@@ -107,7 +96,6 @@ for per-machine paths such as `ISAAC_RUNTIME_PROFILE`, `ISAAC_SIM_ROOT`, and
 | `ROSBRIDGE_HOST` | `127.0.0.1` | rosbridge WebSocket host (for live ROS2 tools) |
 | `ROSBRIDGE_PORT` | `9090` | rosbridge WebSocket port |
 | `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server URL |
-| `ISAACLAB_PATH` | *(empty)* | Absolute path to your IsaacLab root (contains `isaaclab.sh`). Required for `deploy_rl_policy` (G1 locomotion). Example: `/home/kimate/Documents/Github/open_arm_10Things/IsaacLab` |
 
 #### Pull the local model (if using `LLM_MODE=local`)
 
@@ -140,48 +128,6 @@ Interactive API docs are available at **`http://localhost:8000/docs`**.
 curl -X PUT http://localhost:8000/api/v1/settings/llm_mode \
   -H "Content-Type: application/json" -d '{"mode": "local"}'
 ```
-
-Or use the **⚙ Settings** button in the Isaac Assist panel — select the provider from the dropdown, enter your API key, and click **Save Settings**. The provider reloads instantly; no service restart needed.
-
-### 3.4 Isaac Lab setup (G1 locomotion — optional)
-
-Required only if you want to deploy RL locomotion policies (e.g. Unitree G1 walking via `deploy_rl_policy`).
-
-**Point the service at your existing Isaac Lab install** — do not clone a second copy:
-
-```bash
-# In your .env or .env.local
-ISAACLAB_PATH=/home/kimate/Documents/Github/open_arm_10Things/IsaacLab
-```
-
-The service searches for `isaaclab.sh` in this order:
-1. `ISAACLAB_PATH` env var
-2. `~/Documents/Github/open_arm_10Things/IsaacLab` (project default)
-3. `~/IsaacLab`, `~/isaac-lab`, `/opt/IsaacLab`
-4. `PATH`
-
-**Clone the G1 pre-trained checkpoint** (one-time):
-
-```bash
-git clone https://github.com/unitreerobotics/unitree_rl_gym
-cd unitree_rl_gym && pip install -e .
-# Checkpoint is at: deploy/pre_train/g1/motion.pt
-```
-
-**Deploy from chat:**
-
-```
-"Deploy the G1 walking policy"
-```
-
-Isaac Assist will:
-1. Stop the simulation
-2. Lock arm joints in a down-at-sides pose (correct CG)
-3. Freeze all 24 Inspire Hand joints at neutral
-4. Launch the Isaac Lab teleop agent with keyboard control
-5. Prompt you to press **Play** in Isaac Sim
-
-Keyboard controls once Play is pressed: `W/S` = forward/back · `A/D` = turn · `Q/E` = strafe
 
 ---
 
@@ -218,38 +164,21 @@ The `launch_isaac.sh` script configures the correct ROS2 environment and registe
 
 # Launch Isaac Sim and open a specific USD file
 ./launch_isaac.sh /path/to/scene.usd
-
-# Force a specific Isaac Sim generation
-./launch_isaac.sh --version 5.1
-./launch_isaac.sh --version 6.0
-
-# Run through Isaac Lab 3.x
-./launch_isaac.sh --lab
-./launch_isaac.sh --lab scripts/train.py --task MyTask
 ```
 
-The launcher auto-detects Isaac Sim 6.0/source builds first, then falls back to Isaac Sim 5.1. It also selects the matching extension folder automatically:
-
-| Isaac Sim | Extension folder |
-|---|---|
-| 5.1 | `<repo_root>/exts/isaac_5.1` |
-| 6.0 | `<repo_root>/exts/isaac_6.0` |
-
-To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` or `ISAAC_SIM_ROOT` in your `.env` file or export it before launching:
+To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` in your `.env` file or export it before launching:
 
 ```bash
 export ISAAC_SIM_PATH=/path/to/your/isaac-sim
 ./launch_isaac.sh
 ```
 
-To point at a custom Isaac Lab checkout, set `ISAAC_LAB_ROOT` or `ISAACLAB_PATH` to a directory containing `isaaclab.sh`.
-
-The script auto-detects architecture (`x86_64` or `aarch64`) and checks default paths in newest-first order:
+The script auto-detects architecture (`x86_64` or `aarch64`) and sets default paths accordingly:
 
 | Architecture | Default Path |
 |---|---|
-| x86_64 | `~/IsaacSim/_build/linux-x86_64/release`, `~/isaac-sim/isaac-sim-standalone-6.0.0-linux-x86_64`, `~/.local/share/ov/pkg/isaac-sim-6.0.0`, `~/isaac-sim/isaac-sim-standalone-5.1.0-linux-x86_64`, `~/.local/share/ov/pkg/isaac-sim-5.1.0` |
-| aarch64 (Jetson / DGX Spark) | `~/IsaacSim/_build/linux-aarch64/release`, `~/Documents/Github/isaacsim/_build/linux-aarch64/release`, `~/.local/share/ov/pkg/isaac-sim-5.1.0` |
+| x86_64 | `~/isaac-sim/isaac-sim-standalone-5.1.0-linux-x86_64` |
+| aarch64 (Jetson / DGX Spark) | `~/Documents/Github/isaacsim/_build/linux-aarch64/release` |
 
 ### 5.2 Manual extension loading (Isaac Sim Extension Manager)
 
@@ -271,7 +200,7 @@ If you prefer to load the extension manually inside Isaac Sim:
 
 ```bash
 curl http://localhost:8000/health
-# Expected: {"status":"ok","service":"isaac-assist-backend","llm_mode":"anthropic","model":"claude-opus-4-7"}
+# Expected: {"status":"ok","service":"isaac-assist-backend","llm_mode":"anthropic","model":"claude-opus-4-6"}
 ```
 
 ### Check the Extension UI
@@ -308,7 +237,7 @@ See [`.env.local.example`](.env.local.example) for the full annotated template.
 | Variable | Example | Description |
 |---|---|---|
 | `LLM_MODE` | `anthropic` | `anthropic`, `openai`, `ollama`, or `gemini` |
-| `CLOUD_MODEL_NAME` | `claude-opus-4-7` | Model name for cloud providers |
+| `CLOUD_MODEL_NAME` | `claude-opus-4-6` | Model name for cloud providers |
 | `ANTHROPIC_API_KEY` | `sk-ant-xxx` | API key for your chosen provider |
 | `ASSETS_ROOT_PATH` | `/home/user/assets` | Path to Isaac Sim USD assets (local or Nucleus) |
 | `ASSETS_ROBOTS_SUBDIR` | `Collected_Robots` | Subdirectory containing robot USD files |
@@ -348,27 +277,7 @@ The FastAPI service exposes the following REST API modules, all prefixed under `
 | `/chat/pipeline/plan` | Pipeline Planner | Template-based multi-phase autonomous scene builder |
 | `/finetune` | Fine-tuning Builder | Knowledge Base → training data pipeline |
 
-### ROS2 & Visualization
-
-| Tool / Module | Description |
-|---|---|
-| RViz2 auto-launch | Discovers active ROS2 topics, generates a `.rviz` config (image, LiDAR, odometry, TF, map displays), and launches `rviz2` with `use_sim_time=true`. Config files are named after the current USD scene and persisted in `workspace/rviz_configs/`. TF Fixed Frame is auto-detected from the OmniGraph `ROS2PublishTransformTree` node. |
-| RTX LiDAR tools | `add_sensor_to_prim` supports `rtx_lidar` with named config presets: `Example_Rotary`, `Velodyne_VLP16`, `HESAI_XT32_SD10`, `Ouster_OS1_64`, `SICK_picoScan150`, `Livox_Mid_360`, `Example_Solid_State`. `list_sensors` enumerates all sensor prims on the stage. `read_sensor_data` reads live camera/LiDAR/IMU/contact data. |
-| ROS2 Bridge Readiness | Stage Analyzer validator checks: ROS2 clock publisher, topic collisions, frame_id consistency, `RtxLidarHelper` `fullScan` flag on rotary LiDARs, missing `RenderProduct` connections, `frameId`/prim-name mismatches, and `ROS2PublishTransformTree` wiring. |
-
 Full interactive documentation: **`http://localhost:8000/docs`**
-
-### Unitree G1 + Inspire Hand Locomotion Roadmap
-
-Getting a G1 with Inspire Hand walking reliably is a three-phase process. No single off-the-shelf checkpoint covers walking + dexterous hand control today.
-
-| Phase | Approach | Repos | Status |
-|---|---|---|---|
-| **Phase 1 — Walking** | Deploy `unitree_rl_gym` pre-trained `motion.pt` (12 DOF legs only). Hand hangs passively. Fastest path to a stable walking G1 in Isaac Sim. | [unitree_rl_gym](https://github.com/unitreerobotics/unitree_rl_gym) | Not yet wired into Isaac Assist |
-| **Phase 2 — Teleop + Data** | Isaac Lab 2.3 + merged PRs [#3242](https://github.com/isaac-sim/IsaacLab/pull/3242) / [#3440](https://github.com/isaac-sim/IsaacLab/pull/3440): G1+Inspire Hand USD assets, joint retargeting, demo recording pipeline. Collect loco-manipulation demonstrations. | [unitree_rl_lab](https://github.com/unitreerobotics/unitree_rl_lab) · [IsaacLab](https://github.com/isaac-sim/IsaacLab) | ✅ Isaac Lab 2.3 installed — gating on teleop controller |
-| **Phase 3 — Whole-body policy** | Fine-tune GR00T N1.7 (Cosmos-Reason2-2B backbone, 20K hrs EgoScale pretraining) on Phase 2 demos. ZMQ inference bridge → Isaac Sim. No public G1+Inspire checkpoint exists yet; Phase 2 data is the prerequisite. Needs 16GB+ VRAM for inference, 40GB+ for fine-tuning. | [Isaac-GR00T](https://github.com/NVIDIA/Isaac-GR00T) · [GR00T-WBC](https://github.com/NVlabs/GR00T-WholeBodyControl) | WBC repo on N1.5/N1.6; N1.7 deployment community WIP |
-
-See [docs/G1_INSPIRE_LOCOMOTION_PLAN.md](docs/G1_INSPIRE_LOCOMOTION_PLAN.md) for the detailed implementation plan.
 
 ---
 
@@ -383,21 +292,10 @@ The knowledge base lives in `workspace/knowledge/` and consists of:
 | File | Purpose |
 |---|---|
 | `code_patterns_5.1.0.jsonl` | Verified code snippets for Isaac Sim 5.1 |
-| `code_patterns_6.0.0.jsonl` | Verified code snippets for Isaac Sim 6.0 / Isaac Lab 3.x |
+| `code_patterns_6.0.0.jsonl` | Verified code snippets for Isaac Sim 6.0 *(coming soon)* |
 | `knowledge_5.1.0.jsonl` | Indexed documentation chunks |
 
 When a user asks the LLM to perform an action, the system automatically retrieves relevant patterns for the active Isaac Sim version and injects them into the prompt. This means the LLM sees **working, tested code** rather than hallucinating outdated Kit commands.
-
-Runtime selection is controlled by `ISAAC_VERSION`, `ISAAC_RUNTIME_PROFILE`, `ISAAC_SIM_ROOT`, or `ISAAC_SIM_PATH`. The active profiles are:
-
-| Profile | Isaac Sim | Isaac Lab | ROS2 OmniGraph namespace |
-|---|---|---|---|
-| `isaacsim-5.1` | 5.1.x | 2.x | `isaacsim.ros2.bridge.*` |
-| `isaacsim-6.0` | 6.0.x | 3.x | `isaacsim.ros2.nodes.*` |
-
-Unscoped legacy templates are treated as **5.1-only**. A template or code pattern must explicitly opt into 6.0 before it is used in a 6.0 session.
-
-See [Runtime Version Scopes](docs/runtime-version-scopes.md) for the full policy covering launchers, extension folders, QA docs, templates, known-good code, and research reports.
 
 ### 9.2 Contributing Code Patterns
 
@@ -407,9 +305,6 @@ Code patterns are stored as JSONL (one JSON object per line). Each entry has thi
 {
   "title": "Short descriptive title",
   "keywords": ["keyword1", "keyword2", "keyword3"],
-  "runtime_profiles": ["isaacsim-6.0"],
-  "isaac_sim_versions": ["6.0.0"],
-  "isaac_lab_versions": ["3.x"],
   "code": "import omni.usd\nfrom pxr import UsdGeom\n\n# ... working code ...",
   "note": "Brief note about gotchas or why this approach is preferred."
 }
@@ -468,39 +363,3 @@ The long-term goal is a community-trained model that understands Isaac Sim's ful
 ---
 
 > **Spec Reference:** See `Docs/00_INDEX.md` for the full ecosystem specification, data models, and phase roadmap.
-
----
-
-## License
-
-Copyright 2026 Kimate Richards / 10Things, Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-> <http://www.apache.org/licenses/LICENSE-2.0>
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the [LICENSE](LICENSE) file for details.
-
----
-
-## Attribution
-
-**Isaac Assist** is created and maintained by **Kimate Richards** and **[10Things, Inc.](https://10things.com)**
-
-If you use this project in your research or work, please cite:
-
-```
-Kimate Richards / 10Things, Inc. (2026). Isaac Assist — Omniverse Extension & Background Service.
-https://github.com/10ThingsInc/Omniverse_Nemotron_Ext
-```
-
-This project builds on and integrates with the following technologies:
-
-- [NVIDIA Isaac Sim](https://developer.nvidia.com/isaac-sim) — Robotics simulation platform
-- [NVIDIA Omniverse](https://www.nvidia.com/en-us/omniverse/) — 3D development platform
-- [OpenUSD](https://openusd.org/) — Universal Scene Description

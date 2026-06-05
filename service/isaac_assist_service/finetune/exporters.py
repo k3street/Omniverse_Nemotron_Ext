@@ -3,7 +3,7 @@ import logging
 from typing import List, Dict, Any
 from pathlib import Path
 
-from ..knowledge.knowledge_base import KnowledgeBase
+from service.isaac_assist_service.knowledge.knowledge_base import KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
