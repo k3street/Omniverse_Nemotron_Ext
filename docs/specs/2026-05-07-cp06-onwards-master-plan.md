@@ -143,8 +143,33 @@ Each shipped canonical:
 | CP-03 | Color-routed sort | ✅ shipped | (prior) | red→Red, blue→Blue |
 | CP-04 | Compact 2x2m | ✅ shipped | (prior) | 4 cubes 100% |
 | CP-05 | Reorient (passive flip) | ⚠️ probe | (prior) | physics tuning gap |
-| CP-06 | UR10 PickPlace | 🔧 in-progress | Sprint 1 | port from standalone |
-| CP-07..CP-38 | TBD | 📋 planned | — | — |
+| CP-06 | Franka + bundled PickPlaceController | 🛑 blocked | Sprint 1 | infra built; cube transport fails (FixedJoint missing). Postponed to Sprint 3. See `workspace/templates/CP-06.json#blocked`. |
+| CP-07 | 4× Franka factory (multi-robot scoping) | ✅ form-gate shipped | Sprint 1 | 127/127 build, 16 cubes + 4 conveyors via settle_state, pipeline_ok=True. Function-gate testing pending. |
+| CP-08 | 2x2 grid palletizer | ✅ shipped | Sprint 2 | First user of `compute_stack_placement` + `drop_targets`. 37/37 build, form-gate ✓, function-gate ✓ on Cube_1. |
+| CP-09 | Graduated tower (5-cube column) | ⚠️ probe | Sprint 2 | Column-stack vertical motion. 43/43 build, form-gate ✓, function-gate stochastic (cuRobo seed × narrow placement margin). |
+| CP-10 | 3x3 grid palletizer (9 cubes) | ✅ form-gate shipped | Sprint 2 | Scales CP-08 pattern; 9-entry drop_targets dict, 67/67 build, form-gate ✓. |
+| CP-11 | Pinwheel palletizer (donut_3x3) | ✅ form-gate shipped | Sprint 2 | First user of compute_stack_placement v2's `donut_RxC` (8 cubes + center gap). 61/61 build, form-gate ✓. |
+| CP-12 | Mixed-SKU palletizer (3 cubes, 5/8/10cm) | ✅ form-gate shipped | Sprint 2 | Per-cube drop-z based on cube size. 33/33 build, form-gate ✓. Function-gate likely fails on 10cm cube (gripper width limit). |
+| CP-13 | 2-cube column stack (cube on cube) | ✅ form-gate shipped | Sprint 2 | Smallest multi-layer stack. 27/27 build, form-gate ✓. PalletBase 15×15cm; Cube_2 lands on Cube_1 at z=0.875. |
+| CP-14 | 2-robot relay-stacker | ✅ form-gate shipped | Sprint 2 | Combines CP-02 multi-robot + CP-13 column. 29/29 build, form-gate ✓. Per-robot source_paths + drop_targets. |
+| CP-15 | Mixed-SKU graduated tower | ✅ form-gate shipped | Sprint 2 | First user of compute_stack_placement v3's `cube_sizes` (cumulative-z column). 3 cubes 10/8/5cm descending. 32/32 build, form-gate ✓. |
+| CP-16..CP-38 | TBD | 📋 planned | — | — |
+
+**2026-05-07/2026-05-08 progress** — 39+ atomic commits since structural work began. Smoke regression (6 fixtures) green throughout:
+
+- **Phase A (settle_state)** — 9 commits. Replaced regex-based settle extraction with structural `settle_state` JSON field (kcode-spec sec 4 anti-fragility). CP-01..CP-05 migrated; CP-07 unblocked; CP-06 postponed.
+- **Phase B (Tier A tool + canonicals + reliability)** — 17+ commits:
+  - **`compute_stack_placement` v1+v2** — pure-data placement computer. Patterns: `column`, `grid_RxC`, `donut_RxC` (RxC minus center). Tier A — 7 scenarios depend.
+  - **`drop_targets` dict in cuRobo handler** — per-cube drop position dispatch. Falls through to drop_target → DEST_PATH bbox center for unmapped cubes. `_compute_h1` extended to clear all targets.
+  - **4 new canonicals**: CP-08, CP-09, CP-10, CP-11 — all form-gate-verified.
+  - **function_gate_suite** extended with CP-08 (expect_pass=True) and CP-09 (probe).
+  - **NaN/OOB-safety in cuRobo controller** — defensive guard against bad-seed trajectories. Skips apply_action when q7 contains NaN/Inf or values > ±5 rad.
+  - **Ground plane fix** — added /World/Ground to CP-08..CP-11. Was the actual root cause of CP-09 "stochastic blowup" (cube fell off conveyor end into infinite void). Now cubes land at_rest at z=0 floor.
+  - **`add_vision_classifier_gate` v1** (Tier A #2) — wraps vision_detect_objects with cube↔class matching. Infrastructure-complete; production usage requires populated scene + render-wait (Gemini detection failed on minimal synthetic scenes).
+
+**Reliability observation post-Ground-fix**: CP-09 single-cube probe now lands cube near (but outside) 10×10cm TowerBase target → at_rest, no numerical blowup. Precision/target-size issue, not scene-broken issue.
+
+**Postponed (Sprint 3)**: CP-06 builtin handler (FixedJoint integration), full vision-gate canonicals (need viewport-render-wait scaffolding), per-cube cube_size for mixed-SKU palletizers, set_gripper_rotation (Tier B).
 
 ## Source documents
 

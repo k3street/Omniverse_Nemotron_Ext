@@ -38273,6 +38273,164 @@ DATA_HANDLERS["vision_plan_trajectory"] = _handle_vision_plan_trajectory
 DATA_HANDLERS["vision_analyze_scene"] = _handle_vision_analyze_scene
 
 
+async def _handle_add_vision_classifier_gate(args: Dict) -> Dict:
+    """Tier A tool — build a class-routing dict by VLM vision classification.
+
+    Agent-side helper for vision-gated palletizing/sorting (CP-N: parcel
+    singulation, vision-quality-gate, postal cross-belt sorter, etc).
+
+    Pipeline:
+      1. (Optional) set viewport to camera_path so the captured image is
+         from the requested vantage. If omitted, current viewport is used.
+      2. Capture viewport image.
+      3. For each cube_path, get its world position via BBoxCache.
+      4. Project world position to image (y, x) via the camera's
+         intrinsics. Match each cube to the nearest detection by
+         normalized image distance.
+      5. Return {cube_path: detected_label} mapping.
+
+    Args:
+      camera_path:    USD path of the camera to use (optional)
+      cube_paths:     list of USD paths to classify
+      class_labels:   list of expected class names (e.g. ['red cube', 'blue cube'])
+      destination_map: optional {class_label: destination_prim_path} —
+                       when provided, returned mapping is keyed by
+                       cube_path → destination_path (color_routing-shaped)
+                       in addition to cube_path → class_label.
+
+    Returns:
+      {
+        cube_to_class: {cube_path: detected_label, ...},
+        cube_to_destination: {cube_path: destination_path, ...} (if destination_map provided),
+        unmatched_cubes: [cube_path, ...],
+        raw_detections: [{point: [y,x], label: ...}, ...],
+        model: gemini-...,
+      }
+
+    v1 simplification: 2D-distance matching is performed in image
+    coordinates without explicit world→image projection — assumes
+    detections are returned in roughly the same order as cube_paths
+    by left-to-right viewport position. Agent should validate
+    by inspecting unmatched_cubes and raw_detections.
+    """
+    camera_path = args.get("camera_path")
+    cube_paths = list(args.get("cube_paths") or [])
+    class_labels = list(args.get("class_labels") or [])
+    destination_map = args.get("destination_map") or {}
+
+    if not cube_paths:
+        return {"type": "error", "error": "cube_paths is required and non-empty"}
+    if not class_labels:
+        return {"type": "error", "error": "class_labels is required (list of expected class names)"}
+
+    # Optionally set viewport to the requested camera before capture.
+    if camera_path:
+        try:
+            await execute_tool_call("set_viewport_camera", {"camera_path": camera_path})
+        except Exception as _e:
+            # Non-fatal: continue with current viewport
+            pass
+
+    # Force-flush render before capture. Kit RPC's /capture endpoint
+    # otherwise returns axis-only black image when the viewport hasn't
+    # rendered the new scene state yet (KNOWN LIMITATION).
+    flush_code = """
+import omni.kit.app
+app = omni.kit.app.get_app()
+for _ in range(60):
+    app.update()
+print("flushed")
+"""
+    try:
+        await kit_tools.exec_sync(flush_code, timeout=15)
+    except Exception:
+        pass
+
+    # Capture viewport
+    img, mime = await _get_viewport_bytes()
+    if img is None:
+        return {"type": "error", "error": "Could not capture viewport image. Is Isaac Sim running?"}
+
+    # Run vision detection
+    vp = _get_vision_provider()
+    detections = await vp.detect_objects(img, mime, labels=class_labels,
+                                          max_objects=max(10, len(cube_paths)))
+
+    # Get cube world positions via Kit RPC
+    pos_code = f"""\
+import omni.usd, json
+from pxr import Usd, UsdGeom
+stage = omni.usd.get_context().get_stage()
+positions = {{}}
+for path in {cube_paths!r}:
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): continue
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty(): continue
+    c = b.GetMidpoint()
+    positions[path] = [float(c[0]), float(c[1]), float(c[2])]
+print(json.dumps(positions))
+"""
+    pos_res = await kit_tools.exec_sync(pos_code, timeout=10)
+    cube_world_positions = {}
+    for line in (pos_res.get("output") or "").splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                import json as _j
+                cube_world_positions = _j.loads(line)
+                break
+            except Exception:
+                continue
+
+    # Match detections to cubes by sorted left-to-right xy comparison.
+    # v1 heuristic: sort cubes by world x (ascending → leftmost first
+    # in a robot-standard front-facing camera), sort detections by
+    # image x (point[1]). Pair them in order.
+    sorted_cubes = sorted(
+        [p for p in cube_paths if p in cube_world_positions],
+        key=lambda p: cube_world_positions[p][0],
+    )
+    sorted_dets = sorted(
+        [d for d in detections if isinstance(d.get("point"), (list, tuple)) and len(d["point"]) >= 2],
+        key=lambda d: float(d["point"][1]),
+    )
+
+    cube_to_class: Dict[str, str] = {}
+    unmatched_cubes: List[str] = []
+    n_pairs = min(len(sorted_cubes), len(sorted_dets))
+    for i in range(n_pairs):
+        cube_to_class[sorted_cubes[i]] = sorted_dets[i].get("label", "")
+    for cube in sorted_cubes[n_pairs:]:
+        unmatched_cubes.append(cube)
+
+    cube_to_destination = {}
+    if destination_map:
+        for cube, label in cube_to_class.items():
+            # Fuzzy match: detected label may be "red cube" while
+            # destination_map keys are "red". Try exact, then prefix.
+            dest = destination_map.get(label)
+            if dest is None:
+                for k, v in destination_map.items():
+                    if k.lower() in label.lower() or label.lower() in k.lower():
+                        dest = v
+                        break
+            if dest:
+                cube_to_destination[cube] = dest
+
+    return {
+        "cube_to_class": cube_to_class,
+        "cube_to_destination": cube_to_destination,
+        "unmatched_cubes": unmatched_cubes,
+        "raw_detections": detections,
+        "model": getattr(vp, "model", "?"),
+    }
+
+
+DATA_HANDLERS["add_vision_classifier_gate"] = _handle_add_vision_classifier_gate
+
+
 # ── Scene Package Export ─────────────────────────────────────────────────────
 # Collects all approved code patches from the audit log for a session,
 # then writes:  scene_setup.py, ros2_launch.py (if ROS2 nodes present),
@@ -55682,6 +55840,188 @@ DATA_HANDLERS["compute_volume"] = _handle_compute_volume
 DATA_HANDLERS["compute_surface_area"] = _handle_compute_surface_area
 CODE_GEN_HANDLERS["compute_convex_hull"] = _gen_compute_convex_hull
 
+
+async def _handle_compute_stack_placement(args: Dict) -> Dict:
+    """Compute placement positions for stacking N items on top of a target prim.
+
+    Reads target's world-axis-aligned bbox, then computes positions purely in
+    Python — no stage mutation. Returned positions are world coords intended
+    for use as drop_target / placing_position values in a pick-place flow.
+
+    Args:
+      target_path:        USD path of the target (pallet, container, zone)
+      pattern:            'column' | 'grid_RxC' (e.g. 'grid_2x2', 'grid_3x3')
+      n_items:            total positions to compute
+      cube_size:          edge length of each item (default 0.05)
+      layer_rotation_deg: yaw rotation applied per layer (e.g. 90 for brick)
+      spacing:            optional explicit center-to-center spacing
+                          (default = cube_size, i.e. flush packing)
+      anchor:             'top' (place on top of target, default) |
+                          'inside_floor' (place on target's interior floor —
+                          for bins/containers; uses target_top_z - target_height)
+
+    Returns:
+      {
+        positions: [{position: [x,y,z], rotation_deg: float}, ...],
+        n_items: <int>,
+        target_path: <str>,
+        pattern: <str>,
+        spacing: <float>,
+      }
+    """
+    target_path = args["target_path"]
+    pattern = args.get("pattern", "column")
+    n_items = int(args.get("n_items", 1))
+    cube_size = float(args.get("cube_size", 0.05))
+    cube_sizes = args.get("cube_sizes")  # optional per-item override (list)
+    if cube_sizes is not None:
+        if not isinstance(cube_sizes, (list, tuple)) or len(cube_sizes) != n_items:
+            return {"type": "error",
+                    "error": f"cube_sizes must be a list of length n_items={n_items}, got {cube_sizes!r}"}
+        try:
+            cube_sizes = [float(s) for s in cube_sizes]
+        except (ValueError, TypeError):
+            return {"type": "error", "error": f"cube_sizes entries must be numbers: {cube_sizes!r}"}
+    layer_rotation_deg = float(args.get("layer_rotation_deg", 0.0))
+    spacing = args.get("spacing")
+    spacing = float(spacing) if spacing is not None else cube_size
+    anchor = args.get("anchor", "top")
+
+    # Parse pattern → (rows, cols, skip_center) per layer
+    skip_center = False
+    if pattern == "column":
+        rows, cols = 1, 1
+    elif pattern.startswith("grid_") and "x" in pattern[5:]:
+        try:
+            r_str, c_str = pattern[5:].split("x", 1)
+            rows, cols = int(r_str), int(c_str)
+            if rows < 1 or cols < 1:
+                return {"type": "error", "error": f"grid dims must be >=1, got {rows}x{cols}"}
+        except (ValueError, IndexError):
+            return {"type": "error", "error": f"unrecognized grid pattern: {pattern}"}
+    elif pattern.startswith("donut_") and "x" in pattern[6:]:
+        try:
+            r_str, c_str = pattern[6:].split("x", 1)
+            rows, cols = int(r_str), int(c_str)
+            if rows < 3 or cols < 3 or rows % 2 == 0 or cols % 2 == 0:
+                return {"type": "error",
+                        "error": f"donut requires odd RxC >=3, got {rows}x{cols}"}
+            skip_center = True
+        except (ValueError, IndexError):
+            return {"type": "error", "error": f"unrecognized donut pattern: {pattern}"}
+    else:
+        return {"type": "error",
+                "error": f"unsupported pattern: {pattern!r} (use 'column', 'grid_RxC', or 'donut_RxC')"}
+
+    if n_items < 1:
+        return {"type": "error", "error": f"n_items must be >=1, got {n_items}"}
+
+    code = f"""\
+import json
+import omni.usd
+from pxr import Usd, UsdGeom
+
+target_path = {target_path!r}
+pattern = {pattern!r}
+n_items = {n_items}
+cube_size = {cube_size}
+cube_sizes = {cube_sizes!r}
+spacing = {spacing}
+rows, cols = {rows}, {cols}
+skip_center = {skip_center}
+layer_rotation_deg = {layer_rotation_deg}
+anchor = {anchor!r}
+
+stage = omni.usd.get_context().get_stage()
+prim = stage.GetPrimAtPath(target_path)
+result = {{
+    'target_path': target_path,
+    'pattern': pattern,
+    'n_items': n_items,
+    'spacing': spacing,
+    'positions': [],
+}}
+
+if not prim or not prim.IsValid():
+    result['error'] = f'target prim not found: {{target_path}}'
+else:
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    bbox = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+    if bbox.IsEmpty():
+        result['error'] = f'target bbox empty (no geometry?): {{target_path}}'
+    else:
+        bmin = bbox.GetMin()
+        bmax = bbox.GetMax()
+        cx = 0.5 * (bmin[0] + bmax[0])
+        cy = 0.5 * (bmin[1] + bmax[1])
+        target_top_z = float(bmax[2])
+        target_bot_z = float(bmin[2])
+        target_height = target_top_z - target_bot_z
+        # When cube_sizes provided, base_z's cube_size term is the FIRST item's
+        # size (for first-cube anchor). Subsequent items compute z per their own size.
+        first_cube_size = cube_sizes[0] if cube_sizes else cube_size
+        if anchor == 'inside_floor':
+            base_z = target_bot_z + first_cube_size * 0.5
+        else:
+            base_z = target_top_z + first_cube_size * 0.5
+
+        # Build the per-layer (row, col) sequence. For donut patterns,
+        # skip the geometric center (only valid for odd rows × odd cols).
+        layer_slots = []
+        for r in range(rows):
+            for c in range(cols):
+                if skip_center and r == rows // 2 and c == cols // 2:
+                    continue
+                layer_slots.append((r, c))
+        per_layer = len(layer_slots)
+
+        # Center the grid on (cx, cy):
+        #   col index 0..cols-1, with center at (cols-1)/2.0
+        #   row index 0..rows-1, with center at (rows-1)/2.0
+        positions = []
+        # For column mixed-SKU: z stacks cumulatively. For grid mixed-SKU
+        # multi-layer: z increment per layer assumes layer height = current
+        # item's size (genuinely ambiguous for mixed grid; documented).
+        is_column = (rows == 1 and cols == 1)
+        floor_z = target_bot_z if anchor == 'inside_floor' else target_top_z
+        for i in range(n_items):
+            layer = i // per_layer
+            slot = i % per_layer
+            row, col = layer_slots[slot]
+            x = cx + (col - (cols - 1) * 0.5) * spacing
+            y = cy + (row - (rows - 1) * 0.5) * spacing
+            this_size = cube_sizes[i] if cube_sizes else cube_size
+            if cube_sizes:
+                if is_column:
+                    # Cumulative stack: sum of all lower cubes + half this one
+                    z = floor_z + sum(cube_sizes[:i]) + this_size * 0.5
+                else:
+                    # Grid mixed-SKU multi-layer: uniform-within-layer assumption
+                    z = floor_z + this_size * 0.5 + layer * this_size
+            else:
+                z = base_z + layer * cube_size
+            yaw = (layer * layer_rotation_deg) % 360.0
+            positions.append({{
+                'position': [round(x, 6), round(y, 6), round(z, 6)],
+                'rotation_deg': yaw,
+                'size': this_size,
+            }})
+
+        result['positions'] = positions
+        result['target_bbox_min'] = [round(float(bmin[i]), 6) for i in range(3)]
+        result['target_bbox_max'] = [round(float(bmax[i]), 6) for i in range(3)]
+        result['anchor'] = anchor
+        result['base_z'] = round(base_z, 6)
+
+print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(
+        code, f"compute_stack_placement {target_path} {pattern} n={n_items}"
+    )
+
+
+DATA_HANDLERS["compute_stack_placement"] = _handle_compute_stack_placement
+
 # ══════ From feat/atomic-tier5-omnigraph ══════
 def _gen_add_node(args: Dict) -> str:
     """Add a single node to an existing OmniGraph via og.Controller.edit()."""
@@ -60122,6 +60462,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             planning_obstacles=args.get("planning_obstacles") or [],
             curobo_world_yml=args.get("curobo_world_yml"),
             color_routing=args.get("color_routing"),
+            drop_targets=args.get("drop_targets"),
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
         )
@@ -63292,6 +63633,7 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            planning_obstacles=None,
                            curobo_world_yml=None,
                            color_routing=None,
+                           drop_targets=None,
                            require_upright=False,
                            upright_dot_threshold=0.85):
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
@@ -63367,6 +63709,11 @@ PLANNING_OBSTACLES = {_obs}
 # cube's Semantics_color (or Semantics_class) class_name. Falls through
 # to DEST_PATH when no routing entry matches.
 COLOR_ROUTING = {_json.dumps(color_routing or {})}
+# Stack-placement enabler: dict {{cube_path → [x,y,z]}} OR list of [x,y,z]
+# parallel to SOURCE_PATHS. When set, _bin_drop_pos returns this position
+# instead of DROP_TARGET / DEST_PATH for the named cube. Used by CP-08+
+# canonicals where each cube goes to a distinct grid/column position.
+DROP_TARGETS = {_json.dumps(drop_targets) if drop_targets else 'None'}
 
 # Per-robot subscription + scene-reset name. Earlier hardcoded
 # "_curobo_pp_sub" / "curobo_pp" meant a second install (e.g. for a
@@ -63653,6 +64000,20 @@ def _destination_path_for(cube_path):
     return DEST_PATH
 
 def _bin_drop_pos(cube_path=None):
+    # Per-cube explicit drop position takes priority over scalar DROP_TARGET
+    # and DEST_PATH bbox. Supports dict (cube_path → [x,y,z]) or list
+    # parallel to SOURCE_PATHS.
+    if cube_path and DROP_TARGETS is not None:
+        if isinstance(DROP_TARGETS, dict):
+            if cube_path in DROP_TARGETS:
+                return np.array(DROP_TARGETS[cube_path], dtype=np.float32)
+        elif isinstance(DROP_TARGETS, list):
+            try:
+                idx = SOURCE_PATHS.index(cube_path)
+                if 0 <= idx < len(DROP_TARGETS):
+                    return np.array(DROP_TARGETS[idx], dtype=np.float32)
+            except ValueError:
+                pass
     if DROP_TARGET is not None: return np.array(DROP_TARGET, dtype=np.float32)
     # Color-routing: pick destination per cube. Falls back to DEST_PATH.
     dest = _destination_path_for(cube_path) if cube_path else DEST_PATH
@@ -63670,6 +64031,14 @@ def _compute_h1():
     for sp in SOURCE_PATHS:
         wp = _world_pos(sp)
         if wp is not None: zs.append(float(wp[2]))
+    # Multi-target stacking: every drop target's z matters — h1 must clear
+    # the highest one (e.g. column-stacked tower's top cube).
+    if DROP_TARGETS is not None:
+        _vals = (DROP_TARGETS.values() if isinstance(DROP_TARGETS, dict)
+                 else DROP_TARGETS if isinstance(DROP_TARGETS, list) else [])
+        for _v in _vals:
+            if isinstance(_v, (list, tuple)) and len(_v) >= 3:
+                zs.append(float(_v[2]))
     dp = _bin_drop_pos()
     if dp is not None: zs.append(float(dp[2]))
     return (max(zs) + 0.20) if zs else 0.3
@@ -63882,6 +64251,24 @@ def _apply_arm_joints(q7):
     # (still-opening) positions kept overwriting the gripper-controller's
     # close target every physics tick → grip never reached close pose.
     q7_arr = np.asarray(q7, dtype=np.float64)[:7]
+    # Safety check: cuRobo's planner occasionally returns trajectories
+    # that are catastrophic under bad seeds — both NaN/Inf values AND
+    # finite-but-impossible joint targets (>±5 rad on a Franka whose
+    # joint limits are all within ±3.8 rad). Both modes blow up cube
+    # state via massive joint forces. Reject and skip the apply.
+    if not np.all(np.isfinite(q7_arr)):
+        S.setdefault("nan_skipped", 0)
+        S["nan_skipped"] += 1
+        try: _a_last_err.Set(f"NaN trajectory skipped (n={{S['nan_skipped']}})")
+        except Exception: pass
+        return
+    if np.any(np.abs(q7_arr) > 5.0):
+        S.setdefault("oob_skipped", 0)
+        S["oob_skipped"] += 1
+        _max = float(np.max(np.abs(q7_arr)))
+        try: _a_last_err.Set(f"Out-of-bounds q (max={{_max:.2f}}) skipped (n={{S['oob_skipped']}})")
+        except Exception: pass
+        return
     art_ctrl.apply_action(ArticulationAction(
         joint_positions=q7_arr,
         joint_indices=np.arange(7),

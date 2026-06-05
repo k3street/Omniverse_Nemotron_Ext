@@ -27,6 +27,34 @@ Architecture:
 Sandbox safety: only standard builtins (enumerate, range, etc.) +
 the registered tool functions are bound. No file I/O, network, or
 Python imports are reachable from template code.
+
+Template JSON format (workspace/templates/CP-NN.json):
+  {
+    "task_id":      "CP-NN",
+    "goal":         "<one-paragraph user-facing description>",
+    "tools_used":   ["create_prim", "robot_wizard", ...],
+    "thoughts":     "<numbered list of non-obvious build specifics>",
+    "code":         "<Python source executed in sandbox; only tool
+                     calls + safe builtins are bound>",
+    "settle_state": {
+      "cubes":     {"/World/Cube_1": [x,y,z], ...},
+      "conveyors": {"/World/ConveyorBelt": [vx,vy,vz], ...}
+    },
+    "verify_args":  { ... },   # form-gate input
+    "simulate_args": { ... }   # function-gate input
+  }
+
+  - settle_state (preferred): explicit dict, source of truth for
+    settle_after_canonical. Use this for any new template; required
+    for templates with f-string-templated paths (regex can't parse
+    those).
+  - Templates predating settle_state fall back to regex extraction
+    from the code field (works for simple create_prim/create_conveyor
+    calls only). Migration is back-compat: add settle_state, leave
+    code unchanged.
+
+Optional fields: failure_modes, extension_notes, verified_status,
+benchmark_vs_alternatives, blocked (when shipping is paused).
 """
 from __future__ import annotations
 
@@ -173,17 +201,28 @@ async def settle_after_canonical(template: Dict[str, Any]) -> Dict[str, Any]:
       2. Restores cube positions to their template-authored translate
       3. Restores surface velocities on conveyors to template-authored values
 
-    Reads template's code field to extract authored values via regex.
+    Source of truth (preferred): template["settle_state"] explicit dict
+    with shape {"cubes": {path: [x,y,z], ...}, "conveyors": {path: [vx,vy,vz], ...}}.
+    Fall-back: regex extraction from template["code"] (works for simple
+    create_prim/create_conveyor calls but breaks on f-string-templated
+    paths like f"/World/Conv{i}" used in multi-station factories).
+
     Idempotent — running on a clean scene is a no-op.
     """
     from .tools import kit_tools
 
-    code = template.get("code") or ""
-    if not code:
-        return {"settled": False, "reason": "template has no code field"}
-
-    cube_pos = _extract_cube_positions_from_code(code)
-    conv_vel = _extract_conveyor_velocities_from_code(code)
+    settle_state = template.get("settle_state") or {}
+    if settle_state and isinstance(settle_state, dict):
+        cube_pos = dict(settle_state.get("cubes") or {})
+        conv_vel = dict(settle_state.get("conveyors") or {})
+        source = "settle_state"
+    else:
+        code = template.get("code") or ""
+        if not code:
+            return {"settled": False, "reason": "template has no code field nor settle_state"}
+        cube_pos = _extract_cube_positions_from_code(code)
+        conv_vel = _extract_conveyor_velocities_from_code(code)
+        source = "regex"
 
     # Build the kit-side script: stop, restore translate + velocity
     import json as _j
@@ -233,6 +272,7 @@ print(json.dumps({{
                 continue
     return {
         "settled": True,
+        "source": source,
         "n_cubes_restored": len((parsed or {}).get("restored_cubes", [])),
         "n_conveyors_restored": len((parsed or {}).get("restored_conveyors", [])),
     }

@@ -1407,6 +1407,37 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_vision_classifier_gate",
+            "description": "Tier A tool — build a class-routing dict by VLM vision classification of cubes in the scene. Captures viewport (optionally setting it to a specific camera first), runs vision_detect_objects with the provided class_labels, then matches detected labels to cube_paths by left-to-right ordering (sorted by world x for cubes vs image x for detections). Returns {cube_path: detected_label} mapping for use as setup_pick_place_controller's color_routing argument. v1 simplification: pairing is by ordering, not full 2D-position projection — best for 2-4 visually-separable cubes. KNOWN LIMITATION 2026-05-08: viewport capture in Kit RPC context returns black-with-axes image (rendering not flushing); production usage requires render-flush scaffolding TBD. Used by CP-N parcel singulation, vision quality gate, color sorter, postal cross-belt sorter (6 scenarios in the 33-canonical roadmap).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cube_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "USD paths of cubes to classify",
+                    },
+                    "class_labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Expected class labels for vision detection (e.g. ['red cube', 'blue cube', 'green cube'])",
+                    },
+                    "camera_path": {
+                        "type": "string",
+                        "description": "Optional: USD path of camera to set viewport to before capture. If omitted, current viewport is used.",
+                    },
+                    "destination_map": {
+                        "type": "object",
+                        "description": "Optional: dict mapping class_label → destination_prim_path (e.g. {'red': '/World/RedBin'}). When provided, returned cube_to_destination is shaped for setup_pick_place_controller's color_routing arg.",
+                    },
+                },
+                "required": ["cube_paths", "class_labels"],
+            },
+        },
+    },
 
     # ─── Nucleus Browse & Download ─────────────────────────────────────────────
     {
@@ -2720,6 +2751,7 @@ ISAAC_SIM_TOOLS = [
                         "curobo_world_yml": {"type": "string", "description": "curobo mode: path to cuRobo world_config YAML (cuboid/mesh obstacles). If omitted, the live USD stage is used to auto-build a Cuboid scene for collision checking."},
                         "planning_obstacles": {"type": "array", "items": {"type": "string"}, "description": "curobo mode: list of USD paths to include as collision obstacles during planning. Each prim's world-bound is converted to a Cuboid. Use to avoid the conveyor/table/walls during transit."},
                         "color_routing": {"type": "object", "description": "curobo mode (SORT-01 enabler): dict mapping semantic class_name → destination prim path. When present, the controller looks up each picked cube's Semantics_color (or Semantics_class) class_name and routes to the matching bin instead of destination_path. Cubes must be labeled with set_semantic_label(prim_path, class_name='red'|'blue'|..., semantic_type='color') beforehand. Falls through to destination_path when no entry matches. Example: {\"red\": \"/World/RedBin\", \"blue\": \"/World/BlueBin\"}."},
+                        "drop_targets": {"type": "object", "description": "curobo mode (stack-placement enabler): dict mapping cube_path → world drop position [x,y,z], OR list of [x,y,z] parallel to source_paths. When set, each cube is dropped at its specified position instead of destination_path's bbox center. Used by CP-08+ palletizing/stacking canonicals where each cube goes to a distinct grid/column position. Pair with compute_stack_placement to derive the positions. Falls through to drop_target then destination_path for cubes not listed. Example: {\"/World/Cube_1\": [0.4, -0.4, 0.13], \"/World/Cube_2\": [0.45, -0.4, 0.13]}."},
                         "diffik_method": {"type": "string", "enum": ["dls", "svd", "pinv"], "description": "diffik mode: Jacobian inversion method. 'dls' (damped least-squares, default, λ=0.05) handles singularities gracefully; 'pinv' is Moore-Penrose pseudoinverse; 'svd' is truncated SVD. Use 'dls' unless you know you need the others."},
                     },
                     "required": ["robot_path", "target_source"],
@@ -5841,6 +5873,27 @@ ISAAC_SIM_TOOLS = [
                         "export_hull_path": {"type": "string", "description": "Optional USD path for an exported convex-hull Mesh prim. If provided, the convex hull is computed via scipy.spatial.ConvexHull (with a manual gift-wrap fallback) and authored at this path so it can be inspected in the viewport."},
                     },
                     "required": ["prim_path"],
+                },
+            },
+        },
+    {
+            "type": "function",
+            "function": {
+                "name": "compute_stack_placement",
+                "description": "Compute placement positions for stacking N items on top of (or inside) a target prim. Pure-data tool: reads target's world bbox once, computes positions in Python, returns list of {position, rotation_deg} per item in placement order (bottom layer first, row-major within a layer). Use the returned positions as drop_target / placing_position values in pick-place flows. Patterns: 'column' (single 1x1 stack) or 'grid_RxC' (e.g. 'grid_2x2', 'grid_3x3'). For brick-pattern palletizing, set layer_rotation_deg=90 to alternate orientation per layer. Anchor: 'top' (default — items sit on target top face) or 'inside_floor' (items rest on target's interior bottom — for bins/containers). Tier A — used by CP-08 Nested-Box, CP-09 Graduated Tower, CP-14 Pinwheel, CP-20 Brick-Layer, CP-27/CP-33 Cortex stacking.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_path": {"type": "string", "description": "USD path of the target prim (pallet, container, zone) — must have world bbox geometry"},
+                        "pattern": {"type": "string", "description": "'column' (1x1 stack), 'grid_RxC' (RxC items per layer, e.g. 'grid_2x2'), or 'donut_RxC' (RxC minus center cell — odd R,C >=3, gives 8 positions for donut_3x3 in pinwheel/ring shape). Default 'column'."},
+                        "n_items": {"type": "integer", "description": "Total number of placement positions to compute (>=1). Spans multiple layers if n_items > rows*cols."},
+                        "cube_size": {"type": "number", "description": "Edge length of each item in meters (default 0.05). Used when cube_sizes is omitted (uniform items)."},
+                        "cube_sizes": {"type": "array", "items": {"type": "number"}, "description": "Optional per-item cube edge lengths (length must equal n_items). When set, each computed position's z accounts for that item's own size — useful for mixed-SKU palletizers. Returned positions include a 'size' field per item. Best for single-layer arrangements; multi-layer with mixed sizes assumes uniform within layer (use with care)."},
+                        "layer_rotation_deg": {"type": "number", "description": "Yaw rotation applied per layer in degrees (default 0; use 90 for brick-pattern alternation)"},
+                        "spacing": {"type": "number", "description": "Optional center-to-center spacing override; default = cube_size (flush packing). Use larger for gaps between items."},
+                        "anchor": {"type": "string", "description": "'top' (default — place above target's top face) or 'inside_floor' (place on target's interior floor — for bins/containers)"},
+                    },
+                    "required": ["target_path", "n_items"],
                 },
             },
         },
