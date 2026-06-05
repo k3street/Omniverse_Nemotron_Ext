@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-06-05T11:05:17+00:00
-Tool count: 422
+Generated: 2026-05-14T01:32:31+00:00
+Tool count: 431
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -148,11 +148,11 @@ class LookupProductSpecArgs(BaseModel):
 
 
 class CreateMaterialArgs(BaseModel):
-    """Create a visual material with specified appearance properties. For OmniPBR-style colors, this emits a USD Preview Surface material, which is the safe Isaac Sim 5.1/6.0 path. Do not create an OmniPBR U"""
+    """Create a new MDL material (OmniPBR, OmniGlass, OmniSurface) with specified appearance properties."""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     material_path: str = Field(..., description="USD path for the material")
-    shader_type: str = Field(..., description="Use OmniPBR for ordinary colored PBR surfaces; it is generated as USD Preview Surface.")
+    shader_type: str
     diffuse_color: Optional[List[float]] = Field(None, description="RGB color [r, g, b] 0-1")
     metallic: Optional[float] = Field(None, description="Metallic factor 0-1")
     roughness: Optional[float] = Field(None, description="Roughness factor 0-1")
@@ -352,44 +352,43 @@ class SimulateTraversalCheckArgs(BaseModel):
     """FUNCTION GATE for pick-place / assembly-line scenes — counterpart to verify_pickplace_pipeline's FORM gate. Plays the timeline for duration_s of sim time, captures the cube's position twice (for veloc"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
+    cube_path: str = Field(..., description="Prim path of the cube to track (e.g. /World/Cube_1).")
     target_path: str = Field(..., description="Prim path of the destination whose world bbox is the target (e.g. /World/Bin).")
-    cube_path: Optional[str] = Field(None, description="Prim path of the cube to track in single-cube mode (e.g. /World/Cube_1).")
-    cube_paths: Optional[List[str]] = Field(None, description="Optional multi-cube mode. Success if any listed cube reaches the target bbox. Takes precedence over cube_path.")
     duration_s: Optional[float] = Field(None, description="Sim duration in seconds. Default 60. Use 30 for smoke tests.")
     xy_tolerance: Optional[float] = Field(None, description="Extra xy slack on target bbox in meters. Default 0.0 (strict).")
     floor_tolerance: Optional[float] = Field(None, description="Allowed z drop below target floor in meters (for end-of-run bounce). Default 0.10.")
     rest_speed_threshold: Optional[float] = Field(None, description="Max speed in m/s to consider the cube at rest. Default 0.05.")
     require_upright: Optional[bool] = Field(None, description="REORIENT-01: when true, success requires cube's local +Z dotted with world +Z >= upright_tolerance_dot at sim end (cube finishes upright, not on its side). Default false.")
     upright_tolerance_dot: Optional[float] = Field(None, description="Min dot product of cube up vs world up (default 0.95 ≈ within 18° of vertical). Only used when require_upright=true.")
-    seed: Optional[int] = Field(None, description="Base RNG seed for deterministic repeated runs. Run i uses seed+i. Default 42.")
-    n_runs: Optional[int] = Field(None, description="Repeat count for the same built scene. Restores cube/controller state between runs. Clamped to 1..50.")
+    seed: Optional[int] = Field(None, description="Base random seed for RNGs (random/numpy/torch). Default 42. Run i uses seed+i for variety with reproducibility.")
+    n_runs: Optional[int] = Field(None, description="Number of repeated runs against the same built scene. Default 1. Multi-run reset: snapshots cube xforms + ctrl:* attrs + articulation joint state before run 0, restores between subsequent runs, delete")
 
 
 class DiagnoseSceneFeasibilityArgs(BaseModel):
-    """PRE-FLIGHT CONSTRAINT VALIDATOR. Runs deterministic geometric checks on a built scene to predict whether simulate_traversal_check would succeed before running expensive simulation. Returns verdict, me"""
+    """PRE-FLIGHT CONSTRAINT VALIDATOR — runs deterministic geometric checks on a built scene to predict whether simulate_traversal_check would succeed, BEFORE running expensive 60-180s sim. Use cases: (1) c"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    robot_path: str = Field(..., description="USD path of the robot prim, e.g. /World/Franka.")
+    robot_path: str = Field(..., description="USD path of the robot prim (e.g. /World/Franka).")
     pick_pose: Optional[List[float]] = Field(None, description="World [x, y, z] of the pick target.")
     drop_pose: Optional[List[float]] = Field(None, description="World [x, y, z] of the drop target.")
-    obstacles: Optional[List[str]] = Field(None, description="USD paths for collision context.")
-    ee_offset: Optional[List[float]] = Field(None, description="Tool-tip offset [x, y, z].")
-    robot_base: Optional[List[float]] = Field(None, description="World [x, y, z] of robot base.")
-    max_reach: Optional[float] = Field(None, description="Robot max reach in meters. Default 0.855 for Franka.")
+    obstacles: Optional[List[str]] = Field(None, description="List of USD paths for collision context (Bin, Pillar, etc).")
+    ee_offset: Optional[List[float]] = Field(None, description="Tool-tip offset [x,y,z] relative to ee_link. Optional.")
+    robot_base: Optional[List[float]] = Field(None, description="World [x,y,z] of robot base. Default [0,0,0].")
+    max_reach: Optional[float] = Field(None, description="Robot max reach in meters. Default 0.855 (Franka).")
     sensor_path: Optional[str] = Field(None, description="Optional sensor prim path for sensor-zone metric.")
-    cube_paths: Optional[List[str]] = Field(None, description="Optional cube paths for sensor-zone metric.")
-    cube_xys: Optional[List[List[float]]] = Field(None, description="Optional cube xy positions [[x,y], ...].")
-    sensor_xy: Optional[List[float]] = Field(None, description="Sensor world xy [x, y].")
-    sensor_radius: Optional[float] = Field(None, description="Sensor zone radius in meters.")
-    mutex_corridors: Optional[Dict[str, Any]] = Field(None, description="Multi-robot mutex check context.")
-    path_n_samples: Optional[int] = Field(None, description="Samples for path-clearance metric.")
-    seed: Optional[int] = Field(None, description="Random seed for IK and sampling.")
-    use_cache: Optional[bool] = Field(None, description="Use 60s scene-graph hash cache.")
-    lang: Optional[str] = Field(None, description="Message language.")
+    cube_paths: Optional[List[str]] = Field(None, description="Optional list of cube paths in scene for sensor-zone metric.")
+    cube_xys: Optional[List[List[float]]] = Field(None, description="Optional cube xy positions [[x,y],...] for sensor-zone metric.")
+    sensor_xy: Optional[List[float]] = Field(None, description="Sensor world xy [x,y] for sensor-zone metric.")
+    sensor_radius: Optional[float] = Field(None, description="Sensor zone radius in meters. Default 0.1.")
+    mutex_corridors: Optional[Dict[str, Any]] = Field(None, description="Multi-robot mutex check: {robot_a_corridor:{min,max}, robot_b_corridor:{min,max}, has_mutex:bool}.")
+    path_n_samples: Optional[int] = Field(None, description="N samples for path-clearance metric. Default 20.")
+    seed: Optional[int] = Field(None, description="Random seed for IK + sampling. Default 42.")
+    use_cache: Optional[bool] = Field(None, description="Use 60s scene-graph-hash cache. Default true. Set false for baseline/CI runs.")
+    lang: Optional[str] = Field(None, description="Message language: 'sv' (Swedish, default) or 'en'.")
 
 
 class SetupRos2ControlCompatArgs(BaseModel):
-    """Configure Isaac Sim's ROS2 bridge for standard topic_based_ros2_control topic names (/isaac_joint_states and /isaac_joint_commands)."""
+    """PHASE 6 M1: configure Isaac Sim's ROS2 bridge to use the standard topic_based_ros2_control topic names (/isaac_joint_states + /isaac_joint_commands). MoveIt2 / ros2_control external clients expect the"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     robot_path: str
@@ -399,7 +398,7 @@ class SetupRos2ControlCompatArgs(BaseModel):
 
 
 class EmitRos2ControlYamlArgs(BaseModel):
-    """Generate ros2_control YAML for outside-Kit launch and optionally write it to disk."""
+    """PHASE 6 M1: generate colcon-buildable ros2_control YAML for outside-Kit launch. Caller passes robot_path + controller_type + optional output_path. Returns the YAML as text + writes to output_path if p"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     robot_path: str
@@ -528,7 +527,7 @@ class SetupIsaacRosCumotionMoveitArgs(BaseModel):
 
 
 class PrecheckRos2EnvironmentArgs(BaseModel):
-    """Verify ROS2 environment readiness before scene build."""
+    """PHASE 6 M1: verify ROS2 environment is ready BEFORE scene build. Checks AMENT_PREFIX_PATH set, rosbridge port (default 9090) accepting connections, ROS_DOMAIN_ID consistency. Returns {ok, issues[], de"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     rosbridge_port: Optional[int] = Field(None)
@@ -805,6 +804,13 @@ class VisionPlanTrajectoryArgs(BaseModel):
     num_points: Optional[int] = Field(None, description="Number of trajectory waypoints. Default: 15")
 
 
+class VisionAnalyzeSceneArgs(BaseModel):
+    """Use the Gemini Robotics-ER vision model for free-form spatial reasoning about the viewport. Ask questions like 'what object should I move to make room?', 'how full is the container?', 'describe the wo"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    question: str = Field(..., description="Natural language question about the scene")
+
+
 class LoadRlPolicyArgs(BaseModel):
     """Tier C — registers a trained RL policy on a robot. Sets metadata attrs. Used by #30 FrankaDrawerOpen."""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
@@ -873,6 +879,25 @@ class AddForceTorqueSensorArgs(BaseModel):
     sensor_path: str
     parent_path: str
     threshold: Optional[float] = Field(None)
+    noise_std: Optional[float] = Field(None, description="Gaussian noise std-dev (N / N·m) added to force/torque readings for sim-to-real gap emulation. Default 0.0 = no noise.")
+    publish_topic: Optional[str] = Field(None, description="Optional ROS2-style topic name. When set, the generated code registers a publisher stub so downstream consumers can subscribe.")
+
+
+class SetupAdmittanceControllerArgs(BaseModel):
+    """CRM-A2 — Tier C compliance tool. Configures an admittance controller for a robot using the step law F = K·(x_desired - x_actual) - D·v_actual + F_ext. dry_run=True (default) returns a config dict for"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    robot_path: str = Field(..., description="USD path to the robot articulation root, e.g. '/World/Franka'.")
+    target_frame: Optional[str] = Field(None, description="Tool/end-effector frame name used by ros2_control. Default 'tool0'.")
+    mass_xyz: Optional[List[float]] = Field(None, description="Virtual mass for each translational axis [kg]. Default [1.0, 1.0, 1.0].")
+    stiffness_xyz: Optional[List[float]] = Field(None, description="Translational spring stiffness per axis [N/m]. Must be positive. Default [500.0, 500.0, 500.0].")
+    damping_xyz: Optional[List[float]] = Field(None, description="Translational damping coefficient per axis [N·s/m]. Default [50.0, 50.0, 50.0].")
+    mass_rot: Optional[List[float]] = Field(None, description="Virtual inertia for each rotational axis [kg·m²]. Default [0.1, 0.1, 0.1].")
+    stiffness_rot: Optional[List[float]] = Field(None, description="Rotational spring stiffness per axis [N·m/rad]. Must be positive. Default [50.0, 50.0, 50.0].")
+    damping_rot: Optional[List[float]] = Field(None, description="Rotational damping coefficient per axis [N·m·s/rad]. Default [5.0, 5.0, 5.0].")
+    ft_sensor_path: Optional[str] = Field(None, description="Optional USD path to the force/torque sensor prim whose readings feed the F_ext term.")
+    chain_after: Optional[str] = Field(None, description="ros2_control controller that runs before the admittance layer. Default 'joint_trajectory_controller'.")
+    dry_run: Optional[bool] = Field(None, description="If true (default), return config dict without touching Kit or ROS2. Set false only when bridge is provisioned.")
 
 
 class SetupAssemblyConstraintArgs(BaseModel):
@@ -1034,13 +1059,6 @@ class SetupPickPlaceWithVisionArgs(BaseModel):
     sensor_path: Optional[str] = Field(None)
     belt_path: Optional[str] = Field(None)
     planning_obstacles: Optional[List[str]] = Field(None)
-
-
-class VisionAnalyzeSceneArgs(BaseModel):
-    """Use the Gemini Robotics-ER vision model for free-form spatial reasoning about the viewport. Ask questions like 'what object should I move to make room?', 'how full is the container?', 'describe the wo"""
-    model_config = ConfigDict(populate_by_name=True, extra='allow')
-
-    question: str = Field(..., description="Natural language question about the scene")
 
 
 class AddVisionClassifierGateArgs(BaseModel):
@@ -3727,57 +3745,146 @@ class SetAudioPropertyArgs(BaseModel):
 
 
 class ReadLayoutSpecArgs(BaseModel):
-    """Read the current multimodal LayoutSpec for a session. Use before canvas edits or role rebinding."""
+    """Read the current LayoutSpec persisted for a multimodal session. Returns either the full spec JSON + summary, or a compact summary only, depending on detail_level."""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    session_id: str
-    detail_level: Optional[str] = Field(None)
+    session_id: str = Field(..., description="Multimodal session ID.")
+    detail_level: Optional[str] = Field(None, description="summary = compact text; full = full JSON + summary. Default: full.")
 
 
 class UpdateLayoutSpecArgs(BaseModel):
-    """Apply structured mutations to the current LayoutSpec using a parent revision guard."""
+    """Apply mutations to the LayoutSpec for a multimodal session and persist a new revision via compare-and-set (CAS). Caller must supply parent_revision they read; mismatch returns a 409-style conflict. Su"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    session_id: str
-    parent_revision: int
-    mutations: List[Dict[str, Any]]
-    reason: Optional[str] = Field(None)
+    session_id: str = Field(..., description="Multimodal session ID.")
+    mutations: List[Dict[str, Any]] = Field(..., description="List of mutation dicts. See spec for mutation shapes.")
+    parent_revision: int = Field(..., description="The revision number caller read. Must match current; else conflict returned.")
+    reason: Optional[str] = Field(None, description="One-line explanation of why this mutation was proposed; surfaces in UI.")
 
 
 class CommitLayoutSpecArgs(BaseModel):
-    """Commit the proposed LayoutSpec for a session after user acceptance."""
+    """Promote a proposed LayoutSpec to committed state. Today this is a telemetry-only marker (persisted spec is always authoritative). Logs the commit event for the session."""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    session_id: str
+    session_id: str = Field(..., description="Multimodal session ID.")
 
 
 class ApplyLayoutSpecToSceneArgs(BaseModel):
-    """Ratify the current LayoutSpec against a canonical template and prepare scene application."""
+    """Apply (ratify) the current LayoutSpec for a session against a canonical template; returns ratify status (ok / needs_choice / rejected) with bindings, diagnostics, and ambiguous-role candidates. When f"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    session_id: str
-    template_id: Optional[str] = Field(None)
-    force_freeform: Optional[bool] = Field(None)
+    session_id: str = Field(..., description="Multimodal session ID.")
+    template_id: Optional[str] = Field(None, description="Optional canonical template ID to ratify against. If absent, similarity gate picks.")
+    force_freeform: Optional[bool] = Field(None, description="Skip canonical ratify and fall to T5 free-form. Default: false.")
 
 
 class QueryLayoutMetricArgs(BaseModel):
-    """Query geometry or structural metrics from the current LayoutSpec, such as counts, bounds, or distances."""
+    """Query a geometric or structural metric against the current LayoutSpec without returning the full state. Cheap lookup for chat-side reasoning. Supported metrics: distance (args: from_id, to_id), reacha"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    session_id: str
-    metric: str
-    object_a: Optional[str] = Field(None)
-    object_b: Optional[str] = Field(None)
-    object_class: Optional[str] = Field(None)
+    session_id: str = Field(..., description="Multimodal session ID.")
+    metric: str = Field(..., description="Metric name (e.g. 'distance', 'reachable').")
+    args: Optional[Dict[str, Any]] = Field(None, description="Metric-specific arguments. See spec for per-metric shape.")
+
+
+class SampleCorrelatedDrArgs(BaseModel):
+    """Draw N samples from a correlated multivariate normal preset for domain randomization. Pure Python (Cholesky-based). Use preset='sensor_camera' for the bundled lighting/exposure/white_balance/noise pre"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    preset: Optional[str] = Field(None, description="Optional bundled preset name (e.g. 'sensor_camera').")
+    axes: Optional[List[Dict[str, Any]]] = Field(None, description="List of axis dicts: {name, mean, std}. Required when no preset.")
+    correlations: Optional[List[Dict[str, Any]]] = Field(None, description="List of {axis_a, axis_b, rho} pairs.")
+    n_samples: Optional[int] = Field(None, description="Number of samples. Defaults to preset's num_samples.")
+    seed: Optional[int] = Field(None, description="Optional RNG seed for reproducibility.")
+    name: Optional[str] = Field(None, description="Label for the config when no preset given.")
+
+
+class EurekaHistoryArgs(BaseModel):
+    """Query persisted Eureka run history (Phase 64 SQLite store). Returns either a specific run + its iterations (when run_id is given) or a paginated list of recent runs filtered by status."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    run_id: Optional[str] = Field(None, description="Specific run ID; if absent, returns list of runs.")
+    status_filter: Optional[str] = Field(None, description="Filter listing by run status.")
+    limit: Optional[int] = Field(None, description="Max runs to return (default 20).")
+    db_path: Optional[str] = Field(None, description="Optional SQLite file path; defaults to in-memory.")
+
+
+class ValidateUsdReferencePostArgs(BaseModel):
+    """Run Phase 66 validator against a synthetic USD-reference state (typically observed after add_usd_reference). Checks: target_set, asset_exists, asset_too_large, prim_type_resolved, parent_exists, depth"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    prim_path: str
+    reference_target: str
+    asset_exists: Optional[bool] = Field(None)
+    asset_size_bytes: Optional[int] = Field(None)
+    prim_type_after: Optional[str] = Field(None)
+    parent_path: Optional[str] = Field(None)
+    depth: Optional[int] = Field(None)
+    is_circular: Optional[bool] = Field(None)
+    strict: Optional[bool] = Field(None)
+
+
+class ValidateAssemblyConstraintArgs(BaseModel):
+    """Pre-flight validation for an assembly constraint spec (Phase 72). Pure Python; no Kit/PhysX. Checks name non-empty, target prims set, type in known set, required params present per constraint type (di"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    name: str
+    type: str
+    target_a: Dict[str, Any]
+    target_b: Dict[str, Any]
+    tolerance_m: Optional[float] = Field(None)
+    tolerance_rad: Optional[float] = Field(None)
+    params: Optional[Dict[str, Any]] = Field(None)
+
+
+class ViewportCacheStatsArgs(BaseModel):
+    """Return Phase 77 ViewportHashCache statistics: hits, misses, evictions, entries, total_bytes, hit_rate. Optional clear=true resets the cache."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    clear: Optional[bool] = Field(None, description="If true, clear the cache before returning stats.")
+
+
+class RetrieveTemplateByRoleArgs(BaseModel):
+    """Phase 20 role-based canonical-template retrieval. Ranks templates by exact role-hint match, then fuzzy token overlap, with legacy templates appended below role-based matches."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    query: str = Field(..., description="Free-text user request.")
+    role_hints: Optional[List[str]] = Field(None, description="Optional role names to weight toward (e.g. 'picker').")
+    max_results: Optional[int] = Field(None)
+
+
+class ValidateJointPostArgs(BaseModel):
+    """Run Phase 67 validator against a synthetic articulated-joint state (typically observed after create_articulated_joint). Checks: prim_exists, body0_set, body1_set, axis_set, axis_valid, limits_consiste"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    prim_path: str
+    joint_type: Optional[str] = Field(None)
+    body0: Optional[str] = Field(None)
+    body1: Optional[str] = Field(None)
+    axis: Optional[str] = Field(None)
+    lower_limit: Optional[float] = Field(None)
+    upper_limit: Optional[float] = Field(None)
+    articulation_root_path: Optional[str] = Field(None)
+    exists: Optional[bool] = Field(None)
+    strict: Optional[bool] = Field(None)
+
+
+class ExecuteContactSequencePlanArgs(BaseModel):
+    """Execute an N-step contact-sequence plan: approach → make_contact → apply_force / slide / twist → release / verify. Each step specifies prim_a + prim_b, optional target force/torque/duration, and a suc"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    steps: List[Dict[str, Any]] = Field(..., description="List of step dicts. Each: step_idx, step_type, prim_a, prim_b, optional target_force_N, target_torque_Nm, duration_s, success_predicate, retry_count, mutex_paths.")
+    abort_on_failure: Optional[bool] = Field(None, description="Stop plan execution on first failure. Default: true.")
+    dry_run: Optional[bool] = Field(None, description="Use pure-Python state machine (default true). False requires Kit RPC.")
 
 
 class RebindRoleArgs(BaseModel):
-    """Bind or correct a template role to a specific object in the current LayoutSpec."""
+    """Re-bind a role in a canonical template to a different object_id in the current LayoutSpec. Used after an apply_layout_spec_to_scene call returns status=needs_choice or status=rejected, to fix ambiguou"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    session_id: str
-    role_name: str
-    object_id: str
+    session_id: str = Field(..., description="Multimodal session ID.")
+    role_name: str = Field(..., description="Name of the role to rebind (e.g. 'pick_target', 'tool').")
+    target: str = Field(..., description="object_id in the LayoutSpec to bind the role to.")
 
 
 # ---------------------------------------------------------------------------
@@ -3870,6 +3977,7 @@ MODEL_REGISTRY = {
     "vision_detect_objects": VisionDetectObjectsArgs,
     "vision_bounding_boxes": VisionBoundingBoxesArgs,
     "vision_plan_trajectory": VisionPlanTrajectoryArgs,
+    "vision_analyze_scene": VisionAnalyzeSceneArgs,
     "load_rl_policy": LoadRlPolicyArgs,
     "setup_grasp_pose_sampler": SetupGraspPoseSamplerArgs,
     "setup_nav_robot": SetupNavRobotArgs,
@@ -3877,6 +3985,7 @@ MODEL_REGISTRY = {
     "create_linear_axis_robot": CreateLinearAxisRobotArgs,
     "nir_material_sensor": NirMaterialSensorArgs,
     "add_force_torque_sensor": AddForceTorqueSensorArgs,
+    "setup_admittance_controller": SetupAdmittanceControllerArgs,
     "setup_assembly_constraint": SetupAssemblyConstraintArgs,
     "setup_zone_partition": SetupZonePartitionArgs,
     "setup_cortex_behavior": SetupCortexBehaviorArgs,
@@ -3892,7 +4001,6 @@ MODEL_REGISTRY = {
     "create_kit_tray": CreateKitTrayArgs,
     "track_slot_occupancy": TrackSlotOccupancyArgs,
     "setup_pick_place_with_vision": SetupPickPlaceWithVisionArgs,
-    "vision_analyze_scene": VisionAnalyzeSceneArgs,
     "add_vision_classifier_gate": AddVisionClassifierGateArgs,
     "nucleus_browse": NucleusBrowseArgs,
     "download_asset": DownloadAssetArgs,
@@ -4205,5 +4313,13 @@ MODEL_REGISTRY = {
     "commit_layout_spec": CommitLayoutSpecArgs,
     "apply_layout_spec_to_scene": ApplyLayoutSpecToSceneArgs,
     "query_layout_metric": QueryLayoutMetricArgs,
+    "sample_correlated_dr": SampleCorrelatedDrArgs,
+    "eureka_history": EurekaHistoryArgs,
+    "validate_usd_reference_post": ValidateUsdReferencePostArgs,
+    "validate_assembly_constraint": ValidateAssemblyConstraintArgs,
+    "viewport_cache_stats": ViewportCacheStatsArgs,
+    "retrieve_template_by_role": RetrieveTemplateByRoleArgs,
+    "validate_joint_post": ValidateJointPostArgs,
+    "execute_contact_sequence_plan": ExecuteContactSequencePlanArgs,
     "rebind_role": RebindRoleArgs,
 }

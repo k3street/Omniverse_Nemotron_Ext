@@ -89,6 +89,11 @@ export interface FloorPlanState {
     // spec §2.3 — selection is UI state, not document state)
     selectedIds: string[];
 
+    // Phase 24 — active workflow ID for canvas confirm-bar wiring.
+    // null means no workflow is currently driving the canvas; the
+    // ConfirmBar operates in pure-UI (undo-only) mode when null.
+    currentWorkflowId: string | null;
+
     // History
     undoStack: Command[];
     redoStack: Command[];
@@ -101,6 +106,8 @@ export interface FloorPlanState {
 
     // ─── Actions ──────────────────────────────────────────────────
     setSpec: (spec: LayoutSpec | null, revision: number) => void;
+    /** Phase 24: set or clear the active workflow that drives the canvas. */
+    setWorkflowId: (id: string | null) => void;
     setSelection: (ids: string[]) => void;
     addToSelection: (id: string) => void;
     removeFromSelection: (id: string) => void;
@@ -150,6 +157,7 @@ export const useFloorPlanStore = create<FloorPlanState>((set, get) => {
         revision: 0,
         simState: "unbuilt",
         selectedIds: [],
+        currentWorkflowId: null,
         undoStack: [],
         redoStack: [],
 
@@ -163,6 +171,8 @@ export const useFloorPlanStore = create<FloorPlanState>((set, get) => {
 
         setSpec: (spec, revision) =>
             set({ spec, revision, undoStack: [], redoStack: [] }),
+
+        setWorkflowId: (id) => set({ currentWorkflowId: id }),
 
         setSelection: (ids) => set({ selectedIds: ids }),
         addToSelection: (id) =>

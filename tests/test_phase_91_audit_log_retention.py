@@ -16,19 +16,20 @@ pytestmark = pytest.mark.l0
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_file(directory: Path, name: str, age_days: float, content: bytes = b"log data\n") -> Path:
-    """Create a file in *directory* and backdate its mtime by *age_days* days."""
-    p = directory / name
-    p.write_bytes(content)
-    now_ts = time.time()
-    past_ts = now_ts - age_days * 86400
-    os.utime(p, (past_ts, past_ts))
-    return p
-
-
 def _ref_now() -> datetime:
     """Stable reference 'now' for all tests."""
     return datetime(2026, 5, 13, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _make_file(directory: Path, name: str, age_days: float, content: bytes = b"log data\n") -> Path:
+    """Create a file in *directory* and backdate its mtime by *age_days*
+    days, anchored to ``_ref_now()`` so the enforcer's age math matches
+    the test's expectations regardless of wall-clock time."""
+    p = directory / name
+    p.write_bytes(content)
+    past_ts = _ref_now().timestamp() - age_days * 86400
+    os.utime(p, (past_ts, past_ts))
+    return p
 
 
 # ---------------------------------------------------------------------------

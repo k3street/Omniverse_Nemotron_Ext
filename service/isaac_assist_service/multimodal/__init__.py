@@ -73,15 +73,23 @@ __all__ = [
     "validate_layout_spec",
     "LayoutSpecValidationError",
     # Text modality (Block 2)
+    # NOTE: extract_intent_rules and extract_intent_llm are pre-wired
+    # exports for downstream phases that consume rule-based + LLM-based
+    # intent extractors. They have 0 callers today (per the 2026-05-13
+    # integration audit) but are kept available so future modality work
+    # doesn't have to amend __init__.py.
     "extract_intent_rules",
     "extract_intent_llm",
     "produce_layout_spec_from_text",
     # Voice modality (Block 3)
+    # NOTE: pre-wired; 0 callers today. Same retention rationale.
     "produce_layout_spec_from_voice",
     # VLM modalities — sketch + photo (Block 3)
+    # NOTE: pre-wired; 0 callers today. Same retention rationale.
     "produce_layout_spec_from_sketch",
     "produce_layout_spec_from_photo",
     # Viewport / sync-from-stage (Block 3 + IA Phase 22)
+    # NOTE: prims_to_layout_spec pre-wired; 0 callers today.
     "classify_prim",
     "prims_to_layout_spec",
     "sync_from_stage",

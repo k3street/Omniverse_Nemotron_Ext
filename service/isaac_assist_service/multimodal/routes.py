@@ -75,7 +75,31 @@ class PatchRequest(BaseModel):
 
 
 class CommitRequest(BaseModel):
-    pass  # body intentionally empty — commit is just a marker
+    """Commit request — optionally carries a workflow_id for Phase 24 wiring.
+
+    If workflow_id is present, the commit will additionally forward an
+    approve decision to the workflow lifecycle via
+    approve_workflow_checkpoint.  A missing / unknown workflow_id never
+    blocks the commit — it returns a workflow_warning in the response.
+    """
+    workflow_id: Optional[str] = Field(
+        default=None,
+        description="Active workflow to approve after committing the canvas.",
+    )
+
+
+class RejectCanvasRequest(BaseModel):
+    """Reject a canvas proposal and optionally forward the rejection to a
+    workflow checkpoint.
+
+    workflow_id: the workflow to reject.  Must be present for the workflow
+        action to fire; if missing, the request is a no-op on the workflow
+        side (the route still returns 200 so the caller doesn't need to
+        guard).
+    feedback: free-text reason forwarded verbatim to the workflow record.
+    """
+    workflow_id: Optional[str] = Field(default=None)
+    feedback: str = Field(default="", description="User feedback / rejection reason.")
 
 
 class BuildRequest(BaseModel):
@@ -172,12 +196,93 @@ async def patch_canvas(session_id: str, body: PatchRequest) -> Dict[str, Any]:
     }
 
 
+def _forward_workflow_approve(
+    workflow_id: str,
+    feedback: str = "canvas confirmed",
+) -> Optional[str]:
+    """Forward an approve decision to the in-process workflow registry.
+
+    Returns None on success, or a warning string if the workflow_id is
+    not found (callers return 200 with workflow_warning in this case).
+
+    Intentionally does NOT raise — a missing workflow must never block the
+    canvas commit from returning a success response.
+    """
+    try:
+        from ..chat.tools.handlers._state import _WORKFLOWS  # noqa: PLC0415
+        wf = _WORKFLOWS.get(workflow_id)
+        if wf is None:
+            return f"workflow_id '{workflow_id}' not found in active registry"
+        from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
+        now = _dt.now(_tz.utc).isoformat()
+        decision = {
+            "phase": wf.get("current_phase", "unknown"),
+            "action": "approve",
+            "feedback": feedback,
+            "at": now,
+        }
+        wf.setdefault("checkpoint_decisions", []).append(decision)
+        wf.setdefault("events", []).append({"type": "checkpoint_decision", **decision})
+        wf["updated_at"] = now
+        wf["status"] = "approved_via_canvas"
+        logger.info(
+            f"[canvas-commit] forwarded approve to workflow {workflow_id!r}, "
+            f"phase={decision['phase']!r}"
+        )
+        return None
+    except Exception as exc:  # pragma: no cover — guard against import errors
+        logger.warning(f"[canvas-commit] workflow approve forward failed: {exc}")
+        return str(exc)
+
+
+def _forward_workflow_reject(
+    workflow_id: str,
+    feedback: str,
+) -> Optional[str]:
+    """Forward a reject decision to the in-process workflow registry.
+
+    Same soft-failure semantics as _forward_workflow_approve — never raises.
+    """
+    try:
+        from ..chat.tools.handlers._state import _WORKFLOWS  # noqa: PLC0415
+        wf = _WORKFLOWS.get(workflow_id)
+        if wf is None:
+            return f"workflow_id '{workflow_id}' not found in active registry"
+        from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
+        now = _dt.now(_tz.utc).isoformat()
+        decision = {
+            "phase": wf.get("current_phase", "unknown"),
+            "action": "reject",
+            "feedback": feedback,
+            "at": now,
+        }
+        wf.setdefault("checkpoint_decisions", []).append(decision)
+        wf.setdefault("events", []).append({"type": "checkpoint_decision", **decision})
+        wf["updated_at"] = now
+        wf["status"] = "cancelled"
+        logger.info(
+            f"[canvas-reject] forwarded reject to workflow {workflow_id!r}, "
+            f"feedback={feedback!r}"
+        )
+        return None
+    except Exception as exc:  # pragma: no cover
+        logger.warning(f"[canvas-reject] workflow reject forward failed: {exc}")
+        return str(exc)
+
+
 @router.post("/{session_id}/commit")
 async def commit_canvas(session_id: str, body: CommitRequest) -> Dict[str, Any]:
-    """Mark the current LayoutSpec as committed. The proposed/committed
-    distinction lives in the SPA UI state — backend just emits a telemetry
-    event for downstream consumers (canvas-mirror panel transition,
-    auto-build trigger)."""
+    """Mark the current LayoutSpec as committed.
+
+    Phase 24 extension: if body.workflow_id is present, forward an approve
+    decision to the in-process workflow registry after committing the canvas.
+    An unknown workflow_id never blocks the commit — it surfaces as
+    workflow_warning in the response instead.
+
+    The proposed/committed distinction lives in the SPA UI state — backend
+    emits a telemetry event for downstream consumers (canvas-mirror panel
+    transition, auto-build trigger).
+    """
     store = get_store()
     spec = store.get_latest(session_id)
     if spec is None:
@@ -187,8 +292,49 @@ async def commit_canvas(session_id: str, body: CommitRequest) -> Dict[str, Any]:
         )
     store.append_event(session_id, "canvas_commit", {
         "revision": spec.revision,
+        "workflow_id": body.workflow_id,
     })
-    return {"committed": True, "revision": spec.revision}
+
+    response: Dict[str, Any] = {"committed": True, "revision": spec.revision}
+
+    if body.workflow_id:
+        warning = _forward_workflow_approve(body.workflow_id)
+        if warning:
+            response["workflow_warning"] = warning
+        else:
+            response["workflow_approved"] = body.workflow_id
+
+    return response
+
+
+@router.post("/{session_id}/reject")
+async def reject_canvas(session_id: str, body: RejectCanvasRequest) -> Dict[str, Any]:
+    """Reject a proposed canvas mutation and optionally forward the rejection
+    to an active workflow checkpoint.
+
+    Phase 24: the ConfirmBar calls this on "Reject" when a workflow is
+    active.  If workflow_id is absent the route still returns 200 — the
+    rejection is purely local (the SPA undoes the BulkUpdate command).
+
+    feedback is forwarded verbatim to the workflow record so the LLM can
+    regenerate the proposal with the user's guidance.
+    """
+    store = get_store()
+    store.append_event(session_id, "canvas_reject", {
+        "workflow_id": body.workflow_id,
+        "feedback": body.feedback,
+    })
+
+    response: Dict[str, Any] = {"rejected": True, "feedback": body.feedback}
+
+    if body.workflow_id:
+        warning = _forward_workflow_reject(body.workflow_id, body.feedback)
+        if warning:
+            response["workflow_warning"] = warning
+        else:
+            response["workflow_rejected"] = body.workflow_id
+
+    return response
 
 
 @router.post("/{session_id}/preview_render")

@@ -7,8 +7,9 @@ generator yields N+1 results.
 """
 from __future__ import annotations
 
-import pytest
 import asyncio
+
+import pytest
 
 pytestmark = pytest.mark.l0
 

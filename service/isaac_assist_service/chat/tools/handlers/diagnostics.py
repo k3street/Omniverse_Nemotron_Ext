@@ -5187,8 +5187,9 @@ def register(
     Called by `handlers/_dispatch.py:register_handlers()` which is the
     sole dispatch entry point from `tool_executor.py`.
     """
-    # Data handlers (27)
+    # Data handlers (28)
     data["check_collision_mesh"] = _handle_check_collision_mesh
+    data["check_collisions"] = _handle_check_collisions
     data["check_teleop_hardware"] = _handle_check_teleop_hardware
     data["check_tf_health"] = _handle_check_tf_health
     data["check_vram_headroom"] = _handle_check_vram_headroom

@@ -18,6 +18,26 @@ five conditions on `AssemblyConstraint` instances:
 `validate_constraints` aggregates multiple constraints into a single
 `ValidationResult`.
 
+## Relationship to setup_assembly_constraint_runtime.AssemblyConstraint
+
+This module defines its own `AssemblyConstraint` dataclass with a
+*violation-tracking* shape (``constraint_id``, ``kind``, ``prim_path_a/b``,
+``parameters``). The Phase 72 typed *runtime* version
+(``setup_assembly_constraint_runtime.AssemblyConstraint``) carries a
+different field set (``name``, ``type``, ``target_a/b`` with USD feature
+names + ``offset_m``, ``params``). The two are intentionally separate
+layers, not duplicates:
+
+| Module                                   | Class shape                          | Purpose                                        |
+|------------------------------------------|--------------------------------------|------------------------------------------------|
+| `setup_assembly_constraint_runtime`      | typed (name/type/target_a/b/params)  | runtime evaluation w/ Kit/PhysX                |
+| `sub_phase_72b_assembly_constraint_violations` (this) | lightweight (id/kind/prim_path_a/b) | offline violation aggregation                  |
+
+If you need *both* shapes — e.g. evaluating a runtime constraint and
+recording violations into the Phase 11b framework — alias one at import:
+
+    from .setup_assembly_constraint_runtime import AssemblyConstraint as RuntimeAssemblyConstraint
+
 Per specs/IA_FULL_SPEC_2026-05-10.md Phase 72b.
 """
 from __future__ import annotations
@@ -84,6 +104,11 @@ _BINARY_KINDS: frozenset[str] = frozenset(
 @dataclass
 class AssemblyConstraint:
     """One assembly constraint between one or two USD prims.
+
+    NOTE: This is the Phase 72b *violation-tracking* shape, not the
+    Phase 72 *runtime* shape. See module docstring for the comparison
+    table. The runtime equivalent is
+    ``setup_assembly_constraint_runtime.AssemblyConstraint``.
 
     Attributes:
         constraint_id: Unique identifier for this constraint instance.

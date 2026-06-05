@@ -1,11 +1,31 @@
 """Phase 76 — Vision: SPEC/PROVIDER layer for Gemini Vision.
 
-Provider abstraction (interface, request/response shapes, retry/error
-semantics, prompt templates, mock provider). Pure Python — no Gemini API key
-required.
+This module is the TYPED PROTOCOL LAYER for vision providers — it ships
+the request/response dataclasses (VisionRequest, BoundingBox,
+VisionResponse), the VisionProvider Protocol, a NotImplementedError-
+gated `GeminiVisionProvider` stub for unit testing the abstraction, and
+`MockVisionProvider` for deterministic in-process responses.
 
-Full live implementation requires GEMINI_API_KEY and runtime testing
-(opus-runtime mode). Per specs/IA_FULL_SPEC_2026-05-10.md Phase 76.
+## Relationship to `service.isaac_assist_service.chat.vision_gemini`
+
+For ACTUAL live Gemini API calls, use the async implementation at
+`service.isaac_assist_service.chat.vision_gemini.GeminiVisionProvider`.
+That module is the concrete API caller (uses aiohttp, GEMINI_API_KEY,
+real network) and is the one wired into `handlers/vision.py` and
+`handlers/_shared.py`.
+
+The two modules are LAYERS, not duplicates:
+
+| Layer                              | Module                                                    | Purpose                                        |
+|------------------------------------|-----------------------------------------------------------|------------------------------------------------|
+| Typed protocol + dataclasses + mock| `multimodal.vision_provider_gemini` (this module)         | Abstraction + tests, no network               |
+| Concrete async API caller          | `chat.vision_gemini`                                      | Hits Gemini Vision REST endpoint              |
+
+If you need typed inputs/outputs WITH a real API call, build a thin
+adapter that wraps `chat.vision_gemini.GeminiVisionProvider` in a class
+implementing the VisionProvider Protocol defined here.
+
+Per specs/IA_FULL_SPEC_2026-05-10.md Phase 76.
 """
 from __future__ import annotations
 

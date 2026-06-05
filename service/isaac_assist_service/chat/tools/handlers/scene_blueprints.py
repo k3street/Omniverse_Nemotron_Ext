@@ -403,7 +403,15 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
 
 
 def _gen_load_scene_template(args: Dict) -> str:
-    """Generate code to build a quick-start scene template."""
+    """Generate code to build a quick-start scene template.
+
+    NOT a dispatch target — superseded by the data-tool path
+    ``load_scene_template`` → ``build_scene_from_blueprint``. Kept for
+    historical reference and as a quick reference for what the
+    pick_and_place blueprint expands to in raw Kit-USD-Python; do not
+    call from new code without first registering it in the codegen
+    dispatch table.
+    """
     template = args["template_name"]
 
     if template == "pick_and_place":

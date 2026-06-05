@@ -770,31 +770,42 @@ ISAAC_SIM_TOOLS = [
         "function": {
             "name": "diagnose_scene_feasibility",
             "description": (
-                "PRE-FLIGHT CONSTRAINT VALIDATOR. Runs deterministic geometric checks "
-                "on a built scene to predict whether simulate_traversal_check would "
-                "succeed before running expensive simulation. Returns verdict, metrics, "
-                "violations, alternatives, seed_used, cache_hit, and elapsed_ms."
+                "PRE-FLIGHT CONSTRAINT VALIDATOR — runs deterministic geometric "
+                "checks on a built scene to predict whether simulate_traversal_check "
+                "would succeed, BEFORE running expensive 60-180s sim. Use cases: "
+                "(1) canonical authoring pre-commit gate (filter infeasible/over"
+                "constrained); (2) novel-task pre-flight (cuts agent feedback time "
+                "from 90s sim to <2s analysis); (3) auto-tune trigger for "
+                "tightly_feasible verdicts. Computes: ik_feasible at pick + drop, "
+                "manipulability (singularity check), reach_utilization (% of robot "
+                "max reach), inside_obstacle_bbox (drop pose inside Bin/Pillar), "
+                "clearance_pct (path-clearance from N=20 straight-line samples in "
+                "joint space), cube_in_sensor_zone_at_settle (controller will claim?). "
+                "Returns: {verdict, metrics, violations[], alternatives[], seed_used, "
+                "cache_hit, elapsed_ms}. Verdict ∈ {feasible, tightly_feasible "
+                "(WARNINGs but no ERROR/CRITICAL), overconstrained (≥1 ERROR), "
+                "infeasible (≥1 CRITICAL)}. Cached 60s by scene-graph hash."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "robot_path": {"type": "string", "description": "USD path of the robot prim, e.g. /World/Franka."},
-                    "pick_pose": {"type": "array", "items": {"type": "number"}, "description": "World [x, y, z] of the pick target."},
-                    "drop_pose": {"type": "array", "items": {"type": "number"}, "description": "World [x, y, z] of the drop target."},
-                    "obstacles": {"type": "array", "items": {"type": "string"}, "description": "USD paths for collision context.", "default": []},
-                    "ee_offset": {"type": "array", "items": {"type": "number"}, "description": "Tool-tip offset [x, y, z]."},
-                    "robot_base": {"type": "array", "items": {"type": "number"}, "description": "World [x, y, z] of robot base.", "default": [0.0, 0.0, 0.0]},
-                    "max_reach": {"type": "number", "description": "Robot max reach in meters. Default 0.855 for Franka.", "default": 0.855},
+                    "robot_path": {"type": "string", "description": "USD path of the robot prim (e.g. /World/Franka)."},
+                    "pick_pose": {"type": "array", "description": "World [x, y, z] of the pick target.", "items": {"type": "number"}},
+                    "drop_pose": {"type": "array", "description": "World [x, y, z] of the drop target.", "items": {"type": "number"}},
+                    "obstacles": {"type": "array", "description": "List of USD paths for collision context (Bin, Pillar, etc).", "items": {"type": "string"}, "default": []},
+                    "ee_offset": {"type": "array", "description": "Tool-tip offset [x,y,z] relative to ee_link. Optional.", "items": {"type": "number"}},
+                    "robot_base": {"type": "array", "description": "World [x,y,z] of robot base. Default [0,0,0].", "items": {"type": "number"}, "default": [0.0, 0.0, 0.0]},
+                    "max_reach": {"type": "number", "description": "Robot max reach in meters. Default 0.855 (Franka).", "default": 0.855},
                     "sensor_path": {"type": "string", "description": "Optional sensor prim path for sensor-zone metric."},
-                    "cube_paths": {"type": "array", "items": {"type": "string"}, "description": "Optional cube paths for sensor-zone metric."},
-                    "cube_xys": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "description": "Optional cube xy positions [[x,y], ...]."},
-                    "sensor_xy": {"type": "array", "items": {"type": "number"}, "description": "Sensor world xy [x, y]."},
-                    "sensor_radius": {"type": "number", "description": "Sensor zone radius in meters.", "default": 0.1},
-                    "mutex_corridors": {"type": "object", "description": "Multi-robot mutex check context."},
-                    "path_n_samples": {"type": "integer", "description": "Samples for path-clearance metric.", "default": 20},
-                    "seed": {"type": "integer", "description": "Random seed for IK and sampling.", "default": 42},
-                    "use_cache": {"type": "boolean", "description": "Use 60s scene-graph hash cache.", "default": True},
-                    "lang": {"type": "string", "enum": ["sv", "en"], "description": "Message language.", "default": "sv"},
+                    "cube_paths": {"type": "array", "description": "Optional list of cube paths in scene for sensor-zone metric.", "items": {"type": "string"}},
+                    "cube_xys": {"type": "array", "description": "Optional cube xy positions [[x,y],...] for sensor-zone metric.", "items": {"type": "array", "items": {"type": "number"}}},
+                    "sensor_xy": {"type": "array", "description": "Sensor world xy [x,y] for sensor-zone metric.", "items": {"type": "number"}},
+                    "sensor_radius": {"type": "number", "description": "Sensor zone radius in meters. Default 0.1.", "default": 0.1},
+                    "mutex_corridors": {"type": "object", "description": "Multi-robot mutex check: {robot_a_corridor:{min,max}, robot_b_corridor:{min,max}, has_mutex:bool}."},
+                    "path_n_samples": {"type": "integer", "description": "N samples for path-clearance metric. Default 20.", "default": 20},
+                    "seed": {"type": "integer", "description": "Random seed for IK + sampling. Default 42.", "default": 42},
+                    "use_cache": {"type": "boolean", "description": "Use 60s scene-graph-hash cache. Default true. Set false for baseline/CI runs.", "default": True},
+                    "lang": {"type": "string", "description": "Message language: 'sv' (Swedish, default) or 'en'.", "default": "sv", "enum": ["sv", "en"]},
                 },
                 "required": ["robot_path"],
             },
@@ -805,8 +816,12 @@ ISAAC_SIM_TOOLS = [
         "function": {
             "name": "setup_ros2_control_compat",
             "description": (
-                "Configure Isaac Sim's ROS2 bridge for standard topic_based_ros2_control "
-                "topic names (/isaac_joint_states and /isaac_joint_commands)."
+                "PHASE 6 M1: configure Isaac Sim's ROS2 bridge to use the standard "
+                "topic_based_ros2_control topic names (/isaac_joint_states + "
+                "/isaac_joint_commands). MoveIt2 / ros2_control external clients "
+                "expect these names by default. Use BEFORE setup_ros2_bridge so the "
+                "OmniGraph is wired with the matching topics. Pair with "
+                "emit_ros2_control_yaml to generate the user-side launch config."
             ),
             "parameters": {
                 "type": "object",
@@ -824,7 +839,12 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "emit_ros2_control_yaml",
-            "description": "Generate ros2_control YAML for outside-Kit launch and optionally write it to disk.",
+            "description": (
+                "PHASE 6 M1: generate colcon-buildable ros2_control YAML for outside-"
+                "Kit launch. Caller passes robot_path + controller_type + optional "
+                "output_path. Returns the YAML as text + writes to output_path if "
+                "provided. Pair with setup_ros2_control_compat in the canonical."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1095,7 +1115,13 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "precheck_ros2_environment",
-            "description": "Verify ROS2 environment readiness before scene build.",
+            "description": (
+                "PHASE 6 M1: verify ROS2 environment is ready BEFORE scene build. "
+                "Checks AMENT_PREFIX_PATH set, rosbridge port (default 9090) "
+                "accepting connections, ROS_DOMAIN_ID consistency. Returns "
+                "{ok, issues[], details}. Fail-fast: if ok=false, surface issues "
+                "and don't proceed to build."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1748,6 +1774,20 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "vision_analyze_scene",
+            "description": "Use the Gemini Robotics-ER vision model for free-form spatial reasoning about the viewport. Ask questions like 'what object should I move to make room?', 'how full is the container?', 'describe the workspace layout'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "Natural language question about the scene"},
+                },
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "load_rl_policy",
             "description": "Tier C — registers a trained RL policy on a robot. Sets metadata attrs. Used by #30 FrankaDrawerOpen.",
             "parameters": {
@@ -1859,8 +1899,86 @@ ISAAC_SIM_TOOLS = [
                     "sensor_path": {"type": "string"},
                     "parent_path": {"type": "string"},
                     "threshold": {"type": "number"},
+                    "noise_std": {
+                        "type": "number",
+                        "description": "Gaussian noise std-dev (N / N·m) added to force/torque readings for sim-to-real gap emulation. Default 0.0 = no noise.",
+                    },
+                    "publish_topic": {
+                        "type": "string",
+                        "description": "Optional ROS2-style topic name. When set, the generated code registers a publisher stub so downstream consumers can subscribe.",
+                    },
                 },
                 "required": ["sensor_path", "parent_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_admittance_controller",
+            "description": (
+                "CRM-A2 — Tier C compliance tool. Configures an admittance controller "
+                "for a robot using the step law F = K·(x_desired - x_actual) - D·v_actual + F_ext. "
+                "dry_run=True (default) returns a config dict for offline inspection; "
+                "dry_run=False requires the Kit RPC + ros2_control bridge (CRM-A1). "
+                "Used by #22 Peg-in-Hole Insertion and any contact-rich task needing "
+                "compliant Cartesian control."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "target_frame": {
+                        "type": "string",
+                        "description": "Tool/end-effector frame name used by ros2_control. Default 'tool0'.",
+                    },
+                    "mass_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Virtual mass for each translational axis [kg]. Default [1.0, 1.0, 1.0].",
+                    },
+                    "stiffness_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Translational spring stiffness per axis [N/m]. Must be positive. Default [500.0, 500.0, 500.0].",
+                    },
+                    "damping_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Translational damping coefficient per axis [N·s/m]. Default [50.0, 50.0, 50.0].",
+                    },
+                    "mass_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Virtual inertia for each rotational axis [kg·m²]. Default [0.1, 0.1, 0.1].",
+                    },
+                    "stiffness_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Rotational spring stiffness per axis [N·m/rad]. Must be positive. Default [50.0, 50.0, 50.0].",
+                    },
+                    "damping_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Rotational damping coefficient per axis [N·m·s/rad]. Default [5.0, 5.0, 5.0].",
+                    },
+                    "ft_sensor_path": {
+                        "type": "string",
+                        "description": "Optional USD path to the force/torque sensor prim whose readings feed the F_ext term.",
+                    },
+                    "chain_after": {
+                        "type": "string",
+                        "description": "ros2_control controller that runs before the admittance layer. Default 'joint_trajectory_controller'.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true (default), return config dict without touching Kit or ROS2. Set false only when bridge is provisioned.",
+                    },
+                },
+                "required": ["robot_path"],
             },
         },
     },
@@ -2127,20 +2245,6 @@ ISAAC_SIM_TOOLS = [
                     "planning_obstacles": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["robot_path", "cube_paths", "class_labels", "camera_path", "destination_map"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "vision_analyze_scene",
-            "description": "Use the Gemini Robotics-ER vision model for free-form spatial reasoning about the viewport. Ask questions like 'what object should I move to make room?', 'how full is the container?', 'describe the workspace layout'.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "question": {"type": "string", "description": "Natural language question about the scene"},
-                },
-                "required": ["question"],
             },
         },
     },
@@ -9144,18 +9248,24 @@ ISAAC_SIM_TOOLS = [
                 },
             },
         },
-
-    # ─── Multimodal Canvas / LayoutSpec ─────────────────────────────────────
     {
         "type": "function",
         "function": {
             "name": "read_layout_spec",
-            "description": "Read the current multimodal LayoutSpec for a session. Use before canvas edits or role rebinding.",
+            "description": (
+                "Read the current LayoutSpec persisted for a multimodal session. Returns either "
+                "the full spec JSON + summary, or a compact summary only, depending on "
+                "detail_level."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "session_id": {"type": "string"},
-                    "detail_level": {"type": "string", "enum": ["summary", "full"], "default": "full"},
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                    "detail_level": {
+                        "type": "string",
+                        "enum": ["summary", "full"],
+                        "description": "summary = compact text; full = full JSON + summary. Default: full.",
+                    },
                 },
                 "required": ["session_id"],
             },
@@ -9165,16 +9275,30 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "update_layout_spec",
-            "description": "Apply structured mutations to the current LayoutSpec using a parent revision guard.",
+            "description": (
+                "Apply mutations to the LayoutSpec for a multimodal session and persist a new "
+                "revision via compare-and-set (CAS). Caller must supply parent_revision they read; "
+                "mismatch returns a 409-style conflict. Surfaces in the SPA confirm bar."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "session_id": {"type": "string"},
-                    "parent_revision": {"type": "integer", "minimum": 0},
-                    "mutations": {"type": "array", "items": {"type": "object"}},
-                    "reason": {"type": "string"},
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                    "mutations": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of mutation dicts. See spec for mutation shapes.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "One-line explanation of why this mutation was proposed; surfaces in UI.",
+                    },
+                    "parent_revision": {
+                        "type": "integer",
+                        "description": "The revision number caller read. Must match current; else conflict returned.",
+                    },
                 },
-                "required": ["session_id", "parent_revision", "mutations"],
+                "required": ["session_id", "mutations", "parent_revision"],
             },
         },
     },
@@ -9182,11 +9306,15 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "commit_layout_spec",
-            "description": "Commit the proposed LayoutSpec for a session after user acceptance.",
+            "description": (
+                "Promote a proposed LayoutSpec to committed state. Today this is a telemetry-only "
+                "marker (persisted spec is always authoritative). Logs the commit event for the "
+                "session."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "session_id": {"type": "string"},
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
                 },
                 "required": ["session_id"],
             },
@@ -9196,13 +9324,24 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "apply_layout_spec_to_scene",
-            "description": "Ratify the current LayoutSpec against a canonical template and prepare scene application.",
+            "description": (
+                "Apply (ratify) the current LayoutSpec for a session against a canonical template; "
+                "returns ratify status (ok / needs_choice / rejected) with bindings, diagnostics, "
+                "and ambiguous-role candidates. When force_freeform=True, skips ratification and "
+                "falls to free-form (T5) planning."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "session_id": {"type": "string"},
-                    "template_id": {"type": "string"},
-                    "force_freeform": {"type": "boolean", "default": False},
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                    "template_id": {
+                        "type": "string",
+                        "description": "Optional canonical template ID to ratify against. If absent, similarity gate picks.",
+                    },
+                    "force_freeform": {
+                        "type": "boolean",
+                        "description": "Skip canonical ratify and fall to T5 free-form. Default: false.",
+                    },
                 },
                 "required": ["session_id"],
             },
@@ -9212,18 +9351,24 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "query_layout_metric",
-            "description": "Query geometry or structural metrics from the current LayoutSpec, such as counts, bounds, or distances.",
+            "description": (
+                "Query a geometric or structural metric against the current LayoutSpec without "
+                "returning the full state. Cheap lookup for chat-side reasoning. Supported "
+                "metrics: distance (args: from_id, to_id), reachable (args: robot_id, target_id, "
+                "reach_m), and others per spec."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "session_id": {"type": "string"},
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
                     "metric": {
                         "type": "string",
-                        "enum": ["counts", "bounds", "distance", "objects_by_class", "bindings"],
+                        "description": "Metric name (e.g. 'distance', 'reachable').",
                     },
-                    "object_a": {"type": "string"},
-                    "object_b": {"type": "string"},
-                    "object_class": {"type": "string"},
+                    "args": {
+                        "type": "object",
+                        "description": "Metric-specific arguments. See spec for per-metric shape.",
+                    },
                 },
                 "required": ["session_id", "metric"],
             },
@@ -9232,16 +9377,272 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "rebind_role",
-            "description": "Bind or correct a template role to a specific object in the current LayoutSpec.",
+            "name": "sample_correlated_dr",
+            "description": (
+                "Draw N samples from a correlated multivariate normal preset for "
+                "domain randomization. Pure Python (Cholesky-based). Use preset="
+                "'sensor_camera' for the bundled lighting/exposure/white_balance/"
+                "noise preset, or supply your own axes (mean+std) and correlations "
+                "(rho pairs). Returns the samples and the empirical correlation for "
+                "each requested pair."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "session_id": {"type": "string"},
-                    "role_name": {"type": "string"},
-                    "object_id": {"type": "string"},
+                    "preset": {
+                        "type": "string",
+                        "description": "Optional bundled preset name (e.g. 'sensor_camera').",
+                    },
+                    "axes": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of axis dicts: {name, mean, std}. Required when no preset.",
+                    },
+                    "correlations": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of {axis_a, axis_b, rho} pairs.",
+                    },
+                    "n_samples": {
+                        "type": "integer",
+                        "description": "Number of samples. Defaults to preset's num_samples.",
+                    },
+                    "seed": {
+                        "type": "integer",
+                        "description": "Optional RNG seed for reproducibility.",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Label for the config when no preset given.",
+                    },
                 },
-                "required": ["session_id", "role_name", "object_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eureka_history",
+            "description": (
+                "Query persisted Eureka run history (Phase 64 SQLite store). "
+                "Returns either a specific run + its iterations (when run_id is "
+                "given) or a paginated list of recent runs filtered by status."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "Specific run ID; if absent, returns list of runs.",
+                    },
+                    "status_filter": {
+                        "type": "string",
+                        "enum": ["running", "completed", "failed", "cancelled"],
+                        "description": "Filter listing by run status.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max runs to return (default 20).",
+                    },
+                    "db_path": {
+                        "type": "string",
+                        "description": "Optional SQLite file path; defaults to in-memory.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_usd_reference_post",
+            "description": (
+                "Run Phase 66 validator against a synthetic USD-reference state "
+                "(typically observed after add_usd_reference). Checks: target_set, "
+                "asset_exists, asset_too_large, prim_type_resolved, parent_exists, "
+                "depth_within_limit, not_circular, target_extension. Returns "
+                "findings categorized by severity."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string"},
+                    "reference_target": {"type": "string"},
+                    "asset_exists": {"type": "boolean"},
+                    "asset_size_bytes": {"type": "integer"},
+                    "prim_type_after": {"type": "string"},
+                    "parent_path": {"type": "string"},
+                    "depth": {"type": "integer"},
+                    "is_circular": {"type": "boolean"},
+                    "strict": {"type": "boolean"},
+                },
+                "required": ["prim_path", "reference_target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_assembly_constraint",
+            "description": (
+                "Pre-flight validation for an assembly constraint spec (Phase 72). "
+                "Pure Python; no Kit/PhysX. Checks name non-empty, target prims set, "
+                "type in known set, required params present per constraint type "
+                "(distance_between needs 'distance', angle_between needs 'angle_rad', "
+                "fixed_offset needs 'offset')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "type": {
+                        "type": "string",
+                        "enum": ["coincident_axes", "concentric", "tangent",
+                                 "parallel_planes", "fixed_offset", "angle_between",
+                                 "distance_between"],
+                    },
+                    "target_a": {"type": "object"},
+                    "target_b": {"type": "object"},
+                    "tolerance_m": {"type": "number"},
+                    "tolerance_rad": {"type": "number"},
+                    "params": {"type": "object"},
+                },
+                "required": ["name", "type", "target_a", "target_b"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "viewport_cache_stats",
+            "description": (
+                "Return Phase 77 ViewportHashCache statistics: hits, misses, "
+                "evictions, entries, total_bytes, hit_rate. Optional clear=true "
+                "resets the cache."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "clear": {
+                        "type": "boolean",
+                        "description": "If true, clear the cache before returning stats.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "retrieve_template_by_role",
+            "description": (
+                "Phase 20 role-based canonical-template retrieval. Ranks "
+                "templates by exact role-hint match, then fuzzy token overlap, "
+                "with legacy templates appended below role-based matches."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text user request."},
+                    "role_hints": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional role names to weight toward (e.g. 'picker').",
+                    },
+                    "max_results": {"type": "integer"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_joint_post",
+            "description": (
+                "Run Phase 67 validator against a synthetic articulated-joint "
+                "state (typically observed after create_articulated_joint). "
+                "Checks: prim_exists, body0_set, body1_set, axis_set, axis_valid, "
+                "limits_consistent, articulation_root, joint_type_known. Returns "
+                "findings categorized by severity."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string"},
+                    "joint_type": {
+                        "type": "string",
+                        "enum": ["revolute", "prismatic", "fixed", "spherical"],
+                    },
+                    "body0": {"type": "string"},
+                    "body1": {"type": "string"},
+                    "axis": {"type": "string", "enum": ["X", "Y", "Z"]},
+                    "lower_limit": {"type": "number"},
+                    "upper_limit": {"type": "number"},
+                    "articulation_root_path": {"type": "string"},
+                    "exists": {"type": "boolean"},
+                    "strict": {"type": "boolean"},
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_contact_sequence_plan",
+            "description": (
+                "Execute an N-step contact-sequence plan: approach → make_contact "
+                "→ apply_force / slide / twist → release / verify. Each step "
+                "specifies prim_a + prim_b, optional target force/torque/duration, "
+                "and a success predicate. Optional mutex_paths gate shared-resource "
+                "locking across multi-robot plans. dry_run=true (default) uses the "
+                "pure-Python state machine; dry_run=false requires Kit RPC + PhysX."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "List of step dicts. Each: step_idx, step_type, prim_a, prim_b, optional target_force_N, target_torque_Nm, duration_s, success_predicate, retry_count, mutex_paths.",
+                    },
+                    "abort_on_failure": {
+                        "type": "boolean",
+                        "description": "Stop plan execution on first failure. Default: true.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Use pure-Python state machine (default true). False requires Kit RPC.",
+                    },
+                },
+                "required": ["steps"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rebind_role",
+            "description": (
+                "Re-bind a role in a canonical template to a different object_id in the current "
+                "LayoutSpec. Used after an apply_layout_spec_to_scene call returns "
+                "status=needs_choice or status=rejected, to fix ambiguous or wrong bindings."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Multimodal session ID."},
+                    "role_name": {
+                        "type": "string",
+                        "description": "Name of the role to rebind (e.g. 'pick_target', 'tool').",
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "object_id in the LayoutSpec to bind the role to.",
+                    },
+                },
+                "required": ["session_id", "role_name", "target"],
             },
         },
     },

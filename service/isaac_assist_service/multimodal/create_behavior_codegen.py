@@ -87,10 +87,10 @@ PATTERN_REQUIRED_PARAMS: Dict[str, List[str]] = {
 _PICK_PLACE_TEMPLATE = '''\
 """Auto-generated pick-and-place behavior for Isaac Sim 5.x."""
 import numpy as np
-import omni.isaac.cortex
-from omni.isaac.cortex.cortex_world import CortexWorld
-from omni.isaac.cortex.df import DfNetwork, DfState
-from omni.isaac.cortex.behaviors.franka import simple_state_machine
+import isaacsim.cortex.framework
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.df import DfNetwork, DfState
+from isaacsim.cortex.framework.behaviors.franka import simple_state_machine
 
 
 PICK_POSE = {pick_pose}
@@ -131,9 +131,9 @@ def make_behavior_network() -> DfNetwork:
 _NAVIGATE_TO_TEMPLATE = '''\
 """Auto-generated navigate-to behavior for Isaac Sim 5.x."""
 import numpy as np
-import omni.isaac.cortex
-from omni.isaac.cortex.cortex_world import CortexWorld
-from omni.isaac.cortex.df import DfNetwork, DfState
+import isaacsim.cortex.framework
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.df import DfNetwork, DfState
 
 
 TARGET_XY = {target_xy}
@@ -164,9 +164,9 @@ def make_behavior_network() -> DfNetwork:
 _SCAN_GRID_TEMPLATE = '''\
 """Auto-generated scan-grid behavior for Isaac Sim 5.x."""
 import numpy as np
-import omni.isaac.cortex
-from omni.isaac.cortex.cortex_world import CortexWorld
-from omni.isaac.cortex.df import DfNetwork, DfState
+import isaacsim.cortex.framework
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.df import DfNetwork, DfState
 
 
 GRID_ORIGIN = {grid_origin}
@@ -207,9 +207,9 @@ def make_behavior_network() -> DfNetwork:
 _PRESS_BUTTON_TEMPLATE = '''\
 """Auto-generated press-button behavior for Isaac Sim 5.x."""
 import numpy as np
-import omni.isaac.cortex
-from omni.isaac.cortex.cortex_world import CortexWorld
-from omni.isaac.cortex.df import DfNetwork, DfState
+import isaacsim.cortex.framework
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.df import DfNetwork, DfState
 
 
 BUTTON_PATH = "{button_path}"
@@ -257,9 +257,9 @@ def make_behavior_network() -> DfNetwork:
 _FOLLOW_PATH_TEMPLATE = '''\
 """Auto-generated follow-path behavior for Isaac Sim 5.x."""
 import numpy as np
-import omni.isaac.cortex
-from omni.isaac.cortex.cortex_world import CortexWorld
-from omni.isaac.cortex.df import DfNetwork, DfState
+import isaacsim.cortex.framework
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.df import DfNetwork, DfState
 
 
 WAYPOINTS = {waypoints}
@@ -292,9 +292,9 @@ def make_behavior_network() -> DfNetwork:
 _GUARD_ZONE_TEMPLATE = '''\
 """Auto-generated guard-zone behavior for Isaac Sim 5.x."""
 import numpy as np
-import omni.isaac.cortex
-from omni.isaac.cortex.cortex_world import CortexWorld
-from omni.isaac.cortex.df import DfNetwork, DfState
+import isaacsim.cortex.framework
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.df import DfNetwork, DfState
 
 
 ZONE_BBOX = {zone_bbox}  # [[x_min, y_min, z_min], [x_max, y_max, z_max]]
@@ -329,9 +329,9 @@ def make_behavior_network() -> DfNetwork:
 _SYNCHRONIZE_WITH_TEMPLATE = '''\
 """Auto-generated synchronize-with behavior for Isaac Sim 5.x."""
 import numpy as np
-import omni.isaac.cortex
-from omni.isaac.cortex.cortex_world import CortexWorld
-from omni.isaac.cortex.df import DfNetwork, DfState
+import isaacsim.cortex.framework
+from isaacsim.cortex.framework.cortex_world import CortexWorld
+from isaacsim.cortex.framework.df import DfNetwork, DfState
 
 
 PARTNER_ROBOT_PATH = "{partner_robot_path}"
@@ -498,11 +498,18 @@ class CreateBehaviorCodeGenerator:
                 "(pre-5.x API); use CortexWorld.get_robot() instead"
             )
 
-        # Must import omni.isaac.cortex
-        if "omni.isaac.cortex" not in code:
+        # Must NOT use deprecated pre-5.x Cortex namespace
+        if "omni.isaac.cortex" in code:
             issues.append(
-                "Code does not import omni.isaac.cortex; "
-                "add 'import omni.isaac.cortex' or equivalent"
+                "uses deprecated pre-5.x Cortex namespace; "
+                "expected `isaacsim.cortex.framework`"
+            )
+
+        # Must import isaacsim.cortex.framework
+        if "isaacsim.cortex.framework" not in code:
+            issues.append(
+                "Code does not import isaacsim.cortex.framework; "
+                "add 'import isaacsim.cortex.framework' or equivalent"
             )
 
         # Must define a class or function

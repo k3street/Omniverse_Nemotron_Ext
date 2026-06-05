@@ -22,6 +22,24 @@ from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
+# CRM-C1 — compliance mode closed enum
+# ---------------------------------------------------------------------------
+
+COMPLIANCE_MODE_ENUM = frozenset({
+    "admittance",
+    "cartesian_compliance_fdcc",
+    "cartesian_impedance",
+    "variable_impedance",
+    "franka_cartesian_impedance",
+    "null",
+})
+"""
+Closed set of legal compliance_mode values (excluding Python None which means
+"unset / auto-pick at planning time").  Validated in validate.py.
+"""
+
+
+# ---------------------------------------------------------------------------
 # L0 — closed enums
 # ---------------------------------------------------------------------------
 
@@ -292,6 +310,22 @@ class LayoutSpec(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
     """T2 substitution targets — values that vary the same template's behavior
     without changing which template matches. Not read by retrieval."""
+
+    # CRM-C1 — compliance template fields (Phase 20-managed) ----------------
+    compliance_mode: Optional[str] = None
+    """Compliance variant to activate when the template is instantiated.
+    Must be a member of COMPLIANCE_MODE_ENUM or None (auto-pick at planning
+    time via autopick_compliance_mode).  Validated in validate.py."""
+
+    compliance_params: Dict[str, Any] = Field(default_factory=dict)
+    """Free-form controller parameters passed verbatim to the compliance
+    handler (e.g. stiffness K, damping D, mass M).  No nested validation —
+    handler is responsible for interpreting its own schema."""
+
+    compliance_handoff_at: float = Field(default=0.5, ge=0.0, le=1.0)
+    """Fraction in [0, 1] of the planned trajectory at which rigid execution
+    hands off to the compliance controller.  0.0 = immediately compliant;
+    1.0 = rigid throughout (no handoff).  Validated in validate.py."""
 
     source: Source
 

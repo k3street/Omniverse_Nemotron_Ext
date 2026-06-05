@@ -921,7 +921,15 @@ def _gen_setup_contact_sensors(args: Dict) -> str:
 
 
 def _gen_check_collision_mesh_code(prim_path: str) -> str:
-    """Build the read-only Kit/USD/trimesh analysis script for check_collision_mesh."""
+    """Build the read-only Kit/USD/trimesh analysis script for
+    ``check_collision_mesh``.
+
+    NOT a dispatch target — this is an internal helper used by
+    ``diagnostics._handle_check_collision_mesh``. The dispatch entry
+    point ``codegen["check_collision_mesh"]`` is wired in
+    ``diagnostics.register`` to ``_gen_fix_collision_mesh``; this
+    function is invoked only from inside the read-only data handler.
+    """
     # Phase 8 wave 6 — _PHYSX_HULL_MAX_VERTS migrated to module body.
 
     safe_path = prim_path.replace("'", "").replace('"', "")
@@ -2234,7 +2242,7 @@ def register(
     Called by `handlers/_dispatch.py:register_handlers()` which is the
     sole dispatch entry point from `tool_executor.py`.
     """
-    # Data handlers (18)
+    # Data handlers (19)
     data["get_angular_velocity"] = _handle_get_angular_velocity
     data["get_articulation_mass"] = _handle_get_articulation_mass
     data["get_articulation_state"] = _handle_get_articulation_state
@@ -2250,6 +2258,7 @@ def register(
     data["get_kinematic_state"] = _handle_get_kinematic_state
     data["get_linear_velocity"] = _handle_get_linear_velocity
     data["get_mass"] = _handle_get_mass
+    data["get_physics_errors"] = _handle_get_physics_errors
     data["get_physics_scene_config"] = _handle_get_physics_scene_config
     data["lookup_material"] = _handle_lookup_material
     data["suggest_physics_settings"] = _handle_suggest_physics_settings

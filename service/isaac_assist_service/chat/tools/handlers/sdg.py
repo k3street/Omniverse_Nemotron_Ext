@@ -835,6 +835,88 @@ print(json.dumps({{
 
 
 # ---------------------------------------------------------------------------
+# Phase 61 — sample_correlated_dr (typed in-process sampler)
+
+
+async def _handle_sample_correlated_dr(args: Dict) -> Dict[str, Any]:
+    """Draw N samples from a correlated multivariate normal preset.
+
+    Uses the Phase 61 Cholesky-based sampler in
+    `multimodal.sdg_correlated_dr`. Pure Python, no Kit/GPU required.
+
+    Args:
+        preset: optional name. ``"sensor_camera"`` selects the bundled
+            SENSOR_CAMERA_PRESET (4 axes, 3 PSD correlation pairs).
+        axes: list of dicts ``[{name, mean, std}, ...]`` (used when no preset).
+        correlations: list of dicts ``[{axis_a, axis_b, rho}, ...]``.
+        n_samples: number of draws. Defaults to preset's ``num_samples``.
+        seed: optional int for reproducibility.
+
+    Returns:
+        Dict with: ``samples`` (list of {axis: value}), ``empirical_rho``
+        (per requested pair), ``axis_names``, ``n_samples``.
+    """
+    import random as _random
+    from service.isaac_assist_service.multimodal.sdg_correlated_dr import (
+        CorrelatedDRConfig,
+        CorrelationPair,
+        DRAxis,
+        SENSOR_CAMERA_PRESET,
+        empirical_correlation,
+        sample_correlated,
+    )
+
+    preset = args.get("preset")
+    if preset == "sensor_camera":
+        config = SENSOR_CAMERA_PRESET
+    else:
+        raw_axes = args.get("axes") or []
+        raw_corr = args.get("correlations") or []
+        try:
+            axes = [
+                DRAxis(name=a["name"], mean=float(a["mean"]), std=float(a["std"]))
+                for a in raw_axes
+            ]
+            correlations = [
+                CorrelationPair(
+                    axis_a=c["axis_a"], axis_b=c["axis_b"], rho=float(c["rho"])
+                )
+                for c in raw_corr
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            return {"error": f"malformed axes/correlations: {exc}"}
+        if not axes:
+            return {"error": "must specify preset or non-empty axes"}
+        config = CorrelatedDRConfig(
+            name=args.get("name", "custom"),
+            axes=axes,
+            correlations=correlations,
+        )
+
+    n = args.get("n_samples")
+    seed = args.get("seed")
+    rng = _random.Random(int(seed)) if seed is not None else _random.Random()
+    try:
+        samples = sample_correlated(config, rng=rng, n_samples=int(n) if n else None)
+    except ValueError as exc:
+        return {"error": f"correlation matrix not PSD: {exc}"}
+
+    empirical = {
+        f"{pair.axis_a}__{pair.axis_b}": empirical_correlation(
+            samples, pair.axis_a, pair.axis_b
+        )
+        for pair in config.correlations
+    }
+    return {
+        "preset": preset,
+        "axis_names": config.axis_names(),
+        "n_samples": len(samples),
+        "samples": samples,
+        "empirical_rho": empirical,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
@@ -847,9 +929,10 @@ def register(
     Called by `handlers/_dispatch.py:register_handlers()` which is the
     sole dispatch entry point from `tool_executor.py`.
     """
-    # Data handlers (2)
+    # Data handlers (3)
     data["benchmark_sdg"] = _handle_benchmark_sdg
     data["preview_sdg"] = _handle_preview_sdg
+    data["sample_correlated_dr"] = _handle_sample_correlated_dr
 
     # Code-gen handlers (10)
     codegen["add_domain_randomizer"] = _gen_add_domain_randomizer

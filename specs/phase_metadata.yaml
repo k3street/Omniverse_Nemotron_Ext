@@ -175,8 +175,9 @@
   - tests/test_role_based_templates.py
   loc: 250
   effort_min: 90
-  blocked_by:
+  related_to:
   - '19'
+  related_to_reason: 'Phase 19 hosts the end-to-end Kit RPC application path that consumes role-ranked templates; Phase 20''s retriever has no code-import dependency on Phase 19.'
 '21':
   title: 'Role library: scene-template index by role'
   agent_type: sonnet-mechanical
@@ -198,8 +199,9 @@
   - tests/test_sync_from_stage.py
   loc: 400
   effort_min: 180
-  blocked_by:
+  related_to:
   - '19'
+  related_to_reason: 'Phase 22 pairs with Phase 19 (round-trip) but the SPEC/PARSER layer parses synthetic prim dicts and has no code-import dependency on Phase 19''s code generator.'
   needs_runtime: Kit RPC /list_prims
 '23':
   title: Snap engine hardening
@@ -214,9 +216,18 @@
   loc: 350
 '24':
   title: Agent confirm bar wired to workflow lifecycle
-  agent_type: TS-only
-  status: scaffold
-  note: ConfirmBar.vue
+  agent_type: TS-only → upgraded with Python backend
+  status: landed
+  landed_date: '2026-05-13'
+  note: ConfirmBar.tsx + floorPlanStore workflow wiring + backend routes
+  gate: pytest tests/test_phase_24_commit_canvas_workflow.py — backend route accepts
+    workflow_id and forwards approve/reject; TypeScript interface defined
+  files:
+  - service/isaac_assist_service/multimodal/routes.py
+  - web/floor-plan-ui/src/components/ConfirmBar.tsx
+  - web/floor-plan-ui/src/store/floorPlanStore.ts
+  - tests/test_phase_24_commit_canvas_workflow.py
+  loc: 400
 24b:
   title: Canvas SPA interactive editing parity
   agent_type: sonnet-bounded
@@ -268,9 +279,25 @@
   note: 5 canonical templates — data
 '29':
   title: 'Canvas mirror panel: live state-sync from Kit'
-  agent_type: TS-only
-  status: scaffold
-  note: MirrorPanel.vue
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/LISTENER layer landed — StageEventClassifier (ObjectsChanged →
+    prim_added/prim_removed/prim_transformed, AttributeValueChanged →
+    attribute_changed, MetadataChanged → metadata_changed), StageEvent
+    dataclass, DebouncedEventDispatcher (enqueue/flush/should_flush/
+    pending_count), coalesce_events (add+remove drop, last-transform,
+    last-attr). 32 pytest tests pass. Kit Sdf.Notice wiring remains
+    scaffold (guarded behind try/except at module level).
+  gate: >-
+    pytest tests/test_phase_29_stage_event_listener.py — event filter
+    classifies prim_add/prim_remove/prim_transform, debounce coalesces
+    rapid events
+  files:
+  - exts/isaac_6.0/omni.isaac.assist/omni/isaac/assist/ui/stage_event_listener.py
+  - tests/test_phase_29_stage_event_listener.py
+  loc: 280
 '30':
   title: Multimodal "force_freeform" path
   agent_type: sonnet-mechanical
@@ -800,10 +827,12 @@
   agent_type: opus-runtime
   status: landed
   landed_date: '2026-05-13'
-  note: surface gripper force/hold-capacity model + gripper-type registry
-  gate: pytest tests/test_phase_80_surface_gripper_model.py — suction force model returns physically reasonable values; gripper registry covers 8+ types
+  note: surface gripper force/hold-capacity model + gripper-type registry; surface_gripper_suction.py is canonical; surface_gripper_model.py is shim alias
+  gate: pytest tests/test_phase_80_surface_gripper_suction.py tests/test_phase_80_surface_gripper_model.py — suction force model returns physically reasonable values; gripper registry covers 8+ types
   files:
+  - service/isaac_assist_service/multimodal/surface_gripper_suction.py
   - service/isaac_assist_service/multimodal/surface_gripper_model.py
+  - tests/test_phase_80_surface_gripper_suction.py
   - tests/test_phase_80_surface_gripper_model.py
   loc: 280
 80b:

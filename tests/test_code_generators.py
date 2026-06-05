@@ -310,6 +310,772 @@ _TEST_VECTORS = [
         {"task": "Isaac-Reach-Franka-v0", "algo": "ppo", "num_steps": 100000},
         ["IsaacLab", "train"],
     ),
+    # ----- qa-20-followup: drain _KNOWN_UNTESTED ratchet (batch 1) -----
+    (
+        "add_default_light",
+        {},
+        ["UsdLux.DomeLight.Define", "omni.usd.get_context().get_stage()"],
+    ),
+    (
+        "enable_extension",
+        {"ext_id": "omni.foo"},
+        ["get_extension_manager", "omni.foo"],
+    ),
+    (
+        "save_stage",
+        {"path": "/tmp/scene_out.usd"},
+        ["omni.usd.get_context()", "/tmp/scene_out.usd"],
+    ),
+    (
+        "open_stage",
+        {"path": "/tmp/scene_in.usd"},
+        ["omni.usd.get_context()", "/tmp/scene_in.usd"],
+    ),
+    (
+        "export_stage",
+        {"path": "/tmp/x.usda", "format": "usda"},
+        ["/tmp/x.usda", "usda"],
+    ),
+    (
+        "focus_viewport_on",
+        {"prim_path": "/World/Cube"},
+        ["import omni.usd", "/World/Cube"],
+    ),
+    (
+        "highlight_prim",
+        {"prim_path": "/World/Hot"},
+        ["/World/Hot"],
+    ),
+    (
+        "group_prims",
+        {"prim_paths": ["/World/A", "/World/B"], "group_name": "Grp"},
+        ["import omni.usd", "Grp"],
+    ),
+    (
+        "duplicate_prims",
+        {"prim_paths": ["/World/A"], "offset": [1, 0, 0]},
+        ["import omni.usd", "/World/A"],
+    ),
+    (
+        "delete_node",
+        {"graph_path": "/World/G", "node_name": "N1"},
+        ["import omni.graph.core", "/World/G"],
+    ),
+    (
+        "debug_graph",
+        {"graph_path": "/World/G"},
+        ["import omni.graph.core", "/World/G"],
+    ),
+    (
+        "explain_graph",
+        {"graph_path": "/World/G"},
+        ["import omni.graph.core", "/World/G"],
+    ),
+    (
+        "preflight_check",
+        {},
+        ["omni.usd.get_context().get_stage()", "issues"],
+    ),
+    (
+        "flatten_layers",
+        {"output_path": "/tmp/flat.usd"},
+        ["omni.usd.get_context().get_stage()", "/tmp/flat.usd"],
+    ),
+    (
+        "show_workspace",
+        {"articulation_path": "/World/Robot"},
+        ["debug_draw", "/World/Robot"],
+    ),
+    (
+        "show_tf_tree",
+        {},
+        ["ROS_DISTRO"],
+    ),
+    (
+        "teach_robot_pose",
+        {"robot_path": "/World/R", "pose_name": "home"},
+        ["/World/R", "home"],
+    ),
+    (
+        "start_teleop_session",
+        {"robot_path": "/World/R"},
+        ["import omni.usd", "/World/R"],
+    ),
+    (
+        "stop_teleop_session",
+        {},
+        ["Stop Teleop Session", "import omni.usd"],
+    ),
+    # ----- qa-20-followup: drain _KNOWN_UNTESTED ratchet (batch 2) -----
+    (
+        "set_keyframe",
+        {"prim_path": "/W/Cube", "attr": "translate", "value": [1.0, 2.0, 3.0], "time": 10},
+        ["omni.usd.get_context()", "/W/Cube"],
+    ),
+    (
+        "set_camera_params",
+        {"camera_path": "/W/Cam", "focal_length": 50},
+        ["omni.usd.get_context()", "/W/Cam"],
+    ),
+    (
+        "set_camera_look_at",
+        {"camera_path": "/W/Cam", "target": [0.0, 0.0, 0.0]},
+        ["import omni.usd", "/W/Cam"],
+    ),
+    (
+        "set_render_resolution",
+        {"width": 1920, "height": 1080},
+        ["omni.kit.viewport.utility", "1920", "1080"],
+    ),
+    (
+        "set_render_mode",
+        {"mode": "path_traced"},
+        ["carb.settings", "PathTracing"],
+    ),
+    (
+        "set_light_intensity",
+        {"light_path": "/W/L", "intensity": 1000},
+        ["import omni.usd", "/W/L"],
+    ),
+    (
+        "set_light_color",
+        {"light_path": "/W/L", "rgb": [1.0, 0.5, 0.2]},
+        ["import omni.usd", "/W/L"],
+    ),
+    (
+        "set_drive_gains",
+        {"joint_path": "/W/J", "kp": 500, "kd": 50},
+        ["UsdPhysics", "/W/J"],
+    ),
+    (
+        "set_joint_limits",
+        {"joint_path": "/W/J", "lower": -1.57, "upper": 1.57},
+        ["UsdPhysics", "/W/J"],
+    ),
+    (
+        "set_linear_velocity",
+        {"prim_path": "/W/B", "velocity": [0.0, 0.0, 0.5]},
+        ["import omni.usd", "/W/B"],
+    ),
+    (
+        "set_semantic_label",
+        {"prim_path": "/W/C", "class_name": "cube"},
+        ["Semantics", "/W/C"],
+    ),
+    (
+        "remove_semantic_label",
+        {"prim_path": "/W/C"},
+        ["import omni.usd", "/W/C"],
+    ),
+    (
+        "set_variant",
+        {"prim_path": "/W/Robot", "variant_set": "Gripper", "variant": "Default"},
+        ["omni.usd", "/W/Robot"],
+    ),
+    (
+        "set_timeline_range",
+        {"start": 0, "end": 100},
+        ["omni.timeline", "100"],
+    ),
+    (
+        "set_edit_target",
+        {"layer_path": "/W/Layer.usda"},
+        ["import omni.usd", "/W/Layer.usda"],
+    ),
+    (
+        "set_environment_background",
+        {"preset": "sky"},
+        ["import omni.usd"],
+    ),
+    (
+        "set_graph_variable",
+        {"graph_path": "/W/G", "name": "x", "value": 1.0},
+        ["import omni.graph.core", "/W/G"],
+    ),
+    (
+        "set_audio_property",
+        {"prim_path": "/W/A", "prop": "volume", "value": 0.5},
+        ["UsdMedia", "/W/A"],
+    ),
+    (
+        "set_prim_metadata",
+        {"prim_path": "/W/C", "key": "mykey", "value": "myval"},
+        ["import omni.usd", "/W/C"],
+    ),
+    (
+        "set_render_config",
+        {"renderer": "rtx", "samples_per_pixel": 8},
+        ["import omni.usd", "/Render/Vars"],
+    ),
+    (
+        "set_clearance_monitor",
+        {"articulation_path": "/W/R", "min_distance": 0.1},
+        ["import omni.usd", "/W/R"],
+    ),
+    (
+        "visualize_clearance",
+        {"articulation_path": "/W/R"},
+        ["debug_draw", "/W/R"],
+    ),
+    (
+        "visualize_collision_mesh",
+        {"prim_path": "/W/B"},
+        ["UsdPhysics", "/W/B"],
+    ),
+    (
+        "visualize_forces",
+        {"articulation_path": "/W/R"},
+        ["import omni.usd", "/W/R"],
+    ),
+    (
+        "teleop_safety_config",
+        {"robot_path": "/W/R", "max_velocity": 1.0},
+        ["Teleop Safety", "/W/R"],
+    ),
+    (
+        "record_demo_video",
+        {"output_path": "/tmp/v.mp4"},
+        ["/tmp/v.mp4"],
+    ),
+    # ----- qa-20-followup: drain _KNOWN_UNTESTED ratchet (batch 3) -----
+    (
+        "activate_area",
+        {"area_id": "A1", "prim_scope": "/W/Areas"},
+        ["omni.usd.get_context()", "/W/Areas"],
+    ),
+    (
+        "add_latency_randomization",
+        {"mean_ms": 50, "std_ms": 10},
+        ["latency randomization"],
+    ),
+    (
+        "add_node",
+        {"graph_path": "/W/G", "node_type": "omni.graph.nodes.Add", "name": "N1"},
+        ["omni.graph.core", "/W/G"],
+    ),
+    (
+        "add_sublayer",
+        {"layer_path": "/tmp/sub.usda"},
+        ["omni.usd", "/tmp/sub.usda"],
+    ),
+    (
+        "add_usd_reference",
+        {"prim_path": "/W/Ref", "usd_url": "/tmp/robot.usd"},
+        ["omni.usd", "/W/Ref"],
+    ),
+    (
+        "apply_force",
+        {"prim_path": "/W/B", "force": [0.0, 0.0, 100.0]},
+        ["UsdPhysics", "/W/B"],
+    ),
+    (
+        "apply_physics_material",
+        {"prim_path": "/W/B", "material_name": "Steel"},
+        ["UsdPhysics", "/W/B"],
+    ),
+    (
+        "assemble_robot",
+        {"base_path": "/W/Base", "attachment_path": "/W/EE"},
+        ["Phase 70", "RobotAssembler"],
+    ),
+    (
+        "assign_class_to_children",
+        {"prim_path": "/W/Parent", "class_name": "cube"},
+        ["Semantics", "/W/Parent"],
+    ),
+    (
+        "batch_delete_prims",
+        {"prim_paths": ["/W/A", "/W/B"]},
+        ["omni.usd", "/W/A"],
+    ),
+    (
+        "batch_set_attributes",
+        {"updates": [{"prim_path": "/W/A", "attr": "visibility", "value": "invisible"}]},
+        ["batch_set_attributes"],
+    ),
+    (
+        "bulk_apply_schema",
+        {"prim_paths": ["/W/A"], "schema": "PhysicsCollisionAPI"},
+        ["CollisionAPI"],
+    ),
+    (
+        "bulk_set_attribute",
+        {"prim_paths": ["/W/A"], "attr": "visibility", "value": "invisible"},
+        ["omni.usd", "/W/A"],
+    ),
+    (
+        "check_physics_health",
+        {},
+        ["UsdPhysics", "import omni.usd"],
+    ),
+    (
+        "check_singularity",
+        {"articulation_path": "/W/R", "target_position": [1, 0, 0.5]},
+        ["isaacsim", "/W/R"],
+    ),
+    (
+        "compute_convex_hull",
+        {"prim_path": "/W/Mesh"},
+        ["UsdGeom", "/W/Mesh"],
+    ),
+    (
+        "configure_camera",
+        {"camera_path": "/W/Cam", "fov": 60},
+        ["UsdGeom", "/W/Cam"],
+    ),
+    (
+        "configure_coco_yolo_writer",
+        {"output_dir": "/tmp/coco", "format": "coco"},
+        ["omni.replicator.core", "/tmp/coco"],
+    ),
+    (
+        "configure_correlated_dr",
+        {
+            "parameter_groups": [
+                {"params": ["a", "b"], "ranges": {"a": [0, 1]}, "correlation": 0.5}
+            ]
+        },
+        ["Correlated", "import numpy"],
+    ),
+    (
+        "configure_differential_sdg",
+        {"baseline_pipeline_id": "p1", "candidate_pipeline_id": "p2"},
+        ["omni.replicator.core"],
+    ),
+    (
+        "configure_ros2_bridge",
+        {},
+        ["configure_ros2_bridge"],
+    ),
+    (
+        "configure_ros2_time",
+        {"mode": "system"},
+        ["omni.graph.core"],
+    ),
+    (
+        "configure_self_collision",
+        {"articulation_path": "/W/R", "mode": "enable"},
+        ["UsdPhysics", "/W/R"],
+    ),
+    (
+        "configure_teleop_mapping",
+        {"robot_path": "/W/R", "mapping_file": "/tmp/m.json"},
+        ["UsdPhysics", "Teleop"],
+    ),
+    (
+        "configure_zmq_stream",
+        {"camera_prim": "/W/Cam", "endpoint": "tcp://localhost:5555"},
+        ["omni.graph.core"],
+    ),
+    (
+        "connect_nodes",
+        {"graph_path": "/W/G", "src": "A.out", "dst": "B.in"},
+        ["omni.graph.core", "/W/G"],
+    ),
+    (
+        "create_audio_prim",
+        {"prim_path": "/W/Audio", "audio_file": "/tmp/x.wav", "position": [0, 0, 0]},
+        ["UsdMedia", "/W/Audio"],
+    ),
+    (
+        "create_behavior",
+        {
+            "robot_path": "/W/R",
+            "behavior_name": "pp",
+            "behavior_type": "pick_place",
+            "pick_pose": {"x": 0, "y": 0, "z": 0.5, "roll": 0, "pitch": 0, "yaw": 0},
+            "place_pose": {"x": 1, "y": 0, "z": 0.5, "roll": 0, "pitch": 0, "yaw": 0},
+        },
+        ["isaacsim.cortex.framework"],
+    ),
+    (
+        "create_bin",
+        {"prim_path": "/W/Bin"},
+        ["UsdGeom", "/W/Bin"],
+    ),
+    (
+        "create_broken_scene",
+        {"scenario": "cube_clipping"},
+        ["Broken scene"],
+    ),
+    (
+        "create_calibration_experiment",
+        {"experiment_name": "cam_intrinsics"},
+        ["Calibration experiment", "import numpy"],
+    ),
+    (
+        "create_conveyor",
+        {"prim_path": "/W/Conv", "length": 2.0},
+        ["UsdPhysics", "/W/Conv"],
+    ),
+    (
+        "create_graph",
+        {"graph_path": "/W/G"},
+        ["template"],
+    ),
+    (
+        "create_hdri_skydome",
+        {"hdri_path": "/tmp/sky.hdr"},
+        ["UsdLux", "/tmp/sky.hdr"],
+    ),
+    (
+        "create_sdg_pipeline",
+        {"output_dir": "/tmp/sdg"},
+        ["omni.replicator.core"],
+    ),
+    (
+        "enable_deterministic_mode",
+        {"seed": 42},
+        ["deterministic", "import os"],
+    ),
+    (
+        "enable_post_process",
+        {"effect": "bloom"},
+        ["omni.usd"],
+    ),
+    (
+        "enforce_class_balance",
+        {
+            "pipeline_id": "p1",
+            "target_distribution": {"cube": 0.5, "sphere": 0.5},
+        },
+        ["omni.replicator.core"],
+    ),
+    (
+        "export_template",
+        {"name": "pick_place", "output_path": "/tmp/t.json"},
+        ["import json"],
+    ),
+    (
+        "fix_collision_mesh",
+        {"prim_path": "/W/M"},
+        ["UsdPhysics", "/W/M"],
+    ),
+    (
+        "fix_ros2_qos",
+        {"topic": "/img"},
+        ["omni.graph.core", "/img"],
+    ),
+    (
+        "generate_occupancy_map",
+        {"output_path": "/tmp/map.png"},
+        ["MapGenerator"],
+    ),
+    (
+        "grasp_object",
+        {"robot_path": "/W/R", "target_prim": "/W/Cube"},
+        ["UsdGeom", "/W/R"],
+    ),
+    (
+        "import_template",
+        {"file_path": "/tmp/t.json"},
+        ["import json"],
+    ),
+    (
+        "load_robot_pose",
+        {"robot_path": "/W/R", "pose_name": "home"},
+        ["import os", "home"],
+    ),
+    (
+        "optimize_scene",
+        {},
+        ["UsdPhysics", "import json"],
+    ),
+    (
+        "preview_dr",
+        {"preset": "lighting_jitter"},
+        ["preview"],
+    ),
+    (
+        "quick_demo",
+        {"scenario": "pick_place"},
+        ["Quick Demo Builder", "franka"],
+    ),
+    (
+        "record_waypoints",
+        {"articulation_path": "/W/R", "output_path": "/tmp/wp.json"},
+        ["isaacsim", "/W/R"],
+    ),
+    (
+        "replay_rosbag",
+        {"bag_path": "/tmp/bag.db3"},
+        ["import subprocess", "/tmp/bag.db3"],
+    ),
+    (
+        "replay_trajectory",
+        {"articulation_path": "/W/R", "trajectory_path": "/tmp/t.json"},
+        ["isaacsim", "/W/R"],
+    ),
+    (
+        "render_video",
+        {"output_path": "/tmp/v.mp4", "duration": 5},
+        ["/tmp/v.mp4"],
+    ),
+    (
+        "robot_wizard",
+        {"robot_class": "franka_panda"},
+        ["robot_wizard"],
+    ),
+    (
+        "scatter_on_surface",
+        {"surface_path": "/W/Table", "count": 10},
+        ["UsdGeom", "random"],
+    ),
+    (
+        "set_joint_velocity_limit",
+        {"joint_path": "/W/J", "vel_limit": 3.14},
+        ["UsdPhysics", "/W/J"],
+    ),
+    (
+        "set_motion_policy",
+        {"articulation_path": "/W/R", "policy_type": "rmpflow"},
+        ["set_motion_policy"],
+    ),
+    (
+        "set_physics_scene_config",
+        {"gravity": [0, 0, -9.81]},
+        ["UsdPhysics"],
+    ),
+    (
+        "setup_multi_rate",
+        {"physics_dt": 0.005, "render_dt": 0.033},
+        ["Dual-rate", "VecEnv"],
+    ),
+    (
+        "start_teaching_mode",
+        {"articulation_path": "/W/R", "mode": "free_drive"},
+        ["start_teaching_mode"],
+    ),
+    (
+        "tune_gains",
+        {"articulation_path": "/W/R"},
+        ["UsdPhysics", "/W/R"],
+    ),
+    # ----- qa-20-followup: drain _KNOWN_UNTESTED ratchet (batch 4) -----
+    (
+        "add_domain_randomizer",
+        {"target": "/W/L", "param_path": "inputs:intensity", "randomizer_type": "uniform", "lo": 500, "hi": 2000},
+        ["omni.replicator.core"],
+    ),
+    (
+        "add_proximity_sensor",
+        {"sensor_path": "/W/R/Sensor", "parent_path": "/W/R", "position": [0, 0, 1], "detection_distance": 1.0},
+        ["UsdPhysics", "/W/R"],
+    ),
+    (
+        "check_path_clearance",
+        {"articulation_path": "/W/R", "trajectory": [[0, 0, 0], [1, 0, 0]]},
+        ["UsdPhysics", "/W/R"],
+    ),
+    (
+        "clone_envs",
+        {"source_path": "/W/Env", "num_envs": 4},
+        ["GridCloner"],
+    ),
+    (
+        "cloud_download_results",
+        {"job_id": "j1", "output_dir": "/tmp/out"},
+        ["import subprocess", "j1"],
+    ),
+    (
+        "create_conveyor_track",
+        {"waypoints": [[0, 0, 0], [1, 0, 0]]},
+        ["UsdGeom"],
+    ),
+    (
+        "create_gripper",
+        {"articulation_path": "/W/R", "gripper_type": "parallel_jaw"},
+        ["ParallelGripper"],
+    ),
+    (
+        "debug_draw",
+        {"prim_path": "/W/X", "draw_type": "bbox", "points": [[0, 0, 0], [1, 0, 0]]},
+        ["debug_draw"],
+    ),
+    (
+        "define_grasp_pose",
+        {"robot_path": "/W/R", "object_path": "/W/C", "pose_name": "top"},
+        ["UsdGeom", "/W/R"],
+    ),
+    (
+        "evaluate_groot",
+        {"task": "pick_place", "checkpoint_path": "/tmp/ck.pt"},
+        ["import subprocess"],
+    ),
+    (
+        "evaluate_reward",
+        {"reward_code": "r=1", "env_id": "e1"},
+        ["import subprocess"],
+    ),
+    (
+        "finetune_groot",
+        {"demo_data": "/tmp/d.h5", "output_dir": "/tmp/out"},
+        ["import subprocess", "GR00T"],
+    ),
+    (
+        "generate_eval_harness",
+        {"task_name": "pick_place", "output_dir": "/tmp/eval"},
+        ["Evaluation harness", "pick_place"],
+    ),
+    (
+        "generate_teleop_watchdog_script",
+        {"robot_path": "/W/R", "output_path": "/tmp/wd.py"},
+        ["Teleop watchdog"],
+    ),
+    (
+        "load_payload",
+        {"prim_path": "/W/R/EE", "mass": 1.0},
+        ["import omni.usd", "/W/R/EE"],
+    ),
+    (
+        "merge_meshes",
+        {"prim_paths": ["/W/A", "/W/B"], "output_path": "/W/Merged"},
+        ["MeshMerger"],
+    ),
+    (
+        "monitor_joint_effort",
+        {"articulation_path": "/W/R", "threshold": 100.0},
+        ["omni.physx", "/W/R"],
+    ),
+    (
+        "navigate_to",
+        {"robot_path": "/W/R", "target_position": [1, 1, 0]},
+        ["wheeled_robots", "/W/R"],
+    ),
+    (
+        "optimize_collision",
+        {"prim_path": "/W/M", "approximation": "convexHull"},
+        ["UsdPhysics", "/W/M"],
+    ),
+    (
+        "play_animation",
+        {"animation_path": "/W/A", "start": 0, "end": 100},
+        ["omni.timeline"],
+    ),
+    (
+        "publish_robot_description",
+        {"articulation_path": "/W/R", "topic": "/robot_description"},
+        ["UsdPhysics", "rclpy"],
+    ),
+    (
+        "record_trajectory",
+        {"articulation": "/W/R", "duration": 5.0},
+        ["import omni.usd"],
+    ),
+    (
+        "run_arena_benchmark",
+        {"env_id": "e1", "arena_id": "a1"},
+        ["import subprocess", "num_episodes"],
+    ),
+    (
+        "setup_contact_sensors",
+        {"articulation_path": "/W/R", "body_names": ["link1"]},
+        ["ContactSensorCfg", "/W/R"],
+    ),
+    (
+        "simplify_collision",
+        {"prim_path": "/W/M", "approximation": "convexHull"},
+        ["UsdPhysics", "/W/M"],
+    ),
+    (
+        "solve_ik",
+        {"articulation_path": "/W/R", "target_position": [1, 0, 0.5]},
+        ["cuRobo IK"],
+    ),
+    (
+        "verify_import",
+        {"articulation_path": "/W/R"},
+        ["UsdPhysics", "/W/R"],
+    ),
+    # ----- qa-20-followup: drain _KNOWN_UNTESTED ratchet (batch 5) -----
+    (
+        "create_arena",
+        {"scene_type": "pick_place", "arena_id": "a1", "robot_asset": "/W/R", "task": "reach"},
+        ["isaaclab_tasks"],
+    ),
+    (
+        "create_arena_variant",
+        {"base_env_id": "a1", "variant_name": "v1", "robot_asset": "/W/R"},
+        ["isaaclab_tasks"],
+    ),
+    (
+        "create_wheeled_robot",
+        {"robot_path": "/W/W", "drive_type": "differential", "wheel_radius": 0.05, "wheel_base": 0.3},
+        ["wheeled_robots"],
+    ),
+    (
+        "export_dataset",
+        {"output_dir": "/tmp/out", "pipeline_id": "p1", "num_frames": 100},
+        ["omni.replicator.core"],
+    ),
+    (
+        "export_nav2_map",
+        {"output_path": "/tmp/map.png", "origin": [0, 0, 0], "resolution": 0.05, "width": 10.0, "height": 10.0},
+        ["import os", "/tmp/map.png"],
+    ),
+    (
+        "export_policy",
+        {"checkpoint": "/tmp/ck.pt", "output_path": "/tmp/p.onnx", "target_device": "cpu"},
+        ["GR00T", "TensorRT"],
+    ),
+    (
+        "export_teleop_mapping",
+        {"session_name": "s1", "output_path": "/tmp/m.json", "device": "xbox_gamepad"},
+        ["import json", "xbox_gamepad"],
+    ),
+    (
+        "extract_attention_maps",
+        {"checkpoint_path": "/tmp/ck.pt", "observation_path": "/tmp/obs.h5"},
+        ["GR00T attention", "import torch"],
+    ),
+    (
+        "record_teleop_demo",
+        {"output_path": "/tmp/demo.h5", "session_name": "s1", "robot_path": "/W/R"},
+        ["UsdPhysics", "/W/R"],
+    ),
+    (
+        "setup_loco_manipulation_training",
+        {"task_description": "pick", "robot": "humanoid_h1"},
+        ["Loco-manipulation"],
+    ),
+    (
+        "setup_pick_place_controller",
+        {"robot_path": "/W/R", "source_paths": ["/W/C"], "destination_path": "/W/B"},
+        ["setup_pick_place_controller"],
+    ),
+    (
+        "setup_pick_place_ros2_bridge",
+        {"robot_path": "/W/R", "source_paths": ["/W/C"], "destination_path": "/W/B"},
+        ["setup_pick_place_ros2_bridge"],
+    ),
+    (
+        "setup_ros2_bridge",
+        {"profile": "rtps", "robot_path": "/W/R"},
+        ["Unknown profile"],
+    ),
+    (
+        "setup_rsi_from_demos",
+        {"demo_path": "/tmp/d.h5", "env_cfg": {}},
+        ["Reference State", "/tmp/d.h5"],
+    ),
+    (
+        "setup_whole_body_control",
+        {"articulation_path": "/W/R", "locomotion_policy": "rl_policy"},
+        ["whole-body", "/W/R"],
+    ),
+    (
+        "interpolate_trajectory",
+        {
+            "articulation_path": "/W/R",
+            "waypoints": [
+                {"joint_positions": [0.0] * 7},
+                {"joint_positions": [1.0] * 7},
+            ],
+            "method": "linear",
+            "num_steps": 10,
+        },
+        ["import numpy", "Sparse waypoints"],
+    ),
 ]
 
 
@@ -427,11 +1193,38 @@ class TestCodeGenEdgeCases:
 
 
 class TestAllCodeGenHandlersCovered:
-    """Safety net: ensure every CODE_GEN_HANDLER appears in at least one test vector."""
+    """Safety net: ensure every CODE_GEN_HANDLER appears in at least one test vector.
+
+    Ratchet: ``_KNOWN_UNTESTED`` is the pre-existing backlog of handlers
+    without test vectors. This set was captured 2026-05-13 (item qa-18)
+    after the 144/145 spec landing. New handler additions are not
+    permitted to skip vectors — they must be removed from this set as
+    they gain coverage.
+
+    The intent is: this test rejects regressions (handler added without
+    vector) while documenting the historical backlog. If you must add a
+    handler without a vector, add it here explicitly and open a follow-up
+    issue.
+    """
+
+    _KNOWN_UNTESTED: "frozenset[str]" = frozenset()
 
     def test_all_handlers_tested(self):
         tested = {v[0] for v in _TEST_VECTORS}
-        untested = set(CODE_GEN_HANDLERS.keys()) - tested
+        untested = set(CODE_GEN_HANDLERS.keys()) - tested - self._KNOWN_UNTESTED
         assert untested == set(), (
-            f"CODE_GEN_HANDLERS not covered by test vectors: {untested}"
+            f"CODE_GEN_HANDLERS not covered by test vectors and not in "
+            f"_KNOWN_UNTESTED ratchet: {untested}. Either add a test vector "
+            f"to _TEST_VECTORS or add the handler to _KNOWN_UNTESTED with a "
+            f"follow-up issue."
+        )
+
+    def test_known_untested_is_pruned(self):
+        """Ratchet inverse: anything in _KNOWN_UNTESTED that NOW has a vector
+        should be removed from the ratchet so the gap doesn't grow stale."""
+        tested = {v[0] for v in _TEST_VECTORS}
+        stale = self._KNOWN_UNTESTED & tested
+        assert not stale, (
+            f"Handlers in _KNOWN_UNTESTED also have test vectors — remove them "
+            f"from the ratchet so it tracks the true backlog: {sorted(stale)}"
         )

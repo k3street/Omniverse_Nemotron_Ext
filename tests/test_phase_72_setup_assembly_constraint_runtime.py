@@ -496,3 +496,38 @@ def test_phase_72_runtime_evaluate_unknown_raises():
     rt = AssemblyConstraintRuntime()
     with pytest.raises(KeyError):
         rt.evaluate_one("does_not_exist", {})
+
+
+# ---------------------------------------------------------------------------
+# 18. dry_run=False raises NotImplementedError for physics-dependent types
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_one_dry_run_false_raises_for_physics_types():
+    """dry_run=False + physics-dependent constraint type must raise NotImplementedError."""
+    rt = AssemblyConstraintRuntime(dry_run=False)
+    c = AssemblyConstraint(
+        name="tangent_live",
+        type="tangent",
+        target_a=_make_target("/World/X"),
+        target_b=_make_target("/World/Y"),
+    )
+    rt.register(c)
+    with pytest.raises(NotImplementedError):
+        rt.evaluate_one("tangent_live", {})
+
+
+def test_evaluate_one_dry_run_true_still_returns_satisfied_with_clarifying_message():
+    """dry_run=True + physics-dependent type returns satisfied=True with clarifying message."""
+    rt = AssemblyConstraintRuntime(dry_run=True)
+    c = AssemblyConstraint(
+        name="tangent_dry",
+        type="tangent",
+        target_a=_make_target("/World/X"),
+        target_b=_make_target("/World/Y"),
+    )
+    rt.register(c)
+    ev = rt.evaluate_one("tangent_dry", {})
+    assert ev.satisfied is True
+    assert "dry-run" in ev.message
+    assert "physics-dependent" in ev.message

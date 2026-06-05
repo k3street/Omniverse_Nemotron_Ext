@@ -383,16 +383,41 @@ async def _handle_add_force_torque_sensor(args: Dict) -> Dict:
     Wraps Isaac Sim's IsaacForceSensor schema.
 
     Args:
-      sensor_path:   USD path of the force sensor
-      parent_path:   USD path of the prim to attach sensor to (robot link)
-      threshold:     force threshold for triggering events (default 5.0 N)
+      sensor_path:    USD path of the force sensor
+      parent_path:    USD path of the prim to attach sensor to (robot link)
+      threshold:      force threshold for triggering events (default 5.0 N)
+      noise_std:      Gaussian noise std-dev added to force/torque readings
+                      (default 0.0 = no noise). Enables sim-to-real gap
+                      emulation for contact-rich manipulation training.
+      publish_topic:  If set, the generated code registers a ROS2-style
+                      publisher stub on this topic so downstream consumers
+                      can subscribe.  None (default) skips publishing.
 
-    Returns: {sensor_path, parent_path, threshold}
+    Returns: {sensor_path, parent_path, threshold, noise_std, publish_topic}
     """
     from .. import kit_tools
-    sensor_path = args["sensor_path"]
-    parent_path = args["parent_path"]
-    threshold = float(args.get("threshold", 5.0))
+    sensor_path: str = args["sensor_path"]
+    parent_path: str = args["parent_path"]
+    threshold: float = float(args.get("threshold", 5.0))
+    noise_std: float = float(args.get("noise_std", 0.0))
+    publish_topic: str | None = args.get("publish_topic", None) or None
+
+    # Build optional noise block — injected verbatim into the generated script.
+    noise_block: str = ""
+    if noise_std > 0.0:
+        noise_block = f"""\
+import random as _rnd
+def _add_noise(v, std={noise_std}):
+    return tuple(x + _rnd.gauss(0.0, std) for x in v)
+"""
+
+    # Build optional publish stub — injected only when a topic is requested.
+    publish_block: str = ""
+    if publish_topic is not None:
+        publish_block = f"""\
+# Publish stub — downstream consumers subscribe to {publish_topic!r}
+sprim.CreateAttribute("ftsensor:publish_topic", Sdf.ValueTypeNames.String).Set({publish_topic!r})
+"""
 
     code = f"""\
 import omni.usd, json
@@ -410,6 +435,7 @@ try:
 except Exception:
     pass
 
+{noise_block}
 # Create sensor prim with reading attrs (logical wrapper; reading hooks runtime)
 from pxr import UsdGeom, Gf
 spp = Sdf.Path({sensor_path!r})
@@ -418,16 +444,20 @@ if not sprim or not sprim.IsValid():
     sprim = UsdGeom.Xform.Define(stage, spp).GetPrim()
 sprim.CreateAttribute("ftsensor:parent",      Sdf.ValueTypeNames.String).Set({parent_path!r})
 sprim.CreateAttribute("ftsensor:threshold",   Sdf.ValueTypeNames.Float).Set({threshold})
+sprim.CreateAttribute("ftsensor:noise_std",   Sdf.ValueTypeNames.Float).Set({noise_std})
 sprim.CreateAttribute("ftsensor:last_force",  Sdf.ValueTypeNames.Float3).Set((0.0, 0.0, 0.0))
 sprim.CreateAttribute("ftsensor:last_torque", Sdf.ValueTypeNames.Float3).Set((0.0, 0.0, 0.0))
 sprim.CreateAttribute("ftsensor:triggered",   Sdf.ValueTypeNames.Bool).Set(False)
-print(json.dumps({{"sensor_path": str(sprim.GetPath()), "parent": {parent_path!r}, "threshold": {threshold}}}))
+{publish_block}
+print(json.dumps({{"sensor_path": str(sprim.GetPath()), "parent": {parent_path!r}, "threshold": {threshold}, "noise_std": {noise_std}, "publish_topic": {publish_topic!r}}}))
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     return {
         "sensor_path": sensor_path,
         "parent_path": parent_path,
         "threshold": threshold,
+        "noise_std": noise_std,
+        "publish_topic": publish_topic,
         "raw": (res.get("output") or "")[-200:],
     }
 

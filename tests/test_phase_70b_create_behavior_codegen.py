@@ -190,7 +190,7 @@ def test_generate_pick_place_returns_class_or_dfnetwork():
 
 
 # ---------------------------------------------------------------------------
-# 11. generate ALWAYS includes `omni.isaac.cortex`
+# 11. generate ALWAYS includes `isaacsim.cortex.framework` (5.x namespace)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("pattern,params", [
@@ -211,8 +211,8 @@ def test_generate_always_includes_cortex_import(pattern, params):
         params=params,
     )
     code = gen.generate(cfg)
-    assert "omni.isaac.cortex" in code, (
-        f"Pattern '{pattern}': generated code missing 'omni.isaac.cortex'"
+    assert "isaacsim.cortex.framework" in code, (
+        f"Pattern '{pattern}': generated code missing 'isaacsim.cortex.framework'"
     )
 
 
@@ -297,7 +297,7 @@ def test_validate_generated_catches_missing_cortex_import():
         "    def step(self): pass\n"
     )
     issues = gen.validate_generated(bad_code)
-    assert any("omni.isaac.cortex" in i for i in issues), (
+    assert any("isaacsim.cortex.framework" in i for i in issues), (
         f"Expected cortex import issue, got: {issues}"
     )
 
@@ -317,3 +317,56 @@ def test_validate_generated_clean_code_returns_empty():
     code = gen.generate(cfg)
     issues = gen.validate_generated(code)
     assert issues == [], f"Clean generated code should have no issues, got: {issues}"
+
+
+# ---------------------------------------------------------------------------
+# 17. generated code uses 5.x namespace, not pre-5.x
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("pattern,params", [
+    ("pick_place",       {"pick_pose": [0, 0, 0], "place_pose": [0, 0, 1]}),
+    ("navigate_to",      {"target_xy": [1.0, 2.0]}),
+    ("scan_grid",        {"grid_origin": [0, 0, 0], "grid_size": [2, 2], "grid_step": 0.5}),
+    ("press_button",     {"button_path": "/World/Button"}),
+    ("follow_path",      {"waypoints": [[0, 0, 0], [1, 0, 0]]}),
+    ("guard_zone",       {"zone_bbox": [[0, 0, 0], [1, 1, 1]]}),
+    ("synchronize_with", {"partner_robot_path": "/World/PartnerRobot"}),
+])
+def test_generated_code_uses_5x_namespace(pattern, params):
+    gen = CreateBehaviorCodeGenerator()
+    cfg = BehaviorConfig(
+        name="TestBehavior",
+        pattern=pattern,
+        robot_prim_path="/World/Robot",
+        params=params,
+    )
+    code = gen.generate(cfg)
+    assert "isaacsim.cortex.framework" in code, (
+        f"Pattern '{pattern}': generated code missing 5.x namespace 'isaacsim.cortex.framework'"
+    )
+    assert "omni.isaac.cortex" not in code, (
+        f"Pattern '{pattern}': generated code contains deprecated pre-5.x namespace 'omni.isaac.cortex'"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 18. validate_generated catches deprecated pre-5.x Cortex namespace
+# ---------------------------------------------------------------------------
+
+def test_validate_catches_deprecated_namespace():
+    gen = CreateBehaviorCodeGenerator()
+    deprecated_code = (
+        "import omni.isaac.cortex\n"
+        "from omni.isaac.cortex.cortex_world import CortexWorld\n"
+        "from omni.isaac.cortex.df import DfNetwork, DfState\n"
+        "\n"
+        "class MyBehavior(DfState):\n"
+        "    def step(self): return self\n"
+        "\n"
+        "def make_behavior_network():\n"
+        "    return DfNetwork(initial_state=MyBehavior())\n"
+    )
+    issues = gen.validate_generated(deprecated_code)
+    assert any("omni.isaac.cortex" in i or "deprecated" in i.lower() for i in issues), (
+        f"Expected deprecated namespace issue, got: {issues}"
+    )

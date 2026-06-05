@@ -190,6 +190,19 @@ _ROBOT_WIZARD_REGISTRY = {
         "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/UniversalRobots/ur10e/ur10e.usd",
         "robot_type": "manipulator",
     },
+    "yaskawa_gp25": {
+        "name": "Yaskawa Motoman GP25",
+        "manufacturer": "Yaskawa Motoman",
+        "model": "GP25",
+        "rel_path": "Robots/Yaskawa/GP25/gp25.usd",
+        "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Yaskawa/GP25/gp25.usd",
+        "robot_type": "manipulator",
+        "payload_kg": 25.0,
+        "reach_m": 1.73,
+        "dof": 6,
+        "controller_model": "YRC1000",
+        "urdf_path": "robots/yaskawa/gp25/gp25.urdf",
+    },
     "allegro": {
         "rel_path": "Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand.usd",
         "cloud_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand.usd",
@@ -200,6 +213,8 @@ _ROBOT_WIZARD_REGISTRY = {
     "unitree_g1": "g1",
     "carter": "nova_carter",
     "ur10": "ur10e",
+    "gp25": "yaskawa_gp25",
+    "yaskawa_motoman_gp25": "yaskawa_gp25",
 }
 
 def _resolve_robot_asset(entry: Dict) -> str:
