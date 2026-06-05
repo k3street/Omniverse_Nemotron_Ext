@@ -34,6 +34,7 @@ during development.
 After large merges, run the app and visually confirm these surfaces:
 
 - Header: `Isaac Assist · Floor Plan` and `multimodal canvas v1.0`
+- Header `Preview Build` action and dry-run build preview panel
 - Left toolbar and object palette
 - Konva viewport with grid, layout objects, reach/agency overlays, and guide support
 - Properties/layers panel, including Cosmos asset-match feedback and build-asset selector

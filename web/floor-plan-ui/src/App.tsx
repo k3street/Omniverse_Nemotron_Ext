@@ -15,7 +15,7 @@
  * Spec §11.2 + §11.3 + §13.
  */
 import { useEffect, useState } from "react";
-import { CanvasGetResponse } from "./api/types";
+import { BuildResponse, CanvasGetResponse } from "./api/types";
 import {
     CanvasApi,
     createCanvasApi,
@@ -51,6 +51,25 @@ export function App() {
     const [bootError, setBootError] = useState<string | null>(null);
     const [conflict, setConflict] = useState<{ message: string } | null>(null);
     const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+    const [buildState, setBuildState] = useState<"idle" | "previewing" | "ready" | "failed">("idle");
+    const [buildResult, setBuildResult] = useState<BuildResponse | null>(null);
+    const [buildError, setBuildError] = useState<string | null>(null);
+
+    const previewBuild = async () => {
+        if (!spec || buildState === "previewing") return;
+        setBuildState("previewing");
+        setBuildError(null);
+        try {
+            await flushPendingPatch(api);
+            const result = await api.build(sessionId, { dry_run: true });
+            setBuildResult(result);
+            setBuildState("ready");
+        } catch (e) {
+            console.warn("[build] preview failed:", e);
+            setBuildError(String(e));
+            setBuildState("failed");
+        }
+    };
 
     // ─── Boot: GET spec, fall back to WAL on error ───────────────────
     useEffect(() => {
@@ -144,7 +163,11 @@ export function App() {
             }}
         >
             <style>{KEYFRAMES_BREATHE}</style>
-            <Header />
+            <Header
+                disabled={!spec || bootStatus !== "ready" || buildState === "previewing"}
+                onPreviewBuild={() => void previewBuild()}
+                state={buildState}
+            />
             <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
                 <Toolbar />
                 <Palette />
@@ -174,6 +197,18 @@ export function App() {
                         {conflict && (
                             <BootOverlay text={conflict.message} color="#FFA800" />
                         )}
+                        {(buildResult || buildError || buildState === "previewing") && (
+                            <BuildPreviewPanel
+                                state={buildState}
+                                result={buildResult}
+                                error={buildError}
+                                onClose={() => {
+                                    setBuildResult(null);
+                                    setBuildError(null);
+                                    setBuildState("idle");
+                                }}
+                            />
+                        )}
                     </div>
                     <ChatRibbon />
                 </div>
@@ -184,7 +219,15 @@ export function App() {
     );
 }
 
-function Header() {
+function Header({
+    disabled,
+    onPreviewBuild,
+    state,
+}: {
+    disabled: boolean;
+    onPreviewBuild: () => void;
+    state: "idle" | "previewing" | "ready" | "failed";
+}) {
     return (
         <div
             style={{
@@ -204,6 +247,135 @@ function Header() {
             <span style={{ color: TEXT_SECONDARY, fontSize: 11, fontWeight: 400 }}>
                 multimodal canvas v1.0
             </span>
+            <button
+                type="button"
+                onClick={onPreviewBuild}
+                disabled={disabled}
+                title="Generate reviewed Kit code without mutating Isaac Sim"
+                style={{
+                    marginLeft: "auto",
+                    marginRight: 12,
+                    height: 24,
+                    padding: "0 12px",
+                    background: disabled ? "#2E3237" : ACCENT,
+                    color: disabled ? TEXT_SECONDARY : "#000",
+                    border: "none",
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: disabled ? "default" : "pointer",
+                    fontFamily: "inherit",
+                }}
+            >
+                {state === "previewing" ? "Previewing..." : "Preview Build"}
+            </button>
+        </div>
+    );
+}
+
+function BuildPreviewPanel({
+    state,
+    result,
+    error,
+    onClose,
+}: {
+    state: "idle" | "previewing" | "ready" | "failed";
+    result: BuildResponse | null;
+    error: string | null;
+    onClose: () => void;
+}) {
+    const assets = result?.asset_resolutions ?? [];
+    const code = result?.instantiation?.generated_code ?? "";
+    const status = result?.instantiation?.status ?? result?.status ?? state;
+    return (
+        <div
+            style={{
+                position: "absolute",
+                left: 16,
+                right: 16,
+                bottom: 16,
+                maxHeight: 220,
+                background: "#171A1EF2",
+                border: "1px solid #2E3237",
+                borderRadius: 6,
+                boxShadow: "0 10px 32px rgba(0,0,0,0.45)",
+                zIndex: 60,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+            }}
+            data-testid="build-preview-panel"
+        >
+            <div
+                style={{
+                    height: 34,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "0 10px",
+                    borderBottom: "1px solid #2E3237",
+                }}
+            >
+                <span style={{ color: ACCENT, fontWeight: 700 }}>Build preview</span>
+                <span style={{ color: TEXT_SECONDARY, fontSize: 11 }}>
+                    {error ? "failed" : `${status} · ${assets.length} resolved assets`}
+                </span>
+                <button
+                    type="button"
+                    onClick={onClose}
+                    style={{
+                        marginLeft: "auto",
+                        background: "transparent",
+                        color: TEXT_SECONDARY,
+                        border: "1px solid #3A3F45",
+                        borderRadius: 4,
+                        fontSize: 11,
+                        padding: "3px 8px",
+                        cursor: "pointer",
+                    }}
+                >
+                    Close
+                </button>
+            </div>
+            <div style={{ display: "flex", minHeight: 0 }}>
+                <div
+                    style={{
+                        width: 260,
+                        padding: 10,
+                        borderRight: "1px solid #2E3237",
+                        color: TEXT_SECONDARY,
+                        fontSize: 11,
+                        lineHeight: 1.45,
+                        overflow: "auto",
+                    }}
+                >
+                    {state === "previewing" && <div>Generating Kit code...</div>}
+                    {error && <div style={{ color: "#FF6B6B" }}>{error}</div>}
+                    {!error && assets.map((asset) => (
+                        <div key={asset.object_id} style={{ marginBottom: 8 }}>
+                            <div style={{ color: TEXT_PRIMARY }}>{asset.object_class}</div>
+                            <div>{asset.source}{asset.needs_review ? " · review" : ""}</div>
+                        </div>
+                    ))}
+                </div>
+                <pre
+                    style={{
+                        margin: 0,
+                        padding: 10,
+                        flex: 1,
+                        minHeight: 120,
+                        maxHeight: 184,
+                        overflow: "auto",
+                        color: TEXT_PRIMARY,
+                        background: "#0F1216",
+                        fontSize: 11,
+                        lineHeight: 1.45,
+                        whiteSpace: "pre-wrap",
+                    }}
+                >
+                    {code || (error ? "" : "Generated code will appear here.")}
+                </pre>
+            </div>
         </div>
     );
 }

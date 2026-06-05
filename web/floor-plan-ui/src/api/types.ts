@@ -150,6 +150,32 @@ export interface PatchValidationFailureResponse {
     issues: Array<{ code: string; severity: string; message: string }>;
 }
 
+export interface AssetResolutionSummary {
+    object_id: string;
+    object_class: string;
+    usd_ref: string;
+    source: string;
+    needs_review: boolean;
+}
+
+export interface BuildResponse {
+    ratified: boolean;
+    status?: string;
+    diagnostics?: unknown[];
+    errors?: unknown[];
+    revision: number;
+    bindings?: Record<string, unknown>;
+    ambiguous_roles?: unknown[];
+    asset_resolutions?: AssetResolutionSummary[];
+    instantiation?: {
+        status: string;
+        message?: string;
+        build_id?: string | null;
+        dry_run: boolean;
+        generated_code?: string | null;
+    };
+}
+
 export interface CosmosObserveRequest {
     prompt: string;
     image_base64?: string;

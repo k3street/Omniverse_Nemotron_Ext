@@ -79,6 +79,36 @@ describe("normalizeLayoutSpec", () => {
 });
 
 describe("createCanvasApi", () => {
+    it("posts build preview requests with dry_run", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                ratified: true,
+                revision: 4,
+                asset_resolutions: [],
+                instantiation: {
+                    status: "dry_run",
+                    dry_run: true,
+                    generated_code: "# code",
+                },
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const api = createCanvasApi("");
+        const response = await api.build("build session", { dry_run: true });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/v1/canvas/build%20session/build",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dry_run: true }),
+            },
+        );
+        expect(response.instantiation?.status).toBe("dry_run");
+    });
+
     it("posts viewport observation requests to the Cosmos viewport route", async () => {
         const spec = baseSpec();
         const fetchMock = vi.fn().mockResolvedValue({
