@@ -1,0 +1,33 @@
+{
+  "task_id": "CP-NEW-sim2real-gap",
+  "goal": "Build a sim-to-real-gap measurement: replay a real-world rosbag of joint targets, measure deviation between sim observations and real recorded ones. Realizes Phase 9 yrkesroll #14 (sim-to-real engineer / robotics R&D persona).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_bin",
+    "replay_rosbag",
+    "compare_sim_real_video",
+    "measure_sim_real_gap"
+  ],
+  "thoughts": [
+    "Sim2real-gap = compare sim observations to real ones for same input. Used for sim2real fidelity tuning.",
+    "replay_rosbag plays back recorded joint commands from a real Franka. Sim runs same trajectory.",
+    "compare_sim_real_video aligns sim camera output with real video frame-by-frame.",
+    "measure_sim_real_gap returns numerical deviation (joint pos RMSE, EE position RMSE).",
+    "Function-gate N/A. Validation = gap_metric.json file emitted with RMSE values."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[0.4, 0.2, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\ncreate_bin(prim_path=\"/World/Bin\", position=[-0.4, 0, 0.75], size=[0.30, 0.30, 0.15])\n\nconfigure_camera(\n    camera_path=\"/World/SimCamera\",\n    position=[0.5, 0.5, 1.20],\n    look_at=[0.4, 0.2, 0.83],\n    fov=60,\n)\n\nreplay_rosbag(\n    bag_path=\"/data/sim2real/franka_pickplace_real.bag\",\n    target_robot=\"/World/Franka\",\n    speed=1.0,\n)\n\ncompare_sim_real_video(\n    sim_camera=\"/World/SimCamera\",\n    real_video=\"/data/sim2real/franka_pickplace_real.mp4\",\n    output_path=\"/tmp/sim2real_compare.mp4\",\n)\n\nmeasure_sim_real_gap(\n    sim_robot=\"/World/Franka\",\n    real_data_path=\"/data/sim2real/franka_pickplace_real.bag\",\n    metrics=[\"joint_pos_rmse\", \"ee_pos_rmse\", \"ee_orient_rmse\"],\n    output_path=\"/tmp/sim2real_gap.json\",\n)",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": null,
+  "extends": "phase9-yrkesroll-#14",
+  "extension_notes": "Sim2real-gap canonical. Requires real-recorded rosbag at /data/sim2real/. Without that asset, replay_rosbag returns immediately. Validation = /tmp/sim2real_gap.json populated.",
+  "failure_modes": [
+    "Real rosbag at /data/sim2real/ not available — handler may return error",
+    "compare_sim_real_video requires camera frames to be timestamp-aligned — sim camera capture rate must match real",
+    "joint_pos_rmse computation assumes joint name parity between sim Franka and real Franka URDF"
+  ],
+  "verified_status": "draft (Phase 9 #14; needs real rosbag asset)"
+}

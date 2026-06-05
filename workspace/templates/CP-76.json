@@ -60,9 +60,12 @@
     "cube_path": "/World/Cube_workpiece"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_mating",
     "target_path": "/World/HoldPedestal",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_mating",
+      "/World/Cube_workpiece"
+    ]
   },
   "extends": "CP-68",
   "extension_notes": "CP-76 extends CP-68's robot-to-robot handoff with moving obstacle pattern. Both robots place AT the same destination (HoldPedestal) \u2014 R1 first, R2 stacks on top. The pedestal substitutes for actual mid-air holding (which would need runtime FixedJoint between R1 hand and workpiece). Realizes Industrial Set 1 #4 in build-spec form. Runtime mid-air-hold + collision-aware coordination is Sprint 4+ work.",

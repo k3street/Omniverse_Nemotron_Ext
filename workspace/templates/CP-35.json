@@ -92,7 +92,7 @@
     "cube_path": "/World/Cube_r1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_r1",
+    "cube_paths": ["/World/Cube_r1", "/World/Cube_r2"],
     "target_path": "/World/RedBin",
     "duration_s": 240
   },

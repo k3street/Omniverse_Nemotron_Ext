@@ -66452,7 +66452,7 @@ except Exception: pass
 # on stochastic CUDA IK. Earlier 4 seeds caused stuck-controller pattern
 # in CP-10/11/26-style canonicals — IK failed transiently, controller
 # retried infinitely on same cube (Mode A controller-stuck bug fix 2026-05-09).
-_PLANNER_ATTR = "_curobo_pp_planner_v17"
+_PLANNER_ATTR = "_curobo_pp_planner_v21"
 _planner = getattr(builtins, _PLANNER_ATTR, None)
 if _planner is None:
     for _old in ("_curobo_pp_planner", "_curobo_pp_planner_v2", "_curobo_pp_planner_v3", "_curobo_pp_planner_v4", "_curobo_pp_planner_v5", "_curobo_pp_planner_v6", "_curobo_pp_planner_v7", "_curobo_pp_planner_v8", "_curobo_pp_planner_v9", "_curobo_pp_planner_v10", "_curobo_pp_planner_v11", "_curobo_pp_planner_v16", "_curobo_pp_planner_v13"):
@@ -66886,12 +66886,29 @@ def _cube_to_pick():
                     if _v: _belt_v = abs(float(_v[0]))
         except Exception: pass
     _look_ahead_x = 0.30 if _belt_v > 0.25 else 0.0
+    # Phase 4 (2026-05-10): 3D-aware reach check. EE has to reach
+    # h1 = EE_INITIAL_HEIGHT above cube, not the cube itself. With h1
+    # significantly above robot base, the EE travel distance is sqrt(
+    # xy_dist² + (h1 - base_z)²), not just xy_dist. CP-37 sets
+    # EE_INITIAL_HEIGHT=1.30 to clear pillar at z=1.15; with cube at xy
+    # distance 0.797m and h1-base_z=0.55m, 3D distance is 0.97m, beyond
+    # Franka's 0.855m reach. The 2D check accepts the cube; 3D rejects.
+    # Without this, controller wastes plan_pose calls on unreachable goals.
+    _h1_offset = max(0.0, float(EE_INITIAL_HEIGHT) - base_z)
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
         if cp is None: continue
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
-        if float(np.linalg.norm(cp[:2] - base_xy)) > _reach_m: continue
+        _xy_dist = float(np.linalg.norm(cp[:2] - base_xy))
+        if _xy_dist > _reach_m: continue
+        # 3D-aware: reject if EE goal at h1 above cube would exceed reach.
+        # Use _reach_m_raw (no safety margin) for 3D check — the 5cm safety
+        # is already applied to xy. Doubling it for 3D rejected too many
+        # cubes, regressing CP-65 (multi-robot relay where handoff happens
+        # at h1-base_z ≈ 0.5m + xy ≈ 0.6m → 3D 0.78 was rejected at 0.80).
+        _3d_dist = (_xy_dist**2 + _h1_offset**2) ** 0.5
+        if _3d_dist > _reach_m: continue  # tight 3D matches 2D safety margin
         # REORIENT-01 require_upright filter: skip cubes whose +Z axis
         # isn't aligned with world up. Lets cube ride past pick zone on
         # its side, hit a passive flip-wall, become upright, then pick.
@@ -68809,6 +68826,16 @@ register_diagnose_handlers(DATA_HANDLERS)
 # === END DIAGNOSE FEASIBILITY ===
 
 
+# === INDUSTRIAL BRIDGES (controller-logic session) ===
+# Phase 6 M2: modbus_tcp_bridge_attach + diagnose_modbus_bridge + detach.
+# Per docs/specs/2026-05-09-industrial-expansion-spec.md Phase 8.
+# Subprocess-supervised pymodbus client; reads holding registers, pushes
+# USD attr updates. Future: opcua (M3), mqtt-sparkplug (M5), openplc (M5).
+from .bridge_tools import register_bridge_handlers
+register_bridge_handlers(DATA_HANDLERS)
+# === END INDUSTRIAL BRIDGES ===
+
+
 
 async def _handle_setup_ros2_control_compat(args):
     """Phase 6 M1: emit OmniGraph using topic_based_ros2_control standard topic names.
@@ -68961,3 +68988,77 @@ async def _handle_precheck_ros2_environment(args):
 DATA_HANDLERS["setup_ros2_control_compat"] = _handle_setup_ros2_control_compat
 DATA_HANDLERS["emit_ros2_control_yaml"] = _handle_emit_ros2_control_yaml
 DATA_HANDLERS["precheck_ros2_environment"] = _handle_precheck_ros2_environment
+
+
+# === Phase 6 M4 — cuMotion-as-MoveIt2 ===
+
+async def _handle_setup_isaac_ros_cumotion_moveit(args):
+    """Phase 6 M4: configure isaac_ros_cumotion plugin for an external MoveIt2.
+
+    Companion to M1's setup_ros2_control_compat. M1 wires the topic-based
+    ros2_control bridge (so MoveIt2 can drive Isaac Sim joints). M4 selects
+    cuMotion as the planning backend INSIDE MoveIt2 — emits a planning
+    pipeline YAML that MoveIt2 loads via:
+        ros2 launch moveit_setup_assistant launch \\
+            planning_pipeline:=cumotion \\
+            robot_description_kinematics:=<kin_yaml>
+
+    Args:
+      robot_path: USD path of the robot (used for naming + base_frame)
+      output_dir: where to write planning_pipeline.yaml (default /tmp)
+      planner_id: cuMotion sub-planner (default "PathPlanner")
+      max_planning_time: seconds (default 5.0)
+      goal_tolerance_pos_m: position tolerance (default 0.005)
+      goal_tolerance_orient_rad: orientation tolerance (default 0.05)
+
+    Returns: {ok, yaml_path, planner_id, robot_name, ros2_launch_args}.
+    Does NOT start MoveIt2 — that's the user's external launch responsibility.
+    """
+    import os, json
+    robot_path = args.get("robot_path", "")
+    if not robot_path:
+        return {"error": "setup_isaac_ros_cumotion_moveit requires robot_path"}
+    output_dir = args.get("output_dir") or "/tmp"
+    planner_id = args.get("planner_id") or "PathPlanner"
+    max_planning_time = float(args.get("max_planning_time", 5.0))
+    goal_tol_pos = float(args.get("goal_tolerance_pos_m", 0.005))
+    goal_tol_ori = float(args.get("goal_tolerance_orient_rad", 0.05))
+
+    robot_name = robot_path.split("/")[-1] or "robot"
+    yaml_path = os.path.join(output_dir, f"{robot_name}_planning_pipeline.yaml")
+
+    yaml = (
+        "# Generated by setup_isaac_ros_cumotion_moveit (Phase 6 M4)\n"
+        "# Loads as MoveIt2 planning_pipeline YAML.\n"
+        "planning_plugin: 'isaac_ros_cumotion::CumotionPlannerManager'\n"
+        f"planner_configs:\n"
+        f"  {planner_id}:\n"
+        f"    type: 'isaac_ros_cumotion::{planner_id}'\n"
+        f"    max_planning_time: {max_planning_time}\n"
+        f"    goal_position_tolerance: {goal_tol_pos}\n"
+        f"    goal_orientation_tolerance: {goal_tol_ori}\n"
+        "    use_cuda_graph: true\n"
+        "    enable_collision_checking: true\n"
+        f"    request_adapters: ''\n"
+    )
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(yaml_path, "w") as f:
+            f.write(yaml)
+    except Exception as e:
+        return {"error": f"yaml_write_failed: {type(e).__name__}: {e}"}
+
+    return {
+        "ok": True,
+        "yaml_path": yaml_path,
+        "planner_id": planner_id,
+        "robot_name": robot_name,
+        "ros2_launch_args": (
+            f"planning_pipeline:={planner_id} "
+            f"robot_description_planning:={yaml_path}"
+        ),
+        "note": "External step: 'ros2 launch moveit_setup_assistant ...' to apply.",
+    }
+
+
+DATA_HANDLERS["setup_isaac_ros_cumotion_moveit"] = _handle_setup_isaac_ros_cumotion_moveit

@@ -1,0 +1,33 @@
+{
+  "task_id": "CP-NEW-multi-amr-corridor",
+  "goal": "Build a multi-AMR corridor: 3 Nova Carter AMRs navigate corridor, avoid each other, perform handoff. Realizes Phase 10 yrkesroll #16 (multi-AMR fleet logistics persona).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "create_wheeled_robot",
+    "navigate_to",
+    "create_bin",
+    "register_moving_obstacle"
+  ],
+  "thoughts": [
+    "3 AMRs in narrow corridor. Each AMR is moving obstacle for the others. Must coordinate to avoid collision.",
+    "register_moving_obstacle pattern (CP-68) extended to AMR fleet.",
+    "navigate_to per AMR; goal is sequential pass through corridor.",
+    "For V0: AMRs navigate at known times offset from each other (no real coordination).",
+    "Function-gate: each AMR reaches its goal pose."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/CorridorL\", prim_type=\"Cube\", position=[0, -1.0, 0.50], scale=[5.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/CorridorL\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/CorridorR\", prim_type=\"Cube\", position=[0, 1.0, 0.50], scale=[5.0, 0.10, 1.0])\napply_api_schema(prim_path=\"/World/CorridorR\", schema_name=\"PhysicsCollisionAPI\")\n\nfor i, x in enumerate([-2.0, -0.5, 1.0]):\n    create_wheeled_robot(\n        robot_name=\"nova_carter\",\n        dest_path=f\"/World/Carter_{i+1}\",\n        position=[x, 0, 0.10],\n    )\n\nregister_moving_obstacle(robot_path=\"/World/Carter_1\", obstacle_path=\"/World/Carter_2\")\nregister_moving_obstacle(robot_path=\"/World/Carter_1\", obstacle_path=\"/World/Carter_3\")\nregister_moving_obstacle(robot_path=\"/World/Carter_2\", obstacle_path=\"/World/Carter_1\")\nregister_moving_obstacle(robot_path=\"/World/Carter_2\", obstacle_path=\"/World/Carter_3\")\nregister_moving_obstacle(robot_path=\"/World/Carter_3\", obstacle_path=\"/World/Carter_1\")\nregister_moving_obstacle(robot_path=\"/World/Carter_3\", obstacle_path=\"/World/Carter_2\")\n\nnavigate_to(robot_path=\"/World/Carter_1\", goal_position=[2.0, 0, 0.10])\nnavigate_to(robot_path=\"/World/Carter_2\", goal_position=[-2.0, 0, 0.10])\nnavigate_to(robot_path=\"/World/Carter_3\", goal_position=[2.0, 0.3, 0.10])",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": null,
+  "extends": "phase10-yrkesroll-#16",
+  "extends_notes": "Multi-AMR canonical. Tests fleet coordination via register_moving_obstacle.",
+  "extension_notes": "Multi-AMR canonical. Tests fleet coordination via register_moving_obstacle. Function-gate N/A — AMR navigation, not cube delivery. Validation = each Carter reaches its goal_position within 30s.",
+  "failure_modes": [
+    "create_wheeled_robot for 3 instances may exhaust GPU memory if Carter is heavy mesh",
+    "navigate_to without ROS2 nav2 may use simple Vector-to-goal (collision unaware)",
+    "AMR fleet coordination — without claim mutex, AMRs may collide in narrow corridor"
+  ],
+  "verified_status": "draft (Phase 10 #16; needs Carter SimReady + nav2 or simple navigate_to)"
+}

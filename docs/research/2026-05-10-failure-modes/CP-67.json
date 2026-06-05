@@ -1,0 +1,1255 @@
+{
+  "samples": [
+    {
+      "sim_t": 0.016666666666666666,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1,
+          "ctrl:plan_calls": 7,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 1.016666666666668,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 61,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 61,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 2.033333333333331,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 122,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 122,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 3.049999999999994,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 183,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 183,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 4.0666666666666575,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 244,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 244,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 5.083333333333321,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 305,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 305,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 6.099999999999984,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 366,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 366,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 7.116666666666647,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 427,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 427,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 8.11666666666665,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 487,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 487,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 9.1166666666667,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 547,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 547,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 10.116666666666749,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 607,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 607,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 11.116666666666799,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 667,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 667,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 12.116666666666848,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 727,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 727,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 13.116666666666898,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 787,
+          "ctrl:plan_calls": 14,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 787,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 14.116666666666948,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 847,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 847,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 15.116666666666998,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 907,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 907,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 16.116666666667033,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 967,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 967,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 17.133333333333642,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1028,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1028,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 18.15000000000025,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1089,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1089,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 19.16666666666686,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1150,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1150,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 20.18333333333347,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1211,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1211,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 21.200000000000077,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1272,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1272,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 22.216666666666686,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1333,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1333,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 23.233333333333295,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "executing",
+          "ctrl:cubes_delivered": 1,
+          "ctrl:cycles_attempted": 1,
+          "ctrl:tick_count": 1394,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1394,
+          "ctrl:plan_calls": 0,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        }
+      }
+    },
+    {
+      "sim_t": 24.249999999999904,
+      "vals": {
+        "/World/FrankaA": {
+          "ctrl:phase": "wait_sensor",
+          "ctrl:cubes_delivered": 2,
+          "ctrl:cycles_attempted": 2,
+          "ctrl:tick_count": 1455,
+          "ctrl:plan_calls": 21,
+          "ctrl:plan_fails": 0,
+          "ctrl:last_fail_goal": "",
+          "ctrl:last_error": ""
+        },
+        "/World/FrankaB": {
+          "ctrl:phase": "settling",
+          "ctrl:cubes_delivered": 0,
+          "ctrl:cycles_attempted": 0,
+          "ctrl:tick_count": 1455,
+          "ctrl:plan_calls": 12,
+          "ctrl:plan_fails": 2,
+          "ctrl:last_fail_goal": "world=[ 0.         -0.69999999  1.12999999]",
+          "ctrl:last_error": "RuntimeError: planning failed for /World/Cube_4"
+        }
+      }
+    }
+  ],
+  "cube_trajectories": [
+    {
+      "sim_t": 0.0,
+      "/World/Cube_1": [
+        -1.394,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.144,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.894,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.644,
+        0.7,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 1.0,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.533,
+        0.7,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 2.0,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.533,
+        0.7,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 3.0,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.533,
+        0.7,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 4.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.533,
+        0.702,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 5.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.533,
+        0.702,
+        0.83
+      ]
+    },
+    {
+      "sim_t": 6.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.536,
+        0.706,
+        1.141
+      ]
+    },
+    {
+      "sim_t": 7.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.007,
+        0.151,
+        1.158
+      ]
+    },
+    {
+      "sim_t": 8.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.042,
+        0.118,
+        0.923
+      ]
+    },
+    {
+      "sim_t": 9.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.055,
+        0.084,
+        0.859
+      ]
+    },
+    {
+      "sim_t": 10.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.055,
+        0.084,
+        0.859
+      ]
+    },
+    {
+      "sim_t": 11.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.055,
+        0.084,
+        0.859
+      ]
+    },
+    {
+      "sim_t": 12.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.055,
+        0.084,
+        0.859
+      ]
+    },
+    {
+      "sim_t": 13.1,
+      "/World/Cube_1": [
+        -1.283,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -1.033,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.783,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.055,
+        0.084,
+        0.859
+      ]
+    },
+    {
+      "sim_t": 14.1,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.533,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.091,
+        -0.084,
+        0.871
+      ]
+    },
+    {
+      "sim_t": 15.1,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.533,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 16.1,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.533,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 17.1,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.533,
+        0.701,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 18.2,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.533,
+        0.701,
+        0.83
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 19.2,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.534,
+        0.7,
+        0.832
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 20.2,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        -0.502,
+        0.546,
+        1.171
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 21.2,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        0.005,
+        0.13,
+        1.031
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 22.2,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        0.019,
+        0.081,
+        0.859
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 23.2,
+      "/World/Cube_1": [
+        -1.032,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.782,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        0.016,
+        0.065,
+        0.86
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    },
+    {
+      "sim_t": 24.2,
+      "/World/Cube_1": [
+        -0.904,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_2": [
+        -0.654,
+        0.7,
+        0.83
+      ],
+      "/World/Cube_3": [
+        0.008,
+        0.03,
+        0.861
+      ],
+      "/World/Cube_4": [
+        -0.143,
+        -0.328,
+        0.775
+      ]
+    }
+  ],
+  "summary": {
+    "n_samples": 25,
+    "duration_s": 25,
+    "sample_dt_s": 1.0,
+    "robots": [
+      "/World/FrankaA",
+      "/World/FrankaB"
+    ],
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ],
+    "phase_histogram": [
+      {
+        "robot": "/World/FrankaB",
+        "phase": "wait_sensor",
+        "seconds": 24.0
+      },
+      {
+        "robot": "/World/FrankaA",
+        "phase": "executing",
+        "seconds": 23.0
+      },
+      {
+        "robot": "/World/FrankaA",
+        "phase": "wait_sensor",
+        "seconds": 2.0
+      },
+      {
+        "robot": "/World/FrankaB",
+        "phase": "settling",
+        "seconds": 1.0
+      }
+    ],
+    "last_phase": {
+      "/World/FrankaA": "wait_sensor",
+      "/World/FrankaB": "settling"
+    },
+    "plan_calls": 21,
+    "plan_fails": 2,
+    "plan_fail_rate": 0.09523809523809523,
+    "cubes_delivered_final": 2,
+    "cycles_attempted_final": 2,
+    "last_errors": [
+      "RuntimeError: planning failed for /World/Cube_4"
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "task_id": "CP-NEW-operator-ergonomics",
+  "goal": "Build an operator-ergonomics scene: human operator (Avatar) and Franka share workspace; ergonomic posture checked via human-pose tracking. Realizes Phase 10 yrkesroll #18 (HFE / ergonomics specialist persona).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "import_robot",
+    "play_animation",
+    "create_bin",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": [
+    "Mixed human-robot workspace. Human is animated avatar (Mocap or rigged dummy), Franka picks parts from operator's bench.",
+    "Operator pose tracked at runtime. Ergonomic metric = wrist-elbow-shoulder angle deviation from neutral.",
+    "Ergonomics validation is offline (post-process the operator's joint_pos log).",
+    "For canonical-build: scene contains avatar + Franka + parts. animate the avatar reaching for parts.",
+    "Function-gate: standard pick-place delivery. Avatar's role is observational."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\nimport_robot(file_path=\"OperatorAvatar\", format=\"asset_library\", dest_path=\"/World/Operator\")\nteleport_prim(prim_path=\"/World/Operator\", position=[-0.5, -0.6, 0])\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[0.4, 0.2, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\ncreate_bin(prim_path=\"/World/Bin\", position=[-0.5, 0, 0.78], size=[0.30, 0.20, 0.10])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.2, 0.835], size=[0.10, 0.10, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=None,\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/Bin\", \"/World/Operator\"],\n)\n\nplay_animation(\n    target_path=\"/World/Operator\",\n    animation_name=\"reach_and_grab\",\n    loop=True,\n)",
+  "verify_args": null,
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 90
+  },
+  "diagnose_args": null,
+  "extends": "phase10-yrkesroll-#18",
+  "extension_notes": "HFE canonical. Avatar is a moving obstacle for the robot. Real ergonomics analysis would compute REBA/RULA scores from operator's joint angles — not part of canonical itself.",
+  "failure_modes": [
+    "OperatorAvatar SimReady asset may not exist — fallback to Cube placeholder",
+    "play_animation requires reach_and_grab animation pre-baked into asset",
+    "Operator marked as planning_obstacle — cuRobo may take longer to find collision-free path"
+  ],
+  "verified_status": "draft (Phase 10 #18; needs Avatar SimReady)"
+}

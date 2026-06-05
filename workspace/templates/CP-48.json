@@ -67,7 +67,12 @@
     "cube_path": "/World/Cube_g1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_g1",
+    "cube_paths": [
+      "/World/Cube_g1",
+      "/World/Cube_g2",
+      "/World/Cube_g3",
+      "/World/Cube_g4"
+    ],
     "target_path": "/World/GoodBin",
     "duration_s": 150
   },

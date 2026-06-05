@@ -69,7 +69,7 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_1",
+    "cube_paths": ["/World/Cube_1", "/World/Cube_2", "/World/Cube_3", "/World/Cube_4", "/World/Cube_5", "/World/Cube_6"],
     "target_path": "/World/Pallet",
     "duration_s": 90
   },

@@ -842,6 +842,217 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "modbus_tcp_bridge_attach",
+            "description": (
+                "PHASE 6 M2: spawn supervised pymodbus subprocess that polls "
+                "Modbus-TCP holding registers and emits USD attribute updates. "
+                "Maps Modbus registers to USD attr paths (e.g. belt-speed, "
+                "light-emissive). Subprocess pattern avoids in-Kit threading "
+                "lifecycle issues. Returns {bridge_id, pid, log_path} for "
+                "caller to track + diagnose. Use diagnose_modbus_bridge to "
+                "check status, modbus_tcp_bridge_detach to stop cleanly."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Modbus server IP/hostname."},
+                    "port": {"type": "integer", "default": 502},
+                    "register_map": {
+                        "type": "object",
+                        "description": "Map of {usd_attr_path: holding_register_addr} (int).",
+                    },
+                    "rate_hz": {"type": "number", "default": 1.0, "description": "Poll rate in Hz."},
+                    "mode": {"type": "string", "enum": ["client", "server"], "default": "client"},
+                },
+                "required": ["host", "register_map"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "modbus_tcp_bridge_detach",
+            "description": (
+                "PHASE 6 M2: stop a previously-attached Modbus bridge. SIGTERM "
+                "first, SIGKILL after 5s if needed. Idempotent — safe to call "
+                "even if bridge already exited."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bridge_id": {"type": "string", "description": "Returned by modbus_tcp_bridge_attach."},
+                },
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_modbus_bridge",
+            "description": (
+                "PHASE 6 M2 honesty pair: query a Modbus bridge's status. "
+                "Returns {alive, pid, n_register_updates, last_errors, log_tail}. "
+                "Detects: dead subprocess, connect failures, register-read errors. "
+                "Tells the agent whether the bridge is functioning before claims "
+                "of a working PLC connection."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bridge_id": {"type": "string"},
+                },
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "opcua_bridge_attach",
+            "description": (
+                "PHASE 6 M3: spawn supervised asyncua subprocess that polls "
+                "OPC-UA nodes and emits USD attribute updates. Same subprocess "
+                "pattern as modbus_tcp_bridge_attach. Use diagnose_opcua_bridge "
+                "+ opcua_bridge_detach for honesty pair + cleanup."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "opc.tcp://host:4840 endpoint."},
+                    "node_map": {
+                        "type": "object",
+                        "description": "Map of {usd_attr_path: opcua_node_id_string (e.g. 'ns=2;i=2')}.",
+                    },
+                    "rate_hz": {"type": "number", "default": 1.0},
+                },
+                "required": ["url", "node_map"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "opcua_bridge_detach",
+            "description": "PHASE 6 M3: stop a previously-attached OPC-UA bridge. Same semantics as modbus_tcp_bridge_detach.",
+            "parameters": {
+                "type": "object",
+                "properties": {"bridge_id": {"type": "string"}},
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_opcua_bridge",
+            "description": "PHASE 6 M3 honesty pair: query an OPC-UA bridge's status (alive, n_register_updates, last_errors, log_tail).",
+            "parameters": {
+                "type": "object",
+                "properties": {"bridge_id": {"type": "string"}},
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mqtt_sparkplug_bridge_attach",
+            "description": (
+                "PHASE 6 M5: spawn supervised paho-mqtt subprocess that "
+                "subscribes to MQTT topics (Sparkplug-compatible) and emits "
+                "USD attribute updates from messages. Use "
+                "diagnose_mqtt_sparkplug_bridge + mqtt_sparkplug_bridge_detach."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "MQTT broker host."},
+                    "port": {"type": "integer", "default": 1883},
+                    "topic_map": {
+                        "type": "object",
+                        "description": "Map of {usd_attr_path: mqtt_topic}.",
+                    },
+                    "username": {"type": "string"},
+                    "password": {"type": "string"},
+                },
+                "required": ["host", "topic_map"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mqtt_sparkplug_bridge_detach",
+            "description": "PHASE 6 M5: stop a previously-attached MQTT bridge.",
+            "parameters": {
+                "type": "object",
+                "properties": {"bridge_id": {"type": "string"}},
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_mqtt_sparkplug_bridge",
+            "description": "PHASE 6 M5 honesty pair: query MQTT bridge status.",
+            "parameters": {
+                "type": "object",
+                "properties": {"bridge_id": {"type": "string"}},
+                "required": ["bridge_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "openplc_runtime_attach",
+            "description": (
+                "PHASE 10 M5 P3: convenience wrapper over modbus_tcp_bridge_attach "
+                "for OpenPLC Runtime. Maps input_map / output_map (separately) to "
+                "Modbus holding registers (output offset +1000). Default port 502, "
+                "10Hz scan rate. Returns same shape as modbus_tcp_bridge_attach."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "default": "127.0.0.1"},
+                    "port": {"type": "integer", "default": 502},
+                    "input_map": {"type": "object", "description": "{usd_attr: input_addr}"},
+                    "output_map": {"type": "object", "description": "{usd_attr: output_addr}"},
+                    "rate_hz": {"type": "number", "default": 10.0},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_isaac_ros_cumotion_moveit",
+            "description": (
+                "PHASE 6 M4: emit MoveIt2 planning_pipeline YAML configured for "
+                "isaac_ros_cumotion plugin (cuRobo-as-MoveIt-OMPL-replacement). "
+                "Companion to setup_ros2_control_compat. Does NOT start MoveIt2 — "
+                "user runs 'ros2 launch' externally with the returned launch args."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "output_dir": {"type": "string", "default": "/tmp"},
+                    "planner_id": {"type": "string", "default": "PathPlanner"},
+                    "max_planning_time": {"type": "number", "default": 5.0},
+                    "goal_tolerance_pos_m": {"type": "number", "default": 0.005},
+                    "goal_tolerance_orient_rad": {"type": "number", "default": 0.05},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "precheck_ros2_environment",
             "description": "Verify ROS2 environment readiness before scene build.",
             "parameters": {

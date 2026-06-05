@@ -67,9 +67,14 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_1",
     "target_path": "/World/OutBin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "extends": "CP-56",
   "extension_notes": "CP-67 combines rotary_table (CP-56) + 2-robot relay (CP-51) + mutex (CP-52) for #13 Leader/Follower Rotary Station. Disc rotation transports cubes from A's drop point to B's pick point. Mutex coordinates simultaneous access. Runtime mutex enforcement is Sprint 4+.",

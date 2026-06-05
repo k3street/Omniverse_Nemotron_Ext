@@ -1,0 +1,498 @@
+{
+  "samples": [
+    {
+      "sim_t": 0.016666666666666666,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=0",
+          "builtin_pp:tick_count": 4
+        }
+      }
+    },
+    {
+      "sim_t": 1.016666666666668,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=0",
+          "builtin_pp:tick_count": 64
+        }
+      }
+    },
+    {
+      "sim_t": 2.033333333333331,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=1",
+          "builtin_pp:tick_count": 125
+        }
+      }
+    },
+    {
+      "sim_t": 3.049999999999994,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=1",
+          "builtin_pp:tick_count": 186
+        }
+      }
+    },
+    {
+      "sim_t": 4.0666666666666575,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=1",
+          "builtin_pp:tick_count": 247
+        }
+      }
+    },
+    {
+      "sim_t": 5.083333333333321,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=1",
+          "builtin_pp:tick_count": 308
+        }
+      }
+    },
+    {
+      "sim_t": 6.099999999999984,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=1",
+          "builtin_pp:tick_count": 369
+        }
+      }
+    },
+    {
+      "sim_t": 7.116666666666647,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=2",
+          "builtin_pp:tick_count": 430
+        }
+      }
+    },
+    {
+      "sim_t": 8.11666666666665,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=4",
+          "builtin_pp:tick_count": 490
+        }
+      }
+    },
+    {
+      "sim_t": 9.1166666666667,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=4",
+          "builtin_pp:tick_count": 550
+        }
+      }
+    },
+    {
+      "sim_t": 10.116666666666749,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=4",
+          "builtin_pp:tick_count": 610
+        }
+      }
+    },
+    {
+      "sim_t": 11.116666666666799,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=5",
+          "builtin_pp:tick_count": 670
+        }
+      }
+    },
+    {
+      "sim_t": 12.116666666666848,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=5",
+          "builtin_pp:tick_count": 730
+        }
+      }
+    },
+    {
+      "sim_t": 13.116666666666898,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=5",
+          "builtin_pp:tick_count": 790
+        }
+      }
+    },
+    {
+      "sim_t": 14.116666666666948,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=6",
+          "builtin_pp:tick_count": 850
+        }
+      }
+    },
+    {
+      "sim_t": 15.116666666666998,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=6",
+          "builtin_pp:tick_count": 910
+        }
+      }
+    },
+    {
+      "sim_t": 16.116666666667033,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=6",
+          "builtin_pp:tick_count": 970
+        }
+      }
+    },
+    {
+      "sim_t": 17.133333333333642,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=8 fj_held xyd=0.265",
+          "builtin_pp:tick_count": 1031
+        }
+      }
+    },
+    {
+      "sim_t": 18.15000000000025,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "event=8 fj_held xyd=0.200",
+          "builtin_pp:tick_count": 1092
+        }
+      }
+    },
+    {
+      "sim_t": 19.16666666666686,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "seek_cube",
+          "builtin_pp:tick_count": 1153
+        }
+      }
+    },
+    {
+      "sim_t": 20.18333333333347,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "seek_cube",
+          "builtin_pp:tick_count": 1214
+        }
+      }
+    },
+    {
+      "sim_t": 21.200000000000077,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "seek_cube",
+          "builtin_pp:tick_count": 1275
+        }
+      }
+    },
+    {
+      "sim_t": 22.216666666666686,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "seek_cube",
+          "builtin_pp:tick_count": 1336
+        }
+      }
+    },
+    {
+      "sim_t": 23.233333333333295,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "seek_cube",
+          "builtin_pp:tick_count": 1397
+        }
+      }
+    },
+    {
+      "sim_t": 24.249999999999904,
+      "vals": {
+        "/World/UR10": {
+          "builtin_pp:phase": "seek_cube",
+          "builtin_pp:tick_count": 1458
+        }
+      }
+    }
+  ],
+  "cube_trajectories": [
+    {
+      "sim_t": 0.0,
+      "/World/Cube_1": [
+        -0.5,
+        0.4,
+        0.975
+      ]
+    },
+    {
+      "sim_t": 1.0,
+      "/World/Cube_1": [
+        -0.5,
+        0.4,
+        0.975
+      ]
+    },
+    {
+      "sim_t": 2.0,
+      "/World/Cube_1": [
+        -0.5,
+        0.4,
+        0.975
+      ]
+    },
+    {
+      "sim_t": 3.0,
+      "/World/Cube_1": [
+        -0.763,
+        0.08,
+        0.977
+      ]
+    },
+    {
+      "sim_t": 4.1,
+      "/World/Cube_1": [
+        -0.928,
+        0.09,
+        1.282
+      ]
+    },
+    {
+      "sim_t": 5.1,
+      "/World/Cube_1": [
+        -1.02,
+        0.328,
+        1.517
+      ]
+    },
+    {
+      "sim_t": 6.1,
+      "/World/Cube_1": [
+        -1.145,
+        0.691,
+        1.314
+      ]
+    },
+    {
+      "sim_t": 7.1,
+      "/World/Cube_1": [
+        -1.169,
+        0.795,
+        1.215
+      ]
+    },
+    {
+      "sim_t": 8.1,
+      "/World/Cube_1": [
+        -1.168,
+        0.804,
+        1.204
+      ]
+    },
+    {
+      "sim_t": 9.1,
+      "/World/Cube_1": [
+        -1.19,
+        0.944,
+        1.107
+      ]
+    },
+    {
+      "sim_t": 10.1,
+      "/World/Cube_1": [
+        -1.193,
+        0.999,
+        1.088
+      ]
+    },
+    {
+      "sim_t": 11.1,
+      "/World/Cube_1": [
+        -1.164,
+        0.984,
+        1.085
+      ]
+    },
+    {
+      "sim_t": 12.1,
+      "/World/Cube_1": [
+        -0.912,
+        0.609,
+        1.115
+      ]
+    },
+    {
+      "sim_t": 13.1,
+      "/World/Cube_1": [
+        -0.304,
+        0.378,
+        0.957
+      ]
+    },
+    {
+      "sim_t": 14.1,
+      "/World/Cube_1": [
+        0.244,
+        -0.102,
+        0.893
+      ]
+    },
+    {
+      "sim_t": 15.1,
+      "/World/Cube_1": [
+        0.369,
+        -0.226,
+        0.813
+      ]
+    },
+    {
+      "sim_t": 16.1,
+      "/World/Cube_1": [
+        0.255,
+        -0.206,
+        0.8
+      ]
+    },
+    {
+      "sim_t": 17.1,
+      "/World/Cube_1": [
+        0.314,
+        -0.112,
+        0.813
+      ]
+    },
+    {
+      "sim_t": 18.2,
+      "/World/Cube_1": [
+        0.357,
+        -0.154,
+        0.913
+      ]
+    },
+    {
+      "sim_t": 19.2,
+      "/World/Cube_1": [
+        0.368,
+        -0.287,
+        0.883
+      ]
+    },
+    {
+      "sim_t": 20.2,
+      "/World/Cube_1": [
+        0.368,
+        -0.287,
+        0.883
+      ]
+    },
+    {
+      "sim_t": 21.2,
+      "/World/Cube_1": [
+        0.368,
+        -0.287,
+        0.883
+      ]
+    },
+    {
+      "sim_t": 22.2,
+      "/World/Cube_1": [
+        0.368,
+        -0.287,
+        0.883
+      ]
+    },
+    {
+      "sim_t": 23.2,
+      "/World/Cube_1": [
+        0.368,
+        -0.287,
+        0.883
+      ]
+    },
+    {
+      "sim_t": 24.2,
+      "/World/Cube_1": [
+        0.368,
+        -0.287,
+        0.883
+      ]
+    }
+  ],
+  "summary": {
+    "n_samples": 25,
+    "duration_s": 25,
+    "sample_dt_s": 1.0,
+    "robots": [
+      "/World/UR10"
+    ],
+    "cube_paths": [
+      "/World/Cube_1"
+    ],
+    "phase_histogram": [
+      {
+        "robot": "/World/UR10",
+        "phase": "seek_cube",
+        "seconds": 6.0
+      },
+      {
+        "robot": "/World/UR10",
+        "phase": "event=1",
+        "seconds": 5.0
+      },
+      {
+        "robot": "/World/UR10",
+        "phase": "event=4",
+        "seconds": 3.0
+      },
+      {
+        "robot": "/World/UR10",
+        "phase": "event=5",
+        "seconds": 3.0
+      },
+      {
+        "robot": "/World/UR10",
+        "phase": "event=6",
+        "seconds": 3.0
+      },
+      {
+        "robot": "/World/UR10",
+        "phase": "event=0",
+        "seconds": 2.0
+      },
+      {
+        "robot": "/World/UR10",
+        "phase": "event=2",
+        "seconds": 1.0
+      },
+      {
+        "robot": "/World/UR10",
+        "phase": "event=8 fj_held xyd=0.265",
+        "seconds": 1.0
+      },
+      {
+        "robot": "/World/UR10",
+        "phase": "event=8 fj_held xyd=0.200",
+        "seconds": 1.0
+      }
+    ],
+    "last_phase": {
+      "/World/UR10": "seek_cube"
+    },
+    "plan_calls": 0,
+    "plan_fails": 0,
+    "plan_fail_rate": null,
+    "cubes_delivered_final": 0,
+    "cycles_attempted_final": 0,
+    "last_errors": []
+  }
+}

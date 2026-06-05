@@ -50,6 +50,7 @@ app = omni.kit.app.get_app()
 
 duration_s = {duration_s}
 sample_dt_s = {sample_dt_s}
+seed_cube_paths = {seed_cube_paths_json}  # from template.simulate_args
 target_attrs = ["ctrl:phase", "ctrl:phase_duration", "ctrl:cubes_delivered",
                 "ctrl:cycles_attempted", "ctrl:tick_count",
                 "ctrl:plan_calls", "ctrl:plan_fails", "ctrl:last_fail_goal",
@@ -76,11 +77,21 @@ def _find_robots():
 
 def _find_cubes():
     out = []
+    seen = set()
+    # Seed with explicit paths from simulate_args (e.g. /World/CubeHeap/Item_1, /World/Peg_3).
+    # Probe these even if they don't exist (will just have no positions in trajectory).
+    for sp in seed_cube_paths:
+        if sp and sp not in seen:
+            p = stage.GetPrimAtPath(sp)
+            if p and p.IsValid():
+                out.append(sp); seen.add(sp)
+    # Then heuristic prefix scan for any other cube_* (multi-cube canonicals).
     for prim in stage.Traverse():
         n = str(prim.GetPath())
+        if n in seen: continue
         tail = n.rsplit("/", 1)[-1].lower()
         if tail == "cube" or tail.startswith("cube_") or tail.startswith("cube "):
-            out.append(n)
+            out.append(n); seen.add(n)
     return out[:8]  # cap at 8 cubes
 
 robots = _find_robots()
@@ -205,7 +216,14 @@ async def _probe(label: str, duration_s: int = 60, sample_dt_s: float = 1.0) -> 
     except Exception:
         pass
 
-    probe_code = _PROBE_CODE.format(duration_s=duration_s, sample_dt_s=sample_dt_s)
+    sa = template.get("simulate_args") or {}
+    seed = []
+    if sa.get("cube_path"): seed.append(sa["cube_path"])
+    if sa.get("cube_paths"): seed.extend(sa["cube_paths"])
+    probe_code = _PROBE_CODE.format(
+        duration_s=duration_s, sample_dt_s=sample_dt_s,
+        seed_cube_paths_json=json.dumps(seed),
+    )
     res = await kit_tools.exec_sync(probe_code, timeout=duration_s + 60)
     out = (res.get("output") or "").strip()
     for line in out.splitlines()[::-1]:
@@ -291,6 +309,46 @@ def _diagnose_stuck(summary: Dict[str, Any], cube_traj: Optional[List[Dict]] = N
             f"{cycles} cycles attempted, 0 deliveries — gripper-release issue? "
             f"drop precision issue? Mode B FJ never created?"
         )
+
+    # Multi-robot handoff phantom-success detection.
+    # Pattern: one robot incremented cubes_delivered (handed off to handoff station)
+    # but another robot is stuck in wait_sensor → relay never picked up cube.
+    last_phase = summary.get("last_phase") or {}
+    delivered = summary.get("cubes_delivered_final", 0) or 0
+    n_robots = len(last_phase) if isinstance(last_phase, dict) else 0
+    if n_robots >= 2 and delivered >= 1:
+        wait_sensor_count = sum(
+            1 for v in last_phase.values()
+            if isinstance(v, str) and "wait_sensor" in v
+        )
+        # ≥1 cube counted but >50% of robots still waiting on sensor → handoff stalled
+        if wait_sensor_count > n_robots // 2:
+            diagnoses.append(
+                f"phantom_handoff: {delivered} cube(s) delivered upstream but "
+                f"{wait_sensor_count}/{n_robots} robots still in wait_sensor — "
+                f"handoff sensor likely never triggered for downstream robot. "
+                f"Check sensor placement at handoff station."
+            )
+
+    # Detect "drop-precision" pattern: cubes delivered to bin xy but fall below
+    # bin floor (z < bin_z - 0.20m). Indicates bin too small or drop too close
+    # to edge.
+    if cube_traj and len(cube_traj) >= 3:
+        cube_paths_list = summary.get("cube_paths") or []
+        for cp in cube_paths_list:
+            positions = [s.get(cp) for s in cube_traj if s.get(cp) is not None]
+            if len(positions) < 2: continue
+            final = positions[-1]
+            initial = positions[0]
+            # Heuristic: cube moved significantly toward target xy
+            # but final z is well below initial spawn (large drop = fall through)
+            dz = final[2] - initial[2]
+            if dz < -0.25:
+                diagnoses.append(
+                    f"{cp}: large vertical drop (Δz={dz:.2f}m) — likely "
+                    f"fell through bin floor or off bin edge. "
+                    f"Check bin size/walls or drop_target precision."
+                )
 
     last_errors = summary.get("last_errors", [])
     for e in last_errors[:3]:

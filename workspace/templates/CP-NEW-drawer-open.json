@@ -1,0 +1,32 @@
+{
+  "task_id": "CP-NEW-drawer-open",
+  "goal": "Build a drawer-open station: Franka pulls open a kitchen-cabinet drawer (prismatic joint along Y axis, ~30cm travel). Validates the articulated-mechanism manipulation pattern needed for fixture-disassembly and inspection workflows.",
+  "tools_used": [
+    "robot_wizard",
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "setup_pick_place_controller",
+    "verify_pickplace_pipeline"
+  ],
+  "thoughts": [
+    "Drawer = parent cabinet body (static) + drawer face (rigid + prismatic-jointed). Joint axis along world Y (drawer pulls toward robot when its base is on +Y side). Joint upper limit = 0.30m travel.",
+    "Handle is a small cylinder/cube extruded from drawer face (z=center, x=center, y=front face). Robot grips handle, pulls in -Y direction.",
+    "setup_pick_place_controller doesn't natively support drawer-pull motion. This canonical uses a custom 6-waypoint trajectory: approach, grasp_handle, pull_back (joint extends), release. Initial implementation: target_source='spline' with hardcoded waypoints + manual gripper close; later: target_source='curobo' with constraint_phrase='maintain Y-pull while preserving handle grasp'.",
+    "Success criterion: drawer joint position >= 0.25m (within 5cm of full open) AND robot wrist within 5cm of nominal release pose. simulate_traversal_check is N/A (no cube delivery); custom validation via joint position read.",
+    "Asset: built from primitives (cube body + cube drawer + cylinder handle), no Nucleus dependency. Less faithful than Isaac Lab's Open-Drawer-Franka but unblocks the canonical."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Cabinet body (static)\ncreate_prim(prim_path=\"/World/Cabinet/Body\", prim_type=\"Cube\", position=[0.7, 0.0, 0.40], scale=[0.45, 0.30, 0.40])\napply_api_schema(prim_path=\"/World/Cabinet/Body\", schema_name=\"PhysicsCollisionAPI\")\n\n# Drawer face (rigid; prismatic joint to body)\ncreate_prim(prim_path=\"/World/Cabinet/Drawer\", prim_type=\"Cube\", position=[0.55, 0.0, 0.40], scale=[0.05, 0.28, 0.18])\napply_api_schema(prim_path=\"/World/Cabinet/Drawer\", schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path=\"/World/Cabinet/Drawer\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/Cabinet/Drawer\", attr_name=\"physics:mass\", value=2.0)\n\n# Handle protruding from drawer face\ncreate_prim(prim_path=\"/World/Cabinet/Drawer/Handle\", prim_type=\"Cylinder\", position=[0.50, 0.0, 0.40], scale=[0.02, 0.10, 0.02])\n\n# Prismatic joint between body and drawer (X-axis pull)\ncreate_prim(prim_path=\"/World/Cabinet/DrawerJoint\", prim_type=\"PhysicsPrismaticJoint\")\nset_attribute(prim_path=\"/World/Cabinet/DrawerJoint\", attr_name=\"physics:body0\", value=\"/World/Cabinet/Body\")\nset_attribute(prim_path=\"/World/Cabinet/DrawerJoint\", attr_name=\"physics:body1\", value=\"/World/Cabinet/Drawer\")\nset_attribute(prim_path=\"/World/Cabinet/DrawerJoint\", attr_name=\"physics:axis\", value=\"X\")\nset_attribute(prim_path=\"/World/Cabinet/DrawerJoint\", attr_name=\"physics:lowerLimit\", value=-0.30)\nset_attribute(prim_path=\"/World/Cabinet/DrawerJoint\", attr_name=\"physics:upperLimit\", value=0.0)\n\n# Robot — facing drawer\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0.0, 0.0, 0.0],\n    orientation=[1.0, 0, 0, 0],\n)\n\n# Custom waypoint pull (target_source='spline' baseline)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"spline\",\n    sensor_path=\"/World/Cabinet/Drawer/Handle\",\n    belt_path=None,\n    source_paths=[\"/World/Cabinet/Drawer/Handle\"],\n    destination_path=\"/World/Cabinet/Drawer/Handle\",\n    drop_target_z_offset=0.30,\n)",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": null,
+  "extends": "phase8-yrkesroll-#4",
+  "extension_notes": "First articulated-manipulation canonical. No cube delivery — success measured via PrismaticJoint position attribute. Currently spline controller with handle-as-source workaround; cuRobo + constraint_phrase upgrade is follow-on work.",
+  "failure_modes": [
+    "PhysicsPrismaticJoint axis convention varies by Isaac Sim version; X may need to be 'Y' or {1,0,0} tuple",
+    "Spline controller doesn't know how to pull drawer — hardcoded waypoints would drag in absolute world space, but the handle moves with the drawer → motion plan diverges",
+    "Mass too low → drawer flies open from light contact; mass too high → robot wrist torque saturates",
+    "Sensor=handle path treats handle as movable cube — pick-place controller may try to LIFT handle vertically instead of pulling horizontally"
+  ],
+  "verified_status": "draft (Phase 8 yrkesroll #4; needs Kit smoke-test; spline+drawer is open question)"
+}

@@ -1,0 +1,37 @@
+{
+  "task_id": "CP-NEW-g1-bimanual-tabletop",
+  "goal": "Build a tabletop bimanual reach scene with Unitree G1 humanoid: G1 standing in front of table, both hands reach to two cubes. Maps to GR00T sim-to-real bimanual demo. Realizes Phase 8 yrkesroll #1 (ML/RL persona). Asset: G1 from NVIDIA SimReady catalog.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "import_robot",
+    "teleport_prim",
+    "setup_whole_body_control",
+    "create_bin"
+  ],
+  "thoughts": [
+    "G1 = NVIDIA-shipped humanoid asset, available via import_robot(format='asset_library'). Anchored as fixed base (no locomotion in this canonical, just bimanual reach).",
+    "Tabletop scene: 1.5m × 0.6m table. G1 stands with hip at z=0.95 (G1 nominal hip height ~1.0m).",
+    "Two target cubes: Cube_left at table (-0.20, 0.30, 0.80), Cube_right at (+0.20, 0.30, 0.80).",
+    "setup_whole_body_control wraps the G1 articulation; doesn't yet exist as a tested handler — falls back to setup_pick_place_controller per arm if WBC unavailable.",
+    "Function-gate semantics: 1 cube each delivered to drop_left/drop_right would be ideal; for V0, accept either cube reaching the drop bin (cube_paths)."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0.40, 0.40], scale=[0.75, 0.30, 0.40])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nimport_robot(file_path=\"G1\", format=\"asset_library\", dest_path=\"/World/G1\")\nteleport_prim(prim_path=\"/World/G1\", position=[0, -0.20, 0.95])\n\ncreate_prim(prim_path=\"/World/Cube_left\", prim_type=\"Cube\", position=[-0.20, 0.40, 0.835], size=0.05)\ncreate_prim(prim_path=\"/World/Cube_right\", prim_type=\"Cube\", position=[0.20, 0.40, 0.835], size=0.05)\nfor cube in [\"/World/Cube_left\", \"/World/Cube_right\"]:\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=cube, schema_name=api)\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.45, 0.75], size=[0.30, 0.20, 0.15])\n\nsetup_whole_body_control(\n    articulation_path=\"/World/G1\",\n    locomotion_policy=\"hover_g1_v1\",\n    arm_planner=\"pink_ik\",\n    robot_profile=\"unitree_g1\",\n)",
+  "verify_args": null,
+  "simulate_args": {
+    "cube_paths": ["/World/Cube_left", "/World/Cube_right"],
+    "target_path": "/World/Bin",
+    "duration_s": 120
+  },
+  "diagnose_args": null,
+  "extends": "phase8-yrkesroll-#1",
+  "extension_notes": "First humanoid canonical. Requires NVIDIA G1 SimReady asset (available via import_robot asset_library). setup_whole_body_control handler may not be fully wired — fallback path uses setup_pick_place_controller per arm.",
+  "failure_modes": [
+    "G1 asset path resolution — NVIDIA Nucleus may not be configured locally",
+    "setup_whole_body_control handler stub — may not invoke real WBC; cube delivery via individual arm IK as fallback",
+    "Bimanual coordination: cuRobo/WBC may not parallelize arms; one-arm-at-a-time fallback",
+    "G1 hand frame name conventions vary (left_hand vs L_hand_link); template may need name fixup"
+  ],
+  "verified_status": "draft (Phase 8 #1; needs Nucleus + Kit smoke-test)"
+}

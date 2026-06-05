@@ -1,0 +1,33 @@
+{
+  "task_id": "CP-NEW-plc-conveyor",
+  "goal": "Build a PLC-in-the-loop conveyor station: Isaac Sim conveyor receives pause/resume signals from a Modbus-TCP server (any external PLC or pymodbus mock). The conveyor pauses within ~250ms of a Modbus holding register flipping to 0 and resumes within ~250ms of it returning to non-zero. Validates Phase 6 M2 (modbus_tcp_bridge_attach + diagnose_modbus_bridge).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "create_conveyor",
+    "modbus_tcp_bridge_attach",
+    "diagnose_modbus_bridge",
+    "modbus_tcp_bridge_detach",
+    "verify_pickplace_pipeline"
+  ],
+  "thoughts": [
+    "PLC-in-the-loop test: external Modbus-TCP source drives belt state. We use pymodbus mock server (any holding registers will do) to simulate the PLC.",
+    "Bridge attaches with rate_hz=10 (100ms poll) — well below the 250ms target reaction time spec.",
+    "Register map: holding register 0 → /World/Conveyor/run_command (1=run, 0=pause).",
+    "Test plan: start mock server with HR0=1, attach bridge, verify run state, flip HR0=0 via mock-server callback, observe belt-pause within 250ms via diagnose_modbus_bridge n_register_updates.",
+    "Note: function-gate via simulate_traversal_check is N/A — this canonical doesn't deliver cubes; it tests bridge plumbing. verify_pickplace_pipeline is also N/A. Custom validation via diagnose_modbus_bridge."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_conveyor(prim_path=\"/World/PLCConveyor\", position=[0.0, 0.0, 0.78], size=[2.0, 0.4, 0.05], surface_velocity=[0.3, 0, 0])\nmodbus_tcp_bridge_attach(host=\"127.0.0.1\", port=5021, register_map={\"/World/PLCConveyor/run_command\": 0, \"/World/PLCConveyor/jam_signal\": 1, \"/World/PLCConveyor/reset\": 2, \"/World/PLCConveyor/start_button\": 3}, rate_hz=10.0, mode=\"client\")",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": null,
+  "extends": "phase6-m2",
+  "extension_notes": "First plumbing-only canonical (no cube delivery). Tests Phase 6 M2 modbus_tcp_bridge primitive end-to-end against a pymodbus mock server. Future expansion: drive surfaceVelocity via run_command, hook PLC-pause to controller's belt-pause callback for real cube-pause test.",
+  "failure_modes": [
+    "Modbus mock server not running on 127.0.0.1:5021 → bridge attach succeeds but diagnose shows alive=false + connect_failed in log",
+    "pymodbus not installed → bridge worker fails to start; diagnose log_tail shows ImportError",
+    "Wrong register_map → bridge alive but n_register_updates=0 with errors logged"
+  ],
+  "verified_status": "draft (M2 plumbing test; no function-gate)"
+}
