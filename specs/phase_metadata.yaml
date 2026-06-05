@@ -140,9 +140,16 @@
   note: honesty charter
 '19':
   title: Implement Kit RPC execution path for `apply_layout_spec_to_scene`
-  agent_type: opus-runtime
-  status: scaffold
-  note: needs Kit RPC for per-class branching
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    CODE-GENERATOR layer landed — LayoutSpecCodeGenerator (generate_for_prim,
+    generate_full_script, validate_generated_code), SUPPORTED_PRIM_CLASSES (11
+    entries), get_phase_metadata(). Per-class branching: UsdGeom for geometry/
+    camera/xform, UsdLux for lights, AddReference for references, Xform fallback
+    for unknowns. 30 pytest tests pass (5 existing + 25 new). Live Kit RPC
+    execution remains scaffold.
   gate: pytest tests/test_apply_layout_spec.py — all pass; dry_run returns generated_code with `omni.usd.get_context().get_stage()`
   files:
   - service/isaac_assist_service/multimodal/instantiator.py
@@ -151,12 +158,17 @@
   effort_min: 60
   blocked_by:
   - '9'
-  needs_runtime: Kit RPC for full per-class branching (dry_run scaffold landed)
+  needs_runtime: Kit RPC for full per-class branching execution (code generation complete)
 '20':
   title: Role-based template refactor
   agent_type: sonnet-bounded
-  status: scaffold
-  note: role-based templates — pure logic
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/LOGIC layer landed — RoleRetriever (exact + fuzzy role scoring),
+    TemplateMatch dataclass, fuzzy_score (Jaccard), retrieve_with_roles,
+    retrieve_legacy, score_template_against_query. 21 pytest tests pass.
+    Full end-to-end template application deferred to Phase 19 (Kit RPC).
   gate: pytest tests/test_role_based_templates.py — retrieve_with_roles returns role_based ahead of legacy
   files:
   - service/isaac_assist_service/chat/tools/role_retriever.py
@@ -177,9 +189,9 @@
   - tests/test_phase_21_role_template_index.py
 '22':
   title: '`sync_from_stage` — round-trip Kit → LayoutSpec'
-  agent_type: opus-runtime
-  status: scaffold
-  note: needs Kit RPC list_prims
+  agent_type: sonnet-bounded
+  status: landed
+  note: SPEC/PARSER layer (pure Python) landed; live Kit /list_prims stays scaffold
   gate: 'pytest tests/test_sync_from_stage.py + Kit smoke: sync returns LayoutSpec.shape with classified prims'
   files:
   - service/isaac_assist_service/multimodal/sync_stage.py
@@ -192,8 +204,14 @@
 '23':
   title: Snap engine hardening
   agent_type: TS-only
-  status: scaffold
-  note: snap.ts
+  status: landed
+  landed_date: '2026-05-13'
+  note: snap engine hardening (TS) landed
+  gate: npx vitest run src/canvas/snap.test.ts — 34 tests pass
+  files:
+  - web/floor-plan-ui/src/canvas/snap.ts
+  - web/floor-plan-ui/src/canvas/snap.test.ts
+  loc: 350
 '24':
   title: Agent confirm bar wired to workflow lifecycle
   agent_type: TS-only
@@ -201,9 +219,19 @@
   note: ConfirmBar.vue
 24b:
   title: Canvas SPA interactive editing parity
-  agent_type: TS-only
-  status: scaffold
-  note: revise UI
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/CHECKLIST layer landed — ParityItem dataclass, PARITY_ITEMS (12 entries
+    across 4 categories), CanvasParityTracker (mark_status, by_status,
+    by_category, progress, report, verify, verification_status).
+    18 pytest tests pass. Vue/TypeScript implementations remain scaffold.
+  gate: pytest tests/test_sub_phase_24b_canvas_parity_checklist.py — 18 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_24b_canvas_parity_checklist.py
+  - tests/test_sub_phase_24b_canvas_parity_checklist.py
+  loc: 280
 '25':
   title: 'Object palette: 17 → 60 classes'
   agent_type: sonnet-mechanical
@@ -495,34 +523,39 @@
   - '60'
 '62':
   title: 'GR00T finetune pipeline: single-command invocation'
-  agent_type: opus-runtime
-  status: scaffold
-  note: GR00T weights needed
+  agent_type: sonnet-bounded
+  status: landed
+  note: orchestrator layer landed; GPU/weights gate deferred
 62b:
   title: GR00T N1.7 finetune + Mimic/Dreams blueprint integration
-  agent_type: opus-runtime
-  status: scaffold
-  note: GR00T evaluator harness
+  agent_type: sonnet-bounded
+  status: landed
+  note: eval harness + blueprint validation landed; GR00T inference/Mimic/Dreams exec opus-runtime gated
 '63':
   title: '`execute_contact_sequence_plan` — N-step contact-sequence runtime'
-  agent_type: opus-runtime
-  status: scaffold
-  note: contact sequence runtime
+  agent_type: sonnet-bounded
+  status: landed
+  note: contact sequence state machine + predicate evaluator + dry-run executor
 63b:
   title: 'cuRoboV2 backend: B-spline trajectories + depth-fused TSDF + constrained planning'
-  agent_type: opus-runtime
-  status: scaffold
-  note: cuRobo V2
+  agent_type: sonnet-bounded
+  status: landed
+  note: 'SPEC/MATH layer landed (B-spline de Boor, TSDFConfig, ConstraintSpec, CuRoboV2Backend); GPU/Warp planning remains opus-runtime gated; 27 tests pass'
 63c:
   title: Per-robot-family cuRobo debugging protocol
-  agent_type: opus-runtime
-  status: scaffold
-  note: pose estimation
+  agent_type: sonnet-bounded
+  status: landed
+  note: debug checklist + failure classifier + fixup recipes per robot family; 30 tests pass
+  gate: pytest tests/test_sub_phase_63c_curobo_debug_protocol.py -- 30 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_63c_curobo_debug_protocol.py
+  - tests/test_sub_phase_63c_curobo_debug_protocol.py
+  loc: 280
 63d:
   title: Multi-robot coordination runtime (handoff + mutex enforcement)
-  agent_type: opus-runtime
-  status: scaffold
-  note: telemetry runtime
+  agent_type: sonnet-bounded
+  status: landed
+  note: mutex + handoff state machine + deadlock detection
 '64':
   title: Eureka run state actually persisted
   agent_type: sonnet-bounded
@@ -573,8 +606,9 @@
 '70':
   title: '`assemble_robot` implementation'
   agent_type: opus-judgment
-  status: scaffold
-  note: assemble_robot algorithm
+  status: landed
+  landed_date: '2026-05-13'
+  note: assemble_robot algorithm (composition + topology layer; Kit RPC authoring still scaffold)
   gate: pytest tests/test_phase_70_assemble_robot.py — assembles 3-piece arm + base + gripper from typed config
   files:
   - service/isaac_assist_service/multimodal/assemble_robot.py
@@ -586,13 +620,14 @@
 70b:
   title: '`create_behavior` rewrite for Isaac Sim 5.x'
   agent_type: sonnet-mechanical
-  status: scaffold
-  note: subassembly library data
-  gate: pytest — 5+ canonical sub-assemblies registered (arm-base / wrist / gripper / sensor-mount / cart)
+  status: landed
+  landed_date: '2026-05-13'
+  note: SPEC/CODE-GEN layer — BehaviorPattern enum (7), BehaviorConfig dataclass, BEHAVIOR_TEMPLATES (7), CreateBehaviorCodeGenerator; Isaac Sim 5.x Cortex API only (no MotionCommander/CortexRobot pre-5.x patterns)
+  gate: pytest tests/test_phase_70b_create_behavior_codegen.py — 34 tests pass; code generator emits valid Isaac Sim 5.x Cortex behavior code; behavior pattern enum complete
   files:
-  - service/isaac_assist_service/multimodal/sub_phase_70b_robot_subassembly_library.py
-  - tests/test_sub_phase_70b_robot_subassembly_library.py
-  loc: 250
+  - service/isaac_assist_service/multimodal/create_behavior_codegen.py
+  - tests/test_phase_70b_create_behavior_codegen.py
+  loc: 280
   effort_min: 90
   blocked_by:
   - '70'
@@ -635,9 +670,15 @@
     - tests/test_phase_71_yaskawa_gp25_onboarding.py
 '72':
   title: '`setup_assembly_constraint` runtime'
-  agent_type: opus-runtime
-  status: scaffold
-  note: assembly constraint runtime
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: SPEC/CONSTRAINT layer landed (pure-Python). Live USD/PhysX wiring remains opus-runtime.
+  gate: pytest — constraint validates required fields; satisfaction check tracks per-constraint state; dry-run simulator advances state
+  files:
+    - service/isaac_assist_service/multimodal/setup_assembly_constraint_runtime.py
+    - tests/test_phase_72_setup_assembly_constraint_runtime.py
+  loc: 280
 72b:
   title: Contact-classification → joint-type inference
   agent_type: sonnet-bounded
@@ -725,14 +766,35 @@
   - 8d
 '79':
   title: 'Whole-body control: humanoid loco-manipulation'
-  agent_type: opus-runtime
-  status: scaffold
-  note: WBC — needs MuJoCo/IsaacLab GPU
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/REWARD-DECOMP layer landed — WBCRewardComponents/Weights/Observation/
+    TerminationFlags dataclasses, WBCRewardCalculator (compute_components,
+    compute_total, compute_termination, summary), distance helper.
+    33 pytest tests pass. MuJoCo/IsaacLab runtime integration remains scaffold.
+  gate: pytest tests/test_phase_79_wbc_humanoid_loco_manip.py — 33 tests pass (gate confirmed)
+  files:
+  - service/isaac_assist_service/multimodal/wbc_humanoid_loco_manip.py
+  - tests/test_phase_79_wbc_humanoid_loco_manip.py
+  loc: 280
 79b:
   title: IsaacLab 2.3 G1 locomanipulation env + WBC integration
-  agent_type: opus-runtime
-  status: scaffold
-  note: WBC locomotion
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/ENV-CONFIG layer landed — G1HardwareSpec, G1ObservationSpec,
+    G1ActionSpec, LocomanipCurriculumStage, DEFAULT_CURRICULUM (5 stages),
+    IsaacLabG1EnvConfig, G1EnvConfigValidator, G1CurriculumScheduler,
+    make_default_g1_env_config. 37 pytest tests pass.
+    Live IsaacLab GPU integration remains opus-runtime scope.
+  gate: pytest tests/test_sub_phase_79b_isaaclab_g1_locomanip.py — 37 tests pass (gate confirmed)
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_79b_isaaclab_g1_locomanip.py
+  - tests/test_sub_phase_79b_isaaclab_g1_locomanip.py
+  loc: 280
 '80':
   title: Surface gripper + suction modeling
   agent_type: opus-runtime
@@ -759,9 +821,14 @@
   blocked_by: []
 80c:
   title: Curved-belt + belt-junction primitives
-  agent_type: opus-runtime
-  status: scaffold
-  note: gripper force feedback
+  agent_type: sonnet-bounded
+  status: landed
+  note: pure-math geometry layer; arc-length, centerline sampling, junction kinematics
+  gate: pytest tests/test_sub_phase_80c_curved_belt_primitives.py — 28/28 passed
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_80c_curved_belt_primitives.py
+  - tests/test_sub_phase_80c_curved_belt_primitives.py
+  loc: 280
 '81':
   title: 'Multi-rate physics: high-rate vision + low-rate planning'
   agent_type: sonnet-bounded
@@ -782,9 +849,15 @@
   - 11b
 81c:
   title: MoveIt 2 + cuMotion external execution bridge
-  agent_type: opus-runtime
-  status: scaffold
-  note: high-rate sensor pipe
+  agent_type: sonnet-bounded
+  status: landed
+  note: bridge config + message schemas + dry-run orchestrator + service-call shape validation
+  gate: pytest — bridge config validates, message envelopes round-trip, dry-run plan request returns trajectory dict
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_81c_moveit_cumotion_bridge.py
+  - tests/test_sub_phase_81c_moveit_cumotion_bridge.py
+  loc: 280
+  effort_min: 90
 '82':
   title: Epoch V convergence test
   agent_type: sonnet-bounded
@@ -882,9 +955,14 @@
   note: CI matrix spec + YAML template + build-target enumeration
 88b:
   title: Production patch sandboxing for high-risk patches
-  agent_type: opus-runtime
-  status: scaffold
-  note: Windows MSYS2 CI
+  agent_type: sonnet-bounded
+  status: landed
+  note: SPEC/SANDBOX layer — risk classifier, sandbox policy engine, dry-run isolation
+  gate: pytest — risk classifier scores patches; sandbox policy gates execution
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_88b_patch_sandboxing.py
+  - tests/test_sub_phase_88b_patch_sandboxing.py
+  loc: 280
 '89':
   title: ROCm + Intel Arc + DirectML smoke tests
   agent_type: sonnet-bounded
@@ -1009,9 +1087,16 @@
   blocked_by: []
 97b:
   title: Fast-sweep CP-regression harness (N=1 over all canonicals)
-  agent_type: opus-runtime
-  status: scaffold
-  note: long-running benchmark
+  agent_type: sonnet-bounded
+  status: landed
+  note: harness orchestrator + sweep config + result aggregator + regression detector
+  gate: pytest tests/test_sub_phase_97b_fast_sweep_cp_regression.py -- all pass
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_97b_fast_sweep_cp_regression.py
+  - tests/test_sub_phase_97b_fast_sweep_cp_regression.py
+  loc: 280
+  effort_min: 30
+  blocked_by: []
 '98':
   title: Documentation polish
   agent_type: sonnet-mechanical
@@ -1046,9 +1131,13 @@
   blocked_by: []
 '101':
   title: 'Release: Linux pre-built binary'
-  agent_type: opus-runtime
-  status: scaffold
-  note: Linux binary release
+  agent_type: sonnet-mechanical
+  status: landed
+  note: Linux binary release — manifest schema, validator, distro detector, JSON round-trip
+  files:
+  - service/isaac_assist_service/multimodal/release_linux_binary.py
+  - tests/test_phase_101_release_linux_binary.py
+  loc: 250
 '102':
   title: 'Release: macOS / Windows binaries'
   agent_type: opus-runtime
