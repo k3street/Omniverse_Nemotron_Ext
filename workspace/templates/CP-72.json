@@ -1,0 +1,52 @@
+{
+  "task_id": "CP-72",
+  "goal": "Build a UR10 + Cortex bin-stacking canonical: UR10 + Cortex behavior-tree controller (CortexUr10) picks 4 cubes from feeder and stacks them in a 1x1x4 column in a bin. Realizes #27 UR10BinStacking via Cortex (alternative to cuRobo motion stack).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "import_robot",
+    "teleport_prim",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_cortex_behavior",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six UR10-Cortex-stacking specifics for CP-72 (extends CP-71 with Cortex behavior layer + vertical stack):\n1) UR10 base on table (0,0,0.75) — same layout as CP-71.\n2) 4 cubes pre-placed on feeder surface at known positions (skip dispenser; tighter test of Cortex behavior).\n3) setup_cortex_behavior(robot_path='/World/UR10', robot_kind='ur10') installs CortexUr10 wrapper + RmpFlow obstacle registration + behavior-tree slot.\n4) Cortex coexists with our setup_pick_place_controller — Cortex provides motion (RmpFlow) while our controller drives the pick/place state machine. Two-layer integration test.\n5) drop_targets dict places each cube vertically in bin: z = 0.78 + (i × 0.05) for 4-cube stack.\n6) Realizes #27 UR10BinStacking. CortexUr10 is the canonical Isaac Sim 5.x behavior-tree wrapper and a key API for behavior-driven research scenarios.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 base on table\nimport_robot(file_path=\"UR10\", format=\"asset_library\", dest_path=\"/World/UR10\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\n# Feeder surface\ncreate_conveyor(\n    prim_path=\"/World/Feeder\",\n    position=[-0.5, 0.4, 0.78],\n    size=[0.50, 0.40, 0.05],\n    surface_velocity=[0.001, 0, 0],\n)\n\n# 4 cubes pre-placed on feeder in a row\nfor i, x in enumerate([-0.7, -0.55, -0.4, -0.25]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Stacking bin (small footprint, taller than CP-71's 4-grid layout)\ncreate_bin(prim_path=\"/World/StackBin\", position=[0.5, -0.3, 0.75], size=[0.10, 0.10, 0.30])\n\n# Pick sensor\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[-0.1, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Cortex behavior wrapper for UR10\nsetup_cortex_behavior(\n    robot_path=\"/World/UR10\",\n    robot_kind=\"ur10\",\n    obstacles=[\"/World/Table\", \"/World/Feeder\", \"/World/StackBin\"],\n)\n\n# UR10 cuRobo controller — drop_targets stack vertically (z step = 0.05)\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/Feeder\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/StackBin\",\n    drop_targets={\n        \"/World/Cube_1\": [0.5, -0.3, 0.815],\n        \"/World/Cube_2\": [0.5, -0.3, 0.865],\n        \"/World/Cube_3\": [0.5, -0.3, 0.915],\n        \"/World/Cube_4\": [0.5, -0.3, 0.965],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/Feeder\", \"/World/StackBin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-0.7, 0.4, 0.835],
+      "/World/Cube_2": [-0.55, 0.4, 0.835],
+      "/World/Cube_3": [-0.4, 0.4, 0.835],
+      "/World/Cube_4": [-0.25, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/Feeder": [0.001, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/UR10", "pick_path": "/World/Feeder", "place_path": "/World/StackBin", "robot_kind": "ur10e"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/StackBin",
+    "duration_s": 180
+  },
+  "extends": "CP-71",
+  "extension_notes": "CP-72 adds setup_cortex_behavior on top of CP-71's UR10 + drop_targets pattern. Cortex provides RmpFlow obstacle awareness as a parallel motion layer; our setup_pick_place_controller still drives state machine. Realizes #27 UR10BinStacking. Cube stack heights step by cube_size=0.05m.",
+  "failure_modes": [
+    "Cortex import path drift: setup_cortex_behavior expects isaacsim.cortex extension enabled. If module missing, handler logs a warning + skips behavior install.",
+    "Stacking precision: cuRobo drop precision must hit ±2cm to keep tower stable; UR10 cuRobo with no surface gripper means cube falls during retreat — first cube may topple subsequent placements.",
+    "Same UR10 gripper limitation as CP-69/71 — function-gate (delivery) deferred until surface gripper wires in.",
+    "Verifier may not validate Cortex install — only checks pickplace pipeline shape."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+}

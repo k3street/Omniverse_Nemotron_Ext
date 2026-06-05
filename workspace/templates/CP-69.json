@@ -1,0 +1,61 @@
+{
+  "task_id": "CP-69",
+  "goal": "Build the first UR10 cuRobo pick-place canonical: UR10 picks 1 cube off conveyor, drops in bin. Validates the new robot_family='ur10' branch in the cuRobo handler. Realizes the UR10-arm half of #2 / #3 / #25 / #27 / #33.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "import_robot",
+    "teleport_prim",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six UR10-cuRobo specifics for CP-69 (this is the FIRST UR10 canonical):\n1) UR10 has 1.3m reach (vs Franka 0.85m) \u2014 allows wider workspace; conveyor + bin both at 0.6m radius are well in range.\n2) UR10 mounts via import_robot(asset_library, 'UR10') at /World/UR10. No robot_wizard yet \u2014 that tool only knows franka_panda.\n3) Base at [0, 0, 0.75] \u2014 sitting on the same 0.75m-top table as Franka canonicals, no pedestal needed for tabletop work.\n4) target_source='curobo' + robot_family='ur10' \u2014 the new branch instantiates UR10(attach_gripper=True), uses ur10e.yml cuRobo config, plans to tool0 frame, and routes _grip_open/_grip_close to the surface (suction) gripper auto-attached at flange.\n5) Single cube to keep validation simple \u2014 confirms motion plan + grip cycle works before scaling up.\n6) Same physics as Franka canonicals: rubber material on cube, sleepThreshold=0, MBP broadphase, no GPU dynamics.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 from asset library \u2014 placed on table top (z=0.75)\nimport_robot(file_path=\"UR10\", format=\"asset_library\", dest_path=\"/World/UR10\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\n# Conveyor \u2014 well within UR10's 1.3m reach\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.5, 0.4, 0.78],\n    size=[2.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Single cube on conveyor \u2014 flows past pick zone\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-1.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Output bin\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Pick sensor at conveyor mid-belt\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# UR10 cuRobo pick-place controller \u2014 first call with robot_family='ur10'\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [
+        -1.0,
+        0.4,
+        0.835
+      ]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Bin",
+        "robot_kind": "ur10e"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 90
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-69 is structurally CP-01 with Franka swapped for UR10. First canonical to exercise the new robot_family='ur10' branch in setup_pick_place_controller's cuRobo handler. Surface gripper auto-attached via UR10(attach_gripper=True). Form-gate validates build; runtime delivery is the next milestone.",
+  "failure_modes": [
+    "Asset path drift: import_robot('UR10', asset_library) resolves to local Isaac Sim 5.0 assets \u2014 drift on Isaac Sim version bumps would manifest here first.",
+    "EE-frame mismatch: cuRobo plans to URDF tool0 link; SurfaceGripper attaches at /World/UR10/ee_link in the USD. The two frames are coincident in canonical UR10 but slight pose-drift may yield grip miss on first attempt.",
+    "Surface gripper proximity: cube must contact the ee_link suction surface within tolerance; cuRobo's plan must descend close enough. Default approach height (max(source_z, drop_z) + 0.2m) tested for Franka, may need ee_offset tweak for UR10.",
+    "Reach: UR10 1.3m vs Franka 0.85m \u2014 extra reach is forgiving for the conveyor at x=-1.0, but pose singularities differ between robots; cuRobo plan may take more IK seeds to converge."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+}

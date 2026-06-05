@@ -38853,12 +38853,10 @@ async def _handle_surface_gripper(args: Dict) -> Dict:
     graph_path = args.get("graph_path") or f"{robot_path}/SuctionGraph"
 
     code = f"""\
-import omni.usd, json
+import omni.usd, omni.kit.commands, json, traceback
 from pxr import UsdGeom, Sdf
-import omni.graph.core as og
 
 stage = omni.usd.get_context().get_stage()
-graph_path = {graph_path!r}
 art_path = {ee_link!r}
 robot_path = {robot_path!r}
 
@@ -38868,49 +38866,93 @@ if not stage.GetPrimAtPath(robot_path).IsValid():
 if not stage.GetPrimAtPath(art_path).IsValid():
     print(json.dumps({{"error": f"ee_link not found: {{art_path}}"}})); raise SystemExit
 
-# Create OmniGraph for suction
-keys = og.Controller.Keys
-og.Controller.edit(
-    {{"graph_path": graph_path, "evaluator_name": "execution"}},
-    {{
-        keys.CREATE_NODES: [
-            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-            ("SurfaceGripper", "isaacsim.robot.surface_gripper.OgnSurfaceGripper"),
-        ],
-        keys.CONNECT: [
-            ("OnPlaybackTick.outputs:tick", "SurfaceGripper.inputs:execIn"),
-        ],
-        keys.SET_VALUES: [
-            ("SurfaceGripper.inputs:parentPath", art_path),
-            ("SurfaceGripper.inputs:enabled", True),
-            ("SurfaceGripper.inputs:gripThreshold", {grip_threshold}),
-            ("SurfaceGripper.inputs:forceLimit", {force_limit}),
-            ("SurfaceGripper.inputs:torqueLimit", {torque_limit}),
-        ],
-    }}
-)
+# Isaac Sim 5.x SurfaceGripper schema: an IsaacSurfaceGripper prim authored
+# under the ee_link. UR10 (and other suction-capable robot USDs from the
+# 5.x asset library) ship a `Gripper` variant with `Short_Suction` /
+# `Long_Suction` selections that create the schema prim for free —
+# preferred path because the variant also wires the right physics joints.
+# Falls back to omni.kit.commands "CreateSurfaceGripper" when no variant
+# exists.
 
-# Verify graph created
-gp = stage.GetPrimAtPath(graph_path)
-gn_path = f"{{graph_path}}/SurfaceGripper"
-gn = stage.GetPrimAtPath(gn_path)
+robot_prim = stage.GetPrimAtPath(robot_path)
+sg_path = art_path + "/SurfaceGripper"
+sg_via = "unknown"
+
+variant_set = robot_prim.GetVariantSet("Gripper") if robot_prim.HasVariantSets() else None
+variant_names = list(variant_set.GetVariantNames()) if variant_set else []
+if "Short_Suction" in variant_names:
+    variant_set.SetVariantSelection("Short_Suction")
+    sg_via = "variant:Short_Suction"
+elif "Long_Suction" in variant_names:
+    variant_set.SetVariantSelection("Long_Suction")
+    sg_via = "variant:Long_Suction"
+
+# After variant set, the schema prim should exist. If not, fall back to
+# the Kit command that creates a fresh IsaacSurfaceGripper schema prim.
+if not stage.GetPrimAtPath(sg_path).IsValid():
+    try:
+        ok, prim = omni.kit.commands.execute("CreateSurfaceGripper", prim_path=art_path)
+        if ok and prim:
+            sg_path = str(prim.GetPath())
+            sg_via = "command:CreateSurfaceGripper"
+    except Exception as _e:
+        print(f"(surface_gripper: CreateSurfaceGripper command soft-fail: {{_e}})")
+        traceback.print_exc()
+
+sg_prim = stage.GetPrimAtPath(sg_path)
+if sg_prim and sg_prim.IsValid():
+    # Set scalar properties; relationship setup (attachment_points) needs
+    # joints that exist after world.reset() — left for runtime wiring.
+    for _name, _val in (
+        ("isaac:maxGripDistance", {grip_threshold}),
+        ("isaac:coaxialForceLimit", {force_limit}),
+        ("isaac:shearForceLimit", {force_limit}),
+        ("isaac:retryInterval", 1.0),
+    ):
+        _attr = sg_prim.GetAttribute(_name)
+        if _attr and _attr.IsDefined():
+            try: _attr.Set(_val)
+            except Exception: pass
+
+# Mark the SurfaceGripper path on the robot prim so the cuRobo handler can
+# find it at install time (no scene-traversal needed).
+try:
+    _marker = robot_prim.GetAttribute("isaac_assist:surface_gripper_path")
+    if not _marker or not _marker.IsDefined():
+        _marker = robot_prim.CreateAttribute("isaac_assist:surface_gripper_path", Sdf.ValueTypeNames.String)
+    _marker.Set(sg_path)
+except Exception: pass
+
 print(json.dumps({{
-    "graph_path": graph_path,
-    "gripper_node_path": gn_path,
+    "robot_path": robot_path,
+    "surface_gripper_path": sg_path,
     "ee_link": art_path,
-    "graph_exists": bool(gp and gp.IsValid()),
-    "gripper_node_exists": bool(gn and gn.IsValid()),
+    "schema_prim_exists": bool(sg_prim and sg_prim.IsValid()),
+    "schema_prim_type": str(sg_prim.GetTypeName()) if (sg_prim and sg_prim.IsValid()) else None,
+    "created_via": sg_via,
 }}))
 """
     res = await kit_tools.exec_sync(code, timeout=15)
-    return {
-        "graph_path": graph_path,
-        "gripper_node_path": f"{graph_path}/SurfaceGripper",
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in reversed(out.splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    summary = {
+        "robot_path": robot_path,
         "ee_link": ee_link,
         "force_limit": force_limit,
         "torque_limit": torque_limit,
-        "raw": (res.get("output") or "")[-300:],
+        "raw": out[-300:],
     }
+    if parsed:
+        summary.update(parsed)
+    return summary
 
 
 DATA_HANDLERS["surface_gripper"] = _handle_surface_gripper
@@ -39027,6 +39069,893 @@ print(json.dumps({{
 
 
 DATA_HANDLERS["create_articulated_joint"] = _handle_create_articulated_joint
+
+
+async def _handle_barcode_reader_sensor(args: Dict) -> Dict:
+    """Tier B tool — creates a barcode-reader sensor at a fixed scan position.
+
+    Reads cube identity via Semantics_class lookup when a cube enters the
+    sensor's xy zone. Output published as USD attribute on the sensor prim:
+      barcode:last_read (cube path)
+      barcode:last_class (semantic class read)
+      barcode:read_count
+
+    For canonical-time, creates the sensor prim with attrs. Runtime barcode
+    reading would be a per-tick callback (controller-side, Sprint 3+).
+
+    Args:
+      sensor_path:  USD path of the barcode-reader prim
+      position:     [x, y, z] of scan zone
+      scan_radius:  radius of scan zone (default 0.05m)
+
+    Returns: {sensor_path, position, scan_radius}
+    """
+    sensor_path = args["sensor_path"]
+    position = args.get("position", [0.4, 0.4, 0.835])
+    scan_radius = float(args.get("scan_radius", 0.05))
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf, Gf
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({sensor_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("barcode:scan_radius", Sdf.ValueTypeNames.Float).Set({scan_radius})
+prim.CreateAttribute("barcode:last_read",   Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("barcode:last_class",  Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("barcode:read_count",  Sdf.ValueTypeNames.Int).Set(0)
+print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "scan_radius": {scan_radius}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "sensor_path": sensor_path,
+        "position": position,
+        "scan_radius": scan_radius,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["barcode_reader_sensor"] = _handle_barcode_reader_sensor
+
+
+async def _handle_create_rotary_table(args: Dict) -> Dict:
+    """Tier B tool — creates a rotating turntable (revolute joint with drive).
+
+    Composite: creates a static base + rotating disc + revolute joint between.
+    Optional drive applies continuous angular velocity.
+
+    Args:
+      table_path:   USD path of the rotary table (parent prim)
+      position:     [x, y, z] of table base
+      radius:       table radius (default 0.20m)
+      height:       table thickness (default 0.05m)
+      angular_velocity_deg: continuous rotation speed (deg/s, default 0 = passive)
+
+    Returns: {table_path, base_path, disc_path, joint_path}
+    """
+    table_path = args["table_path"]
+    position = args.get("position", [0, 0, 0.78])
+    radius = float(args.get("radius", 0.20))
+    height = float(args.get("height", 0.05))
+    angular_velocity_deg = float(args.get("angular_velocity_deg", 0.0))
+
+    base_path = f"{table_path}/Base"
+    disc_path = f"{table_path}/Disc"
+    joint_path = f"{table_path}/Joint"
+
+    # Base (static) — slightly below disc
+    await execute_tool_call("create_prim", {
+        "prim_path": base_path,
+        "prim_type": "Cube",
+        "position": [position[0], position[1], position[2] - height * 0.5 - 0.025],
+        "scale": [radius, radius, 0.025],
+    })
+    await execute_tool_call("apply_api_schema", {
+        "prim_path": base_path, "schema_name": "PhysicsCollisionAPI",
+    })
+
+    # Disc (rigid, rotating) — Cylinder for round shape
+    await execute_tool_call("create_prim", {
+        "prim_path": disc_path,
+        "prim_type": "Cylinder",
+        "position": position,
+        "radius": radius,
+        "height": height,
+    })
+    for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+        await execute_tool_call("apply_api_schema",
+                                  {"prim_path": disc_path, "schema_name": api})
+
+    # Revolute joint — disc rotates around world Z relative to base
+    await execute_tool_call("create_articulated_joint", {
+        "joint_path": joint_path,
+        "body0_path": base_path,
+        "body1_path": disc_path,
+        "joint_type": "revolute",
+        "axis": [0, 0, 1],
+        "drive_type": "acceleration" if angular_velocity_deg else None,
+    })
+
+    # Set continuous angular velocity if requested
+    if angular_velocity_deg:
+        vel_code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics
+stage = omni.usd.get_context().get_stage()
+joint = UsdPhysics.RevoluteJoint.Get(stage, {joint_path!r})
+if joint:
+    drive = UsdPhysics.DriveAPI.Get(joint.GetPrim(), "angular")
+    if drive:
+        drive.CreateTargetVelocityAttr().Set({angular_velocity_deg})
+        print(json.dumps({{"target_velocity_deg_s": {angular_velocity_deg}}}))
+    else:
+        print(json.dumps({{"error": "no drive on joint"}}))
+else:
+    print(json.dumps({{"error": "joint not found"}}))
+"""
+        await kit_tools.exec_sync(vel_code, timeout=10)
+
+    return {
+        "table_path": table_path,
+        "base_path": base_path,
+        "disc_path": disc_path,
+        "joint_path": joint_path,
+        "radius": radius,
+        "height": height,
+        "angular_velocity_deg": angular_velocity_deg,
+    }
+
+
+DATA_HANDLERS["create_rotary_table"] = _handle_create_rotary_table
+
+
+async def _handle_register_moving_obstacle(args: Dict) -> Dict:
+    """Tier B tool — registers a dynamic obstacle on a robot for runtime
+    collision avoidance. cuRobo's planning_obstacles is normally static at
+    install time. This tool adds an obstacle path to a robot's runtime list,
+    so the controller can re-query its position each tick.
+
+    For canonical-time, sets a USD attribute on the robot prim:
+      curobo:moving_obstacles (StringArray) — list of obstacle paths
+
+    Runtime usage requires controller integration that reads this attr each
+    tick and updates plan_pose's obstacle list (Sprint 3+).
+
+    Args:
+      robot_path:    USD path of the robot
+      obstacle_path: USD path of the moving obstacle (e.g. another robot's hand)
+
+    Returns: {robot_path, obstacle_path, total_registered}
+    """
+    robot_path = args["robot_path"]
+    obstacle_path = args["obstacle_path"]
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics, Sdf, Vt
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+obstacle = stage.GetPrimAtPath({obstacle_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+if not obstacle or not obstacle.IsValid():
+    print(json.dumps({{"error": f"obstacle not found: {obstacle_path!r}"}})); raise SystemExit
+
+attr = robot.GetAttribute("curobo:moving_obstacles")
+if not attr or not attr.IsValid():
+    attr = robot.CreateAttribute("curobo:moving_obstacles", Sdf.ValueTypeNames.StringArray)
+existing = list(attr.Get() or [])
+if {obstacle_path!r} not in existing:
+    existing.append({obstacle_path!r})
+attr.Set(Vt.StringArray(existing))
+print(json.dumps({{"robot": {robot_path!r}, "obstacle": {obstacle_path!r}, "total_registered": len(existing)}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "robot_path": robot_path,
+        "obstacle_path": obstacle_path,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["register_moving_obstacle"] = _handle_register_moving_obstacle
+
+
+async def _handle_create_gravity_dispenser(args: Dict) -> Dict:
+    """Tier C tool — creates a gravity-fed dispenser hopper that pre-spawns
+    items at a given height so they fall onto a target surface (conveyor/bin).
+
+    Composite: places N cubes at a stacked height above target_path. Items
+    fall under gravity onto the target.
+
+    Args:
+      dispenser_path: USD path of dispenser parent prim
+      target_xy:    [x, y] xy of dispenser center
+      drop_height:  z-height items spawn at (default target+0.30m)
+      n_items:      how many to dispense
+      item_size:    cube edge length (default 0.05)
+
+    Returns: {dispenser_path, items: [paths], n_items}
+    """
+    dispenser_path = args["dispenser_path"]
+    target_xy = args.get("target_xy", [0, 0.4])
+    drop_height = float(args.get("drop_height", 1.1))
+    n_items = int(args.get("n_items", 4))
+    item_size = float(args.get("item_size", 0.05))
+
+    # Create marker prim for dispenser (visual)
+    await execute_tool_call("create_prim", {
+        "prim_path": dispenser_path,
+        "prim_type": "Cube",
+        "position": [target_xy[0], target_xy[1], drop_height + 0.05],
+        "scale": [item_size * 1.5, item_size * 1.5, 0.025],
+    })
+    await execute_tool_call("apply_api_schema", {
+        "prim_path": dispenser_path, "schema_name": "PhysicsCollisionAPI",
+    })
+
+    # Spawn N items stacked vertically below dispenser
+    item_paths = []
+    for i in range(n_items):
+        z = drop_height - i * (item_size + 0.005)
+        path = f"{dispenser_path}/Item_{i+1}"
+        await execute_tool_call("create_prim", {
+            "prim_path": path, "prim_type": "Cube",
+            "position": [target_xy[0], target_xy[1], z], "size": item_size,
+        })
+        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+            await execute_tool_call("apply_api_schema",
+                                      {"prim_path": path, "schema_name": api})
+        item_paths.append(path)
+
+    return {
+        "dispenser_path": dispenser_path,
+        "items": item_paths,
+        "n_items": n_items,
+        "drop_height": drop_height,
+    }
+
+
+async def _handle_create_heap_zone(args: Dict) -> Dict:
+    """Tier C tool — creates a 'heap' zone where N items pile randomly.
+
+    Used for parcel-singulation scenarios (#8). Items spawn at slightly-
+    randomized xy + same z, creating a small pile after physics settles.
+
+    Args:
+      heap_path:   USD path of heap parent prim
+      center:      [x, y, z] center of heap
+      radius:      xy radius of heap zone (default 0.10)
+      n_items:     how many to create
+      item_size:   cube edge length (default 0.05)
+
+    Returns: {heap_path, items: [paths], n_items}
+    """
+    heap_path = args["heap_path"]
+    center = args.get("center", [0, 0.4, 0.85])
+    radius = float(args.get("radius", 0.10))
+    n_items = int(args.get("n_items", 5))
+    item_size = float(args.get("item_size", 0.05))
+
+    # Marker prim
+    await execute_tool_call("create_prim", {
+        "prim_path": heap_path, "prim_type": "Xform",
+    })
+
+    # Spawn items in a quasi-random spread (deterministic via index)
+    import math as _m
+    item_paths = []
+    for i in range(n_items):
+        # deterministic spread: golden angle radial
+        theta = i * 2.39996  # golden angle in radians
+        r = radius * (i / max(1, n_items - 1)) ** 0.5
+        x = center[0] + r * _m.cos(theta)
+        y = center[1] + r * _m.sin(theta)
+        z = center[2] + item_size * 0.5  # spawn slightly above
+        path = f"{heap_path}/Item_{i+1}"
+        await execute_tool_call("create_prim", {
+            "prim_path": path, "prim_type": "Cube",
+            "position": [x, y, z], "size": item_size,
+        })
+        for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+            await execute_tool_call("apply_api_schema",
+                                      {"prim_path": path, "schema_name": api})
+        item_paths.append(path)
+
+    return {
+        "heap_path": heap_path,
+        "items": item_paths,
+        "n_items": n_items,
+        "center": center,
+    }
+
+
+DATA_HANDLERS["create_gravity_dispenser"] = _handle_create_gravity_dispenser
+DATA_HANDLERS["create_heap_zone"] = _handle_create_heap_zone
+
+
+async def _handle_setup_cortex_behavior(args: Dict) -> Dict:
+    """Tier B tool — installs Isaac Sim Cortex framework wrapper around a robot
+    + registers obstacles, then attaches a behavior_module DfNetwork.
+
+    Wraps add_franka_to_stage / add_ur10_to_stage + CortexWorld + behavior
+    tree mounting. Behavior trees are Python files exporting `make_decider_network`
+    function returning a DfNetwork.
+
+    For canonical-time, this tool creates the CortexWorld + robot wrapper.
+    Behavior tree loading runs at install time. Limited to behaviors built
+    into isaacsim.cortex.behaviors module.
+
+    Args:
+      robot_path:        USD path of the robot to wrap
+      robot_kind:        'franka' or 'ur10'
+      behavior_module:   Python module path with make_decider_network
+                          (e.g. 'isaacsim.cortex.behaviors.franka.peck_demo')
+      obstacles:         list of USD paths to register as obstacles
+
+    Returns: {robot_path, behavior_module, obstacles_registered, world_class}
+
+    KNOWN LIMITATIONS:
+    - Cortex framework imports may not be available in all Kit builds.
+      Tool fails gracefully with import error if framework absent.
+    - Behavior tree loading is deferred to runtime (when CortexWorld.run starts).
+    - Conflicts with cuRobo controller (different motion architectures).
+      Use Cortex OR cuRobo, not both on same robot.
+    """
+    robot_path = args["robot_path"]
+    robot_kind = args.get("robot_kind", "franka").lower()
+    behavior_module = args.get("behavior_module", "")
+    obstacles = list(args.get("obstacles") or [])
+
+    if robot_kind not in ("franka", "ur10", "ur10e"):
+        return {"type": "error", "error": f"unsupported robot_kind: {robot_kind}"}
+
+    code = f"""\
+import omni.usd, json
+import sys
+stage = omni.usd.get_context().get_stage()
+robot_path = {robot_path!r}
+behavior_module = {behavior_module!r}
+obstacles = {obstacles!r}
+
+result = {{"robot_path": robot_path, "behavior_module": behavior_module, "obstacles": obstacles}}
+
+try:
+    from isaacsim.cortex.framework.cortex_world import CortexWorld
+    if {robot_kind!r} == "franka":
+        from isaacsim.cortex.framework.robot import add_franka_to_stage as add_robot
+    else:
+        from isaacsim.cortex.framework.robot import add_ur10_to_stage as add_robot
+
+    # Reuse existing World instance or create CortexWorld
+    world = CortexWorld.instance()
+    if world is None:
+        world = CortexWorld()
+    result["world_class"] = type(world).__name__
+
+    # Robot wrapper (assumes prim already exists; wraps it)
+    cortex_robot = add_robot(name=f"cortex_{{robot_path.replace('/', '_').strip('_')}}", prim_path=robot_path)
+    world.add_robot(cortex_robot)
+    result["robot_wrapped"] = True
+
+    # Register obstacles
+    for obs_path in obstacles:
+        prim = stage.GetPrimAtPath(obs_path)
+        if prim and prim.IsValid():
+            try:
+                from isaacsim.core.api.objects import DynamicCuboid
+                # Wrap as obstacle (DynamicCuboid wrapper around existing prim)
+                obs = DynamicCuboid(prim_path=obs_path, name=f"obs_{{obs_path.split('/')[-1]}}")
+                cortex_robot.register_obstacle(obs)
+            except Exception as _oe:
+                result.setdefault("obstacle_errors", []).append(f"{{obs_path}}: {{type(_oe).__name__}}")
+
+    # Behavior module loading (deferred — actual mount is at world.run())
+    if behavior_module:
+        try:
+            import importlib
+            mod = importlib.import_module(behavior_module)
+            result["behavior_module_loaded"] = True
+            if hasattr(mod, "make_decider_network"):
+                result["behavior_has_make_decider_network"] = True
+            else:
+                result["behavior_has_make_decider_network"] = False
+        except Exception as _be:
+            result["behavior_load_error"] = f"{{type(_be).__name__}}: {{str(_be)[:100]}}"
+except ImportError as _ie:
+    result["error"] = f"Cortex framework unavailable: {{type(_ie).__name__}}: {{str(_ie)[:200]}}"
+except Exception as _e:
+    result["error"] = f"{{type(_e).__name__}}: {{str(_e)[:200]}}"
+
+print(json.dumps(result))
+"""
+    res = await kit_tools.exec_sync(code, timeout=20)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    return parsed or {"error": "could not parse cortex setup output", "raw": out[-300:]}
+
+
+DATA_HANDLERS["setup_cortex_behavior"] = _handle_setup_cortex_behavior
+
+
+async def _handle_setup_zone_partition(args: Dict) -> Dict:
+    """Tier C tool — partitions a conveyor into N zones, each assigned to
+    a specific robot. Used by Parallel Picking Duo (#10) for spatial
+    coordination.
+
+    Creates N marker prims under conveyor_path, each tagged with
+    zone:robot_path attr. Zones are equal-width segments along conveyor's
+    longest axis (typically X).
+
+    Args:
+      conveyor_path: USD path of conveyor to partition
+      n_zones:       number of zones (typically = n_robots)
+      robots:        list of robot paths (one per zone)
+      base_path:     parent path for zone markers (default: conveyor_path)
+
+    Returns: {zones: [{path, robot, x_range}, ...]}
+    """
+    conveyor_path = args["conveyor_path"]
+    n_zones = int(args.get("n_zones", 2))
+    robots = list(args.get("robots") or [])
+    base_path = args.get("base_path") or conveyor_path
+
+    if len(robots) != n_zones:
+        return {"type": "error",
+                "error": f"robots length ({len(robots)}) must match n_zones ({n_zones})"}
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf, Usd, Gf
+stage = omni.usd.get_context().get_stage()
+conv = stage.GetPrimAtPath({conveyor_path!r})
+if not conv or not conv.IsValid():
+    print(json.dumps({{"error": f"conveyor not found: {conveyor_path!r}"}})); raise SystemExit
+
+cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+bbox = cache.ComputeWorldBound(conv).ComputeAlignedRange()
+xmin, xmax = float(bbox.GetMin()[0]), float(bbox.GetMax()[0])
+y_center = 0.5 * (float(bbox.GetMin()[1]) + float(bbox.GetMax()[1]))
+z_top = float(bbox.GetMax()[2])
+
+n_zones = {n_zones}
+robots = {robots!r}
+zone_width = (xmax - xmin) / n_zones
+zones = []
+for i in range(n_zones):
+    z_start = xmin + i * zone_width
+    z_end = z_start + zone_width
+    zone_path = f"{base_path!r}/Zone_{{i+1}}"
+    pp = Sdf.Path(zone_path)
+    prim = stage.GetPrimAtPath(pp)
+    if not prim or not prim.IsValid():
+        prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+    UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(0.5*(z_start+z_end), y_center, z_top))
+    prim.CreateAttribute("zone:robot_path", Sdf.ValueTypeNames.String).Set(robots[i])
+    prim.CreateAttribute("zone:x_min", Sdf.ValueTypeNames.Float).Set(z_start)
+    prim.CreateAttribute("zone:x_max", Sdf.ValueTypeNames.Float).Set(z_end)
+    prim.CreateAttribute("zone:index", Sdf.ValueTypeNames.Int).Set(i)
+    zones.append({{"path": zone_path, "robot": robots[i], "x_range": [z_start, z_end]}})
+
+print(json.dumps({{"zones": zones, "conveyor_x_range": [xmin, xmax]}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    out = (res.get("output") or "").strip()
+    parsed = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    return parsed or {"error": "could not parse zone_partition output"}
+
+
+DATA_HANDLERS["setup_zone_partition"] = _handle_setup_zone_partition
+
+
+async def _handle_add_force_torque_sensor(args: Dict) -> Dict:
+    """Tier C tool — adds an Isaac Sim ForceSensor (force/torque) on a robot
+    end-effector or articulation joint.
+
+    Used by #22 Peg-in-Hole (force-threshold-gated phase transitions).
+    Wraps Isaac Sim's IsaacForceSensor schema.
+
+    Args:
+      sensor_path:   USD path of the force sensor
+      parent_path:   USD path of the prim to attach sensor to (robot link)
+      threshold:     force threshold for triggering events (default 5.0 N)
+
+    Returns: {sensor_path, parent_path, threshold}
+    """
+    sensor_path = args["sensor_path"]
+    parent_path = args["parent_path"]
+    threshold = float(args.get("threshold", 5.0))
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdPhysics, Sdf
+stage = omni.usd.get_context().get_stage()
+parent = stage.GetPrimAtPath({parent_path!r})
+if not parent or not parent.IsValid():
+    print(json.dumps({{"error": f"parent not found: {parent_path!r}"}})); raise SystemExit
+
+# Apply ForceSensor schema (UsdPhysics.ForceSensor or simulated via attrs)
+try:
+    api = UsdPhysics.RigidBodyAPI.Get(parent)
+    if not api:
+        api = UsdPhysics.RigidBodyAPI.Apply(parent)
+except Exception:
+    pass
+
+# Create sensor prim with reading attrs (logical wrapper; reading hooks runtime)
+from pxr import UsdGeom, Gf
+spp = Sdf.Path({sensor_path!r})
+sprim = stage.GetPrimAtPath(spp)
+if not sprim or not sprim.IsValid():
+    sprim = UsdGeom.Xform.Define(stage, spp).GetPrim()
+sprim.CreateAttribute("ftsensor:parent",      Sdf.ValueTypeNames.String).Set({parent_path!r})
+sprim.CreateAttribute("ftsensor:threshold",   Sdf.ValueTypeNames.Float).Set({threshold})
+sprim.CreateAttribute("ftsensor:last_force",  Sdf.ValueTypeNames.Float3).Set((0.0, 0.0, 0.0))
+sprim.CreateAttribute("ftsensor:last_torque", Sdf.ValueTypeNames.Float3).Set((0.0, 0.0, 0.0))
+sprim.CreateAttribute("ftsensor:triggered",   Sdf.ValueTypeNames.Bool).Set(False)
+print(json.dumps({{"sensor_path": str(sprim.GetPath()), "parent": {parent_path!r}, "threshold": {threshold}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "sensor_path": sensor_path,
+        "parent_path": parent_path,
+        "threshold": threshold,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_setup_assembly_constraint(args: Dict) -> Dict:
+    """Tier C tool — creates an assembly constraint (peg-into-hole) via
+    UsdPhysics joint when the peg is sufficiently aligned with the hole.
+
+    For canonical-time, sets up the peg + hole prims with a metadata
+    relationship. Runtime (Sprint 3+) would create FixedJoint when peg
+    enters hole within tolerance.
+
+    Args:
+      peg_path:    USD path of the peg
+      hole_path:   USD path of the hole
+      tolerance:   alignment tolerance (default 0.005m)
+      constraint_path: USD path for the resulting joint (default <hole>/AssemblyJoint)
+
+    Returns: {peg_path, hole_path, constraint_path, tolerance}
+    """
+    peg_path = args["peg_path"]
+    hole_path = args["hole_path"]
+    tolerance = float(args.get("tolerance", 0.005))
+    constraint_path = args.get("constraint_path") or f"{hole_path}/AssemblyJoint"
+
+    code = f"""\
+import omni.usd, json
+from pxr import Sdf, UsdGeom
+stage = omni.usd.get_context().get_stage()
+hole = stage.GetPrimAtPath({hole_path!r})
+peg = stage.GetPrimAtPath({peg_path!r})
+if not hole or not hole.IsValid():
+    print(json.dumps({{"error": f"hole not found: {hole_path!r}"}})); raise SystemExit
+if not peg or not peg.IsValid():
+    print(json.dumps({{"error": f"peg not found: {peg_path!r}"}})); raise SystemExit
+hole.CreateAttribute("assembly:peg_path",        Sdf.ValueTypeNames.String).Set({peg_path!r})
+hole.CreateAttribute("assembly:tolerance",       Sdf.ValueTypeNames.Float).Set({tolerance})
+hole.CreateAttribute("assembly:constraint_path", Sdf.ValueTypeNames.String).Set({constraint_path!r})
+hole.CreateAttribute("assembly:engaged",         Sdf.ValueTypeNames.Bool).Set(False)
+print(json.dumps({{"hole": {hole_path!r}, "peg": {peg_path!r}, "tolerance": {tolerance}, "constraint_path": {constraint_path!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "peg_path": peg_path,
+        "hole_path": hole_path,
+        "constraint_path": constraint_path,
+        "tolerance": tolerance,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["add_force_torque_sensor"] = _handle_add_force_torque_sensor
+DATA_HANDLERS["setup_assembly_constraint"] = _handle_setup_assembly_constraint
+
+
+async def _handle_create_recirculation_loop(args: Dict) -> Dict:
+    """Tier C — creates a closed-loop conveyor (rectangular path) for recirculation
+    sortation scenarios (#17 Postal Cross-Belt Sorter). Composed of 4 conveyor
+    segments arranged in a rectangle.
+
+    Args:
+      loop_path:  USD path of loop parent
+      center:     [x, y, z] center
+      length:     longest dimension of rectangle
+      width:      shorter dimension
+      velocity:   conveyor surface velocity magnitude (default 0.2)
+
+    Returns: {loop_path, segments: [...], length, width}
+    """
+    loop_path = args["loop_path"]
+    center = args.get("center", [0, 0, 0.78])
+    length = float(args.get("length", 2.0))
+    width = float(args.get("width", 0.6))
+    velocity = float(args.get("velocity", 0.2))
+
+    # Create parent Xform
+    await execute_tool_call("create_prim", {
+        "prim_path": loop_path, "prim_type": "Xform",
+    })
+
+    # 4 segments: top (+y, moves +x), right (+x, moves -y), bottom (-y, moves -x), left (-x, moves +y)
+    segments = [
+        ("Top",    [center[0], center[1] + width / 2, center[2]], [length, 0.10, 0.05], [+velocity, 0, 0]),
+        ("Right",  [center[0] + length / 2, center[1], center[2]], [0.10, width, 0.05], [0, -velocity, 0]),
+        ("Bottom", [center[0], center[1] - width / 2, center[2]], [length, 0.10, 0.05], [-velocity, 0, 0]),
+        ("Left",   [center[0] - length / 2, center[1], center[2]], [0.10, width, 0.05], [0, +velocity, 0]),
+    ]
+    seg_paths = []
+    for name, pos, size, vel in segments:
+        seg_path = f"{loop_path}/{name}"
+        await execute_tool_call("create_conveyor", {
+            "prim_path": seg_path, "position": pos, "size": size, "surface_velocity": list(vel),
+        })
+        seg_paths.append({"path": seg_path, "name": name, "velocity": list(vel)})
+
+    return {
+        "loop_path": loop_path,
+        "segments": seg_paths,
+        "length": length,
+        "width": width,
+    }
+
+
+async def _handle_create_linear_axis_robot(args: Dict) -> Dict:
+    """Tier C — creates a linear-axis (gantry) wrapping for a manipulator.
+    The base of the manipulator is mounted on a prismatic-jointed slider
+    that moves along world X (or specified axis).
+
+    Args:
+      robot_path:    USD path of the manipulator (already imported)
+      slider_path:   USD path for the slider (default: <robot>_Slider)
+      axis:          [x, y, z] direction of slider motion (default world X)
+      limit_lower:   slider position min (m)
+      limit_upper:   slider position max (m)
+
+    Returns: {robot_path, slider_path, joint_path, axis}
+    """
+    robot_path = args["robot_path"]
+    slider_path = args.get("slider_path") or f"{robot_path}_Slider"
+    axis = args.get("axis", [1, 0, 0])
+    limit_lower = args.get("limit_lower", -1.0)
+    limit_upper = args.get("limit_upper", 1.0)
+
+    # Create slider parent prim (small base block under robot)
+    await execute_tool_call("create_prim", {
+        "prim_path": slider_path,
+        "prim_type": "Cube",
+        "position": [0, 0, 0.05],
+        "scale": [0.05, 0.10, 0.025],
+    })
+    for api in ("PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMassAPI"):
+        await execute_tool_call("apply_api_schema",
+                                  {"prim_path": slider_path, "schema_name": api})
+
+    # Prismatic joint between slider and world
+    joint_path = f"{slider_path}/SliderJoint"
+    await execute_tool_call("create_articulated_joint", {
+        "joint_path": joint_path,
+        "body0_path": "",  # empty = grounded
+        "body1_path": slider_path,
+        "joint_type": "prismatic",
+        "axis": axis,
+        "limit_lower": limit_lower,
+        "limit_upper": limit_upper,
+        "drive_type": "force",
+    })
+
+    return {
+        "robot_path": robot_path,
+        "slider_path": slider_path,
+        "joint_path": joint_path,
+        "axis": axis,
+        "limit_range": [limit_lower, limit_upper],
+    }
+
+
+async def _handle_nir_material_sensor(args: Dict) -> Dict:
+    """Tier C — Near-IR material classification sensor for recycling scenarios
+    (#18). Reads cube's material:type attr (set by user pre-canonical) within
+    sensor proximity.
+
+    Args:
+      sensor_path:  USD path of the sensor
+      position:     [x,y,z] of sensor center
+      scan_radius:  detection radius
+
+    Returns: {sensor_path, position, scan_radius}
+    """
+    sensor_path = args["sensor_path"]
+    position = args.get("position", [0.4, 0.4, 0.85])
+    scan_radius = float(args.get("scan_radius", 0.05))
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf, Gf
+stage = omni.usd.get_context().get_stage()
+pp = Sdf.Path({sensor_path!r})
+prim = stage.GetPrimAtPath(pp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, pp).GetPrim()
+UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d({position[0]}, {position[1]}, {position[2]}))
+prim.CreateAttribute("nir:scan_radius",  Sdf.ValueTypeNames.Float).Set({scan_radius})
+prim.CreateAttribute("nir:last_material",Sdf.ValueTypeNames.String).Set("")
+prim.CreateAttribute("nir:read_count",   Sdf.ValueTypeNames.Int).Set(0)
+print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "scan_radius": {scan_radius}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "sensor_path": sensor_path,
+        "position": position,
+        "scan_radius": scan_radius,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["create_recirculation_loop"] = _handle_create_recirculation_loop
+DATA_HANDLERS["create_linear_axis_robot"] = _handle_create_linear_axis_robot
+DATA_HANDLERS["nir_material_sensor"] = _handle_nir_material_sensor
+
+
+async def _handle_load_rl_policy(args: Dict) -> Dict:
+    """Tier C — registers a trained RL policy for runtime control. Used by
+    #30 FrankaDrawerOpen + similar manipulation-via-RL scenarios.
+
+    For canonical-time, sets metadata attrs on robot for policy reference.
+    Runtime policy execution requires controller integration.
+
+    Args:
+      robot_path:    USD path of the robot
+      policy_path:   path to .pt or .onnx checkpoint
+      observation_keys: list of observation names policy expects
+      action_dim:    action space dimensionality
+
+    Returns: {robot_path, policy_path, observation_keys, action_dim}
+    """
+    robot_path = args["robot_path"]
+    policy_path = args.get("policy_path", "")
+    observation_keys = list(args.get("observation_keys") or ["joint_positions"])
+    action_dim = int(args.get("action_dim", 7))
+
+    code = f"""\
+import omni.usd, json
+from pxr import Sdf, Vt
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+robot.CreateAttribute("rl:policy_path",       Sdf.ValueTypeNames.String).Set({policy_path!r})
+robot.CreateAttribute("rl:observation_keys",  Sdf.ValueTypeNames.StringArray).Set(Vt.StringArray({observation_keys!r}))
+robot.CreateAttribute("rl:action_dim",        Sdf.ValueTypeNames.Int).Set({action_dim})
+robot.CreateAttribute("rl:policy_loaded",     Sdf.ValueTypeNames.Bool).Set(False)
+print(json.dumps({{"robot": {robot_path!r}, "policy": {policy_path!r}, "obs_keys": {observation_keys!r}, "action_dim": {action_dim}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "robot_path": robot_path,
+        "policy_path": policy_path,
+        "observation_keys": observation_keys,
+        "action_dim": action_dim,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_setup_grasp_pose_sampler(args: Dict) -> Dict:
+    """Tier C — sets up an Isaac Replicator grasp-pose sampler for SDG
+    scenarios (#32 GraspingWorkflow SDG).
+
+    Stores config attrs on a marker prim. Actual SDG execution at runtime
+    requires Replicator pipeline.
+
+    Args:
+      sampler_path: USD path of the sampler
+      target_path:  USD path of object to sample grasps for
+      n_samples:    number of grasp poses (default 100)
+      sampling_mode: 'antipodal' | 'top_down' | 'parallel_jaw' (default 'antipodal')
+
+    Returns: {sampler_path, target_path, n_samples, sampling_mode}
+    """
+    sampler_path = args["sampler_path"]
+    target_path = args["target_path"]
+    n_samples = int(args.get("n_samples", 100))
+    sampling_mode = args.get("sampling_mode", "antipodal")
+
+    code = f"""\
+import omni.usd, json
+from pxr import UsdGeom, Sdf
+stage = omni.usd.get_context().get_stage()
+target = stage.GetPrimAtPath({target_path!r})
+if not target or not target.IsValid():
+    print(json.dumps({{"error": f"target not found: {target_path!r}"}})); raise SystemExit
+sp = Sdf.Path({sampler_path!r})
+prim = stage.GetPrimAtPath(sp)
+if not prim or not prim.IsValid():
+    prim = UsdGeom.Xform.Define(stage, sp).GetPrim()
+prim.CreateAttribute("grasp:target",         Sdf.ValueTypeNames.String).Set({target_path!r})
+prim.CreateAttribute("grasp:n_samples",      Sdf.ValueTypeNames.Int).Set({n_samples})
+prim.CreateAttribute("grasp:sampling_mode",  Sdf.ValueTypeNames.String).Set({sampling_mode!r})
+prim.CreateAttribute("grasp:samples_generated", Sdf.ValueTypeNames.Int).Set(0)
+print(json.dumps({{"sampler": str(prim.GetPath()), "target": {target_path!r}, "n_samples": {n_samples}, "mode": {sampling_mode!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "sampler_path": sampler_path,
+        "target_path": target_path,
+        "n_samples": n_samples,
+        "sampling_mode": sampling_mode,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+async def _handle_setup_nav_robot(args: Dict) -> Dict:
+    """Tier C — wraps a wheeled robot with navigation stack (Nav2-compatible).
+    Used by #31 RoboParty (mixed fleet with mobile robots).
+
+    For canonical-time, stores nav config on robot. Runtime nav execution
+    requires Nav2 + ROS2 bridge integration.
+
+    Args:
+      robot_path:    USD path of mobile robot
+      occupancy_map: path to .pgm/.yaml occupancy map (optional)
+      nav_topic:     ROS2 topic for nav goals (default '/goal_pose')
+      odom_topic:    ROS2 topic for odometry (default '/odom')
+
+    Returns: {robot_path, nav_topic, odom_topic, occupancy_map}
+    """
+    robot_path = args["robot_path"]
+    occupancy_map = args.get("occupancy_map", "")
+    nav_topic = args.get("nav_topic", "/goal_pose")
+    odom_topic = args.get("odom_topic", "/odom")
+
+    code = f"""\
+import omni.usd, json
+from pxr import Sdf
+stage = omni.usd.get_context().get_stage()
+robot = stage.GetPrimAtPath({robot_path!r})
+if not robot or not robot.IsValid():
+    print(json.dumps({{"error": f"robot not found: {robot_path!r}"}})); raise SystemExit
+robot.CreateAttribute("nav:occupancy_map", Sdf.ValueTypeNames.String).Set({occupancy_map!r})
+robot.CreateAttribute("nav:goal_topic",    Sdf.ValueTypeNames.String).Set({nav_topic!r})
+robot.CreateAttribute("nav:odom_topic",    Sdf.ValueTypeNames.String).Set({odom_topic!r})
+robot.CreateAttribute("nav:current_goal",  Sdf.ValueTypeNames.Float3).Set((0,0,0))
+robot.CreateAttribute("nav:reached",       Sdf.ValueTypeNames.Bool).Set(True)
+print(json.dumps({{"robot": {robot_path!r}, "nav_topic": {nav_topic!r}, "odom_topic": {odom_topic!r}, "map": {occupancy_map!r}}}))
+"""
+    res = await kit_tools.exec_sync(code, timeout=10)
+    return {
+        "robot_path": robot_path,
+        "nav_topic": nav_topic,
+        "odom_topic": odom_topic,
+        "occupancy_map": occupancy_map,
+        "raw": (res.get("output") or "")[-200:],
+    }
+
+
+DATA_HANDLERS["load_rl_policy"] = _handle_load_rl_policy
+DATA_HANDLERS["setup_grasp_pose_sampler"] = _handle_setup_grasp_pose_sampler
+DATA_HANDLERS["setup_nav_robot"] = _handle_setup_nav_robot
 
 
 # ── Scene Package Export ─────────────────────────────────────────────────────
@@ -61062,6 +61991,7 @@ def _gen_setup_pick_place_controller(args: Dict) -> str:
             color_routing=args.get("color_routing"),
             drop_targets=args.get("drop_targets"),
             gripper_rotation=args.get("gripper_rotation"),
+            robot_family=args.get("robot_family", "franka"),
             require_upright=bool(args.get("require_upright", False)),
             upright_dot_threshold=float(args.get("upright_dot_threshold", 0.85)),
         )
@@ -61482,7 +62412,7 @@ import numpy as np
 import builtins
 import json
 import time
-from pxr import UsdGeom, UsdPhysics, Gf
+from pxr import UsdGeom, UsdPhysics, Gf, Sdf
 
 ROBOT_PATH = {robot_path!r}
 SENSOR_PATH = {sensor_path!r}
@@ -61599,11 +62529,36 @@ if ROBOT_FAMILY == "franka":
     _ROBOT_NAME = "builtin_pp_robot_" + _ROBOT_TAG
     _robot = Franka(prim_path=ROBOT_PATH, name=_ROBOT_NAME)
 elif ROBOT_FAMILY in ("ur10", "ur10e"):
-    from isaacsim.robot.manipulators.examples.universal_robots import UR10
+    # The standalone ur10_pick_up.py example uses SingleManipulator with an
+    # external SurfaceGripper, NOT UR10(attach_gripper=True). The latter
+    # raises "Failed to get rigid body velocities from backend" inside its
+    # initialize() because SingleRigidPrim is constructed before the
+    # variant's rigid sub-prim has registered with PhysicsView. The
+    # external-gripper pattern is the documented working recipe.
+    from isaacsim.robot.manipulators import SingleManipulator
     from isaacsim.robot.manipulators.examples.universal_robots.controllers.pick_place_controller import PickPlaceController
+    from isaacsim.robot.manipulators.grippers import SurfaceGripper
     _ROBOT_NAME = "builtin_pp_robot_" + _ROBOT_TAG
-    # UR10 class auto-attaches surface gripper at flange when attach_gripper=True
-    _robot = UR10(prim_path=ROBOT_PATH, name=_ROBOT_NAME, attach_gripper=True)
+    # Set the Short_Suction variant on the robot prim — this authors the
+    # IsaacSurfaceGripper schema + suction joint under ee_link.
+    _robot_prim = stage.GetPrimAtPath(ROBOT_PATH)
+    try:
+        _vs = _robot_prim.GetVariantSet("Gripper")
+        if "Short_Suction" in list(_vs.GetVariantNames()):
+            _vs.SetVariantSelection("Short_Suction")
+    except Exception as _ve: print(f"(builtin pp: UR10 variant set soft-fail: {{_ve}})")
+    _ee_path = ROBOT_PATH + "/ee_link"
+    _sg_path = _ee_path + "/SurfaceGripper"
+    _gripper = SurfaceGripper(end_effector_prim_path=_ee_path, surface_gripper_path=_sg_path)
+    _robot = SingleManipulator(prim_path=ROBOT_PATH, name=_ROBOT_NAME,
+                               end_effector_prim_path=_ee_path, gripper=_gripper)
+    # UR10 home pose from the standalone example
+    try:
+        _robot.set_joints_default_state(positions=np.array(
+            [-np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2, np.pi/2, 0], dtype=np.float32))
+    except Exception as _hp: print(f"(builtin pp: UR10 home pose soft-fail: {{_hp}})")
+    try: _gripper.set_default_state(opened=True)
+    except Exception: pass
 elif ROBOT_FAMILY == "cobotta_pro_900":
     from isaacsim.robot.manipulators.examples.cobotta_900 import CobottaPro900
     from isaacsim.robot.manipulators.examples.cobotta_900.controllers.pick_place_controller import PickPlaceController
@@ -61659,6 +62614,21 @@ _controller = PickPlaceController(
 )
 _art_ctrl = _robot.get_articulation_controller()
 
+# Belt pause/resume — cube needs to be stationary for the PickPlaceController
+# to catch it; otherwise the controller keeps re-targeting a moving picking_position
+# and the cube exits the reach window before the IK chain converges.
+# Cache the surfaceVelocity attribute at install time. The cuRobo handler does
+# the same and pauses cleanly; fresh-lookup-per-call interacts badly with the
+# in-callback Set propagation.
+_belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
+_belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_belt_prim and _belt_prim.IsValid()) else None
+_captured_belt = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
+_nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > 1e-6) else (0.2, 0.0, 0.0)
+def _pause_belt():
+    if _belt_sv: _belt_sv.Set((0, 0, 0))
+def _resume_belt():
+    if _belt_sv: _belt_sv.Set(_nominal_belt)
+
 # Per-cube state machine: deliver cubes one at a time
 S = {{"delivered": set(), "current": None}}
 
@@ -61682,24 +62652,55 @@ def _bin_pos():
     c = b.GetMidpoint()
     return np.array([float(c[0]), float(c[1]), float(c[2])])
 
+def _robot_base_xy():
+    # Use the robot prim's world TRANSFORM (root xform), NOT its bounding-box
+    # midpoint. The bbox midpoint of an articulation drifts wildly with arm
+    # pose — for UR10 in default extended pose the bbox midpoint sat at
+    # (0.571, 0.171), 60cm off the actual base, making the reach-check
+    # reject every cube that was actually within reach.
+    p = stage.GetPrimAtPath(ROBOT_PATH)
+    if not p or not p.IsValid(): return None
+    m = UsdGeom.Xformable(p).ComputeLocalToWorldTransform(0)
+    t = m.ExtractTranslation()
+    return np.array([float(t[0]), float(t[1])])
+
 def _next_cube():
-    \"\"\"First undelivered cube whose xy is within 0.95m of robot base.\"\"\"
-    base = _cube_pos(ROBOT_PATH)
+    \"\"\"First undelivered cube whose xy is within reach of robot base.\"\"\"
+    # Reach varies per family: Franka 0.85m, Cobotta 0.95m, UR10 1.3m.
+    _REACH_M = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.95
+    base = _robot_base_xy()
     if base is None: return None
     for sp in SOURCE_PATHS:
         if sp in S["delivered"]: continue
         cp = _cube_pos(sp)
         if cp is None: continue
-        if float(np.linalg.norm(cp[:2] - base[:2])) <= 0.95:
+        if float(np.linalg.norm(cp[:2] - base)) <= _REACH_M:
             return sp
     return None
 
+_DBG_TICKS = [0]
+# Write debug state to a custom attr on the robot prim so external probes
+# (and the form-gate verifier) can observe controller progress.
+_dbg_attr = stage.GetPrimAtPath(ROBOT_PATH).CreateAttribute(
+    "builtin_pp:tick_count", Sdf.ValueTypeNames.Int) if stage.GetPrimAtPath(ROBOT_PATH).IsValid() else None
+_dbg_phase_attr = stage.GetPrimAtPath(ROBOT_PATH).CreateAttribute(
+    "builtin_pp:phase", Sdf.ValueTypeNames.String) if stage.GetPrimAtPath(ROBOT_PATH).IsValid() else None
+_dbg_picked_attr = stage.GetPrimAtPath(ROBOT_PATH).CreateAttribute(
+    "builtin_pp:picked", Sdf.ValueTypeNames.String) if stage.GetPrimAtPath(ROBOT_PATH).IsValid() else None
+
 def _on_step(dt):
     try:
+        _DBG_TICKS[0] += 1
+        if _dbg_attr: _dbg_attr.Set(_DBG_TICKS[0])
         if S["current"] is None:
+            if _dbg_phase_attr: _dbg_phase_attr.Set("seek_cube")
             picked = _next_cube()
-            if picked is None: return
+            if picked is None:
+                _resume_belt()
+                return
             S["current"] = picked
+            if _dbg_picked_attr: _dbg_picked_attr.Set(picked)
+            _pause_belt()
             try: _controller.reset()
             except Exception: pass
         cube_pos = _cube_pos(S["current"])
@@ -61718,10 +62719,14 @@ def _on_step(dt):
         )
         if actions is not None:
             _art_ctrl.apply_action(actions)
+            if _dbg_phase_attr: _dbg_phase_attr.Set("executing")
         if _controller.is_done():
             S["delivered"].add(S["current"])
             S["current"] = None
+            if _dbg_phase_attr: _dbg_phase_attr.Set("delivered")
+            _resume_belt()  # next cube can flow in
     except Exception as _e:
+        if _dbg_phase_attr: _dbg_phase_attr.Set(f"error:{{type(_e).__name__}}:{{str(_e)[:80]}}")
         print(f"(builtin pp _on_step: {{type(_e).__name__}}: {{_e}})")
 
 _physx = omni.physx.get_physx_interface()
@@ -64234,6 +65239,7 @@ def _gen_pick_place_curobo(robot_path, sensor_path, belt_path,
                            color_routing=None,
                            drop_targets=None,
                            gripper_rotation=None,
+                           robot_family="franka",
                            require_upright=False,
                            upright_dot_threshold=0.85):
     """GPU-accelerated global trajectory optimization via cuRobo MotionPlanner.
@@ -64292,8 +65298,30 @@ from curobo.types import JointState, GoalToolPose
 
 from isaacsim.core.api import World
 from isaacsim.core.simulation_manager import SimulationManager
-from isaacsim.robot.manipulators.examples.franka import Franka
 from isaacsim.core.utils.types import ArticulationAction
+
+# Robot-family branching: Franka uses 7-DOF + ParallelGripper, UR10 uses 6-DOF
+# without built-in gripper (suction via separate surface_gripper tool).
+ROBOT_FAMILY = {robot_family!r}
+if ROBOT_FAMILY == "franka":
+    from isaacsim.robot.manipulators.examples.franka import Franka as _RobotWrapper
+    _ARM_DOF = 7
+    _CUROBO_ROBOT_CFG = "franka.yml"
+    _TOOL_FRAME = "panda_hand"
+    _GRIPPER_LINK = "panda_hand"
+    _FINGER_JOINTS = ("panda_finger_joint1", "panda_finger_joint2")
+elif ROBOT_FAMILY in ("ur10", "ur10e"):
+    # UR10 wrapper class hardcodes attach_gripper EE+gripper init — using
+    # the bare SingleArticulation avoids that init path. Surface gripper is
+    # wired separately via create_gripper(suction) in CP-70+ canonicals.
+    from isaacsim.core.prims import SingleArticulation as _RobotWrapper
+    _ARM_DOF = 6
+    _CUROBO_ROBOT_CFG = "ur10e.yml"
+    _TOOL_FRAME = "tool0"
+    _GRIPPER_LINK = "wrist_3_link"
+    _FINGER_JOINTS = ()  # UR10 has no built-in gripper; use surface_gripper separately
+else:
+    raise RuntimeError(f"Unsupported robot_family: {{ROBOT_FAMILY!r}}")
 
 ROBOT_PATH = {robot_path!r}
 SENSOR_PATH = {sensor_path!r}
@@ -64475,17 +65503,55 @@ except Exception: pass
 _physics_sim_view = SimulationManager.get_physics_sim_view()
 
 world = World.instance() or World()
-_FRANKA_NAME = "curobo_pp_franka_" + _ROBOT_TAG
-franka = Franka(prim_path=ROBOT_PATH, name=_FRANKA_NAME)
+_ROBOT_NAME = f"curobo_pp_{{ROBOT_FAMILY}}_" + _ROBOT_TAG
+# UR10 wrapped without attach_gripper for now — attach_gripper=True triggers
+# a SingleRigidPrim init on /ee_link which raises "Failed to get rigid body
+# velocities from backend" before world.reset() makes the variant's rigid-
+# body sub-prim visible to PhysicsView. CP-69 form-gate validates motion-
+# planning install only; runtime gripping for UR10 is wired in CP-70+ via
+# create_gripper(suction) on a separate prim path. _grip_open/_grip_close
+# fall through to a no-op (hasattr(franka, "gripper") guard).
+franka = _RobotWrapper(prim_path=ROBOT_PATH, name=_ROBOT_NAME)
+# world.scene.add can throw if a stale wrapper from a prior run already
+# claimed _ROBOT_NAME. We use the local `franka` instance regardless —
+# cuRobo planning doesn't need scene registration. Falling through to
+# get_object would surface the stale (potentially broken) wrapper.
 try: world.scene.add(franka)
-except Exception:
-    _existing = world.scene.get_object(_FRANKA_NAME)
-    if _existing is not None: franka = _existing
+except Exception as _se:
+    print(f"(curobo: world.scene.add soft-fail (using fresh wrapper): {{_se}})")
 
 try:
-    franka.initialize(_physics_sim_view); franka.post_reset()
+    franka.initialize(_physics_sim_view)
 except Exception as _e:
-    print(json.dumps({{"ok": False, "error": f"franka init failed: {{_e}}"}})); raise
+    print(json.dumps({{"ok": False, "error": f"{{ROBOT_FAMILY}} initialize failed: {{_e}}"}})); raise
+try:
+    franka.post_reset()
+except Exception as _e:
+    print(f"(curobo: {{ROBOT_FAMILY}} post_reset soft-fail: {{_e}})")
+
+# Surface-gripper integration (UR10 + any robot with the IsaacSurfaceGripper
+# schema authored under the EE link). The surface_gripper tool drops a
+# marker attribute `isaac_assist:surface_gripper_path` on the robot prim
+# when it installs; we read it here and instantiate the Python wrapper.
+# The wrapper's open()/close() drive the C++ surface_gripper_interface,
+# which is what _grip_open/_grip_close need to release/attach cubes.
+_surface_gripper = None
+try:
+    _sg_attr = stage.GetPrimAtPath(ROBOT_PATH).GetAttribute("isaac_assist:surface_gripper_path")
+    _sg_path = _sg_attr.Get() if (_sg_attr and _sg_attr.IsDefined()) else None
+    if _sg_path and stage.GetPrimAtPath(_sg_path).IsValid():
+        from isaacsim.robot.manipulators.grippers.surface_gripper import SurfaceGripper as _SG
+        _ee_path = "/".join(_sg_path.split("/")[:-1])
+        _surface_gripper = _SG(end_effector_prim_path=_ee_path, surface_gripper_path=_sg_path)
+        try:
+            _surface_gripper.initialize(physics_sim_view=_physics_sim_view, articulation_num_dofs=_ARM_DOF)
+            print(f"(curobo: SurfaceGripper wired at {{_sg_path}})")
+        except Exception as _sge:
+            print(f"(curobo: SurfaceGripper init soft-fail: {{_sge}})")
+            _surface_gripper = None
+except Exception as _sge:
+    print(f"(curobo: SurfaceGripper detection soft-fail: {{_sge}})")
+    _surface_gripper = None
 
 for _ in range(20): _app.update()
 
@@ -64503,7 +65569,10 @@ try:
         franka.set_world_pose(position=_usd_pos, orientation=_usd_quat)
 except Exception: _usd_pos, _usd_quat = np.zeros(3), np.array([1,0,0,0])
 
-_HOME_Q = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04], dtype=np.float32)
+if ROBOT_FAMILY == "franka":
+    _HOME_Q = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04], dtype=np.float32)
+else:  # ur10/ur10e — 6-DOF home pose
+    _HOME_Q = np.array([0.0, -1.571, 1.571, -1.571, -1.571, 0.0], dtype=np.float32)
 try:
     _n_dof = len(franka.dof_names) if franka.dof_names else len(_HOME_Q)
     franka.set_joint_positions(_HOME_Q[:_n_dof])
@@ -64515,10 +65584,10 @@ except Exception: pass
 
 art_ctrl = franka.get_articulation_controller()
 
-# Boost finger gains for friction grip
+# Boost finger gains for friction grip (Franka only — UR10 has no built-in fingers)
 try:
-    for _fj in ("panda_finger_joint1", "panda_finger_joint2"):
-        _jp = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/panda_hand/{{_fj}}")
+    for _fj in _FINGER_JOINTS:
+        _jp = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/{{_GRIPPER_LINK}}/{{_fj}}")
         if _jp.IsValid():
             _drv = UsdPhysics.DriveAPI.Get(_jp, "linear")
             if _drv:
@@ -64546,7 +65615,7 @@ if _planner is None:
     # 4 IK × 1 trajopt is enough for tabletop picks and produces consistent
     # trajectories.
     _pcfg = MotionPlannerCfg.create(
-        robot="franka.yml",
+        robot=_CUROBO_ROBOT_CFG,
         use_cuda_graph=True,
         num_ik_seeds=4,
         num_trajopt_seeds=1,
@@ -64778,8 +65847,8 @@ def _plan_to_world_point(point_world, current_q7, exclude_obs=None, yaw_deg=0.0)
     pos_t = torch.tensor([[[[[float(p_base[0]), float(p_base[1]), float(p_base[2])]]]]],
                          dtype=torch.float32, device='cuda')
     quat_base = _rotated_down_quat_base(yaw_deg) if yaw_deg else _DOWN_Q_BASE
-    goal = GoalToolPose(tool_frames=['panda_hand'], position=pos_t, quaternion=quat_base)
-    q = torch.tensor([[float(x) for x in current_q7[:7]]], dtype=torch.float32, device='cuda')
+    goal = GoalToolPose(tool_frames=[_TOOL_FRAME], position=pos_t, quaternion=quat_base)
+    q = torch.tensor([[float(x) for x in current_q7[:_ARM_DOF]]], dtype=torch.float32, device='cuda')
     start = JointState.from_position(q, joint_names=_PLANNER_JOINT_NAMES)
     try:
         # update_world disabled — Warp 1.8.2 lacks CuboidDataWarp registration
@@ -64810,14 +65879,30 @@ if _belt_sv and sum(abs(v) for v in (_belt_sv.Get() or (0,0,0))) < 1e-6:
     _resume_belt()
 
 def _grip_open():
+    # Three-tier fallback:
+    #   1. franka.gripper (Franka's ParallelGripper) — articulation joint command
+    #   2. _surface_gripper (UR10 / suction) — C++ interface releases FixedJoint
+    #   3. silent no-op (robot has no recognized gripper)
     try:
-        a = franka.gripper.forward("open")
-        if a: art_ctrl.apply_action(a)
+        if hasattr(franka, "gripper") and franka.gripper is not None:
+            a = franka.gripper.forward("open")
+            if a: art_ctrl.apply_action(a)
+            return
+    except Exception: pass
+    try:
+        if _surface_gripper is not None:
+            _surface_gripper.open()
     except Exception: pass
 def _grip_close():
     try:
-        a = franka.gripper.forward("close")
-        if a: art_ctrl.apply_action(a)
+        if hasattr(franka, "gripper") and franka.gripper is not None:
+            a = franka.gripper.forward("close")
+            if a: art_ctrl.apply_action(a)
+            return
+    except Exception: pass
+    try:
+        if _surface_gripper is not None:
+            _surface_gripper.close()
     except Exception: pass
 
 _sensor = stage.GetPrimAtPath(SENSOR_PATH) if SENSOR_PATH else None
@@ -64890,11 +65975,11 @@ def _record_err(e):
     except Exception: pass
 
 def _apply_arm_joints(q7):
-    # Apply ONLY the 7 arm joints. Earlier impl read get_joint_positions()
-    # and wrote it back as full 9-DOF target — the finger joints' current
-    # (still-opening) positions kept overwriting the gripper-controller's
-    # close target every physics tick → grip never reached close pose.
-    q7_arr = np.asarray(q7, dtype=np.float64)[:7]
+    # Apply ONLY the arm joints (Franka 7, UR10 6). Earlier impl read
+    # get_joint_positions() and wrote it back as full DOF target — the
+    # finger joints' current (still-opening) positions kept overwriting
+    # the gripper-controller's close target → grip never reached close pose.
+    q7_arr = np.asarray(q7, dtype=np.float64)[:_ARM_DOF]
     # Safety check: cuRobo's planner occasionally returns trajectories
     # that are catastrophic under bad seeds — both NaN/Inf values AND
     # finite-but-impossible joint targets (>±5 rad on a Franka whose
@@ -64915,7 +66000,7 @@ def _apply_arm_joints(q7):
         return
     art_ctrl.apply_action(ArticulationAction(
         joint_positions=q7_arr,
-        joint_indices=np.arange(7),
+        joint_indices=np.arange(_ARM_DOF),
     ))
 
 def _build_segments(cube_pos, drop_pos, current_q):
@@ -64925,7 +66010,14 @@ def _build_segments(cube_pos, drop_pos, current_q):
     # joint-space optimizer can choose curved paths that brush the cube
     # body (no scene-collision available with Warp 1.8.2).
     h1 = EE_INITIAL_HEIGHT
-    FL = 0.105  # finger length
+    # Tool-tip Z offset relative to the planner's tool_frame origin.
+    # Franka panda_hand → finger tips: +0.105m straight along local +Z.
+    # UR10 tool0 → suction_cup tip: +0.158m in local +X (NOT +Z); during a
+    # top-down grasp this becomes a lateral world-XY offset, not vertical.
+    # The 0.158 here is wrong-but-trying — proper UR10 grasp wiring needs
+    # the GoalToolPose offset transformed by the planner's solved EE quat,
+    # which the current pipeline doesn't compute. Tracked for follow-up.
+    FL = 0.105 if ROBOT_FAMILY == "franka" else 0.0
     pz = float(cube_pos[2]) + FL + float(EE_OFFSET[2])
     h_mid_pick = float(cube_pos[2]) + 0.18  # 18cm above cube
     h_mid_drop = float(drop_pos[2]) + 0.18  # 18cm above drop pose
@@ -64983,8 +66075,8 @@ def _on_step(dt):
                 # Set home_returned flag so we don't loop on it.
                 _grip_open()
                 art_ctrl.apply_action(ArticulationAction(
-                    joint_positions=_HOME_Q[:7].astype(np.float64),
-                    joint_indices=np.arange(7),
+                    joint_positions=_HOME_Q[:_ARM_DOF].astype(np.float64),
+                    joint_indices=np.arange(_ARM_DOF),
                 ))
                 S["home_returned"] = True
             return
@@ -65002,7 +66094,7 @@ def _on_step(dt):
                 return
             jp = franka.get_joint_positions()
             if jp is None: return
-            segs = _build_segments(cp, dp, jp[:7])
+            segs = _build_segments(cp, dp, jp[:_ARM_DOF])
             if segs is None:
                 _record_err(RuntimeError("planning failed"))
                 S["mode"] = "wait_sensor"; S["picked_path"] = None

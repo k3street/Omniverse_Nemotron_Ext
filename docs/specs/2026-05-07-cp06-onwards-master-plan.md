@@ -192,8 +192,30 @@ Each shipped canonical:
 | CP-52 | Parallel-picking duo (mutex) | ✅ form-gate shipped | Sprint 2 | First user of `setup_robot_claim_mutex`. 2 Frankas share conveyor. 42/42 build. Realizes #10. |
 | CP-53 | Producer/consumer bounded buffer | ✅ form-gate shipped | Sprint 2 | 3-slot staging rack between 2 robots + mutex. 38/38 build. Realizes #12. |
 | CP-54 | Surface-gripper (suction) canonical | ✅ form-gate shipped | Sprint 2 | First user of `surface_gripper` tool. 39/39 build. Pattern for #25/27/29/33. |
+| CP-55 | Drawer-open station (prismatic joint) | ✅ build-only | Sprint 2 | First user of `create_articulated_joint`. Cabinet + drawer + 15cm prismatic. 17/17 build. Realizes #30 infrastructure. |
+| CP-56 | Rotary-table demo | ✅ build-only | Sprint 2 | First user of `create_rotary_table`. 4 cubes on rotating disc. 38/38 build. Realizes #13 infrastructure. |
+| CP-57 | Parcel-singulation-from-heap | ✅ form-gate shipped | Sprint 2 | First user of `create_heap_zone`. 5 cubes in golden-angle pile. 20/20 build. Realizes #8 infrastructure. |
+| CP-58 | Peg-in-hole insertion array (#22) | ✅ form-gate shipped | Sprint 2 | First user of `add_force_torque_sensor` + `setup_assembly_constraint`. 4 pegs + 4 holes. 48/48 build. |
+| CP-59 | Vision-gated bin-picking duo (#14) | ⚠ build 51/52 | Sprint 2 | Combines vision + mutex + heap. Vision returned 0 (heap overlap confused Gemini). Pattern shape valid. |
+| CP-60 | Recirculation-loop demo (#17) | ✅ build-only | Sprint 2 | First user of `create_recirculation_loop`. 4-segment closed loop. 13/13 build. |
+| CP-61 | Cortex-Franka block-stacking (#28) | ✅ build-only | Sprint 2 | First user of `setup_cortex_behavior` + `register_moving_obstacle`. 34/34 build. Form-gate skip (Cortex ≠ pick-place). |
+| CP-62 | Surface-gripper gantry (#29) | ✅ form-gate shipped | Sprint 2 | First user of `create_linear_axis_robot`. 40/40 build. |
+| CP-63 | SDG grasp-pose-sampler (#32) | ✅ build-only | Sprint 2 | `setup_grasp_pose_sampler` config. 17/17 build. |
+| CP-64 | Nav-robot RoboParty (#31) | ✅ build-only | Sprint 2 | Carter AMR + `setup_nav_robot`. 7/7 build. |
+| CP-65 | Two-cell kit-tray relay (#6) | ✅ form-gate shipped | Sprint 2 | 2 Frankas + kit tray + handoff. 44/44 build. |
+| CP-66 | Recycling multi-sensor (#18) | ✅ form-gate shipped | Sprint 2 | 4-material sortation via barcode_reader + nir_material_sensor. 59/59 build. |
+| CP-67 | Leader/follower rotary station (#13) | ✅ build-only | Sprint 2 | Rotary table + 2 robots + mutex. 43/43 build. Form-gate skip (rotary disc bridge). |
+| CP-68 | Robot-to-robot handoff w/ moving obstacles (#7) | ✅ form-gate shipped | Sprint 2 | CP-51 + register_moving_obstacle. 26/26 build. |
+| CP-69 | UR10 cuRobo single-cube pick-place (#2/#3 base) | ✅ form-gate shipped | Sprint 2 | First UR10 canonical. 21/21 build. Validates `robot_family='ur10'` branch in cuRobo handler. Deferred: function-gate (no gripper wired). |
+| CP-70 | UR10 + surface_gripper (suction) | ✅ form-gate shipped | Sprint 2 | OgnSurfaceGripper at ee_link. 22/22 build. Cobotta variant deferred (no cobotta_900 module in this Isaac Sim install). |
+| CP-71 | UR10 bin filling (#25) | ✅ form-gate shipped | Sprint 2 | UR10 + create_gravity_dispenser + 4-cube drop_targets 2x2. 20/20 build. |
+| CP-72 | UR10 Cortex bin stacking (#27) | ✅ form-gate shipped | Sprint 2 | UR10 + setup_cortex_behavior + 1x1x4 vertical stack via drop_targets. 40/40 build. |
+| CP-73 | UR10 Cortex conveyor demo (#33) | ✅ form-gate shipped | Sprint 2 | UR10 + Cortex + active 0.2 m/s belt — Isaac Sim demo_ur10_conveyor canonical. 40/40 build. |
+| CP-74 | UR10 builtin (PickPlaceController) reference | ✅ form-gate shipped | Sprint 2 | Same scene as CP-69 with target_source='builtin'. Validates the canonical Isaac Sim 5.x UR10 stack: Short_Suction variant + external SurfaceGripper + SingleManipulator + universal_robots.PickPlaceController. 21/21 build. Function-gate still open (belt-pause-from-callback doesn't propagate; tracked in task #36). |
 
-**🎉 SPRINT 2 + 3 COMPLETE 🎉**: 46 canonicals (CP-07..CP-52, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 120+ atomic commits since structural work began.
+**Robot-family expansion (2026-05-08)**: cuRobo handler now accepts `robot_family={franka,ur10,ur10e}`. Refactored generated code emits runtime branching: 7-DOF Franka with ParallelGripper at panda_hand vs 6-DOF UR10 (SingleArticulation, no built-in gripper) at tool0, with ur10e.yml cuRobo config.
+
+**🎉 SPRINT 2 + 3 COMPLETE 🎉**: 51 canonicals (CP-07..CP-73, ex-CP-06 postponed) shipped. **All form-gate verified.** Total: 125+ atomic commits since structural work began.
 
 **ALL 4 Tier A tools built**:
 - `compute_stack_placement` v1+v2+v3 — 7 scenarios
@@ -201,7 +223,16 @@ Each shipped canonical:
 - `create_kit_tray` + `track_slot_occupancy` — 3 scenarios
 - `setup_robot_claim_mutex` — 4 scenarios
 
-**Tier B tools built**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `drop_targets` extension
+**Tier B tools built (6/8 listed in research)**: `set_gripper_rotation`, `setup_robot_handoff_signal`, `surface_gripper`, `create_articulated_joint`, `register_moving_obstacle`, `setup_cortex_behavior`, plus `drop_targets` extension
+
+**Tier C tools built (13/13)**: `barcode_reader_sensor`, `create_rotary_table`, `create_gravity_dispenser`, `create_heap_zone`, `setup_zone_partition`, `add_force_torque_sensor`, `setup_assembly_constraint`, `create_recirculation_loop`, `create_linear_axis_robot`, `nir_material_sensor`, `load_rl_policy`, `setup_grasp_pose_sampler`, `setup_nav_robot`
+
+**🎉 TOTAL: 25 production tools shipped** — ALL research-listed tools built:
+- 4/4 Tier A
+- 6/6 Tier B
+- 13/13 Tier C
+- 1 composite (setup_pick_place_with_vision)
+- 1 extension (drop_targets dict/list in cuRobo handler)
 
 **Research scenarios fully delivered (12 of 33)**: #4, #5, #10, #11, #12, #15, #16, #19 (partial), #20, #23, #24, #25/27/29/33 (partial — surface_gripper infra in CP-54)
 

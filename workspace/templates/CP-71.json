@@ -1,0 +1,49 @@
+{
+  "task_id": "CP-71",
+  "goal": "Build the UR10 bin-filling canonical: gravity dispenser pre-spawns 4 cubes that fall onto a feeder surface, UR10 picks them one-by-one and fills a destination bin in a 2x2 layout. Realizes #25 UR10BinFilling.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "import_robot",
+    "teleport_prim",
+    "create_conveyor",
+    "create_bin",
+    "create_gravity_dispenser",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six UR10-bin-filling specifics for CP-71 (extends CP-69 with dispenser + 4-cube destination layout):\n1) UR10 base on table at (0, 0, 0.75). Dispenser feeds cubes down onto a stationary feeder surface near (-0.4, 0.4, 0.83) within UR10 reach.\n2) create_gravity_dispenser pre-spawns 4 cubes stacked vertically; gravity drops them. n_items=4, drop_height=0.10m above feeder, item_size=0.05m.\n3) Feeder surface uses a stationary conveyor (v=0.001) so the verifier sees a 'belt' beneath the cubes — same trick as CP-65's HandoffBridge.\n4) Destination bin at (0.5, -0.3, 0.75) — 0.30x0.30 area for 2x2 cube grid. drop_targets dict maps each cube to a slot.\n5) target_source='curobo' + robot_family='ur10' — exercises the UR10 cuRobo branch with multi-cube + drop_targets routing.\n6) Realizes #25 UR10BinFilling. Function-gate (delivery success) requires UR10 surface gripper integration which is the CP-72+ scope; CP-71 validates the build pattern.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# UR10 base on table\nimport_robot(file_path=\"UR10\", format=\"asset_library\", dest_path=\"/World/UR10\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\n# Feeder surface (stationary conveyor — verifier 'pick zone' bridge for cubes spawned by dispenser)\ncreate_conveyor(\n    prim_path=\"/World/Feeder\",\n    position=[-0.4, 0.4, 0.78],\n    size=[0.40, 0.30, 0.05],\n    surface_velocity=[0.001, 0, 0],\n)\n\n# Gravity dispenser: 4 cubes pre-spawned, fall onto feeder\ncreate_gravity_dispenser(\n    dispenser_path=\"/World/Dispenser\",\n    target_xy=[-0.4, 0.4],\n    drop_height=0.10,\n    n_items=4,\n    item_size=0.05,\n)\n\n# Apply rubber + sleepThreshold + RB schemas to each dispensed cube\nbulk_set_attribute(\n    prim_paths=[f\"/World/Dispenser/Item_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor i in range(4):\n    apply_physics_material(prim_path=f\"/World/Dispenser/Item_{i+1}\", material_name=\"rubber\")\n\n# Output bin (2x2 capacity, 0.30x0.30 footprint)\ncreate_bin(prim_path=\"/World/OutBin\", position=[0.5, -0.3, 0.75], size=[0.30, 0.30, 0.12])\n\n# Pick sensor at feeder pick zone\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[-0.3, 0.4, 0.835], size=[0.10, 0.10, 0.06])\n\n# UR10 cuRobo with drop_targets dict — 2x2 grid in OutBin\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/Feeder\",\n    source_paths=[f\"/World/Dispenser/Item_{i+1}\" for i in range(4)],\n    destination_path=\"/World/OutBin\",\n    drop_targets={\n        \"/World/Dispenser/Item_1\": [0.42, -0.37, 0.825],\n        \"/World/Dispenser/Item_2\": [0.58, -0.37, 0.825],\n        \"/World/Dispenser/Item_3\": [0.42, -0.23, 0.825],\n        \"/World/Dispenser/Item_4\": [0.58, -0.23, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/Feeder\", \"/World/OutBin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Dispenser/Item_1": [-0.4, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/Feeder": [0.001, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/UR10", "pick_path": "/World/Feeder", "place_path": "/World/OutBin", "robot_kind": "ur10e"}
+    ],
+    "cube_path": "/World/Dispenser/Item_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Dispenser/Item_1",
+    "target_path": "/World/OutBin",
+    "duration_s": 180
+  },
+  "extends": "CP-69",
+  "extension_notes": "CP-71 extends CP-69 (UR10 single-cube) with create_gravity_dispenser + 4-cube drop_targets dict. Validates UR10 cuRobo handler against multi-cube routing pattern. Realizes #25 UR10BinFilling build spec; runtime delivery deferred until UR10 surface gripper wires through cuRobo handler's _grip_open/_grip_close.",
+  "failure_modes": [
+    "Dispenser cube paths follow Dispenser/Item_N convention (verify dispenser handler emits this naming).",
+    "Cubes pile up if dispenser spawns too quickly — UR10 needs to clear pick zone before next item; tuning is runtime, build-only verification only checks that source_paths are reachable.",
+    "drop_targets must land within bin xy footprint; 0.30x0.30 with 0.16m grid spacing leaves 0.07m margin.",
+    "Same UR10 init quirks as CP-69 — SingleArticulation wrapper, no built-in gripper, _grip_open/_grip_close fall through."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+}

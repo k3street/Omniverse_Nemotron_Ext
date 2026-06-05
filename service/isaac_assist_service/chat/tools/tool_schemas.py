@@ -1396,6 +1396,261 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "load_rl_policy",
+            "description": "Tier C — registers a trained RL policy on a robot. Sets metadata attrs. Used by #30 FrankaDrawerOpen.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "policy_path": {"type": "string"},
+                    "observation_keys": {"type": "array", "items": {"type": "string"}},
+                    "action_dim": {"type": "integer"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_grasp_pose_sampler",
+            "description": "Tier C — sets up grasp-pose sampler config for SDG (#32 GraspingWorkflow SDG).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sampler_path": {"type": "string"},
+                    "target_path": {"type": "string"},
+                    "n_samples": {"type": "integer"},
+                    "sampling_mode": {"type": "string", "enum": ["antipodal", "top_down", "parallel_jaw"]},
+                },
+                "required": ["sampler_path", "target_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_nav_robot",
+            "description": "Tier C — wraps wheeled robot with Nav2-compatible navigation config. Used by #31 RoboParty.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "occupancy_map": {"type": "string"},
+                    "nav_topic": {"type": "string"},
+                    "odom_topic": {"type": "string"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_recirculation_loop",
+            "description": "Tier C — closed-loop conveyor (rectangular path) for recirculation sortation (#17 Postal Cross-Belt Sorter). 4 conveyor segments arranged as rectangle.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "loop_path": {"type": "string"},
+                    "center": {"type": "array", "items": {"type": "number"}},
+                    "length": {"type": "number"},
+                    "width": {"type": "number"},
+                    "velocity": {"type": "number"},
+                },
+                "required": ["loop_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_linear_axis_robot",
+            "description": "Tier C — wraps a manipulator on a prismatic-jointed slider (gantry). Used by #29 SurfaceGripperGantry.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "slider_path": {"type": "string"},
+                    "axis": {"type": "array", "items": {"type": "number"}},
+                    "limit_lower": {"type": "number"},
+                    "limit_upper": {"type": "number"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nir_material_sensor",
+            "description": "Tier C — Near-IR material classification sensor (#18 Recycling Multi-Sensor). Reads cube's material:type attr within proximity.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sensor_path": {"type": "string"},
+                    "position": {"type": "array", "items": {"type": "number"}},
+                    "scan_radius": {"type": "number"},
+                },
+                "required": ["sensor_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_force_torque_sensor",
+            "description": "Tier C — adds force/torque sensor to a robot link with threshold for trigger events. Used by #22 Peg-in-Hole Insertion (force-gated phase transitions).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sensor_path": {"type": "string"},
+                    "parent_path": {"type": "string"},
+                    "threshold": {"type": "number"},
+                },
+                "required": ["sensor_path", "parent_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_assembly_constraint",
+            "description": "Tier C — sets up assembly relationship between peg and hole. Used by #22 Peg-in-Hole. Runtime FixedJoint creation when peg aligns within tolerance is Sprint 3+.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "peg_path": {"type": "string"},
+                    "hole_path": {"type": "string"},
+                    "tolerance": {"type": "number"},
+                    "constraint_path": {"type": "string"},
+                },
+                "required": ["peg_path", "hole_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_zone_partition",
+            "description": "Tier C tool — partitions a conveyor into N equal-width zones, each assigned to a specific robot. Used by #10 Parallel Picking Duo for spatial coordination. Creates marker prims under conveyor with zone:robot_path, zone:x_min, zone:x_max attrs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "conveyor_path": {"type": "string"},
+                    "n_zones": {"type": "integer"},
+                    "robots": {"type": "array", "items": {"type": "string"}},
+                    "base_path": {"type": "string"},
+                },
+                "required": ["conveyor_path", "n_zones", "robots"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_cortex_behavior",
+            "description": "Tier B tool — installs Isaac Sim Cortex framework wrapper (CortexWorld + CortexFranka/CortexUr10), registers obstacles, attempts to load a behavior_module's make_decider_network. Used by #27 UR10BinStacking, #28 FrankaCortexBlockStacking, #33 demo_ur10_conveyor. Cortex is reactive behavior-tree-based, alternative to cuRobo motion planning. Does NOT play with cuRobo controller — use one or the other per robot.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "robot_kind": {"type": "string", "enum": ["franka", "ur10", "ur10e"]},
+                    "behavior_module": {"type": "string", "description": "Python module path with make_decider_network (e.g. 'isaacsim.cortex.behaviors.franka.peck_demo')"},
+                    "obstacles": {"type": "array", "items": {"type": "string"}, "description": "USD paths to register as obstacles for RmpFlow"},
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_gravity_dispenser",
+            "description": "Tier C tool — creates a gravity-fed dispenser. N items pre-spawned stacked vertically below dispenser; fall under gravity onto target surface. Used by #25 UR10BinFilling.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dispenser_path": {"type": "string"},
+                    "target_xy": {"type": "array", "items": {"type": "number"}},
+                    "drop_height": {"type": "number"},
+                    "n_items": {"type": "integer"},
+                    "item_size": {"type": "number"},
+                },
+                "required": ["dispenser_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_heap_zone",
+            "description": "Tier C tool — creates a heap of N items in a circular spread (golden-angle deterministic). Items pile via physics. Used by #8 Parcel Singulation + Sort.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "heap_path": {"type": "string"},
+                    "center": {"type": "array", "items": {"type": "number"}},
+                    "radius": {"type": "number"},
+                    "n_items": {"type": "integer"},
+                    "item_size": {"type": "number"},
+                },
+                "required": ["heap_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "register_moving_obstacle",
+            "description": "Tier B tool — registers a dynamic obstacle on a robot for runtime collision avoidance. cuRobo's planning_obstacles is normally static at install time; this adds a moving obstacle path to robot's runtime list (curobo:moving_obstacles attr). Runtime polling requires controller integration. Used by #7 Robot-to-Robot Handoff (avoid other arm), #28 FrankaCortexBlockStacking (track moving cubes).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {"type": "string"},
+                    "obstacle_path": {"type": "string"},
+                },
+                "required": ["robot_path", "obstacle_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "barcode_reader_sensor",
+            "description": "Tier B sensor — creates a barcode-reader prim at a fixed scan position. Reads cube identity via Semantics_class lookup when cube enters scan zone. Output published as USD attrs (barcode:last_read, barcode:last_class, barcode:read_count). Used by #17 Postal Cross-Belt Sorter, #18 Recycling Multi-Sensor.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sensor_path": {"type": "string"},
+                    "position": {"type": "array", "items": {"type": "number"}},
+                    "scan_radius": {"type": "number"},
+                },
+                "required": ["sensor_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_rotary_table",
+            "description": "Tier C composite tool — creates a rotating turntable (cylindrical disc + base + revolute joint). Optional drive for continuous rotation. Used by #13 Leader/Follower Rotary Station.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table_path": {"type": "string"},
+                    "position": {"type": "array", "items": {"type": "number"}},
+                    "radius": {"type": "number"},
+                    "height": {"type": "number"},
+                    "angular_velocity_deg": {"type": "number", "description": "Continuous rotation deg/s (default 0 = passive)"},
+                },
+                "required": ["table_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_articulated_joint",
             "description": "Tier B tool — creates a USD physics joint (revolute/prismatic/fixed/spherical) between two prims for articulated mechanisms (drawers, doors, hinges, levers, rotary tables). Supports axis specification + joint limits + optional drive. Unlocks #13 Leader/Follower Rotary Station + #30 FrankaDrawerOpen.",
             "parameters": {
@@ -2883,6 +3138,7 @@ ISAAC_SIM_TOOLS = [
                         "color_routing": {"type": "object", "description": "curobo mode (SORT-01 enabler): dict mapping semantic class_name → destination prim path. When present, the controller looks up each picked cube's Semantics_color (or Semantics_class) class_name and routes to the matching bin instead of destination_path. Cubes must be labeled with set_semantic_label(prim_path, class_name='red'|'blue'|..., semantic_type='color') beforehand. Falls through to destination_path when no entry matches. Example: {\"red\": \"/World/RedBin\", \"blue\": \"/World/BlueBin\"}."},
                         "drop_targets": {"type": "object", "description": "curobo mode (stack-placement enabler): dict mapping cube_path → world drop position [x,y,z], OR list of [x,y,z] parallel to source_paths. When set, each cube is dropped at its specified position instead of destination_path's bbox center. Used by CP-08+ palletizing/stacking canonicals where each cube goes to a distinct grid/column position. Pair with compute_stack_placement to derive the positions. Falls through to drop_target then destination_path for cubes not listed. Example: {\"/World/Cube_1\": [0.4, -0.4, 0.13], \"/World/Cube_2\": [0.45, -0.4, 0.13]}."},
                         "gripper_rotation": {"type": "object", "description": "curobo mode (Tier B brick-pattern enabler): dict mapping cube_path → yaw_deg (degrees), OR list of yaw_deg parallel to source_paths, OR scalar yaw_deg for all cubes. Rotates gripper around world Z-axis at drop time. Used by brick-layer palletizers (CP-N: layer 0 yaw=0, layer 1 yaw=90 for interlocking) and mixed-SKU palletizers needing per-item orientation. Yaw applies to drop-side trajectory segments (S4-S5); pick-side stays gripper-down regardless. Example: {\"/World/Cube_10\": 90, \"/World/Cube_11\": 90} for layer-1 cubes in CP-20 brick pattern."},
+                        "robot_family": {"type": "string", "enum": ["franka", "ur10", "ur10e"], "description": "curobo mode: which robot family the controller targets. 'franka' (default) — 7-DOF Franka Panda + ParallelGripper, panda_hand tool frame, franka.yml cuRobo config. 'ur10'/'ur10e' — 6-DOF Universal Robots arm, tool0 tool frame, ur10e.yml cuRobo config; UR10 has NO built-in gripper (use create_gripper for surface_gripper or attach an external EE separately). Required for all non-Franka cuRobo canonicals (CP-69+ research scenarios #2, #3, #25, #27, #33). Default 'franka' preserves existing canonical behavior."},
                         "diffik_method": {"type": "string", "enum": ["dls", "svd", "pinv"], "description": "diffik mode: Jacobian inversion method. 'dls' (damped least-squares, default, λ=0.05) handles singularities gracefully; 'pinv' is Moore-Penrose pseudoinverse; 'svd' is truncated SVD. Use 'dls' unless you know you need the others."},
                     },
                     "required": ["robot_path", "target_source"],
