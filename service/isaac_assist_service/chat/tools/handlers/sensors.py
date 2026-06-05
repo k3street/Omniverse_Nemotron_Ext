@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, List
 
 def _gen_add_sensor(args: Dict) -> str:
     """Generate code for adding a sensor based on type and optional product spec."""
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     prim_path = args["prim_path"]
     sensor_type = args["sensor_type"]
 
@@ -174,7 +174,7 @@ def _gen_set_camera_look_at(args: Dict) -> str:
     *inverse* view matrix, so we extract its inverse and decompose into a
     rotation that the camera xform op can consume.
     """
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     camera_path = args["camera_path"]
     target = args["target"]
     if not isinstance(target, (list, tuple)) or len(target) != 3:
@@ -473,7 +473,8 @@ async def _handle_add_vision_classifier_gate(args: Dict) -> Dict:
     by inspecting unmatched_cubes and raw_detections.
     """
     from .. import kit_tools
-    from ..tool_executor import execute_tool_call, _get_viewport_bytes, _get_vision_provider
+    from ..tool_executor import execute_tool_call  # dispatch entry, stays in tool_executor
+    from ._shared import _get_viewport_bytes, _get_vision_provider
     camera_path = args.get("camera_path")
     cube_paths = list(args.get("cube_paths") or [])
     class_labels = list(args.get("class_labels") or [])

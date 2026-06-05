@@ -12,7 +12,482 @@ Per `specs/IA_FULL_SPEC_2026-05-10.md` Phases 2 + 6.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List, Optional
+
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 20, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+def _generate_calibration_script(
+    real_data_path: str,
+    articulation_path: str,
+    parameters: List[str],
+    num_samples: int,
+    num_workers: int,
+    output_dir: str,
+) -> str:
+    """Generate the headless Bayesian-optimization script.
+
+    Uses Ray Tune + OptunaSearch (already in isaac_lab_env). The script replays
+    commanded torques in sim and minimizes trajectory mismatch.
+    """
+    return f'''"""Auto-generated physics calibration script.
+Articulation: {articulation_path}
+Real data:    {real_data_path}
+Parameters:   {parameters}
+"""
+from __future__ import annotations
+import json
+import os
+from pathlib import Path
+
+import h5py
+import numpy as np
+import ray
+from ray import tune
+from ray.tune.search.optuna import OptunaSearch
+
+REAL_DATA_PATH = {real_data_path!r}
+ARTICULATION_PATH = {articulation_path!r}
+PARAMETERS = {parameters!r}
+OUTPUT_DIR = Path({output_dir!r})
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_real_data(path):
+    with h5py.File(path, "r") as f:
+        return {{
+            "joint_positions": f["joint_positions"][:],
+            "joint_velocities": f["joint_velocities"][:],
+            "joint_torques_commanded": f["joint_torques_commanded"][:],
+        }}
+
+
+def replay_trajectory(art, commanded_torques):
+    """Stub — IsaacLab integration replays commanded torques in sim."""
+    raise NotImplementedError("Replay must run inside isaac_lab_env (GPU + Kit)")
+
+
+def trajectory_distance(sim, real):
+    return float(np.sqrt(np.mean((sim - real) ** 2)))
+
+
+def objective(config):
+    real = load_real_data(REAL_DATA_PATH)
+    # IsaacLab env imports happen inside the trial process (needs GPU)
+    from isaaclab.app import AppLauncher
+    app = AppLauncher(headless=True).app  # noqa: F841
+    from isaaclab.assets import Articulation
+    art = Articulation.from_path(ARTICULATION_PATH)
+    if "friction" in config:
+        art.write_joint_friction_coefficient_to_sim(config["friction"])
+    if "damping" in config:
+        art.write_joint_damping_to_sim(config["damping"])
+    if "armature" in config:
+        art.write_joint_armature_to_sim(config["armature"])
+    if "masses" in config:
+        art.set_masses(config["masses"])
+    sim_traj = replay_trajectory(art, real["joint_torques_commanded"])
+    error = trajectory_distance(sim_traj, real["joint_positions"])
+    return {{"loss": error}}
+
+
+def make_search_space(parameters):
+    space = {{}}
+    if "friction" in parameters:
+        space["friction"] = tune.uniform(0.1, 2.0)
+    if "damping" in parameters:
+        space["damping"] = tune.uniform(0.01, 1.0)
+    if "armature" in parameters:
+        space["armature"] = tune.uniform(0.0, 0.5)
+    if "viscous_friction" in parameters:
+        space["viscous_friction"] = tune.uniform(0.0, 0.5)
+    if "masses" in parameters:
+        space["masses_scale"] = tune.uniform(0.8, 1.2)
+    return space
+
+
+def main():
+    ray.init(num_cpus={num_workers}, ignore_reinit_error=True)
+    analysis = tune.run(
+        objective,
+        search_alg=OptunaSearch(metric="loss", mode="min"),
+        config=make_search_space(PARAMETERS),
+        num_samples={num_samples},
+        local_dir=str(OUTPUT_DIR / "ray_results"),
+    )
+    best = analysis.get_best_config(metric="loss", mode="min")
+    result = {{
+        "calibrated_parameters": best,
+        "best_loss": analysis.best_result["loss"],
+    }}
+    (OUTPUT_DIR / "result.json").write_text(json.dumps(result, indent=2))
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 16, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+_MOTION_ROBOT_CONFIGS = {
+    "franka": {
+        "rmp_config": "franka/rmpflow",
+        "desc": "franka/robot_descriptor.yaml",
+        "urdf": "franka/lula_franka_gen.urdf",
+        "ee_frame": "panda_hand",
+    },
+    "ur10": {
+        "rmp_config": "universal_robots/ur10/rmpflow",
+        "desc": "universal_robots/ur10/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur10/lula_ur10_gen.urdf",
+        "ee_frame": "ee_link",
+    },
+    "ur5e": {
+        "rmp_config": "universal_robots/ur5e/rmpflow",
+        "desc": "universal_robots/ur5e/robot_descriptor.yaml",
+        "urdf": "universal_robots/ur5e/lula_ur5e_gen.urdf",
+        "ee_frame": "ee_link",
+    },
+    "cobotta": {
+        "rmp_config": "denso/cobotta_pro_900/rmpflow",
+        "desc": "denso/cobotta_pro_900/robot_descriptor.yaml",
+        "urdf": "denso/cobotta_pro_900/lula_cobotta_gen.urdf",
+        "ee_frame": "onrobot_rg6_base_link",
+    },
+}
+
+_CUROBO_ROBOT_YML_MAP = {
+    "franka": "franka.yml",
+    "franka_panda": "franka.yml",
+    "panda": "franka.yml",
+    "ur10e": "ur10e.yml",
+    "ur10": "ur10.yml",
+    "ur5e": "ur5e.yml",
+    "ur5": "ur5e.yml",
+    "iiwa": "iiwa.yml",
+    "kinova_gen3": "kinova_gen3.yml",
+    "jaco7": "jaco7.yml",
+}
+
+_CONTROLLER_METADATA = {
+    "native": {
+        "hardware_req": "CPU (Franka only)",
+        "cycle_class": "medium",          # short / medium / long
+        "collision_aware": "partial",      # true / false / partial
+        "motion_quality": 2,                # 1-5, 5=best
+        "use_case_fit": ["dynamic_targets", "belt_picking", "live_cube_tracking"],
+        "summary": "Canonical Isaac Sim franka.PickPlaceController + RmpFlow. Reactive. Good for Franka on moving targets. CPU only.",
+        "avoid": ["obstacle-rich scenes", "non-Franka arms"],
+    },
+    "sensor_gated": {
+        "hardware_req": "CPU",
+        "cycle_class": "medium",
+        "collision_aware": "false",
+        "motion_quality": 2,
+        "use_case_fit": ["industrial_sim2real", "plc_mimic", "teach_replay"],
+        "summary": "Sensor-triggered state machine with pre-taught or coord-based PICK/DROP/HOME. Generic (any arm with RmpFlow config).",
+        "avoid": ["complex multi-segment planning", "online re-planning"],
+    },
+    "fixed_poses": {
+        "hardware_req": "CPU",
+        "cycle_class": "varies",
+        "collision_aware": "false",
+        "motion_quality": 1,
+        "use_case_fit": ["cycle_time_demos", "validation", "pose_replay"],
+        "summary": "Timer-driven pose-list replay. No sensing, no grasping logic.",
+        "avoid": ["any real pick-place task"],
+    },
+    "cube_tracking": {
+        "hardware_req": "CPU",
+        "cycle_class": "medium",
+        "collision_aware": "false",
+        "motion_quality": 2,
+        "use_case_fit": ["ml_demo_generation"],
+        "summary": "Omniscient reactive tracker — cheats using ground-truth cube pose each frame. NOT sim2real honest.",
+        "avoid": ["sim2real evaluation", "industrial training"],
+    },
+    "ros2_cmd": {
+        "hardware_req": "External",
+        "cycle_class": "varies",
+        "collision_aware": "depends",
+        "motion_quality": 3,
+        "use_case_fit": ["digital_twin", "plc_in_loop", "external_moveit"],
+        "summary": "Subscribes to external target-pose / gripper topics. State machine lives outside Isaac Sim.",
+        "avoid": ["self-contained Isaac Sim simulations"],
+    },
+    "spline": {
+        "hardware_req": "CPU",
+        "cycle_class": "medium",
+        "collision_aware": "pre-check only",
+        "motion_quality": 4,
+        "use_case_fit": ["repetitive_cycles", "sim2real_demos", "cpu_only", "deterministic_motion"],
+        "summary": "Pre-planned 6-waypoint Cartesian trajectory with warm-start IK chaining + scipy.CubicSpline interpolation. Smooth, deterministic, CPU-only. Beats native on delivery rate.",
+        "avoid": ["obstacle-rich scenes", "highly-dynamic targets"],
+    },
+    "curobo": {
+        "hardware_req": "NVIDIA GPU >= Volta (compute_capability >= 7.0), 4GB VRAM",
+        "cycle_class": "short",
+        "collision_aware": "true",
+        "motion_quality": 5,
+        "use_case_fit": ["obstacle_rich_scenes", "precision_picking", "production_cycle_time"],
+        "summary": "GPU-accelerated global trajectory optimization with collision checking (Cuboid/SDF/mesh). Industrial quality motion, fastest cycle time when hardware supports.",
+        "avoid": ["no GPU / pre-Volta GPU"],
+    },
+    "diffik": {
+        "hardware_req": "CPU, Isaac Lab",
+        "cycle_class": "long",
+        "collision_aware": "false",
+        "motion_quality": 2,
+        "use_case_fit": ["teleop", "cartesian_rl_observation", "simple_free_motion"],
+        "summary": "Stateless Jacobian-based differential IK (Isaac Lab). No planning or collision awareness. Jittery but fast per-step compute.",
+        "avoid": ["singularity-prone trajectories", "obstacle avoidance"],
+    },
+    "osc": {
+        "hardware_req": "CPU, Isaac Lab",
+        "cycle_class": "long",
+        "collision_aware": "false",
+        "motion_quality": 3,
+        "use_case_fit": ["contact_rich_tasks", "polishing", "assembly", "compliant_motion"],
+        "summary": "Operational-space control with task-space impedance (torque mode). Experimental. Accept 2/4 delivery minimum.",
+        "avoid": ["standard pick-place without contact tasks"],
+    },
+    "auto": {
+        "hardware_req": "any",
+        "cycle_class": "varies",
+        "collision_aware": "varies",
+        "motion_quality": None,
+        "use_case_fit": ["unknown_hardware", "portable_scripts", "agent_selects"],
+        "summary": "Probes runtime env and selects best available (curobo → native → spline → diffik).",
+        "avoid": [],
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Theme-local DR symbols (Phase 8 wave 15, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+_DR_RANGE_HINTS = {
+    "friction": "+-30% of calibrated values",
+    "damping": "+-20%",
+    "armature": "+-10%",
+    "masses": "+-5-10%",
+    "viscous_friction": "+-20%",
+}
+
+def _suggested_dr_ranges(parameters: List[str]) -> Dict[str, str]:
+    return {p: _DR_RANGE_HINTS[p] for p in parameters if p in _DR_RANGE_HINTS}
+
+# ---------------------------------------------------------------------------
+# Theme-local constants + helpers (Phase 8 wave 13, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+_FIX_PROFILE_PATTERNS = {
+    "franka": ["franka", "panda"],
+    "ur5": ["ur5"],
+    "ur10": ["ur10"],
+    "g1": ["g1", "unitree_g1"],
+    "allegro": ["allegro"],
+}
+
+_ROBOT_FIX_PROFILES = {
+    "franka": {
+        "robot_name": "franka",
+        "display_name": "Franka Emika Panda",
+        "known_issues": [
+            "rootJoint creates unwanted floating base — delete it",
+            "Default drive stiffness too low for position control",
+            "panda_hand and finger links often missing CollisionAPI",
+        ],
+        "fixes": [
+            {
+                "description": "Delete rootJoint to allow fixedBase anchoring",
+                "code": "stage.RemovePrim('{art_path}/rootJoint')",
+            },
+            {
+                "description": "Set fixedBase for stationary arm",
+                "code": "PhysxSchema.PhysxArticulationAPI.Apply(stage.GetPrimAtPath('{art_path}')).CreateEnabledSelfCollisionsAttr(False)",
+            },
+            {
+                "description": "Set drive stiffness Kp=1000, Kd=100 on all joints",
+                "code": "# Apply Kp=1000, Kd=100 to all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to hand and finger links",
+                "code": "# Apply CollisionAPI to panda_hand, panda_leftfinger, panda_rightfinger",
+            },
+        ],
+        "drive_gains": {"kp": 1000, "kd": 100},
+    },
+    "ur5": {
+        "robot_name": "ur5",
+        "display_name": "Universal Robots UR5",
+        "known_issues": [
+            "Joint limits often imported as ±infinity",
+            "Missing collision meshes on wrist links",
+        ],
+        "fixes": [
+            {
+                "description": "Set finite joint limits (±2π for revolute joints)",
+                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to wrist links",
+                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
+            },
+        ],
+        "drive_gains": {"kp": 800, "kd": 80},
+    },
+    "ur10": {
+        "robot_name": "ur10",
+        "display_name": "Universal Robots UR10",
+        "known_issues": [
+            "Joint limits often imported as ±infinity",
+            "Missing collision meshes on wrist links",
+            "Default mass values may be incorrect for UR10 (heavier than UR5)",
+        ],
+        "fixes": [
+            {
+                "description": "Set finite joint limits (±2π for revolute joints)",
+                "code": "# Set lowerLimit=-6.283, upperLimit=6.283 on all revolute joints",
+            },
+            {
+                "description": "Add CollisionAPI to wrist links",
+                "code": "# Apply CollisionAPI to wrist_1_link, wrist_2_link, wrist_3_link",
+            },
+        ],
+        "drive_gains": {"kp": 1000, "kd": 100},
+    },
+    "g1": {
+        "robot_name": "g1",
+        "display_name": "Unitree G1 Humanoid",
+        "known_issues": [
+            "Many links imported with zero mass",
+            "Extreme inertia ratios between torso and finger links",
+            "Self-collision filtering needed for dense link structure",
+        ],
+        "fixes": [
+            {
+                "description": "Set minimum mass (0.1 kg) on zero-mass links",
+                "code": "# Set mass=0.1 on all links where mass==0",
+            },
+            {
+                "description": "Enable self-collision filtering",
+                "code": "PhysxSchema.PhysxArticulationAPI.Apply(root).CreateEnabledSelfCollisionsAttr(True)",
+            },
+        ],
+        "drive_gains": {"kp": 500, "kd": 50},
+    },
+    "allegro": {
+        "robot_name": "allegro",
+        "display_name": "Allegro Hand",
+        "known_issues": [
+            "Very small link masses cause solver instability",
+            "Finger joint limits must be carefully bounded",
+            "CollisionAPI often missing on fingertip links",
+        ],
+        "fixes": [
+            {
+                "description": "Set minimum mass (0.01 kg) on finger links",
+                "code": "# Set mass=0.01 on all finger links",
+            },
+            {
+                "description": "Add CollisionAPI to all fingertip links",
+                "code": "# Apply CollisionAPI to all *_tip links",
+            },
+        ],
+        "drive_gains": {"kp": 100, "kd": 10},
+    },
+}
+
+_ROBOT_TYPE_DEFAULTS = {
+    "manipulator": {"stiffness": 1000, "damping": 100},
+    "mobile":      {"stiffness": 500,  "damping": 50},
+    "humanoid":    {"stiffness": 800,  "damping": 80},
+}
+
+def _detect_robot_for_fix(articulation_path: str) -> Optional[str]:
+    """Auto-detect robot name from articulation path for fix profile lookup."""
+    path_lower = articulation_path.lower()
+    for robot_name, patterns in _FIX_PROFILE_PATTERNS.items():
+        for pat in patterns:
+            if pat in path_lower:
+                return robot_name
+    return None
+
+# _handle_apply_robot_fix_profile moved to handlers/robot.py (Phase 7 wave 7).
+
+
+# ══════ From feat/addendum-phase7B-sdg-quality ══════
+# _handle_validate_annotations moved to handlers/diagnostics.py (Phase 7 wave 14).
+
+# _handle_analyze_randomization moved to handlers/training.py (Phase 7 wave 5).
+
+# _handle_diagnose_domain_gap moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
+
+
+# ══════ From feat/addendum-phase8F-ros2-quality ══════
+# _handle_diagnose_ros2 moved to handlers/ros2.py (Phase 7 wave 14).
+
+# _gen_fix_ros2_qos moved to handlers/ros2.py (Phase 6 wave 7).
+
+# _gen_configure_ros2_time moved to handlers/ros2.py (Phase 6 wave 7).
+
+
+# ══════ From feat/addendum-phase8B-workspace-singularity-v2 ══════
+# _gen_show_workspace moved to handlers/diagnostics.py (Phase 6 wave 22).
+
+# _gen_check_singularity moved to handlers/diagnostics.py (Phase 6 wave 10).
+
+# _gen_monitor_joint_effort moved to handlers/diagnostics.py (Phase 6 wave 10).
+
+
+# ══════ From feat/new-performance-diagnostics ══════
+
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 11, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.robot.
+
+_DEFAULT_CALIBRATE_PARAMS = ["friction", "damping", "masses"]
+
+_QUICK_CALIBRATE_PARAMS = ["armature", "friction", "masses"]
+
+_SUPPORTED_MOTION_ROBOTS = {
+    "franka", "ur10", "ur5e", "ur3e", "cobotta", "rs007n",
+    "dofbot", "kawasaki", "flexiv_rizon",
+}
+
+_VALID_CALIBRATE_PARAMS = {"friction", "damping", "armature", "masses", "viscous_friction"}
+
+_WHOLE_BODY_PROFILES = {
+    "g1": {
+        "locomotion": "hover_g1_flat.pt",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Working (IsaacLab 2.3)",
+    },
+    "h1": {
+        "locomotion": "hover_h1_rough.pt",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Working",
+    },
+    "figure02": {
+        "locomotion": "custom",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Manual config required",
+    },
+    "generic": {
+        "locomotion": "custom",
+        "command_type": "velocity",
+        "ee_frame": "left_hand",
+        "status": "Generic skeleton — review before use",
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -245,11 +720,8 @@ print(json.dumps({{'articulation_path': '{art_path}', 'issues': issues, 'total':
 
 
 def _gen_robot_wizard(args: Dict) -> str:
-    from ..tool_executor import (
-        _ROBOT_WIZARD_REGISTRY,
-        _ROBOT_TYPE_DEFAULTS,
-        _resolve_robot_asset,
-    )
+    # Phase 8 wave 13 — _ROBOT_TYPE_DEFAULTS migrated.
+    from ._shared import _ROBOT_WIZARD_REGISTRY, _resolve_robot_asset
 
     # Resolve `robot_name` against the registry BEFORE requiring asset_path.
     # This is the deterministic path: agent says robot_name="franka_panda"
@@ -1282,7 +1754,7 @@ print(f"URDF preview (first 500 chars):\\n{{urdf_string[:500]}}")
 
 
 def _gen_move_to_pose(args: Dict) -> str:
-    from ..tool_executor import _MOTION_ROBOT_CONFIGS  # noqa: PLC0415
+    # Phase 8 wave 16 — _MOTION_ROBOT_CONFIGS migrated.
     art_path = args["articulation_path"]
     target_pos = args["target_position"]
     target_ori = args.get("target_orientation")
@@ -1508,7 +1980,7 @@ def _gen_set_motion_policy(args: Dict) -> str:
 
 
 def _gen_solve_ik(args: Dict) -> str:
-    from ..tool_executor import _MOTION_ROBOT_CONFIGS, _CUROBO_ROBOT_YML_MAP  # noqa: PLC0415
+    # Phase 8 wave 16 — _CUROBO_ROBOT_YML_MAP migrated.
     art_path = args["articulation_path"]
     target_pos = args["target_position"]
     target_ori = args.get("target_orientation")
@@ -2289,7 +2761,7 @@ print(f"Linear interpolation: {{len(wp_array)}} waypoints -> {{len(interpolated)
 
 def _gen_setup_whole_body_control(args: Dict) -> str:
     """Generate ActionGroupCfg combining a locomotion RL policy + arm planner."""
-    from ..tool_executor import _WHOLE_BODY_PROFILES
+    # Phase 8 wave 11 — _WHOLE_BODY_PROFILES migrated.
     articulation_path = args["articulation_path"]
     locomotion_policy = args["locomotion_policy"]
     arm_planner = args.get("arm_planner", "pink_ik")
@@ -2514,7 +2986,7 @@ def _gen_record_trajectory(args: Dict) -> str:
 
 
 def _gen_import_robot(args: Dict) -> str:
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     from ....config import config  # noqa: E402
 
     file_path = args["file_path"]
@@ -3881,7 +4353,7 @@ print(json.dumps({{"sampler": str(prim.GetPath()), "target": {target_path!r}, "n
 
 async def _handle_generate_robot_description(args: Dict) -> Dict:
     """Check if a robot has pre-built motion generation configs."""
-    from ..tool_executor import _SUPPORTED_MOTION_ROBOTS, _MOTION_ROBOT_CONFIGS  # noqa: PLC0415
+    # Phase 8 wave 16 — _MOTION_ROBOT_CONFIGS migrated.
     art_path = args["articulation_path"]
     robot_type = args.get("robot_type", "").lower()
 
@@ -3942,7 +4414,7 @@ async def _handle_generate_robot_description(args: Dict) -> Dict:
 
 async def _handle_apply_robot_fix_profile(args: Dict) -> Dict:
     """Look up known robot import issues and return a fix profile."""
-    from ..tool_executor import _ROBOT_FIX_PROFILES, _detect_robot_for_fix  # noqa: PLC0415
+    # Phase 8 wave 13 — _detect_robot_for_fix migrated.
     art_path = args["articulation_path"]
     robot_name = args.get("robot_name", "")
 
@@ -3981,14 +4453,8 @@ async def _handle_apply_robot_fix_profile(args: Dict) -> Dict:
 async def _handle_calibrate_physics(args: Dict) -> Dict:
     """Generate a Ray-Tune+Optuna calibration script and return the launch command."""
     from pathlib import Path as _Path
-    from ..tool_executor import (  # noqa: PLC0415
-        _DEFAULT_CALIBRATE_PARAMS,
-        _VALID_CALIBRATE_PARAMS,
-        _check_real_data_path,
-        _safe_robot_name,
-        _generate_calibration_script,
-        _suggested_dr_ranges,
-    )
+    from ._shared import _check_real_data_path, _safe_robot_name
+    # Phase 8 wave 20 — _generate_calibration_script migrated.
     real_data_path = args.get("real_data_path", "")
     articulation_path = args.get("articulation_path", "")
 
@@ -4058,13 +4524,8 @@ async def _handle_calibrate_physics(args: Dict) -> Dict:
 async def _handle_quick_calibrate(args: Dict) -> Dict:
     """Faster calibration: only the highest-impact parameters."""
     from pathlib import Path as _Path
-    from ..tool_executor import (  # noqa: PLC0415
-        _QUICK_CALIBRATE_PARAMS,
-        _check_real_data_path,
-        _safe_robot_name,
-        _generate_calibration_script,
-        _suggested_dr_ranges,
-    )
+    from ._shared import _check_real_data_path, _safe_robot_name
+    # Phase 8 wave 20 — _generate_calibration_script migrated.
     real_data_path = args.get("real_data_path", "")
     articulation_path = args.get("articulation_path", "")
 
@@ -5080,13 +5541,7 @@ async def _handle_list_available_controllers(args) -> dict:
         "recommended_for_hardware": ["native", "spline", ...]
       }
     """
-    from ..tool_executor import (
-        _probe_gpu_capability,
-        _probe_scipy,
-        _probe_curobo,
-        _probe_isaac_lab,
-        _CONTROLLER_METADATA,
-    )
+    from ._shared import _probe_gpu_capability, _probe_scipy, _probe_curobo, _probe_isaac_lab
     env = {
         "gpu": _probe_gpu_capability(),
         "scipy": _probe_scipy(),

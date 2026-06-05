@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 pytestmark = pytest.mark.l0
 
-from service.isaac_assist_service.chat.tools.tool_executor import (
-    DATA_HANDLERS,
+from service.isaac_assist_service.chat.tools.tool_executor import DATA_HANDLERS
+from service.isaac_assist_service.chat.tools.handlers.scene_blueprints import (
     _handle_lookup_product_spec,
     _load_sensor_specs,
 )
@@ -29,26 +29,32 @@ class TestLookupProductSpec:
     @pytest.fixture(autouse=True)
     def _reset_cache(self):
         """Reset the cached sensor specs between tests."""
-        import service.isaac_assist_service.chat.tools.tool_executor as te
-        old = te._sensor_specs
-        te._sensor_specs = None
+        # Phase 8 wave 7 (2026-05-13): _sensor_specs migrated from
+        # tool_executor.py to handlers/scene_blueprints.py.
+        import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
+        old = sb._sensor_specs
+        sb._sensor_specs = None
         yield
-        te._sensor_specs = old
+        sb._sensor_specs = old
 
     @pytest.mark.asyncio
     async def test_no_match_returns_not_found(self, monkeypatch):
         import service.isaac_assist_service.chat.tools.tool_executor as te
-        monkeypatch.setattr(te, "_sensor_specs", [])
+
+        import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
+        monkeypatch.setattr(sb, "_sensor_specs", [])
         result = await _handle_lookup_product_spec({"product_name": "NonExistent9000"})
         assert result["found"] is False
 
     @pytest.mark.asyncio
     async def test_exact_match(self, monkeypatch):
         import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         fake_specs = [
             {"product": "Intel RealSense D435i", "type": "camera", "fov_h": 87},
         ]
-        monkeypatch.setattr(te, "_sensor_specs", fake_specs)
+        monkeypatch.setattr(sb, "_sensor_specs", fake_specs)
         result = await _handle_lookup_product_spec({"product_name": "Intel RealSense D435i"})
         assert result["found"] is True
         assert result["spec"]["fov_h"] == 87
@@ -56,31 +62,37 @@ class TestLookupProductSpec:
     @pytest.mark.asyncio
     async def test_case_insensitive_match(self, monkeypatch):
         import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         fake_specs = [
             {"product": "Velodyne VLP-16", "type": "lidar"},
         ]
-        monkeypatch.setattr(te, "_sensor_specs", fake_specs)
+        monkeypatch.setattr(sb, "_sensor_specs", fake_specs)
         result = await _handle_lookup_product_spec({"product_name": "velodyne vlp-16"})
         assert result["found"] is True
 
     @pytest.mark.asyncio
     async def test_substring_match(self, monkeypatch):
         import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         fake_specs = [
             {"product": "Intel RealSense D435i", "type": "camera"},
             {"product": "Intel RealSense L515", "type": "camera"},
         ]
-        monkeypatch.setattr(te, "_sensor_specs", fake_specs)
+        monkeypatch.setattr(sb, "_sensor_specs", fake_specs)
         result = await _handle_lookup_product_spec({"product_name": "realsense"})
         assert result["found"] is True
 
     @pytest.mark.asyncio
     async def test_type_based_suggestion(self, monkeypatch):
         import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         fake_specs = [
             {"product": "Velodyne VLP-16", "type": "lidar", "subtype": "3d"},
         ]
-        monkeypatch.setattr(te, "_sensor_specs", fake_specs)
+        monkeypatch.setattr(sb, "_sensor_specs", fake_specs)
         result = await _handle_lookup_product_spec({"product_name": "lidar"})
         assert result["found"] is False
         assert "suggestions" in result
@@ -147,8 +159,10 @@ class TestCatalogSearch:
     @pytest.mark.asyncio
     async def test_catalog_search_robots(self, monkeypatch):
         import service.isaac_assist_service.chat.tools.tool_executor as te
+
+        import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
         # Reset cached index
-        monkeypatch.setattr(te, "_asset_index", None)
+        monkeypatch.setattr(sb, "_asset_index", None)
         handler = DATA_HANDLERS["catalog_search"]
         result = await handler({"query": "franka", "asset_type": "robot", "limit": 5})
         assert "results" in result
@@ -160,7 +174,9 @@ class TestCatalogSearch:
     @pytest.mark.asyncio
     async def test_catalog_search_no_results(self, monkeypatch):
         import service.isaac_assist_service.chat.tools.tool_executor as te
-        monkeypatch.setattr(te, "_asset_index", None)
+
+        import service.isaac_assist_service.chat.tools.handlers.scene_blueprints as sb
+        monkeypatch.setattr(sb, "_asset_index", None)
         handler = DATA_HANDLERS["catalog_search"]
         result = await handler({"query": "zzzznonexistent"})
         assert result["total_matches"] == 0
@@ -1384,6 +1400,8 @@ class TestDiagnoseRos2:
         assert "BEST_EFFORT" in qos_issues[0]["message"]
         assert qos_issues[0]["severity"] == "warning"
 # ── Performance Diagnostics ─────────────────────────────────────────────────
+from service.isaac_assist_service.chat.tools.handlers.diagnostics import _analyze_performance
+
 
 class TestAnalyzePerformance:
     """Unit tests for the _analyze_performance analysis function (no Kit needed)."""
@@ -2106,9 +2124,11 @@ class TestCheckCollisionMesh:
         assert "raw_output" in result
 
 
+from service.isaac_assist_service.chat.tools.handlers.physics import _gen_check_collision_mesh_code
+
+
 class TestCheckCollisionMeshCodeGen:
     """The read-only Kit script must compile and reference the right APIs."""
-
     def test_compiles(self):
         code = _gen_check_collision_mesh_code("/World/Robot/link3")
         compile(code, "<check_collision_mesh>", "exec")

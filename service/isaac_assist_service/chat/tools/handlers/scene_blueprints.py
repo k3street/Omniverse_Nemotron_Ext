@@ -9,7 +9,310 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict
+import json
+import logging
+from pathlib import Path
+
+from ....config import config
+
+from typing import Any, Callable, Dict, List, Optional
+
+# ---------------------------------------------------------------------------
+# Theme-local asset-index unit (Phase 8 wave 23, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.scene_blueprints.
+
+_asset_index: Optional[List[Dict]] = None
+
+_CATALOG_ROBOTS = {
+    "franka": "franka.usd",
+    "panda": "franka.usd",
+    "spot": "spot.usd",
+    "spot_with_arm": "spot_with_arm.usd",
+    "carter": "carter_v1.usd",
+    "jetbot": "jetbot.usd",
+    "kaya": "kaya.usd",
+    "ur10": "ur10.usd",
+    "ur5e": "ur5e.usd",
+    "anymal_c": "anymal_c.usd",
+    "anymal_d": "anymal_d.usd",
+    "a1": "a1.usd",
+    "go1": "go1.usd",
+    "go2": "go2.usd",
+    "g1": "g1.usd",
+    "unitree_g1": "g1.usd",
+    "g1_23dof": "g1_23dof_robot.usd",
+    "h1": "h1.usd",
+    "unitree_h1": "h1.usd",
+    "h1_hand_left": "h1_hand_left.usd",
+    "allegro_hand": "allegro_hand.usd",
+    "ridgeback_franka": "ridgeback_franka.usd",
+    "humanoid": "humanoid.usd",
+    "humanoid_28": "humanoid_28.usd",
+}
+
+def _invalidate_asset_index() -> None:
+    """Invalidate the cached asset index so the next search rebuilds it."""
+    global _asset_index
+    _asset_index = None
+
+def _build_asset_index() -> List[Dict]:
+    """Build searchable index from asset_catalog.json (fast) + known robots."""
+    global _asset_index
+    if _asset_index is not None:
+        return _asset_index
+
+    index = []
+    assets_root = getattr(config, "assets_root_path", None) or ""
+    robots_sub = getattr(config, "assets_robots_subdir", None) or "Collected_Robots"
+    robots_dir = f"{assets_root}/{robots_sub}" if assets_root else ""
+
+    # 1. Load asset_catalog.json (5,000+ entries with rich metadata)
+    catalog_path = Path(assets_root) / "asset_catalog.json" if assets_root else None
+    catalog_loaded = False
+    if catalog_path and catalog_path.exists():
+        try:
+            catalog = json.loads(catalog_path.read_text())
+            for entry in catalog.get("assets", []):
+                tags = entry.get("tags", [])
+                index.append({
+                    "name": entry.get("name", ""),
+                    "type": entry.get("category", "prop"),
+                    "path": entry.get("usd_path", ""),
+                    "rel_path": entry.get("relative_path", ""),
+                    "tags": tags,
+                    "source": "asset_catalog",
+                })
+            catalog_loaded = True
+            logger.info(f"[AssetIndex] Loaded {len(index)} entries from asset_catalog.json")
+        except Exception as e:
+            logger.warning(f"[AssetIndex] Failed to load asset_catalog.json: {e}")
+
+    # 2. Always add the known robot name map (canonical names → files)
+    for name, filename in _CATALOG_ROBOTS.items():
+        index.append({
+            "name": name,
+            "type": "robot",
+            "path": f"{robots_dir}/{filename}" if robots_dir else filename,
+            "source": "robot_library",
+        })
+
+    # 3. JSONL manifest (user-added entries)
+    manifest_path = _WORKSPACE / "knowledge" / "asset_manifest.jsonl"
+    if manifest_path.exists():
+        for line in manifest_path.read_text().splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    index.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+    # 4. Filesystem walk only if catalog wasn't loaded (slow fallback)
+    if not catalog_loaded and assets_root:
+        search_dir = Path(assets_root)
+        if search_dir.exists():
+            try:
+                for f in search_dir.rglob("*"):
+                    if f.suffix.lower() in (".usd", ".usda", ".usdz"):
+                        rel = f.relative_to(search_dir)
+                        name_parts = rel.stem.replace("_", " ").replace("-", " ")
+                        path_str = str(rel).lower()
+                        if any(k in path_str for k in ("robot", "arm", "gripper", "manipulator")):
+                            atype = "robot"
+                        elif any(k in path_str for k in ("env", "room", "warehouse", "house", "kitchen")):
+                            atype = "environment"
+                        elif any(k in path_str for k in ("sensor", "camera", "lidar")):
+                            atype = "sensor"
+                        elif any(k in path_str for k in ("material", "mdl", "texture")):
+                            atype = "material"
+                        else:
+                            atype = "prop"
+                        index.append({
+                            "name": name_parts,
+                            "type": atype,
+                            "path": str(f),
+                            "source": "filesystem",
+                            "rel_path": str(rel),
+                        })
+            except PermissionError:
+                pass
+
+    _asset_index = index
+    return _asset_index
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 18, 2026-05-13)
+
+def _load_template_manifests(library_dir: Path) -> List[Dict]:
+    """Load manifest.json from each template directory in library_dir.
+
+    Each entry is augmented with `_template_dir` so the caller can resolve
+    paths.  Missing or malformed manifests are skipped.
+    """
+    manifests: List[Dict] = []
+    if not library_dir.exists():
+        return manifests
+    for entry in sorted(library_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        manifest_path = entry / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[filter_templates_by_hardware] bad manifest at {manifest_path}: {e}")
+            continue
+        if not isinstance(data, dict):
+            continue
+        data["_template_dir"] = str(entry)
+        manifests.append(data)
+    return manifests
+
+# _handle_filter_templates_by_hardware moved to handlers/scene_blueprints.py (Phase 7 wave 12+13 redirect-stub stripped).
+
+# _gen_export_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
+
+# _gen_import_template moved to handlers/scene_blueprints.py (Phase 6 wave 11).
+
+
+# _handle_check_vram_headroom moved to handlers/diagnostics.py (Phase 7 wave 12+13 redirect-stub stripped).
+
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 16, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.scene_blueprints.
+
+_LIST_LOCAL_DEFAULT_ROOTS = [
+    "/home/anton/projects/Omniverse_Nemotron_Ext/workspace",
+    "/home/anton/projects/Omniverse_Nemotron_Ext/data",
+    "/home/anton/Downloads",
+    "/home/anton/Documents",
+    "/home/anton/robots",
+    "/home/anton/projects/myarm",
+    "/home/anton/projects/sharp_football",
+    "/tmp",
+]
+
+_LIST_LOCAL_MAX_RESULTS = 200
+
+_LIST_LOCAL_MAX_DEPTH = 6
+
+_LIST_LOCAL_ALLOWED_EXTS = {
+    ".urdf", ".usd", ".usda", ".usdc", ".usdz",
+    ".step", ".stp", ".iges", ".igs", ".stl", ".obj", ".fbx", ".gltf", ".glb",
+    ".ifc", ".ifczip",
+    ".yaml", ".yml", ".json",  # config, scene templates
+    ".pcd", ".ply",  # point clouds
+    ".png", ".jpg", ".jpeg", ".exr", ".hdr",  # textures (filtered by name pattern)
+}
+
+# ---------------------------------------------------------------------------
+# Theme-local constants + helpers (Phase 8 wave 7, 2026-05-13)
+# Migrated from tool_executor.py — used only by this module.
+
+_WORKSPACE = Path(__file__).resolve().parents[5] / "workspace"
+
+_ISAA_MANIFEST_VERSION = 1
+
+_SCENE_TEMPLATES = {
+    "tabletop_manipulation": {
+        "description": "Table-top manipulation scene with a Franka robot arm, objects to grasp, and an overhead camera. Ideal for pick-and-place tasks.",
+        "category": "manipulation",
+        "room_dims": [4, 4, 3],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [5, 5, 1]},
+            {"name": "Table", "prim_type": "Cube", "position": [0, 0, 0.4], "scale": [0.8, 0.6, 0.4]},
+            {"name": "Franka", "prim_path": "/World/Franka", "asset_name": "franka", "position": [0, -0.3, 0.8], "scale": [1, 1, 1]},
+            {"name": "Cube_Red", "prim_type": "Cube", "position": [0.15, 0.1, 0.85], "scale": [0.03, 0.03, 0.03]},
+            {"name": "Cube_Green", "prim_type": "Cube", "position": [-0.1, 0.15, 0.85], "scale": [0.03, 0.03, 0.03]},
+            {"name": "Cylinder_Blue", "prim_type": "Cylinder", "position": [0.05, -0.1, 0.85], "scale": [0.02, 0.02, 0.04]},
+            {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 1.8], "rotation": [-90, 0, 0]},
+        ],
+        "suggested_sensors": ["camera (overhead, 1280x720)", "contact_sensor (gripper fingers)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
+    },
+    "warehouse_picking": {
+        "description": "Warehouse bin-picking scene with shelving units, a mobile robot, bins with objects, and an overhead camera. Good for logistics and order-fulfillment tasks.",
+        "category": "warehouse",
+        "room_dims": [10, 8, 4],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [12, 10, 1]},
+            {"name": "Shelf_A", "prim_type": "Cube", "position": [-2, 2, 1.0], "scale": [1.2, 0.4, 2.0]},
+            {"name": "Shelf_B", "prim_type": "Cube", "position": [2, 2, 1.0], "scale": [1.2, 0.4, 2.0]},
+            {"name": "Bin_1", "prim_type": "Cube", "position": [-2, 2, 0.3], "scale": [0.4, 0.3, 0.25]},
+            {"name": "Bin_2", "prim_type": "Cube", "position": [-2, 2, 0.8], "scale": [0.4, 0.3, 0.25]},
+            {"name": "Bin_3", "prim_type": "Cube", "position": [2, 2, 0.3], "scale": [0.4, 0.3, 0.25]},
+            {"name": "MobileRobot", "prim_path": "/World/Carter", "asset_name": "carter", "position": [0, -1, 0], "scale": [1, 1, 1]},
+            {"name": "OverheadCamera", "prim_type": "Camera", "position": [0, 0, 3.5], "rotation": [-90, 0, 0]},
+        ],
+        "suggested_sensors": ["camera (overhead, 1920x1080)", "rtx_lidar (mobile robot)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
+    },
+    "mobile_navigation": {
+        "description": "Indoor navigation scene with a ground plane, walls, obstacles, and a wheeled robot with lidar. Good for SLAM and path-planning tasks.",
+        "category": "mobile",
+        "room_dims": [8, 8, 3],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [10, 10, 1]},
+            {"name": "Wall_North", "prim_type": "Cube", "position": [0, 4, 1.0], "scale": [8, 0.1, 2.0]},
+            {"name": "Wall_South", "prim_type": "Cube", "position": [0, -4, 1.0], "scale": [8, 0.1, 2.0]},
+            {"name": "Wall_East", "prim_type": "Cube", "position": [4, 0, 1.0], "scale": [0.1, 8, 2.0]},
+            {"name": "Wall_West", "prim_type": "Cube", "position": [-4, 0, 1.0], "scale": [0.1, 8, 2.0]},
+            {"name": "Obstacle_1", "prim_type": "Cylinder", "position": [1.5, 1.0, 0.5], "scale": [0.3, 0.3, 1.0]},
+            {"name": "Obstacle_2", "prim_type": "Cube", "position": [-1.0, -1.5, 0.4], "scale": [0.6, 0.6, 0.8]},
+            {"name": "Obstacle_3", "prim_type": "Cylinder", "position": [-2.0, 2.0, 0.5], "scale": [0.25, 0.25, 1.0]},
+            {"name": "Jetbot", "prim_path": "/World/Jetbot", "asset_name": "jetbot", "position": [0, 0, 0.05], "scale": [1, 1, 1]},
+        ],
+        "suggested_sensors": ["rtx_lidar (robot-mounted, 360 deg)", "camera (front-facing)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 60.0, "solver_iterations": 16},
+    },
+    "inspection_cell": {
+        "description": "Automated inspection cell with a conveyor belt, inspection cameras, structured lighting, and sample objects. Good for quality-inspection and defect-detection tasks.",
+        "category": "inspection",
+        "room_dims": [6, 4, 3],
+        "objects": [
+            {"name": "GroundPlane", "prim_type": "Plane", "position": [0, 0, 0], "scale": [8, 6, 1]},
+            {"name": "Conveyor", "prim_type": "Cube", "position": [0, 0, 0.45], "scale": [3.0, 0.5, 0.05]},
+            {"name": "ConveyorLegs_L", "prim_type": "Cube", "position": [-1.2, 0, 0.2], "scale": [0.05, 0.4, 0.4]},
+            {"name": "ConveyorLegs_R", "prim_type": "Cube", "position": [1.2, 0, 0.2], "scale": [0.05, 0.4, 0.4]},
+            {"name": "InspectionCamera_Top", "prim_type": "Camera", "position": [0, 0, 1.5], "rotation": [-90, 0, 0]},
+            {"name": "InspectionCamera_Side", "prim_type": "Camera", "position": [0, -1.2, 0.8], "rotation": [0, 0, 0]},
+            {"name": "Light_Bar_1", "prim_type": "RectLight", "position": [-0.5, 0, 1.2], "scale": [0.8, 0.1, 0.05]},
+            {"name": "Light_Bar_2", "prim_type": "RectLight", "position": [0.5, 0, 1.2], "scale": [0.8, 0.1, 0.05]},
+            {"name": "SampleObject_1", "prim_type": "Cube", "position": [-0.3, 0, 0.5], "scale": [0.08, 0.08, 0.08]},
+            {"name": "SampleObject_2", "prim_type": "Cylinder", "position": [0.1, 0, 0.5], "scale": [0.04, 0.04, 0.06]},
+            {"name": "SampleObject_3", "prim_type": "Sphere", "position": [0.4, 0, 0.52], "scale": [0.03, 0.03, 0.03]},
+        ],
+        "suggested_sensors": ["camera (top-down, high-res 4K)", "camera (side-view, 1280x720)"],
+        "physics_settings": {"gravity": -9.81, "time_step": 1.0 / 120.0, "solver_iterations": 32},
+    },
+}
+
+_TEMPLATE_EXPORT_DIR = _WORKSPACE / "templates" / "exports"
+
+_TEMPLATE_LIBRARY_DIR = _WORKSPACE / "templates" / "library"
+
+_SENSOR_SPECS_PATH = _WORKSPACE / "knowledge" / "sensor_specs.jsonl"
+
+_sensor_specs: Optional[List[Dict]] = None
+
+def _load_sensor_specs() -> List[Dict]:
+    global _sensor_specs
+    if _sensor_specs is not None:
+        return _sensor_specs
+    specs = []
+    if _SENSOR_SPECS_PATH.exists():
+        for line in _SENSOR_SPECS_PATH.read_text().splitlines():
+            line = line.strip()
+            if line:
+                specs.append(json.loads(line))
+    _sensor_specs = specs
+    return specs
+
+
+# _load_deformable_presets migrated to handlers/physics.py (Phase 8 wave 6, 2026-05-13).
 
 
 # ---------------------------------------------------------------------------
@@ -18,7 +321,7 @@ from typing import Any, Callable, Dict
 
 def _gen_build_scene_from_blueprint(args: Dict) -> str:
     """Generate code to build a scene from a structured blueprint."""
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     blueprint = args.get("blueprint", {})
     objects = blueprint.get("objects", [])
     dry_run = args.get("dry_run", False)
@@ -248,7 +551,7 @@ def _gen_export_template(args: Dict) -> str:
         config/<files>     (optional; copied from CONFIG_DIR if present)
 
     """
-    from ..tool_executor import _TEMPLATE_EXPORT_DIR, _ISAA_MANIFEST_VERSION
+    # Phase 8 wave 7 — _TEMPLATE_EXPORT_DIR migrated to module body.
     from datetime import datetime as _dt
     name = args["name"]
     safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
@@ -316,7 +619,7 @@ print(f'[export_template] wrote {{isaa_path}} ({{isaa_path.stat().st_size}} byte
 
 def _gen_import_template(args: Dict) -> str:
     """Generate code that extracts an .isaa file into the local library."""
-    from ..tool_executor import _TEMPLATE_LIBRARY_DIR
+    # Phase 8 wave 7 — _TEMPLATE_LIBRARY_DIR migrated to module body.
     file_path = args["file_path"]
     library_dir = args.get("library_dir") or str(_TEMPLATE_LIBRARY_DIR)
     overwrite = bool(args.get("overwrite", False))
@@ -432,7 +735,7 @@ async def _handle_lookup_knowledge(args: Dict) -> Dict:
 
 async def _handle_lookup_product_spec(args: Dict) -> Dict:
     """Fuzzy-match a product name against the sensor specs database."""
-    from ..tool_executor import _load_sensor_specs
+    # Phase 8 wave 7 — _load_sensor_specs migrated to module body.
     query = args.get("product_name", "").lower()
     specs = _load_sensor_specs()
     # Exact match first
@@ -454,7 +757,7 @@ async def _handle_lookup_product_spec(args: Dict) -> Dict:
 
 async def _handle_catalog_search(args: Dict) -> Dict:
     """Fuzzy-match assets by name, type, and path."""
-    from ..tool_executor import _build_asset_index
+    # Phase 8 wave 23 — _build_asset_index migrated.
     query = args.get("query", "").lower()
     asset_type = args.get("asset_type", "any").lower()
     limit = args.get("limit", 10)
@@ -690,7 +993,7 @@ else:
         catalog_error = f"catalog file not found at {catalog_path}"
 
     # Invalidate cached asset index so next search picks up the new entry
-    from ..tool_executor import _invalidate_asset_index
+    # Phase 8 wave 23 — _invalidate_asset_index migrated.
     _invalidate_asset_index()
 
     size = dl_result.get("size", 0)
@@ -740,12 +1043,8 @@ async def _handle_list_local_files(args: Dict) -> Dict:
     """
     import fnmatch as _fnmatch_files
     import os as _os_files
-    from ..tool_executor import (
-        _LIST_LOCAL_ALLOWED_EXTS,
-        _LIST_LOCAL_DEFAULT_ROOTS,
-        _LIST_LOCAL_MAX_DEPTH,
-        _LIST_LOCAL_MAX_RESULTS,
-    )
+    # (Phase 8 wave 16) tool_executor imports migrated to module body:
+    # _LIST_LOCAL_MAX_DEPTH migrated to module body (Phase 8 wave 16).
     pattern = (args.get("pattern") or "*").strip()
     extensions_raw = args.get("extensions") or []
     if isinstance(extensions_raw, str):
@@ -845,11 +1144,9 @@ async def _handle_filter_templates_by_hardware(args: Dict) -> Dict:
     """Filter templates by GPU VRAM + tag/category."""
     from pathlib import Path as _Path
     from typing import List as _List
-    from ..tool_executor import (
-        _TEMPLATE_LIBRARY_DIR,
-        _detect_local_vram_gb,
-        _load_template_manifests,
-    )
+    from ._shared import _detect_local_vram_gb
+    # _load_template_manifests, _TEMPLATE_LIBRARY_DIR are module-local
+    # (Phase 8 waves 7 + 18).
     device_vram_gb = args.get("device_vram_gb")
     if device_vram_gb is None:
         device_vram_gb = _detect_local_vram_gb()
@@ -908,7 +1205,7 @@ async def _handle_filter_templates_by_hardware(args: Dict) -> Dict:
 
 async def _handle_list_scene_templates(args: Dict) -> Dict:
     """List available scene templates, optionally filtered by category."""
-    from ..tool_executor import _SCENE_TEMPLATES
+    # Phase 8 wave 7 — _SCENE_TEMPLATES migrated to module body.
     category = args.get("category", "").lower()
 
     templates = []
@@ -932,7 +1229,7 @@ async def _handle_list_scene_templates(args: Dict) -> Dict:
 
 async def _handle_load_scene_template(args: Dict) -> Dict:
     """Load a scene template by name. Returns a blueprint compatible with build_scene_from_blueprint."""
-    from ..tool_executor import _SCENE_TEMPLATES
+    # Phase 8 wave 7 — _SCENE_TEMPLATES migrated to module body.
     template_name = args.get("template_name", "").lower().replace(" ", "_").replace("-", "_")
 
     if template_name not in _SCENE_TEMPLATES:

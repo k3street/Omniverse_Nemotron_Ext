@@ -15,6 +15,459 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 
+def _lazy_execute_tool_call(*args, **kwargs):
+    """Lazy proxy for tool_executor.execute_tool_call to avoid circular
+    import at module load. Tests patch `execute_tool_call` directly on
+    this module; this proxy makes that work without needing a top-level
+    import."""
+    from ..tool_executor import execute_tool_call as _real
+    return _real(*args, **kwargs)
+
+
+execute_tool_call = _lazy_execute_tool_call
+
+
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 27, 2026-05-13)
+
+def _per_joint_rmse(sim_traj: List[List[float]], real_traj: List[List[float]]) -> List[float]:
+    """RMSE per joint between two joint-trajectory arrays of shape (T, n_joints)."""
+    n_steps = min(len(sim_traj), len(real_traj))
+    if n_steps == 0:
+        return []
+    n_joints = min(len(sim_traj[0]), len(real_traj[0])) if sim_traj[0] else 0
+    rmses: List[float] = []
+    for j in range(n_joints):
+        sq = 0.0
+        for t in range(n_steps):
+            d = float(sim_traj[t][j]) - float(real_traj[t][j])
+            sq += d * d
+        rmses.append((sq / n_steps) ** 0.5)
+    return rmses
+
+def _load_trajectory_for_gap(path: str) -> Optional[Dict]:
+    """Load trajectory from HDF5 or CSV. Returns dict of arrays or None on error."""
+    if not Path(path).exists():
+        return None
+    try:
+        if path.endswith((".h5", ".hdf5")):
+            try:
+                import h5py
+            except ImportError:
+                return {"_error": "h5py not installed"}
+            data = {}
+            with h5py.File(path, "r") as f:
+                for key in f.keys():
+                    try:
+                        data[key] = f[key][:].tolist()
+                    except Exception:
+                        pass
+            return data
+        elif path.endswith(".csv"):
+            import csv
+            data: Dict = {"rows": []}
+            with open(path, "r") as fp:
+                reader = csv.DictReader(fp)
+                for row in reader:
+                    data["rows"].append(row)
+            return data
+        else:
+            return {"_error": f"Unsupported file format: {path}"}
+    except Exception as e:
+        return {"_error": str(e)}
+
+async def _augment_verify_with_feasibility(verify_result: Dict, stages: list) -> Dict:
+    """Phase 1.5 — Opus §F. Run diagnose_scene_feasibility for each stage's
+    pick+drop pose, merge any infeasible/overconstrained violations into the
+    verify_result['issues'] list. Sets pipeline_ok=False if any CRITICAL
+    violations found.
+
+    Reads stage pick_pos / place_pos from verify_result['results']
+    (already computed by the kit-side script) — avoids second Kit RPC trip
+    to compute them.
+
+    Test contract: callers patch this module's `execute_tool_call`
+    binding (see test_verify_feasibility_augment.py). The function reads
+    the module-level name, so patching diagnostics.execute_tool_call
+    intercepts the call.
+    """
+    import json as _j
+    out_text = (verify_result.get("output") or "").strip()
+    parsed = None
+    for line in out_text.splitlines()[::-1]:
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = _j.loads(line); break
+            except Exception:
+                continue
+    if not parsed:
+        return verify_result  # non-parseable; leave alone
+
+    stage_results = parsed.get("results") or []
+    issues = list(parsed.get("issues") or [])
+    pipeline_ok = bool(parsed.get("pipeline_ok"))
+    feasibility_reports = []
+
+    for i, sr in enumerate(stage_results):
+        rp = sr.get("robot_path")
+        pick_pos = sr.get("pick_pos")
+        place_pos = sr.get("place_pos")
+        if not rp or not pick_pos or not place_pos:
+            continue
+        try:
+            diag_res = await execute_tool_call("diagnose_scene_feasibility", {
+                "robot_path": rp,
+                "pick_pose": pick_pos,
+                "drop_pose": place_pos,
+                "robot_base": sr.get("robot_pos") or [0, 0, 0],
+                "max_reach": sr.get("reach_m") or 0.855,
+                "use_cache": True,
+            })
+        except Exception as e:
+            issues.append(f"[feasibility] stage {i}: diagnose call failed: {type(e).__name__}: {str(e)[:80]}")
+            continue
+        if isinstance(diag_res, dict) and "verdict" in diag_res:
+            d = diag_res
+        else:
+            d = None
+            for line in (diag_res.get("output") or "").splitlines()[::-1]:
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        d = _j.loads(line); break
+                    except Exception:
+                        continue
+        if not d:
+            continue
+        feasibility_reports.append({"stage_index": i, "verdict": d.get("verdict"),
+                                     "n_violations": len(d.get("violations") or [])})
+        verdict = d.get("verdict")
+        if verdict in ("infeasible", "overconstrained"):
+            for v in (d.get("violations") or []):
+                if v.get("severity") in ("ERROR", "CRITICAL"):
+                    issues.append(f"[feasibility] stage {i}: {v.get('message')}")
+            if verdict == "infeasible":
+                pipeline_ok = False
+
+    parsed["issues"] = issues
+    parsed["pipeline_ok"] = pipeline_ok
+    parsed["feasibility_reports"] = feasibility_reports
+
+    # Re-serialize the augmented payload onto the result for the caller
+    new_output = _j.dumps(parsed)
+    return {**verify_result, "output": new_output}
+
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 26, 2026-05-13)
+
+def _analyze_performance(stats: Dict, timing: Dict, mem: Dict) -> List[Dict]:
+    """Analyze profiling data and return a list of performance issues."""
+    issues = []
+
+    # Physics narrow-phase bottleneck
+    narrow_ms = timing.get("narrow_phase_ms", 0)
+    if narrow_ms > 10:
+        issues.append({
+            "category": "physics_narrow_phase",
+            "severity": "high",
+            "message": (
+                f"Narrow phase takes {narrow_ms:.0f}ms. "
+                f"Heavy trimesh colliders are likely the cause."
+            ),
+            "fix": "Switch to convexHull or convexDecomposition approximation",
+        })
+
+    # VRAM pressure
+    used_mb = mem.get("used_mb", 0)
+    total_mb = mem.get("total_mb", 1)
+    if total_mb > 0 and used_mb / total_mb > 0.9:
+        issues.append({
+            "category": "memory",
+            "severity": "high",
+            "message": f"GPU memory {used_mb:.0f}/{total_mb:.0f} MB (>90%)",
+            "breakdown": mem.get("per_category", {}),
+            "fix": "Reduce texture resolution or number of render products",
+        })
+
+    # Solver convergence
+    solver_ms = timing.get("solver_ms", 0)
+    solver_iters = stats.get("solver_iterations", 0)
+    if solver_ms > 5 and solver_iters > 16:
+        issues.append({
+            "category": "solver",
+            "severity": "medium",
+            "message": (
+                f"Solver takes {solver_ms:.0f}ms at "
+                f"{solver_iters} iterations"
+            ),
+            "fix": "Reduce solver iterations to 4-8 for non-contact-critical bodies",
+        })
+
+    # Broad-phase bottleneck
+    broad_ms = timing.get("broad_phase_ms", 0)
+    if broad_ms > 8:
+        issues.append({
+            "category": "physics_broad_phase",
+            "severity": "medium",
+            "message": f"Broad phase takes {broad_ms:.0f}ms",
+            "fix": "Reduce number of active rigid bodies or increase physics scene bounds",
+        })
+
+    # High dynamic rigid body count
+    nb_dynamic = stats.get("nb_dynamic_rigids", 0)
+    if nb_dynamic > 500:
+        issues.append({
+            "category": "scene_complexity",
+            "severity": "medium",
+            "message": f"{nb_dynamic} dynamic rigid bodies in scene",
+            "fix": "Consider using GPU pipeline or reducing active body count",
+        })
+
+    return issues
+
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 18, 2026-05-13)
+
+def _detect_used_vram_gb() -> Optional[float]:
+    """Best-effort current VRAM usage via nvidia-smi."""
+    try:
+        from ...fingerprint.collector import run_shell
+    except Exception:
+        return None
+    try:
+        out = run_shell("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits")
+    except Exception:
+        return None
+    if not out:
+        return None
+    try:
+        # Take the first GPU
+        first = out.splitlines()[0].strip()
+        used_mb = float(first)
+        return round(used_mb / 1024.0, 2)
+    except Exception:
+        return None
+
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 10, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.diagnostics.
+
+_BROKEN_SCENE_FAULTS = {
+    "missing_collision": {
+        "what_breaks": "Ground plane has no CollisionAPI — robot falls through floor",
+        "learning_goal": "Physics basics — CollisionAPI must be applied for objects to interact",
+    },
+    "zero_mass": {
+        "what_breaks": "Robot link has mass=0 — articulation behaves erratically",
+        "learning_goal": "Inertia understanding — every dynamic body needs positive mass",
+    },
+    "wrong_scale": {
+        "what_breaks": "Object imported at 100x scale (cm vs m mismatch)",
+        "learning_goal": "USD units — metersPerUnit must match between asset and stage",
+    },
+    "inverted_joint": {
+        "what_breaks": "One joint axis flipped — robot moves opposite direction",
+        "learning_goal": "URDF import debugging — axis conventions can flip",
+    },
+    "no_physics_scene": {
+        "what_breaks": "Missing PhysicsScene prim — no physics simulation runs",
+        "learning_goal": "Scene setup — every physics-enabled stage needs a PhysicsScene",
+    },
+    "inf_joint_limits": {
+        "what_breaks": "Joint limits set to ±inf — arm can move through itself or environment",
+        "learning_goal": "URDF best practices — always set finite joint limits",
+    },
+}
+
+_PHYSX_ERROR_PATTERNS = [
+    {
+        "pattern": r"negative mass",
+        "category": "mass_configuration",
+        "fix": "Set the mass to a positive value via UsdPhysics.MassAPI. Check that density and volume are both positive.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"joint limit exceeded",
+        "category": "joint_limits",
+        "fix": "Increase the joint limit range or add damping to prevent overshoot. Check RevoluteJoint.LowerLimitAttr/UpperLimitAttr.",
+        "severity": "warning",
+        "prim_regex": r"joint[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"collision mesh invalid|degenerate triangle|invalid mesh",
+        "category": "collision_mesh",
+        "fix": "Regenerate the collision mesh with convex decomposition. Remove degenerate (zero-area) triangles from the source mesh.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"solver diverge|solver divergence|simulation diverge",
+        "category": "solver_divergence",
+        "fix": "Lower the physics timestep (e.g. 1/120 instead of 1/60), increase solver iterations (positionIterations=16, velocityIterations=4), or reduce extreme mass ratios.",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"invalid inertia|zero inertia|non-positive inertia",
+        "category": "inertia_tensor",
+        "fix": "Set a valid diagonal inertia tensor via MassAPI.DiagonalInertiaAttr. All components must be > 0.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"missing collision|no collision api|CollisionAPI not applied",
+        "category": "missing_collision",
+        "fix": "Apply UsdPhysics.CollisionAPI to the mesh prim: UsdPhysics.CollisionAPI.Apply(prim).",
+        "severity": "error",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"PhysicsScene.*not found|no physics scene",
+        "category": "missing_physics_scene",
+        "fix": "Create a PhysicsScene prim: stage.DefinePrim('/World/PhysicsScene', 'PhysicsScene'). Apply UsdPhysics.Scene API.",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"mass ratio|extreme mass ratio",
+        "category": "mass_ratio",
+        "fix": "Reduce the mass ratio between contacting bodies to below 100:1. Consider using articulations instead of free bodies for robot links.",
+        "severity": "warning",
+        "prim_regex": r"(?:between|bodies)[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"articulation.*loop|closed loop|kinematic loop",
+        "category": "articulation_loop",
+        "fix": "PhysX does not support closed-loop articulations. Break the loop by removing one joint or using a D6 joint with a spring constraint instead.",
+        "severity": "critical",
+        "prim_regex": r"articulation[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"self.intersection|self.penetration|initial overlap|interpenetration",
+        "category": "initial_overlap",
+        "fix": "Move the overlapping bodies apart before starting simulation. Use debug draw to visualize collision shapes.",
+        "severity": "warning",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"too many contacts|contact buffer overflow",
+        "category": "contact_overflow",
+        "fix": "Increase PhysxScene.maxNbContactDataBlocks or simplify collision geometry. Consider using collision filtering.",
+        "severity": "error",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"gpu.*memory|cuda.*out of memory|gpu.*buffer",
+        "category": "gpu_memory",
+        "fix": "Reduce the number of collision pairs, lower particle counts, or use simpler collision shapes (convex hull instead of triangle mesh).",
+        "severity": "critical",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"fixed base.*missing|no fixed base|floating base",
+        "category": "fixed_base",
+        "fix": "Set PhysxArticulationAPI.fixedBase=True on the articulation root prim for stationary robots.",
+        "severity": "warning",
+        "prim_regex": r"articulation[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"nan|NaN detected|not a number",
+        "category": "nan_values",
+        "fix": "NaN typically indicates numerical instability. Check for zero-mass bodies, extreme forces, or missing gravity direction. Lower timestep and increase solver iterations.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"joint drive.*target|drive target out of range",
+        "category": "drive_target",
+        "fix": "Ensure joint drive targets are within the joint limit range. Clamp target values to [lowerLimit, upperLimit].",
+        "severity": "warning",
+        "prim_regex": r"joint[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"invalid transform|singular matrix|non-finite transform",
+        "category": "invalid_transform",
+        "fix": "Reset the prim transform to identity. Check for zero-scale axes or non-orthogonal rotation matrices.",
+        "severity": "critical",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"broadphase.*overflow|pair buffer.*full",
+        "category": "broadphase_overflow",
+        "fix": "Increase PhysxScene.maxBiasCoefficient or reduce the number of dynamic objects. Use collision groups to limit pair generation.",
+        "severity": "error",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"unstable simulation|jitter|oscillat",
+        "category": "simulation_instability",
+        "fix": "Increase solver iterations, add damping to joints, or lower the physics timestep. Check for stiff springs without adequate damping.",
+        "severity": "warning",
+        "prim_regex": None,
+    },
+    {
+        "pattern": r"metersPerUnit.*mismatch|scale mismatch|unit mismatch",
+        "category": "unit_mismatch",
+        "fix": "Ensure all referenced assets use the same metersPerUnit. Set UsdGeom.SetStageMetersPerUnit(stage, 1.0) or scale the referenced asset.",
+        "severity": "error",
+        "prim_regex": r"asset[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+    {
+        "pattern": r"exceeded velocity|velocity clamp|max velocity",
+        "category": "velocity_exceeded",
+        "fix": "Increase PhysxRigidBodyAPI.maxLinearVelocity or reduce applied forces. Default max is 100 m/s.",
+        "severity": "warning",
+        "prim_regex": r"prim[:\s]+['\"]?(/[^\s'\"]+)",
+    },
+]
+
+_TELEOP_DEVICES = {
+    "quest_3": {
+        "supported": True,
+        "transport": "webxr",
+        "latency_budget_ms": 80,
+        "known_limitations": [
+            "Meta Browser required; Safari does not expose XR_EXT_hand_tracking",
+        ],
+        "notes": "Quest 3 uses WebXR over Wi-Fi — keep router <= 10 ms from host.",
+    },
+    "vision_pro": {
+        "supported": True,
+        "transport": "cloudxr",
+        "latency_budget_ms": 60,
+        "known_limitations": [
+            "Requires native CloudXR app on visionOS",
+            "WebXR on Safari does NOT expose hand tracking — browser path will not work",
+        ],
+        "notes": "Vision Pro must use the NVIDIA CloudXR native app, not Safari.",
+    },
+    "spacemouse": {
+        "supported": True,
+        "transport": "usb-hid",
+        "latency_budget_ms": 20,
+        "known_limitations": ["6-DoF only — no hand retargeting"],
+        "notes": "3Dconnexion SpaceMouse over USB-HID. Local, sub-20 ms RTT.",
+    },
+    "keyboard": {
+        "supported": True,
+        "transport": "usb-hid",
+        "latency_budget_ms": 20,
+        "known_limitations": ["Discrete input only — coarse joint nudges"],
+        "notes": "Keyboard fallback for smoke tests without XR hardware.",
+    },
+}
+
+_VRAM_PER_ENV_MB = {
+    "clone": {"low": 8, "medium": 16, "high": 32},
+    "train": {"low": 12, "medium": 24, "high": 48},
+    "sdg": {"low": 32, "medium": 64, "high": 128},
+    "render": {"low": 256, "medium": 512, "high": 1024},
+    "custom": {"low": 16, "medium": 32, "high": 64},
+}
+
+
 # ---------------------------------------------------------------------------
 # Phase 6 wave 10 — debug-draw + physics health + singularity + visualization
 
@@ -1639,8 +2092,7 @@ else:
 def _gen_create_broken_scene(args: Dict) -> str:
     """Generate code that creates a scene with a specific, diagnosable fault for teaching."""
     from .. import tool_executor as _te  # noqa: PLC0415
-    _BROKEN_SCENE_FAULTS = _te._BROKEN_SCENE_FAULTS
-
+    # Phase 8 mop-up — _BROKEN_SCENE_FAULTS is now module-local.
     fault_type = args.get("fault_type", "missing_collision")
     scene_name = args.get("scene_name", "BrokenScene")
 
@@ -2056,7 +2508,7 @@ async def _handle_check_teleop_hardware(args: Dict) -> Dict:
     """Look up a teleop device in the known-devices table and probe local availability."""
     from pathlib import Path  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
-    _TELEOP_DEVICES = _te._TELEOP_DEVICES
+    # Phase 8 mop-up — _TELEOP_DEVICES is now module-local.
     device = str(args.get("device", "")).lower()
     info = _TELEOP_DEVICES.get(device)
     if info is None:
@@ -2174,10 +2626,10 @@ else:
 
 async def _handle_check_vram_headroom(args: Dict) -> Dict:
     """Estimate VRAM cost vs available, return warnings + suggestions."""
-    from .. import tool_executor as _te  # noqa: PLC0415
-    _VRAM_PER_ENV_MB = _te._VRAM_PER_ENV_MB
-    _detect_local_vram_gb = _te._detect_local_vram_gb
-    _detect_used_vram_gb = _te._detect_used_vram_gb
+    # Phase 8 wave 18 — _detect_local_vram_gb now in _shared,
+    # _detect_used_vram_gb is module-local. _VRAM_PER_ENV_MB is also
+    # module-local (wave 10).
+    from ._shared import _detect_local_vram_gb
     operation = args.get("operation", "custom")
     num_envs = int(args.get("num_envs", 1))
     complexity = args.get("complexity", "medium")
@@ -2443,7 +2895,7 @@ async def _handle_diagnose_performance(args: Dict) -> Dict:
     """Collect PhysX stats, timing, and GPU memory, then analyze for bottlenecks."""
     from .. import kit_tools  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
-    _analyze_performance = _te._analyze_performance
+    # _analyze_performance migrated to module body (Phase 8 wave 26).
     code = """\
 import json
 
@@ -2552,7 +3004,7 @@ async def _handle_diagnose_physics_error(args: Dict) -> Dict:
     """Pattern-match against known PhysX errors and return diagnosis."""
     import re as _re  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
-    _PHYSX_ERROR_PATTERNS = _te._PHYSX_ERROR_PATTERNS
+    # Phase 8 mop-up — _PHYSX_ERROR_PATTERNS is now module-local.
     error_text = args.get("error_text", "")
     if not error_text.strip():
         return {"matches": [], "message": "No error text provided."}
@@ -2867,7 +3319,7 @@ print(json.dumps({{'prim_a': {prim_a!r}, 'prim_b': {prim_b!r}, 'distance_m': dis
 async def _handle_measure_sim_real_gap(args: Dict) -> Dict:
     """Compare sim and real trajectories to quantify the gap."""
     from .. import tool_executor as _te  # noqa: PLC0415
-    _load_trajectory_for_gap = _te._load_trajectory_for_gap
+    # _load_trajectory_for_gap migrated to module body (Phase 8 wave 27).
     sim_path = args.get("sim_trajectory", "")
     real_path = args.get("real_trajectory", "")
 
@@ -3702,9 +4154,8 @@ async def _handle_validate_calibration(args: Dict) -> Dict:
     report is computed in-process.
     """
     from .. import tool_executor as _te  # noqa: PLC0415
-    _check_real_data_path = _te._check_real_data_path
-    _per_joint_rmse = _te._per_joint_rmse
-
+    from ._shared import _check_real_data_path  # noqa: PLC0415
+    # _per_joint_rmse migrated to module body (Phase 8 wave 27).
     calibrated_params = args.get("calibrated_params")
     test_data_path = args.get("test_data_path", "")
     baseline_error = args.get("baseline_error")
@@ -4036,8 +4487,7 @@ except Exception as e:
 
 async def _handle_validate_teleop_demo(args: Dict) -> Dict:
     """Validate an HDF5 teleop file against the robomimic schema."""
-    from .. import tool_executor as _te  # noqa: PLC0415
-    _open_hdf5_safely = _te._open_hdf5_safely
+    from ._shared import _open_hdf5_safely  # noqa: PLC0415
     import math  # noqa: PLC0415
     path = args["hdf5_path"]
     f, reason = _open_hdf5_safely(path)
@@ -4152,7 +4602,7 @@ async def _handle_verify_pickplace_pipeline(args: Dict) -> Dict:
     from .. import kit_tools  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
     _ROBOT_REACH_M = _te._ROBOT_REACH_M
-    _augment_verify_with_feasibility = _te._augment_verify_with_feasibility
+    # _augment_verify_with_feasibility migrated to module body (Phase 8 wave 27).
     stages = args.get("stages")
     if not stages:
         # Allow a single-stage shorthand

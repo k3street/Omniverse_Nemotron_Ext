@@ -30,7 +30,488 @@ Per `specs/IA_FULL_SPEC_2026-05-10.md` Phase 3.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from typing import Any, Callable, Dict, Optional
+
+# ---------------------------------------------------------------------------
+# Theme-local state caches (Phase 8 wave 22, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.scene_authoring.
+
+_STAGE_INDEX: Dict[str, Dict[str, Any]] = {}
+
+_STAGE_INDEX_META: Dict[str, Any] = {"prim_scope": None, "prim_count": 0}
+
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 21, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.scene_authoring.
+
+def _parse_unified_diff_to_changes(raw_diff_lines: List[str]) -> List[Dict]:
+    """Parse a unified diff of USDA text into structured SceneChange dicts.
+
+    Each returned dict has:
+        prim_path: str
+        change_type: "added" | "removed" | "modified"
+        details: dict  (attribute, old, new, or raw line)
+    """
+    import re
+    changes: List[Dict] = []
+    current_prim: Optional[str] = None
+
+    # Track added/removed lines to pair modifications
+    added_lines: List[str] = []
+    removed_lines: List[str] = []
+
+    def _flush_pending():
+        nonlocal added_lines, removed_lines
+        if not current_prim:
+            added_lines.clear()
+            removed_lines.clear()
+            return
+        # Pair removed/added as modifications
+        paired = min(len(removed_lines), len(added_lines))
+        for i in range(paired):
+            changes.append({
+                "prim_path": current_prim,
+                "change_type": "modified",
+                "details": {"old_line": removed_lines[i].strip(), "new_line": added_lines[i].strip()},
+            })
+        for i in range(paired, len(removed_lines)):
+            changes.append({
+                "prim_path": current_prim,
+                "change_type": "removed",
+                "details": {"line": removed_lines[i].strip()},
+            })
+        for i in range(paired, len(added_lines)):
+            changes.append({
+                "prim_path": current_prim,
+                "change_type": "added",
+                "details": {"line": added_lines[i].strip()},
+            })
+        added_lines = []
+        removed_lines = []
+
+    prim_re = re.compile(r'^\s*def\s+(\w+)\s+"([^"]+)"')
+    for line in raw_diff_lines:
+        # Skip diff headers
+        if line.startswith("---") or line.startswith("+++") or line.startswith("@@"):
+            _flush_pending()
+            continue
+
+        # Detect prim context from context lines
+        m = prim_re.match(line.lstrip("+-"))
+        if m:
+            _flush_pending()
+            current_prim = m.group(2)
+            # A whole prim definition added/removed
+            if line.startswith("+") and not line.startswith("+++"):
+                changes.append({
+                    "prim_path": current_prim,
+                    "change_type": "added",
+                    "details": {"prim_type": m.group(1)},
+                })
+            elif line.startswith("-") and not line.startswith("---"):
+                changes.append({
+                    "prim_path": current_prim,
+                    "change_type": "removed",
+                    "details": {"prim_type": m.group(1)},
+                })
+            continue
+
+        if line.startswith("-") and not line.startswith("---"):
+            removed_lines.append(line[1:])
+        elif line.startswith("+") and not line.startswith("+++"):
+            added_lines.append(line[1:])
+        else:
+            _flush_pending()
+
+    _flush_pending()
+
+    # Deduplicate: group by prim_path + change_type
+    seen: Dict[tuple, Dict] = {}
+    deduped: List[Dict] = []
+    for c in changes:
+        key = (c["prim_path"], c["change_type"])
+        if key not in seen:
+            seen[key] = c
+            deduped.append(c)
+        else:
+            # Merge details for same prim
+            existing = seen[key]
+            if "modifications" not in existing:
+                existing["modifications"] = [existing.get("details", {})]
+            existing["modifications"].append(c.get("details", {}))
+    return deduped
+
+def _summarize_changes(changes: List[Dict]) -> str:
+    """Generate a concise human-readable summary from structured changes."""
+    if not changes:
+        return "No changes detected."
+
+    added = [c for c in changes if c["change_type"] == "added"]
+    removed = [c for c in changes if c["change_type"] == "removed"]
+    modified = [c for c in changes if c["change_type"] == "modified"]
+
+    parts: List[str] = []
+    total = len(added) + len(removed) + len(modified)
+    parts.append(f"{total} change(s) detected:")
+
+    for c in added:
+        ptype = c.get("details", {}).get("prim_type", "prim")
+        parts.append(f"  + Added {ptype}: {c['prim_path']}")
+    for c in removed:
+        ptype = c.get("details", {}).get("prim_type", "prim")
+        parts.append(f"  - Removed {ptype}: {c['prim_path']}")
+    for c in modified:
+        detail = c.get("details", {})
+        desc = detail.get("new_line", detail.get("line", "property changed"))
+        parts.append(f"  ~ Modified: {c['prim_path']} ({desc})")
+
+    return "\n".join(parts)
+
+def _score_prim_for_query(path: str, meta: Dict[str, Any], keywords: List[str]) -> int:
+    """Simple keyword scoring: count hits in path / type / schemas."""
+    score = 0
+    haystack_parts = [path.lower(), str(meta.get("type", "")).lower()]
+    for s in meta.get("schemas", []) or []:
+        haystack_parts.append(str(s).lower())
+    haystack = " ".join(haystack_parts)
+    for kw in keywords:
+        kw_lower = kw.lower().strip()
+        if not kw_lower:
+            continue
+        if kw_lower in haystack:
+            score += 1
+    return score
+
+def _neighbour_paths(selected: str) -> List[str]:
+    """Return paths considered neighbours of `selected` — parent, siblings, direct children."""
+    if not selected:
+        return []
+    selected = selected.rstrip("/")
+    parent = selected.rsplit("/", 1)[0] or "/"
+    neighbours: List[str] = []
+    for path in _STAGE_INDEX.keys():
+        if path == selected:
+            continue
+        if path == parent:
+            neighbours.append(path)
+            continue
+        # siblings share the parent prefix
+        if parent != "/" and path.startswith(parent + "/") and path.count("/") == selected.count("/"):
+            neighbours.append(path)
+            continue
+        # direct children of selected
+        if path.startswith(selected + "/") and path.count("/") == selected.count("/") + 1:
+            neighbours.append(path)
+    return neighbours
+
+def _build_select_by_criteria_code(criteria: Dict[str, Any]) -> str:
+    """Generate the Kit-side query code for select_by_criteria.
+
+    Split out from the handler so tests can exercise the generator
+    without a live Kit RPC.
+    """
+    return f"""\
+import omni.usd
+from pxr import Usd, Sdf
+import json
+import re
+
+stage = omni.usd.get_context().get_stage()
+_criteria = {criteria!r}
+
+_type = _criteria.get("type")
+_schema = _criteria.get("has_schema")
+_name_pat = _criteria.get("name_pattern")
+_path_pat = _criteria.get("path_pattern")
+_has_attr = _criteria.get("has_attribute")
+_kind = _criteria.get("kind")
+_parent = _criteria.get("parent")
+_active = _criteria.get("active")
+
+_name_re = re.compile(_name_pat) if _name_pat else None
+_path_re = re.compile(_path_pat) if _path_pat else None
+
+# Traversal root — whole stage or a parent subtree
+if _parent:
+    _root = stage.GetPrimAtPath(_parent)
+    _iterator = iter(Usd.PrimRange(_root)) if _root and _root.IsValid() else iter([])
+else:
+    _iterator = iter(stage.Traverse())
+
+_matches = []
+for _prim in _iterator:
+    if _type and _prim.GetTypeName() != _type:
+        continue
+    if _schema:
+        _applied = [str(a) for a in _prim.GetAppliedSchemas()]
+        if _schema not in _applied and not _applied.__contains__(_schema):
+            # Also check substring match for aliases like "PhysicsRigidBodyAPI"
+            if not any(_schema in a for a in _applied):
+                continue
+    if _name_re and not _name_re.search(_prim.GetName()):
+        continue
+    if _path_re and not _path_re.search(str(_prim.GetPath())):
+        continue
+    if _has_attr:
+        _a = _prim.GetAttribute(_has_attr)
+        if not _a or not _a.IsValid():
+            continue
+    if _kind:
+        from pxr import Usd as _U
+        _k = _U.ModelAPI(_prim).GetKind()
+        if _k != _kind:
+            continue
+    if _active is not None:
+        if bool(_prim.IsActive()) != bool(_active):
+            continue
+    _matches.append(str(_prim.GetPath()))
+
+_matches.sort()
+print(json.dumps({{"matches": _matches, "count": len(_matches), "criteria": _criteria}}))
+"""
+
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 12, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.scene_authoring.
+
+_WORKSPACE = Path(__file__).resolve().parents[5] / "workspace"
+
+_TIER12_HELPERS = (
+    "            def _layer_offset_dict(lo):\n"
+    "                if lo is None:\n"
+    "                    return {'offset': 0.0, 'scale': 1.0}\n"
+    "                try:\n"
+    "                    return {'offset': float(lo.offset), 'scale': float(lo.scale)}\n"
+    "                except Exception:\n"
+    "                    return {'offset': 0.0, 'scale': 1.0}\n"
+)
+
+_TIER14_SCHEMA_MAP = {
+    "PhysicsRigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "UsdPhysics.RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "RigidBodyAPI": ("pxr.UsdPhysics", "RigidBodyAPI"),
+    "PhysicsCollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "UsdPhysics.CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "CollisionAPI": ("pxr.UsdPhysics", "CollisionAPI"),
+    "PhysicsMassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "UsdPhysics.MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "MassAPI": ("pxr.UsdPhysics", "MassAPI"),
+    "PhysxRigidBodyAPI": ("pxr.PhysxSchema", "PhysxRigidBodyAPI"),
+    "PhysxCollisionAPI": ("pxr.PhysxSchema", "PhysxCollisionAPI"),
+    "PhysxDeformableBodyAPI": ("pxr.PhysxSchema", "PhysxDeformableBodyAPI"),
+    "PhysxTriggerAPI": ("pxr.PhysxSchema", "PhysxTriggerAPI"),
+    "PhysxContactReportAPI": ("pxr.PhysxSchema", "PhysxContactReportAPI"),
+}
+
+_DELTA_ROOT = _WORKSPACE / "snapshots" / "deltas"
+
+# Phase 8 wave 14 (2026-05-13): _TEMPLATE_KEYWORDS + _detect_template
+# migrated from tool_executor.py. Used only by _gen_create_graph.
+_TEMPLATE_KEYWORDS = {
+    "ros2_clock": ["clock", "sim_time", "simulation time", "simtime"],
+    "ros2_joint_state": ["joint state", "joint_state", "joint states", "joint positions"],
+    "ros2_camera": ["camera", "image", "rgb", "depth image"],
+    "ros2_lidar": ["lidar", "laser scan", "laserscan", "point cloud lidar"],
+    "ros2_cmd_vel": ["cmd_vel", "twist", "teleop", "drive", "velocity command"],
+    "ros2_tf": ["tf", "transform tree", "transforms", "tf2"],
+    "ros2_imu": ["imu", "inertial", "accelerometer", "gyroscope"],
+    "ros2_odom": ["odom", "odometry"],
+}
+
+
+def _detect_template(description: str) -> Optional[str]:
+    """Auto-detect the best template from a natural language description."""
+    desc_lower = description.lower()
+    best_match = None
+    best_score = 0
+    for template_name, keywords in _TEMPLATE_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in desc_lower)
+        if score > best_score:
+            best_score = score
+            best_match = template_name
+    return best_match if best_score > 0 else None
+
+
+_OG_TEMPLATES = {
+    "ros2_clock": {
+        "description": "Publish simulation clock to ROS2 /clock topic",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("publish_clock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_clock.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_clock.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_clock.inputs:timeStamp"),
+        ],
+        "values": {},
+        "param_keys": [],
+    },
+    "ros2_joint_state": {
+        "description": "Publish robot joint states to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("articulation_controller", "isaacsim.core.nodes.IsaacArticulationController"),
+            ("publish_joint_state", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_joint_state.inputs:execIn"),
+            ("on_playback_tick.outputs:tick", "articulation_controller.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_joint_state.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_joint_state.inputs:timeStamp"),
+        ],
+        "values": {
+            "articulation_controller.inputs:robotPath": "{robot_path}",
+            "publish_joint_state.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["robot_path", "topic"],
+        "defaults": {"topic": "/joint_states"},
+    },
+    "ros2_camera": {
+        "description": "Publish camera images to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("camera_helper", "isaacsim.ros2.bridge.ROS2CameraHelper"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "camera_helper.inputs:execIn"),
+            ("ros2_context.outputs:context", "camera_helper.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "camera_helper.inputs:timeStamp"),
+        ],
+        "values": {
+            "camera_helper.inputs:cameraPrimPath": "{camera_path}",
+            "camera_helper.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["camera_path", "topic"],
+        "defaults": {"topic": "/camera/image_raw"},
+    },
+    "ros2_lidar": {
+        "description": "Publish lidar scans to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("read_lidar", "isaacsim.sensor.nodes.IsaacReadLidar"),
+            ("publish_laser_scan", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "read_lidar.inputs:execIn"),
+            ("read_lidar.outputs:execOut", "publish_laser_scan.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_laser_scan.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_laser_scan.inputs:timeStamp"),
+            ("read_lidar.outputs:azimuthRange", "publish_laser_scan.inputs:azimuthRange"),
+            ("read_lidar.outputs:depthRange", "publish_laser_scan.inputs:depthRange"),
+            ("read_lidar.outputs:horizontalResolution", "publish_laser_scan.inputs:horizontalResolution"),
+            ("read_lidar.outputs:intensitiesData", "publish_laser_scan.inputs:intensitiesData"),
+            ("read_lidar.outputs:linearDepthData", "publish_laser_scan.inputs:linearDepthData"),
+            ("read_lidar.outputs:numCols", "publish_laser_scan.inputs:numCols"),
+            ("read_lidar.outputs:numRows", "publish_laser_scan.inputs:numRows"),
+        ],
+        "values": {
+            "read_lidar.inputs:lidarPrimPath": "{lidar_path}",
+            "publish_laser_scan.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["lidar_path", "topic"],
+        "defaults": {"topic": "/scan"},
+    },
+    "ros2_cmd_vel": {
+        "description": "Subscribe to /cmd_vel and drive a differential robot",
+        "nodes": [
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("subscribe_twist", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("differential_controller", "isaacsim.robot.wheeled_robots.DifferentialController"),
+            ("articulation_controller", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "connections": [
+            ("ros2_context.outputs:context", "subscribe_twist.inputs:context"),
+            ("subscribe_twist.outputs:linearVelocity", "differential_controller.inputs:linearVelocity"),
+            ("subscribe_twist.outputs:angularVelocity", "differential_controller.inputs:angularVelocity"),
+            ("differential_controller.outputs:velocityCommand", "articulation_controller.inputs:velocityCommand"),
+        ],
+        "values": {
+            "subscribe_twist.inputs:topicName": "{topic}",
+            "articulation_controller.inputs:robotPath": "{robot_path}",
+        },
+        "param_keys": ["robot_path", "topic"],
+        "defaults": {"topic": "/cmd_vel"},
+    },
+    "ros2_tf": {
+        "description": "Publish TF transform tree to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("publish_tf", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "publish_tf.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_tf.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_tf.inputs:timeStamp"),
+        ],
+        "values": {
+            "publish_tf.inputs:parentPrim": "{root_prim}",
+        },
+        "param_keys": ["root_prim"],
+        "defaults": {"root_prim": "/World"},
+    },
+    "ros2_imu": {
+        "description": "Publish IMU data to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_imu", "isaacsim.sensor.nodes.IsaacReadIMU"),
+            ("publish_imu", "isaacsim.ros2.bridge.ROS2PublishImu"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "read_imu.inputs:execIn"),
+            ("read_imu.outputs:execOut", "publish_imu.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_imu.inputs:context"),
+            ("read_imu.outputs:angVel", "publish_imu.inputs:angularVelocity"),
+            ("read_imu.outputs:linAcc", "publish_imu.inputs:linearAcceleration"),
+            ("read_imu.outputs:orientation", "publish_imu.inputs:orientation"),
+        ],
+        "values": {
+            "read_imu.inputs:imuPrimPath": "{imu_path}",
+            "publish_imu.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["imu_path", "topic"],
+        "defaults": {"topic": "/imu/data"},
+    },
+    "ros2_odom": {
+        "description": "Publish odometry data to ROS2",
+        "nodes": [
+            ("on_playback_tick", "omni.graph.action.OnPlaybackTick"),
+            ("ros2_context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("read_sim_time", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+            ("compute_odom", "isaacsim.core.nodes.IsaacComputeOdometry"),
+            ("publish_odom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+        ],
+        "connections": [
+            ("on_playback_tick.outputs:tick", "compute_odom.inputs:execIn"),
+            ("compute_odom.outputs:execOut", "publish_odom.inputs:execIn"),
+            ("ros2_context.outputs:context", "publish_odom.inputs:context"),
+            ("read_sim_time.outputs:simulationTime", "publish_odom.inputs:timeStamp"),
+            ("compute_odom.outputs:angularVelocity", "publish_odom.inputs:angularVelocity"),
+            ("compute_odom.outputs:linearVelocity", "publish_odom.inputs:linearVelocity"),
+            ("compute_odom.outputs:orientation", "publish_odom.inputs:orientation"),
+            ("compute_odom.outputs:position", "publish_odom.inputs:position"),
+        ],
+        "values": {
+            "compute_odom.inputs:chassisPrimPath": "{chassis_path}",
+            "publish_odom.inputs:topicName": "{topic}",
+        },
+        "param_keys": ["chassis_path", "topic"],
+        "defaults": {"topic": "/odom"},
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +521,7 @@ from typing import Any, Callable, Dict, Optional
 def _gen_create_prim(args: Dict) -> str:
     # Lazy import to avoid circular dependency at module load time;
     # _SAFE_XFORM_SNIPPET stays in tool_executor.py until Phase 8.
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
 
     prim_path = args["prim_path"]
     prim_type = args["prim_type"]
@@ -217,7 +698,7 @@ def _gen_assign_material(args: Dict) -> str:
 
 def _gen_teleport_prim(args: Dict) -> str:
     # Lazy import — same pattern as _gen_create_prim.
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
 
     prim_path = args["prim_path"]
     lines = [
@@ -315,7 +796,7 @@ def _gen_apply_api_schema(args: Dict) -> str:
 
 def _gen_clone_prim(args: Dict) -> str:
     # Lazy import — same pattern as _gen_create_prim.
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
 
     src = args["source_path"]
     tgt = args["target_path"]
@@ -459,7 +940,7 @@ def _gen_create_omnigraph(args: Dict) -> str:
     # _OG_NODE_TYPE_MAP is cross-theme (~3 callers across tool_executor.py),
     # so it stays in tool_executor.py until Phase 8's deeper shared-module
     # pass. Lazy import keeps module-load circular-free.
-    from ..tool_executor import _OG_NODE_TYPE_MAP
+    from ._shared import _OG_NODE_TYPE_MAP
 
     graph_path = args["graph_path"]
     graph_type = args.get("graph_type", "action_graph")
@@ -1511,7 +1992,7 @@ print(f"export_stage: started async export of {{target}} as {{fmt}} — completi
 
 def _gen_add_node(args: Dict) -> str:
     """Add a single node to an existing OmniGraph via og.Controller.edit()."""
-    from ..tool_executor import _OG_NODE_TYPE_MAP
+    from ._shared import _OG_NODE_TYPE_MAP
     graph_path = args["graph_path"]
     raw_node_type = args["node_type"]
     node_name = args["name"]
@@ -1713,7 +2194,7 @@ print(f"bulk_set_attribute: applied={{_applied}} created={{_created}} "
 
 def _gen_bulk_apply_schema(args: Dict) -> str:
     """T14.2 — apply the same API schema to many prims via Sdf.ChangeBlock."""
-    from ..tool_executor import _TIER14_SCHEMA_MAP
+    # Phase 8 wave 12 — _TIER14_SCHEMA_MAP migrated.
     prim_paths = args["prim_paths"]
     schema = args["schema"]
     if schema in _TIER14_SCHEMA_MAP:
@@ -1790,7 +2271,7 @@ print(f"bulk_apply_schema: schema={schema!r} applied={{_applied}} "
 
 def _gen_group_prims(args: Dict) -> str:
     """T14.4 — create an Xform parent and reparent prims under it."""
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     prim_paths = args["prim_paths"]
     group_name = args["group_name"]
     group_parent = args.get("group_parent", "/World")
@@ -1849,7 +2330,7 @@ print(f"group_prims: group={{_group_path}} moved={{_moved}} "
 
 def _gen_duplicate_prims(args: Dict) -> str:
     """T14.5 — duplicate prims via Sdf.CopySpec and apply a positional offset."""
-    from ..tool_executor import _SAFE_XFORM_SNIPPET
+    from ._shared import _SAFE_XFORM_SNIPPET
     prim_paths = args["prim_paths"]
     offset = args["offset"]
     suffix = args.get("suffix", "_copy")
@@ -2112,10 +2593,7 @@ print(f"Merged {{len(prim_paths)}} meshes: {{prim_paths}}")
 
 def _gen_create_graph(args: Dict) -> str:
     """Generate OmniGraph code from a template-based description."""
-    from .. import tool_executor as _te  # noqa: PLC0415
-    _OG_TEMPLATES = _te._OG_TEMPLATES
-    _detect_template = _te._detect_template
-
+    # Phase 8 wave 14: _detect_template + _TEMPLATE_KEYWORDS now module-local.
     description = args.get("description", "")
     template_name = args.get("template")
     graph_path = args.get("graph_path", "/World/ActionGraph")
@@ -3016,7 +3494,7 @@ async def _handle_scene_diff(args: Dict) -> Dict:
     - snapshot_a + snapshot_b → explicit comparison
     """
     from .. import kit_tools
-    from ..tool_executor import _parse_unified_diff_to_changes, _summarize_changes
+    # Phase 8 wave 21 — _summarize_changes migrated.
 
     since = args.get("since")
     snap_a = args.get("snapshot_a")
@@ -3219,7 +3697,8 @@ else:
 async def _handle_build_stage_index(args: Dict) -> Dict:
     """Build the metadata index and populate the module-level cache."""
     from .. import kit_tools
-    from ..tool_executor import _STAGE_INDEX, _STAGE_INDEX_META, _gen_build_stage_index
+    # _gen_build_stage_index lives in handlers/diagnostics.py (Phase 6 wave 22)
+    from .diagnostics import _gen_build_stage_index
 
     prim_scope = args.get("prim_scope") or "/World"
     max_prims = int(args.get("max_prims", 50000))
@@ -3241,11 +3720,7 @@ async def _handle_build_stage_index(args: Dict) -> Dict:
 
 async def _handle_query_stage_index(args: Dict) -> Dict:
     """Return prims relevant to the keywords plus neighbours of selected_prim."""
-    from ..tool_executor import (
-        _STAGE_INDEX,
-        _score_prim_for_query,
-        _neighbour_paths,
-    )
+    # _STAGE_INDEX (wave 22) + _neighbour_paths (wave 21) module-local.
 
     keywords = args.get("keywords") or []
     if isinstance(keywords, str):
@@ -3613,7 +4088,7 @@ except Exception as e:
 async def _handle_list_references(args: Dict) -> Dict:
     """Enumerate USD reference arcs composed onto a prim."""
     from .. import kit_tools
-    from ..tool_executor import _TIER12_HELPERS
+    # Phase 8 wave 12 — _TIER12_HELPERS migrated.
 
     prim_path = args["prim_path"]
     prim_path_repr = repr(prim_path)
@@ -3720,7 +4195,7 @@ async def _handle_list_references(args: Dict) -> Dict:
 async def _handle_list_payloads(args: Dict) -> Dict:
     """Enumerate USD payload arcs (deferred-load) on a prim."""
     from .. import kit_tools
-    from ..tool_executor import _TIER12_HELPERS
+    # Phase 8 wave 12 — _TIER12_HELPERS migrated.
 
     prim_path = args["prim_path"]
     prim_path_repr = repr(prim_path)
@@ -3838,7 +4313,7 @@ async def _handle_select_by_criteria(args: Dict) -> Dict:
     payload on stdout that the LLM can read from the patch result.
     """
     from .. import kit_tools
-    from ..tool_executor import _build_select_by_criteria_code
+    # Phase 8 wave 21 — _build_select_by_criteria_code migrated.
 
     criteria = args.get("criteria", {})
     if not isinstance(criteria, dict):
@@ -4391,7 +4866,8 @@ print(json.dumps({"graphs": graphs, "count": len(graphs)}))
 
 async def _handle_save_delta_snapshot(args: Dict) -> Dict:
     from .. import kit_tools
-    from ..tool_executor import _DELTA_ROOT, logger, _gen_save_delta_snapshot
+    # _gen_save_delta_snapshot is module-local (line 1401).
+    from ..tool_executor import logger
     import json
     snapshot_id = args["snapshot_id"]
     base_snapshot_id = args.get("base_snapshot_id")
@@ -4421,7 +4897,7 @@ async def _handle_save_delta_snapshot(args: Dict) -> Dict:
 
 async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
     from .. import kit_tools
-    from ..tool_executor import _DELTA_ROOT, _gen_restore_delta_snapshot
+    # _gen_restore_delta_snapshot is module-local (line 1444).
     import json
     snapshot_id = args["snapshot_id"]
     manifest_path = _DELTA_ROOT / f"{snapshot_id}.json"

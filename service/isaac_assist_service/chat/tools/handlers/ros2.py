@@ -12,6 +12,113 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict
 
+# ---------------------------------------------------------------------------
+# Theme-local constants (Phase 8 wave 4, 2026-05-13)
+# Migrated from tool_executor.py — used only by this module.
+
+_ROS2_QOS_PRESETS = {
+    "scan": ("BEST_EFFORT", "VOLATILE", "Laser scan data — high-frequency, drop-tolerant"),
+    "robot_description": ("RELIABLE", "TRANSIENT_LOCAL", "Robot URDF — latched, must arrive"),
+    "tf": ("RELIABLE", "VOLATILE", "Transform tree — must be reliable"),
+    "tf_static": ("RELIABLE", "TRANSIENT_LOCAL", "Static transforms — latched"),
+    "cmd_vel": ("RELIABLE", "VOLATILE", "Velocity commands — must not be dropped"),
+    "camera": ("BEST_EFFORT", "VOLATILE", "Camera images — high-bandwidth, drop-tolerant"),
+    "image": ("BEST_EFFORT", "VOLATILE", "Image data — high-bandwidth, drop-tolerant"),
+    "joint_states": ("RELIABLE", "VOLATILE", "Joint state feedback — must be reliable"),
+    "clock": ("BEST_EFFORT", "VOLATILE", "Simulation clock — high-frequency"),
+}
+
+_NAV2_BRIDGE_PROFILES = {
+    "ur10e_moveit2": {
+        "description": "UR10e arm wired for MoveIt2 — joint state publish, FollowJointTrajectory subscribe, TF.",
+        "topics": ["/joint_states", "/joint_command", "/tf"],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "topic_values": {
+            "PublishJointState.inputs:topicName": "/joint_states",
+            "SubscribeJointState.inputs:topicName": "/joint_command",
+        },
+    },
+    "jetbot_nav2": {
+        "description": "Jetbot wired for Nav2 — lidar publish, cmd_vel subscribe, odom publish, TF, clock.",
+        "topics": ["/scan", "/cmd_vel", "/odom", "/tf", "/clock"],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishLidar", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("SubscribeCmdVel", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("PublishOdom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("DifferentialController", "isaacsim.robot.wheeled_robots.DifferentialController"),
+        ],
+        "topic_values": {
+            "PublishLidar.inputs:topicName": "/scan",
+            "SubscribeCmdVel.inputs:topicName": "/cmd_vel",
+            "PublishOdom.inputs:topicName": "/odom",
+            "PublishClock.inputs:topicName": "/clock",
+        },
+    },
+    "franka_moveit2": {
+        "description": "Franka arm wired for MoveIt2 — joint state, gripper state, TF.",
+        "topics": ["/joint_states", "/gripper", "/tf"],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+            ("PublishGripper", "isaacsim.ros2.bridge.ROS2PublishJointState"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
+        ],
+        "topic_values": {
+            "PublishJointState.inputs:topicName": "/joint_states",
+            "SubscribeJointState.inputs:topicName": "/joint_command",
+            "PublishGripper.inputs:topicName": "/gripper",
+        },
+    },
+    "amr_full": {
+        "description": "Full AMR — 2x lidar, 4x camera, odom, cmd_vel, TF, clock.",
+        "topics": [
+            "/scan_front", "/scan_rear", "/cmd_vel", "/odom", "/tf", "/clock",
+            "/camera_front/image_raw", "/camera_rear/image_raw",
+            "/camera_left/image_raw", "/camera_right/image_raw",
+        ],
+        "nodes": [
+            ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+            ("ROS2Context", "isaacsim.ros2.bridge.ROS2Context"),
+            ("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ("PublishLidarFront", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("PublishLidarRear", "isaacsim.ros2.bridge.ROS2PublishLaserScan"),
+            ("SubscribeCmdVel", "isaacsim.ros2.bridge.ROS2SubscribeTwist"),
+            ("PublishOdom", "isaacsim.ros2.bridge.ROS2PublishOdometry"),
+            ("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+            ("PublishCamFront", "isaacsim.ros2.bridge.ROS2PublishImage"),
+            ("PublishCamRear", "isaacsim.ros2.bridge.ROS2PublishImage"),
+            ("PublishCamLeft", "isaacsim.ros2.bridge.ROS2PublishImage"),
+            ("PublishCamRight", "isaacsim.ros2.bridge.ROS2PublishImage"),
+        ],
+        "topic_values": {
+            "PublishLidarFront.inputs:topicName": "/scan_front",
+            "PublishLidarRear.inputs:topicName": "/scan_rear",
+            "SubscribeCmdVel.inputs:topicName": "/cmd_vel",
+            "PublishOdom.inputs:topicName": "/odom",
+            "PublishCamFront.inputs:topicName": "/camera_front/image_raw",
+            "PublishCamRear.inputs:topicName": "/camera_rear/image_raw",
+            "PublishCamLeft.inputs:topicName": "/camera_left/image_raw",
+            "PublishCamRight.inputs:topicName": "/camera_right/image_raw",
+        },
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Phase 6 wave 7 — ROS2 bridge + TF + QoS + rosbag
@@ -213,7 +320,7 @@ print("Start simulation (Play) to begin publishing.")
 
 def _gen_fix_ros2_qos(args: Dict) -> str:
     """Generate code to update the QoS profile on a ROS2 publisher for a given topic."""
-    from ..tool_executor import _ROS2_QOS_PRESETS  # noqa: PLC0415
+    # Phase 8 wave 4 — _ROS2_QOS_PRESETS migrated to module body.
     topic = args["topic"]
 
     # Determine the QoS preset from the topic name
@@ -385,7 +492,7 @@ print("Configured {mode} mode: ROS2 nodes will use simulation clock from /clock 
 
 def _gen_setup_ros2_bridge(args: Dict) -> str:
     """Generate OmniGraph code for a complete ROS2 bridge profile."""
-    from ..tool_executor import _NAV2_BRIDGE_PROFILES, _OG_NODE_TYPE_MAP  # noqa: PLC0415
+    from ._shared import _OG_NODE_TYPE_MAP
     profile_name = args["profile"]
     robot_path = args["robot_path"]
     graph_path = args.get("graph_path", "/World/ROS2_Bridge")
@@ -552,7 +659,7 @@ async def _handle_diagnose_ros2(args: Dict) -> Dict:
     """
     from .. import kit_tools  # noqa: PLC0415
     from .. import tool_executor as _te  # noqa: PLC0415
-    _ROS2_QOS_PRESETS = _te._ROS2_QOS_PRESETS
+    # Phase 8 mop-up — _ROS2_QOS_PRESETS is now module-local.
     from typing import List, Dict as _Dict, Any  # noqa: PLC0415
     issues: List[_Dict[str, Any]] = []
 

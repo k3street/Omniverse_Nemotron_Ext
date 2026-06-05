@@ -5,10 +5,10 @@ shared utilities) and Phase 13 (archive recovered-state block).
 
 ## Summary
 
-- Total symbols: 57
+- Total symbols: 3
 - DEAD (no references anywhere): **0** — safe to delete
-- INTERNAL_ONLY (only used inside tool_executor.py): **7** — delete after auditing internal uses
-- HANDLER_USED (used by handlers/*.py): **50** — migrate to handlers/_shared.py or _state.py
+- INTERNAL_ONLY (only used inside tool_executor.py): **1** — delete after auditing internal uses
+- HANDLER_USED (used by handlers/*.py): **2** — migrate to handlers/_shared.py or _state.py
 - EXTERNAL_USED (used by service/, tests/, scripts/ outside handlers/): **0** — migrate cautiously
 
 ## Classification
@@ -16,59 +16,5 @@ shared utilities) and Phase 13 (archive recovered-state block).
 | Line | Kind | Name | Classification |
 |-----:|------|------|----------------|
 | 59 | class | `_LockedPatch` | INTERNAL_ONLY |
-| 66 | class | `_StageWriteLockQueue` | INTERNAL_ONLY |
-| 106 | constant | `_ARENA_SCENE_MAP` | HANDLER_USED |
-| 117 | constant | `_ASYNC_TASKS_LOCK` | HANDLER_USED |
-| 120 | constant | `_BROKEN_SCENE_FAULTS` | HANDLER_USED |
-| 151 | constant | `_CLOUD_PRICING` | HANDLER_USED |
-| 159 | constant | `_CLOUD_SCRIPT_ALLOWLIST` | HANDLER_USED |
-| 162 | constant | `_DEFAULT_CALIBRATE_PARAMS` | HANDLER_USED |
-| 165 | constant | `_DEFAULT_SUGGESTIONS` | HANDLER_USED |
-| 172 | constant | `_DELTA_ROOT` | HANDLER_USED |
-| 175 | constant | `_DEVICE_AXIS_DEFAULTS` | HANDLER_USED |
-| 183 | constant | `_DOMINANT_TERM_THRESHOLD` | HANDLER_USED |
-| 227 | constant | `_DR_RANGE_HINTS` | INTERNAL_ONLY |
-| 280 | constant | `_EXPORT_TARGETS` | HANDLER_USED |
-| 288 | constant | `_FINETUNE_FREEZE_PROFILES` | HANDLER_USED |
-| 311 | constant | `_FIX_PROFILE_PATTERNS` | INTERNAL_ONLY |
-| 320 | constant | `_GROOT_EMBODIMENTS` | HANDLER_USED |
-| 348 | constant | `_ISAA_MANIFEST_VERSION` | HANDLER_USED |
-| 351 | constant | `_LIGHT_TYPE_NAMES` | HANDLER_USED |
-| 361 | constant | `_MOBILE_ROBOT_KEYWORDS` | HANDLER_USED |
-| 364 | constant | `_NAV2_BRIDGE_PROFILES` | HANDLER_USED |
-| 456 | constant | `_OG_TEMPLATES` | HANDLER_USED |
-| 636 | constant | `_PHYSICS_MATERIALS_PATH` | INTERNAL_ONLY |
-| 640 | constant | `_PHYSICS_SETTINGS_PRESETS` | HANDLER_USED |
-| 697 | constant | `_PHYSX_ERROR_PATTERNS` | HANDLER_USED |
-| 841 | constant | `_PHYSX_ERROR_RE` | HANDLER_USED |
-| 848 | constant | `_PHYSX_HULL_MAX_POLYS` | HANDLER_USED |
-| 851 | constant | `_PHYSX_HULL_MAX_VERTS` | HANDLER_USED |
-| 854 | constant | `_POST_PROCESS_PATHS` | HANDLER_USED |
-| 876 | constant | `_QUICK_CALIBRATE_PARAMS` | HANDLER_USED |
-| 879 | constant | `_QUICK_DEMO_TEMPLATES` | HANDLER_USED |
-| 907 | constant | `_RENDER_QUALITY_PRESETS` | HANDLER_USED |
-| 926 | constant | `_REWARD_HACK_PATTERNS` | HANDLER_USED |
-| 933 | constant | `_ROBOT_FIX_PROFILES` | HANDLER_USED |
-| 1044 | constant | `_ROBOT_NAME_PATTERNS` | INTERNAL_ONLY |
-| 1053 | constant | `_ROBOT_TYPE_DEFAULTS` | HANDLER_USED |
-| 1070 | constant | `_ROBOT_WIZARD_REGISTRY` | HANDLER_USED |
-| 1150 | function | `_resolve_robot_asset` | HANDLER_USED |
-| 1166 | constant | `_ROS2_QOS_PRESETS` | HANDLER_USED |
-| 1182 | constant | `_SCENE_STYLE_PRESETS` | HANDLER_USED |
-| 1190 | constant | `_SCENE_TEMPLATES` | HANDLER_USED |
-| 1265 | constant | `_SLASH_COMMANDS` | HANDLER_USED |
-| 1283 | constant | `_STARTER_PROMPTS` | HANDLER_USED |
-| 1327 | constant | `_STREAM_QUALITY_PRESETS` | HANDLER_USED |
-| 1334 | constant | `_SUGGESTION_MAP` | HANDLER_USED |
-| 1383 | constant | `_SUPPORTED_MOTION_ROBOTS` | HANDLER_USED |
-| 1389 | constant | `_TELEOP_DEVICES` | HANDLER_USED |
-| 1426 | constant | `_TEMPLATE_EXPORT_DIR` | HANDLER_USED |
-| 1429 | constant | `_TEMPLATE_KEYWORDS` | INTERNAL_ONLY |
-| 1441 | constant | `_TEMPLATE_LIBRARY_DIR` | HANDLER_USED |
-| 1444 | constant | `_TIER12_HELPERS` | HANDLER_USED |
-| 1455 | constant | `_TIER14_SCHEMA_MAP` | HANDLER_USED |
-| 1473 | constant | `_VALID_CALIBRATE_PARAMS` | HANDLER_USED |
-| 1476 | constant | `_VRAM_PER_ENV_MB` | HANDLER_USED |
-| 1485 | constant | `_WHOLE_BODY_PROFILES` | HANDLER_USED |
-| 1513 | constant | `_WORKFLOW_RETRY_HARD_CAP` | HANDLER_USED |
-| 1567 | constant | `_WRITE_LOCK_QUEUE` | HANDLER_USED |
+| 66 | class | `_StageWriteLockQueue` | HANDLER_USED |
+| 355 | constant | `_WRITE_LOCK_QUEUE` | HANDLER_USED |

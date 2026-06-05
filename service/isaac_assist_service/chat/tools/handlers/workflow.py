@@ -12,6 +12,224 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+# Phase 8 wave 28 (2026-05-13): import shared async-task state.
+import time as _time
+from ._state import ASYNC_TASKS as _ASYNC_TASKS, ASYNC_TASKS_LOCK as _ASYNC_TASKS_LOCK
+
+# ---------------------------------------------------------------------------
+# Theme-local helpers (Phase 8 wave 27, 2026-05-13)
+
+def _wf_make_initial_plan(workflow_type: str, goal: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the initial editable plan artifact from a template + goal + params.
+
+    The LLM is expected to refine this further on the user-facing side; this
+    function only produces the structural skeleton so the workflow can be
+    persisted and queried before the LLM round-trips.
+    """
+    tpl = _WORKFLOW_TEMPLATES[workflow_type]
+    merged_params = dict(tpl["default_params"])
+    merged_params.update(params or {})
+    return {
+        "workflow_type": workflow_type,
+        "goal": goal,
+        "params": merged_params,
+        "phases": [
+            {
+                "name": p["name"],
+                "checkpoint": p["checkpoint"],
+                "error_fix": p["error_fix"],
+                "status": "pending",
+            }
+            for p in tpl["phases"]
+        ],
+        "editable": True,
+    }
+
+def _wf_advance_phase(wf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Move the workflow to the next phase. Returns the next phase dict or None."""
+    phases = wf["plan"]["phases"]
+    current = wf["current_phase"]
+    # Mark current as completed
+    for p in phases:
+        if p["name"] == current and p["status"] != "completed":
+            p["status"] = "completed"
+            wf["completed_phases"].append(current)
+            break
+    # Find next pending phase
+    for p in phases:
+        if p["status"] == "pending":
+            wf["current_phase"] = p["name"]
+            p["status"] = "in_progress"
+            return p
+    # No phases left
+    wf["current_phase"] = None
+    wf["status"] = "completed"
+    return None
+
+def _async_task_runner(task_id: str, task_type: str, params: Dict) -> None:
+    """Worker body executed in a daemon thread.
+
+    Real long-running ops (SDG, training) are dispatched via Kit; here we
+    simulate progress so the lifecycle is observable from the chat panel.
+    Production integrations replace this body with concrete handlers per
+    task_type.
+    """
+    try:
+        with _ASYNC_TASKS_LOCK:
+            entry = _ASYNC_TASKS.get(task_id)
+            if entry is None:
+                return
+            entry["state"] = "running"
+            entry["started_at"] = _time.time()
+
+        # Heuristic total duration so a smoke test completes quickly.
+        total_steps = max(int(params.get("steps", 5)), 1)
+        step_sleep = float(params.get("step_seconds", 0.0))
+        for i in range(total_steps):
+            if step_sleep > 0:
+                _time.sleep(step_sleep)
+            with _ASYNC_TASKS_LOCK:
+                entry = _ASYNC_TASKS.get(task_id)
+                if entry is None or entry.get("state") == "cancelled":
+                    return
+                entry["progress"] = (i + 1) / total_steps
+
+        with _ASYNC_TASKS_LOCK:
+            entry = _ASYNC_TASKS.get(task_id)
+            if entry is None:
+                return
+            entry["state"] = "done"
+            entry["finished_at"] = _time.time()
+            entry["progress"] = 1.0
+            entry["result"] = {
+                "task_type": task_type,
+                "params": params,
+                "message": f"{task_type} task completed",
+            }
+    except Exception as e:  # noqa: BLE001
+        with _ASYNC_TASKS_LOCK:
+            entry = _ASYNC_TASKS.get(task_id)
+            if entry is not None:
+                entry["state"] = "error"
+                entry["finished_at"] = _time.time()
+                entry["error"] = str(e)
+
+# ---------------------------------------------------------------------------
+# Theme-local constants + helpers (Phase 8 wave 13, 2026-05-13)
+# Migrated from tool_executor.py — used only by handlers.workflow.
+
+_DEFAULT_SUGGESTIONS = [
+    "Run the simulation to see the result",
+    "Capture a viewport screenshot",
+    "Check for any physics warnings",
+]
+
+_MOBILE_ROBOT_KEYWORDS = {"carter", "jetbot", "nova_carter", "kaya", "husky", "turtlebot"}
+
+_SLASH_COMMANDS = [
+    {"command": "/help", "description": "What can I do?", "always": True},
+    {"command": "/scene", "description": "Summarize current scene", "always": True},
+    {"command": "/debug", "description": "Diagnose physics issues", "requires_physics": True},
+    {"command": "/performance", "description": "Why is my sim slow?", "always": True},
+    {"command": "/workspace", "description": "Show robot workspace", "requires_robot": True},
+    {"command": "/diff", "description": "What changed?", "always": True},
+    {"command": "/import", "description": "Import a robot", "always": True},
+    {"command": "/template", "description": "Load a scene template", "always": True},
+]
+
+_STARTER_PROMPTS = {
+    "empty": {
+        "welcome": "Your scene is empty — a blank canvas!",
+        "prompts": [
+            "Import a robot: 'add a Franka Panda to the scene'",
+            "Load a template: 'set up a pick and place scene'",
+            "Browse assets: 'show me available robots'",
+        ],
+    },
+    "robot_only": {
+        "welcome": "I see a robot in the scene, but no objects to interact with.",
+        "prompts": [
+            "Add objects: 'place 3 cubes on a table'",
+            "Test the robot: 'move the arm to a test position'",
+            "Check setup: 'are the collision meshes correct?'",
+        ],
+    },
+    "robot_and_objects": {
+        "welcome": "Your scene has a robot and objects — ready for action!",
+        "prompts": [
+            "Move the arm to grab the nearest object",
+            "Why is the robot not moving?",
+            "Show me the robot's workspace",
+        ],
+    },
+    "mobile_robot": {
+        "welcome": "I see a mobile robot in the scene.",
+        "prompts": [
+            "Drive the robot forward 2 meters",
+            "Set up navigation: 'create an occupancy map'",
+            "Check sensors: 'what sensors does the robot have?'",
+        ],
+    },
+    "no_physics": {
+        "welcome": "Physics is not enabled in this scene.",
+        "prompts": [
+            "Enable physics for this scene",
+            "Add rigid body physics to the objects",
+            "Set up a physics scene with gravity",
+        ],
+    },
+}
+
+_SUGGESTION_MAP = {
+    "import_robot": [
+        "Configure the gripper",
+        "Check if the collision meshes are correct",
+        "Move the arm to a test position",
+    ],
+    "create_prim": [
+        "Add physics to this object",
+        "Change the material or color",
+        "Position it precisely in the scene",
+    ],
+    "clone_prim": [
+        "Set up physics for all copies",
+        "Create an RL training environment",
+        "Adjust spacing between copies",
+    ],
+    "move_to_pose": [
+        "Plan a pick-and-place sequence",
+        "Check for collisions along the path",
+        "Record the joint positions",
+    ],
+    "sim_control": [
+        "Capture a screenshot of the result",
+        "Check for physics errors",
+        "Measure performance (FPS, frame time)",
+    ],
+    "create_material": [
+        "Apply this material to an object",
+        "Adjust roughness or metallic properties",
+        "Create a glass or transparent variant",
+    ],
+    "configure_sdg": [
+        "Preview a sample frame",
+        "Add more randomizers (lighting, pose)",
+        "Export to COCO or KITTI format",
+    ],
+    "set_physics_params": [
+        "Test with a simulation run",
+        "Add rigid body physics to objects",
+        "Check solver iteration count for stability",
+    ],
+    "load_scene_template": [
+        "Run the simulation to see it in action",
+        "Customize the robot's behavior",
+        "Capture a screenshot of the scene",
+    ],
+}
+
+_WORKFLOW_RETRY_HARD_CAP = 5
+
 
 # ---------------------------------------------------------------------------
 # Phase 7 wave 12 — workflow data-handlers
@@ -25,7 +243,8 @@ async def _handle_record_feedback(args: Dict) -> Dict:
     approved = args["approved"]
     edited = args.get("edited", False)
     correction = args.get("correction")
-    return _te._turn_recorder.record_feedback(
+    from ._state import get_turn_recorder
+    return get_turn_recorder().record_feedback(
         session_id=session_id,
         turn_id=turn_id,
         approved=approved,
@@ -183,7 +402,7 @@ async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
                                          "go1", "go2", "h1", "allegro")):
             has_robot = True
             robot_paths.append(str(p))
-            if any(kw in p_lower for kw in _te._MOBILE_ROBOT_KEYWORDS):
+            if any(kw in p_lower for kw in _MOBILE_ROBOT_KEYWORDS):
                 is_mobile = True
 
     if isinstance(articulations, list) and len(articulations) > 0:
@@ -209,7 +428,7 @@ async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
     else:
         archetype = "empty"
 
-    template = _te._STARTER_PROMPTS[archetype]
+    template = _STARTER_PROMPTS[archetype]
 
     # Build scene summary line
     summary_parts = []
@@ -252,7 +471,7 @@ async def _handle_slash_command_discovery(args: Dict) -> Dict:
             has_physics = has_physics if has_physics is not None else False
 
     commands = []
-    for cmd in _te._SLASH_COMMANDS:
+    for cmd in _SLASH_COMMANDS:
         if cmd.get("always"):
             commands.append({"command": cmd["command"], "description": cmd["description"]})
         elif cmd.get("requires_robot") and has_robot:
@@ -274,12 +493,12 @@ async def _handle_post_action_suggestions(args: Dict) -> Dict:
     tool_args = args.get("tool_args", {})
     tool_result = args.get("tool_result", {})
 
-    suggestions = _te._SUGGESTION_MAP.get(completed_tool, _te._DEFAULT_SUGGESTIONS)
+    suggestions = _SUGGESTION_MAP.get(completed_tool, _DEFAULT_SUGGESTIONS)
 
     # Context-aware adjustments
     if completed_tool == "import_robot":
         robot_name = tool_args.get("file_path", "")
-        if any(kw in robot_name.lower() for kw in _te._MOBILE_ROBOT_KEYWORDS):
+        if any(kw in robot_name.lower() for kw in _MOBILE_ROBOT_KEYWORDS):
             suggestions = [
                 "Set up navigation for the mobile robot",
                 "Add a lidar sensor",
@@ -308,7 +527,8 @@ async def _handle_queue_write_locked_patch(args: Dict) -> Dict:
         msg = format_issues_for_llm(issues)
         logger.warning(f"[ToolExecutor] queue_write_locked_patch blocked: {msg}")
         return {"type": "error", "error": msg, "validation_blocked": True}
-    outcome = await _te._WRITE_LOCK_QUEUE.submit(code, desc, priority)
+    from ._state import get_write_lock_queue
+    outcome = await get_write_lock_queue().submit(code, desc, priority)
     return {**outcome, "description": desc}
 
 
@@ -332,10 +552,10 @@ async def _handle_start_workflow(args: Dict) -> Dict:
     import uuid as _wf_uuid  # noqa: PLC0415
     wf_id = f"wf_{_wf_uuid.uuid4().hex[:12]}"
     scope_prim = args.get("scope_prim", "/World")
-    max_retries = min(int(args.get("max_retries", 3)), _te._WORKFLOW_RETRY_HARD_CAP)
+    max_retries = min(int(args.get("max_retries", 3)), _WORKFLOW_RETRY_HARD_CAP)
     auto_approve = bool(args.get("auto_approve_checkpoints", False))
 
-    plan = _te._wf_make_initial_plan(workflow_type, goal, args.get("params") or {})
+    plan = _wf_make_initial_plan(workflow_type, goal, args.get("params") or {})
 
     from datetime import datetime as _wf_dt  # noqa: PLC0415
     def _wf_now_iso() -> str:
@@ -479,7 +699,7 @@ async def _handle_approve_workflow_checkpoint(args: Dict) -> Dict:
         }
 
     # approve → advance to next phase
-    next_phase = _te._wf_advance_phase(wf)
+    next_phase = _wf_advance_phase(wf)
     if next_phase is None:
         return {
             "ok": True,
@@ -599,7 +819,7 @@ async def _handle_execute_with_retry(args: Dict) -> Dict:
     code = args.get("code", "")
     description = args.get("description", "Autonomous error-fix execution")
     requested_max = int(args.get("max_retries", 3))
-    max_retries = min(requested_max, _te._WORKFLOW_RETRY_HARD_CAP)
+    max_retries = min(requested_max, _WORKFLOW_RETRY_HARD_CAP)
     context_hints = args.get("context_hints") or []
 
     if not code:
@@ -648,8 +868,8 @@ async def _handle_dispatch_async_task(args: Dict) -> Dict:
     label = args.get("label") or f"{task_type} task"
 
     task_id = f"task_{task_type}_{_uuid.uuid4().hex[:8]}"
-    with _te._ASYNC_TASKS_LOCK:
-        _te._ASYNC_TASKS[task_id] = {
+    with _ASYNC_TASKS_LOCK:
+        _ASYNC_TASKS[task_id] = {
             "task_id": task_id,
             "task_type": task_type,
             "label": label,
@@ -667,7 +887,7 @@ async def _handle_dispatch_async_task(args: Dict) -> Dict:
     # reasoning (e.g. when running under pytest without a real Kit).
     if not args.get("dry_run"):
         thread = _threading.Thread(
-            target=_te._async_task_runner,
+            target=_async_task_runner,
             args=(task_id, task_type, params),
             name=f"async-{task_id}",
             daemon=True,
@@ -688,8 +908,8 @@ async def _handle_query_async_task(args: Dict) -> Dict:
     from .. import tool_executor as _te  # noqa: PLC0415
     import time as _time  # noqa: PLC0415
     task_id = args["task_id"]
-    with _te._ASYNC_TASKS_LOCK:
-        entry = _te._ASYNC_TASKS.get(task_id)
+    with _ASYNC_TASKS_LOCK:
+        entry = _ASYNC_TASKS.get(task_id)
         if entry is None:
             return {"task_id": task_id, "state": "unknown", "error": "task_id not found"}
         snapshot = dict(entry)

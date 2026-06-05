@@ -97,6 +97,52 @@ TRAINING = TrainingState()
 DR = DRState()
 BRIDGES = BridgeState()
 
+# Phase 8 wave 28 (2026-05-13): async-task registry + lock migrated from
+# tool_executor.py. Workflow theme owns both. Module-level so consumers
+# import directly (no lazy proxy needed — they're plain Python objects).
+import threading as _threading  # noqa: E402
+
+ASYNC_TASKS_LOCK: _threading.Lock = _threading.Lock()
+ASYNC_TASKS: Dict[str, Dict[str, Any]] = {}
+
+
+# Phase 8 wave 25 (2026-05-13): TURN_RECORDER singleton migrated from
+# tool_executor.py. Cross-theme: used by workflow + training.
+# Lazy-instantiated to avoid import-time side effects.
+_TURN_RECORDER_SINGLETON = None
+
+
+def get_write_lock_queue():
+    """Return the shared _StageWriteLockQueue singleton.
+
+    Phase 8 wave 28 — singleton lives in `tool_executor.py:_WRITE_LOCK_QUEUE`
+    (initialized at module load alongside its class). Workflow handlers
+    use it to serialize stage-mutating patches.
+    """
+    from .. import tool_executor as _te
+    return _te._WRITE_LOCK_QUEUE
+
+
+def get_turn_recorder():
+    """Return the shared TurnRecorder singleton.
+
+    Phase 8 wave 25 — the singleton currently lives in
+    `tool_executor.py:_turn_recorder` (a TurnRecorder instantiated at
+    module load). We delegate to that instance so both old and new
+    callers see the same recorder. A future wave can flip the
+    canonical home to this module.
+    """
+    global _TURN_RECORDER_SINGLETON
+    if _TURN_RECORDER_SINGLETON is None:
+        try:
+            from .. import tool_executor as _te
+            _TURN_RECORDER_SINGLETON = _te._turn_recorder
+        except (ImportError, AttributeError):
+            # Fallback: instantiate our own if tool_executor no longer has it.
+            from ...finetune.turn_recorder import TurnRecorder
+            _TURN_RECORDER_SINGLETON = TurnRecorder()
+    return _TURN_RECORDER_SINGLETON
+
 
 __all__ = [
     "WorkflowState",
@@ -107,6 +153,10 @@ __all__ = [
     "WORKFLOWS",
     "EUREKA",
     "TRAINING",
+    "ASYNC_TASKS",
+    "ASYNC_TASKS_LOCK",
+    "get_write_lock_queue",
+    "get_turn_recorder",
     "DR",
     "BRIDGES",
 ]
