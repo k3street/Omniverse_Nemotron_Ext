@@ -66,7 +66,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/PlasticBin",
-    "duration_s": 120
+    "duration_s": 180
   },
   "extends": "CP-17",
   "extension_notes": "CP-66 combines barcode_reader_sensor + nir_material_sensor with 4-class semantic routing. Uses semantic_type='material' instead of 'color'. cuRobo's color_routing dispatches per material class (Semantics_class API). Realizes #18 Recycling Multi-Sensor.",

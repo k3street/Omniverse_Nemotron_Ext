@@ -49,7 +49,11 @@
     "target_path": "/World/Bin_red",
     "duration_s": 180,
     "xy_tolerance": 0.15,
-    "rest_speed_threshold": 100.0
+    "rest_speed_threshold": 100.0,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2"
+    ]
   },
   "extends": "CP-81",
   "extension_notes": "CP-82 = converted from builtin to cuRobo. cuRobo handler implements _destination_path_for via Semantics_color lookup; builtin handler doesn't.",

@@ -938,18 +938,50 @@ class ChatOrchestrator:
 
         try:
             from .tools.template_retriever import (
-                retrieve_templates_with_scores, format_for_prompt
+                retrieve_templates_with_scores, format_for_prompt,
+                retrieve_with_intent_filter,
             )
             # top_k tradeoff: higher k → more gap signal for confidence, but
             # more attention dilution + larger system prompt. 3 is the
             # default (fits CP-{01,02,N} for assembly-line family without
             # bloating prompt). Env-tunable for experimentation.
             _template_top_k = int(os.environ.get("TEMPLATE_TOP_K", "3"))
-            scored = retrieve_templates_with_scores(
-                user_message,
-                top_k=_template_top_k,
-                profile=runtime_profile,
+            # Block 2 (multimodal foundation spec section 7.3): text-prompt
+            # modality -> LayoutSpec.intent -> structural-filter-first
+            # retrieval. Off by default during ramp; enable via env flag.
+            # When disabled, falls back to legacy similarity-only retrieval.
+            _multimodal_text = (
+                os.environ.get("MULTIMODAL_TEXT_INTENT", "off").lower()
+                in ("on", "true", "1", "yes")
             )
+            scored = None
+            if _multimodal_text:
+                try:
+                    from ..multimodal import produce_layout_spec_from_text
+                    spec = produce_layout_spec_from_text(user_message)
+                    intent_dump = spec.intent.model_dump(mode="json")
+                    scored = retrieve_with_intent_filter(
+                        intent_dump,
+                        top_k=_template_top_k,
+                    )
+                    logger.info(
+                        f"[{session_id}] multimodal text-intent retrieval: "
+                        f"pattern={spec.intent.pattern_hint} "
+                        f"n_robots={spec.intent.counts.robots} "
+                        f"hits={len(scored)}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[{session_id}] multimodal text-intent path failed; "
+                        f"falling back to legacy retrieval: {e}"
+                    )
+                    scored = None
+            if scored is None:
+                scored = retrieve_templates_with_scores(
+                    user_message,
+                    top_k=_template_top_k,
+                    profile=runtime_profile,
+                )
             top_sim = scored[0]["similarity"] if scored else 0.0
             second_sim = scored[1]["similarity"] if len(scored) > 1 else 0.0
             margin = top_sim - second_sim

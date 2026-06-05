@@ -361,6 +361,122 @@ def substitute_template_params(
     return out, eff
 
 
+# ---------------------------------------------------------------------------
+# Block 1B Step 18 — Role-based template substitution.
+# Replaces hardcoded prim paths in CP-N templates with role placeholders.
+# When LayoutSpec has no objects (text-only / canonical path), substitution
+# uses the template's authored `role_defaults`. When ratified bindings come
+# from LayoutSpec, substitution uses those.
+# ---------------------------------------------------------------------------
+
+_ROLE_INDEXED_PAT = __import__("re").compile(r"\{\{(\w+)\[(\d+)\]\.(\w+)\}\}")
+_ROLE_DOTTED_PAT = __import__("re").compile(r"\{\{(\w+)\.(\w+)\}\}")
+
+
+def _format_for_code(v: Any) -> str:
+    """Format a python value as a literal usable inside tool-call args.
+
+    Strings get quoted via repr (so quotes are preserved). Lists/tuples
+    are rendered as bracket literals with elements recursively formatted.
+    Numbers and booleans are emitted plain. Dicts use Python literal form.
+    """
+    if v is None:
+        return "None"
+    if isinstance(v, bool):
+        return "True" if v else "False"
+    if isinstance(v, str):
+        return repr(v)
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, (list, tuple)):
+        return "[" + ", ".join(_format_for_code(x) for x in v) + "]"
+    if isinstance(v, dict):
+        return (
+            "{"
+            + ", ".join(
+                f"{_format_for_code(k)}: {_format_for_code(val)}"
+                for k, val in v.items()
+            )
+            + "}"
+        )
+    return repr(v)
+
+
+def substitute_role_placeholders(
+    code_template: str,
+    role_defaults: Dict[str, Any],
+) -> str:
+    """Substitute {{role.field}} and {{role[N].field}} placeholders.
+
+    role_defaults shape (example):
+        {
+          "primary_robot": {
+            "path": "/World/Franka",
+            "class": "franka_panda",
+            "position": [0, 0, 0.75],
+            "orientation": [0.7071068, 0, 0, 0.7071068],
+          },
+          "workpieces": [
+            {"path": "/World/Cube_1", "position": [-1.4, 0.4, 0.835]},
+            {"path": "/World/Cube_2", "position": [-1.15, 0.4, 0.835]},
+            ...
+          ],
+        }
+
+    Placeholders for which no value is found pass through unchanged so
+    failure modes are visible in the captured tool-call args.
+    """
+    if not code_template or not role_defaults:
+        return code_template
+
+    def _indexed(m):
+        role, idx_str, field = m.group(1), m.group(2), m.group(3)
+        spec = role_defaults.get(role)
+        if not isinstance(spec, list):
+            return m.group(0)
+        idx = int(idx_str)
+        if idx < 0 or idx >= len(spec):
+            return m.group(0)
+        entry = spec[idx]
+        if not isinstance(entry, dict) or field not in entry:
+            return m.group(0)
+        return _format_for_code(entry[field])
+
+    def _dotted(m):
+        role, field = m.group(1), m.group(2)
+        spec = role_defaults.get(role)
+        if not isinstance(spec, dict) or field not in spec:
+            return m.group(0)
+        return _format_for_code(spec[field])
+
+    out = _ROLE_INDEXED_PAT.sub(_indexed, code_template)
+    out = _ROLE_DOTTED_PAT.sub(_dotted, out)
+    return out
+
+
+def instantiate_role_based_code(
+    template: Dict[str, Any],
+    role_bindings: Dict[str, Any] | None = None,
+) -> str:
+    """Produce executable `code` from a role-based template.
+
+    Behavior:
+    - If template has `code_template`, substitute placeholders using
+      role_bindings (preferred) or template["role_defaults"] (fallback).
+    - If template has only legacy `code`, return that unchanged.
+
+    role_bindings shape mirrors role_defaults (path/class/position/etc per role).
+    During Block 1B, the canonical hard-instantiate path passes None and
+    we use role_defaults. Block 2+ will pass ratified bindings sourced
+    from a LayoutSpec.
+    """
+    code_template = template.get("code_template")
+    if not code_template:
+        return template.get("code", "")
+    effective = role_bindings or template.get("role_defaults") or {}
+    return substitute_role_placeholders(code_template, effective)
+
+
 async def execute_template_canonical(
     template: Dict[str, Any],
     param_overrides: Dict[str, Any] | None = None,

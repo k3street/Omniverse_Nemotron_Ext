@@ -63,7 +63,13 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/StackBin",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "extends": "CP-71",
   "extension_notes": "CP-72 adds setup_cortex_behavior on top of CP-71's UR10 + drop_targets pattern. Cortex provides RmpFlow obstacle awareness as a parallel motion layer; our setup_pick_place_controller still drives state machine. Realizes #27 UR10BinStacking. Cube stack heights step by cube_size=0.05m.",

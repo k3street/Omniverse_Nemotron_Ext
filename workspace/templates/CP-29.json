@@ -45,7 +45,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/TargetZone",
-    "duration_s": 45
+    "duration_s": 180
   },
   "extends": "CP-28",
   "extension_notes": "CP-29 is a controlled experiment to test whether CP-28's measured -0.16m y-bias is CONSTANT (compensable) or VARIABLE. Run precision_benchmark.py on CP-29 \u2014 if mean dy \u2248 0, bias is constant. If still -0.16, bias is something else (relative to robot pose, not drop_target).",

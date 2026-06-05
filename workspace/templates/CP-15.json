@@ -54,9 +54,13 @@
     "cube_path": "/World/Cube_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Cube_1",
     "target_path": "/World/PalletBase",
-    "duration_s": 180
+    "duration_s": 180,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3"
+    ]
   },
   "extends": "CP-13",
   "extension_notes": "CP-15 realizes the research-defined 'Graduated Tower' canonical (sequence-constrained stacking with strict descending order). First canonical truly using compute_stack_placement v3's cube_sizes feature for mixed-SKU column. Robot picks biggest-first (Cube_1 at conveyor-far-left enters reach first via belt motion).",

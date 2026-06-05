@@ -62,7 +62,13 @@
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Slot",
     "duration_s": 180,
-    "xy_tolerance": 0.1
+    "xy_tolerance": 0.1,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2",
+      "/World/Cube_3",
+      "/World/Cube_4"
+    ]
   },
   "extends": "CP-08",
   "extension_notes": "CP-24 stress-tests precision via narrow-slot destination. Y-axis tolerance \u00b11cm. cuRobo's typical drop precision (~5cm) likely exceeds this \u2014 function-gate may fail on Y placement. Pattern shows the canonical SHAPE for narrow-slot loaders; production version would need higher-precision controller (sensor_gated with teach poses) or wider slot.",

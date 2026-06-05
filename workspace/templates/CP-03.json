@@ -19,6 +19,115 @@
   ],
   "thoughts": "Six SORT-01 specifics (extends CP-01: orientation rule, CPU dynamics, sleepThreshold, rubber-on-cube, target_source='curobo', cuRobo per-robot subscription tag \u2014 all inherited):\n1) Two visually distinct cubes via create_material (OmniPBR with diffuse_color [1,0,0] for red, [0,0,1] for blue) + assign_material per cube. Visual color matters for human verification.\n2) Each cube also gets a Semantics_color SemanticsAPI label via set_semantic_label(prim_path=cube, class_name='red'|'blue', semantic_type='color'). The class_name (lowercase) is what setup_pick_place_controller's color_routing dict keys on at pick time.\n3) Two bins, each tinted with the corresponding visual material so the human-readable scene matches the routing logic. Tinting is purely cosmetic \u2014 the dispatcher reads cube semantic, not bin color.\n4) Single setup_pick_place_controller call with source_paths=[red_cube, blue_cube] and color_routing={'red': '/World/RedBin', 'blue': '/World/BlueBin'}. The kit-side _bin_drop_pos(cube_path) reads the cube's Semantics_color and selects destination per cube.\n5) Bins positioned at distinct xy on opposite sides of the robot so visual routing is unambiguous. RedBin at +x, BlueBin at -x relative to robot.\n6) target_source='curobo' for smoothest motion. Color routing is only implemented in cuRobo controller's _bin_drop_pos for now (other target_source modes ignore color_routing; falls through to destination_path).",
   "code": "# DomeLight\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\n# Parent Xform\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka \u2014 same orientation as CP-01\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Conveyor\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Two cubes with distinct visual + physics + semantic labels\n# Red cube\ncreate_prim(prim_path=\"/World/Cube_red\", prim_type=\"Cube\", position=[-1.4, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_red\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/RedMat\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\nassign_material(prim_path=\"/World/Cube_red\", material_path=\"/World/Materials/RedMat\")\nset_semantic_label(prim_path=\"/World/Cube_red\", class_name=\"red\", semantic_type=\"color\")\n\n# Blue cube\ncreate_prim(prim_path=\"/World/Cube_blue\", prim_type=\"Cube\", position=[-1.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_blue\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/BlueMat\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\nassign_material(prim_path=\"/World/Cube_blue\", material_path=\"/World/Materials/BlueMat\")\nset_semantic_label(prim_path=\"/World/Cube_blue\", class_name=\"blue\", semantic_type=\"color\")\n\n# sleepThreshold + rubber on both cubes\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\napply_physics_material(prim_path=\"/World/Cube_red\", material_name=\"rubber\")\napply_physics_material(prim_path=\"/World/Cube_blue\", material_name=\"rubber\")\n\n# Two bins, each tinted with its color (visual aid)\ncreate_bin(prim_path=\"/World/RedBin\", position=[0.4, -0.4, 0.75], size=[0.3, 0.3, 0.15])\nassign_material(prim_path=\"/World/RedBin\", material_path=\"/World/Materials/RedMat\")\ncreate_bin(prim_path=\"/World/BlueBin\", position=[-0.4, -0.4, 0.75], size=[0.3, 0.3, 0.15])\nassign_material(prim_path=\"/World/BlueBin\", material_path=\"/World/Materials/BlueMat\")\n\n# Pick sensor\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller with color_routing\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    destination_path=\"/World/RedBin\",\n    color_routing={\"red\": \"/World/RedBin\", \"blue\": \"/World/BlueBin\"},\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedBin\", \"/World/BlueBin\"],\n)",
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "color_routed",
+      "uses_conveyor_transport": true,
+      "has_color_routing": true
+    },
+    "structural_tags": [
+      "isaac:transport.conveyor",
+      "isaac:robot.fixed_base.arm",
+      "isaac:routing.color"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "input_conveyor": {
+      "constraints": ["conveyor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "primary_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "larger_x_first"
+    },
+    "secondary_destination": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "workpieces": {
+      "constraints": ["cube"],
+      "min": 1,
+      "max": 8,
+      "param_name": "n_cubes",
+      "unordered": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "input_conveyor": {
+      "path": "/World/ConveyorBelt",
+      "position": [0.0, 0.4, 0.78],
+      "size": [3.0, 0.4, 0.05],
+      "surface_velocity": [0.2, 0, 0]
+    },
+    "primary_destination": {
+      "path": "/World/RedBin",
+      "color": "red",
+      "material_path": "/World/Materials/RedMat",
+      "position": [0.4, -0.4, 0.75],
+      "size": [0.3, 0.3, 0.15]
+    },
+    "secondary_destination": {
+      "path": "/World/BlueBin",
+      "color": "blue",
+      "material_path": "/World/Materials/BlueMat",
+      "position": [-0.4, -0.4, 0.75],
+      "size": [0.3, 0.3, 0.15]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.4, 0.4, 0.835],
+      "size": [0.06, 0.06, 0.06]
+    },
+    "primary_material": {
+      "path": "/World/Materials/RedMat",
+      "diffuse_color": [1.0, 0.0, 0.0]
+    },
+    "secondary_material": {
+      "path": "/World/Materials/BlueMat",
+      "diffuse_color": [0.0, 0.0, 1.0]
+    },
+    "workpieces": [
+      {"path": "/World/Cube_red", "position": [-1.4, 0.4, 0.835], "color": "red", "material_path": "/World/Materials/RedMat"},
+      {"path": "/World/Cube_blue", "position": [-1.0, 0.4, 0.835], "color": "blue", "material_path": "/World/Materials/BlueMat"}
+    ]
+  },
+  "code_template": "# DomeLight\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\n# Parent Xform\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Primary robot\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n# Input conveyor\ncreate_conveyor(\n    prim_path={{input_conveyor.path}},\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\n# Workpiece 0 (primary color)\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\ncreate_material(material_path={{primary_material.path}}, shader_type=\"OmniPBR\", diffuse_color={{primary_material.diffuse_color}})\nassign_material(prim_path={{workpieces[0].path}}, material_path={{workpieces[0].material_path}})\nset_semantic_label(prim_path={{workpieces[0].path}}, class_name={{workpieces[0].color}}, semantic_type=\"color\")\n\n# Workpiece 1 (secondary color)\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\ncreate_material(material_path={{secondary_material.path}}, shader_type=\"OmniPBR\", diffuse_color={{secondary_material.diffuse_color}})\nassign_material(prim_path={{workpieces[1].path}}, material_path={{workpieces[1].material_path}})\nset_semantic_label(prim_path={{workpieces[1].path}}, class_name={{workpieces[1].color}}, semantic_type=\"color\")\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\napply_physics_material(prim_path={{workpieces[0].path}}, material_name=\"rubber\")\napply_physics_material(prim_path={{workpieces[1].path}}, material_name=\"rubber\")\n\n# Tinted bins\ncreate_bin(prim_path={{primary_destination.path}}, position={{primary_destination.position}}, size={{primary_destination.size}})\nassign_material(prim_path={{primary_destination.path}}, material_path={{primary_destination.material_path}})\ncreate_bin(prim_path={{secondary_destination.path}}, position={{secondary_destination.position}}, size={{secondary_destination.size}})\nassign_material(prim_path={{secondary_destination.path}}, material_path={{secondary_destination.material_path}})\n\n# Pick sensor\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\n# Controller with color_routing\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{input_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}],\n    destination_path={{primary_destination.path}},\n    color_routing={{{primary_destination.color}}: {{primary_destination.path}}, {{secondary_destination.color}}: {{secondary_destination.path}}},\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}}, {{primary_destination.path}}, {{secondary_destination.path}}],\n)",
+  "verify_args_template": {
+    "stages": [
+      {
+        "robot_path": "{{primary_robot.path}}",
+        "pick_path": "{{input_conveyor.path}}",
+        "place_path": "{{primary_destination.path}}",
+        "robot_kind": "{{primary_robot.class}}"
+      }
+    ],
+    "cube_path": "{{workpieces[0].path}}"
+  },
+  "simulate_args_template": {
+    "cube_path": "{{workpieces[0].path}}",
+    "target_path": "{{primary_destination.path}}",
+    "duration_s": 180
+  },
   "settle_state": {
     "cubes": {
       "/World/Cube_red": [

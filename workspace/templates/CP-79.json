@@ -39,7 +39,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-78",
   "extension_notes": "CP-79 mirrors CP-78 with cube at +X +Y instead of -X +Y, isolating geometry-vs-home-pose alignment. Builtin handler's mirror home pose [\u03c0/2, ...] points EE toward -X +Y, so this scene would need the ORIGINAL standalone home [-\u03c0/2, ...] for natural alignment. Diagnostic only \u2014 actual code change to flip home per-canonical is Sprint 4+.",

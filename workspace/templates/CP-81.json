@@ -46,7 +46,11 @@
     "target_path": "/World/Bin",
     "duration_s": 180,
     "xy_tolerance": 0.15,
-    "rest_speed_threshold": 100.0
+    "rest_speed_threshold": 100.0,
+    "cube_paths": [
+      "/World/Cube_1",
+      "/World/Cube_2"
+    ]
   },
   "extends": "CP-78",
   "extension_notes": "CP-81 = converted from builtin to cuRobo target_source. The builtin two-cube path was failing reproducibly; cuRobo handles multi-cube via _picked_path/_cube_to_pick which works.",

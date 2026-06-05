@@ -1,0 +1,18 @@
+{
+  "_doc": "Phase 1 — explicit allowlist of schema names whose handler value is intentionally None. These are handled inline by the LLM, special-cased in the orchestrator, or registered conditionally (e.g. ROS2 tools become None when ros-mcp is not installed). Any schema with a None handler that is NOT in this list ⇒ ghost (phase-1 fails). Any name in this list that is NOT actually None in DATA_HANDLERS/CODE_GEN_HANDLERS ⇒ stale fixture (phase-1 fails).",
+  "_source": "specs/IA_FULL_SPEC_2026-05-10.md Phase 1; tool_executor.py:4863 (explain_error) and 4897-4907 (ros2_*).",
+  "none_handlers": [
+    "explain_error",
+    "ros2_connect",
+    "ros2_list_topics",
+    "ros2_get_topic_type",
+    "ros2_get_message_type",
+    "ros2_subscribe_once",
+    "ros2_publish",
+    "ros2_publish_sequence",
+    "ros2_list_services",
+    "ros2_call_service",
+    "ros2_list_nodes",
+    "ros2_get_node_details"
+  ]
+}

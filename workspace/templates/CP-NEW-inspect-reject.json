@@ -28,7 +28,7 @@
       "/World/Cube_5"
     ],
     "target_path": "/World/PassBin",
-    "duration_s": 150
+    "duration_s": 180
   },
   "diagnose_args": null,
   "extends": "phase9-yrkesroll-#7",

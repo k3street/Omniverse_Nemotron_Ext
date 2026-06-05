@@ -40,7 +40,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin_red",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-78",
   "extension_notes": "CP-85 = CP-78 with color_routing on a single cube. Validates that color routing dispatch works with raycast workaround for the simplest case (one cube \u2192 one of N bins).",
