@@ -300,6 +300,7 @@ print(json.dumps({"status": "tracking_started", "message": "Live change tracking
 """
         result = await kit_tools.queue_exec_patch(code, "watch_changes(start)")
         return {
+            "success": bool(result.get("success", False)),
             "status": "tracking_started",
             "message": "Live change tracking started. Use watch_changes(action='query') to see accumulated changes, or watch_changes(action='stop') to end.",
             "queued": result.get("queued", False),
@@ -326,10 +327,12 @@ else:
             line = line.strip()
             if line.startswith("{"):
                 try:
-                    return json.loads(line)
+                    parsed = json.loads(line)
+                    parsed.setdefault("success", not bool(parsed.get("error")))
+                    return parsed
                 except json.JSONDecodeError:
                     pass
-        return {"status": "stopped", "queued": result.get("queued", False)}
+        return {"success": bool(result.get("success", False)), "status": "stopped", "queued": result.get("queued", False)}
 
     elif action == "query":
         code = """\
@@ -354,12 +357,14 @@ else:
             line = line.strip()
             if line.startswith("{"):
                 try:
-                    return json.loads(line)
+                    parsed = json.loads(line)
+                    parsed.setdefault("success", not bool(parsed.get("error")))
+                    return parsed
                 except json.JSONDecodeError:
                     pass
-        return {"status": "query_sent", "queued": result.get("queued", False)}
+        return {"success": bool(result.get("success", False)), "status": "query_sent", "queued": result.get("queued", False)}
 
-    return {"error": f"Unknown action: {action}. Use 'start', 'stop', or 'query'."}
+    return {"success": False, "error": f"Unknown action: {action}. Use 'start', 'stop', or 'query'."}
 
 
 async def _handle_scene_aware_starter_prompts(args: Dict) -> Dict:
@@ -842,6 +847,7 @@ async def _handle_execute_with_retry(args: Dict) -> Dict:
     # the budget so the caller can decide whether to retry on failure.
     result = await kit_tools.queue_exec_patch(code, description)
     return {
+        "success": bool(result.get("success", False)),
         "ok": True,
         "type": "code_patch",
         "code": code,

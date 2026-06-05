@@ -1,6 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 class ApprovalDecision(BaseModel):
     request_id: str
@@ -9,11 +9,11 @@ class ApprovalDecision(BaseModel):
     rejected_action_ids: List[str] = []
     remember: bool = False
     user_note: Optional[str] = None
-    decided_at: datetime = datetime.utcnow()
+    decided_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AuditEntry(BaseModel):
     entry_id: str
-    timestamp: datetime = datetime.utcnow()
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     event_type: str
     plan_id: Optional[str] = None
     action_id: Optional[str] = None

@@ -22,10 +22,18 @@ class TestOrchestratorPipeline:
         orch._history = {}
         orch._knowledge = {}
 
-        # Patch classify_intent to return a fixed intent
+        # Patch classify_intent to return a fixed intent. Must match the
+        # IntentClassification TypedDict shape (intent_router.py:108) — the
+        # orchestrator at line 690 reads intent_result["intent"], so a
+        # bare-string mock raises TypeError on subscript.
         monkeypatch.setattr(
             "service.isaac_assist_service.chat.orchestrator.classify_intent",
-            AsyncMock(return_value="general_query"),
+            AsyncMock(return_value={
+                "intent": "general_query",
+                "multi_step": False,
+                "complexity": "single",
+                "confidence": 0.5,
+            }),
         )
 
         # Patch is_kit_rpc_alive to return False (no Kit)
@@ -106,8 +114,14 @@ class TestOrchestratorPipeline:
                 "arguments": json.dumps({"prim_path": "/World/Cube", "prim_type": "Cube"}),
             },
         }
+        # Round 2 produces the user-facing text. The orchestrator's
+        # honesty-rewrite hook (orchestrator.py:1490) may issue an extra
+        # rewrite turn when it judges a "claims success but tool
+        # failed" mismatch — supply a third stub so the mock provider
+        # doesn't exhaust mid-pipeline.
         mock_llm_provider.responses = [
             fake_llm_response(text="", tool_calls=[tool_call]),
+            fake_llm_response(text="I created a cube for you."),
             fake_llm_response(text="I created a cube for you."),
         ]
 

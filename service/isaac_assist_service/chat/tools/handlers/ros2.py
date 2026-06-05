@@ -839,6 +839,7 @@ print(json.dumps(result))
         })
 
     return {
+        "success": True,
         "issues": issues,
         "issue_count": len(issues),
         "ros2_context_found": scene_info.get("ros2_context_found", False),

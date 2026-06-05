@@ -1553,7 +1553,7 @@ else:
     }}))
 """
     result = await kit_tools.queue_exec_patch(code, f"Analyze DR randomization ({num_samples} samples)")
-    return {"type": "data", "queued": result.get("queued", False)}
+    return {"success": bool(result.get("success", False)), "type": "data", "queued": result.get("queued", False)}
 
 
 async def _handle_apply_dr_preset(args: Dict) -> Dict:
@@ -2341,6 +2341,7 @@ print(json.dumps({{"robot": {robot_path!r}, "policy": {policy_path!r}, "obs_keys
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     return {
+        "success": bool(res.get("success", False)),
         "robot_path": robot_path,
         "policy_path": policy_path,
         "observation_keys": observation_keys,

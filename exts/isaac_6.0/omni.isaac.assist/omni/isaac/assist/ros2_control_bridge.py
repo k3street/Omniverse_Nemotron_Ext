@@ -142,12 +142,13 @@ class Ros2ControlBridge:
         """Spin up the rclpy node. Idempotent — second call is a no-op."""
         if not _RCLPY_AVAILABLE:
             return {
+                "success": False,
                 "available": False,
                 "started": False,
                 "reason": "rclpy not importable",
             }
         if self._started:
-            return {"available": True, "started": True, "reason": "already started"}
+            return {"success": True, "available": True, "started": True, "reason": "already started"}
         try:
             if not rclpy.ok():
                 rclpy.init(args=None)
@@ -158,10 +159,11 @@ class Ros2ControlBridge:
                 self._node_name,
                 self._domain_id,
             )
-            return {"available": True, "started": True}
+            return {"success": True, "available": True, "started": True}
         except Exception as exc:
             logger.exception("[ros2_control_bridge] start() failed")
             return {
+                "success": False,
                 "available": True,
                 "started": False,
                 "reason": f"rclpy node creation failed: {exc}",
@@ -170,7 +172,12 @@ class Ros2ControlBridge:
     def stop(self) -> Dict[str, Any]:
         """Destroy publishers, subscribers, then the node. Idempotent."""
         if not self._started:
-            return {"available": _RCLPY_AVAILABLE, "stopped": True, "reason": "not started"}
+            return {
+                "success": True,
+                "available": _RCLPY_AVAILABLE,
+                "stopped": True,
+                "reason": "not started",
+            }
         try:
             for pub in self._ft_publishers.values():
                 if pub.handle is not None and self._node is not None:
@@ -193,10 +200,11 @@ class Ros2ControlBridge:
                     pass
             self._node = None
             self._started = False
-            return {"available": True, "stopped": True}
+            return {"success": True, "available": True, "stopped": True}
         except Exception as exc:
             logger.exception("[ros2_control_bridge] stop() failed")
             return {
+                "success": False,
                 "available": True,
                 "stopped": False,
                 "reason": f"shutdown failed: {exc}",

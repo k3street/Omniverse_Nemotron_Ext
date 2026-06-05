@@ -167,8 +167,10 @@ def test_start_without_rclpy_returns_available_false():
     # paths must NOT raise and must return a structured dict.
     assert isinstance(r, dict)
     assert "available" in r
+    assert "success" in r, "Section 19 honesty gate: success key required"
     if r["available"] is False:
         assert r["started"] is False
+        assert r["success"] is False
         assert "reason" in r
 
 
@@ -179,6 +181,7 @@ def test_stop_before_start_is_safe():
     r = bridge.stop()
     assert isinstance(r, dict)
     assert r.get("stopped") is True
+    assert r.get("success") is True, "stopped state is a successful no-op"
     assert "not started" in r.get("reason", "")
 
 

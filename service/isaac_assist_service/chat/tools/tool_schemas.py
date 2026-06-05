@@ -287,21 +287,12 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "create_material",
-            "description": (
-                "Create a visual material with specified appearance properties. "
-                "For OmniPBR-style colors, this emits a USD Preview Surface material, "
-                "which is the safe Isaac Sim 5.1/6.0 path. Do not create an OmniPBR "
-                "USD prim type in run_usd_script; bind this material with assign_material."
-            ),
+            "description": "Create a new MDL material (OmniPBR, OmniGlass, OmniSurface) with specified appearance properties.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "material_path": {"type": "string", "description": "USD path for the material"},
-                    "shader_type": {
-                        "type": "string",
-                        "enum": ["OmniPBR", "OmniGlass", "OmniSurface"],
-                        "description": "Use OmniPBR for ordinary colored PBR surfaces; it is generated as USD Preview Surface.",
-                    },
+                    "shader_type": {"type": "string", "enum": ["OmniPBR", "OmniGlass", "OmniSurface"]},
                     "diffuse_color": {"type": "array", "items": {"type": "number"}, "description": "RGB color [r, g, b] 0-1"},
                     "metallic": {"type": "number", "description": "Metallic factor 0-1"},
                     "roughness": {"type": "number", "description": "Roughness factor 0-1"},
@@ -745,12 +736,7 @@ ISAAC_SIM_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "cube_path": {"type": "string", "description": "Prim path of the cube to track in single-cube mode (e.g. /World/Cube_1)."},
-                    "cube_paths": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional multi-cube mode. Success if any listed cube reaches the target bbox. Takes precedence over cube_path.",
-                    },
+                    "cube_path": {"type": "string", "description": "Prim path of the cube to track (e.g. /World/Cube_1)."},
                     "target_path": {"type": "string", "description": "Prim path of the destination whose world bbox is the target (e.g. /World/Bin)."},
                     "duration_s": {"type": "number", "description": "Sim duration in seconds. Default 60. Use 30 for smoke tests.", "default": 60},
                     "xy_tolerance": {"type": "number", "description": "Extra xy slack on target bbox in meters. Default 0.0 (strict).", "default": 0.0},
@@ -758,10 +744,10 @@ ISAAC_SIM_TOOLS = [
                     "rest_speed_threshold": {"type": "number", "description": "Max speed in m/s to consider the cube at rest. Default 0.05.", "default": 0.05},
                     "require_upright": {"type": "boolean", "description": "REORIENT-01: when true, success requires cube's local +Z dotted with world +Z >= upright_tolerance_dot at sim end (cube finishes upright, not on its side). Default false.", "default": False},
                     "upright_tolerance_dot": {"type": "number", "description": "Min dot product of cube up vs world up (default 0.95 ≈ within 18° of vertical). Only used when require_upright=true.", "default": 0.95},
-                    "seed": {"type": "integer", "description": "Base RNG seed for deterministic repeated runs. Run i uses seed+i. Default 42.", "default": 42},
-                    "n_runs": {"type": "integer", "description": "Repeat count for the same built scene. Restores cube/controller state between runs. Clamped to 1..50.", "default": 1, "minimum": 1, "maximum": 50},
+                    "seed": {"type": "integer", "description": "Base random seed for RNGs (random/numpy/torch). Default 42. Run i uses seed+i for variety with reproducibility.", "default": 42},
+                    "n_runs": {"type": "integer", "description": "Number of repeated runs against the same built scene. Default 1. Multi-run reset: snapshots cube xforms + ctrl:* attrs + articulation joint state before run 0, restores between subsequent runs, deletes transient FixedJoint prims. Use n_runs=5 to detect flaky vs stable canonicals (stable_ok ≥4/5, flaky 1-3/5, stable_fail 0/5).", "default": 1, "minimum": 1, "maximum": 50},
                 },
-                "required": ["target_path"],
+                "required": ["cube_path", "target_path"],
             },
         },
     },
@@ -1979,6 +1965,245 @@ ISAAC_SIM_TOOLS = [
                     },
                 },
                 "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_impedance_controller",
+            "description": (
+                "CRM-B1 — Tier C compliance tool. Configures a Cartesian impedance controller "
+                "for a torque-mode robot using the law τ = J^T·(Kx·Δx + Dx·v + Kr·Δr + Dr·ω). "
+                "Requires torque_mode=True; returns error with recommended_alternative='admittance' "
+                "if the robot is position-mode only. "
+                "dry_run=True (default) returns a config dict for offline inspection; "
+                "dry_run=False requires Kit RPC + ros2_control bridge + torque-mode robot (CRM-A1). "
+                "Used by contact-rich tasks on torque-capable robots (e.g. Franka FCI)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "target_frame": {
+                        "type": "string",
+                        "description": "Tool/end-effector frame name used by ros2_control. Default 'tool0'.",
+                    },
+                    "Kx": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Cartesian translational stiffness per axis [N/m]. Default [400.0, 400.0, 400.0].",
+                    },
+                    "Kr": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Rotational stiffness per axis [N·m/rad]. Default [40.0, 40.0, 40.0].",
+                    },
+                    "Dx": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Cartesian translational damping per axis [N·s/m]. Default [40.0, 40.0, 40.0].",
+                    },
+                    "Dr": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Rotational damping per axis [N·m·s/rad]. Default [4.0, 4.0, 4.0].",
+                    },
+                    "null_space_stiffness": {
+                        "type": "number",
+                        "description": "Null-space stiffness scalar — keeps the arm near its rest configuration. Default 0.5.",
+                    },
+                    "null_space_damping": {
+                        "type": "number",
+                        "description": "Null-space damping scalar. Default 0.5.",
+                    },
+                    "torque_mode": {
+                        "type": "boolean",
+                        "description": "Must be true for impedance control. Set false on position-mode robots to receive an error with recommended_alternative='admittance'.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true (default), return config dict without touching Kit or ROS2. Set false only when bridge + torque-mode robot is provisioned.",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_compliance_params",
+            "description": (
+                "CRM-B2 — Runtime mutation of an already-installed compliance controller. "
+                "Reads the in-memory state for robot_path and applies non-None param overrides "
+                "(additive / pass-through semantics — None args leave existing values unchanged). "
+                "Used by variable_impedance to shift K between search-phase (low K) and "
+                "insertion-phase (high K) without reinstalling the controller. "
+                "Returns the merged state dict on success, or a structured error with "
+                "available_robots when no controller is installed for robot_path. "
+                "dry_run=True (default) mutates in-memory state; dry_run=False raises "
+                "NotImplementedError (requires Kit RPC + ros2_control bridge)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "stiffness_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New translational spring stiffness per axis [N/m]. Omit to leave unchanged.",
+                    },
+                    "damping_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New translational damping coefficient per axis [N·s/m]. Omit to leave unchanged.",
+                    },
+                    "mass_xyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New virtual mass per translational axis [kg]. Omit to leave unchanged.",
+                    },
+                    "stiffness_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New rotational spring stiffness per axis [N·m/rad]. Omit to leave unchanged.",
+                    },
+                    "damping_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New rotational damping coefficient per axis [N·m·s/rad]. Omit to leave unchanged.",
+                    },
+                    "mass_rot": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "New virtual inertia per rotational axis [kg·m²]. Omit to leave unchanged.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true (default), mutate in-memory state and return merged dict. Set false only when Kit RPC + bridge is provisioned.",
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "release_compliance",
+            "description": (
+                "CRM-B3 — Remove a previously installed compliance controller and restore the robot "
+                "to its rigid joint-target path. Pops the robot_path entry from the in-memory "
+                "_INSTALLED_COMPLIANCE state dict. "
+                "Idempotent: releasing a robot_path with no installed controller returns "
+                "success=True with was_installed=False and a descriptive note — safe to call "
+                "without checking first. "
+                "Returns was_installed=True and released_mode when a controller was removed. "
+                "dry_run=True (default) modifies only in-memory state; dry_run=False raises "
+                "NotImplementedError (requires Kit RPC to tear down ros2_control bridge)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": (
+                            "If true (default), release in-memory state only (no Kit calls). "
+                            "Set false only when Kit RPC + ros2_control bridge teardown is provisioned."
+                        ),
+                    },
+                },
+                "required": ["robot_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "follow_trajectory_with_compliance",
+            "description": (
+                "CRM-C4 — Phase 63b ↔ Layer 1 bridge. Executes a constrained trajectory with a "
+                "rigid-to-compliant handoff: from t=0 to t=compliance_handoff_at, the robot follows "
+                "the trajectory's waypoints as exact joint targets; from t=compliance_handoff_at to "
+                "t=1 the compliance controller (admittance / impedance / FDCC) takes over and the "
+                "remaining waypoints become 'desired pose' references that yield to F/T feedback. "
+                "When the trajectory's first waypoint exposes a 'lock_orientation_from' field, the "
+                "bridge compares it to compliance_handoff_at and emits a structured "
+                "'handoff_mismatch_warning' (not a failure) on divergence > 0.01. "
+                "Requires a compliance controller already installed via setup_admittance_controller "
+                "(or setup_impedance_controller); otherwise returns a structured error suggesting "
+                "the setup tool. "
+                "dry_run=True (default) returns a structured plan dict (n_rigid, n_compliant, "
+                "t_handoff_observed, final_pose, ...) for offline inspection; dry_run=False raises "
+                "NotImplementedError (requires Kit RPC + ros2_control bridge). "
+                "Used by contact-rich tasks (e.g. #22 Peg-in-Hole) to splice Phase 63b's "
+                "plan_constrained_trajectory into a compliant insertion segment."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "trajectory": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": (
+                            "Required. Non-empty list of Phase 63b waypoint dicts produced by "
+                            "plan_constrained_trajectory. Each waypoint must contain at least one "
+                            "of 'joint_positions' or 'pose'. The first waypoint may optionally "
+                            "expose 'lock_orientation_from' (float in [0, 1]) which the bridge "
+                            "compares to compliance_handoff_at for seamless-transition checking."
+                        ),
+                    },
+                    "robot_path": {
+                        "type": "string",
+                        "description": "USD path to the robot articulation root, e.g. '/World/Franka'.",
+                    },
+                    "compliance_handoff_at": {
+                        "type": "number",
+                        "description": (
+                            "Fraction in [0, 1] dividing the rigid prefix from the compliant "
+                            "suffix. Default 0.5. n_rigid = int(handoff_at * n_waypoints); "
+                            "n_compliant = n_waypoints - n_rigid. Should equal the trajectory's "
+                            "'lock_orientation_from' when present to avoid handoff_mismatch_warning."
+                        ),
+                    },
+                    "compliance_controller": {
+                        "type": "string",
+                        "description": (
+                            "Must be a member of COMPLIANCE_MODE_ENUM excluding 'null' (which "
+                            "means 'no compliance' and is incompatible with this bridge). "
+                            "Valid: 'admittance', 'cartesian_compliance_fdcc', "
+                            "'cartesian_impedance', 'variable_impedance', "
+                            "'franka_cartesian_impedance'. Default 'admittance'."
+                        ),
+                    },
+                    "timeout_s": {
+                        "type": "number",
+                        "description": "Live-mode watchdog timeout in seconds. Must be > 0. Default 30.0.",
+                    },
+                    "velocity_scaling": {
+                        "type": "number",
+                        "description": "Multiplier on trajectory velocity. Must be > 0. Default 1.0.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": (
+                            "If true (default), return the plan dict without touching Kit or ROS2. "
+                            "Set false only when Kit RPC + ros2_control bridge is provisioned."
+                        ),
+                    },
+                },
+                "required": ["trajectory"],
             },
         },
     },

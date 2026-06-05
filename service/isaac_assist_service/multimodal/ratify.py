@@ -137,6 +137,172 @@ class RatifyResult:
     diagnostics: List[BindingDiagnostic] = field(default_factory=list)
 
 
+@dataclass
+class ComplianceResolution:
+    """Result of post-ratify compliance auto-pick / override validation.
+
+    Produced by ``resolve_compliance`` and consumed by the chat handler
+    that calls ratify (see chat/tools/multimodal_handlers.py
+    ``_handle_apply_layout_spec_to_scene``). Provides the final
+    compliance mode to use plus any violations from an explicit override.
+
+    Attributes:
+        mode: Final compliance mode to use. ``None`` means rigid baseline.
+        source: How ``mode`` was derived — ``"auto"`` (from
+            ``autopick_compliance_mode``), ``"override"`` (caller supplied
+            it on the LayoutSpec), or ``"skipped"`` (ratify rejected or
+            no bindings to dispatch against).
+        violations: Phase 11b ``ConstraintViolation`` records emitted by
+            ``validate_compliance_override``. Empty when ``source="auto"``
+            or override was clean.
+        hard_violation: True if any violation has severity ERROR — caller
+            should refuse to dispatch the controller.
+        diagnostics: Human-readable strings explaining the decision.
+    """
+    mode: Optional[str]
+    source: Literal["auto", "override", "skipped"]
+    violations: List[Any] = field(default_factory=list)
+    hard_violation: bool = False
+    diagnostics: List[str] = field(default_factory=list)
+
+
+def resolve_compliance(
+    layout_spec: LayoutSpec,
+    ratify_result: RatifyResult,
+) -> ComplianceResolution:
+    """Auto-pick or validate the compliance mode for a ratified LayoutSpec.
+
+    Wires together two pieces landed in earlier CRM tasks:
+
+      * Auto-pick (CRM-C2) — when the LayoutSpec has no
+        ``compliance_mode`` set, derive one from intent + role bindings
+        via ``role_retriever.autopick_compliance_mode``.
+      * Override validator (CRM-C3) — when the LayoutSpec explicitly
+        sets ``compliance_mode``, run
+        ``compliance_validator.validate_compliance_override`` against
+        the Phase 11b ``ValidationResult`` framework. Soft violations
+        are surfaced as diagnostics; ERROR-severity violations set
+        ``hard_violation=True`` so the caller can refuse to dispatch.
+
+    Args:
+        layout_spec: The LayoutSpec ratify ran against. Must have its
+            three compliance fields (mode/params/handoff_at) populated
+            per CRM-C1 schema.
+        ratify_result: The result of ``ratify(template, layout_spec)``.
+            Used to fish out the primary_robot binding so the auto-pick
+            table can match by robot class.
+
+    Returns:
+        ComplianceResolution. Always returns; never raises.
+    """
+    # Skip compliance resolution if ratify didn't succeed — nothing to
+    # dispatch against.
+    if ratify_result.status != "ok":
+        return ComplianceResolution(
+            mode=None,
+            source="skipped",
+            diagnostics=[
+                f"ratify status={ratify_result.status!r}; compliance resolution skipped"
+            ],
+        )
+
+    # Build the role_bindings shape autopick expects: a dict with a
+    # "primary_robot" key holding an object that exposes .class (or, in
+    # mapping form, just {primary_robot: {"class": "..."}}).
+    role_bindings: Dict[str, Any] = {}
+    for role_name, binding in (ratify_result.bindings or {}).items():
+        obj_id = getattr(binding, "object_id", None)
+        if obj_id is None:
+            continue
+        # Resolve object_id → its object_class
+        obj_class: Optional[str] = None
+        for obj in (layout_spec.objects or []):
+            if getattr(obj, "id", None) == obj_id:
+                obj_class = getattr(obj, "object_class", None)
+                break
+        if obj_class is None:
+            continue
+        role_bindings[role_name] = {"class": obj_class, "object_id": obj_id}
+
+    # Determine whether the LayoutSpec carries an explicit mode override.
+    user_mode = getattr(layout_spec, "compliance_mode", None)
+    if user_mode:
+        # Override path — validate against Phase 11b framework.
+        try:
+            from service.isaac_assist_service.chat.tools.compliance_validator import (
+                validate_compliance_override,
+            )
+        except Exception as exc:  # pragma: no cover — only on broken install
+            return ComplianceResolution(
+                mode=user_mode,
+                source="override",
+                diagnostics=[f"validator import failed: {exc}"],
+            )
+
+        # The validator wants robot_class + has_ft_sensor. Pull from the
+        # primary_robot binding; default has_ft_sensor=False (conservative).
+        primary = role_bindings.get("primary_robot") or {}
+        robot_class = primary.get("class") or ""
+        has_ft_sensor = bool(getattr(layout_spec, "compliance_params", {})
+                             .get("ft_sensor_path"))
+        result = validate_compliance_override(
+            mode=user_mode,
+            robot_class=robot_class,
+            has_ft_sensor=has_ft_sensor,
+        )
+        # Phase 11b ValidationResult exposes .violations and .errors;
+        # accept either to stay decoupled from the framework's exact
+        # field names.
+        violations = (
+            getattr(result, "violations", None)
+            or getattr(result, "errors", None)
+            or []
+        )
+        # severity may be the Phase 11b GradedScale enum (with .name)
+        # OR a string — handle both.
+        def _is_hard(violation: Any) -> bool:
+            sev = getattr(violation, "severity", None)
+            if sev is None:
+                return False
+            sev_name = getattr(sev, "name", None) or str(sev)
+            return "ERROR" in sev_name.upper() or "CRITICAL" in sev_name.upper()
+
+        hard = any(_is_hard(v) for v in violations)
+        return ComplianceResolution(
+            mode=user_mode,
+            source="override",
+            violations=list(violations),
+            hard_violation=hard,
+            diagnostics=[
+                f"override mode={user_mode!r} robot_class={robot_class!r} "
+                f"has_ft_sensor={has_ft_sensor}; "
+                f"{len(violations)} violations ({'HARD' if hard else 'soft'})"
+            ],
+        )
+
+    # Auto-pick path — caller didn't set compliance_mode; derive it.
+    try:
+        from service.isaac_assist_service.chat.tools.role_retriever import (
+            autopick_compliance_mode,
+        )
+    except Exception as exc:  # pragma: no cover
+        return ComplianceResolution(
+            mode=None,
+            source="auto",
+            diagnostics=[f"autopick import failed: {exc}"],
+        )
+
+    auto_mode = autopick_compliance_mode(layout_spec, role_bindings)
+    return ComplianceResolution(
+        mode=auto_mode,
+        source="auto",
+        diagnostics=[
+            f"auto-picked mode={auto_mode!r} from "
+            f"intent.has_contact_phase + primary_robot.class"
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Template role spec — interpreted from the template's "roles" dict
 # ---------------------------------------------------------------------------

@@ -6,17 +6,25 @@ dependency — full end-to-end application of the retrieved template is
 deferred to Phase 19 (Kit RPC).
 
 Per specs/IA_FULL_SPEC_2026-05-10.md Phase 20.
+
+Also hosts CRM-C2 `autopick_compliance_mode` per
+`docs/specs/2026-05-11-contact-rich-manipulation-spec.md` §4.1 — the
+auto-pick algorithm that resolves an embodiment-appropriate
+compliance_mode when a template doesn't supply one explicitly.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 from service.isaac_assist_service.multimodal.role_template_index import (
     ROLE_TEMPLATE_INDEX,
     RoleTemplateIndex,
 )
+
+if TYPE_CHECKING:
+    from service.isaac_assist_service.multimodal.types import LayoutSpec
 
 # ---------------------------------------------------------------------------
 # Phase metadata
@@ -267,3 +275,253 @@ class RoleRetriever:
 
         out.sort(key=lambda m: -m.match_score)
         return out
+
+
+# ---------------------------------------------------------------------------
+# CRM-C2 — Compliance auto-pick
+#
+# Spec: docs/specs/2026-05-11-contact-rich-manipulation-spec.md §4.1
+#
+# Design notes:
+#
+# * The decision table is encoded as `_COMPLIANCE_TABLE` — a list of
+#   (predicate, mode) rules consulted in order.  Adding a new robot class
+#   (e.g. "yaskawa_gp25", "h1") is a single-line edit: append one
+#   ``_ComplianceRule`` row to the table.
+#
+# * The "real_robot_deployment" tag is matched both as a bare identifier
+#   AND as a namespaced ``user:`` / ``isaac:`` variant — multimodal types
+#   require namespaced tag formats (regex), but template authors and the
+#   spec example use the bare form interchangeably.
+#
+# * All input access is defensive: missing intent, missing
+#   structural_features, missing role_bindings, missing primary_robot,
+#   non-string class — every degenerate case folds back to one of two
+#   safe defaults (None when no contact phase confirmed, "admittance"
+#   when contact is confirmed but the robot is unknown).
+#
+# * Returns the bare string mode (e.g. "admittance") — matches the
+#   ``compliance_mode`` field type on ``LayoutSpec`` and the enum in
+#   ``COMPLIANCE_MODE_ENUM``.  Returns ``None`` when no compliance is
+#   required (free-space task, rigid baseline).
+# ---------------------------------------------------------------------------
+
+_REAL_ROBOT_DEPLOYMENT_TAG = "real_robot_deployment"
+"""Tag indicating the layout will be deployed to a physical robot — flips
+Franka selection from sim-safe ``admittance`` to vendor-tuned
+``franka_cartesian_impedance`` per spec §4.1."""
+
+_DEFAULT_FRANKA_SIM_MODE = "admittance"
+_FRANKA_REAL_DEPLOY_MODE = "franka_cartesian_impedance"
+_DEFAULT_POSITION_MODE = "admittance"
+"""Position-mode robots default to admittance per spec §3 (mainline
+ros2_controllers, position-mode + external F/T sensor)."""
+
+
+@dataclass(frozen=True)
+class _ComplianceRule:
+    """Single row in the compliance auto-pick table.
+
+    ``robot_classes`` lists the exact ``role_bindings["primary_robot"]["class"]``
+    string(s) the row matches.  Adding a new robot is a one-line edit:
+    append a new ``_ComplianceRule`` to ``_COMPLIANCE_TABLE``.
+
+    ``mode_for_sim`` is the mode picked when the layout is NOT tagged
+    ``real_robot_deployment``; ``mode_for_real`` is the mode picked when
+    the tag IS present.  Most rows use the same value for both because
+    only Franka has a vendor-tuned real-robot variant.
+    """
+
+    robot_classes: tuple[str, ...]
+    mode_for_sim: str
+    mode_for_real: str
+    notes: str = ""
+
+
+_COMPLIANCE_TABLE: tuple[_ComplianceRule, ...] = (
+    # Franka — only embodiment with a vendor-tuned real-robot variant.
+    _ComplianceRule(
+        robot_classes=("franka_panda",),
+        mode_for_sim=_DEFAULT_FRANKA_SIM_MODE,
+        mode_for_real=_FRANKA_REAL_DEPLOY_MODE,
+        notes="Franka FCI provides Cartesian impedance for sim-to-real transfer.",
+    ),
+    # Universal Robots family — position-mode only; admittance via F/T sensor.
+    _ComplianceRule(
+        robot_classes=("ur10e", "ur5e", "ur3e"),
+        mode_for_sim=_DEFAULT_POSITION_MODE,
+        mode_for_real=_DEFAULT_POSITION_MODE,
+        notes="UR robots are position-mode only.",
+    ),
+    # Kinova Gen3 — position-mode, admittance default.
+    _ComplianceRule(
+        robot_classes=("kinova_gen3",),
+        mode_for_sim=_DEFAULT_POSITION_MODE,
+        mode_for_real=_DEFAULT_POSITION_MODE,
+        notes="Kinova Gen3 is position-mode at the ros2_control surface.",
+    ),
+    # Add new robots here.  Single-line edit: append one _ComplianceRule.
+    # Example future entries:
+    #   _ComplianceRule(("yaskawa_gp25",), "admittance", "admittance",
+    #                   "Yaskawa GP25 — position-mode, palletizing scale."),
+    #   _ComplianceRule(("h1",), "admittance", "admittance",
+    #                   "Unitree H1 humanoid — manipulation arm only."),
+)
+
+
+_UNKNOWN_ROBOT_MODE = "admittance"
+"""Safe fallback for unrecognised robot classes per spec §4.1 last
+clause — admittance is mainline ros2_controllers, position-mode agnostic,
+works with any externally-mounted F/T sensor."""
+
+
+def _tag_matches_real_deployment(tag: str) -> bool:
+    """Match ``real_robot_deployment`` whether bare or namespaced.
+
+    Multimodal ``structural_tags`` follow the regex
+    ``^(isaac|cad|user):[a-z0-9_]+(\\.[a-z0-9_]+)*$`` — but the spec
+    pseudo-code and template authors use the bare ``real_robot_deployment``
+    form.  Accept both to be robust to either convention.
+    """
+    if not isinstance(tag, str):
+        return False
+    if tag == _REAL_ROBOT_DEPLOYMENT_TAG:
+        return True
+    # Strip optional namespace prefix ("user:", "isaac:", "cad:") then
+    # accept the remainder as the bare tag.
+    if ":" in tag:
+        _, _, body = tag.partition(":")
+        return body == _REAL_ROBOT_DEPLOYMENT_TAG
+    return False
+
+
+def _has_real_robot_deployment(structural_tags: Any) -> bool:
+    """Defensive check for the real-robot-deployment tag in a tag list.
+
+    Accepts any iterable of strings (or non-strings — ignored).  Returns
+    False if the input is None / non-iterable / empty.
+    """
+    if not structural_tags:
+        return False
+    try:
+        return any(_tag_matches_real_deployment(t) for t in structural_tags)
+    except TypeError:
+        # structural_tags wasn't actually iterable — degenerate input.
+        return False
+
+
+def _resolve_robot_class(role_bindings: Any) -> str | None:
+    """Pull the primary_robot.class string from a role_bindings mapping.
+
+    Tolerates:
+    * ``role_bindings`` is ``None`` or not a mapping → returns ``None``
+    * ``primary_robot`` missing or not a mapping → returns ``None``
+    * ``"class"`` missing or not a string → returns ``None``
+
+    The actual robot-class string is NOT lowercased / normalised here —
+    the auto-pick table holds the canonical class names as listed in
+    ``role_template_index.py`` (e.g. ``"franka_panda"``).  Matching is
+    case-sensitive on purpose: if a caller passes a mangled class
+    name, we want it to fall through to the unknown-robot branch with
+    a safe default rather than silently coerce.
+    """
+    if not isinstance(role_bindings, Mapping):
+        return None
+    primary = role_bindings.get("primary_robot")
+    if not isinstance(primary, Mapping):
+        return None
+    cls = primary.get("class")
+    if not isinstance(cls, str):
+        return None
+    return cls
+
+
+def _lookup_compliance_rule(robot_class: str) -> _ComplianceRule | None:
+    """Find the auto-pick row matching ``robot_class``, or ``None``."""
+    for rule in _COMPLIANCE_TABLE:
+        if robot_class in rule.robot_classes:
+            return rule
+    return None
+
+
+def autopick_compliance_mode(
+    layout_spec: "LayoutSpec | Any",
+    role_bindings: Mapping[str, Any] | None,
+) -> str | None:
+    """Auto-pick a compliance_mode for a LayoutSpec + role_bindings pair.
+
+    Per spec §4.1, the user never sees this choice unless they explicitly
+    override.  Free-space tasks → None (rigid baseline).  Contact-rich
+    tasks → embodiment-appropriate compliance mode.
+
+    Args:
+        layout_spec: The LayoutSpec for which to resolve compliance.
+            Accessed defensively via ``getattr`` so partially-formed
+            specs (e.g. missing intent, missing structural_features)
+            collapse to the safe "no contact" branch.
+        role_bindings: A mapping shaped like
+            ``{"primary_robot": {"class": "<robot_class>", ...}, ...}``.
+            May be ``None`` or missing the ``primary_robot`` entry — in
+            both cases falls back to safe defaults.
+
+    Returns:
+        One of:
+        * ``None`` — no contact phase detected; rigid baseline is fine.
+          Free-space pick-and-place, navigation, simple inspection.
+        * ``"admittance"`` — DEFAULT for position-mode robots with a
+          contact phase.  UR, Kinova, unknown robots all map here.
+          Also the sim-default for Franka (no real-robot tag).
+        * ``"franka_cartesian_impedance"`` — Franka + real-robot tag.
+          Vendor-tuned for sim-to-real transfer.
+
+    Returns combinations by input:
+        +-------------------+-----------------+--------------------+-----------------------------+
+        | has_contact_phase | robot_class     | real_robot_deploy  | returned mode               |
+        +===================+=================+====================+=============================+
+        | False (or absent) | any             | any                | None                        |
+        | True              | franka_panda    | False              | "admittance"                |
+        | True              | franka_panda    | True               | "franka_cartesian_impedance"|
+        | True              | ur10e/ur5e/ur3e | any                | "admittance"                |
+        | True              | kinova_gen3     | any                | "admittance"                |
+        | True              | unknown / None  | any                | "admittance"                |
+        +-------------------+-----------------+--------------------+-----------------------------+
+
+    Notes:
+        * NOT validated against ``COMPLIANCE_MODE_ENUM`` here — the
+          ``LayoutSpec.compliance_mode`` field is validated separately in
+          ``multimodal/validate.py``.  Every value this function can
+          return is already a member of the enum by construction.
+        * Hard-incompatibility checks for explicit overrides live in
+          CRM-C3's ``validate_compliance_override`` — this function only
+          produces sim-safe choices, so no validation is needed here.
+        * To add a new robot class, append one row to
+          ``_COMPLIANCE_TABLE`` above — a single-line edit.
+    """
+    # ----- 1. Defensive read of intent.structural_features ----------------
+    intent = getattr(layout_spec, "intent", None)
+    structural_features = getattr(intent, "structural_features", None)
+
+    # has_contact_phase is read defensively; if absent OR not truthy
+    # we treat the task as free-space (no compliance needed).
+    has_contact_phase = bool(
+        getattr(structural_features, "has_contact_phase", False)
+    )
+    if not has_contact_phase:
+        return None
+
+    # ----- 2. Resolve robot class + deployment tag ------------------------
+    robot_class = _resolve_robot_class(role_bindings)
+    structural_tags = getattr(intent, "structural_tags", None)
+    real_deployment = _has_real_robot_deployment(structural_tags)
+
+    # ----- 3. Look up the rule, with unknown-robot fallback ---------------
+    rule = (
+        _lookup_compliance_rule(robot_class) if robot_class else None
+    )
+    if rule is None:
+        # Unknown robot OR missing primary_robot binding → safe default.
+        # ``real_deployment`` is IGNORED here because there's no
+        # vendor-tuned mode without a known embodiment.
+        return _UNKNOWN_ROBOT_MODE
+
+    return rule.mode_for_real if real_deployment else rule.mode_for_sim

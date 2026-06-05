@@ -560,7 +560,7 @@ def _gen_export_template(args: Dict) -> str:
 
     """
     # Phase 8 wave 7 — _TEMPLATE_EXPORT_DIR migrated to module body.
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timezone as _tz
     name = args["name"]
     safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
     description = args.get("description", "")
@@ -569,7 +569,7 @@ def _gen_export_template(args: Dict) -> str:
     min_vram_gb = args.get("min_vram_gb")
     recommended_vram_gb = args.get("recommended_vram_gb")
     tags = args.get("tags", []) or []
-    timestamp = _dt.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = _dt.now(_tz.utc).strftime("%Y%m%dT%H%M%SZ")
 
     # Build the manifest dict literal we want serialized inside Kit.
     manifest = {
@@ -855,7 +855,7 @@ print(json.dumps(payload))
 """
     result = await kit_tools.exec_sync(code, timeout=15)
     if not result.get("success"):
-        return {"error": f"Kit RPC failed: {result.get('output', 'unknown')}",
+        return {"success": False, "error": f"Kit RPC failed: {result.get('output', 'unknown')}",
                 "hint": "Is Isaac Sim running? Is a Nucleus server accessible?"}
 
     output = result.get("output", "").strip()
@@ -864,10 +864,12 @@ print(json.dumps(payload))
         line = line.strip()
         if line.startswith("{"):
             try:
-                return _json.loads(line)
+                parsed = _json.loads(line)
+                parsed.setdefault("success", not bool(parsed.get("error")))
+                return parsed
             except _json.JSONDecodeError:
                 pass
-    return {"error": "Failed to parse Nucleus response", "raw_output": output[:500]}
+    return {"success": False, "error": "Failed to parse Nucleus response", "raw_output": output[:500]}
 
 
 async def _handle_download_asset(args: Dict) -> Dict:
@@ -884,13 +886,13 @@ async def _handle_download_asset(args: Dict) -> Dict:
     nucleus_url = args.get("nucleus_url", "")
     # Validate URL format
     if not nucleus_url.startswith("omniverse://"):
-        return {"error": "nucleus_url must start with omniverse://"}
+        return {"success": False, "error": "nucleus_url must start with omniverse://"}
     if not _re.match(r'^omniverse://[a-zA-Z0-9._:-]+/[a-zA-Z0-9/_. -]+$', nucleus_url):
-        return {"error": "Invalid nucleus_url format"}
+        return {"success": False, "error": "Invalid nucleus_url format"}
 
     assets_root = getattr(config, "assets_root_path", "") or ""
     if not assets_root:
-        return {"error": "ASSETS_ROOT_PATH not configured in .env"}
+        return {"success": False, "error": "ASSETS_ROOT_PATH not configured in .env"}
 
     # Determine local destination
     # omniverse://localhost/NVIDIA/Assets/Isaac/5.1/Robots/Franka/franka.usd
@@ -918,6 +920,7 @@ async def _handle_download_asset(args: Dict) -> Dict:
 
     if local_path.exists():
         return {
+            "success": True,
             "status": "already_exists",
             "local_path": str(local_path),
             "message": f"Asset already downloaded at {local_path}",
@@ -943,7 +946,7 @@ else:
 """
     result = await kit_tools.exec_sync(code, timeout=60)
     if not result.get("success"):
-        return {"error": f"Kit RPC download failed: {result.get('output', 'unknown')}"}
+        return {"success": False, "error": f"Kit RPC download failed: {result.get('output', 'unknown')}"}
 
     output = result.get("output", "").strip()
     dl_result = None
@@ -957,7 +960,7 @@ else:
                 pass
 
     if not dl_result or dl_result.get("status") != "ok":
-        return {"error": "Download failed", "details": dl_result or output[:500]}
+        return {"success": False, "error": "Download failed", "details": dl_result or output[:500]}
 
     # Register in asset_catalog.json
     catalog_path = _Path(assets_root) / "asset_catalog.json"
@@ -1018,6 +1021,7 @@ else:
             f"Fix the catalog issue and re-register manually."
         )
     return {
+        "success": True,
         "status": "downloaded" if catalog_registered else "downloaded_uncataloged",
         "local_path": str(local_path),
         "size": size,

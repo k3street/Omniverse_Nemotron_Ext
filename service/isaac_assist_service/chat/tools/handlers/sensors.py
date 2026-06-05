@@ -453,6 +453,7 @@ print(json.dumps({{"sensor_path": str(sprim.GetPath()), "parent": {parent_path!r
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     return {
+        "success": bool(res.get("success", False)),
         "sensor_path": sensor_path,
         "parent_path": parent_path,
         "threshold": threshold,
@@ -511,9 +512,9 @@ async def _handle_add_vision_classifier_gate(args: Dict) -> Dict:
     destination_map = args.get("destination_map") or {}
 
     if not cube_paths:
-        return {"type": "error", "error": "cube_paths is required and non-empty"}
+        return {"success": False, "type": "error", "error": "cube_paths is required and non-empty"}
     if not class_labels:
-        return {"type": "error", "error": "class_labels is required (list of expected class names)"}
+        return {"success": False, "type": "error", "error": "class_labels is required (list of expected class names)"}
 
     # Optionally set viewport to the requested camera before capture.
     if camera_path:
@@ -541,7 +542,7 @@ print("flushed")
     # Capture viewport
     img, mime = await _get_viewport_bytes()
     if img is None:
-        return {"type": "error", "error": "Could not capture viewport image. Is Isaac Sim running?"}
+        return {"success": False, "type": "error", "error": "Could not capture viewport image. Is Isaac Sim running?"}
 
     # Run vision detection
     vp = _get_vision_provider()
@@ -612,6 +613,7 @@ print(json.dumps(positions))
                 cube_to_destination[cube] = dest
 
     return {
+        "success": True,
         "cube_to_class": cube_to_class,
         "cube_to_destination": cube_to_destination,
         "unmatched_cubes": unmatched_cubes,
@@ -661,6 +663,7 @@ print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "sc
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     return {
+        "success": bool(res.get("success", False)),
         "sensor_path": sensor_path,
         "position": position,
         "scan_radius": scan_radius,
@@ -775,6 +778,7 @@ print(json.dumps({{"created": str(prim.GetPath()), "position": {position!r}, "sc
 """
     res = await kit_tools.exec_sync(code, timeout=10)
     return {
+        "success": bool(res.get("success", False)),
         "sensor_path": sensor_path,
         "position": position,
         "scan_radius": scan_radius,

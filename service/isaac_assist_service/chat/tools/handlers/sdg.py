@@ -824,6 +824,7 @@ print(json.dumps({{
         code, f"Benchmark SDG ({num_frames} frames, {len(annotators)} annotators)"
     )
     return {
+        "success": bool(result.get("success", False)),
         "queued": result.get("queued", False),
         "pipeline_id": pipeline_id,
         "num_frames": num_frames,
