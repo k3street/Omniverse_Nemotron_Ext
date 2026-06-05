@@ -17,6 +17,7 @@ import logging
 import os
 import json
 import time
+import webbrowser
 from typing import Optional, Dict, List, Tuple
 
 try:
@@ -620,6 +621,94 @@ class ChatViewWindow(ui.Window):
             logger.warning(f"[ModelSwitch] dispatch failed: {e}")
 
     # ═══════════════════════════════════════════════════════════════════════
+    # Modes popup
+    # ═══════════════════════════════════════════════════════════════════════
+    _MODE_ITEMS = (
+        ("Open canvas editor", "2D layout in browser tab", "_modes_open_canvas"),
+        ("Upload sketch or photo", "Image-to-layout path is staged", "_modes_upload_sketch"),
+        ("Voice input", "Push-to-talk path is staged", "_modes_voice_input"),
+        ("Extract layout from scene", "Mirror current scene into a layout", "_modes_extract_from_scene"),
+        ("Analyze viewport", "Use the existing Vision toggle", "_modes_analyze_viewport"),
+    )
+
+    def _open_modes_popup(self):
+        if getattr(self, "_modes_popup", None) is not None:
+            try:
+                self._modes_popup.visible = not self._modes_popup.visible
+                return
+            except Exception:
+                self._modes_popup = None
+
+        self._modes_popup = ui.Window(
+            "Input modes",
+            width=320,
+            height=300,
+            flags=ui.WINDOW_FLAGS_NO_RESIZE,
+        )
+        with self._modes_popup.frame:
+            with ui.VStack(spacing=4):
+                ui.Spacer(height=4)
+                for label, secondary, action_name in self._MODE_ITEMS:
+                    with ui.VStack(height=48, spacing=2):
+                        ui.Button(
+                            label,
+                            height=22,
+                            clicked_fn=lambda fn=action_name: self._modes_dispatch(fn),
+                            style={
+                                "font_size": self._sz(12),
+                                "color": COL_TEXT,
+                                "background_color": 0xFF22262B,
+                            },
+                        )
+                        ui.Label(
+                            secondary,
+                            height=14,
+                            style={"font_size": self._sz(10), "color": COL_TEXT_DIM},
+                        )
+                ui.Spacer(height=4)
+
+    def _modes_dispatch(self, method_name: str):
+        if getattr(self, "_modes_popup", None) is not None:
+            try:
+                self._modes_popup.visible = False
+            except Exception:
+                pass
+        fn = getattr(self, method_name, None)
+        if fn is None:
+            logger.warning(f"[Modes] action {method_name!r} is not implemented")
+            return
+        try:
+            fn()
+        except Exception as e:
+            logger.warning(f"[Modes] action {method_name!r} failed: {e}")
+
+    def _modes_open_canvas(self):
+        session_id = getattr(self.service, "session_id", "default_session")
+        url = f"http://localhost:8000/floorplan?session={session_id}"
+        try:
+            webbrowser.open(url)
+            logger.info(f"[Modes] opened canvas at {url}")
+        except Exception as e:
+            logger.warning(f"[Modes] webbrowser.open failed: {e}")
+
+    def _modes_upload_sketch(self):
+        self._add_assistant_bubble(
+            "Sketch/photo upload is staged, but the image-to-layout adapter is not wired yet."
+        )
+
+    def _modes_voice_input(self):
+        self._add_assistant_bubble(
+            "Voice input is staged, but the speech-to-text adapter is not wired yet."
+        )
+
+    def _modes_extract_from_scene(self):
+        logger.info("[Modes] extract-from-scene is staged; opening the canvas fallback")
+        self._modes_open_canvas()
+
+    def _modes_analyze_viewport(self):
+        self._toggle_livekit()
+
+    # ═══════════════════════════════════════════════════════════════════════
     # Settings popup (Set button)
     # ═══════════════════════════════════════════════════════════════════════
     def _open_settings_popup(self):
@@ -836,6 +925,15 @@ class ChatViewWindow(ui.Window):
                 height=22,
                 clicked_fn=self._toggle_livekit,
                 style={"font_size": 11},
+                tooltip="Toggle viewport vision stream",
+            )
+            self.btn_modes = ui.Button(
+                "Modes",
+                width=54,
+                height=22,
+                clicked_fn=self._open_modes_popup,
+                style={"font_size": 11},
+                tooltip="Input modes: canvas, sketch, voice, scene, vision",
             )
             self.btn_model = ui.Button(
                 "Model",
@@ -887,28 +985,85 @@ class ChatViewWindow(ui.Window):
                 ui.Spacer(height=4)
 
     def _build_chips(self):
-        """Empty-state suggestion chips. Visible until first message ever
-        sent; clicking a chip fills the input field. Disappears after
-        first send and stays hidden for the window's lifetime."""
-        self.chips_container = ui.HStack(height=22, spacing=4)
+        """Canonical quick prompts. Clicking a chip fills the input field."""
+        self.chips_container = ui.ScrollingFrame(
+            height=24,
+            horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
+            vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF,
+        )
         self._chips_shown = True
         with self.chips_container:
+            self.chips_row = ui.HStack(spacing=6)
+            self._refresh_quick_prompts()
+
+    def _refresh_quick_prompts(self):
+        prompts: List[Tuple[str, str]] = []
+        templates_dir = self._templates_dir()
+
+        if templates_dir and templates_dir.exists():
+            for template_path in sorted(templates_dir.glob("CP-*.json")):
+                try:
+                    template = json.loads(template_path.read_text())
+                except Exception:
+                    continue
+                task_id = template.get("task_id", template_path.stem)
+                goal = template.get("goal") or ""
+                if goal:
+                    prompts.append((self._derive_short_label(task_id, goal), goal))
+
+        prompts.extend(
+            [
+                ("Inspect the stage", "Inspect the stage"),
+                ("Add a Franka arm", "Add a Franka arm"),
+            ]
+        )
+
+        try:
+            self.chips_row.clear()
+        except Exception:
+            pass
+        with self.chips_row:
             ui.Spacer(width=2)
-            for label in (
-                "Build a pick-and-place scene",
-                "Add a Franka arm",
-                "Inspect the stage",
-            ):
+            for label, prompt in prompts:
                 ui.Button(
                     label,
                     height=20,
-                    clicked_fn=lambda t=label: self._on_chip(t),
+                    clicked_fn=lambda t=prompt: self._on_chip(t),
                     style={
                         "font_size": 10,
                         "background_color": 0xFF2A2E33,
                         "color": COL_TEXT_DIM,
                     },
+                    tooltip=prompt,
                 )
+
+    @staticmethod
+    def _derive_short_label(task_id: str, goal: str) -> str:
+        overrides = {
+            "CP-01": "Build pick-and-place",
+            "CP-02": "Multi-robot line",
+            "CP-03": "Color sorting",
+            "CP-04": "Compact cell",
+            "CP-05": "Reorient and deliver",
+        }
+        if task_id in overrides:
+            return overrides[task_id]
+        head = goal.split(":", 1)[0].split(".", 1)[0].split(",", 1)[0].strip()
+        if len(head) <= 26:
+            return head
+        return head[:23].rstrip() + "..."
+
+    def _templates_dir(self):
+        try:
+            from pathlib import Path
+            here = Path(__file__).resolve()
+            for ancestor in here.parents:
+                candidate = ancestor / "workspace" / "templates"
+                if candidate.exists():
+                    return candidate
+        except Exception:
+            pass
+        return None
 
     def _build_input(self):
         with ui.HStack(height=28, spacing=4):
@@ -1000,10 +1155,10 @@ class ChatViewWindow(ui.Window):
         self.input_field.model.set_value(text)
 
     def _hide_chips(self):
-        if self._chips_shown:
-            self.chips_container.visible = False
-            self.chips_container.height = ui.Pixel(0)
-            self._chips_shown = False
+        # Keep canonical prompts available across the session. Older builds
+        # hid this row after the first message; multimodal mode switching
+        # benefits from persistent prompt access.
+        return
 
     async def _handle_service_request(self, text: str):
         try:
@@ -1056,8 +1211,95 @@ class ChatViewWindow(ui.Window):
                 self._on_undo_failed(payload)
             elif evt_type == "chat_cleared":
                 pass  # UI handled it locally — server confirmation only
+            elif evt_type == "canvas_proposed":
+                self._on_canvas_proposed(payload)
+            elif evt_type == "canvas_committed":
+                self._on_canvas_committed(payload)
+            elif evt_type == "canvas_preview_updated":
+                self._on_canvas_preview_updated(payload)
+            elif evt_type == "canvas_build_progress":
+                self._on_canvas_build_progress(payload)
+            elif evt_type == "canvas_build_completed":
+                self._on_canvas_build_completed(payload)
         except Exception as e:
             logger.exception(f"SSE handler failed for {evt_type}: {e}")
+
+    def _ensure_mirror(self):
+        if getattr(self, "_canvas_mirror", None) is not None:
+            return self._canvas_mirror
+        try:
+            from .canvas_mirror import CanvasMirrorWindow
+            session_id = getattr(self.service, "session_id", "default_session")
+            self._canvas_mirror = CanvasMirrorWindow(session_id=session_id)
+            return self._canvas_mirror
+        except Exception as e:
+            logger.warning(f"[CanvasMirror] unavailable: {e}")
+            return None
+
+    def _on_canvas_proposed(self, payload):
+        mirror = self._ensure_mirror()
+        if mirror is None:
+            return
+        try:
+            from pathlib import Path
+            path = payload.get("path")
+            mirror.show_with_preview(
+                preview_path=Path(path) if path else None,
+                state="proposed",
+                revision=payload.get("revision", 0),
+            )
+        except Exception as e:
+            logger.warning(f"[CanvasMirror] proposed update failed: {e}")
+
+    def _on_canvas_committed(self, payload):
+        mirror = self._ensure_mirror()
+        if mirror is None:
+            return
+        try:
+            mirror._state_label_revision = payload.get("revision", 0)
+        except Exception:
+            pass
+
+    def _on_canvas_preview_updated(self, payload):
+        mirror = self._ensure_mirror()
+        if mirror is None:
+            return
+        try:
+            from pathlib import Path
+            path = payload.get("path")
+            if path:
+                mirror.show_with_preview(
+                    preview_path=Path(path),
+                    state=mirror._state if mirror._state != "hidden" else "proposed",
+                    revision=payload.get("revision", 0),
+                )
+        except Exception as e:
+            logger.warning(f"[CanvasMirror] preview update failed: {e}")
+
+    def _on_canvas_build_progress(self, payload):
+        try:
+            tool = payload.get("tool", "")
+            idx = payload.get("index")
+            total = payload.get("total")
+            if idx is not None and total is not None:
+                self.live_header_lbl.text = f"Building ({idx}/{total}) - {tool}"
+            else:
+                self.live_header_lbl.text = f"Building - {tool}"
+        except Exception:
+            pass
+
+    def _on_canvas_build_completed(self, payload):
+        mirror = self._ensure_mirror()
+        if mirror is None:
+            return
+        try:
+            mirror.show_with_preview(
+                preview_path=None,
+                state="live",
+                revision=payload.get("revision", 0),
+            )
+        except Exception as e:
+            logger.warning(f"[CanvasMirror] completion update failed: {e}")
 
     def _on_cancel_ack(self, payload):
         """Server confirmed it has stopped issuing tool calls. Show a

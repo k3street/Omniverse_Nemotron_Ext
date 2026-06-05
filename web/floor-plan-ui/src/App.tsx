@@ -1,0 +1,277 @@
+/**
+ * Floor Plan SPA — Block 1A.3 entry point.
+ *
+ * Composition (top → bottom, left → right):
+ *
+ *   ┌─ Header ────────────────────────────────────────────────────┐
+ *   ├─Toolbar─┬─Palette─┬─CanvasViewport────────┬─PropertiesPanel─┤
+ *   │         │         │  (Konva + Transformer)│                 │
+ *   │         │         │  ConfirmBar (overlay) │                 │
+ *   │         │         │                       │                 │
+ *   ├─────────┴─────────┴───────ChatRibbon──────┴─────────────────┤
+ *   ├─StatusBar──────────────────────────────────────────────────┤
+ *   └─────────────────────────────────────────────────────────────┘
+ *
+ * Spec §11.2 + §11.3 + §13.
+ */
+import { useEffect, useState } from "react";
+import { CanvasGetResponse } from "./api/types";
+import {
+    CanvasApi,
+    createCanvasApi,
+    CanvasConflictError,
+    CanvasValidationError,
+} from "./api/floorPlanApi";
+import { useFloorPlanStore } from "./store/floorPlanStore";
+import { schedulePatch, startSSE, flushPendingPatch } from "./store/sync";
+import { Toolbar } from "./components/Toolbar";
+import { Palette } from "./components/Palette";
+import { CanvasViewport } from "./components/CanvasViewport";
+import { PropertiesPanel } from "./components/PropertiesPanel";
+import { ConfirmBar } from "./components/ConfirmBar";
+import { ChatRibbon } from "./components/ChatRibbon";
+import { KEYFRAMES_BREATHE } from "./canvas/motionTokens";
+
+const TEXT_PRIMARY = "#DDDDDD";
+const TEXT_SECONDARY = "#8A8E92";
+const ACCENT = "#76B900";
+const BG = "#111214";
+
+const api: CanvasApi = createCanvasApi("");
+
+export function App() {
+    const sessionId = useFloorPlanStore((s) => s.sessionId);
+    const spec = useFloorPlanStore((s) => s.spec);
+    const revision = useFloorPlanStore((s) => s.revision);
+    const setSpec = useFloorPlanStore((s) => s.setSpec);
+    const restoreFromWAL = useFloorPlanStore((s) => s.restoreFromWAL);
+    const applyAgentBulkUpdate = useFloorPlanStore((s) => s.applyAgentBulkUpdate);
+
+    const [bootStatus, setBootStatus] = useState<"loading" | "ready" | "error">("loading");
+    const [bootError, setBootError] = useState<string | null>(null);
+    const [conflict, setConflict] = useState<{ message: string } | null>(null);
+    const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+
+    // ─── Boot: GET spec, fall back to WAL on error ───────────────────
+    useEffect(() => {
+        (async () => {
+            try {
+                const res: CanvasGetResponse = await api.get(sessionId);
+                if (res.spec) {
+                    setSpec(res.spec, res.revision);
+                } else {
+                    // No spec yet — try WAL restore for offline-first
+                    if (!restoreFromWAL()) {
+                        setSpec(null, res.revision);
+                    }
+                }
+                setBootStatus("ready");
+            } catch (e) {
+                console.warn("[boot] GET failed, attempting WAL restore:", e);
+                if (restoreFromWAL()) {
+                    setBootStatus("ready");
+                } else {
+                    setBootError(String(e));
+                    setBootStatus("error");
+                }
+            }
+        })();
+    }, [sessionId, setSpec, restoreFromWAL]);
+
+    // ─── Auto-patch on local mutations ───────────────────────────────
+    useEffect(() => {
+        if (!spec || bootStatus !== "ready") return;
+        setSaveState("saving");
+        schedulePatch(api, spec)
+            .then((ok) => {
+                setSaveState(ok ? "saved" : "failed");
+                if (ok) setTimeout(() => setSaveState("idle"), 1500);
+            })
+            .catch((e) => {
+                if (e instanceof CanvasConflictError) {
+                    setConflict({
+                        message:
+                            `Server has revision ${e.detail.actual_revision}, ` +
+                            `you have ${e.detail.expected_revision}. Reloading…`,
+                    });
+                    if (e.detail.current_spec) {
+                        setSpec(e.detail.current_spec, e.detail.actual_revision);
+                    }
+                } else if (e instanceof CanvasValidationError) {
+                    setSaveState("failed");
+                }
+            });
+    }, [spec, bootStatus, setSpec]);
+
+    // ─── SSE listener — agent writes ─────────────────────────────────
+    useEffect(() => {
+        if (bootStatus !== "ready") return;
+        const stop = startSSE(sessionId, (evt) => {
+            if (evt.type === "canvas/agent_write" && evt.payload?.spec) {
+                const newSpec = evt.payload.spec as typeof spec;
+                if (newSpec && newSpec.objects) {
+                    applyAgentBulkUpdate(
+                        newSpec.objects,
+                        `Agent: ${evt.payload.summary ?? "scene update"}`,
+                    );
+                }
+            } else if (evt.type === "canvas/revision_bump" && evt.payload?.revision) {
+                useFloorPlanStore.setState({ revision: evt.payload.revision as number });
+            }
+        });
+        return stop;
+    }, [bootStatus, sessionId, applyAgentBulkUpdate]);
+
+    // ─── Force-flush pending patch on unmount ────────────────────────
+    useEffect(() => {
+        return () => {
+            void flushPendingPatch(api);
+        };
+    }, []);
+
+    return (
+        <div
+            style={{
+                display: "flex",
+                flexDirection: "column",
+                width: "100vw",
+                height: "100vh",
+                background: BG,
+                color: TEXT_PRIMARY,
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                fontSize: 13,
+                overflow: "hidden",
+            }}
+        >
+            <style>{KEYFRAMES_BREATHE}</style>
+            <Header />
+            <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
+                <Toolbar />
+                <Palette />
+                <div
+                    style={{
+                        flex: 1,
+                        display: "flex",
+                        flexDirection: "column",
+                        position: "relative",
+                        minWidth: 0,
+                    }}
+                >
+                    <div
+                        style={{
+                            flex: 1,
+                            position: "relative",
+                            display: "flex",
+                            minHeight: 0,
+                        }}
+                    >
+                        <CanvasViewport />
+                        <ConfirmBar />
+                        {bootStatus === "loading" && <BootOverlay text="Loading layout…" />}
+                        {bootStatus === "error" && (
+                            <BootOverlay text={`Boot failed: ${bootError}`} color="#FF4444" />
+                        )}
+                        {conflict && (
+                            <BootOverlay text={conflict.message} color="#FFA800" />
+                        )}
+                    </div>
+                    <ChatRibbon />
+                </div>
+                <PropertiesPanel />
+            </div>
+            <StatusBar revision={revision} saveState={saveState} sessionId={sessionId} />
+        </div>
+    );
+}
+
+function Header() {
+    return (
+        <div
+            style={{
+                height: 36,
+                background: "#1A1C1F",
+                borderBottom: "1px solid #2E3237",
+                display: "flex",
+                alignItems: "center",
+                paddingLeft: 12,
+                color: TEXT_PRIMARY,
+                fontSize: 13,
+                fontWeight: 600,
+                gap: 8,
+            }}
+        >
+            <span>Isaac Assist · Floor Plan</span>
+            <span style={{ color: TEXT_SECONDARY, fontSize: 11, fontWeight: 400 }}>
+                multimodal canvas v1.0
+            </span>
+        </div>
+    );
+}
+
+function BootOverlay({ text, color = TEXT_SECONDARY }: { text: string; color?: string }) {
+    return (
+        <div
+            style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(17,18,20,0.85)",
+                color,
+                fontSize: 13,
+                pointerEvents: "none",
+                zIndex: 100,
+            }}
+        >
+            {text}
+        </div>
+    );
+}
+
+function StatusBar({
+    revision,
+    saveState,
+    sessionId,
+}: {
+    revision: number;
+    saveState: "idle" | "saving" | "saved" | "failed";
+    sessionId: string;
+}) {
+    let saveLabel = "";
+    let saveColor: string = TEXT_SECONDARY;
+    if (saveState === "saving") {
+        saveLabel = "● saving…";
+        saveColor = "#FFA800";
+    } else if (saveState === "saved") {
+        saveLabel = "✓ saved";
+        saveColor = ACCENT;
+    } else if (saveState === "failed") {
+        saveLabel = "⚠ save failed";
+        saveColor = "#FF4444";
+    }
+    return (
+        <div
+            style={{
+                height: 22,
+                background: "#181A1D",
+                borderTop: "1px solid #2E3237",
+                display: "flex",
+                alignItems: "center",
+                paddingLeft: 12,
+                paddingRight: 12,
+                color: TEXT_SECONDARY,
+                fontSize: 11,
+                gap: 16,
+                flexShrink: 0,
+            }}
+        >
+            <span style={{ color: ACCENT }}>● rev {revision}</span>
+            <span>session: {sessionId}</span>
+            {saveLabel && <span style={{ color: saveColor }}>{saveLabel}</span>}
+            <span style={{ marginLeft: "auto", fontSize: 10 }}>
+                ⌘Z undo · ⌘⇧Z redo · ⌫ delete · ⎋ deselect
+            </span>
+        </div>
+    );
+}

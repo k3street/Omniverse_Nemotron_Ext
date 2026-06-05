@@ -67879,3 +67879,11 @@ def _resolve_auto_target_source(args: dict) -> tuple[str, str]:
         return "diffik", "Isaac Lab available; no better option"
     # 5) Last resort
     return "native", "no better option; falling back to native"
+
+
+# === MULTIMODAL HANDLERS (multimodal-foundation session) ===
+# Keep the canvas/LayoutSpec handlers outside this large shared file; this
+# import registers read/update/commit/apply/query/rebind handlers in-place.
+from .multimodal_handlers import register_multimodal_handlers
+register_multimodal_handlers(DATA_HANDLERS)
+# === END MULTIMODAL HANDLERS ===

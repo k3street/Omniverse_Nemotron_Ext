@@ -1,0 +1,213 @@
+{
+  "version": "1.0",
+  "tags": [
+    {
+      "tag": "isaac:transport.conveyor",
+      "status": "active",
+      "description": "Object placed on a conveyor for translation between stations.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:transport.belt",
+      "status": "active",
+      "description": "Generic belt-driven transport surface.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:robot.fixed_base.arm",
+      "status": "active",
+      "description": "Robot arm with a fixed base (Franka, UR, Kinova, IIWA, Jaco7).",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:robot.mobile.wheeled",
+      "status": "active",
+      "description": "Wheeled mobile platform (Nova Carter etc).",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:robot.mobile.legged",
+      "status": "active",
+      "description": "Legged mobile platform (quadruped, humanoid). Reserved.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:topology.linear_pipeline",
+      "status": "active",
+      "description": "Linear in\u2192through\u2192out pipeline of stations.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:topology.parallel_lanes",
+      "status": "active",
+      "description": "Multiple parallel processing lanes.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:topology.hub_spoke",
+      "status": "active",
+      "description": "Central hub with spoke branches. Reserved.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:routing.semantic_label.color",
+      "status": "active",
+      "description": "Routing decisions driven by color semantic labels.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:routing.semantic_label.shape",
+      "status": "active",
+      "description": "Routing decisions driven by shape labels.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:routing.semantic_label.size",
+      "status": "active",
+      "description": "Routing decisions driven by size labels.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:invariant.cube_upright",
+      "status": "active",
+      "description": "Cube must end up upright (orientation invariant). CP-05 pattern.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:invariant.no_collision_human",
+      "status": "active",
+      "description": "Robot must not collide with human in workspace. Reserved.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:station.passive_flip_wall",
+      "status": "active",
+      "description": "Passive flip station \u2014 gravity + ramp + end-stop. CP-05 pattern.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:station.active_flipper",
+      "status": "active",
+      "description": "Active flip station \u2014 robotic actuator. Reserved.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:constraint.footprint_xy_box",
+      "status": "active",
+      "description": "Layout must fit inside a fixed XY footprint box. CP-04 pattern.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:constraint.reach_limited",
+      "status": "active",
+      "description": "Operations limited by robot reach radius.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:sensor.camera.rgb",
+      "status": "active",
+      "description": "RGB camera sensor.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:sensor.camera.depth",
+      "status": "active",
+      "description": "Depth camera sensor.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:sensor.lidar",
+      "status": "active",
+      "description": "Lidar sensor.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:agent.human.passive",
+      "status": "active",
+      "description": "Passive human present in workspace (reserved for CP-06).",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:agent.human.active",
+      "status": "active",
+      "description": "Active human collaborating with robot. Reserved.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "isaac:behavior.robot_stop_on_human",
+      "status": "active",
+      "description": "Robot stops when human enters safety zone. Reserved.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "cad:imported.fusion360",
+      "status": "active",
+      "description": "Layout imported from Fusion 360 model.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "cad:imported.solidworks",
+      "status": "active",
+      "description": "Layout imported from SolidWorks model.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    },
+    {
+      "tag": "cad:imported.onshape",
+      "status": "active",
+      "description": "Layout imported from Onshape model.",
+      "added_in_version": "1.0",
+      "deprecated_in_version": null,
+      "replaced_by": null
+    }
+  ]
+}

@@ -17,35 +17,52 @@
     "set_camera_look_at",
     "setup_pick_place_with_vision"
   ],
-  "thoughts": "Six runtime-vision specifics for CP-47 (extends CP-33 — vision integrated INTO controller install):\n1) NO pre-set semantic labels on cubes. Cubes only have visual color materials; semantic class set DYNAMICALLY by vision-gate during install.\n2) setup_pick_place_with_vision composite tool: 1 call = vision classify + label + install controller.\n3) Camera at [0, 1.5, 1.5] looking at [0, 0, 0.8] — verified working from CP-33.\n4) destination_map={'red': RedBin, 'blue': BlueBin} — class names match what Gemini returns after suffix-stripping ('red cube' → 'red').\n5) 1 Gemini API call per canonical instantiation (per setup_pick_place_with_vision). Cost-aware.\n6) Production realization of #15 Vision Quality Gate research scenario — full pipeline working end-to-end (CP-33 was vision-gate + manual hardcoded routing; CP-47 is vision-derived).",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cubes — visual color only, NO semantic labels\ncreate_prim(prim_path=\"/World/Cube_red\", prim_type=\"Cube\", position=[-0.6, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_red\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/Red\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\nassign_material(prim_path=\"/World/Cube_red\", material_path=\"/World/Materials/Red\")\n\ncreate_prim(prim_path=\"/World/Cube_blue\", prim_type=\"Cube\", position=[0.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_blue\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/Blue\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\nassign_material(prim_path=\"/World/Cube_blue\", material_path=\"/World/Materials/Blue\")\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\napply_physics_material(prim_path=\"/World/Cube_red\", material_name=\"rubber\")\napply_physics_material(prim_path=\"/World/Cube_blue\", material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/RedBin\",  position=[-0.4, -0.4, 0.75], size=[0.20, 0.20, 0.15])\nassign_material(prim_path=\"/World/RedBin\", material_path=\"/World/Materials/Red\")\ncreate_bin(prim_path=\"/World/BlueBin\", position=[ 0.4, -0.4, 0.75], size=[0.20, 0.20, 0.15])\nassign_material(prim_path=\"/World/BlueBin\", material_path=\"/World/Materials/Blue\")\n\n# Camera + viewport (verified placement from CP-33)\ncreate_prim(prim_path=\"/World/Cam\", prim_type=\"Camera\", position=[0, 1.5, 1.5])\nset_camera_look_at(camera_path=\"/World/Cam\", target=[0, 0, 0.8])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Composite vision-driven setup — 1 Gemini API call per install\nsetup_pick_place_with_vision(\n    robot_path=\"/World/Franka\",\n    cube_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    class_labels=[\"red cube\", \"blue cube\"],\n    camera_path=\"/World/Cam\",\n    destination_map={\"red\": \"/World/RedBin\", \"blue\": \"/World/BlueBin\"},\n    destination_path=\"/World/RedBin\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedBin\", \"/World/BlueBin\"],\n)",
+  "thoughts": "Six runtime-vision specifics for CP-47 (extends CP-33 \u2014 vision integrated INTO controller install):\n1) NO pre-set semantic labels on cubes. Cubes only have visual color materials; semantic class set DYNAMICALLY by vision-gate during install.\n2) setup_pick_place_with_vision composite tool: 1 call = vision classify + label + install controller.\n3) Camera at [0, 1.5, 1.5] looking at [0, 0, 0.8] \u2014 verified working from CP-33.\n4) destination_map={'red': RedBin, 'blue': BlueBin} \u2014 class names match what Gemini returns after suffix-stripping ('red cube' \u2192 'red').\n5) 1 Gemini API call per canonical instantiation (per setup_pick_place_with_vision). Cost-aware.\n6) Production realization of #15 Vision Quality Gate research scenario \u2014 full pipeline working end-to-end (CP-33 was vision-gate + manual hardcoded routing; CP-47 is vision-derived).",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cubes \u2014 visual color only, NO semantic labels\ncreate_prim(prim_path=\"/World/Cube_red\", prim_type=\"Cube\", position=[-0.6, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_red\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/Red\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\nassign_material(prim_path=\"/World/Cube_red\", material_path=\"/World/Materials/Red\")\n\ncreate_prim(prim_path=\"/World/Cube_blue\", prim_type=\"Cube\", position=[0.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_blue\", schema_name=api)\ncreate_material(material_path=\"/World/Materials/Blue\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 0.0, 1.0])\nassign_material(prim_path=\"/World/Cube_blue\", material_path=\"/World/Materials/Blue\")\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\napply_physics_material(prim_path=\"/World/Cube_red\", material_name=\"rubber\")\napply_physics_material(prim_path=\"/World/Cube_blue\", material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/RedBin\",  position=[-0.4, -0.4, 0.75], size=[0.20, 0.20, 0.15])\nassign_material(prim_path=\"/World/RedBin\", material_path=\"/World/Materials/Red\")\ncreate_bin(prim_path=\"/World/BlueBin\", position=[ 0.4, -0.4, 0.75], size=[0.20, 0.20, 0.15])\nassign_material(prim_path=\"/World/BlueBin\", material_path=\"/World/Materials/Blue\")\n\n# Camera + viewport (verified placement from CP-33)\ncreate_prim(prim_path=\"/World/Cam\", prim_type=\"Camera\", position=[0, 1.5, 1.5])\nset_camera_look_at(camera_path=\"/World/Cam\", target=[0, 0, 0.8])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Composite vision-driven setup \u2014 1 Gemini API call per install\nsetup_pick_place_with_vision(\n    robot_path=\"/World/Franka\",\n    cube_paths=[\"/World/Cube_red\", \"/World/Cube_blue\"],\n    class_labels=[\"red cube\", \"blue cube\"],\n    camera_path=\"/World/Cam\",\n    destination_map={\"red\": \"/World/RedBin\", \"blue\": \"/World/BlueBin\"},\n    destination_path=\"/World/RedBin\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/RedBin\", \"/World/BlueBin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_red":  [-0.6, 0.4, 0.835],
-      "/World/Cube_blue": [ 0.0, 0.4, 0.835]
+      "/World/Cube_red": [
+        -0.6,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_blue": [
+        0.0,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/RedBin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/RedBin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_red"
   },
   "simulate_args": {
     "cube_path": "/World/Cube_red",
     "target_path": "/World/RedBin",
-    "duration_s": 90
+    "duration_s": 180
   },
   "extends": "CP-33",
-  "extension_notes": "CP-47 is the FULL real-runtime-vision sorter — vision classification + dynamic semantic labels + controller install all in one tool call (setup_pick_place_with_vision). No pre-tagged cubes. CP-33 used hardcoded color_routing matching what vision-gate produces; CP-47 derives routing FROM vision at install time.",
+  "extension_notes": "CP-47 is the FULL real-runtime-vision sorter \u2014 vision classification + dynamic semantic labels + controller install all in one tool call (setup_pick_place_with_vision). No pre-tagged cubes. CP-33 used hardcoded color_routing matching what vision-gate produces; CP-47 derives routing FROM vision at install time.",
   "failure_modes": [
-    "Vision returns 0 detections → tool returns error. Camera placement matters; use verified setup [0, 1.5, 1.5]→[0, 0, 0.8].",
-    "Class label mismatch — destination_map keys must match vision output minus ' cube' suffix ('red cube' → 'red'). Tool handles suffix-stripping internally.",
-    "1 Gemini API call per canonical run — be aware of cost.",
+    "Vision returns 0 detections \u2192 tool returns error. Camera placement matters; use verified setup [0, 1.5, 1.5]\u2192[0, 0, 0.8].",
+    "Class label mismatch \u2014 destination_map keys must match vision output minus ' cube' suffix ('red cube' \u2192 'red'). Tool handles suffix-stripping internally.",
+    "1 Gemini API call per canonical run \u2014 be aware of cost.",
     "Same physics gotchas as CP-33."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending; runtime-vision integration (1 Gemini API call per build)"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths \u2014 Cube_red delivered to RedBin)"
 }

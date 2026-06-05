@@ -1,6 +1,6 @@
 {
   "task_id": "CP-60",
-  "goal": "Build a recirculation-loop demo: 1 cube travels around a 2x0.6m closed-loop conveyor (4 segments). No robot — pure conveyor mechanics. Realizes #17 Postal Cross-Belt Sorter infrastructure (loop topology).",
+  "goal": "Build a recirculation-loop demo: 1 cube travels around a 2x0.6m closed-loop conveyor (4 segments). No robot \u2014 pure conveyor mechanics. Realizes #17 Postal Cross-Belt Sorter infrastructure (loop topology).",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -10,22 +10,47 @@
     "apply_physics_material",
     "bulk_set_attribute"
   ],
-  "thoughts": "Six recirculation-loop specifics for CP-60:\n1) Loop /World/Loop centered at [0, 0, 0.78], length 2.0m, width 0.6m, velocity 0.2.\n2) 4 conveyor segments arranged as rectangle (Top moves +X, Right moves -Y, Bottom moves -X, Left moves +Y).\n3) 1 cube starts on Top segment at [0, +0.3, 0.835]. Belt friction carries it +X.\n4) When cube reaches end of Top, it falls onto Right segment (joins -Y motion).\n5) Cube continues around loop. Demo of closed-loop topology.\n6) Realizes #17 Postal Cross-Belt Sorter loop topology. Full scenario also adds robot + barcode_reader + vision-routing — combine for full pipeline.",
+  "thoughts": "Six recirculation-loop specifics for CP-60:\n1) Loop /World/Loop centered at [0, 0, 0.78], length 2.0m, width 0.6m, velocity 0.2.\n2) 4 conveyor segments arranged as rectangle (Top moves +X, Right moves -Y, Bottom moves -X, Left moves +Y).\n3) 1 cube starts on Top segment at [0, +0.3, 0.835]. Belt friction carries it +X.\n4) When cube reaches end of Top, it falls onto Right segment (joins -Y motion).\n5) Cube continues around loop. Demo of closed-loop topology.\n6) Realizes #17 Postal Cross-Belt Sorter loop topology. Full scenario also adds robot + barcode_reader + vision-routing \u2014 combine for full pipeline.",
   "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Recirculation loop\ncreate_recirculation_loop(\n    loop_path=\"/World/Loop\",\n    center=[0, 0, 0.78],\n    length=2.0,\n    width=0.6,\n    velocity=0.2,\n)\n\n# Test cube on Top segment\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[0, 0.3, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [0, 0.3, 0.835]
+      "/World/Cube_1": [
+        0,
+        0.3,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/Loop/Top":    [0.2, 0, 0],
-      "/World/Loop/Right":  [0, -0.2, 0],
-      "/World/Loop/Bottom": [-0.2, 0, 0],
-      "/World/Loop/Left":   [0, 0.2, 0]
+      "/World/Loop/Top": [
+        0.2,
+        0,
+        0
+      ],
+      "/World/Loop/Right": [
+        0,
+        -0.2,
+        0
+      ],
+      "/World/Loop/Bottom": [
+        -0.2,
+        0,
+        0
+      ],
+      "/World/Loop/Left": [
+        0,
+        0.2,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Loop", "pick_path": "/World/Loop/Top", "place_path": "/World/Loop/Right", "robot_kind": "n/a"}
+      {
+        "robot_path": "",
+        "pick_path": "/World/Loop/Top",
+        "place_path": "/World/Loop/Right",
+        "robot_kind": "n/a"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
@@ -35,11 +60,11 @@
     "duration_s": 30
   },
   "extends": "CP-26",
-  "extension_notes": "CP-60 demonstrates create_recirculation_loop (#17 infrastructure). 4 conveyor segments form a rectangular closed loop; cubes recirculate via belt friction. Full Postal Cross-Belt Sorter scenario adds robot + barcode + vision — combine with CP-33/47 patterns.",
+  "extension_notes": "CP-60 demonstrates create_recirculation_loop (#17 infrastructure). 4 conveyor segments form a rectangular closed loop; cubes recirculate via belt friction. Full Postal Cross-Belt Sorter scenario adds robot + barcode + vision \u2014 combine with CP-33/47 patterns.",
   "failure_modes": [
-    "Cube must transition between segments — at corners belt direction changes 90°. Cube momentum may not carry into next segment. Real industrial loops have curved segments or transfer wheels.",
-    "Verify_args is approximate — recirculation loop isn't a typical pick-place flow.",
-    "Loop dimensions: 2.0×0.6m. Adjust for canonical scale needs."
+    "Cube must transition between segments \u2014 at corners belt direction changes 90\u00b0. Cube momentum may not carry into next segment. Real industrial loops have curved segments or transfer wheels.",
+    "Verify_args is approximate \u2014 recirculation loop isn't a typical pick-place flow.",
+    "Loop dimensions: 2.0\u00d70.6m. Adjust for canonical scale needs."
   ],
   "verified_status": "build-spec-2026-05-08; form-gate verification pending"
 }

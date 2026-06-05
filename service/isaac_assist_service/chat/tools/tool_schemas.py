@@ -8793,4 +8793,105 @@ ISAAC_SIM_TOOLS = [
             },
         },
 
+    # ─── Multimodal Canvas / LayoutSpec ─────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "read_layout_spec",
+            "description": "Read the current multimodal LayoutSpec for a session. Use before canvas edits or role rebinding.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "detail_level": {"type": "string", "enum": ["summary", "full"], "default": "full"},
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_layout_spec",
+            "description": "Apply structured mutations to the current LayoutSpec using a parent revision guard.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "parent_revision": {"type": "integer", "minimum": 0},
+                    "mutations": {"type": "array", "items": {"type": "object"}},
+                    "reason": {"type": "string"},
+                },
+                "required": ["session_id", "parent_revision", "mutations"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "commit_layout_spec",
+            "description": "Commit the proposed LayoutSpec for a session after user acceptance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_layout_spec_to_scene",
+            "description": "Ratify the current LayoutSpec against a canonical template and prepare scene application.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "template_id": {"type": "string"},
+                    "force_freeform": {"type": "boolean", "default": False},
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_layout_metric",
+            "description": "Query geometry or structural metrics from the current LayoutSpec, such as counts, bounds, or distances.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "metric": {
+                        "type": "string",
+                        "enum": ["counts", "bounds", "distance", "objects_by_class", "bindings"],
+                    },
+                    "object_a": {"type": "string"},
+                    "object_b": {"type": "string"},
+                    "object_class": {"type": "string"},
+                },
+                "required": ["session_id", "metric"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rebind_role",
+            "description": "Bind or correct a template role to a specific object in the current LayoutSpec.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "role_name": {"type": "string"},
+                    "object_id": {"type": "string"},
+                },
+                "required": ["session_id", "role_name", "object_id"],
+            },
+        },
+    },
+
 ]

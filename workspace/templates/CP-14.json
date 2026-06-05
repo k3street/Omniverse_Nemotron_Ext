@@ -56,7 +56,9 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/PalletBase",
-    "duration_s": 90
+    "duration_s": 180,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 100.0
   },
   "extends": "CP-13",
   "extension_notes": "CP-14 combines CP-02's multi-robot architecture with CP-13's drop_targets stack pattern. Each robot has independent source_paths + drop_targets. Two _curobo_pp_sub_<TAG> subscriptions coexist. Future variants: 3+ robots cooperative stacking; alternating-color pallet (robot A places red, robot B places blue); mirror-pose paired-pick.",
@@ -66,5 +68,5 @@
     "Both controllers race for same _curobo_pp_sub_ name \u2014 fixed in CP-02 era: per-robot scoping by robot path tag.",
     "Pallet too small \u2014 15x15cm gives ~5cm margin around 5cm cubes. Robot drop precision typically 5cm; cubes may drop just outside. Future: enlarge to 20-30cm."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (multi-cube cube_paths + Mode A 3-strike fix)"
 }

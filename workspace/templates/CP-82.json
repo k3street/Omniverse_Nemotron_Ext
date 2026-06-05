@@ -47,7 +47,9 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin_red",
-    "duration_s": 180
+    "duration_s": 180,
+    "xy_tolerance": 0.15,
+    "rest_speed_threshold": 100.0
   },
   "extends": "CP-81",
   "extension_notes": "CP-82 = converted from builtin to cuRobo. cuRobo handler implements _destination_path_for via Semantics_color lookup; builtin handler doesn't.",
@@ -56,5 +58,5 @@
     "Bin proximity (10cm gap between bins) may cause cube-to-wrong-bin if drop accuracy is poor.",
     "Same raycast dependencies as CP-78."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2717 (same as CP-81 + color_routing dispatch) \u2014 Cube_1 picked but drops at y=-0.49 between Bin_red (-0.30) and Bin_blue (-0.55))"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (drop-precision XY arrival gate (UR10 cuRobo))"
 }

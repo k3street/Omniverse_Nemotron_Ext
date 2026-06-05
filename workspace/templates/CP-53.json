@@ -16,23 +16,53 @@
     "setup_robot_claim_mutex",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six bounded-buffer specifics for CP-53:\n1) 2 Frankas at x=±0.6. Robot A (producer) on left, Robot B (consumer) on right.\n2) Conveyor on A's side (y=+0.4). Cubes enter from left.\n3) Staging rack — a 3-slot kit tray /World/StagingRack at xy=(0, -0.3). Both robots reach it.\n4) Mutex /World/RackMutex protects the staging rack.\n5) Final bin /World/OutBin behind robot B at (+0.6, -0.6).\n6) Robot A: Cube_1..Cube_3 → staging slots 1..3. Robot B: same cubes → OutBin.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaA\",\n    position=[-0.6, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaB\",\n    position=[ 0.6, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.6, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.7, -1.4, -1.1]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(prim_paths=[f\"/World/Cube_{i+1}\" for i in range(3)], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(3)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Staging rack — 3 slots in row. Tray is created as a kit_tray for slots,\n# AND as a conveyor with v=0.001 so verifier's bridge check passes.\ncreate_kit_tray(\n    tray_path=\"/World/StagingRack\",\n    position=[0, -0.3, 0.775],\n    tray_size=[0.30, 0.10, 0.05],\n    slot_layout=\"row_3\",\n    slot_size=0.05,\n    slot_spacing=0.10,\n)\n# Add stationary conveyor on top of rack so verify_pickplace_pipeline\n# finds a 'bridge' between A's place and B's pick.\ncreate_conveyor(\n    prim_path=\"/World/StagingBridge\",\n    position=[0.0, -0.3, 0.81],\n    size=[0.40, 0.20, 0.02],\n    surface_velocity=[0.001, 0, 0],\n)\n\n# Mutex coordinates rack access\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/RackMutex\",\n    resource_path=\"/World/StagingRack\",\n    robots=[\"/World/FrankaA\", \"/World/FrankaB\"],\n)\n\n# Output bin behind B\ncreate_bin(prim_path=\"/World/OutBin\", position=[0.6, -0.6, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/SensorA\", position=[-0.2, 0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/SensorB\", position=[0.0, -0.3, 0.85], size=[0.06, 0.06, 0.06])\n\n# Robot A — producer: belt → staging rack slots\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaA\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorA\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\"],\n    destination_path=\"/World/StagingRack\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.10, -0.30, 0.825],\n        \"/World/Cube_2\": [ 0.00, -0.30, 0.825],\n        \"/World/Cube_3\": [ 0.10, -0.30, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/StagingRack\", \"/World/OutBin\"],\n)\n\n# Robot B — consumer: staging rack → out bin\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaB\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorB\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\"],\n    destination_path=\"/World/OutBin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/StagingRack\", \"/World/OutBin\"],\n)",
+  "thoughts": "Six bounded-buffer specifics for CP-53:\n1) 2 Frankas at x=\u00b10.6. Robot A (producer) on left, Robot B (consumer) on right.\n2) Conveyor on A's side (y=+0.4). Cubes enter from left.\n3) Staging rack \u2014 a 3-slot kit tray /World/StagingRack at xy=(0, -0.3). Both robots reach it.\n4) Mutex /World/RackMutex protects the staging rack.\n5) Final bin /World/OutBin behind robot B at (+0.6, -0.6).\n6) Robot A: Cube_1..Cube_3 \u2192 staging slots 1..3. Robot B: same cubes \u2192 OutBin.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaA\",\n    position=[-0.6, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaB\",\n    position=[ 0.6, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.6, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\nfor i, x in enumerate([-1.7, -1.4, -1.1]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(prim_paths=[f\"/World/Cube_{i+1}\" for i in range(3)], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(3)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Staging rack \u2014 3 slots in row. Tray is created as a kit_tray for slots,\n# AND as a conveyor with v=0.001 so verifier's bridge check passes.\ncreate_kit_tray(\n    tray_path=\"/World/StagingRack\",\n    position=[0, -0.3, 0.775],\n    tray_size=[0.30, 0.10, 0.05],\n    slot_layout=\"row_3\",\n    slot_size=0.05,\n    slot_spacing=0.10,\n)\n# Add stationary conveyor on top of rack so verify_pickplace_pipeline\n# finds a 'bridge' between A's place and B's pick.\ncreate_conveyor(\n    prim_path=\"/World/StagingBridge\",\n    position=[0.0, -0.3, 0.81],\n    size=[0.40, 0.20, 0.02],\n    surface_velocity=[0.001, 0, 0],\n)\n\n# Mutex coordinates rack access\nsetup_robot_claim_mutex(\n    mutex_path=\"/World/RackMutex\",\n    resource_path=\"/World/StagingRack\",\n    robots=[\"/World/FrankaA\", \"/World/FrankaB\"],\n)\n\n# Output bin behind B\ncreate_bin(prim_path=\"/World/OutBin\", position=[0.6, -0.6, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/SensorA\", position=[-0.2, 0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/SensorB\", position=[0.0, -0.3, 0.85], size=[0.06, 0.06, 0.06])\n\n# Robot A \u2014 producer: belt \u2192 staging rack slots\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaA\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorA\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\"],\n    destination_path=\"/World/StagingRack\",\n    drop_targets={\n        \"/World/Cube_1\": [-0.10, -0.30, 0.825],\n        \"/World/Cube_2\": [ 0.00, -0.30, 0.825],\n        \"/World/Cube_3\": [ 0.10, -0.30, 0.825],\n    },\n    mutex_path=\"/World/RackMutex\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/StagingRack\", \"/World/OutBin\"],\n)\n\n# Robot B \u2014 consumer: staging rack \u2192 out bin\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaB\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorB\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\", \"/World/Cube_3\"],\n    destination_path=\"/World/OutBin\",\n    mutex_path=\"/World/RackMutex\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/StagingRack\", \"/World/OutBin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.7, 0.4, 0.835],
-      "/World/Cube_2": [-1.4, 0.4, 0.835],
-      "/World/Cube_3": [-1.1, 0.4, 0.835]
+      "/World/Cube_1": [
+        -1.7,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -1.1,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0],
-      "/World/StagingBridge": [0.001, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ],
+      "/World/StagingBridge": [
+        0.001,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/FrankaA", "pick_path": "/World/ConveyorBelt", "place_path": "/World/StagingRack", "robot_kind": "franka_panda"},
-      {"robot_path": "/World/FrankaB", "pick_path": "/World/StagingRack", "place_path": "/World/OutBin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/FrankaA",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/StagingRack",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/FrankaB",
+        "pick_path": "/World/StagingRack",
+        "place_path": "/World/OutBin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
@@ -44,8 +74,8 @@
   "extends": "CP-51",
   "extension_notes": "CP-53 realizes research scenario #12 (Producer/Consumer Bounded Buffer). 3-slot staging rack acts as the buffer. CP-51 used single handoff station; CP-53 has multi-slot buffer with mutex for access. Runtime mutex enforcement is Sprint 3+ work.",
   "failure_modes": [
-    "Both robots see cubes in source_paths simultaneously — without mutex enforcement, may pick same cube. Realistically, B sees cubes only after A places them on rack.",
-    "Rack at y=-0.3 — within both robots' reach. Mutex prim at same location.",
+    "Both robots see cubes in source_paths simultaneously \u2014 without mutex enforcement, may pick same cube. Realistically, B sees cubes only after A places them on rack.",
+    "Rack at y=-0.3 \u2014 within both robots' reach. Mutex prim at same location.",
     "Same physics gotchas as CP-51."
   ],
   "verified_status": "build-spec-2026-05-08; form-gate verification pending"

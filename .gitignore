@@ -49,3 +49,7 @@ launch_isaac_fixed.sh
 =3.0.0
 .claude/
 docs/research/PRIVATE/
+
+# Floor-plan-ui build artifacts
+web/floor-plan-ui/node_modules/
+web/floor-plan-ui/dist/

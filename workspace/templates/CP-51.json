@@ -15,20 +15,38 @@
     "setup_robot_handoff_signal",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six handoff specifics for CP-51 (extends CP-02 — single-robot relay → two-robot handoff via marker):\n1) 2 Frankas at x=±0.7, both facing +Y.\n2) Single conveyor at y=0.4, cube starts at -1.4. Belt carries cube to robot A's pick zone.\n3) Robot A picks from conveyor, drops at handoff marker /World/Handoff at xy=(0, -0.3, 0.825). Position chosen to be in BOTH robots' reach (sqrt(0.7^2+0.3^2) = 0.76m, within 0.85m).\n4) Robot B picks from handoff marker, drops in /World/Bin at xy=(0, -0.7, 0.75). Within reach (sqrt(0.7^2+0.7^2)=0.99m — borderline, use closer xy if needed).\n5) Two controller installs — A's source_paths includes Cube_1, drop_target = handoff. B's source_paths also includes Cube_1 (after A's drop), drop_target = bin.\n6) Handoff marker prim has state attrs but RUNTIME CLAIM not enforced (no controller integration). Robots may try to grab simultaneously.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Robot A — left, picks from conveyor\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaA\",\n    position=[-0.7, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n# Robot B — right, picks from handoff\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaB\",\n    position=[ 0.7, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.7, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-2.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Handoff station — marker prim used for coordination\nsetup_robot_handoff_signal(\n    handoff_path=\"/World/Handoff\",\n    position=[0, -0.3, 0.825],\n    robot_a=\"/World/FrankaA\",\n    robot_b=\"/World/FrankaB\",\n)\n\n# Final bin behind robot B\ncreate_bin(prim_path=\"/World/Bin\", position=[0.7, -0.5, 0.75], size=[0.3, 0.3, 0.15])\n\n# Sensors\nadd_proximity_sensor(sensor_path=\"/World/SensorA\", position=[-0.3, 0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/SensorB\", position=[0.0, -0.3, 0.85], size=[0.06, 0.06, 0.06])\n\n# Robot A controller — picks from belt, drops at handoff\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaA\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorA\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Handoff\",\n    drop_target=[0, -0.3, 0.825],\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Handoff\", \"/World/Bin\"],\n)\n\n# Robot B controller — picks from handoff, drops in bin\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaB\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorB\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Handoff\", \"/World/Bin\"],\n)",
+  "thoughts": "Six handoff specifics for CP-51 (extends CP-02 \u2014 single-robot relay \u2192 two-robot handoff via marker):\n1) 2 Frankas at x=\u00b10.7, both facing +Y.\n2) Single conveyor at y=0.4, cube starts at -1.4. Belt carries cube to robot A's pick zone.\n3) Robot A picks from conveyor, drops at handoff marker /World/Handoff at xy=(0, -0.3, 0.825). Position chosen to be in BOTH robots' reach (sqrt(0.7^2+0.3^2) = 0.76m, within 0.85m).\n4) Robot B picks from handoff marker, drops in /World/Bin at xy=(0, -0.7, 0.75). Within reach (sqrt(0.7^2+0.7^2)=0.99m \u2014 borderline, use closer xy if needed).\n5) Two controller installs \u2014 A's source_paths includes Cube_1, drop_target = handoff. B's source_paths also includes Cube_1 (after A's drop), drop_target = bin.\n6) Handoff marker prim has state attrs but RUNTIME CLAIM not enforced (no controller integration). Robots may try to grab simultaneously.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Robot A \u2014 left, picks from conveyor\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaA\",\n    position=[-0.7, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n# Robot B \u2014 right, picks from handoff\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/FrankaB\",\n    position=[ 0.7, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[-0.7, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-2.0, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\n# Handoff station \u2014 marker prim used for coordination\nsetup_robot_handoff_signal(\n    handoff_path=\"/World/Handoff\",\n    position=[0, -0.3, 0.825],\n    robot_a=\"/World/FrankaA\",\n    robot_b=\"/World/FrankaB\",\n)\n\n# Final bin behind robot B\ncreate_bin(prim_path=\"/World/Bin\", position=[0.7, -0.5, 0.75], size=[0.3, 0.3, 0.15])\n\n# Sensors\nadd_proximity_sensor(sensor_path=\"/World/SensorA\", position=[-0.3, 0.4, 0.835], size=[0.06, 0.06, 0.06])\nadd_proximity_sensor(sensor_path=\"/World/SensorB\", position=[0.0, -0.3, 0.85], size=[0.06, 0.06, 0.06])\n\n# Robot A controller \u2014 picks from belt, drops at handoff\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaA\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorA\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Handoff\",\n    drop_target=[0, -0.3, 0.825],\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Handoff\", \"/World/Bin\"],\n)\n\n# Robot B controller \u2014 picks from handoff, drops in bin\nsetup_pick_place_controller(\n    robot_path=\"/World/FrankaB\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/SensorB\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Handoff\", \"/World/Bin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-2.0, 0.4, 0.835]
+      "/World/Cube_1": [
+        -2.0,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/FrankaA", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Handoff", "robot_kind": "franka_panda"},
-      {"robot_path": "/World/FrankaB", "pick_path": "/World/Handoff", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/FrankaA",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/Handoff",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/FrankaB",
+        "pick_path": "/World/Handoff",
+        "place_path": "/World/Bin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_1"
   },
@@ -38,11 +56,11 @@
     "duration_s": 120
   },
   "extends": "CP-02",
-  "extension_notes": "CP-51 demonstrates robot-to-robot handoff via fixed-point marker. CP-02 used belt-mediated relay; CP-51 uses direct robot-to-robot via shared station. Realizes research scenario #11. Runtime claim coordination NOT implemented — robots may race; future work needs setup_robot_claim_mutex + controller hooks.",
+  "extension_notes": "CP-51 demonstrates robot-to-robot handoff via fixed-point marker. CP-02 used belt-mediated relay; CP-51 uses direct robot-to-robot via shared station. Realizes research scenario #11. Runtime claim coordination NOT implemented \u2014 robots may race; future work needs setup_robot_claim_mutex + controller hooks.",
   "failure_modes": [
-    "Both robots try to pick Cube_1 simultaneously — race condition. Mitigated by sensor zones (A's sensor at -0.3, B's at 0); cube must be at one zone OR other.",
-    "Handoff position at sqrt(0.7^2+0.3^2)=0.76m from each robot — within 0.85m reach.",
-    "Bin at sqrt(0.7^2+0.7^2)=0.99m from FrankaB — at reach LIMIT. May fail planning. Move closer if needed.",
+    "Both robots try to pick Cube_1 simultaneously \u2014 race condition. Mitigated by sensor zones (A's sensor at -0.3, B's at 0); cube must be at one zone OR other.",
+    "Handoff position at sqrt(0.7^2+0.3^2)=0.76m from each robot \u2014 within 0.85m reach.",
+    "Bin at sqrt(0.7^2+0.7^2)=0.99m from FrankaB \u2014 at reach LIMIT. May fail planning. Move closer if needed.",
     "Same physics gotchas as CP-02."
   ],
   "verified_status": "build-spec-2026-05-08; form-gate verification pending"

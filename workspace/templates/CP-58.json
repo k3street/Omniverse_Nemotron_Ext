@@ -15,37 +15,67 @@
     "setup_assembly_constraint",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six peg-in-hole specifics for CP-58:\n1) 4 cylindrical pegs (5cm tall, 2cm radius) on conveyor.\n2) 4 holes (slightly larger cylinders, 5cm deep) in a panel behind robot at xy(0.05, -0.4) spacing 0.10m.\n3) Force/torque sensor on Franka panda_hand for insertion-force monitoring.\n4) setup_assembly_constraint binds each peg→hole pair. Engaged when peg aligned within 5mm tolerance.\n5) Robot picks peg, transit, descend into hole.\n6) Realizes infrastructure for #22. Runtime force-gated phase transitions are Sprint 4+.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 4 pegs (cylindrical) on conveyor\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Peg_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cylinder\", position=[x, 0.4, 0.835], radius=0.02, height=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Peg_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Peg_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Hole panel + 4 holes\ncreate_prim(prim_path=\"/World/HolePanel\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.20, 0.05, 0.025])\napply_api_schema(prim_path=\"/World/HolePanel\", schema_name=\"PhysicsCollisionAPI\")\n\n# Holes are markers (xform) — actual cylindrical holes would need mesh ops.\n# Each hole xy is a target drop position; assembly_constraint defines peg→hole binding.\nfor i, x in enumerate([-0.15, -0.05, 0.05, 0.15]):\n    hole_path = f\"/World/Hole_{i+1}\"\n    create_prim(prim_path=hole_path, prim_type=\"Xform\", position=[x, -0.4, 0.825])\n    setup_assembly_constraint(\n        peg_path=f\"/World/Peg_{i+1}\",\n        hole_path=hole_path,\n        tolerance=0.005,\n    )\n\n# Force/torque sensor on Franka panda_hand\nadd_force_torque_sensor(\n    sensor_path=\"/World/Franka/FtSensor\",\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=5.0,\n)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Controller drops each peg at its hole position\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Peg_{i+1}\" for i in range(4)],\n    destination_path=\"/World/HolePanel\",\n    drop_targets={\n        \"/World/Peg_1\": [-0.15, -0.4, 0.825],\n        \"/World/Peg_2\": [-0.05, -0.4, 0.825],\n        \"/World/Peg_3\": [ 0.05, -0.4, 0.825],\n        \"/World/Peg_4\": [ 0.15, -0.4, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/HolePanel\"],\n)",
+  "thoughts": "Six peg-in-hole specifics for CP-58:\n1) 4 cylindrical pegs (5cm tall, 2cm radius) on conveyor.\n2) 4 holes (slightly larger cylinders, 5cm deep) in a panel behind robot at xy(0.05, -0.4) spacing 0.10m.\n3) Force/torque sensor on Franka panda_hand for insertion-force monitoring.\n4) setup_assembly_constraint binds each peg\u2192hole pair. Engaged when peg aligned within 5mm tolerance.\n5) Robot picks peg, transit, descend into hole.\n6) Realizes infrastructure for #22. Runtime force-gated phase transitions are Sprint 4+.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 4 pegs (cylindrical) on conveyor\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Peg_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cylinder\", position=[x, 0.4, 0.835], radius=0.02, height=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Peg_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Peg_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Hole panel + 4 holes\ncreate_prim(prim_path=\"/World/HolePanel\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.20, 0.05, 0.025])\napply_api_schema(prim_path=\"/World/HolePanel\", schema_name=\"PhysicsCollisionAPI\")\n\n# Holes are markers (xform) \u2014 actual cylindrical holes would need mesh ops.\n# Each hole xy is a target drop position; assembly_constraint defines peg\u2192hole binding.\nfor i, x in enumerate([-0.15, -0.05, 0.05, 0.15]):\n    hole_path = f\"/World/Hole_{i+1}\"\n    create_prim(prim_path=hole_path, prim_type=\"Xform\", position=[x, -0.4, 0.825])\n    setup_assembly_constraint(\n        peg_path=f\"/World/Peg_{i+1}\",\n        hole_path=hole_path,\n        tolerance=0.005,\n    )\n\n# Force/torque sensor on Franka panda_hand\nadd_force_torque_sensor(\n    sensor_path=\"/World/Franka/FtSensor\",\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=5.0,\n)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# Controller drops each peg at its hole position\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Peg_{i+1}\" for i in range(4)],\n    destination_path=\"/World/HolePanel\",\n    drop_targets={\n        \"/World/Peg_1\": [-0.15, -0.4, 0.825],\n        \"/World/Peg_2\": [-0.05, -0.4, 0.825],\n        \"/World/Peg_3\": [ 0.05, -0.4, 0.825],\n        \"/World/Peg_4\": [ 0.15, -0.4, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/HolePanel\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Peg_1": [-1.4,  0.4, 0.835],
-      "/World/Peg_2": [-1.15, 0.4, 0.835],
-      "/World/Peg_3": [-0.9,  0.4, 0.835],
-      "/World/Peg_4": [-0.65, 0.4, 0.835]
+      "/World/Peg_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Peg_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Peg_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Peg_4": [
+        -0.65,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/HolePanel", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/HolePanel",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Peg_1"
   },
   "simulate_args": {
-    "cube_path": "/World/Peg_1",
+    "cube_paths": [
+      "/World/Peg_1",
+      "/World/Peg_2",
+      "/World/Peg_3",
+      "/World/Peg_4"
+    ],
     "target_path": "/World/HolePanel",
     "duration_s": 120
   },
   "extends": "CP-08",
   "extension_notes": "CP-58 demonstrates peg-in-hole infrastructure. Uses force_torque sensor + assembly_constraint per peg/hole pair. Real insertion physics (force-gated phase transitions, search spiral on alignment failure) requires controller integration in Sprint 4+. CP-58 ships the scaffolding.",
   "failure_modes": [
-    "Holes are Xform markers — no actual cylindrical holes via subtractive mesh. Peg lands on top of HolePanel.",
-    "Force sensor on panda_hand — UsdPhysics applies; runtime sensor value reading needs controller integration.",
-    "Cylindrical pegs (radius 2cm, height 5cm) — gripper grips long axis. Within 4cm gripper opening since diameter 4cm.",
+    "Holes are Xform markers \u2014 no actual cylindrical holes via subtractive mesh. Peg lands on top of HolePanel.",
+    "Force sensor on panda_hand \u2014 UsdPhysics applies; runtime sensor value reading needs controller integration.",
+    "Cylindrical pegs (radius 2cm, height 5cm) \u2014 gripper grips long axis. Within 4cm gripper opening since diameter 4cm.",
     "Same physics gotchas as CP-08."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2717 (peg-in-hole assembly \u2014 earlier \u2713 was false positive due to target_path override; real target is HolePanel and cube doesn't reach it)"
 }
