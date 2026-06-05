@@ -30,7 +30,7 @@ CheckStatus = Literal["pass", "fail", "skipped"]
 
 @dataclass
 class CheckResult:
-    """Result of a single verifier check."""
+    """Outcome of a single verifier check, with status, diagnostics, and issues."""
 
     status: CheckStatus
     diagnostics: List[str] = field(default_factory=list)
@@ -39,18 +39,21 @@ class CheckResult:
     data: Dict[str, Any] = field(default_factory=dict)
 
     def is_pass(self) -> bool:
+        """Return ``True`` when this check's status is ``"pass"``."""
         return self.status == "pass"
 
     def is_fail(self) -> bool:
+        """Return ``True`` when this check's status is ``"fail"``."""
         return self.status == "fail"
 
     def is_skipped(self) -> bool:
+        """Return ``True`` when this check's status is ``"skipped"``."""
         return self.status == "skipped"
 
 
 @dataclass
 class VerifierCheck:
-    """A single feature-dispatched verifier check."""
+    """A single feature-dispatched verifier check (form gate or function gate)."""
 
     id: str  # namespaced: "verify:reach", "simulate:upright_at_rest"
     applies_when: Callable[[StructuralFeatures], bool]
@@ -58,6 +61,11 @@ class VerifierCheck:
     description: str = ""
 
     def __post_init__(self):
+        """Validate that *id* contains a namespace separator ``:``.
+
+        Raises:
+            ValueError: When ``id`` does not contain ``":"``.
+        """
         # Enforce namespace convention
         if ":" not in self.id:
             raise ValueError(f"CheckId must be namespaced (have ':'): {self.id}")
@@ -79,12 +87,15 @@ class GateResult:
     per_check: Dict[str, CheckResult] = field(default_factory=dict)
 
     def passed_check_count(self) -> int:
+        """Return the number of checks that passed in this gate run."""
         return sum(1 for r in self.per_check.values() if r.is_pass())
 
     def failed_check_count(self) -> int:
+        """Return the number of checks that failed in this gate run."""
         return sum(1 for r in self.per_check.values() if r.is_fail())
 
     def is_pass(self) -> bool:
+        """Return ``True`` when the overall gate result is ``"pass"``."""
         return self.overall == "pass"
 
 
@@ -102,29 +113,50 @@ class VerifierRegistry:
     """
 
     def __init__(self):
+        """Initialise the registry with empty form_gate and function_gate check lists."""
         self._form_checks: List[VerifierCheck] = []
         self._function_checks: List[VerifierCheck] = []
 
     def register_form_check(self, check: VerifierCheck) -> None:
+        """Append *check* to the form_gate check list.
+
+        Args:
+            check (VerifierCheck): Check to register.
+
+        Raises:
+            ValueError: When a check with the same ``id`` is already registered.
+        """
         if any(c.id == check.id for c in self._form_checks):
             raise ValueError(f"form_gate check {check.id!r} already registered")
         self._form_checks.append(check)
 
     def register_function_check(self, check: VerifierCheck) -> None:
+        """Append *check* to the function_gate check list.
+
+        Args:
+            check (VerifierCheck): Check to register.
+
+        Raises:
+            ValueError: When a check with the same ``id`` is already registered.
+        """
         if any(c.id == check.id for c in self._function_checks):
             raise ValueError(f"function_gate check {check.id!r} already registered")
         self._function_checks.append(check)
 
     def all_form_checks(self) -> List[VerifierCheck]:
+        """Return a snapshot copy of all registered form_gate checks."""
         return list(self._form_checks)
 
     def all_function_checks(self) -> List[VerifierCheck]:
+        """Return a snapshot copy of all registered function_gate checks."""
         return list(self._function_checks)
 
     def form_check_ids(self) -> List[str]:
+        """Return the ordered list of registered form_gate check IDs."""
         return [c.id for c in self._form_checks]
 
     def function_check_ids(self) -> List[str]:
+        """Return the ordered list of function_gate check IDs."""
         return [c.id for c in self._function_checks]
 
     # --- gate runners ---
@@ -136,6 +168,20 @@ class VerifierRegistry:
         bindings: Optional[List[RoleBinding]] = None,
         args: Optional[Dict[str, Any]] = None,
     ) -> GateResult:
+        """Run all applicable form_gate checks against the given structural features.
+
+        Pre-build / pre-canonical static checks. Only checks whose
+        ``applies_when`` predicate returns ``True`` for *features* are executed.
+
+        Args:
+            features (StructuralFeatures): Feature flags describing the scene.
+            template (Dict, optional): Canonical template dict, if available.
+            bindings (List[RoleBinding], optional): Current role bindings.
+            args (Dict, optional): Additional check arguments.
+
+        Returns:
+            GateResult: Aggregated outcome across all applicable checks.
+        """
         return self._run_gate("form_gate", self._form_checks, features, template, bindings, args or {})
 
     def run_function_gate(
@@ -145,6 +191,20 @@ class VerifierRegistry:
         bindings: Optional[List[RoleBinding]] = None,
         args: Optional[Dict[str, Any]] = None,
     ) -> GateResult:
+        """Run all applicable function_gate checks against the given structural features.
+
+        Post-build, simulation-running dynamic checks. Only checks whose
+        ``applies_when`` predicate returns ``True`` for *features* are executed.
+
+        Args:
+            features (StructuralFeatures): Feature flags describing the scene.
+            template (Dict, optional): Canonical template dict, if available.
+            bindings (List[RoleBinding], optional): Current role bindings.
+            args (Dict, optional): Additional check arguments.
+
+        Returns:
+            GateResult: Aggregated outcome across all applicable checks.
+        """
         return self._run_gate("function_gate", self._function_checks, features, template, bindings, args or {})
 
     def _run_gate(
@@ -156,6 +216,25 @@ class VerifierRegistry:
         bindings: Optional[List[RoleBinding]],
         args: Dict[str, Any],
     ) -> GateResult:
+        """Core dispatch loop shared by ``run_form_gate`` and ``run_function_gate``.
+
+        Iterates *checks*, calls each ``applies_when`` predicate, skips
+        inapplicable checks, runs applicable ones, catches exceptions, and
+        aggregates the results into a ``GateResult``.
+
+        Args:
+            gate_name: Which gate this run belongs to.
+            checks: The registered check list to iterate.
+            features (StructuralFeatures): Scene feature flags.
+            template (Dict, optional): Canonical template dict.
+            bindings (List[RoleBinding], optional): Current role bindings.
+            args (Dict): Additional check arguments.
+
+        Returns:
+            GateResult: Aggregated result. Overall is ``"pass"`` when all
+            applicable checks pass, ``"fail"`` when any fail, or ``"skipped"``
+            when no checks apply.
+        """
         per_check: Dict[str, CheckResult] = {}
         run_ids: List[str] = []
         skipped_ids: List[str] = []
@@ -243,6 +322,14 @@ def register_function_check(
 
 
 def _make_skipped(reason: str) -> CheckResult:
+    """Construct a skipped ``CheckResult`` with the given *reason* string.
+
+    Args:
+        reason (str): Human-readable explanation of why the check was skipped.
+
+    Returns:
+        CheckResult: A ``CheckResult`` with ``status="skipped"``.
+    """
     return CheckResult(status="skipped", reason=reason)
 
 

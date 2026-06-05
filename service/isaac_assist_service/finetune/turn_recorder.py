@@ -52,6 +52,12 @@ class TurnRecorder:
     """Records chat turns as structured JSONL for fine-tuning pipelines."""
 
     def __init__(self, output_dir: str = "workspace/finetune_data/sessions"):
+        """Initialise the recorder and ensure the output directory exists.
+
+        Args:
+            output_dir (str, optional): Path where daily JSONL session files are written.
+                Defaults to "workspace/finetune_data/sessions".
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -286,7 +292,18 @@ class TurnRecorder:
     # ── Redaction ────────────────────────────────────────────────────────────
 
     def _redact(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Strip API keys, tokens, and external paths from a record."""
+        """Strip API keys, bearer tokens, and external filesystem paths from a record.
+
+        Serialises the record to JSON, applies regex substitution for each secret
+        pattern and external path pattern, then re-parses.
+
+        Args:
+            record (Dict[str, Any]): Turn record dict, potentially containing secrets.
+
+        Returns:
+            Dict[str, Any]: Deep copy of the record with sensitive values replaced by
+            ``<REDACTED_SECRET>`` or ``<REDACTED_PATH>``.
+        """
         raw = json.dumps(record, default=str)
         for pattern in _SECRET_PATTERNS:
             raw = pattern.sub("<REDACTED_SECRET>", raw)
@@ -342,7 +359,18 @@ class TurnRecorder:
     def _find_turn(
         self, session_id: str, turn_id: int
     ) -> Optional[tuple]:
-        """Find a recorded turn by session_id and turn_id. Returns (record, filepath)."""
+        """Search JSONL files for a specific turn by session and turn IDs.
+
+        Scans files in reverse chronological order, returning the first match found.
+
+        Args:
+            session_id (str): Session identifier to match.
+            turn_id (int): Turn counter within the session to match.
+
+        Returns:
+            Optional[tuple]: ``(record_dict, Path)`` of the matching file, or None
+            if no matching record is found.
+        """
         for jsonl_file in sorted(self.output_dir.glob("*.jsonl"), reverse=True):
             for line in jsonl_file.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
@@ -360,7 +388,12 @@ class TurnRecorder:
         return None
 
     def _load_all_records(self) -> List[Dict]:
-        """Load every record from all JSONL files in output_dir."""
+        """Load every record from all JSONL files in output_dir, skipping malformed lines.
+
+        Returns:
+            List[Dict]: All parsed records in file-chronological order; may contain
+            duplicate entries for turns that have been updated via feedback linking.
+        """
         records = []
         for jsonl_file in sorted(self.output_dir.glob("*.jsonl")):
             for line in jsonl_file.read_text(encoding="utf-8").splitlines():
@@ -374,7 +407,12 @@ class TurnRecorder:
         return records
 
     def _load_deduplicated(self) -> List[Dict]:
-        """Load records, keeping only the latest entry per (session_id, turn_id)."""
+        """Load records and de-duplicate, keeping the latest entry per (session_id, turn_id).
+
+        Returns:
+            List[Dict]: One record per unique (session_id, turn_id) pair, reflecting
+            the most recent feedback state.
+        """
         all_records = self._load_all_records()
         latest: Dict[str, Dict] = {}
         for r in all_records:
@@ -383,7 +421,18 @@ class TurnRecorder:
         return list(latest.values())
 
     def _filter_quality(self, records: List[Dict], min_quality: str) -> List[Dict]:
-        """Filter records by quality level."""
+        """Filter records by quality level, returning only those meeting the threshold.
+
+        Args:
+            records (List[Dict]): De-duplicated turn records to filter.
+            min_quality (str): Filter level — "all" (no filter), "approved" (feedback
+                must have ``approved=True``), or "approved_successful" (approved and
+                no tool call returned ``type=error``).
+
+        Returns:
+            List[Dict]: Filtered subset of records; returns the full list unchanged for
+            unknown ``min_quality`` values.
+        """
         if min_quality == "all":
             return records
         if min_quality == "approved":

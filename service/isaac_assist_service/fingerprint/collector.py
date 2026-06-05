@@ -1,3 +1,10 @@
+"""Hardware and software fingerprint collector.
+
+Gathers OS, Python, Isaac Sim path, and GPU info in one call so the
+compatibility resolver and audit log can embed a machine snapshot.
+All shell calls are wrapped with a 2-second timeout and fail silently
+to avoid hanging the service at startup.
+"""
 import platform
 import sys
 import os
@@ -6,17 +13,33 @@ import datetime
 from datetime import timezone
 from typing import Dict, Any, List
 
+
 def run_shell(cmd: str) -> str:
+    """Execute a shell command and return its stdout, stripped.
+
+    Returns an empty string on any error (timeout, non-zero exit, etc.)
+    so callers never need to handle exceptions from optional probes.
+
+    Args:
+        cmd (str): Shell command to run.
+
+    Returns:
+        str: Stripped stdout, or ``""`` on failure.
+    """
     try:
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=2)
         return result.stdout.strip()
     except Exception:
         return ""
 
+
 def get_gpu_info() -> List[Dict[str, Any]]:
-    """
-    Parses nvidia-smi explicitly. 
-    Prevents deploying a pynvml dependency requirement.
+    """Collect GPU info via ``nvidia-smi``, avoiding a pynvml dependency.
+
+    Returns:
+        list[dict]: One entry per detected GPU with keys
+        ``device_index`` (int), ``name`` (str), ``vram_mb`` (int).
+        Empty list when no NVIDIA GPU is detected or ``nvidia-smi`` is absent.
     """
     gpus = []
     out = run_shell("nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader")
@@ -34,8 +57,18 @@ def get_gpu_info() -> List[Dict[str, Any]]:
     return gpus
 
 def collect_fingerprint() -> Dict[str, Any]:
-    """
-    Implements 02_ENVIRONMENT_FINGERPRINT data schema.
+    """Collect a full environment fingerprint snapshot.
+
+    Implements the ``02_ENVIRONMENT_FINGERPRINT`` schema: OS, Python,
+    Isaac Sim version inferred from ``ISAAC_SIM_PATH``, GPU devices,
+    driver version, and CUDA version.
+
+    Returns:
+        dict: Fingerprint with keys ``fingerprint_id``, ``collected_at``,
+        ``os_distribution``, ``os_version``, ``kernel_version``,
+        ``architecture``, ``python_version``, ``python_executable``,
+        ``isaac_sim_install_path``, ``isaac_sim_version``,
+        ``gpu_devices``, ``driver_version``, ``cuda_version``.
     """
     isaac_path = os.environ.get("ISAAC_SIM_PATH", "")
     

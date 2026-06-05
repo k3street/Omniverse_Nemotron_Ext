@@ -44,6 +44,12 @@ class IterationRecord:
     duration_s:    float              = 0.0
 
     def to_dict(self) -> dict:
+        """Serialise the iteration record to a JSON-safe dict.
+
+        Returns:
+            dict: Keys are ``iteration``, ``coder``, ``qa``, ``critic``,
+            ``feedback_sent`` (truncated to 400 chars), and ``duration_s``.
+        """
         def _safe(r: AgentResult | None) -> dict | None:
             return r.to_dict() if r else None
         return {
@@ -69,6 +75,13 @@ class LoopResult:
     notes:        list[str]             = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        """Serialise the loop result to a JSON-safe dict for MLflow or API responses.
+
+        Returns:
+            dict: Keys include ``task_id``, ``model_tag``, ``status``,
+            ``total_time_s``, ``final_scores``, ``final_code_blocks`` (count),
+            ``num_iterations``, ``notes``, and ``iterations`` (list of dicts).
+        """
         return {
             "task_id":      self.task_id,
             "model_tag":    self.model_tag,
@@ -109,6 +122,16 @@ class ProjectManagerAgent(AgentBase):
         coder_threshold: float = 0.75,
         critic_threshold: float = 0.70,
     ) -> None:
+        """Initialise the ProjectManagerAgent with its sub-agent instances.
+
+        Args:
+            coder (CoderAgent): Agent responsible for code generation and repair.
+            qa (QAAgent): Agent that runs code in the simulator and parses logs.
+            critic (CriticAgent): Agent that performs code review against USD/Isaac standards.
+            max_iterations (int, optional): Loop cap before declaring failure. Defaults to 3.
+            coder_threshold (float, optional): Minimum Coder score to proceed. Defaults to 0.75.
+            critic_threshold (float, optional): Minimum Critic quality score to pass. Defaults to 0.70.
+        """
         self.coder            = coder
         self.qa               = qa
         self.critic           = critic
@@ -301,6 +324,17 @@ class ProjectManagerAgent(AgentBase):
         qa: AgentResult,
         critic: AgentResult,
     ) -> dict:
+        """Build a scores summary dict from the three final agent results.
+
+        Args:
+            coder (AgentResult): Final result from CoderAgent.
+            qa (AgentResult): Final result from QAAgent.
+            critic (AgentResult): Final result from CriticAgent.
+
+        Returns:
+            dict: Keys are ``coder_score``, ``qa_score``, ``critic_score``, and
+            ``overall`` (arithmetic mean), all rounded to 3 decimal places.
+        """
         return {
             "coder_score":  round(coder.score, 3),
             "qa_score":     round(qa.score, 3),
@@ -312,6 +346,16 @@ class ProjectManagerAgent(AgentBase):
 
     @staticmethod
     def _remaining_issues(qa: AgentResult, critic: AgentResult) -> str:
+        """Summarise which criteria are still failing across QA and Critic.
+
+        Args:
+            qa (AgentResult): QA result from the final loop iteration.
+            critic (AgentResult): Critic result from the final loop iteration.
+
+        Returns:
+            str: Comma-separated list of "qa:<name>" and "critic:<name>" strings,
+            or "unknown" if no failed criteria are found.
+        """
         issues: list[str] = []
         for c in qa.failed_criteria:
             issues.append(f"qa:{c.name}")
@@ -321,6 +365,13 @@ class ProjectManagerAgent(AgentBase):
 
 
 def _format_failed(result: AgentResult) -> str:
-    """Short summary of what failed."""
+    """Return a short comma-separated string of the first three failed criterion names.
+
+    Args:
+        result (AgentResult): An agent result that contains at least one failing criterion.
+
+    Returns:
+        str: e.g. "failed: no_traceback, clean_exit".
+    """
     names = [c.name for c in result.failed_criteria]
     return "failed: " + ", ".join(names[:3])

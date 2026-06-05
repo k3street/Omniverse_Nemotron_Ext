@@ -17,7 +17,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -32,7 +36,7 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 @dataclass
 class G1HardwareSpec:
-    """Unitree G1 humanoid hardware specification."""
+    """Physical joint and DOF specification for the Unitree G1 humanoid robot."""
 
     joint_count: int = 23
     arm_dof_per_side: int = 5
@@ -43,11 +47,11 @@ class G1HardwareSpec:
     has_dexterous_hands: bool = False
 
     def total_arm_dof(self) -> int:
-        """Total arm DOF (both sides)."""
+        """Return the total arm degrees-of-freedom across both sides."""
         return self.arm_dof_per_side * 2
 
     def total_leg_dof(self) -> int:
-        """Total leg DOF (both sides)."""
+        """Return the total leg degrees-of-freedom across both sides."""
         return self.leg_dof_per_side * 2
 
 
@@ -69,6 +73,7 @@ class G1ObservationSpec:
     observation_dim: int = field(init=False)
 
     def __post_init__(self) -> None:
+        """Compute ``observation_dim`` = proprioceptive + exteroceptive + command dims."""
         self.observation_dim = (
             self.proprioceptive_dim + self.exteroceptive_dim + self.command_dim
         )
@@ -87,6 +92,7 @@ class G1ActionSpec:
     action_dim: int = field(init=False)
 
     def __post_init__(self) -> None:
+        """Compute ``action_dim`` = joint_target_dim + gripper_dim."""
         self.action_dim = self.joint_target_dim + self.gripper_dim
 
 
@@ -208,7 +214,7 @@ class IsaacLabG1EnvConfig:
 
     @property
     def control_dt(self) -> float:
-        """Effective control timestep after decimation."""
+        """Effective control timestep in seconds: ``sim_dt × decimation``."""
         return self.sim_dt * self.decimation
 
 
@@ -287,6 +293,12 @@ class G1CurriculumScheduler:
         self,
         stages: Optional[List[LocomanipCurriculumStage]] = None,
     ) -> None:
+        """Initialise the scheduler.
+
+        Args:
+            stages (List[LocomanipCurriculumStage], optional): Custom stage list.
+                Defaults to :data:`DEFAULT_CURRICULUM`.
+        """
         self._stages: List[LocomanipCurriculumStage] = (
             stages if stages is not None else list(DEFAULT_CURRICULUM)
         )
@@ -336,7 +348,7 @@ class G1CurriculumScheduler:
         return False
 
     def reset(self) -> None:
-        """Reset the scheduler back to stage 0."""
+        """Reset the scheduler back to stage 0 (beginning of the curriculum)."""
         self.current_stage_idx = 0
 
 

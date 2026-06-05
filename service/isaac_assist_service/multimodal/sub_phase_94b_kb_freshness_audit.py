@@ -24,6 +24,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -107,6 +112,14 @@ class KBFreshnessAuditor:
         kb_dir: Path,
         stale_threshold_days: int = 90,
     ) -> None:
+        """Initialise the auditor.
+
+        Args:
+            kb_dir (Path): Root directory containing knowledge-base documents
+                (``*.json`` and ``*.md`` files are scanned recursively).
+            stale_threshold_days (int): Number of days since last modification
+                after which a document is considered stale.  Defaults to 90.
+        """
         self._kb_dir = kb_dir
         self._threshold = stale_threshold_days
 

@@ -20,7 +20,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for Phase 61.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -37,6 +41,11 @@ class DRAxis:
     std: float
 
     def __post_init__(self) -> None:
+        """Validate that ``std`` is non-negative.
+
+        Raises:
+            ValueError: When ``std < 0``.
+        """
         if self.std < 0:
             raise ValueError(f"std must be non-negative, got {self.std}")
 
@@ -49,6 +58,11 @@ class CorrelationPair:
     rho: float  # in [-1, 1]
 
     def __post_init__(self) -> None:
+        """Validate ``rho ∈ [-1, 1]`` and that both axes differ.
+
+        Raises:
+            ValueError: When ``rho`` is outside [-1, 1] or ``axis_a == axis_b``.
+        """
         if not -1.0 <= self.rho <= 1.0:
             raise ValueError(f"rho must be in [-1, 1], got {self.rho}")
         if self.axis_a == self.axis_b:
@@ -64,9 +78,25 @@ class CorrelatedDRConfig:
     num_samples: int = 100
 
     def axis_names(self) -> List[str]:
+        """Return the list of axis names in declaration order.
+
+        Returns:
+            List[str]: All ``DRAxis.name`` values.
+        """
         return [a.name for a in self.axes]
 
     def axis_index(self, name: str) -> int:
+        """Return the 0-based index of *name* in the axis list.
+
+        Args:
+            name (str): Axis name to look up.
+
+        Returns:
+            int: Index of the axis.
+
+        Raises:
+            KeyError: When *name* is not in the axis list.
+        """
         for i, a in enumerate(self.axes):
             if a.name == name:
                 return i

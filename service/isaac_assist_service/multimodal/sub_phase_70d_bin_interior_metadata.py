@@ -25,6 +25,11 @@ _DEFAULT_YAML = Path(__file__).parent.parent.parent.parent / "data" / "bin_inter
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -35,7 +40,7 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 @dataclass
 class BinSpec:
-    """Specification for a single industrial bin SKU."""
+    """Physical specification for a single industrial bin SKU (exterior, interior, payload)."""
 
     sku: str
     name: str
@@ -50,14 +55,17 @@ class BinSpec:
     # Convenience accessors ──────────────────────────────────────────────────
     @property
     def interior_w(self) -> float:
+        """Interior width in millimetres (``interior_mm[0]``)."""
         return float(self.interior_mm[0])
 
     @property
     def interior_d(self) -> float:
+        """Interior depth in millimetres (``interior_mm[1]``)."""
         return float(self.interior_mm[1])
 
     @property
     def interior_h(self) -> float:
+        """Interior height in millimetres (``interior_mm[2]``)."""
         return float(self.interior_mm[2])
 
 
@@ -72,6 +80,12 @@ class BinMetadataLoader:
     """
 
     def __init__(self, yaml_path: Optional[Path] = None) -> None:
+        """Initialise the loader, deferring YAML parsing until :meth:`load` is called.
+
+        Args:
+            yaml_path (Path, optional): Override path to the YAML registry.
+                Defaults to ``data/bin_interior_metadata.yaml`` under the project root.
+        """
         self._yaml_path: Path = yaml_path if yaml_path is not None else _DEFAULT_YAML
         self._registry: Optional[Dict[str, BinSpec]] = None
 

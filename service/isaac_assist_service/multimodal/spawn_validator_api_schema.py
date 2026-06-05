@@ -22,7 +22,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -153,6 +157,13 @@ class APISchemaValidator:
     """
 
     def __init__(self, strict: bool = False) -> None:
+        """Initialise the validator.
+
+        Args:
+            strict (bool): When ``True``, every ``"warn"``-severity finding is
+                promoted to ``"error"`` so :meth:`passed` returns ``False`` for
+                any advisory issue.  Defaults to ``False``.
+        """
         self.strict = strict
 
     # ------------------------------------------------------------------
@@ -207,6 +218,7 @@ class APISchemaValidator:
     def _check_schema_known(
         state: APISchemaState, findings: List[APISchemaFinding]
     ) -> None:
+        """Append an error finding if ``state.schema_name`` is not in KNOWN_API_SCHEMAS."""
         if state.schema_name not in KNOWN_API_SCHEMAS:
             findings.append(
                 APISchemaFinding(
@@ -224,6 +236,7 @@ class APISchemaValidator:
     def _check_applied(
         state: APISchemaState, findings: List[APISchemaFinding]
     ) -> None:
+        """Append an error finding if the schema was not successfully applied to the prim."""
         if not state.applied:
             findings.append(
                 APISchemaFinding(
@@ -241,6 +254,7 @@ class APISchemaValidator:
     def _check_required_attrs_present(
         state: APISchemaState, findings: List[APISchemaFinding]
     ) -> None:
+        """Append an error finding if any required attributes are missing from the prim."""
         if state.required_attributes_missing:
             findings.append(
                 APISchemaFinding(
@@ -258,6 +272,7 @@ class APISchemaValidator:
     def _check_no_conflicts(
         state: APISchemaState, findings: List[APISchemaFinding]
     ) -> None:
+        """Append an error finding if the schema conflicts with another co-applied schema."""
         conflict_partners = SCHEMA_CONFLICTS.get(state.schema_name, [])
         active_conflicts = [
             s for s in state.conflicts_with
@@ -280,6 +295,7 @@ class APISchemaValidator:
     def _check_prim_type_set(
         state: APISchemaState, findings: List[APISchemaFinding]
     ) -> None:
+        """Append a warning finding if ``prim_type`` is ``None`` (aids diagnostics)."""
         if state.prim_type is None:
             findings.append(
                 APISchemaFinding(
@@ -297,6 +313,7 @@ class APISchemaValidator:
     def _check_attr_count_matches(
         state: APISchemaState, findings: List[APISchemaFinding]
     ) -> None:
+        """Append an informational finding comparing present vs. expected attribute count."""
         expected_attrs = SCHEMA_REQUIRED_ATTRS.get(state.schema_name, [])
         if not expected_attrs:
             return

@@ -23,7 +23,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -168,6 +172,7 @@ class PatchRiskClassifier:
     )
 
     def __init__(self) -> None:
+        """Initialise the risk scorer (no instance state; all data is class-level)."""
         pass
 
     # ------------------------------------------------------------------
@@ -324,6 +329,14 @@ class PatchSandbox:
     )
 
     def __init__(self, policy: SandboxPolicy, dry_run: bool = True) -> None:
+        """Initialise the executor with a sandbox policy.
+
+        Args:
+            policy (SandboxPolicy): Policy object defining network, filesystem,
+                subprocess, and resource-limit restrictions.
+            dry_run (bool): When ``True`` (default), patch execution is simulated
+                rather than actually applied.
+        """
         self._policy = policy
         self._dry_run = dry_run
 

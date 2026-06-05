@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 @dataclass
 class ObjectClass:
+    """One entry in the canonical object palette, describing a USD asset class."""
     name: str
     usd_ref: str = ""
     category: str = "prop"  # robot | sensor | fixture | prop | environment
@@ -101,10 +102,21 @@ PALETTE: Dict[str, ObjectClass] = {
 
 
 def get_class(name: str) -> "ObjectClass | None":
+    """Return the ``ObjectClass`` for *name*, or ``None`` if not in the palette."""
     return PALETTE.get(name)
 
 
 def list_classes(category: "str | None" = None) -> "list[ObjectClass]":
+    """Return all palette entries, optionally filtered to *category*.
+
+    Args:
+        category (str, optional): Category filter — ``"robot"``, ``"sensor"``,
+            ``"fixture"``, ``"prop"``, or ``"environment"``. ``None`` returns
+            the full palette.
+
+    Returns:
+        list[ObjectClass]: Matching entries.
+    """
     if category is None:
         return list(PALETTE.values())
     return [c for c in PALETTE.values() if c.category == category]

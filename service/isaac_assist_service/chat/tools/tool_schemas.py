@@ -287,12 +287,20 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "create_material",
-            "description": "Create a new MDL material (OmniPBR, OmniGlass, OmniSurface) with specified appearance properties.",
+            "description": (
+                "Create a new material with specified appearance properties. "
+                "OmniPBR-style colors are emitted through the USD Preview Surface "
+                "safe path in Isaac Sim 6; do not create an OmniPBR prim type directly."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "material_path": {"type": "string", "description": "USD path for the material"},
-                    "shader_type": {"type": "string", "enum": ["OmniPBR", "OmniGlass", "OmniSurface"]},
+                    "shader_type": {
+                        "type": "string",
+                        "enum": ["OmniPBR", "OmniGlass", "OmniSurface"],
+                        "description": "Requested material style; OmniPBR is generated as USD Preview Surface for Isaac Sim 6 safety.",
+                    },
                     "diffuse_color": {"type": "array", "items": {"type": "number"}, "description": "RGB color [r, g, b] 0-1"},
                     "metallic": {"type": "number", "description": "Metallic factor 0-1"},
                     "roughness": {"type": "number", "description": "Roughness factor 0-1"},
@@ -746,7 +754,7 @@ ISAAC_SIM_TOOLS = [
                     "seed": {"type": "integer", "description": "Base random seed for RNGs (random/numpy/torch). Default 42. Run i uses seed+i for variety with reproducibility.", "default": 42},
                     "n_runs": {"type": "integer", "description": "Number of repeated runs against the same built scene. Default 1. Multi-run reset: snapshots cube xforms + ctrl:* attrs + articulation joint state before run 0, restores between subsequent runs, deletes transient FixedJoint prims. Use n_runs=5 to detect flaky vs stable canonicals (stable_ok ≥4/5, flaky 1-3/5, stable_fail 0/5).", "default": 1, "minimum": 1, "maximum": 50},
                 },
-                "required": ["cube_path", "target_path"],
+                "required": ["target_path"],
             },
         },
     },
@@ -2999,7 +3007,7 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "iterate_reward",
-                "description": "Generate a mutation prompt for the next Eureka iteration. Combines the previous reward function, per-component training metrics, and optional user feedback into a structured prompt for the LLM to produce an improved reward.",
+                "description": "Generate a mutation prompt for the next Eureka iteration. Combines the previous reward function, per-component training metrics, and optional user feedback into a structured prompt for the LLM to produce an improved reward. When run_id is supplied (from generate_reward), updates the process-local Eureka run state so eureka_status reflects iteration progress and best fitness.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -3009,6 +3017,7 @@ ISAAC_SIM_TOOLS = [
                             "description": "Training metrics: { fitness: float, components: { name: { mean: [float], converged: bool } }, task_success_rate: float }",
                         },
                         "user_feedback": {"type": "string", "description": "Optional user feedback — e.g. 'it keeps dropping the handle'"},
+                        "run_id": {"type": "string", "description": "Optional Eureka run identifier returned by generate_reward. When supplied, EUREKA.runs[run_id] is updated and the response echoes back run_status / current_iteration / best_fitness."},
                     },
                     "required": ["prev_reward_code", "metrics"],
                 },

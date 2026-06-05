@@ -399,7 +399,22 @@ async def compress_history(
     knowledge: ConversationKnowledge,
     small_provider,
 ) -> str:
-    """Use a small/local LLM to compress conversation history."""
+    """Use a small/local LLM to compress conversation history into a summary.
+
+    Skips re-compression when fewer than ``COMPRESS_INTERVAL`` new turns have
+    accumulated since the last compression.  Memoises the result in
+    ``knowledge.compressed_history``.
+
+    Args:
+        history (list[dict]): Full conversation message list.
+        knowledge (ConversationKnowledge): Session knowledge object; updated
+            in-place with the new summary and ``last_compressed_turn``.
+        small_provider: LLM provider for the summarisation call.
+
+    Returns:
+        str: Compressed history summary (may be the previous cached version if
+        insufficient new turns have accumulated).
+    """
     if not history:
         return knowledge.compressed_history
 
@@ -459,7 +474,22 @@ def select_tools(
     message: str,
     knowledge: ConversationKnowledge,
 ) -> List[Dict]:
-    """Return only the tool schemas relevant to this request."""
+    """Return the subset of tool schemas relevant to this request.
+
+    Selection strategy (in priority order):
+    1. Always-included tools (resolvers, ``scene_summary``, etc.).
+    2. Semantic retrieval via ``tool_retriever`` (top-20 by cosine similarity).
+    3. Intent- and keyword-category fallback when retrieval is unavailable.
+    4. Context additions (robots/ROS2 topics detected this session).
+
+    Args:
+        intent (str): Intent label from the intent router.
+        message (str): Raw user message text.
+        knowledge (ConversationKnowledge): Accumulated session state.
+
+    Returns:
+        List[dict]: OpenAI-style tool schema dicts for the selected tools.
+    """
     categories: Set[str] = set()
 
     # 1. Intent-based defaults
@@ -509,7 +539,21 @@ def select_rules(
     knowledge: ConversationKnowledge,
     has_selection: bool = False,
 ) -> str:
-    """Build a minimal system prompt with only relevant rules."""
+    """Build a minimal system prompt containing only the rules relevant to this turn.
+
+    Always includes ``RULE_BASE``.  Appends specialist rule sections (OmniGraph,
+    robot anchoring, Nova Carter, cloner, determinism, multi-step plan) when
+    corresponding keywords appear in the message or current session robots.
+
+    Args:
+        intent (str): Intent label from the intent router.
+        message (str): Raw user message text.
+        knowledge (ConversationKnowledge): Accumulated session state.
+        has_selection (bool): When True, appends the selection-awareness rule.
+
+    Returns:
+        str: Concatenated system-prompt string with relevant rule sections.
+    """
     parts = [RULE_BASE]
 
     # Keyword-driven rule sections
@@ -539,7 +583,21 @@ def filter_scene_context(
     knowledge: ConversationKnowledge,
     max_lines: int = 40,
 ) -> str:
-    """Trim scene context to only the parts relevant to the user's request."""
+    """Trim scene context to only the lines relevant to this request.
+
+    Keeps: summary/header lines, lines mentioning prim paths referenced in the
+    message or in ``knowledge.robots``, and the first 5 lines unconditionally.
+    When the filtered result still exceeds ``max_lines``, truncates from the end.
+
+    Args:
+        full_context (str): Full scene-summary text from the UI extension.
+        message (str): Raw user message (used to extract mentioned prim paths).
+        knowledge (ConversationKnowledge): Accumulated session state.
+        max_lines (int): Maximum number of lines to return (default 40).
+
+    Returns:
+        str: Filtered scene-context string, or empty string if input is empty.
+    """
     if not full_context:
         return ""
 
@@ -600,11 +658,34 @@ async def distill_context(
     negative_patterns_text: str = "",
     small_provider=None,
 ) -> DistilledContext:
-    """
-    Main entry point: produce a compact context package.
+    """Produce a compact context package for the main LLM call.
 
-    Parameters mirror what orchestrator.handle_message currently collects.
-    Returns a DistilledContext ready for the main LLM call.
+    Two-stage pipeline:
+    1. (async) Compress conversation history via a small/local LLM when available.
+    2. (deterministic) Select tools and rules; build a filtered system prompt.
+
+    Args:
+        intent (str): Intent label from the intent router.
+        user_message (str): The current user message.
+        history (list[dict]): Full conversation history (used for compression).
+        knowledge (ConversationKnowledge): Accumulated session state, mutated
+            in-place (``turn_count`` incremented; ``compressed_history`` updated).
+        scene_context (str): Raw scene-summary text from the UI extension.
+        selected_prim (dict | None): Serialised selected prim dict with ``path``,
+            ``type``, ``world_position``, ``schemas``, etc.
+        selected_prim_path (str | None): Simple path string when only the path
+            is known (used as fallback when ``selected_prim`` is None).
+        isaac_version (str): Isaac Sim version string, appended to the prompt.
+        rag_text (str): RAG retrieval results, injected into the system prompt.
+        patterns_text (str): Code-pattern results, injected when non-empty.
+        error_learnings_text (str): Error-learning context, injected when < 1500 chars.
+        success_learnings_text (str): Success-learning context, injected when < 1000 chars.
+        negative_patterns_text (str): Negative-pattern context, injected when < 1200 chars.
+        small_provider: Optional small/fast LLM provider for history compression.
+
+    Returns:
+        DistilledContext: Compact system prompt, selected tools, compressed message list,
+        and rough token estimate.
     """
     knowledge.turn_count += 1
 
@@ -708,7 +789,18 @@ def update_knowledge_from_tool(
     tool_args: Dict,
     tool_result: Dict,
 ):
-    """Extract signal from a tool call/result and update session knowledge."""
+    """Extract signal from a tool call/result and update the session knowledge object.
+
+    Records the action in ``knowledge.recent_actions``, extracts robot prim
+    paths from common arg keys (``prim_path``, ``robot_path``, etc.), and
+    extracts ROS2 topic names from the serialised args and result.
+
+    Args:
+        knowledge (ConversationKnowledge): Mutable session knowledge to update.
+        tool_name (str): Name of the tool that was called.
+        tool_args (dict): Arguments passed to the tool.
+        tool_result (dict): Result returned by the tool.
+    """
     # Track actions
     desc = tool_args.get("description", "") or tool_name
     knowledge.record_action(f"{tool_name}: {desc[:60]}")

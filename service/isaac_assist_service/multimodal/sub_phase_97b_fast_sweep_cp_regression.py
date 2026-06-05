@@ -24,7 +24,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -39,7 +43,7 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 @dataclass
 class CPTestCase:
-    """A single canonical-prompt test case descriptor."""
+    """Descriptor for a single canonical-prompt (CP) regression test case."""
 
     cp_id: str
     name: str
@@ -52,7 +56,7 @@ class CPTestCase:
 
 @dataclass
 class CPRunResult:
-    """Result of a single CP run."""
+    """Pass/fail result record for a single canonical-prompt execution run."""
 
     cp_id: str
     run_idx: int
@@ -64,13 +68,14 @@ class CPRunResult:
     run_at: str = ""
 
     def __post_init__(self) -> None:
+        """Default ``run_at`` to the current UTC ISO-8601 time if not supplied."""
         if not self.run_at:
             self.run_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 @dataclass
 class SweepConfig:
-    """Configuration for a CP regression sweep."""
+    """Configuration controlling the scope and parallelism of a CP regression sweep."""
 
     cp_subset: Optional[List[str]] = None
     n_runs_per_cp: int = 1
@@ -81,7 +86,7 @@ class SweepConfig:
 
 @dataclass
 class RegressionAlert:
-    """Signals a detected regression in CP pass-rate."""
+    """Alert record signalling a detected regression in CP pass-rate for one test case."""
 
     cp_id: str
     baseline_success_rate: float
@@ -95,6 +100,7 @@ class RegressionAlert:
 # ---------------------------------------------------------------------------
 
 def _result_to_dict(r: CPRunResult) -> Dict[str, Any]:
+    """Serialise a ``CPRunResult`` to a plain dict suitable for JSON-Lines output."""
     return {
         "cp_id": r.cp_id,
         "run_idx": r.run_idx,
@@ -108,6 +114,7 @@ def _result_to_dict(r: CPRunResult) -> Dict[str, Any]:
 
 
 def _dict_to_result(d: Dict[str, Any]) -> CPRunResult:
+    """Deserialise a plain dict (from JSON-Lines) back to a ``CPRunResult``."""
     return CPRunResult(
         cp_id=d["cp_id"],
         run_idx=d["run_idx"],
@@ -121,7 +128,7 @@ def _dict_to_result(d: Dict[str, Any]) -> CPRunResult:
 
 
 def save_results_jsonl(results: List[CPRunResult], path: Path) -> None:
-    """Persist *results* to a JSON-Lines file at *path*."""
+    """Persist *results* as a JSON-Lines file, one record per line, at *path*."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         for r in results:
@@ -154,6 +161,11 @@ class FastSweepHarness:
     """
 
     def __init__(self, test_cases: List[CPTestCase]) -> None:
+        """Initialise the harness with *test_cases* as the CP library.
+
+        Args:
+            test_cases (List[CPTestCase]): Full list of canonical prompt test cases.
+        """
         self._test_cases: List[CPTestCase] = list(test_cases)
 
     # ------------------------------------------------------------------
@@ -329,7 +341,7 @@ class FastSweepHarness:
 
     @staticmethod
     def summary(results: List[CPRunResult]) -> Dict[str, Any]:
-        """Compute overall sweep statistics from *results*."""
+        """Compute overall sweep statistics (pass rate, timing, errors) from *results*."""
         n_total = len(results)
         n_success = sum(1 for r in results if r.success)
         total_time = sum(r.duration_s for r in results)

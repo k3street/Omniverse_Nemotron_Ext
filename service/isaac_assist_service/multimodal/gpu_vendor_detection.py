@@ -22,7 +22,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -215,6 +219,14 @@ def select_runtime(
 
     # Sort by preference order; lower index = higher preference
     def _pref(cap: RuntimeCapability) -> int:
+        """Return the preference rank of *cap* (lower = more preferred).
+
+        Args:
+            cap (RuntimeCapability): Capability to rank.
+
+        Returns:
+            int: Index into ``_RUNTIME_PREFERENCE``; ``len`` of the list when unknown.
+        """
         try:
             return _RUNTIME_PREFERENCE.index(cap.runtime)
         except ValueError:
@@ -278,6 +290,15 @@ class GPUSmokeRunner:
     """
 
     def __init__(self, dry_run: bool = True) -> None:
+        """Initialise the smoke runner in dry-run (hardware-free) mode.
+
+        Args:
+            dry_run (bool, optional): Must be ``True``; hardware invocation is not
+                implemented in this detection layer. Defaults to ``True``.
+
+        Raises:
+            NotImplementedError: If ``dry_run=False`` is passed.
+        """
         if not dry_run:
             raise NotImplementedError(
                 "Hardware smoke testing is not implemented in the detection layer. "

@@ -7,9 +7,8 @@ generator yields N+1 results.
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
+import asyncio
 
 pytestmark = pytest.mark.l0
 
@@ -147,15 +146,16 @@ def test_collector_is_complete_flips_after_end():
 # ---------------------------------------------------------------------------
 
 def test_stream_iter_yields_n_plus_one_results():
-    async def collect():
-        builder = StreamingResultBuilder(stream_id="s7")
-        n = 4
+    builder = StreamingResultBuilder(stream_id="s7")
+    n = 4
+
+    async def _collect():
         results = []
         async for item in stream_iter(builder, n, payload_fn=lambda i: {"i": i}):
             results.append(item)
-        return n, results
+        return results
 
-    n, results = asyncio.run(collect())
+    results = asyncio.run(_collect())
 
     assert len(results) == n + 1
     # First N are chunks

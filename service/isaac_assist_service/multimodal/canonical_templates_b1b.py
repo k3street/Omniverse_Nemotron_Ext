@@ -70,8 +70,22 @@ B1B_CANONICAL_TEMPLATES: Dict[str, Dict] = {
 
 
 def get_template(task_id: str) -> Dict:
+    """Return the role-based canonical template for *task_id*, or ``{}`` if unknown.
+
+    Args:
+        task_id (str): Template identifier, e.g. ``"CP-01"``.
+
+    Returns:
+        Dict: Template dict with ``task_id``, ``name``, ``roles``, and ``role_index``
+            keys, or an empty dict when the ID is not registered.
+    """
     return B1B_CANONICAL_TEMPLATES.get(task_id, {})
 
 
 def list_templates() -> List[Dict]:
+    """Return all registered Phase 28 canonical templates as a list.
+
+    Returns:
+        List[Dict]: All template dicts in ``B1B_CANONICAL_TEMPLATES`` (insertion order).
+    """
     return list(B1B_CANONICAL_TEMPLATES.values())

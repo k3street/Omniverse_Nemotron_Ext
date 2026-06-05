@@ -21,7 +21,24 @@ class SwarmPlanGenerator:
     Returns parsed Extension actions.
     """
     async def generate_plan_async(self, req: PlanGenerationRequest, mock_findings: List[Dict[str, Any]]) -> PatchPlan:
-            
+        """Run the Coder→QA→Critic→PM swarm and return a PatchPlan.
+
+        Builds a natural-language task prompt from ``req`` and ``mock_findings``,
+        submits it to the multi-agent loop via ``ProjectManagerAgent.run``, then
+        wraps the loop result in a ``PatchPlan`` with a single "swarm_python_script"
+        action when the agents reach consensus.
+
+        Args:
+            req (PlanGenerationRequest): Generation parameters; ``user_request`` is
+                used as the base prompt when present.
+            mock_findings (List[Dict[str, Any]]): Validation findings appended to the
+                prompt. Each entry should contain ``prim_path`` and ``rule_id``.
+
+        Returns:
+            PatchPlan: Plan with ``status="proposed"``, ``compatibility_status="validated"``
+            and ``overall_confidence=0.9`` on swarm pass; confidence drops to 0.2 and
+            status remains "proposed" with ``compatibility_status="failed"`` on swarm fail.
+        """
         prompt = req.user_request or "Fix the stage according to best OpenUSD/Isaac Sim practices."
         if mock_findings:
             prompt += "\nSpecific validation issues found:\n"

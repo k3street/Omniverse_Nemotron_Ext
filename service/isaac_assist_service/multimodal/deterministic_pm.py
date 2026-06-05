@@ -11,6 +11,20 @@ from typing import Any, Dict, List
 
 
 def deterministic_pm(failure_log: List[str]) -> Dict[str, Any]:
+    """Extract error signatures from a failure log deterministically.
+
+    Scans each log line for ``raise``, ``error``, or ``traceback`` keywords
+    (case-insensitive) and collects up to 10 matching snippets.  No LLM is
+    used; the result is fully reproducible given the same input.
+
+    Args:
+        failure_log (List[str]): Raw log lines from a failed workflow run.
+
+    Returns:
+        Dict[str, Any]: Keys ``signatures`` (list of up to 10 matched lines,
+            truncated to 200 chars each), ``error_count`` (total matches found),
+            and ``is_deterministic`` (always ``True``).
+    """
     error_signatures = []
     for line in failure_log:
         line_lower = line.lower()

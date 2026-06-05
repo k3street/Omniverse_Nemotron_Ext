@@ -65,10 +65,15 @@ def _truncate(s: str, n: int = 4000) -> str:
 # ---------------------------------------------------------------------------
 
 class MCPServer:
-    """
-    Lightweight MCP server that translates Isaac Assist tools into the
-    Model Context Protocol wire format.  Supports both SSE and stdio
-    transports.
+    """Lightweight MCP server that translates Isaac Assist tools into the MCP wire format.
+
+    Converts ISAAC_SIM_TOOLS (OpenAI function-calling format) to MCP tool
+    definitions at startup.  Dispatches JSON-RPC 2.0 requests from SSE or
+    stdio transports to the appropriate handler, routing tool calls through
+    :func:`tool_executor.execute_tool_call`.
+
+    Additionally exposes two meta-tools (``get_settings``, ``update_settings``)
+    that bypass the tool_executor and are handled locally.
     """
 
     SERVER_INFO = {
@@ -77,6 +82,11 @@ class MCPServer:
     }
 
     def __init__(self) -> None:
+        """Load tool schemas and build the MCP tool list.
+
+        Optionally applies polished tool descriptions from
+        ``tool_descriptions_polish`` when available.
+        """
         from .chat.tools.tool_schemas import ISAAC_SIM_TOOLS
         from .chat.tools.tool_executor import execute_tool_call
         from .settings.manager import SettingsManager
@@ -134,8 +144,17 @@ class MCPServer:
     # ── JSON-RPC dispatch ───────────────────────────────────────────────
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Process a single JSON-RPC 2.0 request and return the response.
+        """Process a single JSON-RPC 2.0 request and return the response dict.
+
+        Dispatches to ``_handle_initialize``, ``_handle_tools_list``,
+        ``_handle_tools_call``, or returns a ``-32601 Method not found`` error.
+
+        Args:
+            request (dict): Parsed JSON-RPC 2.0 request with ``method``, ``id``,
+                and optional ``params``.
+
+        Returns:
+            dict: JSON-RPC 2.0 success or error response.
         """
         method = request.get("method", "")
         req_id = request.get("id")
@@ -162,6 +181,7 @@ class MCPServer:
             return self._error_response(req_id, -32603, str(e))
 
     def _handle_initialize(self, params: Dict) -> Dict:
+        """Return the MCP ``initialize`` response with server capabilities."""
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {
@@ -173,9 +193,21 @@ class MCPServer:
         }
 
     def _handle_tools_list(self, params: Dict) -> Dict:
+        """Return the full list of MCP tool definitions."""
         return {"tools": self._mcp_tools}
 
     async def _handle_tools_call(self, params: Dict) -> Dict:
+        """Execute a tool call and return an MCP content-block response.
+
+        Routes ``get_settings`` and ``update_settings`` to the local settings
+        manager; all other tools go through ``execute_tool_call``.
+
+        Args:
+            params (dict): MCP tool-call params with ``name`` and ``arguments``.
+
+        Returns:
+            dict: ``{"content": [...], "isError": bool}`` MCP response.
+        """
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
 
@@ -246,10 +278,12 @@ class MCPServer:
 
     @staticmethod
     def _success_response(req_id: Any, result: Any) -> Dict:
+        """Wrap a result in a JSON-RPC 2.0 success envelope."""
         return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
     @staticmethod
     def _error_response(req_id: Any, code: int, message: str) -> Dict:
+        """Wrap an error in a JSON-RPC 2.0 error envelope."""
         return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 

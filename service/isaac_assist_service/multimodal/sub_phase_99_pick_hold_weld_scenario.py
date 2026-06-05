@@ -21,6 +21,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -67,7 +72,7 @@ class RobotAssignment:
 
 @dataclass
 class WeldSeamSpec:
-    """Specification for the weld seam trajectory."""
+    """Geometry and motion specification for the weld seam trajectory."""
 
     start_xyz: Tuple[float, float, float]
     end_xyz: Tuple[float, float, float]
@@ -166,6 +171,7 @@ class PickHoldWeldStateMachine:
     }
 
     def __init__(self, config: ScenarioConfig) -> None:
+        """Initialise the runner with a scenario *config* and a fresh :class:`ScenarioState`."""
         self.config = config
         self.state = ScenarioState()
 
@@ -207,7 +213,7 @@ class PickHoldWeldStateMachine:
 
     # ------------------------------------------------------------------
     def update_seam_progress(self, pct: float) -> None:
-        """Update seam completion percentage (0–100)."""
+        """Update the seam completion percentage (0–100) recorded in state."""
         self.state.seam_progress_pct = float(pct)
 
     # ------------------------------------------------------------------

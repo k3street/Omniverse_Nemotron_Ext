@@ -33,6 +33,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -47,7 +52,7 @@ def get_phase_metadata() -> Dict[str, Any]:
 
 @dataclass
 class Waypoint:
-    """A single point on a route."""
+    """A single named point on a route in 3-D space (x, y, z)."""
 
     x: float
     y: float
@@ -55,6 +60,7 @@ class Waypoint:
     label: str = ""
 
     def as_xyz(self) -> tuple[float, float, float]:
+        """Return the waypoint coordinates as a plain ``(x, y, z)`` tuple."""
         return (self.x, self.y, self.z)
 
 
@@ -124,7 +130,7 @@ class RouteValidator:
     def _check_insufficient_waypoints(
         self, route: Route
     ) -> ConstraintViolation | None:
-        """Check 3: < 2 waypoints → hard ERROR."""
+        """Return a hard ``ConstraintViolation`` when the route has fewer than 2 waypoints."""
         if len(route.waypoints) < 2:
             n = len(route.waypoints)
             return ConstraintViolation(

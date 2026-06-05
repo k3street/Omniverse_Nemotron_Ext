@@ -37,7 +37,11 @@ _SCAN_DIR_DEFAULT = Path(__file__).resolve().parent
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -90,6 +94,13 @@ class SpecRealityReconciler:
         metadata_path: Path,
         spec_path: Optional[Path] = None,
     ) -> None:
+        """Initialise the reconciler.
+
+        Args:
+            metadata_path (Path): Path to ``specs/phase_metadata.yaml``.
+            spec_path (Path, optional): Path to the canonical spec markdown.
+                Retained for future orphan-line scanning; not actively used.
+        """
         self._metadata_path = Path(metadata_path)
         self._spec_path = Path(spec_path) if spec_path else None
         self._raw: Dict[str, Any] = {}
@@ -100,7 +111,7 @@ class SpecRealityReconciler:
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
-        """Load and cache the YAML metadata (idempotent)."""
+        """Load and cache the YAML metadata from disk (idempotent — no-op if already loaded)."""
         if self._loaded:
             return
         if self._metadata_path.exists():
@@ -109,7 +120,7 @@ class SpecRealityReconciler:
         self._loaded = True
 
     def _phases(self) -> Dict[str, Any]:
-        """Return the raw mapping of phase_id → phase_dict."""
+        """Return the raw mapping of phase_id to phase_dict from the YAML metadata."""
         self._load()
         return {
             str(k): v

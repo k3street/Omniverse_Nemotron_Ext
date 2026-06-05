@@ -67,4 +67,9 @@ async def run_convergence() -> Dict[str, Any]:
 
 
 def run_convergence_sync() -> Dict[str, Any]:
+    """Synchronous wrapper: run :func:`run_convergence` via ``asyncio.run``.
+
+    Returns:
+        Dict[str, Any]: The convergence report dict produced by :func:`run_convergence`.
+    """
     return asyncio.run(run_convergence())

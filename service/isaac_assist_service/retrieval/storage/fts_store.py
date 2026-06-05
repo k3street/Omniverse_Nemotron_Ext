@@ -1,3 +1,9 @@
+"""SQLite FTS5 vector store for RAG document chunks.
+
+The database is written to ``workspace/rag_index.db`` so it survives
+service restarts and can be committed to version control for offline use.
+BM25 ranking is provided natively by SQLite's FTS5 ``rank`` virtual column.
+"""
 import sqlite3
 import os
 import uuid
@@ -8,7 +14,9 @@ from typing import List, Dict, Any
 WORKSPACE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "workspace")
 DB_PATH = os.path.join(WORKSPACE_DIR, "rag_index.db")
 
+
 class FTSStore:
+    """FTS5-backed document chunk store with version-scoped BM25 search."""
     def __init__(self):
         os.makedirs(WORKSPACE_DIR, exist_ok=True)
         self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -16,6 +24,7 @@ class FTSStore:
         self._init_db()
 
     def _init_db(self):
+        """Create the ``document_index`` FTS5 virtual table if absent."""
         c = self.conn.cursor()
         c.execute('''
             CREATE VIRTUAL TABLE IF NOT EXISTS document_index USING fts5(
@@ -30,6 +39,16 @@ class FTSStore:
         self.conn.commit()
 
     def insert_chunk(self, source_id: str, content: str, section_path: str, url: str, version_scope: str, trust_tier: int):
+        """Insert one document chunk into the FTS5 index.
+
+        Args:
+            source_id (str): Parent source identifier.
+            content (str): Text content to index.
+            section_path (str): Heading extracted from the document.
+            url (str): Canonical URL of the source document.
+            version_scope (str): Isaac Sim version, e.g. ``"5.1.0"``.
+            trust_tier (int): Numeric trust level (1 = authoritative).
+        """
         c = self.conn.cursor()
         c.execute('''
             INSERT INTO document_index (content, source_id, section_path, url, version_scope, trust_tier)
@@ -38,6 +57,24 @@ class FTSStore:
         self.conn.commit()
 
     def search(self, query: str, limit: int = 5, version_scope: str = None) -> List[Dict[str, Any]]:
+        """Full-text BM25 search over indexed chunks.
+
+        Multi-word queries are transformed to AND logic so all terms must
+        appear, improving precision at some recall cost. Non-alphanumeric
+        tokens are stripped before query construction to avoid FTS5 syntax
+        errors.
+
+        Args:
+            query (str): Free-text search string.
+            limit (int, optional): Maximum results to return. Defaults to 5.
+            version_scope (str, optional): When given, restrict results to
+                chunks whose ``version_scope`` matches exactly or equals
+                ``"all"``.
+
+        Returns:
+            list[dict]: Matched rows as dicts including a ``rank`` key.
+            Empty list on no match or invalid FTS query.
+        """
         c = self.conn.cursor()
         # Simple BM25 ranking built into SQLite FTS5 extension.
         # We replace spaces with AND to enforce all words matching for higher quality MVP results.

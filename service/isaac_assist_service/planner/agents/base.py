@@ -29,6 +29,7 @@ class Criterion:
     detail: str   = ""    # human-readable evidence / error text
 
     def __str__(self) -> str:
+        """Return a single-line human-readable representation with pass/fail icon."""
         icon = "✓" if self.passed else "✗"
         tail = f" — {self.detail}" if self.detail else ""
         return f"{icon} [{self.name}] {self.description}{tail}"
@@ -76,6 +77,7 @@ class AgentResult:
     # ── Serialisation ─────────────────────────────────────────────────────────
 
     def summary(self) -> str:
+        """Return a multi-line human-readable summary of this agent result."""
         lines = [
             f"[{self.agent.upper()}] iter={self.iteration} "
             f"status={self.status} score={self.score:.2f}"
@@ -87,6 +89,15 @@ class AgentResult:
         return "\n".join(lines)
 
     def to_dict(self) -> dict:
+        """Serialise the result to a JSON-safe dict suitable for logging or API responses.
+
+        Code blocks are truncated to 2000 chars and large string fields are
+        capped so the payload remains human-readable.
+
+        Returns:
+            dict: Keys include ``agent``, ``iteration``, ``status``, ``score``,
+            ``criteria`` (list of criterion dicts), ``output``, and ``feedback``.
+        """
         # Serialize output: include code_blocks + latency for coder results;
         # truncate large strings so JSON stays readable.
         output_serial: Any = None
@@ -202,6 +213,19 @@ class AgentBase(ABC):
         detail: str = "",
         score: float | None = None,
     ) -> Criterion:
+        """Construct a Criterion, defaulting score to 1.0/0.0 when not provided.
+
+        Args:
+            name (str): Short machine-readable criterion identifier.
+            description (str): Human-readable explanation of what is being checked.
+            passed (bool): Whether the criterion was satisfied.
+            detail (str, optional): Evidence text or error snippet. Defaults to "".
+            score (float, optional): Explicit score 0.0–1.0. Defaults to None,
+                which maps to 1.0 if passed else 0.0.
+
+        Returns:
+            Criterion: Populated dataclass instance.
+        """
         return Criterion(
             name=name,
             description=description,
@@ -218,6 +242,18 @@ class AgentBase(ABC):
         logs: list[str] | None = None,
         feedback: str = "",
     ) -> AgentResult:
+        """Build an AgentResult, deriving status from whether all criteria passed.
+
+        Args:
+            iteration (int): 0-based loop counter for this agent run.
+            criteria (list[Criterion]): All criteria checked in this run.
+            output (Any, optional): Agent-specific payload (code dict, analysis dict, etc.).
+            logs (list[str], optional): Raw log lines captured during the run.
+            feedback (str, optional): Synthesised text to pass to the Coder next iteration.
+
+        Returns:
+            AgentResult: Status is "pass" when all criteria passed, else "fail".
+        """
         all_passed = all(c.passed for c in criteria)
         return AgentResult(
             agent=self.name,

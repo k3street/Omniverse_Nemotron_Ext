@@ -28,6 +28,15 @@ class ArticulationIntegrityValidator(ValidationRule):
         )
 
     def check(self, stage_data: Dict[str, Any]) -> List[ValidationFinding]:
+        """Check articulation chain integrity and return any findings.
+
+        Args:
+            stage_data (dict): Serialized stage data from the UI extension.
+
+        Returns:
+            List[ValidationFinding]: Findings for zero-stiffness drives, missing
+            joint limits, absent root bodies, orphan joints, or missing drive APIs.
+        """
         findings = []
         prims = stage_data.get("prims", [])
         prim_map = {p.get("path", ""): p for p in prims}

@@ -12,9 +12,25 @@ class PlanGenerator:
     For Phase 3 mapping, we statically translate known UI rules to Executor rules.
     """
     def __init__(self):
+        """Initialise the deterministic plan generator (no external dependencies)."""
         pass
 
     def generate_plan(self, req: PlanGenerationRequest, mock_findings: List[Dict[str, Any]]) -> PatchPlan:
+        """Translate a list of validation findings into a structured PatchPlan.
+
+        Maps each known rule_id to a deterministic PatchAction. Unknown rule_ids
+        are silently skipped. In Phase 4 this method will be replaced by an
+        LLM-backed implementation.
+
+        Args:
+            req (PlanGenerationRequest): Generation parameters including scope and mode.
+            mock_findings (List[Dict[str, Any]]): Validation findings, each containing
+                at minimum ``finding_id``, ``rule_id``, and ``prim_path`` keys.
+
+        Returns:
+            PatchPlan: Draft or proposed plan whose ``status`` is "draft" when
+            ``req.mode == "explain"``, otherwise "proposed".
+        """
         actions = []
         
         # 1. Map known Findings to fix actions

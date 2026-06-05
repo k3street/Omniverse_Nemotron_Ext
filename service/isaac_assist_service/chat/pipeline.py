@@ -426,11 +426,18 @@ class PipelinePlanner:
     """Generates structured multi-phase plans for robot simulation pipelines."""
 
     def plan(self, prompt: str) -> Dict[str, Any]:
-        """
-        Generate a pipeline plan from a high-level prompt.
+        """Generate a pipeline plan from a high-level prompt.
 
-        First tries to match a known robot template.
-        Falls back to LLM-generated plan for unknown scenarios.
+        Attempts to match a known robot + scenario template first.  When no
+        template exists, returns a dict with ``needs_llm=True`` so the caller
+        can fall through to :meth:`plan_with_llm`.
+
+        Args:
+            prompt (str): High-level user description of the desired simulation.
+
+        Returns:
+            dict: Fully-interpolated phase plan when a template is found, or
+            ``{"needs_llm": True, "detected_robot": ..., ...}`` otherwise.
         """
         prompt_lower = prompt.lower()
 
@@ -453,7 +460,16 @@ class PipelinePlanner:
         }
 
     async def plan_with_llm(self, prompt: str, llm_provider) -> Dict[str, Any]:
-        """Use LLM to generate a plan for arbitrary scenarios."""
+        """Use the LLM to generate a plan for arbitrary scenarios.
+
+        Args:
+            prompt (str): High-level user description of the desired simulation.
+            llm_provider: Any provider with an async ``complete`` method.
+
+        Returns:
+            dict: Parsed JSON plan from the LLM (``source="llm"``), or
+            ``{"error": ..., "raw_response": ...}`` on parse failure.
+        """
         filled_prompt = PIPELINE_PLAN_PROMPT.format(user_request=prompt)
         messages = [
             {"role": "system", "content": "You are a pipeline planner. Respond with valid JSON only."},
@@ -480,6 +496,14 @@ class PipelinePlanner:
         }
 
     def _detect_robot(self, prompt_lower: str) -> Optional[str]:
+        """Return the canonical robot key if one of the known aliases appears in the prompt.
+
+        Args:
+            prompt_lower (str): Lowercased user prompt.
+
+        Returns:
+            str | None: Canonical key (e.g. ``"nova_carter"``), or None if no match.
+        """
         for key, aliases in _ROBOT_ALIASES.items():
             for alias in aliases:
                 if alias in prompt_lower:
@@ -487,6 +511,17 @@ class PipelinePlanner:
         return None
 
     def _detect_scenario(self, prompt_lower: str) -> str:
+        """Detect the environment scenario from a lowercased prompt.
+
+        Falls back to ``"simple"`` when no keyword matches.
+
+        Args:
+            prompt_lower (str): Lowercased user prompt.
+
+        Returns:
+            str: One of ``"home"``, ``"warehouse"``, ``"office"``, ``"outdoor"``,
+            or ``"simple"``.
+        """
         for scenario in _SCENARIO_ASSETS:
             if scenario in prompt_lower:
                 return scenario

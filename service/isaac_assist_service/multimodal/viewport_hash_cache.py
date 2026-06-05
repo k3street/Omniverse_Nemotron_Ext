@@ -45,6 +45,7 @@ def canonical_camera_params(params: Optional[Dict[str, Any]]) -> str:
 
 @dataclass
 class CacheEntry:
+    """One cached viewport vision result with access-time metadata."""
     key: str
     value: Any
     created_at: float
@@ -55,6 +56,7 @@ class CacheEntry:
 
 @dataclass
 class CacheStats:
+    """Snapshot of ``ViewportHashCache`` counters and current occupancy."""
     hits: int
     misses: int
     evictions: int
@@ -79,6 +81,13 @@ class ViewportHashCache:
         ttl_seconds: float = 300.0,
         max_total_bytes: int = 100 * 1024 * 1024,  # 100 MB
     ) -> None:
+        """Initialise the cache.
+
+        Args:
+            max_entries (int): Maximum number of entries before LRU eviction.
+            ttl_seconds (float): Time-to-live per entry in seconds.
+            max_total_bytes (int): Byte budget before additional LRU eviction.
+        """
         self._max_entries = max_entries
         self._ttl_seconds = ttl_seconds
         self._max_total_bytes = max_total_bytes
@@ -237,10 +246,11 @@ class ViewportHashCache:
     # ------------------------------------------------------------------
 
     def _total_bytes(self) -> int:
+        """Return the sum of ``size_bytes`` across all current entries."""
         return sum(e.size_bytes for e in self._store.values())
 
     def stats(self) -> CacheStats:
-        """Return a snapshot of current cache statistics."""
+        """Return a point-in-time snapshot of current cache hit/miss statistics."""
         total = self._hits + self._misses
         hit_rate = self._hits / total if total > 0 else 0.0
         return CacheStats(
@@ -253,10 +263,11 @@ class ViewportHashCache:
         )
 
     def clear(self) -> None:
-        """Drop all entries (counters are preserved)."""
+        """Drop all cached entries (hit/miss/eviction counters are preserved)."""
         self._store.clear()
 
     def __len__(self) -> int:
+        """Return the current number of entries in the cache."""
         return len(self._store)
 
 
@@ -265,7 +276,11 @@ class ViewportHashCache:
 # ---------------------------------------------------------------------------
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for the viewport hash cache phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,

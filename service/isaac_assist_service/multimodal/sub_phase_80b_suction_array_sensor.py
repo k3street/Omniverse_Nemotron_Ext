@@ -18,6 +18,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -63,6 +68,13 @@ class SuctionArray:
     """
 
     def __init__(self, array_id: str, cups: List[SuctionCup]) -> None:
+        """Initialise the suction array.
+
+        Args:
+            array_id (str): Unique identifier for this suction-array instance.
+            cups (List[SuctionCup]): Ordered list of individual cup configurations;
+                a fast ``cup_id`` → ``SuctionCup`` lookup is built internally.
+        """
         self.array_id = array_id
         self.cups: List[SuctionCup] = cups
         # Build a fast lookup from cup_id → SuctionCup

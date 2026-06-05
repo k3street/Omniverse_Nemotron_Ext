@@ -144,6 +144,13 @@ class MultimodalStore:
     """
 
     def __init__(self, db_path: Optional[Path] = None):
+        """Initialise the store, creating the database file if needed.
+
+        Args:
+            db_path (Path, optional): Path to the SQLite database file.
+                Defaults to ``workspace/multimodal/state.db`` relative to the
+                repository root.
+        """
         self._db_path = db_path or DEFAULT_DB_PATH
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         # Per-thread connection storage
@@ -159,6 +166,15 @@ class MultimodalStore:
     # ------------------------------------------------------------------ #
 
     def _connection(self) -> sqlite3.Connection:
+        """Return (or lazily open) the SQLite connection for the current OS thread.
+
+        Each call from the same thread returns the same cached connection.  WAL
+        mode, foreign-key enforcement, and NORMAL synchronous mode are configured
+        on first open.
+
+        Returns:
+            sqlite3.Connection: The per-thread connection in autocommit mode.
+        """
         conn = getattr(self._local, "conn", None)
         if conn is None:
             conn = sqlite3.connect(
@@ -203,6 +219,7 @@ class MultimodalStore:
     # ------------------------------------------------------------------ #
 
     def _init_schema(self) -> None:
+        """Create all tables and indexes if they do not already exist (idempotent)."""
         conn = self._connection()
         conn.executescript(_SCHEMA_SQL)
         # Record schema version (idempotent)
@@ -212,6 +229,11 @@ class MultimodalStore:
         )
 
     def schema_version(self) -> int:
+        """Return the current schema version stored in ``schema_meta``.
+
+        Returns:
+            int: Schema version integer; ``0`` when no version row exists.
+        """
         row = self._connection().execute(
             "SELECT value FROM schema_meta WHERE key='schema_version'"
         ).fetchone()
@@ -222,6 +244,14 @@ class MultimodalStore:
     # ------------------------------------------------------------------ #
 
     def _session_lock(self, session_id: str) -> asyncio.Lock:
+        """Return (or create) the per-session asyncio.Lock used for CAS atomicity.
+
+        Args:
+            session_id (str): Canvas session identifier.
+
+        Returns:
+            asyncio.Lock: The lock for this session; created on first access.
+        """
         with self._locks_mutex:
             lock = self._session_locks.get(session_id)
             if lock is None:
@@ -294,6 +324,21 @@ class MultimodalStore:
         new_spec: LayoutSpec,
         parent_revision: int,
     ) -> LayoutSpec:
+        """Synchronous CAS write; called from a thread executor by ``save_with_cas``.
+
+        Args:
+            session_id (str): Canvas session identifier.
+            new_spec (LayoutSpec): The spec to persist at ``parent_revision + 1``.
+            parent_revision (int): Expected current revision; mismatch raises
+                :exc:`RevisionConflictError`.
+
+        Returns:
+            LayoutSpec: The persisted spec with ``revision`` set to the new value.
+
+        Raises:
+            RevisionConflictError: When the database's current revision differs
+                from *parent_revision*.
+        """
         with self._transaction() as conn:
             row = conn.execute(
                 "SELECT MAX(revision) AS r FROM layout_specs WHERE session_id=?",
@@ -373,6 +418,13 @@ class MultimodalStore:
     # ------------------------------------------------------------------ #
 
     def start_build(self, build_id: str, session_id: str, revision: int) -> None:
+        """Insert a new build_log row with status ``"running"``.
+
+        Args:
+            build_id (str): Unique build identifier.
+            session_id (str): Associated canvas session.
+            revision (int): The LayoutSpec revision this build was triggered on.
+        """
         with self._transaction() as conn:
             conn.execute(
                 "INSERT INTO build_log(build_id, session_id, revision, status, progress) "
@@ -416,6 +468,12 @@ class MultimodalStore:
             )
 
     def finish_build(self, build_id: str, status: str) -> None:
+        """Mark a build as finished and record the completion timestamp.
+
+        Args:
+            build_id (str): Build to update.
+            status (str): Terminal status string, e.g. ``"ok"`` or ``"error"``.
+        """
         with self._transaction() as conn:
             conn.execute(
                 "UPDATE build_log SET status=?, finished_at=datetime('now') "
@@ -424,6 +482,15 @@ class MultimodalStore:
             )
 
     def get_build(self, build_id: str) -> Optional[Dict[str, Any]]:
+        """Return a build_log row by *build_id*, or ``None`` if not found.
+
+        Args:
+            build_id (str): Build identifier.
+
+        Returns:
+            Optional[Dict[str, Any]]: Build dict with ``progress`` decoded from
+                JSON, or ``None``.
+        """
         row = self._connection().execute(
             "SELECT * FROM build_log WHERE build_id=?",
             (build_id,),
@@ -435,6 +502,15 @@ class MultimodalStore:
         return d
 
     def latest_build(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Return the most recent build for *session_id*, or ``None``.
+
+        Args:
+            session_id (str): Canvas session identifier.
+
+        Returns:
+            Optional[Dict[str, Any]]: Build dict with ``progress`` decoded from
+                JSON, or ``None`` when no builds exist for the session.
+        """
         row = self._connection().execute(
             "SELECT * FROM build_log WHERE session_id=? "
             "ORDER BY started_at DESC LIMIT 1",

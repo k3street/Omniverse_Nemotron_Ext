@@ -33,6 +33,16 @@ class IsaacLabSanityValidator(ValidationRule):
         )
 
     def check(self, stage_data: Dict[str, Any]) -> List[ValidationFinding]:
+        """Check IsaacLab RL environment configuration and return any findings.
+
+        Args:
+            stage_data (dict): Serialized stage data from the UI extension.
+
+        Returns:
+            List[ValidationFinding]: Findings for insufficient env spacing, missing
+            collision filters, absent ground plane, bad obs/action space references,
+            or missing robot articulation root.
+        """
         findings = []
         prims = stage_data.get("prims", [])
         prim_map: Dict[str, Dict] = {p.get("path", ""): p for p in prims}

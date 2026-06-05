@@ -25,6 +25,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for Phase 92.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -53,6 +58,12 @@ class SnapshotRetentionPolicy:
     keep_minimum: int = 5
 
     def __post_init__(self) -> None:
+        """Validate policy field constraints.
+
+        Raises:
+            ValueError: When ``archive_after_days ≤ 0``, ``delete_after_days ≤ archive_after_days``,
+                or ``keep_minimum < 0``.
+        """
         if self.archive_after_days <= 0:
             raise ValueError("archive_after_days must be positive")
         if self.delete_after_days <= self.archive_after_days:

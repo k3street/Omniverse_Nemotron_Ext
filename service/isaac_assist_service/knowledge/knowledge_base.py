@@ -1,3 +1,14 @@
+"""Long-term experiential knowledge base for Isaac Assist.
+
+Stores versioned instruction/response JSONL pairs categorised as:
+- ``auto_error_learning`` — failure patterns with normalized deduplication
+- ``auto_success_learning`` — successful execution examples
+- ``negative_patterns`` — structured failure records with root-cause and fix
+
+Provides keyword-overlap retrieval so the chat orchestrator can inject
+relevant past experience into the LLM system prompt, and a ``compact()``
+method to prune the store to configurable size limits.
+"""
 import json
 import hashlib
 import logging
@@ -14,7 +25,19 @@ _LINE_REF_RE = re.compile(r'(?:File "[^"]*", line \d+(?:, in \w+)?|at line \d+|i
 
 
 def _error_signature(output: str) -> str:
-    """Extract a normalized error signature for dedup."""
+    """Extract a normalized error signature suitable for deduplication.
+
+    Scans ``output`` line-by-line for the first line containing an error
+    keyword, then strips file paths and line-number references so that
+    the same logical error from different call sites produces the same key.
+
+    Args:
+        output (str): Raw error output or error description string.
+
+    Returns:
+        str: Normalised signature, at most 200 characters.  Falls back to the
+        first 200 characters of the stripped input if no error line is found.
+    """
     for line in output.split("\n"):
         stripped = line.strip()
         if any(kw in stripped for kw in ("Error", "Exception", "Traceback")):
@@ -25,13 +48,30 @@ def _error_signature(output: str) -> str:
 
 
 def _keyword_set(text: str) -> Set[str]:
-    """Extract a lowercased word set from text, filtering noise."""
+    """Extract a lowercased word set from text, filtering noise.
+
+    Args:
+        text (str): Arbitrary text to tokenize.
+
+    Returns:
+        Set[str]: Words longer than 2 characters, all lowercased.
+    """
     return {w for w in text.lower().split() if len(w) > 2}
 
 class KnowledgeBase:
-    """
-    Long-term experiential memory. Stores instructional data 
-    separated by the application version to build fine-tuning datasets.
+    """Long-term experiential memory for Isaac Assist.
+
+    Persists instruction/response pairs in per-version JSONL files under
+    ``storage_dir``.  Each entry carries a ``source`` tag so callers can
+    retrieve only errors, only successes, or negative patterns.
+
+    Key methods:
+    - :meth:`add_error` / :meth:`add_success` — write deduplicated entries.
+    - :meth:`get_error_learnings` / :meth:`get_success_learnings` — retrieve
+      keyword-matched examples for LLM injection.
+    - :meth:`compact` — prune oversized stores atomically.
+    - :meth:`add_negative_pattern` — record structured failure records with
+      root-cause and applied fix.
     """
     def __init__(self, storage_dir: str = "workspace/knowledge"):
         self.storage_dir = Path(storage_dir)
@@ -40,17 +80,38 @@ class KnowledgeBase:
         self._known_errors: Dict[str, Set[str]] = {}  # version -> set of sigs
         
     def _get_file_path(self, version: str) -> Path:
-        # Sanitize version string for file names
+        """Return the JSONL file path for a given version string.
+
+        Sanitizes ``version`` to safe filename characters, falling back to
+        ``"default_version"`` if the result would be empty.
+
+        Args:
+            version (str): Isaac Sim / extension version identifier.
+
+        Returns:
+            Path: Absolute path to ``knowledge_{version}.jsonl``.
+        """
         clean_version = "".join(c for c in version if c.isalnum() or c in "._-").strip()
         if not clean_version:
             clean_version = "default_version"
         return self.storage_dir / f"knowledge_{clean_version}.jsonl"
 
     def add_entry(self, version: str, instruction: str, response: str, source: str = "audit"):
-        """Appends a new QA pair / instruction pair to the version-specific KB.
-        
-        Local learning sources (auto_error_learning, auto_success_learning) always write.
-        User-contributed data (approved_patch) respects the contribute_data opt-in.
+        """Append a new instruction/response pair to the version-specific JSONL store.
+
+        Local learning sources (``auto_error_learning``, ``auto_success_learning``)
+        always write.  User-contributed data (``approved_patch``) respects the
+        ``contribute_data`` opt-in setting.
+
+        Args:
+            version (str): Isaac Sim version string, used to select the JSONL file.
+            instruction (str): The instruction or context text for the entry.
+            response (str): The corresponding response or fix text.
+            source (str): Entry source tag.  One of ``"audit"``, ``"approved_patch"``,
+                ``"auto_error_learning"``, or ``"auto_success_learning"``.
+
+        Returns:
+            bool: True if the entry was written, False if skipped or an error occurred.
         """
         if source == "approved_patch" and not config.contribute_data:
             logger.info("Data contribution opt-in is disabled. Skipping approved_patch KB entry.")
@@ -71,7 +132,15 @@ class KnowledgeBase:
             return False
 
     def get_entries(self, version: str) -> List[Dict[str, str]]:
-        """Retrieves all stored context for a given version."""
+        """Return all stored entries for a given version.
+
+        Args:
+            version (str): Isaac Sim version string.
+
+        Returns:
+            List[dict]: All parsed JSONL entries, or an empty list if the file does
+            not exist or contains unreadable content.
+        """
         file_path = self._get_file_path(version)
         entries = []
         if not file_path.exists():
@@ -88,7 +157,12 @@ class KnowledgeBase:
             return []
 
     def get_supported_versions(self) -> List[str]:
-        """Lists all versions we currently have knowledge for."""
+        """Return all version strings that have a knowledge file on disk.
+
+        Returns:
+            List[str]: Version identifiers derived from ``knowledge_*.jsonl``
+            filenames in ``storage_dir``.
+        """
         versions = []
         if not self.storage_dir.exists():
             return versions
@@ -102,7 +176,17 @@ class KnowledgeBase:
     # ── Deduplication ────────────────────────────────────────────────────
 
     def _load_error_sigs(self, version: str) -> Set[str]:
-        """Load known error signatures for a version (lazy, once)."""
+        """Load and cache the set of known error signatures for a version.
+
+        Result is memoised in ``_known_errors``.  Subsequent calls for the
+        same version return the cached set without re-reading disk.
+
+        Args:
+            version (str): Isaac Sim version string.
+
+        Returns:
+            Set[str]: Normalized error signatures already recorded for this version.
+        """
         if version in self._known_errors:
             return self._known_errors[version]
 
@@ -119,13 +203,31 @@ class KnowledgeBase:
         return sigs
 
     def is_known_error(self, version: str, error_output: str) -> bool:
-        """Check if this error pattern was already recorded."""
+        """Return True if a matching error signature is already stored.
+
+        Args:
+            version (str): Isaac Sim version string.
+            error_output (str): Raw error text to check.
+
+        Returns:
+            bool: True if the normalized signature matches a stored entry.
+        """
         sig = _error_signature(error_output)
         return sig in self._load_error_sigs(version)
 
     def add_error(self, version: str, instruction: str, response: str,
                   error_output: str) -> bool:
-        """Add an error learning entry, skipping duplicates."""
+        """Add an error learning entry, skipping exact duplicates.
+
+        Args:
+            version (str): Isaac Sim version string.
+            instruction (str): Context/instruction text for the entry.
+            response (str): The fix or corrective response text.
+            error_output (str): Raw error output used to build the dedup signature.
+
+        Returns:
+            bool: True if the entry was written, False if a duplicate was detected.
+        """
         sig = _error_signature(error_output)
         sigs = self._load_error_sigs(version)
         if sig in sigs:
@@ -139,10 +241,19 @@ class KnowledgeBase:
 
     def get_error_learnings(self, version: str, user_message: str,
                             limit: int = 5) -> List[Dict[str, str]]:
-        """
-        Retrieve error learnings relevant to a user message.
-        Uses keyword overlap between the user message and the stored
-        instruction/error text to find the most relevant warnings.
+        """Retrieve error learnings most relevant to a user message.
+
+        Ranks stored ``auto_error_learning`` entries by word-overlap with
+        ``user_message`` and returns the top ``limit`` unique entries.
+
+        Args:
+            version (str): Isaac Sim version string.
+            user_message (str): The current user query to match against.
+            limit (int): Maximum number of entries to return (default 5).
+
+        Returns:
+            List[dict]: Matching entries sorted by descending overlap score,
+            deduplicated by error signature.
         """
         entries = self.get_entries(version)
         errors = [e for e in entries if e.get("source") == "auto_error_learning"]
@@ -185,12 +296,32 @@ class KnowledgeBase:
     # ── Success learning ─────────────────────────────────────────────────
 
     def _success_sig(self, user_message: str) -> str:
-        """Normalize a user message into a dedup key for successes."""
+        """Normalize a user message into a deduplication key for success entries.
+
+        Args:
+            user_message (str): Raw user message text.
+
+        Returns:
+            str: Lowercased, stripped, max-200-char key.
+        """
         return user_message.strip().lower()[:200]
 
     def add_success(self, version: str, instruction: str, response: str,
                     code: str = "") -> bool:
-        """Add a successful execution pattern, skipping near-duplicates."""
+        """Add a successful execution pattern, skipping near-duplicates.
+
+        Uses a normalized form of ``instruction`` as the dedup key so that
+        identical user requests do not accumulate redundant entries.
+
+        Args:
+            version (str): Isaac Sim version string.
+            instruction (str): The user instruction or context text.
+            response (str): The successful response or code pattern.
+            code (str): Optional raw Python code for reference (not indexed).
+
+        Returns:
+            bool: True if the entry was written, False if a near-duplicate exists.
+        """
         sig = self._success_sig(instruction)
         key = f"{version}:success"
         if key not in self._known_errors:
@@ -209,9 +340,16 @@ class KnowledgeBase:
 
     def get_success_learnings(self, version: str, user_message: str,
                               limit: int = 3) -> List[Dict[str, str]]:
-        """
-        Retrieve successful code patterns relevant to a user message.
-        Returns the most relevant proven-working examples.
+        """Retrieve successful code patterns most relevant to a user message.
+
+        Args:
+            version (str): Isaac Sim version string.
+            user_message (str): The current user query to match against.
+            limit (int): Maximum number of entries to return (default 3).
+
+        Returns:
+            List[dict]: Matching ``auto_success_learning`` entries sorted by
+            descending keyword-overlap score.
         """
         entries = self.get_entries(version)
         successes = [e for e in entries if e.get("source") == "auto_success_learning"]
@@ -326,10 +464,21 @@ class KnowledgeBase:
 
     def query_by_error_pattern(self, version: str, error_text: str,
                                limit: int = 3) -> List[Dict[str, str]]:
-        """
-        Search error learnings + negative patterns for entries matching
-        the given error text.  Returns entries with the highest keyword
-        overlap, combining both the main KB and the negative-pattern store.
+        """Search error learnings and negative patterns by keyword overlap.
+
+        Combines results from ``auto_error_learning`` entries in the main KB
+        and the separate negative-pattern store.  Negative patterns get a +1
+        score bonus to prefer their structured root-cause data.
+
+        Args:
+            version (str): Isaac Sim version string.
+            error_text (str): Error output or description to search against.
+            limit (int): Maximum number of results to return (default 3).
+
+        Returns:
+            List[dict]: Matched entries (minimum 2-keyword overlap) sorted by
+            descending score.  Negative pattern entries are reshaped to match
+            the standard instruction/response/source dict format.
         """
         results: List[tuple] = []   # (score, entry)
         query_words = _keyword_set(error_text)
@@ -370,6 +519,14 @@ class KnowledgeBase:
     # ── Negative pattern store ───────────────────────────────────────────
 
     def _negative_patterns_path(self, version: str) -> Path:
+        """Return the JSONL file path for negative patterns for a version.
+
+        Args:
+            version (str): Isaac Sim / extension version identifier.
+
+        Returns:
+            Path: Absolute path to ``negative_patterns_{version}.jsonl``.
+        """
         clean = "".join(c for c in version if c.isalnum() or c in "._-").strip()
         return self.storage_dir / f"negative_patterns_{clean or 'default'}.jsonl"
 
@@ -397,9 +554,20 @@ class KnowledgeBase:
         root_cause: str,
         fix_applied: str,
     ) -> bool:
-        """
-        Record a failure so the system can avoid the same mistake.
-        Deduplicates by error signature within a 24h window.
+        """Record a failure pattern so the system avoids repeating it.
+
+        Deduplicates by normalized error signature within a 24-hour window —
+        the same logical error is only stored once per day.
+
+        Args:
+            version (str): Isaac Sim version string.
+            error_signature (str): Short error description or exception line.
+            failing_code (str): The Python snippet that produced the error.
+            root_cause (str): Human-readable explanation of why it failed.
+            fix_applied (str): Description of the corrective action taken.
+
+        Returns:
+            bool: True if the entry was written, False if a recent duplicate exists.
         """
         sig = _error_signature(error_signature)
         existing = self._load_negative_patterns(version)
@@ -477,9 +645,22 @@ class KnowledgeBase:
         error_output: str = "",
         code: str = "",
     ) -> bool:
-        """
-        Called after a plan is applied.  On success, stores as a positive
-        example.  On failure, stores as a negative pattern with root cause.
+        """Persist the outcome of an executed plan as a learning entry.
+
+        On success stores via :meth:`add_success`.  On failure stores via
+        :meth:`add_negative_pattern` with the error output and a generic
+        root-cause note.
+
+        Args:
+            version (str): Isaac Sim version string.
+            user_message (str): Original user request.
+            plan_steps (list): The ordered list of plan step dicts.
+            success (bool): Whether the plan executed without errors.
+            error_output (str): Raw error text, used when ``success`` is False.
+            code (str): Python code that was executed, for reference.
+
+        Returns:
+            bool: True if a new entry was written, False if skipped as a duplicate.
         """
         if success:
             return self.add_success(

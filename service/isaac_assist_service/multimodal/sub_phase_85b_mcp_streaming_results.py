@@ -31,7 +31,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -54,6 +58,7 @@ class StreamingResultBuilder:
     """
 
     def __init__(self, stream_id: str) -> None:
+        """Initialise the builder with *stream_id* and a zero chunk counter."""
         self._stream_id = stream_id
         self._chunk_counter: int = 0
 
@@ -117,6 +122,7 @@ class StreamingResultCollector:
     """
 
     def __init__(self) -> None:
+        """Initialise the collector with empty chunk and end-result slots."""
         self._chunks: list[MCPStreamChunkResult] = []
         self._end: MCPStreamEndResult | None = None
 

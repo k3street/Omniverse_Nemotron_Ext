@@ -1,3 +1,10 @@
+"""Snapshot persistence manager.
+
+Snapshots are stored under ``workspace/snapshots/{timestamp}_{id}/`` with
+a ``manifest.json`` and one ``.usda`` per captured layer.  A hard cap of
+``MAX_SNAPSHOTS`` prevents unbounded disk growth by pruning the oldest
+directory once the limit is exceeded.
+"""
 import os
 import glob
 import uuid
@@ -9,12 +16,15 @@ from .models import Snapshot, SnapshotInitRequest
 
 logger = logging.getLogger(__name__)
 
-# We use the local workspace/snapshots structure to prevent 
+# We use the local workspace/snapshots structure to prevent
 # littering the user's hidden OS files, and keeping the repo cleanly manageable.
 SNAPSHOT_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "workspace", "snapshots")
 MAX_SNAPSHOTS = 50
 
+
 class SnapshotManager:
+    """Create, list, and prune USD stage snapshots on local disk."""
+
     def __init__(self):
         os.makedirs(SNAPSHOT_ROOT, exist_ok=True)
     
@@ -29,6 +39,19 @@ class SnapshotManager:
             shutil.rmtree(oldest, ignore_errors=True)
 
     def create_snapshot(self, req: SnapshotInitRequest, fingerprint_summary: Dict[str, str]) -> Snapshot:
+        """Write a new snapshot directory to disk and return its Snapshot model.
+
+        Creates ``{SNAPSHOT_ROOT}/{ts}_{id}/layers/`` for USDA files and
+        ``manifest.json`` for the Snapshot model. Prunes the oldest snapshot
+        directory first if ``MAX_SNAPSHOTS`` would be exceeded.
+
+        Args:
+            req (SnapshotInitRequest): Request containing raw USD layer text.
+            fingerprint_summary (dict): Machine fingerprint at creation time.
+
+        Returns:
+            Snapshot: Fully populated snapshot model (also persisted to disk).
+        """
         self._prune_old_snapshots()
         
         short_id = uuid.uuid4().hex[:8]
@@ -80,7 +103,15 @@ class SnapshotManager:
         return snap
         
     def list_snapshots(self) -> List[Dict[str, Any]]:
-        """ Retrieves all valid snapshots from disk """
+        """Return all valid snapshots found on disk, newest first.
+
+        Reads each ``manifest.json`` from subdirectories of ``SNAPSHOT_ROOT``.
+        Directories with corrupt or missing manifests are skipped with a
+        warning log.
+
+        Returns:
+            list[dict]: Snapshot manifest dicts sorted descending by ``created_at``.
+        """
         results = []
         for d in os.listdir(SNAPSHOT_ROOT):
             manifest_path = os.path.join(SNAPSHOT_ROOT, d, "manifest.json")

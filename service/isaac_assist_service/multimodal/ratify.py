@@ -40,22 +40,62 @@ DisambiguatorFn = "Callable[[List[TypedObject]], List[TypedObject]]"
 
 
 def _disambig_smaller_x_first(objs: List[TypedObject]) -> List[TypedObject]:
+    """Sort objects ascending by world X coordinate.
+
+    Args:
+        objs: Candidate TypedObjects.
+
+    Returns:
+        Sorted list, smallest X first.
+    """
     return sorted(objs, key=lambda o: o.position.x)
 
 
 def _disambig_larger_x_first(objs: List[TypedObject]) -> List[TypedObject]:
+    """Sort objects descending by world X coordinate.
+
+    Args:
+        objs: Candidate TypedObjects.
+
+    Returns:
+        Sorted list, largest X first.
+    """
     return sorted(objs, key=lambda o: o.position.x, reverse=True)
 
 
 def _disambig_smaller_y_first(objs: List[TypedObject]) -> List[TypedObject]:
+    """Sort objects ascending by world Y coordinate.
+
+    Args:
+        objs: Candidate TypedObjects.
+
+    Returns:
+        Sorted list, smallest Y first.
+    """
     return sorted(objs, key=lambda o: o.position.y)
 
 
 def _disambig_larger_y_first(objs: List[TypedObject]) -> List[TypedObject]:
+    """Sort objects descending by world Y coordinate.
+
+    Args:
+        objs: Candidate TypedObjects.
+
+    Returns:
+        Sorted list, largest Y first.
+    """
     return sorted(objs, key=lambda o: o.position.y, reverse=True)
 
 
 def _disambig_nearest_to_origin(objs: List[TypedObject]) -> List[TypedObject]:
+    """Sort objects by ascending 2D distance from the world origin (0, 0).
+
+    Args:
+        objs: Candidate TypedObjects.
+
+    Returns:
+        Sorted list, nearest first.
+    """
     return sorted(
         objs,
         key=lambda o: math.hypot(o.position.x, o.position.y),
@@ -63,6 +103,14 @@ def _disambig_nearest_to_origin(objs: List[TypedObject]) -> List[TypedObject]:
 
 
 def _disambig_farthest_from_origin(objs: List[TypedObject]) -> List[TypedObject]:
+    """Sort objects by descending 2D distance from the world origin (0, 0).
+
+    Args:
+        objs: Candidate TypedObjects.
+
+    Returns:
+        Sorted list, farthest first.
+    """
     return sorted(
         objs,
         key=lambda o: math.hypot(o.position.x, o.position.y),
@@ -71,6 +119,14 @@ def _disambig_farthest_from_origin(objs: List[TypedObject]) -> List[TypedObject]
 
 
 def _disambig_first_listed(objs: List[TypedObject]) -> List[TypedObject]:
+    """Return objects in their original emission order (no reordering).
+
+    Args:
+        objs: Candidate TypedObjects.
+
+    Returns:
+        A shallow copy in the same order.
+    """
     return list(objs)  # preserve emission order
 
 
@@ -261,6 +317,15 @@ def resolve_compliance(
         # severity may be the Phase 11b GradedScale enum (with .name)
         # OR a string — handle both.
         def _is_hard(violation: Any) -> bool:
+            """Return ``True`` if *violation* has ERROR or CRITICAL severity.
+
+            Args:
+                violation: Validation issue with a ``.severity`` attribute or
+                    GradedScale IntEnum.
+
+            Returns:
+                bool: ``True`` when severity contains ``ERROR`` or ``CRITICAL``.
+            """
             sev = getattr(violation, "severity", None)
             if sev is None:
                 return False

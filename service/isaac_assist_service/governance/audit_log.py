@@ -1,3 +1,9 @@
+"""Governance audit logger — append-only JSONL audit trail.
+
+Every governance event (patch approved, rejected, executed, rolled back)
+is persisted as a JSONL line so post-hoc analysis and compliance queries
+can reconstruct exactly what the agent did and when.
+"""
 import json
 import logging
 import os
@@ -8,8 +14,9 @@ from service.isaac_assist_service.governance.models import AuditEntry
 
 logger = logging.getLogger(__name__)
 
+
 class AuditLogger:
-    """Writes and reads audit logs to a JSONL file."""
+    """Append-only writer and reverse-chronological reader for the governance audit log."""
 
     def __init__(self, log_path: str = "workspace/audit.jsonl"):
         self.log_path = Path(log_path)
@@ -25,7 +32,14 @@ class AuditLogger:
             logger.error(f"Failed to create audit log file at {self.log_path}: {e}")
 
     def log_entry(self, entry: AuditEntry) -> bool:
-        """Appends a new audit entry to the log."""
+        """Serialize and append a single audit entry to the JSONL file.
+
+        Args:
+            entry (AuditEntry): The governance event to persist.
+
+        Returns:
+            bool: True on success, False if the write failed.
+        """
         try:
             # We serialize datetime to ISO format
             with open(self.log_path, 'a', encoding='utf-8') as f:
@@ -36,7 +50,16 @@ class AuditLogger:
             return False
 
     def query_logs(self, limit: int = 100, event_type: Optional[str] = None) -> List[AuditEntry]:
-        """Queries recent logs, optionally filtering by event type."""
+        """Return the most recent audit entries, newest first.
+
+        Args:
+            limit (int, optional): Maximum number of entries to return. Defaults to 100.
+            event_type (str, optional): If given, only return entries whose
+                ``event_type`` matches this string exactly.
+
+        Returns:
+            list[AuditEntry]: Matching entries, most-recent first.
+        """
         entries = []
         try:
             if not self.log_path.exists():

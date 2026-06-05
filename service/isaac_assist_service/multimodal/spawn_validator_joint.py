@@ -21,7 +21,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -131,6 +135,13 @@ class JointSpawnValidator:
     """
 
     def __init__(self, strict: bool = False) -> None:
+        """Initialise the joint validator.
+
+        Args:
+            strict (bool): When ``True``, every ``"warn"``-severity finding is
+                promoted to ``"error"`` so :meth:`passed` returns ``False`` for
+                any advisory issue.  Defaults to ``False``.
+        """
         self.strict = strict
 
     # ------------------------------------------------------------------
@@ -187,6 +198,7 @@ class JointSpawnValidator:
     def _check_prim_exists(
         state: JointPrimState, findings: List[JointValidationFinding]
     ) -> None:
+        """Append an error finding when the joint prim does not exist."""
         if not state.exists:
             findings.append(
                 JointValidationFinding(
@@ -203,6 +215,7 @@ class JointSpawnValidator:
     def _check_joint_type_known(
         state: JointPrimState, findings: List[JointValidationFinding]
     ) -> None:
+        """Append an error finding when ``joint_type`` is not in KNOWN_JOINT_TYPES."""
         if state.joint_type not in _KNOWN_JOINT_TYPES:
             findings.append(
                 JointValidationFinding(
@@ -219,6 +232,7 @@ class JointSpawnValidator:
     def _check_body0_set(
         state: JointPrimState, findings: List[JointValidationFinding]
     ) -> None:
+        """Append an error finding when ``body0`` (parent rigid body) is not set."""
         if not state.body0:
             findings.append(
                 JointValidationFinding(
@@ -235,6 +249,7 @@ class JointSpawnValidator:
     def _check_body1_set(
         state: JointPrimState, findings: List[JointValidationFinding]
     ) -> None:
+        """Append a warning finding when ``body1`` (child rigid body) is absent where expected."""
         if state.joint_type in _BODY1_REQUIRED_TYPES and not state.body1:
             findings.append(
                 JointValidationFinding(
@@ -265,6 +280,7 @@ class JointSpawnValidator:
     def _check_axis_set(
         state: JointPrimState, findings: List[JointValidationFinding]
     ) -> None:
+        """Append an error finding when ``axis`` is required for the joint type but not set."""
         if state.joint_type in _AXIS_REQUIRED_TYPES and not state.axis:
             findings.append(
                 JointValidationFinding(
@@ -281,6 +297,7 @@ class JointSpawnValidator:
     def _check_axis_valid(
         state: JointPrimState, findings: List[JointValidationFinding]
     ) -> None:
+        """Append an error finding when the set ``axis`` value is not a valid axis token."""
         if state.axis is not None and state.axis not in _VALID_AXES:
             findings.append(
                 JointValidationFinding(
@@ -297,6 +314,7 @@ class JointSpawnValidator:
     def _check_limits_consistent(
         state: JointPrimState, findings: List[JointValidationFinding]
     ) -> None:
+        """Append an error finding when ``lower_limit >= upper_limit``."""
         if state.lower_limit is not None and state.upper_limit is not None:
             if state.lower_limit >= state.upper_limit:
                 findings.append(
@@ -315,6 +333,7 @@ class JointSpawnValidator:
     def _check_articulation_root(
         state: JointPrimState, findings: List[JointValidationFinding]
     ) -> None:
+        """Append a warning when no ``articulation_root_path`` was recorded for the joint."""
         if not state.articulation_root_path:
             findings.append(
                 JointValidationFinding(

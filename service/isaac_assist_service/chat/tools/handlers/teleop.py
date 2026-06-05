@@ -221,6 +221,26 @@ print(f"  Connect: ws://localhost:{{WS_PORT}}")
 
 
 def _gen_configure_teleop_mapping(args: Dict) -> str:
+    """Generate Python that maps teleoperation device axes to robot joint drives.
+
+    Auto-discovers revolute/prismatic joints if ``joint_names`` is not provided,
+    then builds a sequential axis-to-joint mapping table. Raises a ``RuntimeError``
+    rather than silently succeeding when no axes end up mapped.
+
+    Args:
+        args: Tool arguments dict containing:
+            - robot_path (str): USD prim path to the robot articulation root.
+            - device_axes (list[str], optional): Ordered list of device axis
+              names (e.g. ``["x", "y", "z"]``). If omitted, axes are named
+              ``axis_0``, ``axis_1``, … in joint discovery order.
+            - joint_names (list[str], optional): Explicit joint name list.
+              If omitted, joints are auto-discovered from the articulation.
+            - gains (dict, optional): Mapping with keys ``"position"`` and
+              ``"velocity"`` (both ``float``). Defaults to ``1.0`` each.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     robot_path = args["robot_path"]
     device_axes = args.get("device_axes")
     joint_names = args.get("joint_names")
@@ -503,6 +523,19 @@ print(f"  Call stop_teleop_session to finalize and save.")
 
 
 def _gen_stop_teleop_session(args: Dict) -> str:
+    """Generate Python that cleanly tears down an active teleoperation session.
+
+    Deactivates the session flag, removes physics callbacks, zeros all joint
+    velocity targets for safety, stops WebSocket connections, and finalises any
+    active HDF5 recording.
+
+    Args:
+        args: Tool arguments dict. No fields are required; the generated code
+            reads all necessary state from the in-process ``_teleop_state`` dict.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     return """\
 import omni.usd
 import omni.physx
@@ -587,6 +620,25 @@ print("Teleop session stopped.")
 
 
 def _gen_teleop_safety_config(args: Dict) -> str:
+    """Generate Python that arms a safety watchdog and optional workspace limits for teleop.
+
+    Installs a physics-step callback that zeros joint velocity targets if no
+    teleop command is received within the watchdog timeout. Optionally adds
+    Cartesian workspace bounding-box enforcement.
+
+    Args:
+        args: Tool arguments dict containing:
+            - robot_path (str): USD prim path to the robot articulation root.
+            - watchdog_timeout_ms (float, optional): Silence timeout in
+              milliseconds before velocities are zeroed. Defaults to ``500``.
+            - max_joint_velocity (float, optional): Per-joint velocity limit
+              in rad/s. Defaults to ``2.0``.
+            - workspace_limits (dict, optional): Dict with keys ``"min"`` and
+              ``"max"``, each a 3-element ``[x, y, z]`` list in scene units.
+
+    Returns:
+        str: Python source code string for Kit RPC execution.
+    """
     robot_path = args["robot_path"]
     watchdog_ms = args.get("watchdog_timeout_ms", 500)
     max_vel = args.get("max_joint_velocity")

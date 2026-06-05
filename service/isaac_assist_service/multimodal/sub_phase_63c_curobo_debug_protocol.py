@@ -21,6 +21,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -89,6 +94,7 @@ FAILURE_MODES: tuple[str, ...] = (
 
 @dataclass
 class DebugCheck:
+    """A single cuRobo debug verification check for a robot family."""
     check_id: str
     robot_family: Optional[str]  # None = universal (applies to all families)
     description: str
@@ -99,6 +105,7 @@ class DebugCheck:
 
 @dataclass
 class FixupRecipe:
+    """Step-by-step remediation recipe for a cuRobo failure mode."""
     failure_mode: str  # CuRoboFailureMode value
     recipe_id: str
     steps: List[str]
@@ -600,6 +607,7 @@ class CuRoboDebugProtocol:
     """
 
     def __init__(self) -> None:
+        """Initialise the protocol, wiring the pre-populated check and recipe tables."""
         self._checks: Dict[str, List[DebugCheck]] = DEBUG_CHECKS_BY_FAMILY
         self._recipes: Dict[str, FixupRecipe] = _RECIPE_LOOKUP
 
@@ -675,7 +683,14 @@ class CuRoboDebugProtocol:
     # ------------------------------------------------------------------
 
     def summary_for(self, family: str) -> Dict[str, Any]:
-        """Return a summary dict for *family*."""
+        """Return a summary dict for *family* with check count and recipe count.
+
+        Args:
+            family (str): Robot family name, e.g. ``"franka"``, ``"ur"``.
+
+        Returns:
+            Dict[str, Any]: Keys ``check_count``, ``families_supported``, ``recipe_count``.
+        """
         checks = self.checks_for(family)
         return {
             "check_count": len(checks),

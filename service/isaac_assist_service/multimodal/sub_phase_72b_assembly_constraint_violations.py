@@ -58,6 +58,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -199,7 +204,7 @@ class AssemblyConstraintValidator:
     def _check_missing_prim_path(
         self, c: AssemblyConstraint
     ) -> ConstraintViolation | None:
-        """Check 1: empty prim_path_a → hard ERROR."""
+        """Return a hard ERROR violation when ``prim_path_a`` is empty or missing."""
         if not c.prim_path_a:
             return ConstraintViolation(
                 constraint_id="assembly.missing_prim_path",

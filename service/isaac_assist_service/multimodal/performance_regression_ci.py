@@ -33,7 +33,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -247,6 +251,16 @@ class PerformanceRegressionDetector:
         memory_threshold_pct: float = 20.0,
         throughput_threshold_pct: float = -10.0,
     ) -> None:
+        """Initialise the detector with regression thresholds.
+
+        Args:
+            latency_threshold_pct (float, optional): % increase in ``duration_ms``
+                that triggers a regression. Defaults to 10.0.
+            memory_threshold_pct (float, optional): % increase in ``memory_mb``
+                that triggers a regression. Defaults to 20.0.
+            throughput_threshold_pct (float, optional): % drop in ops/s (negative)
+                that triggers a regression. Defaults to -10.0.
+        """
         self.latency_threshold_pct = latency_threshold_pct
         self.memory_threshold_pct = memory_threshold_pct
         # Stored as positive magnitude for internal comparisons
@@ -331,6 +345,15 @@ class PerformanceRegressionDetector:
     def _severity(
         self, abs_delta: float, threshold: float
     ) -> Literal["info", "warn", "critical"]:
+        """Map an absolute delta percentage to a severity level.
+
+        Args:
+            abs_delta (float): Absolute percentage change (always positive).
+            threshold (float): Base threshold for ``"warn"``; 2× triggers ``"critical"``.
+
+        Returns:
+            Literal["info", "warn", "critical"]: Severity label.
+        """
         if abs_delta >= 2.0 * threshold:
             return "critical"
         if abs_delta >= threshold:
@@ -341,6 +364,16 @@ class PerformanceRegressionDetector:
     def _eval_latency(
         self, name: str, b: BenchmarkSample, c: BenchmarkSample
     ) -> RegressionFinding:
+        """Build a RegressionFinding for the latency metric of *name*.
+
+        Args:
+            name (str): Benchmark name.
+            b (BenchmarkSample): Baseline sample.
+            c (BenchmarkSample): Current sample.
+
+        Returns:
+            RegressionFinding: Finding with ``metric="latency"``.
+        """
         delta = self._delta_pct(b.duration_ms, c.duration_ms)
         abs_delta = abs(delta)
         severity = self._severity(abs_delta, self.latency_threshold_pct)
@@ -354,15 +387,41 @@ class PerformanceRegressionDetector:
         )
 
     def _is_regression_latency(self, delta_pct: float) -> bool:
+        """Return ``True`` when latency increased beyond the threshold.
+
+        Args:
+            delta_pct (float): Percentage change (positive = slower).
+
+        Returns:
+            bool: ``True`` when ``delta_pct >= latency_threshold_pct``.
+        """
         return delta_pct >= self.latency_threshold_pct
 
     def _is_improvement_latency(self, delta_pct: float) -> bool:
+        """Return ``True`` when latency improved beyond the threshold.
+
+        Args:
+            delta_pct (float): Percentage change (negative = faster).
+
+        Returns:
+            bool: ``True`` when ``delta_pct <= -latency_threshold_pct``.
+        """
         return delta_pct <= -self.latency_threshold_pct
 
     # throughput — lower ops/s is worse (delta_pct is negative when slower)
     def _eval_throughput(
         self, name: str, b: BenchmarkSample, c: BenchmarkSample
     ) -> RegressionFinding:
+        """Build a RegressionFinding for the throughput metric of *name*.
+
+        Args:
+            name (str): Benchmark name.
+            b (BenchmarkSample): Baseline sample (must have ``throughput_ops_per_s``).
+            c (BenchmarkSample): Current sample (must have ``throughput_ops_per_s``).
+
+        Returns:
+            RegressionFinding: Finding with ``metric="throughput"``.
+        """
         assert b.throughput_ops_per_s is not None
         assert c.throughput_ops_per_s is not None
         delta = self._delta_pct(b.throughput_ops_per_s, c.throughput_ops_per_s)
@@ -378,16 +437,42 @@ class PerformanceRegressionDetector:
         )
 
     def _is_regression_throughput(self, delta_pct: float) -> bool:
+        """Return ``True`` when throughput dropped beyond the threshold.
+
+        Args:
+            delta_pct (float): Percentage change (negative = fewer ops/s).
+
+        Returns:
+            bool: ``True`` when the drop exceeds ``throughput_threshold_pct``.
+        """
         # regression = throughput dropped (negative delta exceeds threshold)
         return delta_pct <= -self._throughput_threshold_abs
 
     def _is_improvement_throughput(self, delta_pct: float) -> bool:
+        """Return ``True`` when throughput improved beyond the threshold.
+
+        Args:
+            delta_pct (float): Percentage change (positive = more ops/s).
+
+        Returns:
+            bool: ``True`` when ``delta_pct >= throughput_threshold_abs``.
+        """
         return delta_pct >= self._throughput_threshold_abs
 
     # memory — higher memory_mb is worse
     def _eval_memory(
         self, name: str, b: BenchmarkSample, c: BenchmarkSample
     ) -> RegressionFinding:
+        """Build a RegressionFinding for the memory metric of *name*.
+
+        Args:
+            name (str): Benchmark name.
+            b (BenchmarkSample): Baseline sample (must have ``memory_mb``).
+            c (BenchmarkSample): Current sample (must have ``memory_mb``).
+
+        Returns:
+            RegressionFinding: Finding with ``metric="memory"``.
+        """
         assert b.memory_mb is not None
         assert c.memory_mb is not None
         delta = self._delta_pct(b.memory_mb, c.memory_mb)
@@ -403,9 +488,25 @@ class PerformanceRegressionDetector:
         )
 
     def _is_regression_memory(self, delta_pct: float) -> bool:
+        """Return ``True`` when memory usage increased beyond the threshold.
+
+        Args:
+            delta_pct (float): Percentage change (positive = more MB used).
+
+        Returns:
+            bool: ``True`` when ``delta_pct >= memory_threshold_pct``.
+        """
         return delta_pct >= self.memory_threshold_pct
 
     def _is_improvement_memory(self, delta_pct: float) -> bool:
+        """Return ``True`` when memory usage improved beyond the threshold.
+
+        Args:
+            delta_pct (float): Percentage change (negative = fewer MB used).
+
+        Returns:
+            bool: ``True`` when ``delta_pct <= -memory_threshold_pct``.
+        """
         return delta_pct <= -self.memory_threshold_pct
 
 
@@ -414,6 +515,14 @@ class PerformanceRegressionDetector:
 # ---------------------------------------------------------------------------
 
 def _sample_to_dict(s: BenchmarkSample) -> Dict[str, Any]:
+    """Serialise a BenchmarkSample to a plain dict for JSON persistence.
+
+    Args:
+        s (BenchmarkSample): Sample to serialise.
+
+    Returns:
+        Dict[str, Any]: All fields as primitive values.
+    """
     return {
         "name": s.name,
         "duration_ms": s.duration_ms,
@@ -424,6 +533,14 @@ def _sample_to_dict(s: BenchmarkSample) -> Dict[str, Any]:
 
 
 def _sample_from_dict(d: Dict[str, Any]) -> BenchmarkSample:
+    """Deserialise a BenchmarkSample from a plain dict (e.g. parsed from JSON).
+
+    Args:
+        d (Dict[str, Any]): Dict produced by :func:`_sample_to_dict`.
+
+    Returns:
+        BenchmarkSample: Reconstructed sample.
+    """
     return BenchmarkSample(
         name=d["name"],
         duration_ms=float(d["duration_ms"]),

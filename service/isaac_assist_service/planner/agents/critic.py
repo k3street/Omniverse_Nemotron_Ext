@@ -259,6 +259,19 @@ class CriticAgent(AgentBase):
         code_blocks: list[str],
         qa_output: dict | None,
     ) -> dict:
+        """Call the LLM for code review, falling back to rule-based analysis on failure.
+
+        Args:
+            task (dict): Original task payload (prompt, required_keywords, etc.).
+            code_blocks (list[str]): Code strings to review.
+            qa_output (dict, optional): Simulator execution output from QAAgent;
+                may be None if QA was skipped.
+
+        Returns:
+            dict: JSON analysis with keys ``quality_score`` (float), ``issues`` (list),
+            ``strengths`` (list), and ``summary`` (str). Falls back to rule-based
+            analysis when the model is unavailable or returns non-JSON output.
+        """
         prompt = _build_critic_prompt(task, code_blocks, qa_output)
         try:
             resp = self.call_llm_api(self.model, prompt, system=_CRITIC_SYSTEM, max_tokens=2048, timeout=self.timeout)

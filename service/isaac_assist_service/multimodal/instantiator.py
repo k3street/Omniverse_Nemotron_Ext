@@ -73,6 +73,13 @@ class LayoutSpecCodeGenerator:
     """
 
     def __init__(self, use_get_context: bool = True) -> None:
+        """Initialise the code generator.
+
+        Args:
+            use_get_context (bool, optional): When ``True`` (default), the generated
+                script header uses ``omni.usd.get_context().get_stage()``.  Set to
+                ``False`` for offline testing only.
+        """
         self._use_get_context = use_get_context
 
     # ------------------------------------------------------------------
@@ -266,6 +273,14 @@ class InstantiateResult:
 
     @classmethod
     def from_exec(cls, result: Dict[str, Any]) -> "InstantiateResult":
+        """Construct an InstantiateResult from a raw Kit RPC exec response dict.
+
+        Args:
+            result (Dict[str, Any]): Raw response dict with at least a ``"success"`` key.
+
+        Returns:
+            InstantiateResult: Status is ``"ok"`` on success, ``"error"`` otherwise.
+        """
         success = bool(result.get("success", False))
         return cls(
             build_id=result.get("build_id"),

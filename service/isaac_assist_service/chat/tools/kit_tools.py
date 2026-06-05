@@ -14,6 +14,7 @@ KIT_RPC_BASE = "http://127.0.0.1:8001"
 
 
 async def _get(path: str, params: Dict = None) -> Dict[str, Any]:
+    """HTTP GET against the Kit RPC base URL; returns ``{"error": ...}`` on failure."""
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
@@ -27,6 +28,7 @@ async def _get(path: str, params: Dict = None) -> Dict[str, Any]:
 
 
 async def _post(path: str, body: Dict) -> Dict[str, Any]:
+    """HTTP POST against the Kit RPC base URL; returns ``{"error": ...}`` on failure."""
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
@@ -40,6 +42,7 @@ async def _post(path: str, body: Dict) -> Dict[str, Any]:
 
 
 async def is_kit_rpc_alive() -> bool:
+    """Return True if the Kit RPC server responds to the ``/health`` ping."""
     result = await _get("/health")
     return result.get("ok", False)
 

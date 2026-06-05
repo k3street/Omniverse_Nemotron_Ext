@@ -10,6 +10,8 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phases 2 + 6.
 """
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from typing import Any, Callable, Dict, List, Optional
@@ -1558,7 +1560,27 @@ Each candidate must:
 Return each candidate as a separate code block.
 """
 
+    # Phase 64 — initialise process-local run state. _handle_eureka_status
+    # reads from EUREKA.runs; without this write, status was always
+    # "not_found". Mirrors the EurekaRunStateStore SQLite schema for keys
+    # that overlap.
+    from ._state import EUREKA
+    run_id = str(uuid.uuid4())
+    EUREKA.runs[run_id] = {
+        "status": "initialized",
+        "task_description": task_description,
+        "env_source_path": env_source_path,
+        "num_candidates": num_candidates,
+        "total_iterations": num_iterations,
+        "current_iteration": 0,
+        "candidates_evaluated": 0,
+        "best_fitness": 0.0,
+        "best_reward_code": None,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
     eureka_config = {
+        "run_id": run_id,
         "task_description": task_description,
         "env_source_path": env_source_path,
         "num_candidates": num_candidates,
@@ -1576,7 +1598,12 @@ async def _handle_iterate_reward(args: Dict) -> Dict:
 
     Delegates to ``_build_mutation_prompt`` to embed the previous reward
     code, per-component training metrics, and optional user feedback into a
-    single LLM-ready string.
+    single LLM-ready string. When ``run_id`` is supplied (the value returned
+    by ``generate_reward``), updates the process-local ``EUREKA.runs[run_id]``
+    state — increments ``current_iteration``, accumulates
+    ``candidates_evaluated``, and tracks the best fitness seen so far. The
+    run is auto-marked ``"completed"`` when ``current_iteration`` reaches
+    ``total_iterations``.
 
     Args:
         args: tool-call args dict containing:
@@ -1586,6 +1613,9 @@ async def _handle_iterate_reward(args: Dict) -> Dict:
               ``task_success_rate``, ``fitness``.
             - user_feedback (str, optional): free-form guidance to include in
               the prompt.
+            - run_id (str, optional): Eureka run identifier from
+              ``generate_reward``. When present, run state is updated and
+              echoed back in the response.
 
     Returns:
         Dict[str, Any] with keys:
@@ -1594,6 +1624,12 @@ async def _handle_iterate_reward(args: Dict) -> Dict:
             - prev_success_rate: success rate from the previous iteration.
             - components_analyzed (list[str]): component names from metrics.
             - has_user_feedback (bool): whether user feedback was included.
+            - run_id (str, optional): echoed back if supplied.
+            - run_status (str, optional): ``"running"``, ``"completed"``, or
+              ``"unknown_run_id"``; present only when ``run_id`` was supplied.
+            - current_iteration, total_iterations, candidates_evaluated,
+              best_fitness: present only when ``run_id`` was supplied and
+              resolved.
     """
     # Phase 8 wave 20 — _build_mutation_prompt migrated.
     prev_reward_code = args["prev_reward_code"]
@@ -1602,13 +1638,49 @@ async def _handle_iterate_reward(args: Dict) -> Dict:
 
     mutation_prompt = _build_mutation_prompt(prev_reward_code, metrics, user_feedback)
 
-    return {
+    response: Dict[str, Any] = {
         "mutation_prompt": mutation_prompt,
         "prev_fitness": metrics.get("fitness", "N/A"),
         "prev_success_rate": metrics.get("task_success_rate", "N/A"),
         "components_analyzed": list(metrics.get("components", {}).keys()),
         "has_user_feedback": user_feedback is not None,
     }
+
+    # Phase 64 — write to process-local EUREKA.runs when caller passes run_id.
+    run_id = args.get("run_id")
+    if run_id is not None:
+        from ._state import EUREKA
+        run = EUREKA.runs.get(run_id)
+        if run is None:
+            response["run_id"] = run_id
+            response["run_status"] = "unknown_run_id"
+        else:
+            run["current_iteration"] = int(run.get("current_iteration", 0)) + 1
+            run["candidates_evaluated"] = int(run.get("candidates_evaluated", 0)) + int(
+                run.get("num_candidates", 0)
+            )
+            fitness = metrics.get("fitness")
+            if isinstance(fitness, (int, float)) and float(fitness) > float(
+                run.get("best_fitness", 0.0)
+            ):
+                run["best_fitness"] = float(fitness)
+                run["best_reward_code"] = prev_reward_code
+            total = int(run.get("total_iterations", 0))
+            if total > 0 and run["current_iteration"] >= total:
+                run["status"] = "completed"
+                run["finished_at"] = datetime.now(timezone.utc).isoformat()
+            else:
+                run["status"] = "running"
+            response.update({
+                "run_id": run_id,
+                "run_status": run["status"],
+                "current_iteration": run["current_iteration"],
+                "total_iterations": total,
+                "candidates_evaluated": run["candidates_evaluated"],
+                "best_fitness": run.get("best_fitness", 0.0),
+            })
+
+    return response
 
 
 async def _handle_eureka_history(args: Dict) -> Dict:

@@ -27,10 +27,21 @@ class CASHistory:
     """In-memory CAS history. Production wires this to persistence.py."""
 
     def __init__(self) -> None:
+        """Initialise an empty in-memory CAS store."""
         self._revisions: Dict[str, LayoutSpecRevision] = {}
         self._session_head: Dict[str, str] = {}  # session_id → latest hash
 
     def commit(self, session_id: str, spec: Any, author: str = "user") -> str:
+        """Compute a SHA-256 hash of *spec*, store a new revision, and update the session head.
+
+        Args:
+            session_id (str): Identifies the canvas session.
+            spec (Any): LayoutSpec object or plain dict to commit.
+            author (str, optional): Who authored this revision. Defaults to ``"user"``.
+
+        Returns:
+            str: 16-character hex revision hash.
+        """
         canonical = json.dumps(spec if isinstance(spec, dict) else {
             "objects": getattr(spec, "objects", []),
             "intent": getattr(spec, "intent", None),
@@ -49,6 +60,14 @@ class CASHistory:
         return rev_hash
 
     def history(self, session_id: str) -> List[LayoutSpecRevision]:
+        """Return all revisions for *session_id* in reverse-chronological order.
+
+        Args:
+            session_id (str): Canvas session identifier.
+
+        Returns:
+            List[LayoutSpecRevision]: Revisions newest-first; empty list if session unknown.
+        """
         out: List[LayoutSpecRevision] = []
         cur = self._session_head.get(session_id)
         while cur is not None:
@@ -60,6 +79,15 @@ class CASHistory:
         return out
 
     def rollback(self, session_id: str, revision_hash: str) -> bool:
+        """Move the session head back to *revision_hash*.
+
+        Args:
+            session_id (str): Canvas session identifier.
+            revision_hash (str): Target revision hash (must already exist in the store).
+
+        Returns:
+            bool: ``True`` on success; ``False`` if the hash is unknown.
+        """
         if revision_hash not in self._revisions:
             return False
         self._session_head[session_id] = revision_hash
@@ -70,6 +98,11 @@ _HISTORY: Optional[CASHistory] = None
 
 
 def get_history() -> CASHistory:
+    """Return the module-level singleton CASHistory, creating it on first call.
+
+    Returns:
+        CASHistory: Shared in-memory CAS store for the current process.
+    """
     global _HISTORY
     if _HISTORY is None:
         _HISTORY = CASHistory()

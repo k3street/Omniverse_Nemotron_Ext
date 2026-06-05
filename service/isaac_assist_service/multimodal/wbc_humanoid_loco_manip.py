@@ -31,7 +31,7 @@ Vec3 = Tuple[float, float, float]
 # ---------------------------------------------------------------------------
 
 def distance(a: Vec3, b: Vec3) -> float:
-    """Euclidean distance between two 3-D points."""
+    """Return the Euclidean distance between two 3-D points *a* and *b*."""
     return math.sqrt(
         (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
     )
@@ -43,7 +43,7 @@ def distance(a: Vec3, b: Vec3) -> float:
 
 @dataclass
 class WBCRewardComponents:
-    """Raw, un-weighted reward signal per objective."""
+    """Raw, un-weighted per-objective reward signals for one WBC timestep."""
     goal_reach: float
     base_stability: float
     end_effector_tracking: float
@@ -121,6 +121,16 @@ class WBCRewardCalculator:
         target_tolerance_m: float = 0.05,
         fall_height_m: float = 0.4,
     ) -> None:
+        """Initialise the reward function with optional custom weights.
+
+        Args:
+            weights (WBCRewardWeights, optional): Per-component scaling weights.
+                Defaults to ``WBCRewardWeights()`` (built-in defaults).
+            target_tolerance_m (float): Distance (m) below which the end-effector
+                is considered on-target.  Defaults to 0.05 m.
+            fall_height_m (float): Base CoM height (m) below which the robot is
+                considered fallen.  Defaults to 0.4 m.
+        """
         self.weights = weights if weights is not None else WBCRewardWeights()
         self.target_tolerance_m = target_tolerance_m
         self.fall_height_m = fall_height_m
@@ -187,7 +197,7 @@ class WBCRewardCalculator:
     # ------------------------------------------------------------------
 
     def compute_total(self, obs: WBCObservation) -> float:
-        """Return the scalar weighted-sum reward for *obs*."""
+        """Return the scalar weighted-sum total reward for observation *obs*."""
         c = self.compute_components(obs)
         w = self.weights
         return (
@@ -300,7 +310,11 @@ class WBCRewardCalculator:
 # ---------------------------------------------------------------------------
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": 79,
         "title": "Whole-body control: humanoid loco-manipulation",

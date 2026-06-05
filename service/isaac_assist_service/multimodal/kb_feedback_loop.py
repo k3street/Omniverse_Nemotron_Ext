@@ -24,6 +24,11 @@ PHASE_STATUS = "landed"
 
 
 def get_phase_metadata() -> Dict[str, Any]:
+    """Return phase identification and status for Phase 94.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,
@@ -66,6 +71,11 @@ class KBFeedbackEntry:
     # ------------------------------------------------------------------
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise this entry to a plain dict suitable for JSON/NDJSON output.
+
+        Returns:
+            Dict[str, Any]: All fields as string values.
+        """
         return {
             "entry_id": self.entry_id,
             "kb_doc_id": self.kb_doc_id,
@@ -77,6 +87,14 @@ class KBFeedbackEntry:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "KBFeedbackEntry":
+        """Reconstruct a KBFeedbackEntry from a plain dict (e.g. parsed from NDJSON).
+
+        Args:
+            data (Dict[str, Any]): Dict with keys matching the dataclass fields.
+
+        Returns:
+            KBFeedbackEntry: Populated instance.
+        """
         return cls(
             entry_id=data["entry_id"],
             kb_doc_id=data["kb_doc_id"],
@@ -110,6 +128,11 @@ class KBFeedbackWriter:
     """
 
     def __init__(self, feedback_dir: Path) -> None:
+        """Initialise the writer, creating *feedback_dir* if it does not exist.
+
+        Args:
+            feedback_dir (Path): Directory where per-document NDJSON files are stored.
+        """
         self._dir = feedback_dir
         self._dir.mkdir(parents=True, exist_ok=True)
 
@@ -164,6 +187,14 @@ class KBFeedbackWriter:
     # ------------------------------------------------------------------
 
     def _path_for(self, kb_doc_id: str) -> Path:
+        """Return the NDJSON file path for *kb_doc_id*.
+
+        Args:
+            kb_doc_id (str): Knowledge-base document identifier.
+
+        Returns:
+            Path: ``{feedback_dir}/{kb_doc_id}.ndjson``
+        """
         return self._dir / f"{kb_doc_id}.ndjson"
 
 
@@ -203,6 +234,12 @@ class KBIndexRefresher:
     _ALL_KINDS: List[str] = ["correction", "addition", "deprecation", "endorsement"]
 
     def __init__(self, feedback_dir: Path, kb_index_path: Path) -> None:
+        """Initialise the refresher with source and destination paths.
+
+        Args:
+            feedback_dir (Path): Directory containing the per-document NDJSON files.
+            kb_index_path (Path): Destination path for the aggregate JSON index file.
+        """
         self._dir = feedback_dir
         self._index_path = kb_index_path
 
@@ -255,6 +292,11 @@ class KBIndexRefresher:
     # ------------------------------------------------------------------
 
     def _write_index(self, index: Dict[str, Any]) -> None:
+        """Atomically write *index* to ``kb_index_path`` via a temp-file rename.
+
+        Args:
+            index (Dict[str, Any]): Aggregate index mapping ``kb_doc_id`` → stats.
+        """
         self._index_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._index_path.with_suffix(".tmp")
         with tmp.open("w", encoding="utf-8") as fh:

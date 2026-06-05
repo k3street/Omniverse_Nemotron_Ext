@@ -12,7 +12,21 @@ from typing import Any, Dict, List
 def recalibrate(rows: List[Dict[str, Any]],
                  current_params: Dict[str, float],
                  learning_rate: float = 0.1) -> Dict[str, float]:
-    """Naive gradient step toward zero mean delta."""
+    """Apply a single gradient step to move analytical model parameters toward zero bias.
+
+    Each parameter is adjusted by ``-learning_rate × mean_delta`` where ``mean_delta``
+    is the average of ``row["delta"]`` (simulated − analytical) across all rows.
+    Returns *current_params* unchanged when inputs are empty.
+
+    Args:
+        rows (List[Dict[str, Any]]): Gap-log rows for the target dimension;
+            each must contain a ``"delta"`` key (float).
+        current_params (Dict[str, float]): Parameter values to adjust.
+        learning_rate (float, optional): Step size for the gradient update. Defaults to 0.1.
+
+    Returns:
+        Dict[str, float]: Updated parameter dict with the same keys as *current_params*.
+    """
     if not rows or not current_params:
         return current_params
     deltas = [r["delta"] for r in rows]

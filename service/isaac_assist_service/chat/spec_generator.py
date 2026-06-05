@@ -159,14 +159,20 @@ User: "Lisa: STEP end-of-arm tool clearance audit"
 
 
 async def generate_spec(message: str, provider) -> StructuredSpec | None:
-    """
-    Run a reasoning-LLM call to produce a structured execution plan.
-    Returns None on any error (caller proceeds without spec — fail-open).
+    """Run a reasoning-LLM call to produce a structured execution plan.
 
-    Provider is the orchestrator's main LLM provider. The function reads
-    SPEC_LLM_MODEL env var to pick a stronger reasoning model when available
-    (e.g. gemini-pro for planning while Flash drives execution); falls back
-    to the main provider if the env override isn't set or fails.
+    Fail-open: any error returns ``None`` so the orchestrator proceeds without
+    the spec — no regression risk.  Reads ``SPEC_LLM_MODEL`` env var to route
+    the planning call to a stronger model than the executor LLM; falls back to
+    ``provider`` when the env var is unset or the override call fails.
+
+    Args:
+        message (str): The user's complex request to plan.
+        provider: LLM provider instance with an async ``complete`` method.
+
+    Returns:
+        StructuredSpec | None: Parsed plan with goal, steps, components, and
+        success criteria; or None on any error.
     """
     messages = [{"role": "user", "content": f'Plan: "{message}"'}]
 

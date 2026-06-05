@@ -1,3 +1,9 @@
+"""LLM provider for a locally-running Ollama instance.
+
+Sends conversations to Ollama's ``/api/chat`` endpoint using its native
+JSON format.  Supports the OpenAI-compatible tool-call format that Ollama
+exposes for models with function-calling support.
+"""
 import aiohttp
 import json
 import logging
@@ -6,25 +12,44 @@ from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class LLMResponse:
+    """Unified response container returned by all LLM provider ``complete`` calls.
+
+    Attributes:
+        text: Plain-text reply from the model (may be empty when tool_calls present).
+        actions: List of ``{"type": "code_snippet", "content": ...}`` dicts extracted
+            from fenced Python blocks in the reply text.
+        tool_calls: OpenAI-format tool-call dicts, or None if the model returned text.
+    """
     text: str
     actions: List[Dict] = field(default_factory=list)
     tool_calls: Optional[List[Dict]] = None
 
+
 class OllamaProvider:
-    """
-    LLM Provider implementation that communicates with a local Ollama instance.
-    Supports tool/function calling via Ollama's tools API.
+    """LLM provider communicating with a local Ollama instance.
+
+    Uses Ollama's ``/api/chat`` endpoint with ``stream: false``.  Supports
+    tool/function calling via Ollama's OpenAI-compatible tools API for models
+    that expose it (e.g. Qwen, Llama 3.1+).
     """
     def __init__(self, host: str = "127.0.0.1", port: int = 11434, model: str = "isaac-assist-nemotron"):
         self.base_url = f"http://{host}:{port}/api/chat"
         self.model = model
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
-        """
-        Sends context and conversation history to Ollama.
-        messages format: [{"role": "user", "content": "..."}]
+        """Send a conversation to Ollama and return the parsed response.
+
+        Args:
+            messages (list[dict]): OpenAI-style message list passed directly to
+                Ollama (roles: ``user``, ``assistant``, ``system``, ``tool``).
+            context (dict): Extra options — ``tools`` is an OpenAI tool-schema list
+                forwarded as-is to Ollama.
+
+        Returns:
+            LLMResponse: Text reply and/or tool_calls from the model.
         """
         payload = {
             "model": self.model,

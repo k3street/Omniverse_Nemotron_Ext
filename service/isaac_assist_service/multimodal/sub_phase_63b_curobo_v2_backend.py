@@ -25,7 +25,7 @@ Vec3 = tuple[float, float, float]
 
 @dataclass
 class BSplineConfig:
-    """Configuration for B-spline curve generation."""
+    """Configuration parameters for cuRobo B-spline trajectory generation."""
     degree: int = 3
     num_control_points: int = 8
     knot_vector: list[float] = field(default_factory=list)
@@ -43,7 +43,7 @@ class TSDFConfig:
 
 @dataclass
 class ConstraintSpec:
-    """Specification for a single planning constraint."""
+    """Specification for a single cuRobo motion-planning constraint."""
     name: str
     kind: Literal["joint_limit", "obstacle", "orientation", "velocity", "jerk"]
     threshold: float
@@ -63,7 +63,7 @@ def linspace(a: float, b: float, n: int) -> list[float]:
 
 
 def vec_distance(a: Vec3, b: Vec3) -> float:
-    """Euclidean distance between two 3-D points."""
+    """Return the Euclidean distance between two 3-D points *a* and *b*."""
     return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
 
 
@@ -78,6 +78,16 @@ class BSplineCurve:
     """
 
     def __init__(self, control_points: list[Vec3], config: Optional[BSplineConfig] = None) -> None:
+        """Initialise the curve from *control_points* and an optional *config*.
+
+        If ``config.knot_vector`` is empty, a clamped uniform knot vector is
+        generated automatically via :meth:`generate_clamped_knot_vector`.
+
+        Args:
+            control_points (list[Vec3]): Ordered control-point positions.
+            config (BSplineConfig, optional): Curve parameters. Defaults to
+                degree-3 with auto-generated knot vector.
+        """
         self.control_points: list[Vec3] = list(control_points)
         self.config: BSplineConfig = config or BSplineConfig(
             num_control_points=len(control_points)
@@ -190,6 +200,14 @@ class CuRoboV2Backend:
         tsdf_config: Optional[TSDFConfig] = None,
         dry_run: bool = True,
     ) -> None:
+        """Initialise the backend.
+
+        Args:
+            bspline_config (BSplineConfig, optional): B-spline parameters. Defaults to degree 3.
+            tsdf_config (TSDFConfig, optional): TSDF voxel parameters. Defaults to 2 cm voxels.
+            dry_run (bool): When ``True`` (default), planning calls return stubs
+                without invoking GPU-backed cuRobo.
+        """
         self.bspline_config: BSplineConfig = bspline_config or BSplineConfig()
         self.tsdf_config: TSDFConfig = tsdf_config or TSDFConfig()
         self.dry_run: bool = dry_run
@@ -290,7 +308,11 @@ class CuRoboV2Backend:
 # ---------------------------------------------------------------------------
 
 def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase metadata for spec-coverage audits."""
+    """Return phase identification and status for this phase.
+
+    Returns:
+        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
+    """
     return {
         "phase": PHASE_ID,
         "title": PHASE_TITLE,

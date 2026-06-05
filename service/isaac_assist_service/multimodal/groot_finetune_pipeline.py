@@ -129,6 +129,13 @@ class GrootFinetunePipeline:
         config: GrootFinetuneConfig,
         dry_run: bool = True,
     ) -> None:
+        """Initialise the pipeline with a config and dry-run flag.
+
+        Args:
+            config (GrootFinetuneConfig): Training configuration.
+            dry_run (bool, optional): When ``True`` (default), all pipeline stages
+                produce mock success events without invoking GR00T or requiring a GPU.
+        """
         self.config = config
         self.dry_run = dry_run
         self._events: list[StageEvent] = []
@@ -199,7 +206,12 @@ class GrootFinetunePipeline:
         return list(self._events)
 
     def status(self) -> dict[str, Any]:
-        """Return a summary of the current pipeline state."""
+        """Return a summary of the current pipeline state.
+
+        Returns:
+            dict[str, Any]: Keys ``current_stage``, ``completed_stages`` (list),
+                ``failed`` (bool), and ``total_events`` (int).
+        """
         completed = [e.stage for e in self._events if e.status == "ok"]
         return {
             "current_stage": self._current_stage,
@@ -209,7 +221,7 @@ class GrootFinetunePipeline:
         }
 
     def cancel(self) -> None:
-        """Mark the pipeline as failed/cancelled."""
+        """Mark the pipeline as failed/cancelled, halting further stage execution."""
         self._failed = True
         self._current_stage = "failed"
 
