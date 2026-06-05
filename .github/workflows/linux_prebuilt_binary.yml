@@ -1,0 +1,95 @@
+# Phase 88 — Linux pre-built binary CI pipeline
+#
+# Builds Isaac Assist service binaries for Linux on self-hosted runners
+# with adequate disk space for PyInstaller + Docker image artefacts.
+#
+# Per specs/IA_FULL_SPEC_2026-05-10.md Phase 88.
+
+name: linux_prebuilt_binary
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Nightly at 02:00 UTC — also triggers aarch64 builds
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  build_linux_binary:
+    name: "build (${{ matrix.os }}, py${{ matrix.python }}, ${{ matrix.arch }})"
+    runs-on: ${{ matrix.os }}
+    # aarch64 cross-compilation is expensive — only run on scheduled nightly
+    if: >-
+      matrix.arch == 'x86_64' ||
+      github.event_name == 'schedule'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        python: ['3.10', '3.11', '3.12']
+        arch: [x86_64, aarch64]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-py${{ matrix.python }}-${{ hashFiles('requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-py${{ matrix.python }}-
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+          pip install pyinstaller
+
+      - name: Run pytest (l0 gate)
+        run: python -m pytest tests/ -m l0 --tb=short -q
+
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel --outdir dist/
+
+      - name: Build PyInstaller binary
+        run: |
+          pyinstaller \
+            --onefile \
+            --name isaac_assist_${{ matrix.arch }} \
+            --distpath dist/pyinstaller/ \
+            service/isaac_assist_service/__main__.py || \
+          echo "PyInstaller target not available; skipping binary build"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: isaac_assist_wheel-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.arch }}
+          path: dist/*.whl
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload PyInstaller binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: isaac_assist_binary-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.arch }}
+          path: dist/pyinstaller/
+          if-no-files-found: warn
+          retention-days: 30

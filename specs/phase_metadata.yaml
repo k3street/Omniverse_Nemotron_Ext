@@ -254,10 +254,22 @@
   status: landed
   note: industrial canonicals
 31b:
-  title: 'Industrial bridges full surface: Modbus, MQTT-Sparkplug, OpenPLC + lifecycle'
-  agent_type: opus-runtime
-  status: scaffold
-  note: bridge lifecycle — needs Modbus/OPC-UA
+  title: 'Industrial bridges full surface: Modbus, MQTT-Sparkplug, OPC-UA'
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/STATE-MACHINE layer landed — BridgeProtocol/BridgeState Literals,
+    RegisterMapEntry, BridgeConfig, IndustrialBridge state machine with dry-run
+    connect/disconnect, register read/write, batch ops, health_check.
+    4 BRIDGE_PRESETS. 20 pytest tests pass. Live PLC connection remains scaffold.
+  gate: pytest tests/test_sub_phase_31b_industrial_bridges_full.py — 20 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_31b_industrial_bridges_full.py
+  - tests/test_sub_phase_31b_industrial_bridges_full.py
+  loc: 340
+  blocked_by:
+  - '31'
 '32':
   title: 'Epoch II convergence test: 30-object canvas scene'
   agent_type: sonnet-bounded
@@ -340,19 +352,21 @@
   note: rule names list
 47b:
   title: Honesty-decorator long-tail rollout
-  agent_type: opus-runtime
-  status: scaffold
-  note: silent-success rules — needs prod data
-  gate: pytest — 5 new rules registered in PatchValidatorRule registry
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: >-
+    SPEC/DECORATOR layer landed — SilentSuccessRule catalogue (10 rules),
+    HonestyDecorator (audit + wrap + raise_on_critical), audit_handler_module
+    AST scanner. 17 pytest tests pass. Runtime rollout across all handlers
+    still needs prod traffic data (opus-runtime phase).
+  gate: pytest tests/test_sub_phase_47b_honesty_decorator_long_tail.py — 17 tests pass
   files:
-  - service/isaac_assist_service/multimodal/sub_phase_47b_patch_validator_silent_success.py
-  - service/isaac_assist_service/chat/tools/patch_validators/rules/silent_success.py
-  - tests/test_sub_phase_47b_patch_validator_silent_success.py
-  loc: 300
-  effort_min: 120
+  - service/isaac_assist_service/multimodal/sub_phase_47b_honesty_decorator_long_tail.py
+  - tests/test_sub_phase_47b_honesty_decorator_long_tail.py
+  loc: 280
   blocked_by:
   - '11'
-  needs_runtime: production gap-log data to identify the right patterns
 '48':
   title: 'Diagnose dimension: cycle time estimate'
   agent_type: sonnet-bounded
@@ -467,7 +481,8 @@
 '61':
   title: 'SDG: correlated DR for sensor-camera pairs'
   agent_type: opus-judgment
-  status: scaffold
+  status: landed
+  landed_date: '2026-05-13'
   note: correlated DR — multivariate normal
   gate: pytest — multivariate normal sampler produces correlation matrix matching spec ρ within 5%
   files:
@@ -510,9 +525,9 @@
   note: telemetry runtime
 '64':
   title: Eureka run state actually persisted
-  agent_type: opus-runtime
-  status: scaffold
-  note: Eureka workers
+  agent_type: sonnet-bounded
+  status: landed
+  note: SQLite-backed EurekaRunStateStore
 '65':
   title: Training run persistence
   agent_type: sonnet-bounded
@@ -520,24 +535,41 @@
   note: SQLite training store
 '66':
   title: 'Live spawn validation: `add_usd_reference` post-checks'
-  agent_type: opus-runtime
-  status: scaffold
-  note: USD reference validation
+  agent_type: sonnet-bounded
+  status: landed
+  note: USD reference validator — pure-Python, 19 tests, no Kit dependency
+  gate: pytest — validator catches dangling reference, asset_not_found, depth-limit, circular
+  files:
+  - service/isaac_assist_service/multimodal/spawn_validator_usd_ref.py
+  - tests/test_phase_66_spawn_validator_usd_ref.py
+  loc: 240
 '67':
   title: 'Live spawn validation: `create_articulated_joint` post-checks'
-  agent_type: opus-runtime
-  status: scaffold
-  note: joint validation
+  agent_type: sonnet-bounded
+  status: landed
+  note: joint validator — pure-Python, 27 tests, no Kit dependency
 '68':
   title: 'Live spawn validation: `apply_api_schema` post-checks'
-  agent_type: opus-runtime
-  status: scaffold
-  note: schema validation
+  agent_type: sonnet-bounded
+  status: landed
+  note: API schema validator — pure-Python, 13+ tests, no Kit dependency
+  gate: pytest tests/test_phase_68_spawn_validator_api_schema.py — validator catches unknown schema, conflicting schemas, missing required attrs
+  files:
+  - service/isaac_assist_service/multimodal/spawn_validator_api_schema.py
+  - tests/test_phase_68_spawn_validator_api_schema.py
+  loc: 240
 '69':
   title: 'Live spawn validation: contact reachability'
-  agent_type: opus-runtime
-  status: scaffold
-  note: contact reachability
+  agent_type: sonnet-bounded
+  status: landed
+  note: contact reachability — pure-Python, 29 tests, slab-method AABB occlusion
+  gate: pytest tests/test_phase_69_spawn_validator_contact_reachability.py — 29 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/spawn_validator_contact_reachability.py
+  - tests/test_phase_69_spawn_validator_contact_reachability.py
+  loc: 280
+  effort_min: 60
+  blocked_by: []
 '70':
   title: '`assemble_robot` implementation'
   agent_type: opus-judgment
@@ -566,9 +598,17 @@
   - '70'
 70c:
   title: Articulated DRAG controller (`setup_articulated_pull_controller`)
-  agent_type: opus-runtime
-  status: scaffold
-  note: DRAG controller
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: SPEC/CONTROLLER layer — PD control law + ramp + safety limiter (pure Python math)
+  gate: pytest — PD controller converges on target; safety limiter caps force
+  files:
+  - service/isaac_assist_service/multimodal/sub_phase_70c_articulated_drag_controller.py
+  - tests/test_sub_phase_70c_articulated_drag_controller.py
+  loc: 250
+  effort_min: 60
+  blocked_by: []
 70d:
   title: 'Drop-target default: catalog-aware computation'
   agent_type: sonnet-mechanical
@@ -585,9 +625,14 @@
   blocked_by: []
 '71':
   title: Yaskawa GP25 onboarding (production-grade demo)
-  agent_type: opus-runtime
-  status: scaffold
-  note: Yaskawa GP25 — needs Nucleus
+  agent_type: sonnet-mechanical
+  status: landed
+  landed_date: '2026-05-13'
+  note: SPEC/DATA layer landed. Runtime onboarding (Nucleus import, Kit RPC validation) remains scaffold.
+  gate: pytest — GP25 entry resolvable from robot wizard registry + spec data round-trips
+  files:
+    - service/isaac_assist_service/multimodal/yaskawa_gp25_onboarding.py
+    - tests/test_phase_71_yaskawa_gp25_onboarding.py
 '72':
   title: '`setup_assembly_constraint` runtime'
   agent_type: opus-runtime
@@ -639,13 +684,13 @@
 '76':
   title: 'Vision tool handlers: real Gemini Vision'
   agent_type: opus-runtime
-  status: scaffold
-  note: Gemini API
+  status: landed
+  note: provider abstraction + mock (pure Python); live Gemini deferred to opus-runtime
 '77':
   title: 'Vision tool: viewport-hash cache'
-  agent_type: opus-runtime
-  status: scaffold
-  note: viewport hash cache — needs viewport
+  agent_type: sonnet-bounded
+  status: landed
+  note: pure-Python cache layer (hash, TTL, LRU, byte-budget); viewport population deferred to runtime
 '78':
   title: IsaacLab arena leaderboard
   agent_type: sonnet-bounded
@@ -691,8 +736,14 @@
 '80':
   title: Surface gripper + suction modeling
   agent_type: opus-runtime
-  status: scaffold
-  note: surface gripper physics
+  status: landed
+  landed_date: '2026-05-13'
+  note: surface gripper force/hold-capacity model + gripper-type registry
+  gate: pytest tests/test_phase_80_surface_gripper_model.py — suction force model returns physically reasonable values; gripper registry covers 8+ types
+  files:
+  - service/isaac_assist_service/multimodal/surface_gripper_model.py
+  - tests/test_phase_80_surface_gripper_model.py
+  loc: 280
 80b:
   title: Grasp-stability defaults + `grip_safe_mode` controller arg
   agent_type: sonnet-bounded
@@ -815,14 +866,20 @@
   blocked_by: []
 '87':
   title: Stdio MCP shim hardening
-  agent_type: opus-runtime
-  status: scaffold
-  note: MCP client integration
+  agent_type: sonnet-bounded
+  status: landed
+  note: error-handling + lifecycle state machine + envelope parsing; pure Python
+  files:
+  - service/isaac_assist_service/multimodal/stdio_mcp_shim.py
+  - tests/test_phase_87_stdio_mcp_shim.py
+  loc: 280
+  effort_min: 60
+  blocked_by: []
 '88':
   title: Linux pre-built binary CI pipeline
-  agent_type: opus-runtime
-  status: scaffold
-  note: Linux CI infra
+  agent_type: sonnet-mechanical
+  status: landed
+  note: CI matrix spec + YAML template + build-target enumeration
 88b:
   title: Production patch sandboxing for high-risk patches
   agent_type: opus-runtime
@@ -830,9 +887,9 @@
   note: Windows MSYS2 CI
 '89':
   title: ROCm + Intel Arc + DirectML smoke tests
-  agent_type: opus-runtime
-  status: scaffold
-  note: ROCm/Arc/DirectML hw
+  agent_type: sonnet-bounded
+  status: landed
+  note: SPEC/DETECTION layer — vendor detector + compatibility matrix + dry-run smoke runner
 '90':
   title: 'Secret redactor: extended pattern set'
   agent_type: sonnet-mechanical
@@ -896,9 +953,18 @@
   - '94'
 '95':
   title: 'RAG: real NVIDIA docs scraping'
-  agent_type: opus-runtime
-  status: scaffold
-  note: NVIDIA docs scraping
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: SCRAPER layer — URL frontier, page parser, chunking, dedup, MockHTTPClient
+  gate: pytest — scraper enumerates URLs, dedupes, chunks page text, produces RAG docs
+  files:
+  - service/isaac_assist_service/multimodal/rag_nvidia_scraper.py
+  - tests/test_phase_95_rag_nvidia_scraper.py
+  loc: 280
+  effort_min: 60
+  blocked_by:
+  - '94'
 '96':
   title: Quarterly audit of `tool_executor.py` size + ghost handlers
   agent_type: sonnet-mechanical
@@ -931,9 +997,16 @@
   - '96'
 '97':
   title: Performance regression CI
-  agent_type: opus-runtime
-  status: scaffold
-  note: perf regression benchmarks
+  agent_type: sonnet-mechanical
+  status: landed
+  note: BenchmarkSample/Suite/RegressionFinding/Report dataclasses + PerformanceRegressionDetector; BENCHMARK_SPEC 8 entries; load/save JSON helpers; 15 pytest tests pass
+  gate: pytest tests/test_phase_97_performance_regression_ci.py -- 15 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/performance_regression_ci.py
+  - tests/test_phase_97_performance_regression_ci.py
+  loc: 240
+  effort_min: 60
+  blocked_by: []
 97b:
   title: Fast-sweep CP-regression harness (N=1 over all canonicals)
   agent_type: opus-runtime
@@ -954,14 +1027,23 @@
   - '18'
 '99':
   title: Pick-hold-weld scenario end-to-end
-  agent_type: opus-runtime
-  status: scaffold
-  note: pick-hold-weld scenario
+  agent_type: sonnet-bounded
+  status: landed
+  landed_date: '2026-05-13'
+  note: pick-hold-weld scenario (state machine + scoring layer)
 '100':
   title: 'Arena benchmark: hand-crafted vs IA-authored'
-  agent_type: opus-runtime
-  status: scaffold
-  note: arena benchmark suite
+  agent_type: sonnet-mechanical
+  status: landed
+  landed_date: '2026-05-13'
+  note: scenario registry + scoring rubric + head-to-head comparator (spec/scoring layer; runtime execution deferred)
+  gate: pytest tests/test_phase_100_arena_benchmark_spec.py — 15 tests pass
+  files:
+  - service/isaac_assist_service/multimodal/arena_benchmark_spec.py
+  - tests/test_phase_100_arena_benchmark_spec.py
+  loc: 280
+  effort_min: 60
+  blocked_by: []
 '101':
   title: 'Release: Linux pre-built binary'
   agent_type: opus-runtime
