@@ -740,7 +740,12 @@ ISAAC_SIM_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "cube_path": {"type": "string", "description": "Prim path of the cube to track (e.g. /World/Cube_1)."},
+                    "cube_path": {"type": "string", "description": "Prim path of the cube to track in single-cube mode (e.g. /World/Cube_1)."},
+                    "cube_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional multi-cube mode. Success if any listed cube reaches the target bbox. Takes precedence over cube_path.",
+                    },
                     "target_path": {"type": "string", "description": "Prim path of the destination whose world bbox is the target (e.g. /World/Bin)."},
                     "duration_s": {"type": "number", "description": "Sim duration in seconds. Default 60. Use 30 for smoke tests.", "default": 60},
                     "xy_tolerance": {"type": "number", "description": "Extra xy slack on target bbox in meters. Default 0.0 (strict).", "default": 0.0},
@@ -748,8 +753,10 @@ ISAAC_SIM_TOOLS = [
                     "rest_speed_threshold": {"type": "number", "description": "Max speed in m/s to consider the cube at rest. Default 0.05.", "default": 0.05},
                     "require_upright": {"type": "boolean", "description": "REORIENT-01: when true, success requires cube's local +Z dotted with world +Z >= upright_tolerance_dot at sim end (cube finishes upright, not on its side). Default false.", "default": False},
                     "upright_tolerance_dot": {"type": "number", "description": "Min dot product of cube up vs world up (default 0.95 ≈ within 18° of vertical). Only used when require_upright=true.", "default": 0.95},
+                    "seed": {"type": "integer", "description": "Base RNG seed for deterministic repeated runs. Run i uses seed+i. Default 42.", "default": 42},
+                    "n_runs": {"type": "integer", "description": "Repeat count for the same built scene. Restores cube/controller state between runs. Clamped to 1..50.", "default": 1, "minimum": 1, "maximum": 50},
                 },
-                "required": ["cube_path", "target_path"],
+                "required": ["target_path"],
             },
         },
     },
