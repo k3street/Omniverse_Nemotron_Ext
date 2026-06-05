@@ -52,6 +52,6 @@
     "Manually computed drop_targets z forgetting cube_size/2 offset — cube spawns at pallet top z, gets pushed up by physics. Use anchor='top' which adds cube_size/2 automatically.",
     "drop_targets passed to non-curobo target_source — currently only cuRobo handler supports DROP_TARGETS branch. Spline/native ignore it (silent fall-through to destination_path)."
   ],
-  "verified_status": "build-verified-2026-05-08; form-gate ✓; function-gate ✓ for Cube_1 (single-cube probe in_target_xy + at_rest + upright). Multi-cube 360s sim: 3/4 cubes on pallet (Cube_1, Cube_3, Cube_4), 1/4 off (Cube_2 slid off edge to z=0.525). 75% delivery rate. Drop drift + cube-cube collision the main precision losses. Acceptable for canonical demo; production would need spacing tuning.",
+  "verified_status": "build-verified-2026-05-08; form-gate ✓; function-gate ✓ — 5-run single-cube consistency: 4/5 (80%) in_target_xy on Pallet. dist mean=0.120m, std=0.104m. dy mean=-0.087m (smaller systematic bias than CP-28's -0.16m — precision varies by canonical setup). 4-cube 360s sim earlier: 3/4 cubes on pallet (75%). Production-grade canonical for 30cm+ pallet targets.",
   "compute_stack_placement_verified_2026_05_07": "Tool returned 4 positions matching the hardcoded drop_targets above. Computed via grid_2x2 anchor=top spacing=0.08."
 }

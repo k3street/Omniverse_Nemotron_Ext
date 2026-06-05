@@ -1,0 +1,50 @@
+{
+  "task_id": "CP-21",
+  "goal": "Build a gravity-feed station: 4 cubes spawn at z=1.0 above the conveyor, fall onto the belt, then are picked into a bin. Tests handler robustness with cubes that have non-zero initial velocity from gravity drop. Industrial pattern: hopper-fed conveyor with robotic singulation.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six gravity-feed specifics for CP-21 (extends CP-01 — same scene + bin, different cube spawn):\n1) Cubes spawn at z=1.0 (~17cm above belt top z=0.83) → fall ~13cm under gravity (v ~ 1.6 m/s at impact). Stick-slip + rubber material catches them on belt.\n2) sleepThreshold=0 critical: settling-from-fall puts cubes momentarily into low-velocity-but-not-zero state. PhysX would normally sleep them; sleepThreshold=0 keeps physics ticking.\n3) Spaced 0.30m apart along conveyor x — gives belt time to carry them sequentially into pick zone (vs all 4 falling simultaneously which causes pile-up).\n4) Robot picks cubes that arrive at sensor zone. Sensor at x=0.4 gates pick; cubes that haven't reached x=0.4 keep belt-riding.\n5) drop_target = Bin bbox center (no special targeting). Cubes go to single Bin.\n6) Settle_state restores spawn z=1.0 (NOT belt-rest z=0.83) — cubes will re-fall on canonical re-entry, demonstrating the gravity feed each time.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 4 cubes at z=1.0 (above belt) — they'll fall on canonical play\nfor i, x in enumerate([-1.4, -1.05, -0.7, -0.35]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 1.0], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.4,  0.4, 1.0],
+      "/World/Cube_2": [-1.05, 0.4, 1.0],
+      "/World/Cube_3": [-0.7,  0.4, 1.0],
+      "/World/Cube_4": [-0.35, 0.4, 1.0]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 90
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-21 inherits CP-01 mechanically but spawns cubes 17cm above belt — they fall and land before pick begins. Tests handler's tolerance for cubes with non-zero initial velocity. settle_state restores fall height so each canonical re-entry demonstrates the gravity feed. Future: pair with create_gravity_dispenser tool when that's built (Tier C).",
+  "failure_modes": [
+    "Cubes fall too high → bounce too much before settling. z=1.0 is ~17cm; lower would settle faster but reduces 'feed' visualization.",
+    "All cubes spawned simultaneously at same x → land in same spot, pile up. Stagger by x=[-1.4, -1.05, -0.7, -0.35] (0.35m apart).",
+    "Cube_4 lands within reach (x=-0.35, |x|<0.7) — controller picks immediately. Belt-feed visual reduced for it.",
+    "Without sleepThreshold=0 → cubes settle, PhysX sleeps them, then belt's friction-based velocity skips sleeping bodies → cubes don't move with belt. Same as CP-01."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+}

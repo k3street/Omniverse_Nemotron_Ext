@@ -1,0 +1,50 @@
+{
+  "task_id": "CP-22",
+  "goal": "Build a high-speed belt stress test: same as CP-01 but conveyor velocity 0.5 (vs 0.2) — apparent speed ~1.5 m/s with stick-slip multiplier. Tests cuRobo controller's ability to plan + execute pick under faster cube motion. Industrial relevance: high-throughput conveyor lines.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "create_bin",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six high-speed-belt specifics for CP-22 (extends CP-01 — same scene, faster belt):\n1) surface_velocity=[0.5, 0, 0] (vs CP-01's 0.2). With ~3× stick-slip multiplier, apparent cube speed ~1.5 m/s. cuRobo handler must plan picks in ~0.5s window before cube exits sensor zone.\n2) Sensor zone 0.06×0.06×0.06m at x=0.4. At 1.5 m/s a cube transits in 0.04s — handler triggers belt-pause IMMEDIATELY on sensor-overlap detection.\n3) Controller's settling state (8 ticks ≈ 0.13s) lets cube come to rest after belt pause. Belt high speed means more residual cube velocity → more settling time may be needed.\n4) Cube spacing 0.30m on conveyor. Higher belt speed → cubes arrive at sensor zone every ~0.20s. Robot cycle ~5-7s; queue builds up. Cubes 3-4 may collide while waiting.\n5) Same physics gotchas as CP-01: CPU dynamics, rubber on cubes, sleepThreshold=0. High velocity stresses these — sleepThreshold matters because cubes may briefly stop mid-belt at speed transitions.\n6) Form-gate verifies bridging works (sensor + belt). Function-gate is the real test of high-speed robustness — likely lower delivery rate than CP-01's 4/4.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# HIGH SPEED conveyor — 0.5 m/s nominal (vs CP-01's 0.2)\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.5, 0, 0],\n)\n\nfor i, x in enumerate([-1.4, -1.1, -0.8, -0.5]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [-1.4, 0.4, 0.835],
+      "/World/Cube_2": [-1.1, 0.4, 0.835],
+      "/World/Cube_3": [-0.8, 0.4, 0.835],
+      "/World/Cube_4": [-0.5, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.5, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 60
+  },
+  "extends": "CP-01",
+  "extension_notes": "CP-22 stress-tests cuRobo's planner cycle time under fast belt conditions. Industrial use: high-throughput sortation lines. Future variants: even faster (1.0 m/s nominal), variable-speed (slow on inspect, fast on transit), with multi-robot pipeline.",
+  "failure_modes": [
+    "Belt too fast → cube exits sensor zone before pause + settle complete → cube travels past pick point. Drop velocity to 0.3-0.4 if 0.5 fails.",
+    "Cubes collide on belt due to short spacing + fast speed. 0.30m spacing at 1.5 m/s gives 0.20s gap; tight but manageable.",
+    "Robot cycle too long for belt pace → cubes pile up at downstream end of belt. Acceptable for canonical demo.",
+    "Same physics gotchas as CP-01: GPU dynamics off, sleepThreshold=0, rubber on cubes."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; function-gate likely lower delivery rate than CP-01 due to high speed"
+}

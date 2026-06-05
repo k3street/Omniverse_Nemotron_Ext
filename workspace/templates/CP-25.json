@@ -1,0 +1,62 @@
+{
+  "task_id": "CP-25",
+  "goal": "Build a high-density 4×4 palletizer: 16 cubes in a 4×4 grid on a 0.40×0.40m pallet, single layer, spacing 0.07m. Tests packing density (16 cubes × 5cm vs 40cm pallet ≈ 90% area utilization).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_conveyor",
+    "add_proximity_sensor",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "compute_stack_placement",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Six high-density specifics for CP-25 (extends CP-10 — bigger grid + tighter spacing):\n1) compute_stack_placement(target='/World/Pallet', pattern='grid_4x4', n_items=16, cube_size=0.05, spacing=0.07, anchor='top') yields 16 positions in 4×4 layout.\n2) Spacing 0.07m (vs CP-10's 0.10m) — leaves only 2cm gap between cubes. Tight precision required.\n3) Pallet 0.40×0.40m (smaller than CP-10's 0.45m). 4 cubes × 0.07m spacing = 0.21m wide cubes-only; +2cm margin per side = 0.40m total. Snug.\n4) 16 cubes on conveyor at 0.20m spacing. Need 3.2m of conveyor — use 4m wide to give margin.\n5) drop_targets dict has 16 entries — biggest single canonical drop_targets dict in the suite (CP-20 has 18 but split across 2 layers).\n6) Realistic industrial throughput pattern — high cube count per pallet maximizes shipping efficiency.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[4.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 16 cubes spaced 0.20m\nfor i in range(16):\n    x = -1.5 + i * 0.20\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(16)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/Cube_{i+1}\" for i in range(16)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Pallet 0.40x0.40x0.05m\ncreate_prim(prim_path=\"/World/Pallet\", prim_type=\"Cube\", position=[0, -0.4, 0.775], scale=[0.20, 0.20, 0.025])\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# 16-entry drop_targets dict (4x4 grid, spacing 0.07m, pallet center y=-0.4)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(16)],\n    destination_path=\"/World/Pallet\",\n    drop_targets={\n        \"/World/Cube_1\":  [-0.105, -0.505, 0.825],\n        \"/World/Cube_2\":  [-0.035, -0.505, 0.825],\n        \"/World/Cube_3\":  [ 0.035, -0.505, 0.825],\n        \"/World/Cube_4\":  [ 0.105, -0.505, 0.825],\n        \"/World/Cube_5\":  [-0.105, -0.435, 0.825],\n        \"/World/Cube_6\":  [-0.035, -0.435, 0.825],\n        \"/World/Cube_7\":  [ 0.035, -0.435, 0.825],\n        \"/World/Cube_8\":  [ 0.105, -0.435, 0.825],\n        \"/World/Cube_9\":  [-0.105, -0.365, 0.825],\n        \"/World/Cube_10\": [-0.035, -0.365, 0.825],\n        \"/World/Cube_11\": [ 0.035, -0.365, 0.825],\n        \"/World/Cube_12\": [ 0.105, -0.365, 0.825],\n        \"/World/Cube_13\": [-0.105, -0.295, 0.825],\n        \"/World/Cube_14\": [-0.035, -0.295, 0.825],\n        \"/World/Cube_15\": [ 0.035, -0.295, 0.825],\n        \"/World/Cube_16\": [ 0.105, -0.295, 0.825],\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Pallet\"],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1":  [-1.5, 0.4, 0.835],
+      "/World/Cube_2":  [-1.3, 0.4, 0.835],
+      "/World/Cube_3":  [-1.1, 0.4, 0.835],
+      "/World/Cube_4":  [-0.9, 0.4, 0.835],
+      "/World/Cube_5":  [-0.7, 0.4, 0.835],
+      "/World/Cube_6":  [-0.5, 0.4, 0.835],
+      "/World/Cube_7":  [-0.3, 0.4, 0.835],
+      "/World/Cube_8":  [-0.1, 0.4, 0.835],
+      "/World/Cube_9":  [ 0.1, 0.4, 0.835],
+      "/World/Cube_10": [ 0.3, 0.4, 0.835],
+      "/World/Cube_11": [ 0.5, 0.4, 0.835],
+      "/World/Cube_12": [ 0.7, 0.4, 0.835],
+      "/World/Cube_13": [ 0.9, 0.4, 0.835],
+      "/World/Cube_14": [ 1.1, 0.4, 0.835],
+      "/World/Cube_15": [ 1.3, 0.4, 0.835],
+      "/World/Cube_16": [ 1.5, 0.4, 0.835]
+    },
+    "conveyors": {
+      "/World/ConveyorBelt": [0.2, 0, 0]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/Pallet", "robot_kind": "franka_panda"}
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Pallet",
+    "duration_s": 360
+  },
+  "extends": "CP-10",
+  "extension_notes": "CP-25 demonstrates high-density single-layer palletizing. 16 cubes on 0.40×0.40m pallet ≈ 25% area coverage by cubes (16 × 25cm² / 1600cm² = 25%). Tighter spacing than CP-10's 0.10m. Function-gate likely partial — drop precision drift accumulates across 16 placements, last cubes may not fit.",
+  "failure_modes": [
+    "Drop precision drift (~5cm) > spacing (7cm) → last placed cube collides with previous. Reduce spacing or reduce cube count.",
+    "Belt has 16 cubes — pile-up on conveyor tail end if robot can't pick fast enough.",
+    "Cube 8-16 start within Franka reach (|x|<0.7 for some) — picked out of belt order. drop_targets dispatches by cube_path so order doesn't matter.",
+    "Pallet 40×40cm — within robot reach (max diagonal sqrt(0.105^2 + 0.505^2)=0.516m from base)."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate verification pending; function-gate partial expected"
+}
