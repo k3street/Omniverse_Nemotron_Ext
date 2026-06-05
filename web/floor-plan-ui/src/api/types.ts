@@ -158,11 +158,25 @@ export interface CosmosObserveRequest {
     parent_revision: number;
 }
 
+export interface CosmosViewportObserveRequest {
+    prompt: string;
+    max_dim?: number;
+    parent_revision: number;
+}
+
 export interface CosmosObserveResponse {
     valid: true;
     revision: number;
     spec: LayoutSpec;
     observation: unknown;
+}
+
+export interface CosmosViewportObserveResponse extends CosmosObserveResponse {
+    viewport_capture?: {
+        width?: number;
+        height?: number;
+        max_dim: number;
+    };
 }
 
 export interface ConflictDetail {

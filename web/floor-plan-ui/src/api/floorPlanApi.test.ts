@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { normalizeLayoutSpec } from "./floorPlanApi";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createCanvasApi, normalizeLayoutSpec } from "./floorPlanApi";
 import { LayoutSpec, TypedObject } from "./types";
 
 function baseSpec(): LayoutSpec {
@@ -48,6 +48,10 @@ function baseSpec(): LayoutSpec {
     };
 }
 
+afterEach(() => {
+    vi.restoreAllMocks();
+});
+
 describe("normalizeLayoutSpec", () => {
     it("maps backend object_class fields to frontend class aliases", () => {
         const spec = baseSpec();
@@ -71,5 +75,48 @@ describe("normalizeLayoutSpec", () => {
 
         expect(normalized?.objects?.[0].class).toBe("franka_panda");
         expect("object_class" in (normalized?.objects?.[0] ?? {})).toBe(false);
+    });
+});
+
+describe("createCanvasApi", () => {
+    it("posts viewport observation requests to the Cosmos viewport route", async () => {
+        const spec = baseSpec();
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                valid: true,
+                revision: 2,
+                spec,
+                observation: {},
+                viewport_capture: {
+                    width: 1280,
+                    height: 720,
+                    max_dim: 1280,
+                },
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const api = createCanvasApi("");
+        const response = await api.cosmosObserveViewport("session one", {
+            prompt: "Seed this from the live scene",
+            max_dim: 1280,
+            parent_revision: 1,
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/v1/canvas/session%20one/cosmos/observe_viewport",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prompt: "Seed this from the live scene",
+                    max_dim: 1280,
+                    parent_revision: 1,
+                }),
+            },
+        );
+        expect(response.revision).toBe(2);
+        expect(response.viewport_capture?.height).toBe(720);
     });
 });

@@ -12,6 +12,8 @@ import {
     ConflictDetail,
     CosmosObserveRequest,
     CosmosObserveResponse,
+    CosmosViewportObserveRequest,
+    CosmosViewportObserveResponse,
     LayoutSpec,
     PatchSuccessResponse,
     PatchValidationFailureResponse,
@@ -45,6 +47,10 @@ export interface CanvasApi {
     previewRender(sessionId: string): Promise<{ rendered: true; path: string; revision: number }>;
     build(sessionId: string, opts?: { template_id?: string; force_freeform?: boolean }): Promise<unknown>;
     cosmosObserve(sessionId: string, req: CosmosObserveRequest): Promise<CosmosObserveResponse>;
+    cosmosObserveViewport(
+        sessionId: string,
+        req: CosmosViewportObserveRequest,
+    ): Promise<CosmosViewportObserveResponse>;
     delete(sessionId: string): Promise<{ deleted: true; removed_revisions: number }>;
     reportClientError(sessionId: string, message: string, stack?: string): Promise<void>;
 }
@@ -137,6 +143,18 @@ export function createCanvasApi(baseUrl: string = ""): CanvasApi {
                 throw new Error(`POST cosmos/observe failed: ${r.status} ${err}`);
             }
             return normalizePatchResponse((await r.json()) as CosmosObserveResponse);
+        },
+        async cosmosObserveViewport(sessionId, req) {
+            const r = await fetch(url(`/${encodeURIComponent(sessionId)}/cosmos/observe_viewport`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(req),
+            });
+            if (!r.ok) {
+                const err = await r.text();
+                throw new Error(`POST cosmos/observe_viewport failed: ${r.status} ${err}`);
+            }
+            return normalizePatchResponse((await r.json()) as CosmosViewportObserveResponse);
         },
         async delete(sessionId) {
             const r = await fetch(url(`/${encodeURIComponent(sessionId)}`), {

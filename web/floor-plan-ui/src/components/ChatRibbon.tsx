@@ -30,6 +30,7 @@ export function ChatRibbon() {
     const [latestAgent, setLatestAgent] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const [importBusy, setImportBusy] = useState(false);
+    const [viewportBusy, setViewportBusy] = useState(false);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
 
     const submit = async () => {
@@ -58,7 +59,7 @@ export function ChatRibbon() {
     };
 
     const importSceneFromImage = async (file: File | null) => {
-        if (!file || importBusy) return;
+        if (!file || importBusy || viewportBusy) return;
         setImportBusy(true);
         try {
             const imageBase64 = await readFileBase64(file);
@@ -80,6 +81,32 @@ export function ChatRibbon() {
             if (fileInputRef.current) fileInputRef.current.value = "";
         }
     };
+
+    const importSceneFromViewport = async () => {
+        if (viewportBusy) return;
+        setViewportBusy(true);
+        try {
+            const response = await api.cosmosObserveViewport(sessionId, {
+                prompt: value.trim() || "Reconstruct the current Isaac Sim viewport as a robotics floor plan.",
+                max_dim: 1280,
+                parent_revision: revision,
+            });
+            setSpec(response.spec, response.revision);
+            const capture = response.viewport_capture;
+            const captureLabel = capture?.width && capture?.height
+                ? ` from ${capture.width}x${capture.height} viewport`
+                : " from viewport";
+            setLatestAgent(`Imported ${response.spec.objects?.length ?? 0} proposed objects${captureLabel}.`);
+            setValue("");
+        } catch (e) {
+            console.warn("[cosmos] viewport import failed:", e);
+            setLatestAgent(`Viewport import failed: ${String(e)}`);
+        } finally {
+            setViewportBusy(false);
+        }
+    };
+
+    const anyImportBusy = importBusy || viewportBusy;
 
     return (
         <div
@@ -123,22 +150,45 @@ export function ChatRibbon() {
                     type="button"
                     title="Import scene from image"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={importBusy}
+                    disabled={anyImportBusy}
                     style={{
                         width: 32,
                         height: 32,
-                        background: importBusy ? "#2E3237" : "#252A30",
-                        color: importBusy ? TEXT_DIM : TEXT,
+                        background: anyImportBusy ? "#2E3237" : "#252A30",
+                        color: anyImportBusy ? TEXT_DIM : TEXT,
                         border: `1px solid ${BORDER}`,
                         borderRadius: 4,
                         fontSize: 15,
-                        cursor: importBusy ? "default" : "pointer",
+                        cursor: anyImportBusy ? "default" : "pointer",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                     }}
                 >
                     {importBusy ? "..." : "▣"}
+                </button>
+                <button
+                    type="button"
+                    title="Import scene from current Isaac viewport"
+                    onClick={() => void importSceneFromViewport()}
+                    disabled={anyImportBusy}
+                    style={{
+                        width: 36,
+                        height: 32,
+                        background: viewportBusy ? "#2E3237" : "#252A30",
+                        color: viewportBusy ? TEXT_DIM : TEXT,
+                        border: `1px solid ${BORDER}`,
+                        borderRadius: 4,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: anyImportBusy ? "default" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        letterSpacing: 0,
+                    }}
+                >
+                    {viewportBusy ? "..." : "VP"}
                 </button>
                 <input
                     type="text"

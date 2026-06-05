@@ -14,6 +14,8 @@ debounced patch sync, and SSE agent-update handling.
 The GUI remains a development surface for the multimodal canvas, not the
 primary Isaac Sim viewport. Use it to inspect and edit layout specs before
 handoff to the Isaac Assist extension/Kit RPC path.
+The bottom ribbon can seed a proposal either from an uploaded image or from
+the current Isaac Sim viewport via `canvas/{session}/cosmos/observe_viewport`.
 
 ## Dev
 
@@ -36,7 +38,7 @@ After large merges, run the app and visually confirm these surfaces:
 - Konva viewport with grid, layout objects, reach/agency overlays, and guide support
 - Properties/layers panel
 - Agent confirmation bar
-- Bottom chat ribbon and revision/session/save status bar
+- Bottom chat ribbon, image import button, viewport import button, and revision/session/save status bar
 
 Then run the non-visual gates:
 
