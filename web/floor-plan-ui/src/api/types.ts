@@ -150,6 +150,21 @@ export interface PatchValidationFailureResponse {
     issues: Array<{ code: string; severity: string; message: string }>;
 }
 
+export interface CosmosObserveRequest {
+    prompt: string;
+    image_base64?: string;
+    mime_type?: string;
+    input_kind?: "photo" | "screenshot" | "render" | "video_frame" | "prompt";
+    parent_revision: number;
+}
+
+export interface CosmosObserveResponse {
+    valid: true;
+    revision: number;
+    spec: LayoutSpec;
+    observation: unknown;
+}
+
 export interface ConflictDetail {
     conflict: true;
     expected_revision: number;

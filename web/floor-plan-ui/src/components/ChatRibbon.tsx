@@ -9,9 +9,10 @@
  * Submission posts to `/api/v1/chat/{session}/message` and displays
  * the most recent agent response inline.  Full transcript stays in Kit.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useFloorPlanStore } from "../store/floorPlanStore";
 import { transition } from "../canvas/motionTokens";
+import { createCanvasApi } from "../api/floorPlanApi";
 
 const BG = "#171A1E";
 const BORDER = "#2E3237";
@@ -19,12 +20,17 @@ const TEXT = "#DDDDDD";
 const TEXT_DIM = "#8A8E92";
 const ACCENT = "#76B900";
 const INPUT_BG = "#0F1216";
+const api = createCanvasApi("");
 
 export function ChatRibbon() {
     const sessionId = useFloorPlanStore((s) => s.sessionId);
+    const revision = useFloorPlanStore((s) => s.revision);
+    const setSpec = useFloorPlanStore((s) => s.setSpec);
     const [value, setValue] = useState("");
     const [latestAgent, setLatestAgent] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [importBusy, setImportBusy] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
 
     const submit = async () => {
         const text = value.trim();
@@ -48,6 +54,30 @@ export function ChatRibbon() {
             console.warn("[chat] submit failed:", e);
         } finally {
             setBusy(false);
+        }
+    };
+
+    const importSceneFromImage = async (file: File | null) => {
+        if (!file || importBusy) return;
+        setImportBusy(true);
+        try {
+            const imageBase64 = await readFileBase64(file);
+            const response = await api.cosmosObserve(sessionId, {
+                prompt: value.trim() || "Reconstruct this robotics scene as an Isaac Sim floor plan.",
+                image_base64: imageBase64,
+                mime_type: file.type || "image/png",
+                input_kind: "photo",
+                parent_revision: revision,
+            });
+            setSpec(response.spec, response.revision);
+            setLatestAgent(`Imported ${response.spec.objects?.length ?? 0} proposed objects from image.`);
+            setValue("");
+        } catch (e) {
+            console.warn("[cosmos] image import failed:", e);
+            setLatestAgent(`Image import failed: ${String(e)}`);
+        } finally {
+            setImportBusy(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
         }
     };
 
@@ -80,6 +110,36 @@ export function ChatRibbon() {
                 </div>
             )}
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                        void importSceneFromImage(e.currentTarget.files?.[0] ?? null);
+                    }}
+                />
+                <button
+                    type="button"
+                    title="Import scene from image"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={importBusy}
+                    style={{
+                        width: 32,
+                        height: 32,
+                        background: importBusy ? "#2E3237" : "#252A30",
+                        color: importBusy ? TEXT_DIM : TEXT,
+                        border: `1px solid ${BORDER}`,
+                        borderRadius: 4,
+                        fontSize: 15,
+                        cursor: importBusy ? "default" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                    }}
+                >
+                    {importBusy ? "..." : "▣"}
+                </button>
                 <input
                     type="text"
                     value={value}
@@ -124,4 +184,16 @@ export function ChatRibbon() {
             </div>
         </div>
     );
+}
+
+function readFileBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error("Failed to read image"));
+        reader.onload = () => {
+            const value = String(reader.result ?? "");
+            resolve(value.includes(",") ? value.split(",", 2)[1] : value);
+        };
+        reader.readAsDataURL(file);
+    });
 }

@@ -10,9 +10,12 @@
 import {
     CanvasGetResponse,
     ConflictDetail,
+    CosmosObserveRequest,
+    CosmosObserveResponse,
     LayoutSpec,
     PatchSuccessResponse,
     PatchValidationFailureResponse,
+    TypedObject,
 } from "./types";
 
 export class CanvasConflictError extends Error {
@@ -41,8 +44,35 @@ export interface CanvasApi {
     commit(sessionId: string): Promise<{ committed: true; revision: number }>;
     previewRender(sessionId: string): Promise<{ rendered: true; path: string; revision: number }>;
     build(sessionId: string, opts?: { template_id?: string; force_freeform?: boolean }): Promise<unknown>;
+    cosmosObserve(sessionId: string, req: CosmosObserveRequest): Promise<CosmosObserveResponse>;
     delete(sessionId: string): Promise<{ deleted: true; removed_revisions: number }>;
     reportClientError(sessionId: string, message: string, stack?: string): Promise<void>;
+}
+
+type BackendTypedObject = Record<string, unknown> & {
+    object_class?: string;
+    class?: string;
+};
+
+export function normalizeLayoutSpec(spec: LayoutSpec | null): LayoutSpec | null {
+    if (!spec) return spec;
+    return {
+        ...spec,
+        objects: (spec.objects ?? []).map((raw) => {
+            const obj = raw as unknown as BackendTypedObject;
+            const objectClass = obj.class ?? obj.object_class;
+            const normalized = { ...obj, class: objectClass } as BackendTypedObject;
+            delete normalized.object_class;
+            return normalized as unknown as TypedObject;
+        }),
+    };
+}
+
+function normalizePatchResponse<T extends { spec: LayoutSpec }>(body: T): T {
+    return {
+        ...body,
+        spec: normalizeLayoutSpec(body.spec) as LayoutSpec,
+    };
 }
 
 export function createCanvasApi(baseUrl: string = ""): CanvasApi {
@@ -51,7 +81,8 @@ export function createCanvasApi(baseUrl: string = ""): CanvasApi {
         async get(sessionId) {
             const r = await fetch(url(`/${encodeURIComponent(sessionId)}`));
             if (!r.ok) throw new Error(`GET canvas failed: ${r.status}`);
-            return r.json();
+            const body = (await r.json()) as CanvasGetResponse;
+            return { ...body, spec: normalizeLayoutSpec(body.spec) };
         },
         async patch(sessionId, spec, parentRevision) {
             const r = await fetch(url(`/${encodeURIComponent(sessionId)}/patch`), {
@@ -68,7 +99,7 @@ export function createCanvasApi(baseUrl: string = ""): CanvasApi {
             if (!body.valid) {
                 throw new CanvasValidationError(body as PatchValidationFailureResponse);
             }
-            return body as PatchSuccessResponse;
+            return normalizePatchResponse(body as PatchSuccessResponse);
         },
         async commit(sessionId) {
             const r = await fetch(url(`/${encodeURIComponent(sessionId)}/commit`), {
@@ -94,6 +125,18 @@ export function createCanvasApi(baseUrl: string = ""): CanvasApi {
             });
             if (!r.ok) throw new Error(`POST build failed: ${r.status}`);
             return r.json();
+        },
+        async cosmosObserve(sessionId, req) {
+            const r = await fetch(url(`/${encodeURIComponent(sessionId)}/cosmos/observe`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(req),
+            });
+            if (!r.ok) {
+                const err = await r.text();
+                throw new Error(`POST cosmos/observe failed: ${r.status} ${err}`);
+            }
+            return normalizePatchResponse((await r.json()) as CosmosObserveResponse);
         },
         async delete(sessionId) {
             const r = await fetch(url(`/${encodeURIComponent(sessionId)}`), {
