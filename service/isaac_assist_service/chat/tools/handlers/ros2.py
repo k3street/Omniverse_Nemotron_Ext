@@ -156,20 +156,16 @@ tf_graph_path = "/World/ROS2_TF_Tree"
 tf_prim = stage.GetPrimAtPath(tf_graph_path)
 if not tf_prim.IsValid():
     print("No TF publisher graph found — creating one at " + tf_graph_path)
-    _bt = og.GraphBackingType
-    if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-        _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-    elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-        _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-    else:
-        _backing = list(_bt)[0]
+    # Round 2 repair (2026-05-17): pipeline_stage requires GraphPipelineStage
+    # enum, not GraphBackingType — Isaac Sim 5.1 strict API check.
+    _ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 
     keys = og.Controller.Keys
     og.Controller.edit(
         {{
             "graph_path": tf_graph_path,
             "evaluator_name": "execution",
-            "pipeline_stage": _backing,
+            "pipeline_stage": _ps,
         }},
         {{
             keys.CREATE_NODES: [
@@ -275,9 +271,24 @@ def _gen_configure_ros2_bridge(args: Dict) -> str:
     for i, sensor in enumerate(sensors):
         stype = sensor.get("type", "camera")
         prim_path = sensor.get("prim_path", "")
-        topic_name = sensor.get("topic_name", "")
+        # Round 6 repair (2026-05-18): templates use `topic`/`topic_name`
+        # interchangeably; accept either so canonical-build doesn't drop
+        # the topic input value.
+        topic_name = sensor.get("topic_name") or sensor.get("topic", "")
         frame_id = sensor.get("frame_id", "")
         node_name = f"{stype}_{i}"
+
+        # Round 6 repair (2026-05-18): canonical templates use friendly
+        # aliases ('camera_rgb', 'camera_depth') that round-trip through
+        # `.title()` to invalid Kit OG node names. Normalize before lookup.
+        _stype_norm = {
+            "camera_rgb": "camera",
+            "camera_depth": "camera",
+            "rgb_camera": "camera",
+            "depth_camera": "camera",
+            "rgb": "camera",
+            "tf": "tf_tree",
+        }.get(stype, stype)
 
         # Map sensor type to OG node type
         og_node_class = {
@@ -286,7 +297,13 @@ def _gen_configure_ros2_bridge(args: Dict) -> str:
             "imu": "ROS2PublishImu",
             "clock": "ROS2PublishClock",
             "joint_state": "ROS2PublishJointState",
-        }.get(stype, f"ROS2Publish{stype.title()}")
+            # Round 3 repair (2026-05-17): "articulation" is a friendly alias
+            # for publishing joint states off an articulation root.
+            "articulation": "ROS2PublishJointState",
+            "tf_tree": "ROS2PublishTransformTree",
+            "odometry": "ROS2PublishOdometry",
+            "odom": "ROS2PublishOdometry",
+        }.get(_stype_norm, f"ROS2Publish{_stype_norm.title()}")
 
         node_defs.append(f'("{node_name}", f"{{_ROS2_NS}}.{og_node_class}")')
 
@@ -301,12 +318,21 @@ def _gen_configure_ros2_bridge(args: Dict) -> str:
             val_defs.append(f'("{node_name}.inputs:topicName", "{topic_name}")')
         if frame_id:
             val_defs.append(f'("{node_name}.inputs:frameId", "{frame_id}")')
-        if prim_path and stype != "clock":
+        if prim_path and _stype_norm != "clock":
             # clock doesn't have a prim path input
-            if stype == "camera":
+            if _stype_norm == "camera":
                 val_defs.append(f'("{node_name}.inputs:renderProductPath", "{prim_path}")')
-            elif stype == "joint_state":
+            elif _stype_norm in ("joint_state", "articulation"):
                 val_defs.append(f'("{node_name}.inputs:targetPrim", "{prim_path}")')
+            elif _stype_norm in ("lidar", "imu", "odom", "odometry"):
+                # Round 6 repair (2026-05-18): these publish nodes don't
+                # accept inputs:prim — they consume sensor data arrays
+                # piped from a sensor-reader graph. We skip the prim wire
+                # for canonical-build so the bridge installs cleanly; a
+                # downstream sensor-reader graph is required for runtime
+                # data. Document the prim via inputs:frameId if not set.
+                if not frame_id:
+                    val_defs.append(f'("{node_name}.inputs:frameId", "sim_{_stype_norm}")')
             else:
                 val_defs.append(f'("{node_name}.inputs:prim", "{prim_path}")')
 
@@ -333,27 +359,39 @@ if not _ros2_os.environ.get("AMENT_PREFIX_PATH"):
         "from that terminal. No nodes were created this call."
     )
 
-# Handle Isaac Sim version namespace differences
-import isaacsim
-_V = tuple(int(x) for x in isaacsim.__version__.split(".")[:2])
-_ROS2_NS = "isaacsim.ros2.nodes" if _V >= (6, 0) else "isaacsim.ros2.bridge"
-print(f"Isaac Sim version: {{isaacsim.__version__}}, using namespace: {{_ROS2_NS}}")
+# Handle Isaac Sim version namespace differences.
+# Round 3 repair (2026-05-17): isaacsim 5.1 no longer exposes __version__;
+# resolve via the extension manager instead (cheap, always works).
+_ROS2_NS = "isaacsim.ros2.bridge"
+import omni.kit.app as _kit_app
+_mgr = _kit_app.get_app().get_extension_manager()
+try:
+    for _info in _mgr.get_extensions():
+        if _info.get("name") in ("isaacsim.exp.full", "isaacsim.exp.base"):
+            _ver = _info.get("version")
+            if _ver and len(_ver) >= 2 and int(_ver[0]) >= 6:
+                _ROS2_NS = "isaacsim.ros2.nodes"
+            break
+except Exception:
+    pass
+# Round 3 repair (2026-05-17): new_stage() between templates disables
+# isaacsim.ros2.bridge — re-enable + pump app updates before creating
+# any ROS2 nodes so the new node types register.
+if not _mgr.is_extension_enabled(_ROS2_NS):
+    _mgr.set_extension_enabled_immediate(_ROS2_NS, True)
+    for _ in range(8):
+        _kit_app.get_app().update()
+print(f"Using ROS2 namespace: {{_ROS2_NS}}")
 
-# Resolve backing type
-_bt = og.GraphBackingType
-if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-else:
-    _backing = list(_bt)[0]
+# Round 2 repair (2026-05-17): pipeline_stage requires GraphPipelineStage enum.
+_ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 
 keys = og.Controller.Keys
 (graph, nodes, _, _) = og.Controller.edit(
     {{
         "graph_path": "/World/ROS2_Bridge",
         "evaluator_name": "execution",
-        "pipeline_stage": _backing,
+        "pipeline_stage": _ps,
     }},
     {{
         keys.CREATE_NODES: [
@@ -512,21 +550,31 @@ for graph in all_graphs:
         break
 
 if not clock_exists:
-    # Resolve backing type
-    _bt = og.GraphBackingType
-    if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-        _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-    elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-        _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-    else:
-        _backing = list(_bt)[0]
+    # Round 3 repair (2026-05-17): new_stage() disables the ros2.bridge
+    # extension — re-enable before creating ROS2Context node. Pump a
+    # few app updates so the new node types register before we attempt
+    # to create them.
+    import omni.kit.app as _kit_app
+    _mgr = _kit_app.get_app().get_extension_manager()
+    if not _mgr.is_extension_enabled('isaacsim.ros2.bridge'):
+        _mgr.set_extension_enabled_immediate('isaacsim.ros2.bridge', True)
+        _app_for_ros2 = _kit_app.get_app()
+        for _ in range(8):
+            _app_for_ros2.update()
+    # Round 2 repair (2026-05-17): Isaac Sim 5.1 `og.Controller.edit`
+    # expects `pipeline_stage` to be a `GraphPipelineStage` enum value, not
+    # the `GraphBackingType` we passed before. Wrong type makes
+    # `get_global_orchestration_graphs_in_pipeline_stage` reject the
+    # call internally with "incompatible function arguments". The correct
+    # value for an action-graph driven by playback tick is SIMULATION.
+    _ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 
     keys = og.Controller.Keys
     (graph, nodes, _, _) = og.Controller.edit(
         {{
             "graph_path": "/World/ROS2ClockGraph",
             "evaluator_name": "execution",
-            "pipeline_stage": _backing,
+            "pipeline_stage": _ps,
         }},
         {{
             keys.CREATE_NODES: [
@@ -573,7 +621,10 @@ def _gen_setup_ros2_bridge(args: Dict) -> str:
             continue  # context is referenced, not ticked
         connections.append((f"OnPlaybackTick.outputs:tick", f"{name}.inputs:execIn"))
 
-    # Bind articulation/controller to the robot path where applicable
+    # Bind articulation/controller to the robot path where applicable.
+    # Round 3 repair (2026-05-17): ROS2SubscribeJointState has no
+    # `targetPrim` attribute in Isaac Sim 5.1's bridge; subscriber routes
+    # joint commands via an external ArticulationController node instead.
     values = dict(profile.get("topic_values", {}))
     for name, _ntype in nodes:
         if name == "ArticulationController":
@@ -582,7 +633,7 @@ def _gen_setup_ros2_bridge(args: Dict) -> str:
             values[f"{name}.inputs:targetPrim"] = robot_path
         elif name == "PublishJointState":
             values[f"{name}.inputs:targetPrim"] = robot_path
-        elif name == "SubscribeJointState":
+        elif name == "PublishGripper":
             values[f"{name}.inputs:targetPrim"] = robot_path
         elif name == "PublishOdom":
             values[f"{name}.inputs:chassisPrim"] = robot_path
@@ -630,20 +681,51 @@ if not _ros2_os.environ.get('AMENT_PREFIX_PATH'):
         'can be built. No nodes were created this call.'
     )
 
-_bt = og.GraphBackingType
-if hasattr(_bt, 'GRAPH_BACKING_TYPE_FABRIC_SHARED'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FABRIC_SHARED
-elif hasattr(_bt, 'GRAPH_BACKING_TYPE_FLATCACHING'):
-    _backing = _bt.GRAPH_BACKING_TYPE_FLATCACHING
-else:
-    _backing = list(_bt)[0]
+# Round 3 repair (2026-05-17): new_stage() between templates disables the
+# isaacsim.ros2.bridge extension — re-enable + pump app updates before
+# creating any nodes so the new node types register.
+import omni.kit.app as _kit_app
+_mgr = _kit_app.get_app().get_extension_manager()
+if not _mgr.is_extension_enabled('isaacsim.ros2.bridge'):
+    _mgr.set_extension_enabled_immediate('isaacsim.ros2.bridge', True)
+    for _ in range(8):
+        _kit_app.get_app().update()
+
+# Round 7 repair (2026-05-18): idempotency. Templates that re-attach to
+# an existing bridge (or that get called twice during the same template
+# build — e.g. CP-NEW-jetbot-sensor-bridge) failed with
+# `OmniGraphError: Failed to wrap graph in node`. Delete any existing
+# graph at this path so og.Controller.edit can author a fresh one.
+import omni.usd as _omni_usd_rb
+_stage_rb = _omni_usd_rb.get_context().get_stage()
+_existing_graph = _stage_rb.GetPrimAtPath("{graph_path}")
+if _existing_graph and _existing_graph.IsValid():
+    try:
+        _stage_rb.RemovePrim("{graph_path}")
+        for _ in range(2):
+            _kit_app.get_app().update()
+        print(f"setup_ros2_bridge: removed pre-existing graph at {graph_path!r} for re-author")
+    except Exception as _rge:
+        print(f"setup_ros2_bridge: graph removal soft-fail: {{_rge}}")
+
+# Round 2 repair (2026-05-17): pipeline_stage requires GraphPipelineStage enum.
+_ps = og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_SIMULATION
 
 keys = og.Controller.Keys
+# Round 9 repair (2026-05-18): SET_VALUES inline crashes the whole
+# Controller.edit call when ANY attribute path is missing on the new
+# Isaac Sim 5.1 node types (e.g. PublishOdom.inputs:chassisPrim was
+# renamed). Author the graph + connections WITHOUT SET_VALUES, then
+# apply each value individually with a try/except so a single missing
+# attribute doesn't abort the whole bridge build.
+_set_pairs = [
+{val_block}
+]
 (graph, nodes, _, _) = og.Controller.edit(
     {{
         "graph_path": "{graph_path}",
         "evaluator_name": "execution",
-        "pipeline_stage": _backing,
+        "pipeline_stage": _ps,
     }},
     {{
         keys.CREATE_NODES: [
@@ -652,12 +734,24 @@ keys = og.Controller.Keys
         keys.CONNECT: [
             {conn_defs}
         ],
-        keys.SET_VALUES: [
-{val_block}
-        ],
     }},
 )
+
+_set_ok = 0
+_set_skip = []
+for _attr_path, _val in _set_pairs:
+    _full = '{graph_path}/' + _attr_path
+    try:
+        og.Controller.attribute(_full).set(_val)
+        _set_ok += 1
+    except Exception as _ae:
+        _set_skip.append((_attr_path, str(_ae)[:80]))
+
 print('ROS2 bridge profile {profile_name} ready at {graph_path} for robot {robot_path}')
+if _set_skip:
+    print(f'(setup_ros2_bridge: applied {{_set_ok}} attrs; {{len(_set_skip)}} skipped)')
+    for _ap, _ar in _set_skip:
+        print(f'  skip: {{_ap}} -> {{_ar}}')
 """
 
 

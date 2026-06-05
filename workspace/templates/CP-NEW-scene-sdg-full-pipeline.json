@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-scene-sdg-full-pipeline",
-  "goal": "Build a full Synthetic Data Generation (SDG) pipeline for YOLOv8 object-detection training. Scene: Franka at a table with 6 cubes in various positions. Domain randomization covers lighting intensity, cube color, cube texture, and pose jitter. configure_coco_yolo_writer sets up a multi-camera COCO + YOLO writer. create_sdg_pipeline registers the render product and annotators. export_dataset runs the full 200-frame generation loop. benchmark_sdg reports throughput. analyze_randomization validates distribution coverage before export. SUCCESS: /tmp/sdg_yolov8/images/ contains 200 RGB frames AND /tmp/sdg_yolov8/annotations/instances.json is valid COCO with class 'cube'. Exercises add_domain_randomizer (×4 types), configure_coco_yolo_writer, create_sdg_pipeline, preview_sdg, analyze_randomization, export_dataset, benchmark_sdg. Realizes industrial-scene-sdg-full-pipeline-001 (industrial category, tier-2).",
+  "goal": "Build a full Synthetic Data Generation (SDG) pipeline for YOLOv8 object-detection training. Scene: Franka at a table with 6 cubes in various positions. Domain randomization covers lighting intensity, cube color, cube texture, and pose jitter. configure_coco_yolo_writer sets up a multi-camera COCO + YOLO writer. create_sdg_pipeline registers the render product and annotators. export_dataset runs the full 200-frame generation loop. benchmark_sdg reports throughput. analyze_randomization validates distribution coverage before export. SUCCESS: /tmp/sdg_yolov8/images/ contains 200 RGB frames AND /tmp/sdg_yolov8/annotations/instances.json is valid COCO with class 'cube'. Exercises add_domain_randomizer (\u00d74 types), configure_coco_yolo_writer, create_sdg_pipeline, preview_sdg, analyze_randomization, export_dataset, benchmark_sdg. Realizes industrial-scene-sdg-full-pipeline-001 (industrial category, tier-2).",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -17,28 +17,35 @@
     "benchmark_sdg"
   ],
   "thoughts": [
-    "Pattern: other (SDG pipeline — no robot motion, no pick-place delivery criterion).",
-    "Full SDG pipeline means: scene build → DR authoring → writer config → pipeline creation → pre-flight (analyze + preview) → export → throughput benchmark.",
+    "Pattern: other (SDG pipeline \u2014 no robot motion, no pick-place delivery criterion).",
+    "Full SDG pipeline means: scene build \u2192 DR authoring \u2192 writer config \u2192 pipeline creation \u2192 pre-flight (analyze + preview) \u2192 export \u2192 throughput benchmark.",
     "Four DR axes: (1) lighting intensity on DomeLight, (2) cube color, (3) cube texture (material swap), (4) cube pose jitter. Covers the standard photometric + geometric variance needed for robust YOLOv8 detector.",
     "configure_coco_yolo_writer is called with cameras=['/World/SdgCamera'] and categories=['cube']. format='coco' produces instances.json compatible with YOLOv8 --data flag. id_offset left default.",
-    "create_sdg_pipeline uses annotators=['rgb', 'bounding_box_2d'] — sufficient for object detection. output_format='coco' activates the CocoWriter path in the handler. 200 frames is enough for a meaningful detection training set.",
+    "create_sdg_pipeline uses annotators=['rgb', 'bounding_box_2d'] \u2014 sufficient for object detection. output_format='coco' activates the CocoWriter path in the handler. 200 frames is enough for a meaningful detection training set.",
     "analyze_randomization(num_samples=50) before export verifies all 4 DR axes have std>0. If any axis collapses the canonical fails early rather than generating 200 useless frames.",
-    "preview_sdg(num_samples=6) generates a quick 2×3 grid to let the operator spot lighting or texture anomalies.",
+    "preview_sdg(num_samples=6) generates a quick 2\u00d73 grid to let the operator spot lighting or texture anomalies.",
     "export_dataset runs the step-loop asynchronously (step_batch=20) to avoid blocking the Kit UI. output_dir must match configure_coco_yolo_writer output_dir.",
     "benchmark_sdg(num_frames=20, annotators=['rgb','bounding_box_2d']) measures FPS so the operator knows wall-clock cost before scaling to larger datasets.",
     "Distinct from CP-NEW-defect-sdg (defect classification, 20 cubes, no YOLO writer, no export_dataset, no benchmark_sdg). Distinct from CP-NEW-dr-curriculum-trainer (RL training curriculum, uses preview_dr + launch_training, no SDG pipeline writer at all). This canonical is the ONLY one that exercises configure_coco_yolo_writer + export_dataset + benchmark_sdg together as a packaged training-data factory.",
-    "motion_controllers: none — pure data generation, no arm motion in this workflow.",
-    "BLOCKER: omni.replicator extension must be enabled. The export loop may stall if Kit runs in headless mode without a valid render product — handler should surface a clear 'no render product' error."
+    "motion_controllers: none \u2014 pure data generation, no arm motion in this workflow.",
+    "BLOCKER: omni.replicator extension must be enabled. The export loop may stall if Kit runs in headless mode without a valid render product \u2014 handler should surface a clear 'no render product' error."
   ],
-  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Table surface ──────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── 6 labelled cubes on the table surface ─────────────────────────────────────\nfor i in range(6):\n    col = i % 3\n    row = i // 3\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(\n        prim_path=path,\n        prim_type=\"Cube\",\n        position=[col * 0.16 - 0.16, row * 0.22 - 0.11, 0.81],\n        size=0.07,\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_semantic_label(prim_path=path, class_name=\"cube\")\n\n# ── SDG camera (overhead nadir, slight tilt for realistic occlusion) ───────────\nconfigure_camera(\n    camera_path=\"/World/SdgCamera\",\n    position=[0, 0, 1.65],\n    look_at=[0, 0, 0.75],\n    fov=55,\n)\n\n# ── Domain randomization — 4 axes ────────────────────────────────────────────\n# Axis 1: DomeLight intensity\nadd_domain_randomizer(\n    target=\"/World/DomeLight\",\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": 300.0, \"intensity_max\": 2500.0},\n)\n\n# Axis 2: cube surface color\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"color\",\n    params={\"color_min\": [0.05, 0.05, 0.05], \"color_max\": [0.95, 0.95, 0.95]},\n)\n\n# Axis 3: cube texture material swap\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"texture\",\n    params={},\n)\n\n# Axis 4: cube pose jitter (small XY + yaw only — keep on table)\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"pose\",\n    params={\"min_angle\": -0.5, \"max_angle\": 0.5, \"surface_prim\": \"/World/Table\"},\n)\n\n# ── Pre-flight: validate DR distribution ─────────────────────────────────────\n_dr_report = analyze_randomization(num_samples=50)\n# Expect 4 axes with std > 0: intensity, color, texture, pose\n\n# ── Pre-flight: visual preview ────────────────────────────────────────────────\npreview_sdg(num_samples=6)\n\n# ── Configure COCO/YOLO writer ────────────────────────────────────────────────\nconfigure_coco_yolo_writer(\n    output_dir=\"/tmp/sdg_yolov8\",\n    cameras=[\"/World/SdgCamera\"],\n    format=\"coco\",\n    categories=[\"cube\"],\n)\n\n# ── Create full SDG pipeline ──────────────────────────────────────────────────\ncreate_sdg_pipeline(\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    output_format=\"coco\",\n    num_frames=200,\n    output_dir=\"/tmp/sdg_yolov8\",\n    camera_position=[0, 0, 1.65],\n    camera_look_at=[0, 0, 0.75],\n    resolution=[1280, 720],\n)\n\n# ── Throughput benchmark (20 frames) before full run ─────────────────────────\nbenchmark_sdg(\n    num_frames=20,\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    resolution=[1280, 720],\n)\n\n# ── Full export: 200 annotated frames ────────────────────────────────────────\nexport_dataset(\n    output_dir=\"/tmp/sdg_yolov8\",\n    num_frames=200,\n    step_batch=20,\n)",
+  "code": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Table surface \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 6 labelled cubes on the table surface \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nfor i in range(6):\n    col = i % 3\n    row = i // 3\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(\n        prim_path=path,\n        prim_type=\"Cube\",\n        position=[col * 0.16 - 0.16, row * 0.22 - 0.11, 0.81],\n        size=0.07,\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_semantic_label(prim_path=path, class_name=\"cube\")\n\n# \u2500\u2500 SDG camera (overhead nadir, slight tilt for realistic occlusion) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nconfigure_camera(\n    camera_path=\"/World/SdgCamera\",\n    position=[0, 0, 1.65],\n    look_at=[0, 0, 0.75],\n    fov=55,\n)\n\n# \u2500\u2500 Domain randomization \u2014 4 axes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Axis 1: DomeLight intensity\nadd_domain_randomizer(\n    target=\"/World/DomeLight\",\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": 300.0, \"intensity_max\": 2500.0},\n)\n\n# Axis 2: cube surface color\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"color\",\n    params={\"color_min\": [0.05, 0.05, 0.05], \"color_max\": [0.95, 0.95, 0.95]},\n)\n\n# Axis 3: cube texture material swap\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"texture\",\n    params={},\n)\n\n# Axis 4: cube pose jitter (small XY + yaw only \u2014 keep on table)\nadd_domain_randomizer(\n    target=\"/World/Cube_.*\",\n    randomizer_type=\"pose\",\n    params={\"min_angle\": -0.5, \"max_angle\": 0.5, \"surface_prim\": \"/World/Table\"},\n)\n\n# \u2500\u2500 Pre-flight: validate DR distribution \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n_dr_report = analyze_randomization(num_samples=50)\n# Expect 4 axes with std > 0: intensity, color, texture, pose\n\n# \u2500\u2500 Pre-flight: visual preview \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\npreview_sdg(num_samples=6)\n\n# \u2500\u2500 Configure COCO/YOLO writer \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nconfigure_coco_yolo_writer(\n    output_dir=\"/tmp/sdg_yolov8\",\n    cameras=[\"/World/SdgCamera\"],\n    format=\"coco\",\n    categories=[\"cube\"],\n)\n\n# \u2500\u2500 Create full SDG pipeline \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_sdg_pipeline(\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    output_format=\"coco\",\n    num_frames=200,\n    output_dir=\"/tmp/sdg_yolov8\",\n    camera_position=[0, 0, 1.65],\n    camera_look_at=[0, 0, 0.75],\n    resolution=[1280, 720],\n)\n\n# \u2500\u2500 Throughput benchmark (20 frames) before full run \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nbenchmark_sdg(\n    num_frames=20,\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    resolution=[1280, 720],\n)\n\n# \u2500\u2500 Full export: 200 annotated frames \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nexport_dataset(\n    output_dir=\"/tmp/sdg_yolov8\",\n    num_frames=200,\n    step_batch=20,\n)",
   "verify_args": null,
   "simulate_args": null,
   "diagnose_args": {
     "expected_output_dir": "/tmp/sdg_yolov8",
     "expected_image_count": 200,
-    "expected_coco_classes": ["cube"],
+    "expected_coco_classes": [
+      "cube"
+    ],
     "expected_annotation_file": "/tmp/sdg_yolov8/annotations/instances.json",
-    "dr_axes_required": ["intensity", "color", "texture", "pose"],
+    "dr_axes_required": [
+      "intensity",
+      "color",
+      "texture",
+      "pose"
+    ],
     "dr_std_threshold": 0.0
   },
   "verified_status": "drafted-2026-05-16-A49; form-gate-schema TBD; function-gate BLOCKED (requires omni.replicator extension + live Kit with GPU render product)",
@@ -50,15 +57,15 @@
   "failure_modes": [
     "omni.replicator not enabled: enable_extension('omni.replicator.core') must be called before create_sdg_pipeline; the handler may auto-enable it but surface an error if Kit was launched without --enable-extension flag",
     "configure_coco_yolo_writer cameras=['/World/SdgCamera']: camera prim must exist before writer config; configure_camera creates it but the path must match exactly",
-    "add_domain_randomizer type='texture': cubes need valid OmniPBR materials; plain-color DisplayColor cubes may no-op the texture swap silently — assign a base OmniPBR mat to /World/Cube_.* before the randomizer if texture axis collapses",
+    "add_domain_randomizer type='texture': cubes need valid OmniPBR materials; plain-color DisplayColor cubes may no-op the texture swap silently \u2014 assign a base OmniPBR mat to /World/Cube_.* before the randomizer if texture axis collapses",
     "add_domain_randomizer type='pose' surface_prim='/World/Table': Table must have a PhysicsCollisionAPI so PhysX can report its surface; missing API causes pose jitter to project cubes through the table",
-    "analyze_randomization std==0 on any axis: if Kit simulation has not stepped at least once, Replicator graph may not have fired — call sim_control(action='step') before analyze_randomization",
+    "analyze_randomization std==0 on any axis: if Kit simulation has not stepped at least once, Replicator graph may not have fired \u2014 call sim_control(action='step') before analyze_randomization",
     "export_dataset step_batch=20: if Kit render product is not ready the step loop stalls; check that preview_sdg completed at least one frame before export",
     "benchmark_sdg must be called AFTER create_sdg_pipeline (pipeline must exist); calling it before pipeline registration returns 'no active pipeline' error",
-    "Output dir /tmp/sdg_yolov8 must be writable; on shared servers /tmp may be small — use a project-local path (e.g. workspace/sdg_output/) and ensure gitignore covers it"
+    "Output dir /tmp/sdg_yolov8 must be writable; on shared servers /tmp may be small \u2014 use a project-local path (e.g. workspace/sdg_output/) and ensure gitignore covers it"
   ],
   "extends": "industrial-category / CP-NEW-defect-sdg",
-  "extension_notes": "First canonical in library to use export_dataset + benchmark_sdg as primary tools. configure_coco_yolo_writer was used in CP-NEW-defect-sdg but without export_dataset or benchmark_sdg. This template is a self-contained training-data factory: scene build → DR authoring → COCO writer → pipeline → analyze → preview → benchmark → export. Covers industrial-scene-sdg-full-pipeline-001 backlog entry.",
+  "extension_notes": "First canonical in library to use export_dataset + benchmark_sdg as primary tools. configure_coco_yolo_writer was used in CP-NEW-defect-sdg but without export_dataset or benchmark_sdg. This template is a self-contained training-data factory: scene build \u2192 DR authoring \u2192 COCO writer \u2192 pipeline \u2192 analyze \u2192 preview \u2192 benchmark \u2192 export. Covers industrial-scene-sdg-full-pipeline-001 backlog entry.",
   "intent": {
     "pattern_hint": "other",
     "structural_features": {
@@ -86,32 +93,94 @@
   },
   "roles": {
     "scene_objects": {
-      "constraints": ["cube"],
+      "constraints": [
+        "cube"
+      ],
       "min": 1,
       "max": 12,
       "param_name": "n_cubes",
       "unordered": true
     },
     "sdg_camera": {
-      "constraints": ["camera"],
+      "constraints": [
+        "camera"
+      ],
       "expected_count": 1,
       "required": true
+    },
+    "n_cubes": {
+      "constraints": [
+        "scalar"
+      ],
+      "expected_count": 1,
+      "required": false
     }
   },
   "role_defaults": {
     "scene_objects": [
-      {"path": "/World/Cube_1", "position": [-0.16, -0.11, 0.81]},
-      {"path": "/World/Cube_2", "position": [0.0,  -0.11, 0.81]},
-      {"path": "/World/Cube_3", "position": [0.16, -0.11, 0.81]},
-      {"path": "/World/Cube_4", "position": [-0.16,  0.11, 0.81]},
-      {"path": "/World/Cube_5", "position": [0.0,   0.11, 0.81]},
-      {"path": "/World/Cube_6", "position": [0.16,  0.11, 0.81]}
+      {
+        "path": "/World/Cube_1",
+        "position": [
+          -0.16,
+          -0.11,
+          0.81
+        ]
+      },
+      {
+        "path": "/World/Cube_2",
+        "position": [
+          0.0,
+          -0.11,
+          0.81
+        ]
+      },
+      {
+        "path": "/World/Cube_3",
+        "position": [
+          0.16,
+          -0.11,
+          0.81
+        ]
+      },
+      {
+        "path": "/World/Cube_4",
+        "position": [
+          -0.16,
+          0.11,
+          0.81
+        ]
+      },
+      {
+        "path": "/World/Cube_5",
+        "position": [
+          0.0,
+          0.11,
+          0.81
+        ]
+      },
+      {
+        "path": "/World/Cube_6",
+        "position": [
+          0.16,
+          0.11,
+          0.81
+        ]
+      }
     ],
     "sdg_camera": {
       "path": "/World/SdgCamera",
-      "position": [0, 0, 1.65],
-      "look_at": [0, 0, 0.75]
-    }
+      "position": [
+        0,
+        0,
+        1.65
+      ],
+      "look_at": [
+        0,
+        0,
+        0.75
+      ]
+    },
+    "n_cubes": 6
   },
   "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1200.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nfor i in range({{n_cubes}}):\n    col = i % 3\n    row = i // 3\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[col*0.16-0.16, row*0.22-0.11, 0.81], size=0.07)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_semantic_label(prim_path=path, class_name=\"cube\")\n\nconfigure_camera(\n    camera_path={{sdg_camera.path}},\n    position={{sdg_camera.position}},\n    look_at={{sdg_camera.look_at}},\n    fov=55,\n)\n\nadd_domain_randomizer(target=\"/World/DomeLight\", randomizer_type=\"lighting\", params={\"intensity_min\": 300.0, \"intensity_max\": 2500.0})\nadd_domain_randomizer(target=\"/World/Cube_.*\", randomizer_type=\"color\", params={\"color_min\": [0.05, 0.05, 0.05], \"color_max\": [0.95, 0.95, 0.95]})\nadd_domain_randomizer(target=\"/World/Cube_.*\", randomizer_type=\"texture\", params={})\nadd_domain_randomizer(target=\"/World/Cube_.*\", randomizer_type=\"pose\", params={\"min_angle\": -0.5, \"max_angle\": 0.5, \"surface_prim\": \"/World/Table\"})\n\n_dr_report = analyze_randomization(num_samples=50)\npreview_sdg(num_samples=6)\n\nconfigure_coco_yolo_writer(\n    output_dir=\"/tmp/sdg_yolov8\",\n    cameras=[{{sdg_camera.path}}],\n    format=\"coco\",\n    categories=[\"cube\"],\n)\n\ncreate_sdg_pipeline(\n    annotators=[\"rgb\", \"bounding_box_2d\"],\n    output_format=\"coco\",\n    num_frames=200,\n    output_dir=\"/tmp/sdg_yolov8\",\n    camera_position={{sdg_camera.position}},\n    camera_look_at={{sdg_camera.look_at}},\n    resolution=[1280, 720],\n)\n\nbenchmark_sdg(num_frames=20, annotators=[\"rgb\", \"bounding_box_2d\"], resolution=[1280, 720])\nexport_dataset(output_dir=\"/tmp/sdg_yolov8\", num_frames=200, step_batch=20)"
 }

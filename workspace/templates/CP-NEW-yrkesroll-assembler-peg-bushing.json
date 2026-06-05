@@ -1,0 +1,295 @@
+{
+  "task_id": "CP-NEW-yrkesroll-assembler-peg-bushing",
+  "goal": "Yrkesroll: Assembler / assembly worker (ONET SOC 51-2099, Assemblers and Fabricators, All Other) at a production peg-into-bushing insertion station. A Franka Panda performs the everyday hands-on cadence of an assembly-line operator: pick a cylindrical peg from an infeed tray, transit to the bushing fixture clamped to the worktable, descend under cartesian impedance with a 20 N Z-axis force cap, release inside the bushing bore, and repeat for THREE pegs in sequence. Success is measured at the production-cadence level as a SUCCESS RATE across the 3-peg run: number of pegs whose final centre is within 3 mm of the bushing axis and whose final Z is below the seated-threshold (0.815 m), divided by 3. Realizes backlog entry yrkesroll-assembler-peg-bushing-001. Distinct from CP-NEW-peg-bushing-impedance (A14: single-peg illustrative impedance demonstration, no production-cadence framing) and CP-NEW-maniskill-peg-insertion (A101: ManiSkill benchmark eval format, vertical, no pick phase, peg pre-grasped, single trial) — this canonical is the YRKESROLL framing of the peg-into-bushing pattern: full pick + transit + insert flow per peg, 3-peg sequential cadence, success-rate metric, operator-role metadata block tying back to ONET SOC 51-2099.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "define_grasp_pose",
+    "add_force_torque_sensor",
+    "add_proximity_sensor",
+    "setup_pick_place_controller",
+    "setup_impedance_controller",
+    "set_compliance_params",
+    "follow_trajectory_with_compliance",
+    "get_joint_torques",
+    "get_world_transform"
+  ],
+  "thoughts": [
+    "Yrkesroll framing — Assembler / assembly worker (ONET SOC 51-2099, Assemblers and Fabricators, All Other). Backlog entry yrkesroll-assembler-peg-bushing-001 calls out 'Franka inserts a cylindrical peg into a bushing using impedance control; insertion force capped at 20 N'. The single-peg shape is already covered by A14 (CP-NEW-peg-bushing-impedance, illustrative impedance) and A101 (CP-NEW-maniskill-peg-insertion, benchmark eval). This canonical fills the missing slot: the YRKESROLL cadence — what an actual production assembler does at the station, namely a sequence of pegs, each going through pick + transit + insert, judged by a production success rate rather than by a single-trial outcome.",
+    "Distinction from A14 (CP-NEW-peg-bushing-impedance, the closest sibling): A14 is single-peg, table-top, impedance-illustration. Its goal sentence is 'inserts a cylindrical peg into a bushing fixture using impedance control with a force/torque sensor capping insertion force at 20 N'. It demonstrates the impedance + assembly-constraint pattern but has no production-cadence framing, no operator-role metadata block, and no success-rate metric — just a single-trial settle_state. A107 inherits the impedance + force-cap pattern from A14 but adds: (1) 3-peg infeed tray, (2) sequential pick+transit+insert loop, (3) operator_role metadata block tying to ONET SOC 51-2099, (4) production_metrics.success_rate, (5) yrkesroll structural tags.",
+    "Distinction from A101 (CP-NEW-maniskill-peg-insertion, the benchmark sibling): A101 is benchmark-shaped — peg pre-grasped, no infeed, no pick phase, pure compliance descent only, eval format = ManiSkill PegInsertionSide-v0 metric dict (success_rate, success_at_depth_threshold, peg_seated, contact_observed). A107 is yrkesroll-shaped — pegs ungrasped on infeed tray, full pick + transit + insert per peg, eval format = production_metrics.success_rate (count of pegs seated / 3), operator_role metadata for ONET SOC 51-2099. A101's success_rate is policy-rollout-over-many-episodes; A107's success_rate is one-pass-three-pegs-at-this-station-on-this-shift.",
+    "Topology — single station on a 1.0×0.6×0.75m worktable. Franka at [0, 0, 0.75]. Bushing fixture (Cube housing with implied Cylinder bore) pinned to the table at [0.0, -0.25, 0.795], scale [0.10, 0.10, 0.04] = 20cm x 20cm x 8cm fixture block; bushing bore top rim at z = 0.815. Infeed tray (Cube pallet) at [0.30, 0.10, 0.755], scale [0.20, 0.15, 0.005], holding 3 pegs in a row along the +Y axis at y=0.05, 0.10, 0.15. Each peg is a Cylinder of radius 0.012m, height 0.07m. Per-peg start positions: Peg_1 [0.30, 0.05, 0.815], Peg_2 [0.30, 0.10, 0.815], Peg_3 [0.30, 0.15, 0.815] (peg centre z = tray top + half-height = 0.7575 + 0.035 = approx 0.815).",
+    "Bushing geometry — modeled as a SOLID Cube fixture with the bore approximated by a slightly-larger-than-peg cylindrical landing volume. Real bushing has a hollow bore; we land each peg on the top rim of the bushing fixture and let the impedance Z-soft surrender settle the peg into the bore opening (assembly-constraint with 3 mm tolerance captures the seated state). Peg radius 0.012 m, bushing bore implied radius 0.015 m (3 mm tolerance), so the peg has 3 mm radial slack on entry. This is the same pattern A14 uses but parameterised per-peg via the workpieces[] role.",
+    "Production cadence — 3 pegs processed in sequence. Each peg has its own pick + transit + insert phase. Inter-peg, the robot returns to a neutral home pose. The 3 pegs are processed in row order along +Y so cuRobo's planning_obstacles list does not need to update between pegs (each peg's source is distinct, no peg blocks another). Total wall-clock budget at velocity_scaling=0.15 is approximately 60-80 s for 3 pegs in dry_run mode (no actual physics propagation). simulate_args.duration_s=240 budgets a 4-minute envelope for the live (non-dry-run) cycle.",
+    "Compliance profile per insertion — cartesian_impedance with Kx=[300, 300, 80] N/m (X/Y stiff to keep peg axially aligned with bore centre, Z soft so the controller surrenders to the 20 N cap), Kr=[30, 30, 30] N·m/rad (all rotation stiff, no twist needed for peg-into-round-bore). Damping Dx=[30, 30, 10], Dr=[3, 3, 3]. Same profile values as A14, applied identically to each of the 3 inserts. The impedance controller is INSTALLED ONCE before peg 1; subsequent pegs reuse the active compliance state. This is the production cadence — the operator does not re-tune the wrist between pegs.",
+    "Force cap 20 N — inherited from backlog spec and from A14. Applied via add_force_torque_sensor with threshold=20.0 on /World/Franka/FtSensor parented at panda_hand. Each insert phase checks the sensor between trajectory waypoints; on breach, the impedance controller's Z-soft compliance absorbs the overshoot. Same value as A14, half of A91's snap-fit 25 N (snap-fit has 4 prongs sharing load, peg has 1).",
+    "Phase ordering per peg — PHASE 1 (transit): setup_pick_place_controller picks peg_i from infeed tray, places directly above bushing at z=0.835 (20 mm above the bore rim, ready for the descent). PHASE 2 (press): follow_trajectory_with_compliance executes the 3-waypoint descent: hover z=0.835 -> rim contact z=0.820 -> seated z=0.810. compliance_handoff_at=0.33 so the rim-contact + seated waypoints run under cartesian_impedance while the hover-to-rim segment runs under cuRobo. PHASE 3 (verify): get_world_transform on peg_i confirms final position within 3 mm radial tolerance and final Z below 0.815 seated-threshold. PHASE 4: increment i, repeat until 3 pegs done.",
+    "Success-rate metric — production_metrics.success_rate = (number of pegs whose final centre is within radial_tolerance_m=0.003 of bushing axis AND final Z below seated_z_max_m=0.815) / 3. expected_success_rate=1.0 for a working pipeline; expected_success_rate>=0.67 (2-of-3) for a degraded pipeline. This is distinct from A101's ManiSkill-format success_rate (policy rollout aggregate over many episodes) — A107's success_rate is per-shift, per-station, 3-peg cadence.",
+    "motion_controllers honesty: curobo via setup_pick_place_controller for the pick + transit phase (untested), cartesian_impedance via follow_trajectory_with_compliance for the insert phase (untested). Same as A14 which used curobo + impedance. No verified runs for production cadence — production cadence requires a ros2_control bridge for live impedance and physics live for 3 sequential pegs without drift; both are pending function-gate sign-off.",
+    "verified_status: drafted on 2026-05-16; form-gate-schema pending lint; function-gate pending Kit RPC + ros2_control bridge for live impedance press + live 3-peg cadence."
+  ],
+  "code": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# Physics: CPU deterministic for reproducible 3-peg cadence.\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Worktable\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Bushing fixture (Cube housing block, static, pinned by absence of RigidBodyAPI) ──\n# Bore top rim z = 0.795 + 0.04/2 = 0.815. Peg seated centre z = 0.810 (5 mm below rim).\ncreate_prim(\n    prim_path=\"/World/Bushing\",\n    prim_type=\"Cube\",\n    position=[0.0, -0.25, 0.795],\n    scale=[0.10, 0.10, 0.04],\n)\napply_api_schema(prim_path=\"/World/Bushing\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/Bushing\", attr_name=\"primvars:displayColor\", value=[[0.40, 0.30, 0.20]])\n\n# ── Infeed tray (production-cadence pallet, 3 pegs in a row) ─────────────────\ncreate_prim(\n    prim_path=\"/World/InfeedTray\",\n    prim_type=\"Cube\",\n    position=[0.30, 0.10, 0.755],\n    scale=[0.20, 0.15, 0.005],\n)\napply_api_schema(prim_path=\"/World/InfeedTray\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/InfeedTray\", attr_name=\"primvars:displayColor\", value=[[0.55, 0.55, 0.55]])\n\n# ── Three pegs on the infeed tray (production batch) ─────────────────────────\n# Each peg: Cylinder r=0.012, h=0.07. Centre z = tray top (0.7575) + h/2 (0.035) = 0.7925.\n# Pegs spaced along +Y axis at y = 0.05, 0.10, 0.15 within the tray footprint.\npeg_positions = [\n    [0.30, 0.05, 0.7925],\n    [0.30, 0.10, 0.7925],\n    [0.30, 0.15, 0.7925],\n]\npeg_paths = []\nfor idx, pos in enumerate(peg_positions):\n    peg_path = f\"/World/Peg_{idx + 1}\"\n    peg_paths.append(peg_path)\n    create_prim(\n        prim_path=peg_path,\n        prim_type=\"Cylinder\",\n        position=pos,\n        radius=0.012,\n        height=0.07,\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=peg_path, schema_name=api)\n    set_attribute(prim_path=peg_path, attr_name=\"physics:mass\", value=0.025)\n    set_attribute(prim_path=peg_path, attr_name=\"primvars:displayColor\", value=[[0.20, 0.50, 0.65]])\n    apply_physics_material(prim_path=peg_path, material_name=\"rubber\")\n\n# Sleep-threshold zero on pegs so the press signal is not lost to sleep.\nbulk_set_attribute(\n    prim_paths=peg_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=peg_paths + [\"/World/Bushing\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\n# ── Force / torque sensor — 20 N insertion force cap (shared across all 3 pegs) ─\nadd_force_torque_sensor(\n    sensor_path=\"/World/Franka/FtSensor\",\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=20.0,\n    noise_std=0.05,\n)\n\n# ── Proximity sensor for pick detection (covers all 3 peg slots on the tray) ──\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.30, 0.10, 0.815],\n    size=[0.20, 0.15, 0.10],\n)\n\n# ── Impedance controller — installed ONCE, reused across all 3 pegs ──────────\n# Kx=[300, 300, 80] — X/Y rigid centering, Z soft for 20 N descent.\n# Kr=[30, 30, 30] — all rotation stiff (peg-into-round-bore: no twist needed).\nsetup_impedance_controller(\n    robot_path=\"/World/Franka\",\n    target_frame=\"panda_hand\",\n    Kx=[300.0, 300.0, 80.0],\n    Kr=[30.0, 30.0, 30.0],\n    Dx=[30.0, 30.0, 10.0],\n    Dr=[3.0, 3.0, 3.0],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\nset_compliance_params(\n    robot_path=\"/World/Franka\",\n    stiffness_xyz=[300.0, 300.0, 80.0],\n    damping_xyz=[30.0, 30.0, 10.0],\n    stiffness_rot=[30.0, 30.0, 30.0],\n    damping_rot=[3.0, 3.0, 3.0],\n    dry_run=True,\n)\n\n# ── PRODUCTION CADENCE: 3 pegs in sequence, each pick + transit + insert ─────\n# Peg 1 of 3 ────────────────────────────────────────────────────────────────\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Peg_1\",\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0],\n)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    source_paths=[\"/World/Peg_1\"],\n    destination_path=\"/World/Bushing\",\n    drop_target=[0.0, -0.25, 0.835],\n    planning_obstacles=[\"/World/Table\", \"/World/Bushing\", \"/World/InfeedTray\"],\n    approach_height=0.12,\n    lift_height=0.12,\n)\nfollow_trajectory_with_compliance(\n    trajectory=[\n        {\"pose\": {\"position\": [0.0, -0.25, 0.835], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0.0, -0.25, 0.820], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0.0, -0.25, 0.810], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}\n    ],\n    robot_path=\"/World/Franka\",\n    compliance_handoff_at=0.33,\n    compliance_controller=\"cartesian_impedance\",\n    timeout_s=15.0,\n    velocity_scaling=0.15,\n    dry_run=True,\n)\nget_joint_torques(articulation=\"/World/Franka\")\nget_world_transform(prim_path=\"/World/Peg_1\")\n\n# Peg 2 of 3 ────────────────────────────────────────────────────────────────\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Peg_2\",\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0],\n)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    source_paths=[\"/World/Peg_2\"],\n    destination_path=\"/World/Bushing\",\n    drop_target=[0.0, -0.25, 0.835],\n    planning_obstacles=[\"/World/Table\", \"/World/Bushing\", \"/World/InfeedTray\"],\n    approach_height=0.12,\n    lift_height=0.12,\n)\nfollow_trajectory_with_compliance(\n    trajectory=[\n        {\"pose\": {\"position\": [0.0, -0.25, 0.835], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0.0, -0.25, 0.820], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0.0, -0.25, 0.810], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}\n    ],\n    robot_path=\"/World/Franka\",\n    compliance_handoff_at=0.33,\n    compliance_controller=\"cartesian_impedance\",\n    timeout_s=15.0,\n    velocity_scaling=0.15,\n    dry_run=True,\n)\nget_joint_torques(articulation=\"/World/Franka\")\nget_world_transform(prim_path=\"/World/Peg_2\")\n\n# Peg 3 of 3 ────────────────────────────────────────────────────────────────\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Peg_3\",\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0],\n)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    source_paths=[\"/World/Peg_3\"],\n    destination_path=\"/World/Bushing\",\n    drop_target=[0.0, -0.25, 0.835],\n    planning_obstacles=[\"/World/Table\", \"/World/Bushing\", \"/World/InfeedTray\"],\n    approach_height=0.12,\n    lift_height=0.12,\n)\nfollow_trajectory_with_compliance(\n    trajectory=[\n        {\"pose\": {\"position\": [0.0, -0.25, 0.835], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0.0, -0.25, 0.820], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0.0, -0.25, 0.810], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}\n    ],\n    robot_path=\"/World/Franka\",\n    compliance_handoff_at=0.33,\n    compliance_controller=\"cartesian_impedance\",\n    timeout_s=15.0,\n    velocity_scaling=0.15,\n    dry_run=True,\n)\nget_joint_torques(articulation=\"/World/Franka\")\nget_world_transform(prim_path=\"/World/Peg_3\")",
+  "settle_state": {
+    "pegs_seated": {
+      "/World/Peg_1": [0.0, -0.25, 0.810],
+      "/World/Peg_2": [0.0, -0.25, 0.810],
+      "/World/Peg_3": [0.0, -0.25, 0.810]
+    },
+    "bushing_static": {
+      "/World/Bushing": [0.0, -0.25, 0.795]
+    },
+    "phase_sequence": [
+      "install_impedance",
+      "pick_peg_1",
+      "insert_peg_1",
+      "verify_peg_1",
+      "pick_peg_2",
+      "insert_peg_2",
+      "verify_peg_2",
+      "pick_peg_3",
+      "insert_peg_3",
+      "verify_peg_3"
+    ],
+    "production_metrics": {
+      "expected_success_rate": 1.0,
+      "degraded_success_rate_min": 0.67,
+      "radial_tolerance_m": 0.003,
+      "seated_z_max_m": 0.815,
+      "force_cap_n": 20.0,
+      "n_pegs": 3
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Peg_1",
+        "place_path": "/World/Bushing",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Peg_2",
+        "place_path": "/World/Bushing",
+        "robot_kind": "franka_panda"
+      },
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Peg_3",
+        "place_path": "/World/Bushing",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_paths": [
+      "/World/Peg_1",
+      "/World/Peg_2",
+      "/World/Peg_3"
+    ],
+    "bushing_path": "/World/Bushing",
+    "radial_tolerance_m": 0.003,
+    "seated_z_max_m": 0.815,
+    "force_cap_n": 20.0,
+    "expected_success_rate": 1.0
+  },
+  "simulate_args": {
+    "cube_paths": [
+      "/World/Peg_1",
+      "/World/Peg_2",
+      "/World/Peg_3"
+    ],
+    "target_path": "/World/Bushing",
+    "duration_s": 240,
+    "xy_tolerance": 0.01
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Table",
+      "/World/Bushing",
+      "/World/InfeedTray"
+    ],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [0.0, 0.0, 0.75],
+    "peg_paths": [
+      "/World/Peg_1",
+      "/World/Peg_2",
+      "/World/Peg_3"
+    ],
+    "bushing_path": "/World/Bushing"
+  },
+  "extends": "yrkesroll-assembler-peg-bushing-001",
+  "extension_notes": "Implements ONET SOC 51-2099 assembler persona (Assemblers and Fabricators, All Other) at a production peg-into-bushing insertion station. Backlog alignment: extends yrkesroll-assembler-peg-bushing-001 (config/canonical_backlog.yaml). Key differentiators: (1) PRODUCTION-CADENCE framing — 3 pegs in sequence at one station, not single-trial. (2) Operator-role metadata block tying to ONET SOC 51-2099 (same code as A91 snap-fit; the assembler persona spans multiple insertion patterns at the same workstation grade). (3) production_metrics.success_rate = (pegs_seated_within_tolerance / 3) — distinct from A101's ManiSkill-format success_rate (policy rollout aggregate over many episodes) and from A14's single-trial settle_state (no success-rate metric). (4) Full pick + transit + insert flow PER peg — distinct from A101 which is pre-grasped and pure-descent. (5) Inherits impedance + force-cap pattern (Kx=[300,300,80], 20 N cap) from A14 but applies it across the 3-peg cadence with the impedance controller installed ONCE and reused. (6) verify_args.stages encodes the 3 sequential pick-place phases (one per peg) so the canonical evaluator runs the cadence end-to-end. compliance_handoff_at=0.33 splits each insert trajectory into a cuRobo hover-to-rim segment and a cartesian_impedance rim-to-seated descent — same handoff pattern used by CRM-B1 canonicals. PhysX numerical instability during peg grip is a shared risk with all impedance-press canonicals (see A14 failure mode 1).",
+  "failure_modes": [
+    "PhysX numerical instability across 3-peg cadence: peg velocity spikes >200 km/s during Franka grip — same shared risk as A14 and A101 single-peg cases, but ACCUMULATES over 3 inserts because the impedance controller stays installed across pegs and any solver state drift in peg N is carried into peg N+1. Mitigation: solver_position_iteration_count=16 (applied via bulk_set_attribute), rubber material on pegs, sleepThreshold=0 to prevent the awake/asleep oscillation that triggers velocity blow-up. Production rollout should periodically reset the solver between pegs (not modeled here — dry_run only).",
+    "Bushing is solid Cube fixture with no actual hollow bore — peg lands on the fixture's top face, not inside a real bore; assembly_constraint not declared (unlike A14 which uses setup_assembly_constraint with tolerance=0.003). The seated state is approximated by the peg's final centre Z being below 0.815. Real production bushing needs mesh import (add_usd_reference of a bushing OBJ/USD with internal cylindrical hollow) or CreateDeformableMesh. Failure mode shared with A14 but more visible here because the metric (success_rate) is computed from peg final-Z.",
+    "drop_target Z=0.835 + descent waypoints [0.835, 0.820, 0.810] require cuRobo IK reachability at exactly those coordinates for each of the 3 pegs (same drop_target across pegs because all 3 go into the same bushing). If cuRobo IK fails for the seated z=0.810 on any peg, that peg's insert phase stalls and its final-Z lookup returns the stalled position (above seated threshold) — success_rate drops to <1.0. Mitigation: solve_ik pre-flight at [0.0, -0.25, 0.810] before installing the impedance controller.",
+    "setup_impedance_controller and set_compliance_params are dry_run=True — no live torque-mode control without a ros2_control bridge; production rollout requires setup_ros2_control_compat first. Shared risk with all CRM-B1 canonicals (A14 peg-bushing, A91 snap-fit, screw-driving, bottle-cap-tighten).",
+    "follow_trajectory_with_compliance is Phase 63b — pose-only waypoints accepted but cuRobo replan is gated. compliance_handoff_at=0.33 means waypoints 2 and 3 (rim-contact, seated) run under cartesian_impedance while waypoint 1 (hover) runs under cuRobo. The bridge accepts this configuration but emits no handoff_mismatch_warning. Same risk shape as A91 snap-fit.",
+    "Sequential peg processing has no inter-peg home-pose return — the robot moves directly from peg N's seated waypoint to peg N+1's pick approach. If cuRobo's plan from a seated wrist-down pose at [0, -0.25, 0.810] to the next pick at [0.30, y_{N+1}, 0.835] hits the InfeedTray or Bushing as a planning obstacle, the transit phase stalls. Mitigation for production: insert an explicit home-pose move_to_pose between pegs (not modeled here to keep the canonical's tool count manageable and the production-cadence story uninterrupted).",
+    "Force cap 20 N applied via add_force_torque_sensor threshold=20.0 — the sensor reports breach but does NOT auto-pause the trajectory. In dry_run mode this is documentation-only; in production, the consumer must poll get_joint_torques between waypoints and abort the trajectory if any reading exceeds 20 N. Modeled here by the get_joint_torques call inserted after each insert phase as a post-hoc check.",
+    "Pegs are placed on the infeed tray with no PhysicsFixedJoint or attach_to_articulation binding — they sit on the tray surface held by gravity + friction (rubber material). If physics settles them outside the radial pick tolerance of setup_pick_place_controller (typical 0.005-0.010 m), the controller misses the grasp. Mitigation: define_grasp_pose is called per peg to refresh the grasp target right before each pick, but if a peg has rolled, the refresh sees the rolled pose; production rollout would need a vision pose-update step (vision_detect_objects).",
+    "production_metrics.success_rate of 1.0 is the EXPECTED rate for a working pipeline — the canonical does not yet have a verified run, so this is an aspirational metric, not a measured one (see verified_status). Downstream consumers should treat success_rate as a CONTRACT (what the canonical claims), not a measurement (what the canonical achieves). The form-gate-schema lint pass validates the contract shape; the function-gate would validate the achieved rate."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema pending lint; function-gate pending Kit RPC + ros2_control bridge + 3-peg live cadence",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": [
+      "curobo",
+      "impedance",
+      "cartesian_impedance"
+    ]
+  },
+  "intent": {
+    "pattern_hint": "insert",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_force_threshold": true,
+      "has_compliance_press": true,
+      "n_workpieces_per_cadence": 3,
+      "has_production_cadence": true,
+      "has_success_rate_metric": true,
+      "press_gesture_has_rotation": false
+    },
+    "structural_tags": [
+      "isaac:yrkesroll.assembler",
+      "isaac:industry.peg_bushing_assembly",
+      "isaac:gesture.full_pick_insert",
+      "isaac:robot.franka_panda",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:topology.insertion",
+      "isaac:assembly.force_gated",
+      "isaac:compliance.impedance",
+      "isaac:compliance.cartesian_impedance",
+      "isaac:sensor.force_torque",
+      "isaac:cadence.production_sequence",
+      "isaac:metric.success_rate"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "torque_mode_capable"
+    },
+    "bushing": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "static_fixture_with_implied_bore"
+    },
+    "infeed_tray": {
+      "constraints": ["cube"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "production_cadence_pallet"
+    },
+    "pick_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "ft_sensor": {
+      "constraints": ["force_torque_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cylinder"],
+      "min": 3,
+      "max": 3,
+      "unordered": false,
+      "note": "Three pegs processed in row order along +Y axis on the infeed tray; one production cadence at the station."
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "family": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "bushing": {
+      "path": "/World/Bushing",
+      "position": [0.0, -0.25, 0.795],
+      "scale": [0.10, 0.10, 0.04],
+      "bore_radius_m": 0.015,
+      "top_rim_z": 0.815
+    },
+    "infeed_tray": {
+      "path": "/World/InfeedTray",
+      "position": [0.30, 0.10, 0.755],
+      "scale": [0.20, 0.15, 0.005]
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.30, 0.10, 0.815],
+      "size": [0.20, 0.15, 0.10]
+    },
+    "ft_sensor": {
+      "path": "/World/Franka/FtSensor",
+      "parent_path": "/World/Franka/panda_hand",
+      "threshold": 20.0
+    },
+    "workpieces": [
+      {"path": "/World/Peg_1", "position": [0.30, 0.05, 0.7925], "radius": 0.012, "height": 0.07, "mass": 0.025, "material": "rubber"},
+      {"path": "/World/Peg_2", "position": [0.30, 0.10, 0.7925], "radius": 0.012, "height": 0.07, "mass": 0.025, "material": "rubber"},
+      {"path": "/World/Peg_3", "position": [0.30, 0.15, 0.7925], "radius": 0.012, "height": 0.07, "mass": 0.025, "material": "rubber"}
+    ],
+    "insert_trajectory": {
+      "compliance_controller": "cartesian_impedance",
+      "compliance_handoff_at": 0.33,
+      "velocity_scaling": 0.15,
+      "timeout_s": 15.0,
+      "waypoint_hover_z": 0.835,
+      "waypoint_rim_z": 0.820,
+      "waypoint_seated_z": 0.810,
+      "Kx_xyz": [300.0, 300.0, 80.0],
+      "Kr_xyz": [30.0, 30.0, 30.0],
+      "Dx_xyz": [30.0, 30.0, 10.0],
+      "Dr_xyz": [3.0, 3.0, 3.0]
+    },
+    "production_metrics": {
+      "n_pegs": 3,
+      "expected_success_rate": 1.0,
+      "degraded_success_rate_min": 0.67,
+      "radial_tolerance_m": 0.003,
+      "seated_z_max_m": 0.815,
+      "force_cap_n": 20.0
+    },
+    "operator_role": {
+      "yrkesroll": "assembler",
+      "title": "Assembler / Assembly Worker (Production-Line)",
+      "onet_soc": "51-2099",
+      "onet_soc_title": "Assemblers and Fabricators, All Other",
+      "onet_soc_note": "51-2099 is the broad assembly-worker code, shared with A91 snap-fit (the assembler persona spans multiple insertion patterns at the same workstation grade — peg-into-bushing here, snap-fit clamshell in A91). Adjacent code 51-2028 from the older 2018 SOC revision is also used in older NIST references; we use 51-2099 to match the 2018-2028 SOC structure as of 2026.",
+      "workstation": "production_insertion_station",
+      "responsibilities": [
+        "pick_peg_from_infeed_tray",
+        "transit_to_bushing_fixture",
+        "insert_peg_under_force_cap",
+        "verify_seated_state",
+        "repeat_for_production_cadence",
+        "monitor_success_rate_per_shift"
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_prim(prim_path={{bushing.path}}, prim_type=\"Cube\", position={{bushing.position}}, scale={{bushing.scale}})\napply_api_schema(prim_path={{bushing.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{infeed_tray.path}}, prim_type=\"Cube\", position={{infeed_tray.position}}, scale={{infeed_tray.scale}})\napply_api_schema(prim_path={{infeed_tray.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cylinder\", position={{workpieces[0].position}}, radius={{workpieces[0].radius}}, height={{workpieces[0].height}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[0].path}}, attr_name=\"physics:mass\", value={{workpieces[0].mass}})\napply_physics_material(prim_path={{workpieces[0].path}}, material_name={{workpieces[0].material}})\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cylinder\", position={{workpieces[1].position}}, radius={{workpieces[1].radius}}, height={{workpieces[1].height}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[1].path}}, attr_name=\"physics:mass\", value={{workpieces[1].mass}})\napply_physics_material(prim_path={{workpieces[1].path}}, material_name={{workpieces[1].material}})\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cylinder\", position={{workpieces[2].position}}, radius={{workpieces[2].radius}}, height={{workpieces[2].height}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[2].path}}, attr_name=\"physics:mass\", value={{workpieces[2].mass}})\napply_physics_material(prim_path={{workpieces[2].path}}, material_name={{workpieces[2].material}})\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{bushing.path}}], attr=\"physxRigidBody:solverPositionIterationCount\", value=16)\nadd_force_torque_sensor(sensor_path={{ft_sensor.path}}, parent_path={{ft_sensor.parent_path}}, threshold={{ft_sensor.threshold}}, noise_std=0.05)\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\nsetup_impedance_controller(robot_path={{primary_robot.path}}, target_frame=\"panda_hand\", Kx={{insert_trajectory.Kx_xyz}}, Kr={{insert_trajectory.Kr_xyz}}, Dx={{insert_trajectory.Dx_xyz}}, Dr={{insert_trajectory.Dr_xyz}}, null_space_stiffness=0.5, null_space_damping=0.5, torque_mode=True, dry_run=True)\nset_compliance_params(robot_path={{primary_robot.path}}, stiffness_xyz={{insert_trajectory.Kx_xyz}}, damping_xyz={{insert_trajectory.Dx_xyz}}, stiffness_rot={{insert_trajectory.Kr_xyz}}, damping_rot={{insert_trajectory.Dr_xyz}}, dry_run=True)\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{workpieces[0].path}}, approach_direction=[0, 0, -1], gripper_offset=[0, 0, 0])\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", sensor_path={{pick_sensor.path}}, source_paths=[{{workpieces[0].path}}], destination_path={{bushing.path}}, drop_target=[0.0, -0.25, {{insert_trajectory.waypoint_hover_z}}], planning_obstacles=[\"/World/Table\", {{bushing.path}}, {{infeed_tray.path}}], approach_height=0.12, lift_height=0.12)\nfollow_trajectory_with_compliance(trajectory=[{\"pose\": {\"position\": [0.0, -0.25, {{insert_trajectory.waypoint_hover_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}, {\"pose\": {\"position\": [0.0, -0.25, {{insert_trajectory.waypoint_rim_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}, {\"pose\": {\"position\": [0.0, -0.25, {{insert_trajectory.waypoint_seated_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}], robot_path={{primary_robot.path}}, compliance_handoff_at={{insert_trajectory.compliance_handoff_at}}, compliance_controller={{insert_trajectory.compliance_controller}}, timeout_s={{insert_trajectory.timeout_s}}, velocity_scaling={{insert_trajectory.velocity_scaling}}, dry_run=True)\nget_joint_torques(articulation={{primary_robot.path}})\nget_world_transform(prim_path={{workpieces[0].path}})\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{workpieces[1].path}}, approach_direction=[0, 0, -1], gripper_offset=[0, 0, 0])\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", sensor_path={{pick_sensor.path}}, source_paths=[{{workpieces[1].path}}], destination_path={{bushing.path}}, drop_target=[0.0, -0.25, {{insert_trajectory.waypoint_hover_z}}], planning_obstacles=[\"/World/Table\", {{bushing.path}}, {{infeed_tray.path}}], approach_height=0.12, lift_height=0.12)\nfollow_trajectory_with_compliance(trajectory=[{\"pose\": {\"position\": [0.0, -0.25, {{insert_trajectory.waypoint_hover_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}, {\"pose\": {\"position\": [0.0, -0.25, {{insert_trajectory.waypoint_rim_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}, {\"pose\": {\"position\": [0.0, -0.25, {{insert_trajectory.waypoint_seated_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}], robot_path={{primary_robot.path}}, compliance_handoff_at={{insert_trajectory.compliance_handoff_at}}, compliance_controller={{insert_trajectory.compliance_controller}}, timeout_s={{insert_trajectory.timeout_s}}, velocity_scaling={{insert_trajectory.velocity_scaling}}, dry_run=True)\nget_joint_torques(articulation={{primary_robot.path}})\nget_world_transform(prim_path={{workpieces[1].path}})\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{workpieces[2].path}}, approach_direction=[0, 0, -1], gripper_offset=[0, 0, 0])\nsetup_pick_place_controller(robot_path={{primary_robot.path}}, target_source=\"curobo\", sensor_path={{pick_sensor.path}}, source_paths=[{{workpieces[2].path}}], destination_path={{bushing.path}}, drop_target=[0.0, -0.25, {{insert_trajectory.waypoint_hover_z}}], planning_obstacles=[\"/World/Table\", {{bushing.path}}, {{infeed_tray.path}}], approach_height=0.12, lift_height=0.12)\nfollow_trajectory_with_compliance(trajectory=[{\"pose\": {\"position\": [0.0, -0.25, {{insert_trajectory.waypoint_hover_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}, {\"pose\": {\"position\": [0.0, -0.25, {{insert_trajectory.waypoint_rim_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}, {\"pose\": {\"position\": [0.0, -0.25, {{insert_trajectory.waypoint_seated_z}}], \"orientation\": [1.0, 0.0, 0.0, 0.0]}}], robot_path={{primary_robot.path}}, compliance_handoff_at={{insert_trajectory.compliance_handoff_at}}, compliance_controller={{insert_trajectory.compliance_controller}}, timeout_s={{insert_trajectory.timeout_s}}, velocity_scaling={{insert_trajectory.velocity_scaling}}, dry_run=True)\nget_joint_torques(articulation={{primary_robot.path}})\nget_world_transform(prim_path={{workpieces[2].path}})",
+  "simulate_args_template": {
+    "target_path": "{{bushing.path}}",
+    "cube_paths": ["{{workpieces[0].path}}", "{{workpieces[1].path}}", "{{workpieces[2].path}}"],
+    "duration_s": 240,
+    "xy_tolerance": 0.01
+  }
+}

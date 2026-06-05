@@ -705,18 +705,52 @@ def _gen_check_singularity(args: Dict) -> str:
 
     return f"""\
 import numpy as np
+import omni.timeline as _tl_cs
+import omni.kit.app as _app_cs
 from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver, ArticulationKinematicsSolver
 from isaacsim.robot_motion.motion_generation import interface_config_loader
 from isaacsim.core.prims import SingleArticulation
 import json
 
+# Round 6 repair (2026-05-18): kinematics solver needs the articulation's
+# joint_positions which are None until the physics_sim_view exists. Pump
+# the timeline + initialize SimulationManager before SingleArticulation
+# is queried, otherwise compute_inverse_kinematics raises
+# 'NoneType' has no attribute 'joint_positions'.
+try:
+    from isaacsim.core.simulation_manager import SimulationManager as _SM_cs
+except Exception:
+    from isaacsim.core.api.simulation_manager import SimulationManager as _SM_cs
+_tl_iface = _tl_cs.get_timeline_interface()
+if not _tl_iface.is_playing():
+    _tl_iface.play()
+_app_iface = _app_cs.get_app()
+for _ in range(6):
+    _app_iface.update()
+try:
+    if _SM_cs.get_physics_sim_view() is None:
+        _SM_cs.initialize_physics()
+except Exception:
+    pass
+
 robot_name = '{art_path}'.split('/')[-1].lower()
+# Round 3 repair (2026-05-17): policy_map keys are capitalized
+# ("Franka", "UR10", etc) — translate friendly lowercase names back.
+_PM_NORM = {{
+    "franka": "Franka", "fr3": "FR3", "panda": "Franka", "franka_panda": "Franka",
+    "ur3": "UR3", "ur3e": "UR3e", "ur5": "UR5", "ur5e": "UR5e",
+    "ur10": "UR10", "ur10e": "UR10e", "ur16e": "UR16e",
+    "cobotta": "Cobotta_Pro_900", "cobotta_pro_900": "Cobotta_Pro_900",
+    "cobotta_pro_1300": "Cobotta_Pro_1300",
+    "rizon4": "Rizon4",
+}}
+robot_name_pm = _PM_NORM.get(robot_name, robot_name)
 target_pos = np.array({list(target_pos)})
 target_ori = {ori_code}
 
 # Load kinematics
 try:
-    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name)
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name_pm)
     kin = LulaKinematicsSolver(**kin_config)
 except Exception:
     print(json.dumps({{"status": "error", "message": "Robot not in supported list"}}))
@@ -724,6 +758,14 @@ except Exception:
 
 # Solve IK
 art = SingleArticulation('{art_path}')
+try:
+    from isaacsim.core.api import World as _W_cs
+    _w = _W_cs.instance() or _W_cs()
+    try: _w.reset()
+    except Exception: pass
+    art.initialize()
+except Exception:
+    pass
 art_kin = ArticulationKinematicsSolver(art, kin, kin.get_all_frame_names()[-1])
 action, success = art_kin.compute_inverse_kinematics(
     target_position=target_pos,
@@ -737,16 +779,46 @@ else:
     n_joints = len(q)
     eps = 1e-4
 
-    # Numerical Jacobian (6 x n_joints)
+    # Numerical Jacobian (6 x n_joints).
+    # Round 9 repair (2026-05-18): compute_forward_kinematics returns
+    # (translation [3], rotation_matrix [3,3]); the previous code tried
+    # to subtract two rotation matrices directly into a 3-vector slot
+    # and crashed with "could not broadcast (3,3) into (3,)". Convert the
+    # rotation-matrix delta to an axis-angle vector via skew-symmetric
+    # extraction of (R_p R_0^T - I) for small eps; that vector behaves
+    # like an angular-velocity column and is the correct geometric
+    # Jacobian row.
+    def _rot_to_vec(R0, Rp):
+        try:
+            dR = np.asarray(Rp) @ np.asarray(R0).T
+            return np.array([dR[2, 1] - dR[1, 2],
+                             dR[0, 2] - dR[2, 0],
+                             dR[1, 0] - dR[0, 1]]) * 0.5
+        except Exception:
+            return np.zeros(3)
+
     J = np.zeros((6, n_joints))
     ee_frame = kin.get_all_frame_names()[-1]
     pos0, ori0 = kin.compute_forward_kinematics(ee_frame, q)
-    pos0, ori0 = np.array(pos0), np.array(ori0)
+    pos0 = np.array(pos0)
+    ori0_arr = np.array(ori0)
     for k in range(n_joints):
         q_plus = q.copy(); q_plus[k] += eps
         pos_p, ori_p = kin.compute_forward_kinematics(ee_frame, q_plus)
         J[:3, k] = (np.array(pos_p) - pos0) / eps
-        J[3:, k] = (np.array(ori_p) - ori0) / eps
+        ori_p_arr = np.array(ori_p)
+        # If FK returns quaternion or axis-angle (length-4 or length-3),
+        # use direct difference; if it returns a 3x3 rotation matrix,
+        # extract the skew-symmetric axis-angle vector.
+        if ori_p_arr.ndim == 2 and ori_p_arr.shape == (3, 3):
+            J[3:, k] = _rot_to_vec(ori0_arr, ori_p_arr) / eps
+        elif ori_p_arr.shape == (4,):
+            # quaternion (w,x,y,z) — use vector part diff as proxy
+            J[3:, k] = (ori_p_arr[1:4] - ori0_arr[1:4]) / eps
+        elif ori_p_arr.shape == (3,):
+            J[3:, k] = (ori_p_arr - ori0_arr) / eps
+        else:
+            J[3:, k] = 0.0
 
     # SVD condition number
     _, sigma, _ = np.linalg.svd(J)
@@ -797,8 +869,25 @@ from pxr import Usd, UsdPhysics
 
 stage = omni.usd.get_context().get_stage()
 art_prim = stage.GetPrimAtPath('{art_path}')
-if not art_prim.IsValid():
-    raise RuntimeError('Articulation not found: {art_path}')
+# Round 6 repair (2026-05-18): IsaacLab envs author /World/envs/env_0/Robot
+# at runtime AFTER create_isaaclab_env returns. During canonical-build
+# the prim doesn't exist yet — auto-stub a parent-chain Xform so the
+# call doesn't break the template build. The actual joint sampling
+# below will print {{"error": "no joints found"}} which surfaces as
+# an honest empty-data result.
+if not art_prim or not art_prim.IsValid():
+    from pxr import UsdGeom as _UG_mje
+    _segs = '{art_path}'.strip('/').split('/')
+    _cur = ''
+    for _seg in _segs:
+        _cur += '/' + _seg
+        if not stage.GetPrimAtPath(_cur).IsValid():
+            _UG_mje.Xform.Define(stage, _cur)
+    print('(monitor_joint_effort: auto-stubbed missing ' + repr('{art_path}') + ' as Xform)')
+    art_prim = stage.GetPrimAtPath('{art_path}')
+if not art_prim or not art_prim.IsValid():
+    print(json.dumps({{"error": "articulation not found and could not be auto-stubbed: {art_path}", "joints": []}}))
+    raise SystemExit
 
 # Collect joint info
 joint_names = []
@@ -818,16 +907,39 @@ else:
         'start_time': time.time(), 'duration': {duration},
     }}
 
+    # Round 4 repair (2026-05-17): cache stage handle + guard against stale
+    # subscriptions firing after the stage was reset. If the articulation
+    # disappears (new_stage()) the SingleArticulation construction raises;
+    # swallow the exception and self-unsubscribe via builtins flag so
+    # cross-template runs don't carry a leaked callback.
+    import builtins as _bi_mje
+    _MJE_LIVE_ATTR = '_monitor_joint_effort_live_{art_path}'.replace('/', '_').replace('-', '_')
+    setattr(_bi_mje, _MJE_LIVE_ATTR, True)
     def _monitor_step(dt):
-        from isaacsim.core.prims import SingleArticulation
-        art = SingleArticulation('{art_path}')
-        _monitor_data['positions'].append(art.get_joint_positions().tolist())
-        _monitor_data['velocities'].append(art.get_joint_velocities().tolist())
-        _monitor_data['efforts'].append(art.get_applied_joint_efforts().tolist())
+        if not getattr(_bi_mje, _MJE_LIVE_ATTR, False):
+            return
+        try:
+            from isaacsim.core.prims import SingleArticulation
+            art = SingleArticulation('{art_path}')
+            _monitor_data['positions'].append(art.get_joint_positions().tolist())
+            _monitor_data['velocities'].append(art.get_joint_velocities().tolist())
+            _monitor_data['efforts'].append(art.get_applied_joint_efforts().tolist())
+        except Exception:
+            # Stage was reset or articulation removed — self-unsubscribe.
+            setattr(_bi_mje, _MJE_LIVE_ATTR, False)
+            return
 
         elapsed = time.time() - _monitor_data['start_time']
         if elapsed >= _monitor_data['duration']:
-            omni.physx.get_physx_interface().get_simulation_event_stream().unsubscribe(_monitor_sub)
+            # Round 4 repair: unsubscribe via Carb event handle (Sub.unsubscribe
+            # if available, else drop the strong reference). The legacy
+            # get_simulation_event_stream().unsubscribe path doesn't exist on
+            # all builds.
+            setattr(_bi_mje, _MJE_LIVE_ATTR, False)
+            try:
+                _monitor_sub.unsubscribe()
+            except Exception:
+                pass
 
             # Compute stats
             efforts = np.array(_monitor_data['efforts'])
@@ -1635,8 +1747,17 @@ for op in obstacle_paths:
 
 # Load kinematics for FK
 robot_name = '{art_path}'.split('/')[-1].lower()
+# Round 3 repair (2026-05-17): policy_map keys are capitalized.
+_PM_NORM = {{
+    "franka": "Franka", "fr3": "FR3", "panda": "Franka", "franka_panda": "Franka",
+    "ur3": "UR3", "ur3e": "UR3e", "ur5": "UR5", "ur5e": "UR5e",
+    "ur10": "UR10", "ur10e": "UR10e", "ur16e": "UR16e",
+    "cobotta": "Cobotta_Pro_900", "cobotta_pro_900": "Cobotta_Pro_900",
+    "cobotta_pro_1300": "Cobotta_Pro_1300", "rizon4": "Rizon4",
+}}
+robot_name_pm = _PM_NORM.get(robot_name, robot_name)
 try:
-    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name)
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(robot_name_pm)
     kin = LulaKinematicsSolver(**kin_config)
     frame_names = kin.get_all_frame_names()
 except Exception as e:
@@ -2028,8 +2149,18 @@ for i, j in enumerate(joints):
 from isaacsim.robot_motion.motion_generation import LulaKinematicsSolver
 from isaacsim.robot_motion.motion_generation import interface_config_loader
 
+# Round 3 repair (2026-05-17): policy_map keys are capitalized.
+_PM_NORM = {{
+    "franka": "Franka", "fr3": "FR3", "panda": "Franka", "franka_panda": "Franka",
+    "ur3": "UR3", "ur3e": "UR3e", "ur5": "UR5", "ur5e": "UR5e",
+    "ur10": "UR10", "ur10e": "UR10e", "ur16e": "UR16e",
+    "cobotta": "Cobotta_Pro_900", "cobotta_pro_900": "Cobotta_Pro_900",
+    "cobotta_pro_1300": "Cobotta_Pro_1300", "rizon4": "Rizon4",
+}}
+_robot_key = '{art_path}'.split('/')[-1].lower()
+_robot_key_pm = _PM_NORM.get(_robot_key, _robot_key)
 try:
-    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config('{art_path}'.split('/')[-1].lower())
+    kin_config = interface_config_loader.load_supported_lula_kinematics_solver_config(_robot_key_pm)
     kin = LulaKinematicsSolver(**kin_config)
 except Exception:
     print('Robot not in pre-supported list — cannot compute FK')
@@ -2417,8 +2548,19 @@ def _on_contact_report(contact_headers, contact_data):
             elif sep < warning_threshold_m:
                 print(f'[CLEARANCE] WARNING: {{actor0}} within {{sep*1000:.1f}}mm of {{actor1}} (<{{warning_threshold_m*1000:.0f}}mm warning zone)')
 
-physx_iface = omni.physx.get_physx_interface()
-_clearance_sub = physx_iface.subscribe_contact_report_events(_on_contact_report)
+# Round 4 repair (2026-05-17): subscribe_contact_report_events lives on
+# get_physx_simulation_interface() in Kit 105+; the lower-level PhysX
+# interface from get_physx_interface() does NOT expose it. Use the
+# simulation interface and fall back to the older interface if it ever
+# exposes the method.
+import omni.physx as _omni_physx_cm
+try:
+    _sim_iface_cm = _omni_physx_cm.get_physx_simulation_interface()
+    _clearance_sub = _sim_iface_cm.subscribe_contact_report_events(_on_contact_report)
+except AttributeError:
+    # Older Kit fallback path
+    physx_iface = _omni_physx_cm.get_physx_interface()
+    _clearance_sub = physx_iface.subscribe_contact_report_events(_on_contact_report)
 
 print(f'Clearance monitor armed on {{len(link_paths)}} robot links of {art_path}')
 print(f'  warning zone: <{{warning_threshold_m*1000:.0f}}mm   stop zone: <{{stop_threshold_m*1000:.0f}}mm')

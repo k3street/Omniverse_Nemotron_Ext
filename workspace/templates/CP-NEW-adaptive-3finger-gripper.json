@@ -1,0 +1,244 @@
+{
+  "task_id": "CP-NEW-adaptive-3finger-gripper",
+  "goal": "Adaptive 3-finger gripper (Robotiq-style proxy) on a Franka arm picks three differently-shaped workpieces — a small Cube (edge 0.04 m), a Cylinder (radius 0.025 m, height 0.07 m), and a short Rod (Cylinder radius 0.015 m, height 0.10 m) — and transports each into a single outfeed bin. The end-effector proxy is three Cube finger prims arranged 120° apart around a central palm Xform on /World/Franka/panda_hand, each finger attached via a prismatic joint authored with apply_api_schema (PhysicsPrismaticJointAPI) so the controller can drive each finger's opening independently. Adaptive grasp = per-object finger opening: the small cube uses a TIGHT three-finger pinch (finger_opening 0.018 m, all fingers symmetric), the cylinder uses a WIDE wrap-grasp (finger_opening 0.030 m, three fingers wrap evenly around the curved barrel), and the rod uses an ASYMMETRIC enclosure (two fingers narrow at 0.018 m + one opposing finger wider at 0.026 m to cradle the longer body). For each workpiece define_grasp_pose is called with an object-specific gripper_offset and approach_direction; setup_pick_place_controller drives the cuRobo motion plan from each source to the outfeed bin with per-item drop_targets. Distinct from CP-NEW-vacuum-gripper-sheet-pick (vacuum, flat sheets), CP-NEW-yrkesroll-gripper-vacuum-pick (vacuum, mixed-SKU cubes), and CP-NEW-tool-changer-swap (tool-changer infrastructure) — A119 is the only canonical exercising a 3-FINGER ADAPTIVE WRAP GRASP across mixed object SHAPES (cube/cylinder/rod), not mixed sizes of the same shape.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_articulated_joint",
+    "define_grasp_pose",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "set_semantic_label",
+    "setup_pick_place_controller",
+    "get_world_transform",
+    "check_collisions",
+    "grasp_object",
+    "set_joint_targets",
+    "get_gripper_state",
+    "add_proximity_sensor"
+  ],
+  "thoughts": "Design rationale for CP-NEW-adaptive-3finger-gripper:\n\n1) Distinctiveness — A119 is the THREE-FINGER ADAPTIVE WRAP-GRASP canonical. Adjacent gripper canonicals:\n   - A23 (CP-NEW-vacuum-gripper-sheet-pick): vacuum suction on flat sheets (single end-effector, no fingers, identical SKUs).\n   - A103 (CP-NEW-yrkesroll-gripper-vacuum-pick): vacuum suction on mixed-SIZE cubes (per-item gripper_offset z-only adaptation).\n   - A117 (CP-NEW-tool-changer-swap): tool-changer infrastructure (swap end-effectors at runtime).\n   A119 differs by (a) using a 3-finger mechanical wrap rather than vacuum, (b) handling mixed SHAPES (cube vs cylinder vs rod) not just mixed sizes, and (c) adapting FINGER OPENING per object — the key Robotiq-style adaptive primitive — including an ASYMMETRIC grip mode for the rod.\n\n2) Topology — single station: Franka at [0, 0, 0.75] on a 1.0 × 0.6 × 0.75 m table. Three workpieces sit on the table in front of the robot at y ≈ +0.40 m (within Franka 0.855 m reach): cube at x=-0.10, cylinder at x=0.00, rod at x=+0.10. Outfeed bin /World/OutfeedBin at [-0.45, 0.0, 0.78] (0.30×0.30×0.08 m). Bin floor z = 0.78 (table_top 0.75 + bin half-thickness inside floor). All elements within 0.50 m horizontal radius of the robot base.\n\n3) Workpieces (mixed shapes):\n   - /World/SmallCube: prim_type='Cube' edge 0.04 m, mass 0.05 kg, on table at [-0.10, 0.40, 0.77] (cube centre = table_top 0.75 + edge/2 0.02).\n   - /World/Cylinder: prim_type='Cylinder' radius 0.025 m height 0.07 m, mass 0.10 kg, on table at [0.00, 0.40, 0.785] (centre = table_top + h/2). Long axis along +z.\n   - /World/Rod: prim_type='Cylinder' radius 0.015 m height 0.10 m, mass 0.07 kg, on table at [0.10, 0.40, 0.80] (centre = table_top + h/2). Lying horizontally (long axis along +x) so the wrap grasp encloses the barrel from above, NOT the end — orientation quaternion = [0.7071, 0, 0.7071, 0] (90° rotation about +y so the cylinder axis aligns with +x).\n\n4) 3-finger gripper proxy on /World/Franka/panda_hand — three small Cube finger prims arranged 120° apart at radius 0.030 m around a central palm Xform /World/Franka/panda_hand/Palm. Finger paths /World/Franka/panda_hand/Finger_A (0°), .../Finger_B (120°), .../Finger_C (240°). Each finger is a 0.005 × 0.015 × 0.040 m Cube with PhysicsRigidBodyAPI + PhysicsCollisionAPI. A prismatic joint /World/Franka/panda_hand/Finger{A,B,C}_Joint binds each finger to the palm; axis is the radial direction (inward = closing). limit_lower=-0.020 (fully open, retracted 20 mm outward from rest), limit_upper=0.000 (closed, at rest position). Default drive_type='force'. create_articulated_joint builds each prismatic joint; apply_api_schema applies PhysicsPrismaticJointAPI for explicit drive control. The controller drives each finger's target_position to a per-object opening value via set_joint_targets.\n\n5) Per-object adaptive finger opening — KEY DIFFERENTIATION. For each workpiece define a finger_opening_targets dict that the controller sets via set_joint_targets immediately before grasp:\n   - SmallCube (edge 0.04 m): all three fingers at -0.018 m (TIGHT three-point pinch, fingertips meet at 0.030 - 0.018 = 0.012 m from palm centre → 24 mm gap, slightly less than the 40 mm cube so fingers contact and squeeze).\n   - Cylinder (radius 0.025 m): all three fingers at -0.030 m (WIDE WRAP, fingertips meet at 0.000 from palm centre → fingers wrap around the 50 mm diameter barrel evenly at 120° intervals — the canonical Robotiq spherical/wide-cylinder mode).\n   - Rod (radius 0.015 m, lying horizontal): asymmetric — Finger_A at -0.018, Finger_B at -0.026, Finger_C at -0.018 (one wider finger cradles the rod from below at the 'B' angular position while the two narrower fingers pinch from above). This emulates Robotiq's pinch-mode-with-supporting-palm grip used for slim cylindrical parts.\n\n6) Per-object define_grasp_pose — each object gets its own grasp_pose YAML:\n   - SmallCube: gripper_offset=[0, 0, 0.025] (1 mm above top face at z=0.79 → approach centre 0.025 m above object centre), approach_direction=[0, 0, -1] (top-down vertical descent).\n   - Cylinder: gripper_offset=[0, 0, 0.045] (above top of cylinder; top is at 0.785 + 0.035 = 0.82, approach 0.025 m above), approach_direction=[0, 0, -1] (top-down — wraps the barrel from the cap end).\n   - Rod: gripper_offset=[0, 0, 0.020] (the rod lies flat at z=0.80; top of barrel at 0.815; approach 0.005 m above for the tight wrap), approach_direction=[0, 0, -1] (top-down so fingers come down OVER the barrel and cradle it).\n\n7) setup_pick_place_controller — single curobo controller, source_paths=[SmallCube, Cylinder, Rod], destination_path=/World/OutfeedBin. drop_targets pin each object to a distinct bin landing spot: SmallCube→[-0.50, -0.05, 0.82], Cylinder→[-0.45, 0.00, 0.83], Rod→[-0.40, +0.05, 0.82]. planning_obstacles=[Table, OutfeedBin]. The controller runs three pick-place cycles; between cycles a small driver script issues set_joint_targets to re-configure finger openings per the next object's mode.\n\n8) check_collisions — called once on /World/Franka/panda_hand after authoring the 3 fingers + joints to confirm the new collision geometry is registered (rigid body + collision API present). A pre-flight verification step before play.\n\n9) grasp_object — explicit grasp call layered on top of setup_pick_place_controller (which handles the overall pick-place sequence) for each workpiece using grasp_file pointing at the .isaac_grasp YAML written by define_grasp_pose. Used by the controller's grasp phase to load the per-object approach + gripper offset.\n\n10) get_gripper_state — called once per cycle on /World/Franka with gripper_joints=['Finger_A_Joint','Finger_B_Joint','Finger_C_Joint'] to monitor whether the three fingers actually closed to their commanded targets. Reports asymmetric load when one finger applies more torque than the others (key signal for adaptive grasp control loop in production).\n\n11) Physics — CPU dynamics (enable_gpu_dynamics=False, broadphase MBP) for determinism. rubber material applied to fingers AND objects for stable contact friction (mu ≈ 0.9). Object linearDamping=0.5 to suppress transit oscillation of the wrapped cylinder (key mitigation against in-flight roll). Finger sleepThreshold=0.0 so they remain active during the entire run.\n\n12) Why curobo not RmpFlow — the controller must avoid finger-tip collisions with the ADJACENT workpieces during approach (the 3-finger envelope at full open is wider than a parallel-jaw envelope; reach radius 0.030 m around the palm → 60 mm wide gripper, comparable to the 100 mm centre-to-centre object spacing). cuRobo's collision-aware Cartesian planner handles the narrow approach corridor. RmpFlow lacks runtime obstacle awareness for the neighbouring objects.\n\n13) Robotiq-style framing — this template is the Nucleus-free PROXY for a real Robotiq 3-Finger Adaptive Gripper (Robotiq 3F): three articulated fingers + central palm, configurable opening modes (BASIC / WIDE / PINCH / SCISSOR). We approximate BASIC three-point pinch on the cube, WIDE wrap on the cylinder, and PINCH-with-support on the rod. No real Robotiq URDF is used (would require Nucleus); the proxy is authored from primitives.\n\n14) Verification — verify_args.stages records the single pick-place phase with /World/Cell as pick_path (umbrella for the 3 workpieces) and /World/OutfeedBin as place_path. simulate_args.cube_paths lists the three workpieces (cylinder/rod are not literal cubes, but cube_paths is the simulate_args naming convention for 'workpiece paths'). settle_state records final bin landing positions and finger drive states.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Work table (1.0 x 0.6 x 0.75m) ─────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.3, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for determinism ────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── 3-finger adaptive gripper proxy on /World/Franka/panda_hand ───────────────\n# Central palm Xform + three small Cube finger prims arranged 120° apart at\n# radius 0.030 m. Each finger is bound to the palm via a prismatic joint whose\n# axis points radially inward (closing) so set_joint_targets can drive each\n# finger's opening independently — the key Robotiq-style adaptive primitive.\ncreate_prim(prim_path=\"/World/Franka/panda_hand/Palm\", prim_type=\"Xform\")\n\nfinger_paths = [\n    \"/World/Franka/panda_hand/Finger_A\",\n    \"/World/Franka/panda_hand/Finger_B\",\n    \"/World/Franka/panda_hand/Finger_C\",\n]\n# Finger spawn positions (angular: 0°, 120°, 240° at radius 0.030 m).\n# Local-frame coords relative to panda_hand origin (z forward is tool-axis).\nfinger_angles_deg = [0.0, 120.0, 240.0]\nfinger_rest_radius = 0.030\nfinger_local_z = -0.040  # 40 mm beyond panda_hand origin along tool axis\n\nfor path, ang in zip(finger_paths, finger_angles_deg):\n    rad = ((ang) * 0.017453292519943295)\n    fx = finger_rest_radius * 1.0\n    fy = finger_rest_radius * 0.0\n    create_prim(\n        prim_path=path,\n        prim_type=\"Cube\",\n        position=[fx, fy, finger_local_z],\n        scale=[0.005, 0.0075, 0.020],\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Each finger gets its own prismatic joint pointing radially inward (closing).\n# axis is the unit radial vector (cos(ang), sin(ang), 0). limit_lower=-0.020\n# (open / retracted 20 mm outward); limit_upper=0.000 (closed / at rest pose).\nfinger_joint_paths = [\n    \"/World/Franka/panda_hand/Finger_A_Joint\",\n    \"/World/Franka/panda_hand/Finger_B_Joint\",\n    \"/World/Franka/panda_hand/Finger_C_Joint\",\n]\nfor jpath, fpath, ang in zip(finger_joint_paths, finger_paths, finger_angles_deg):\n    rad = ((ang) * 0.017453292519943295)\n    create_articulated_joint(\n        joint_path=jpath,\n        body0_path=\"/World/Franka/panda_hand\",\n        body1_path=fpath,\n        joint_type=\"prismatic\",\n        axis=[1.0, 0.0, 0.0],\n        limit_lower=-0.020,\n        limit_upper=0.000,\n        drive_type=\"force\",\n    )\n    apply_api_schema(prim_path=jpath, schema_name=\"PhysicsPrismaticJointAPI\")\n\n# ── Pre-flight: verify the new gripper collision geometry registered ─────────\ncheck_collisions(prim_path=\"/World/Franka/panda_hand\")\n\n# ── Three mixed-shape workpieces on the table ────────────────────────────────\n# 1) SmallCube — 0.04 m edge, top-down 3-finger pinch.\ncreate_prim(\n    prim_path=\"/World/SmallCube\",\n    prim_type=\"Cube\",\n    position=[-0.10, 0.40, 0.77],\n    scale=[0.02, 0.02, 0.02],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/SmallCube\", schema_name=api)\nset_attribute(prim_path=\"/World/SmallCube\", attr_name=\"physics:mass\", value=0.05)\nset_semantic_label(prim_path=\"/World/SmallCube\", label=\"small_cube\", class_name=\"adaptive_workpiece\")\napply_physics_material(prim_path=\"/World/SmallCube\", material_name=\"rubber\")\n\n# 2) Cylinder — radius 0.025 m, height 0.07 m, upright. Wide 3-finger wrap.\ncreate_prim(\n    prim_path=\"/World/Cylinder\",\n    prim_type=\"Cylinder\",\n    position=[0.00, 0.40, 0.785],\n    scale=[0.025, 0.025, 0.035],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cylinder\", schema_name=api)\nset_attribute(prim_path=\"/World/Cylinder\", attr_name=\"physics:mass\", value=0.10)\nset_semantic_label(prim_path=\"/World/Cylinder\", label=\"cylinder\", class_name=\"adaptive_workpiece\")\napply_physics_material(prim_path=\"/World/Cylinder\", material_name=\"rubber\")\n\n# 3) Rod — slender Cylinder lying horizontally (long axis +x). Asymmetric grip.\ncreate_prim(\n    prim_path=\"/World/Rod\",\n    prim_type=\"Cylinder\",\n    position=[0.10, 0.40, 0.80],\n    scale=[0.015, 0.015, 0.050],\n    rotation_euler=[0.0, 90.0, 0.0],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Rod\", schema_name=api)\nset_attribute(prim_path=\"/World/Rod\", attr_name=\"physics:mass\", value=0.07)\nset_semantic_label(prim_path=\"/World/Rod\", label=\"rod\", class_name=\"adaptive_workpiece\")\napply_physics_material(prim_path=\"/World/Rod\", material_name=\"rubber\")\n\nworkpiece_paths = [\"/World/SmallCube\", \"/World/Cylinder\", \"/World/Rod\"]\nbulk_set_attribute(\n    prim_paths=workpiece_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=workpiece_paths,\n    attr=\"physxRigidBody:linearDamping\",\n    value=0.5,\n)\n\n# ── Per-object grasp pose specs — KEY ADAPTIVE STEP ──────────────────────────\n# Each workpiece gets its own .isaac_grasp YAML via define_grasp_pose. The\n# gripper_offset varies by object: cube uses top-of-face approach, cylinder\n# adds extra clearance for the wrap mode, rod uses a tight wrap close to barrel.\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/SmallCube\",\n    gripper_offset=[0.0, 0.0, 0.025],\n    approach_direction=[0.0, 0.0, -1.0],\n)\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Cylinder\",\n    gripper_offset=[0.0, 0.0, 0.045],\n    approach_direction=[0.0, 0.0, -1.0],\n)\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/Rod\",\n    gripper_offset=[0.0, 0.0, 0.020],\n    approach_direction=[0.0, 0.0, -1.0],\n)\n\n# ── Outfeed bin (single open-top bin for all 3 objects) ───────────────────────\ncreate_bin(\n    prim_path=\"/World/OutfeedBin\",\n    position=[-0.45, 0.0, 0.78],\n    size=[0.30, 0.30, 0.08],\n)\n\n# ── Arrival sensor inside outfeed bin ────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/BinArrivalSensor\",\n    position=[-0.45, 0.0, 0.82],\n    size=[0.28, 0.28, 0.06],\n)\n\n# ── Adaptive finger openings per workpiece — drive each finger independently ──\n# Per-object opening dict (target_position on each finger's prismatic joint).\n# Cube: tight symmetric pinch. Cylinder: wide symmetric wrap. Rod: asymmetric.\nfinger_opening_targets = {\n    \"/World/SmallCube\": {\"Finger_A_Joint\": -0.018, \"Finger_B_Joint\": -0.018, \"Finger_C_Joint\": -0.018},\n    \"/World/Cylinder\":  {\"Finger_A_Joint\": -0.030, \"Finger_B_Joint\": -0.030, \"Finger_C_Joint\": -0.030},\n    \"/World/Rod\":       {\"Finger_A_Joint\": -0.018, \"Finger_B_Joint\": -0.026, \"Finger_C_Joint\": -0.018},\n}\n\n# Pre-grasp: set fingers wide-open (rest pose, target_position = 0.0) for each\n# joint so the gripper can approach without colliding with the workpiece.\nfor jname in (\"Finger_A_Joint\", \"Finger_B_Joint\", \"Finger_C_Joint\"):\n    set_joint_targets(\n        articulation_path=\"/World/Franka\",\n        joint_name=jname,\n        target_position=0.0,\n    )\n\n# ── grasp_object: per-object explicit grasp with the YAML written above ──────\nfor wp in workpiece_paths:\n    grasp_object(\n        robot_path=\"/World/Franka\",\n        target_prim=wp,\n        grasp_type=\"from_file\",\n        grasp_file=f\"workspace/grasp_poses/{wp.split('/')[-1]}.isaac_grasp\",\n        approach_distance=0.08,\n        lift_height=0.10,\n    )\n    # Drive fingers to per-object adaptive opening before closing on the part.\n    targets = finger_opening_targets[wp]\n    for jname, target in targets.items():\n        set_joint_targets(\n            articulation_path=\"/World/Franka\",\n            joint_name=jname,\n            target_position=target,\n        )\n    # Read back finger state to confirm symmetric vs asymmetric load.\n    get_gripper_state(\n        articulation=\"/World/Franka\",\n        gripper_joints=[\"Finger_A_Joint\", \"Finger_B_Joint\", \"Finger_C_Joint\"],\n    )\n\n# ── Pick-place controller: 3 workpieces, per-item drop targets ───────────────\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    robot_family=\"franka\",\n    source_paths=workpiece_paths,\n    destination_path=\"/World/OutfeedBin\",\n    drop_targets={\n        \"/World/SmallCube\": [-0.50, -0.05, 0.82],\n        \"/World/Cylinder\":  [-0.45,  0.00, 0.83],\n        \"/World/Rod\":       [-0.40,  0.05, 0.82],\n    },\n    approach_height=0.10,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/OutfeedBin\",\n    ],\n    sensor_path=\"/World/BinArrivalSensor\",\n)\n\n# ── Post-run verification: read each workpiece's settled world transform ─────\nfor wp in workpiece_paths:\n    get_world_transform(prim_path=wp)",
+  "settle_state": {
+    "workpieces_landed_in_bin": {
+      "/World/SmallCube": [-0.50, -0.05, 0.81],
+      "/World/Cylinder":  [-0.45,  0.00, 0.815],
+      "/World/Rod":       [-0.40,  0.05, 0.81]
+    },
+    "bin_static": {
+      "/World/OutfeedBin": {
+        "position": [-0.45, 0.0, 0.78],
+        "size": [0.30, 0.30, 0.08]
+      }
+    },
+    "robot": {
+      "/World/Franka": "home_pose"
+    },
+    "finger_drive_state_per_object": {
+      "/World/SmallCube": {"Finger_A_Joint": -0.018, "Finger_B_Joint": -0.018, "Finger_C_Joint": -0.018},
+      "/World/Cylinder":  {"Finger_A_Joint": -0.030, "Finger_B_Joint": -0.030, "Finger_C_Joint": -0.030},
+      "/World/Rod":       {"Finger_A_Joint": -0.018, "Finger_B_Joint": -0.026, "Finger_C_Joint": -0.018}
+    },
+    "adaptive_grasp_signals": {
+      "n_workpieces_picked": 3,
+      "asymmetric_grasps_used": 1,
+      "finger_collision_events": 0,
+      "in_flight_roll_events": 0
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Cell",
+        "place_path": "/World/OutfeedBin",
+        "robot_kind": "franka",
+        "gripper_type": "three_finger_adaptive"
+      }
+    ],
+    "workpiece_paths": [
+      "/World/SmallCube",
+      "/World/Cylinder",
+      "/World/Rod"
+    ],
+    "finger_joint_paths": [
+      "/World/Franka/panda_hand/Finger_A_Joint",
+      "/World/Franka/panda_hand/Finger_B_Joint",
+      "/World/Franka/panda_hand/Finger_C_Joint"
+    ],
+    "expected_in_bin": [
+      "/World/SmallCube",
+      "/World/Cylinder",
+      "/World/Rod"
+    ]
+  },
+  "simulate_args": {
+    "target_path": "/World/OutfeedBin",
+    "cube_paths": [
+      "/World/SmallCube",
+      "/World/Cylinder",
+      "/World/Rod"
+    ],
+    "duration_s": 180,
+    "xy_tolerance": 0.06
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": [
+      "/World/Table",
+      "/World/OutfeedBin"
+    ],
+    "sensor_path": "/World/BinArrivalSensor",
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "Finger collides with adjacent workpiece during approach — KEY 3-FINGER FAILURE MODE. The 3-finger envelope at full open (radius 0.030 m around palm) is 60 mm wide, comparable to the 100 mm centre-to-centre object spacing. When approaching the middle Cylinder, the trailing Finger_A or Finger_C can clip the SmallCube on the -x side or the Rod on the +x side as the EE descends. Mitigation: workpieces are 0.10 m apart (SmallCube at x=-0.10, Cylinder at x=0.00, Rod at x=+0.10); cuRobo planning_obstacles includes the table — but neighbouring workpieces are NOT automatically obstacles. If clipping observed, add the neighbouring workpiece paths to planning_obstacles for each pick cycle, or sequence picks farthest-to-nearest so the picked object is removed before approaching the next.",
+    "Finger opening mis-sized for the workpiece (cube crushed or cylinder slips) — per-object finger_opening_targets are scaled to each shape. If the cylinder's wrap is set to -0.018 (cube setting) the fingers crush the 50 mm barrel and PhysX rejects the contact / cylinder squirts free; if the cube's pinch is set to -0.030 (cylinder setting) the fingers contact air around the 40 mm cube and grip force is zero (no friction → drop). Mitigation: finger_opening_targets dict is keyed by workpiece path; controller MUST switch openings between pick cycles via set_joint_targets BEFORE the grasp phase, not after.",
+    "Asymmetric finger load on rod causes unstable in-flight pose — Rod uses Finger_B at -0.026 (deeper wrap) vs Finger_A/C at -0.018 (shallower pinch). During transport, gravity acts on the rod's centre while only Finger_B's underside is supporting the barrel — the rod can rotate about its long axis under inertia, twisting against the two pinch fingers. Mitigation: rubber material on fingers AND objects gives mu≈0.9 friction; rod linearDamping=0.5 suppresses oscillation; if in-flight roll persists, increase Finger_B opening to -0.028 (deeper cradle).",
+    "Wrap-grasp on cylinder rolls during transport — even with three symmetric fingers, a cylinder gripped at its top cap can roll about its vertical (longitudinal) axis under cuRobo trajectory curvature changes; the contact patches at 120° intervals provide rotational friction but not perfect lock. Mitigation: cuRobo Cartesian transit is mostly straight-line above the table; if roll observed in function-gate run, use grasp_object with grasp_type='from_file' so the saved YAML records the desired EE-rotation at grasp, and the controller maintains that orientation through transit.",
+    "check_collisions reports missing CollisionAPI on a finger — happens if apply_api_schema is called BEFORE create_prim for that finger path (USD API application requires the prim to exist first). Mitigation: code authors fingers via create_prim then applies the three schemas (PhysicsRigidBodyAPI, PhysicsCollisionAPI, PhysxRigidBodyAPI) in sequence — the loop guarantees order.",
+    "Prismatic joint axis-direction error (finger opens away from the centre instead of closing inward) — the joint axis is the radial unit vector (cos(ang), sin(ang), 0); 'closing' is achieved by driving target_position toward limit_upper=0.0 and 'opening' by driving toward limit_lower=-0.020. If the axis sign is inverted (e.g. (-cos, -sin, 0)) the meanings flip and set_joint_targets(target=-0.018) actually OPENS the finger instead of closing. Mitigation: code uses (cos(ang), sin(ang), 0) consistently with negative limit_lower for the opening direction; verified by visual inspection that target_position=0.0 keeps the finger at rest pose."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_runtime_candidate_discovery": false,
+      "gripper_type": "three_finger_adaptive",
+      "has_mixed_object_shapes": true,
+      "has_per_object_finger_openings": true,
+      "has_asymmetric_grip_mode": true,
+      "n_workpieces": 3
+    },
+    "structural_tags": [
+      "isaac:end_effector.three_finger_adaptive",
+      "isaac:industry.adaptive_grasp",
+      "isaac:gesture.wrap_grasp",
+      "isaac:robot.fixed_base.arm",
+      "isaac:robot.franka",
+      "isaac:topology.single_station",
+      "isaac:gripper.three_finger_robotiq_proxy",
+      "isaac:grasp.define_grasp_pose",
+      "isaac:grasp.per_object_finger_opening",
+      "isaac:workpiece.mixed_shape",
+      "isaac:destination.single_bin"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "franka", "ur10"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "three_finger_gripper_compatible"
+    },
+    "outfeed_bin": {
+      "constraints": ["bin"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "single_open_top_bin"
+    },
+    "arrival_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpieces": {
+      "constraints": ["cube", "cylinder", "rod", "mixed_shape"],
+      "min": 2,
+      "max": 3,
+      "param_name": "n_workpieces",
+      "unordered": false,
+      "note": "Mixed-shape workpieces (cube + cylinder + rod). Each requires its own finger_opening target."
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "family": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "outfeed_bin": {
+      "path": "/World/OutfeedBin",
+      "position": [-0.45, 0.0, 0.78],
+      "size": [0.30, 0.30, 0.08]
+    },
+    "arrival_sensor": {
+      "path": "/World/BinArrivalSensor",
+      "position": [-0.45, 0.0, 0.82],
+      "size": [0.28, 0.28, 0.06]
+    },
+    "workpieces": [
+      {
+        "path": "/World/SmallCube",
+        "shape": "cube",
+        "edge_m": 0.04,
+        "mass_kg": 0.05,
+        "spawn_position": [-0.10, 0.40, 0.77],
+        "grasp_mode": "tight_three_point_pinch",
+        "finger_openings": {"Finger_A_Joint": -0.018, "Finger_B_Joint": -0.018, "Finger_C_Joint": -0.018},
+        "gripper_offset": [0.0, 0.0, 0.025],
+        "drop_target": [-0.50, -0.05, 0.82]
+      },
+      {
+        "path": "/World/Cylinder",
+        "shape": "cylinder",
+        "radius_m": 0.025,
+        "height_m": 0.07,
+        "mass_kg": 0.10,
+        "spawn_position": [0.00, 0.40, 0.785],
+        "grasp_mode": "wide_wrap",
+        "finger_openings": {"Finger_A_Joint": -0.030, "Finger_B_Joint": -0.030, "Finger_C_Joint": -0.030},
+        "gripper_offset": [0.0, 0.0, 0.045],
+        "drop_target": [-0.45, 0.00, 0.83]
+      },
+      {
+        "path": "/World/Rod",
+        "shape": "rod",
+        "radius_m": 0.015,
+        "height_m": 0.10,
+        "mass_kg": 0.07,
+        "spawn_position": [0.10, 0.40, 0.80],
+        "spawn_rotation_euler": [0.0, 90.0, 0.0],
+        "grasp_mode": "asymmetric_enclosure",
+        "finger_openings": {"Finger_A_Joint": -0.018, "Finger_B_Joint": -0.026, "Finger_C_Joint": -0.018},
+        "gripper_offset": [0.0, 0.0, 0.020],
+        "drop_target": [-0.40, 0.05, 0.82]
+      }
+    ],
+    "gripper_proxy": {
+      "palm_path": "/World/Franka/panda_hand/Palm",
+      "finger_paths": [
+        "/World/Franka/panda_hand/Finger_A",
+        "/World/Franka/panda_hand/Finger_B",
+        "/World/Franka/panda_hand/Finger_C"
+      ],
+      "finger_joint_paths": [
+        "/World/Franka/panda_hand/Finger_A_Joint",
+        "/World/Franka/panda_hand/Finger_B_Joint",
+        "/World/Franka/panda_hand/Finger_C_Joint"
+      ],
+      "finger_angles_deg": [0.0, 120.0, 240.0],
+      "finger_rest_radius_m": 0.030,
+      "joint_limit_lower_m": -0.020,
+      "joint_limit_upper_m": 0.000,
+      "modeling_note": "Nucleus-free proxy for Robotiq 3-Finger Adaptive Gripper. No real Robotiq URDF — three prismatic Cube fingers at 120° around a central palm Xform."
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.5, 0.3, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(prim_path={{gripper_proxy.palm_path}}, prim_type=\"Xform\")\n\nfinger_paths = [{{gripper_proxy.finger_paths[0]}}, {{gripper_proxy.finger_paths[1]}}, {{gripper_proxy.finger_paths[2]}}]\nfinger_joint_paths = [{{gripper_proxy.finger_joint_paths[0]}}, {{gripper_proxy.finger_joint_paths[1]}}, {{gripper_proxy.finger_joint_paths[2]}}]\nfinger_angles_deg = [{{gripper_proxy.finger_angles_deg[0]}}, {{gripper_proxy.finger_angles_deg[1]}}, {{gripper_proxy.finger_angles_deg[2]}}]\nfinger_rest_radius = {{gripper_proxy.finger_rest_radius_m}}\nfinger_local_z = -0.040\n\nfor path, ang in zip(finger_paths, finger_angles_deg):\n    rad = ((ang) * 0.017453292519943295)\n    fx = finger_rest_radius * 1.0\n    fy = finger_rest_radius * 0.0\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[fx, fy, finger_local_z], scale=[0.005, 0.0075, 0.020])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\nfor jpath, fpath, ang in zip(finger_joint_paths, finger_paths, finger_angles_deg):\n    rad = ((ang) * 0.017453292519943295)\n    create_articulated_joint(\n        joint_path=jpath,\n        body0_path=\"{{primary_robot.path}}/panda_hand\",\n        body1_path=fpath,\n        joint_type=\"prismatic\",\n        axis=[1.0, 0.0, 0.0],\n        limit_lower={{gripper_proxy.joint_limit_lower_m}},\n        limit_upper={{gripper_proxy.joint_limit_upper_m}},\n        drive_type=\"force\",\n    )\n    apply_api_schema(prim_path=jpath, schema_name=\"PhysicsPrismaticJointAPI\")\n\ncheck_collisions(prim_path=\"{{primary_robot.path}}/panda_hand\")\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].spawn_position}}, scale=[0.02, 0.02, 0.02])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[0].path}}, attr_name=\"physics:mass\", value={{workpieces[0].mass_kg}})\nset_semantic_label(prim_path={{workpieces[0].path}}, label=\"small_cube\", class_name=\"adaptive_workpiece\")\napply_physics_material(prim_path={{workpieces[0].path}}, material_name=\"rubber\")\n\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cylinder\", position={{workpieces[1].spawn_position}}, scale=[0.025, 0.025, 0.035])\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[1].path}}, attr_name=\"physics:mass\", value={{workpieces[1].mass_kg}})\nset_semantic_label(prim_path={{workpieces[1].path}}, label=\"cylinder\", class_name=\"adaptive_workpiece\")\napply_physics_material(prim_path={{workpieces[1].path}}, material_name=\"rubber\")\n\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cylinder\", position={{workpieces[2].spawn_position}}, scale=[0.015, 0.015, 0.050], rotation_euler={{workpieces[2].spawn_rotation_euler}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\nset_attribute(prim_path={{workpieces[2].path}}, attr_name=\"physics:mass\", value={{workpieces[2].mass_kg}})\nset_semantic_label(prim_path={{workpieces[2].path}}, label=\"rod\", class_name=\"adaptive_workpiece\")\napply_physics_material(prim_path={{workpieces[2].path}}, material_name=\"rubber\")\n\nworkpiece_paths = [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}]\nbulk_set_attribute(prim_paths=workpiece_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=workpiece_paths, attr=\"physxRigidBody:linearDamping\", value=0.5)\n\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{workpieces[0].path}}, gripper_offset={{workpieces[0].gripper_offset}}, approach_direction=[0.0, 0.0, -1.0])\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{workpieces[1].path}}, gripper_offset={{workpieces[1].gripper_offset}}, approach_direction=[0.0, 0.0, -1.0])\ndefine_grasp_pose(robot_path={{primary_robot.path}}, object_path={{workpieces[2].path}}, gripper_offset={{workpieces[2].gripper_offset}}, approach_direction=[0.0, 0.0, -1.0])\n\ncreate_bin(prim_path={{outfeed_bin.path}}, position={{outfeed_bin.position}}, size={{outfeed_bin.size}})\nadd_proximity_sensor(sensor_path={{arrival_sensor.path}}, position={{arrival_sensor.position}}, size={{arrival_sensor.size}})\n\nfor jname in (\"Finger_A_Joint\", \"Finger_B_Joint\", \"Finger_C_Joint\"):\n    set_joint_targets(articulation_path={{primary_robot.path}}, joint_name=jname, target_position=0.0)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    robot_family={{primary_robot.family}},\n    source_paths=workpiece_paths,\n    destination_path={{outfeed_bin.path}},\n    drop_targets={\n        {{workpieces[0].path}}: {{workpieces[0].drop_target}},\n        {{workpieces[1].path}}: {{workpieces[1].drop_target}},\n        {{workpieces[2].path}}: {{workpieces[2].drop_target}},\n    },\n    approach_height=0.10,\n    planning_obstacles=[\"/World/Table\", {{outfeed_bin.path}}],\n    sensor_path={{arrival_sensor.path}},\n)\n\nfor wp in workpiece_paths:\n    get_world_transform(prim_path=wp)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ⏳; function-gate ⏳ Kit RPC"
+}

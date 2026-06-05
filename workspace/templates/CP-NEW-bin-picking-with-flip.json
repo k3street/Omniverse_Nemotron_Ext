@@ -17,32 +17,66 @@
     "get_world_transform",
     "check_collisions"
   ],
-  "thoughts": "Design rationale for CP-NEW-bin-picking-with-flip:\n\n1) Distinctiveness: this is the FIRST canonical to compose setup_pick_place_controller with an explicit intermediate move_to_pose flip waypoint inside the transfer arc. CP-NEW-heap-zone-unstack and CP-NEW-maniskill-stack-cube tag pattern_hint='reorient' but the orientation change is implicit (pile geometry / vertical stack); here the reorient is an EXPLICIT mid-air flip — the workpiece changes from lying-on-side (rotation X=90 deg) to upright (identity quaternion) via a 180-deg wrist roll between pick and place. Success criterion explicitly tests rotation_y within +/- 5 deg, not just spatial arrival.\n\n2) Scene layout: Franka at [0, 0, 0.75] on a 0.75 m table. Source bin at [0, 0.40, 0.80] with one workpiece lying on its side. Destination bin at [0, -0.45, 0.80]. Cube edge 0.06 m (small enough that a 90-deg flip fits within the cuRobo planning envelope without elbow self-collision). Workpiece initial pose: position [0, 0.40, 0.83] (centred in source bin interior, 30 mm above bin floor), orientation quaternion [0.7071, 0.7071, 0, 0] (rotation +90 deg about X) — so the cube lies on its side along the X axis.\n\n3) Grasp pose: define_grasp_pose called with approach_direction=[0, 0, -1] (top-down toward the lying-cube top face which is now the cube's +Y face since the cube is rotated 90 deg about X). Gripper_offset=[0, 0, 0.04] — 40 mm hover above the cube centroid for parallel-jaw approach. The grasp YAML written to workspace/grasp_poses/Workpiece.isaac_grasp is advisory for downstream tools but is referenced by the pick stage to inform jaw orientation.\n\n4) Three-segment trajectory (pick + flip + place):\n   Segment A (pick): setup_pick_place_controller with source_paths=['/World/SourceBin/Workpiece'], drop_targets={... : flip_pre_position}, target_source='curobo'. The controller drives the EE to grasp the lying cube, close the gripper, and lift to the flip pre-position [0.0, 0.0, 1.20] (high transit, mid-bin axis).\n   Segment B (flip): move_to_pose with target_position=[0.0, 0.0, 1.20] and target_orientation=[0.0, 1.0, 0.0, 0.0] — this is the 180-deg roll about the EE Y axis (quat [w=0, x=0, y=1, z=0] = rotation pi about Y). The wrist holds the part aloft and rotates the grasped cube from on-side to upright. planner='rmpflow' (fast reactive replanning around the buffered cuRobo state).\n   Segment C (place): a second setup_pick_place_controller call with source_paths=['/World/SourceBin/Workpiece'] (the part is still grasped — controller continues from current EE state) and drop_targets={... : [0, -0.45, 0.86]} drives the now-reoriented part into the destination bin.\n   Note: This canonical models the three segments as a sequential tool chain; the function-gate harness handles the controller-state continuity since pick_place_controller emits a single articulation drive stream that persists across calls when robot_path is the same.\n\n5) Why flip waypoint at [0.0, 0.0, 1.20]: This y=0 transit point sits directly above the Franka base, equidistant from both bins. Z=1.20 m gives 0.10 m clearance above the highest bin wall (bin top z = 0.80+0.20 = 1.00). The wrist roll happens here because elbow self-collision risk is lowest when the EE is centred above the base (links fold symmetrically). check_collisions is called at this waypoint to verify no self-collision before committing the place segment.\n\n6) Physics: CPU dynamics (MBP broadphase) for deterministic part settling. enable_ccd=True on the workpiece (small cube + grasp/release transitions benefit from continuous collision detection). sleepThreshold=0.0 so PhysX does not freeze the part mid-flip if velocities momentarily drop near zero during the wrist roll.\n\n7) Franka reach check: source bin centre at y=+0.40 (dist 0.40 m from base), destination bin centre at y=-0.45 (dist 0.45 m). Flip waypoint at base axis (dist ~0.45 m vertical, 0 horizontal). All within Franka 0.855 m horizontal reach + 1.19 m total reach envelope. Max wrist height across the trajectory = 1.20 m (flip waypoint), comfortably inside reachable workspace.\n\n8) Why move_to_pose (not plan_trajectory): the flip is a single-target re-orientation move (one waypoint, identical position to pre-flip). move_to_pose with planner='rmpflow' is the cleaner API for a single-pose target. plan_trajectory would emit a joint-trajectory list which would then need follow-trajectory execution — overkill for a 1-waypoint roll. If rmpflow refuses the inverted wrist quat, fall back to plan_trajectory with the same single waypoint + explicit elbow seed.\n\n9) Arrival confirmation: add_proximity_sensor at the destination bin captures spatial arrival. The rotation-Y check is post-place via get_world_transform on the workpiece; the function-gate harness reads simulate_args.target_rotation_tolerance_deg=5.0 to enforce the upright criterion. This is the distinguishing 'reorient' contract over plain 'pick_place'.\n\n10) Failure modes: see failure_modes list. Key risks: (a) flip waypoint induces wrist-over-base self-collision; (b) grasp slips during the 180-deg roll because finger grip force is calibrated for a static load, not a rotating one; (c) part lands on the wrong side because the flip overshoots/undershoots 180 deg.\n\n11) Why curobo for pick/place but rmpflow for flip: cuRobo's CUDA-graph collision planning is best for navigating the bin interiors (planning_obstacles list). rmpflow's reactive vector-field control is better for a single in-air re-orientation where the obstacle set is empty (the part is held, no environment in the swept volume). Mixing planners across segments is honest about which controller is suited for which sub-task.",
-  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Robot table platform ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic flip ──────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\n# Mounted at z=0.75 (table top). Source bin at y=+0.40, dest bin at y=-0.45.\n# Flip waypoint at [0, 0, 1.20] is directly above the base — minimises self-collision.\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Source bin (open-top, holds the lying workpiece) ─────────────────────────\n# External 0.25 x 0.25 x 0.20 m. Walls 10 mm. Floor at z=0.80.\ncreate_bin(\n    prim_path=\"/World/SourceBin\",\n    size=[0.25, 0.25, 0.20],\n    position=[0, 0.40, 0.80],\n    wall_thickness=0.01,\n)\n\n# ── Destination bin (open-top, receives the upright workpiece) ───────────────\ncreate_bin(\n    prim_path=\"/World/DestBin\",\n    size=[0.25, 0.25, 0.20],\n    position=[0, -0.45, 0.80],\n    wall_thickness=0.01,\n)\n\n# ── Workpiece: 0.06 m cube lying on its side in the source bin ───────────────\n# Position: bin floor (0.80) + cube half-edge when lying (0.03) + 0.005 settle = 0.835\n# Orientation: [0.7071, 0.7071, 0, 0] = rotation +90 deg about X axis.\n# In this lying pose, what was the cube +Z face is now the +Y face.\ncreate_prim(\n    prim_path=\"/World/SourceBin/Workpiece\",\n    prim_type=\"Cube\",\n    position=[0, 0.40, 0.835],\n    size=0.06,\n)\nset_attribute(\n    prim_path=\"/World/SourceBin/Workpiece\",\n    attr_name=\"xformOp:orient\",\n    value=[0.7071, 0.7071, 0, 0],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/SourceBin/Workpiece\", schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[\"/World/SourceBin/Workpiece\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/SourceBin/Workpiece\"],\n    attr=\"physxRigidBody:enableCCD\",\n    value=True,\n)\napply_physics_material(prim_path=\"/World/SourceBin/Workpiece\", material_name=\"rubber\")\n\n# ── Arrival sensor inside destination bin ────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.86],\n    size=[0.22, 0.22, 0.08],\n)\n\n# ── Grasp pose: side approach for the lying workpiece ────────────────────────\n# approach_direction=[0,0,-1] (top-down onto the now-+Y face of the rotated cube).\n# gripper_offset=[0,0,0.04] — 40 mm hover for jaw closure clearance.\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/SourceBin/Workpiece\",\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0.04],\n)\n\n# ── Segment A: pick from source bin, lift to flip waypoint ───────────────────\n# cuRobo plans collision-free entry past SourceBin walls, closes the gripper,\n# and drives the EE to the flip pre-position [0.0, 0.0, 1.20] above the base.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/SourceBin/Workpiece\"],\n    destination_path=\"/World/Cell\",\n    drop_targets={\"/World/SourceBin/Workpiece\": [0.0, 0.0, 1.20]},\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/SourceBin\",\n        \"/World/DestBin\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n)\n\n# ── Self-collision guard before flip ─────────────────────────────────────────\n# At the flip waypoint the wrist hangs above the base; verify no self-clash\n# before committing the 180-deg roll.\ncheck_collisions(\n    prim_path=\"/World/Franka\",\n)\n\n# ── Segment B: mid-air flip — 180-deg roll about EE Y axis ──────────────────\n# target_orientation [0, 1, 0, 0] = quat (w=0, x=0, y=1, z=0) = rotation pi about Y.\n# The wrist holds position and rotates the grasped cube from lying to upright.\n# planner='rmpflow' handles the in-air reorient without obstacle context.\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[0.0, 0.0, 1.20],\n    target_orientation=[0.0, 1.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n# ── Diagnostic read: confirm part orientation after flip ────────────────────\n# Should report rotation Y close to 0 deg in world (cube returned to identity).\nget_world_transform(prim_path=\"/World/SourceBin/Workpiece\")\n\n# ── Segment C: place into destination bin, upright ──────────────────────────\n# Second setup_pick_place_controller call — controller continues from current\n# EE state (same robot_path), drops the now-upright cube at [0, -0.45, 0.86].\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/SourceBin/Workpiece\"],\n    destination_path=\"/World/DestBin\",\n    drop_targets={\"/World/SourceBin/Workpiece\": [0, -0.45, 0.86]},\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/SourceBin\",\n        \"/World/DestBin\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n)\n\n# ── Final orientation check ─────────────────────────────────────────────────\n# After place, read the part transform; the simulate_args contract enforces\n# rotation_y within +/- 5 deg of zero (identity-upright) AS WELL AS spatial\n# arrival inside the destination bin AABB — both are required for reorient.\nget_world_transform(prim_path=\"/World/SourceBin/Workpiece\")",
+  "thoughts": "Design rationale for CP-NEW-bin-picking-with-flip:\n\n1) Distinctiveness: this is the FIRST canonical to compose setup_pick_place_controller with an explicit intermediate move_to_pose flip waypoint inside the transfer arc. CP-NEW-heap-zone-unstack and CP-NEW-maniskill-stack-cube tag pattern_hint='reorient' but the orientation change is implicit (pile geometry / vertical stack); here the reorient is an EXPLICIT mid-air flip \u2014 the workpiece changes from lying-on-side (rotation X=90 deg) to upright (identity quaternion) via a 180-deg wrist roll between pick and place. Success criterion explicitly tests rotation_y within +/- 5 deg, not just spatial arrival.\n\n2) Scene layout: Franka at [0, 0, 0.75] on a 0.75 m table. Source bin at [0, 0.40, 0.80] with one workpiece lying on its side. Destination bin at [0, -0.45, 0.80]. Cube edge 0.06 m (small enough that a 90-deg flip fits within the cuRobo planning envelope without elbow self-collision). Workpiece initial pose: position [0, 0.40, 0.83] (centred in source bin interior, 30 mm above bin floor), orientation quaternion [0.7071, 0.7071, 0, 0] (rotation +90 deg about X) \u2014 so the cube lies on its side along the X axis.\n\n3) Grasp pose: define_grasp_pose called with approach_direction=[0, 0, -1] (top-down toward the lying-cube top face which is now the cube's +Y face since the cube is rotated 90 deg about X). Gripper_offset=[0, 0, 0.04] \u2014 40 mm hover above the cube centroid for parallel-jaw approach. The grasp YAML written to workspace/grasp_poses/Workpiece.isaac_grasp is advisory for downstream tools but is referenced by the pick stage to inform jaw orientation.\n\n4) Three-segment trajectory (pick + flip + place):\n   Segment A (pick): setup_pick_place_controller with source_paths=['/World/SourceBin/Workpiece'], drop_targets={... : flip_pre_position}, target_source='curobo'. The controller drives the EE to grasp the lying cube, close the gripper, and lift to the flip pre-position [0.0, 0.0, 1.20] (high transit, mid-bin axis).\n   Segment B (flip): move_to_pose with target_position=[0.0, 0.0, 1.20] and target_orientation=[0.0, 1.0, 0.0, 0.0] \u2014 this is the 180-deg roll about the EE Y axis (quat [w=0, x=0, y=1, z=0] = rotation pi about Y). The wrist holds the part aloft and rotates the grasped cube from on-side to upright. planner='rmpflow' (fast reactive replanning around the buffered cuRobo state).\n   Segment C (place): a second setup_pick_place_controller call with source_paths=['/World/SourceBin/Workpiece'] (the part is still grasped \u2014 controller continues from current EE state) and drop_targets={... : [0, -0.45, 0.86]} drives the now-reoriented part into the destination bin.\n   Note: This canonical models the three segments as a sequential tool chain; the function-gate harness handles the controller-state continuity since pick_place_controller emits a single articulation drive stream that persists across calls when robot_path is the same.\n\n5) Why flip waypoint at [0.0, 0.0, 1.20]: This y=0 transit point sits directly above the Franka base, equidistant from both bins. Z=1.20 m gives 0.10 m clearance above the highest bin wall (bin top z = 0.80+0.20 = 1.00). The wrist roll happens here because elbow self-collision risk is lowest when the EE is centred above the base (links fold symmetrically). check_collisions is called at this waypoint to verify no self-collision before committing the place segment.\n\n6) Physics: CPU dynamics (MBP broadphase) for deterministic part settling. enable_ccd=True on the workpiece (small cube + grasp/release transitions benefit from continuous collision detection). sleepThreshold=0.0 so PhysX does not freeze the part mid-flip if velocities momentarily drop near zero during the wrist roll.\n\n7) Franka reach check: source bin centre at y=+0.40 (dist 0.40 m from base), destination bin centre at y=-0.45 (dist 0.45 m). Flip waypoint at base axis (dist ~0.45 m vertical, 0 horizontal). All within Franka 0.855 m horizontal reach + 1.19 m total reach envelope. Max wrist height across the trajectory = 1.20 m (flip waypoint), comfortably inside reachable workspace.\n\n8) Why move_to_pose (not plan_trajectory): the flip is a single-target re-orientation move (one waypoint, identical position to pre-flip). move_to_pose with planner='rmpflow' is the cleaner API for a single-pose target. plan_trajectory would emit a joint-trajectory list which would then need follow-trajectory execution \u2014 overkill for a 1-waypoint roll. If rmpflow refuses the inverted wrist quat, fall back to plan_trajectory with the same single waypoint + explicit elbow seed.\n\n9) Arrival confirmation: add_proximity_sensor at the destination bin captures spatial arrival. The rotation-Y check is post-place via get_world_transform on the workpiece; the function-gate harness reads simulate_args.target_rotation_tolerance_deg=5.0 to enforce the upright criterion. This is the distinguishing 'reorient' contract over plain 'pick_place'.\n\n10) Failure modes: see failure_modes list. Key risks: (a) flip waypoint induces wrist-over-base self-collision; (b) grasp slips during the 180-deg roll because finger grip force is calibrated for a static load, not a rotating one; (c) part lands on the wrong side because the flip overshoots/undershoots 180 deg.\n\n11) Why curobo for pick/place but rmpflow for flip: cuRobo's CUDA-graph collision planning is best for navigating the bin interiors (planning_obstacles list). rmpflow's reactive vector-field control is better for a single in-air re-orientation where the obstacle set is empty (the part is held, no environment in the swept volume). Mixing planners across segments is honest about which controller is suited for which sub-task.",
+  "code": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# \u2500\u2500 Robot table platform \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics: CPU dynamics for deterministic flip \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Franka arm \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Mounted at z=0.75 (table top). Source bin at y=+0.40, dest bin at y=-0.45.\n# Flip waypoint at [0, 0, 1.20] is directly above the base \u2014 minimises self-collision.\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# \u2500\u2500 Source bin (open-top, holds the lying workpiece) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# External 0.25 x 0.25 x 0.20 m. Walls 10 mm. Floor at z=0.80.\ncreate_bin(\n    prim_path=\"/World/SourceBin\",\n    size=[0.25, 0.25, 0.20],\n    position=[0, 0.40, 0.80],\n    wall_thickness=0.01,\n)\n\n# \u2500\u2500 Destination bin (open-top, receives the upright workpiece) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_bin(\n    prim_path=\"/World/DestBin\",\n    size=[0.25, 0.25, 0.20],\n    position=[0, -0.45, 0.80],\n    wall_thickness=0.01,\n)\n\n# \u2500\u2500 Workpiece: 0.06 m cube lying on its side in the source bin \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Position: bin floor (0.80) + cube half-edge when lying (0.03) + 0.005 settle = 0.835\n# Orientation: [0.7071, 0.7071, 0, 0] = rotation +90 deg about X axis.\n# In this lying pose, what was the cube +Z face is now the +Y face.\ncreate_prim(\n    prim_path=\"/World/SourceBin/Workpiece\",\n    prim_type=\"Cube\",\n    position=[0, 0.40, 0.835],\n    size=0.06,\n)\nset_attribute(\n    prim_path=\"/World/SourceBin/Workpiece\",\n    attr_name=\"xformOp:orient\",\n    value=[0.7071, 0.7071, 0, 0],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/SourceBin/Workpiece\", schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[\"/World/SourceBin/Workpiece\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/SourceBin/Workpiece\"],\n    attr=\"physxRigidBody:enableCCD\",\n    value=True,\n)\napply_physics_material(prim_path=\"/World/SourceBin/Workpiece\", material_name=\"rubber\")\n\n# \u2500\u2500 Arrival sensor inside destination bin \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.86],\n    size=[0.22, 0.22, 0.08],\n)\n\n# \u2500\u2500 Grasp pose: side approach for the lying workpiece \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# approach_direction=[0,0,-1] (top-down onto the now-+Y face of the rotated cube).\n# gripper_offset=[0,0,0.04] \u2014 40 mm hover for jaw closure clearance.\ndefine_grasp_pose(\n    robot_path=\"/World/Franka\",\n    object_path=\"/World/SourceBin/Workpiece\",\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0.04],\n)\n\n# \u2500\u2500 Segment A: pick from source bin, lift to flip waypoint \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# cuRobo plans collision-free entry past SourceBin walls, closes the gripper,\n# and drives the EE to the flip pre-position [0.0, 0.0, 1.20] above the base.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/SourceBin/Workpiece\"],\n    destination_path=\"/World/Cell\",\n    drop_targets={\"/World/SourceBin/Workpiece\": [0.0, 0.0, 1.20]},\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/SourceBin\",\n        \"/World/DestBin\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n)\n\n# \u2500\u2500 Self-collision guard before flip \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# At the flip waypoint the wrist hangs above the base; verify no self-clash\n# before committing the 180-deg roll.\ncheck_collisions(\n    prim_path=\"/World/Franka\",\n)\n\n# \u2500\u2500 Segment B: mid-air flip \u2014 180-deg roll about EE Y axis \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# target_orientation [0, 1, 0, 0] = quat (w=0, x=0, y=1, z=0) = rotation pi about Y.\n# The wrist holds position and rotates the grasped cube from lying to upright.\n# planner='rmpflow' handles the in-air reorient without obstacle context.\nmove_to_pose(\n    articulation_path=\"/World/Franka\",\n    target_position=[0.0, 0.0, 1.20],\n    target_orientation=[0.0, 1.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"franka\",\n)\n\n# \u2500\u2500 Diagnostic read: confirm part orientation after flip \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Should report rotation Y close to 0 deg in world (cube returned to identity).\nget_world_transform(prim_path=\"/World/SourceBin/Workpiece\")\n\n# \u2500\u2500 Segment C: place into destination bin, upright \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Second setup_pick_place_controller call \u2014 controller continues from current\n# EE state (same robot_path), drops the now-upright cube at [0, -0.45, 0.86].\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/SourceBin/Workpiece\"],\n    destination_path=\"/World/DestBin\",\n    drop_targets={\"/World/SourceBin/Workpiece\": [0, -0.45, 0.86]},\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/SourceBin\",\n        \"/World/DestBin\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n)\n\n# \u2500\u2500 Final orientation check \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# After place, read the part transform; the simulate_args contract enforces\n# rotation_y within +/- 5 deg of zero (identity-upright) AS WELL AS spatial\n# arrival inside the destination bin AABB \u2014 both are required for reorient.\nget_world_transform(prim_path=\"/World/SourceBin/Workpiece\")",
   "settle_state": {
     "source_bin": {
       "/World/SourceBin": {
-        "position": [0, 0.40, 0.80],
-        "size": [0.25, 0.25, 0.20]
+        "position": [
+          0,
+          0.4,
+          0.8
+        ],
+        "size": [
+          0.25,
+          0.25,
+          0.2
+        ]
       }
     },
     "destination_bin": {
       "/World/DestBin": {
-        "position": [0, -0.45, 0.80],
-        "size": [0.25, 0.25, 0.20]
+        "position": [
+          0,
+          -0.45,
+          0.8
+        ],
+        "size": [
+          0.25,
+          0.25,
+          0.2
+        ]
       }
     },
     "workpiece_initial": {
       "/World/SourceBin/Workpiece": {
-        "position": [0, 0.40, 0.835],
-        "orientation": [0.7071, 0.7071, 0, 0],
+        "position": [
+          0,
+          0.4,
+          0.835
+        ],
+        "orientation": [
+          0.7071,
+          0.7071,
+          0,
+          0
+        ],
         "size": 0.06
       }
     },
     "workpiece_final_expected": {
       "/World/SourceBin/Workpiece": {
-        "position": [0, -0.45, 0.86],
-        "orientation": [1, 0, 0, 0],
+        "position": [
+          0,
+          -0.45,
+          0.86
+        ],
+        "orientation": [
+          1,
+          0,
+          0,
+          0
+        ],
         "rotation_y_tolerance_deg": 5.0
       }
     },
@@ -57,7 +91,12 @@
         "pick_path": "/World/SourceBin",
         "place_path": "/World/DestBin",
         "robot_kind": "franka",
-        "flip_target_orientation": [0.0, 1.0, 0.0, 0.0]
+        "flip_target_orientation": [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
       }
     ],
     "cube_paths": [
@@ -65,7 +104,12 @@
     ],
     "arrival_sensor_path": "/World/ArrivalSensor",
     "target_rotation_tolerance_deg": 5.0,
-    "expected_final_rotation_quat": [1.0, 0.0, 0.0, 0.0]
+    "expected_final_rotation_quat": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ]
   },
   "simulate_args": {
     "target_path": "/World/DestBin",
@@ -74,25 +118,42 @@
       "/World/SourceBin/Workpiece"
     ],
     "duration_s": 180,
-    "xy_tolerance": 0.10,
+    "xy_tolerance": 0.1,
     "target_rotation_tolerance_deg": 5.0,
-    "expected_final_rotation_quat": [1.0, 0.0, 0.0, 0.0]
+    "expected_final_rotation_quat": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ]
   },
   "diagnose_args": {
     "robot_path": "/World/Franka",
-    "obstacles": ["/World/SourceBin", "/World/DestBin", "/World/Table"],
+    "obstacles": [
+      "/World/SourceBin",
+      "/World/DestBin",
+      "/World/Table"
+    ],
     "sensor_path": "/World/ArrivalSensor",
-    "robot_base": [0.0, 0.0, 0.75],
-    "flip_waypoint": [0.0, 0.0, 1.20],
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "flip_waypoint": [
+      0.0,
+      0.0,
+      1.2
+    ],
     "workpiece_path": "/World/SourceBin/Workpiece"
   },
   "failure_modes": [
-    "Flip waypoint causes wrist-over-base self-collision — at [0, 0, 1.20] the wrist must roll 180 deg while the elbow folds toward the shoulder. Franka link2/link3 can clip link4/link5 in certain elbow-up configurations. check_collisions is called before the move_to_pose flip to detect this. Mitigation: increase flip waypoint z from 1.20 to 1.30 if self-collision is reported; alternatively, shift the waypoint laterally to [0.10, 0.0, 1.20] so the elbow has lateral room to splay.",
-    "Grasp slips during the 180-deg roll — Franka parallel-jaw grip force is constant; during the wrist roll the cube experiences a centripetal load proportional to (omega^2 * r). At rmpflow default angular velocity ~1 rad/s and r=0.04 m, centripetal force is ~0.04 N — well within friction budget for rubber material. However if the planner accelerates the wrist for time-optimal motion (omega>5 rad/s), the load can exceed 1 N and the cube may slip. Mitigation: cap planner velocity by passing a slower rmpflow profile, or switch to setup_pick_place_controller's built-in approach_velocity throttle.",
-    "Part lands on the wrong side because the flip overshoots/undershoots 180 deg — rmpflow target_orientation [0, 1, 0, 0] is a rotation pi about Y; if the planner takes the shorter angular path it may converge to the same quaternion via -pi (which is the same orientation but a different intermediate trajectory). Both paths land at identity quaternion in the workpiece frame, so the final rotation_y == 0 criterion is met. The failure mode is partial completion: if rmpflow times out at 170 deg of progress, the residual 10 deg yields rotation_y near 10 deg — outside the 5-deg tolerance. Mitigation: increase planner timeout or chain a second move_to_pose with the same target as a re-convergence step.",
-    "define_grasp_pose YAML write fails — workspace/grasp_poses/ may not exist if the working directory differs from project root. The _gen_define_grasp_pose handler calls os.makedirs(..., exist_ok=True), so the directory is created automatically. If a filesystem permission error occurs, the tool prints an error and pick execution continues (grasp YAML is advisory; the cuRobo controller uses planning_obstacles + drop_targets, not the YAML, for actual motion).",
-    "Second setup_pick_place_controller call resets the controller and drops the grasped cube — if the handler interprets a fresh source_paths/destination_path as a new pick cycle, it may open the gripper to re-grasp at SourceBin. Mitigation: the function-gate harness validates that the controller persists the grasped object between calls by checking get_gripper_state before the place segment; if a regression is detected, replace Segment C with a manual move_to_pose to the drop position followed by grasp_object(grasp_type='release').",
-    "Workpiece orientation [0.7071, 0.7071, 0, 0] not applied by set_attribute(xformOp:orient) — some Cube prims are created with xformOp:rotateXYZ instead of xformOp:orient and the orient attribute is silently ignored. If get_world_transform after physics step reports identity rotation, switch to set_attribute(prim_path=..., attr_name='xformOp:rotateXYZ', value=[90.0, 0.0, 0.0]) to author the 90-deg X rotation in Euler form."
+    "Flip waypoint causes wrist-over-base self-collision \u2014 at [0, 0, 1.20] the wrist must roll 180 deg while the elbow folds toward the shoulder. Franka link2/link3 can clip link4/link5 in certain elbow-up configurations. check_collisions is called before the move_to_pose flip to detect this. Mitigation: increase flip waypoint z from 1.20 to 1.30 if self-collision is reported; alternatively, shift the waypoint laterally to [0.10, 0.0, 1.20] so the elbow has lateral room to splay.",
+    "Grasp slips during the 180-deg roll \u2014 Franka parallel-jaw grip force is constant; during the wrist roll the cube experiences a centripetal load proportional to (omega^2 * r). At rmpflow default angular velocity ~1 rad/s and r=0.04 m, centripetal force is ~0.04 N \u2014 well within friction budget for rubber material. However if the planner accelerates the wrist for time-optimal motion (omega>5 rad/s), the load can exceed 1 N and the cube may slip. Mitigation: cap planner velocity by passing a slower rmpflow profile, or switch to setup_pick_place_controller's built-in approach_velocity throttle.",
+    "Part lands on the wrong side because the flip overshoots/undershoots 180 deg \u2014 rmpflow target_orientation [0, 1, 0, 0] is a rotation pi about Y; if the planner takes the shorter angular path it may converge to the same quaternion via -pi (which is the same orientation but a different intermediate trajectory). Both paths land at identity quaternion in the workpiece frame, so the final rotation_y == 0 criterion is met. The failure mode is partial completion: if rmpflow times out at 170 deg of progress, the residual 10 deg yields rotation_y near 10 deg \u2014 outside the 5-deg tolerance. Mitigation: increase planner timeout or chain a second move_to_pose with the same target as a re-convergence step.",
+    "define_grasp_pose YAML write fails \u2014 workspace/grasp_poses/ may not exist if the working directory differs from project root. The _gen_define_grasp_pose handler calls os.makedirs(..., exist_ok=True), so the directory is created automatically. If a filesystem permission error occurs, the tool prints an error and pick execution continues (grasp YAML is advisory; the cuRobo controller uses planning_obstacles + drop_targets, not the YAML, for actual motion).",
+    "Second setup_pick_place_controller call resets the controller and drops the grasped cube \u2014 if the handler interprets a fresh source_paths/destination_path as a new pick cycle, it may open the gripper to re-grasp at SourceBin. Mitigation: the function-gate harness validates that the controller persists the grasped object between calls by checking get_gripper_state before the place segment; if a regression is detected, replace Segment C with a manual move_to_pose to the drop position followed by grasp_object(grasp_type='release').",
+    "Workpiece orientation [0.7071, 0.7071, 0, 0] not applied by set_attribute(xformOp:orient) \u2014 some Cube prims are created with xformOp:rotateXYZ instead of xformOp:orient and the orient attribute is silently ignored. If get_world_transform after physics step reports identity rotation, switch to set_attribute(prim_path=..., attr_name='xformOp:rotateXYZ', value=[90.0, 0.0, 0.0]) to author the 90-deg X rotation in Euler form."
   ],
   "intent": {
     "pattern_hint": "reorient",
@@ -120,29 +181,44 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "franka"],
+      "constraints": [
+        "franka_panda",
+        "franka"
+      ],
       "expected_count": 1,
       "required": true,
       "disambiguator": "parallel_jaw_required"
     },
     "source_bin": {
-      "constraints": ["bin", "container"],
+      "constraints": [
+        "bin",
+        "container"
+      ],
       "expected_count": 1,
       "required": true
     },
     "destination_bin": {
-      "constraints": ["bin", "container"],
+      "constraints": [
+        "bin",
+        "container"
+      ],
       "expected_count": 1,
       "required": true
     },
     "workpiece": {
-      "constraints": ["cube", "cylinder", "box"],
+      "constraints": [
+        "cube",
+        "cylinder",
+        "box"
+      ],
       "expected_count": 1,
       "required": true,
       "param_name": "workpiece_kind"
     },
     "arrival_sensor": {
-      "constraints": ["proximity_sensor"],
+      "constraints": [
+        "proximity_sensor"
+      ],
       "expected_count": 1,
       "required": false
     }
@@ -151,44 +227,103 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka",
-      "position": [0, 0, 0.75],
-      "orientation": [1, 0, 0, 0]
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        1,
+        0,
+        0,
+        0
+      ]
     },
     "source_bin": {
       "path": "/World/SourceBin",
-      "position": [0, 0.40, 0.80],
-      "size": [0.25, 0.25, 0.20],
+      "position": [
+        0,
+        0.4,
+        0.8
+      ],
+      "size": [
+        0.25,
+        0.25,
+        0.2
+      ],
       "wall_thickness": 0.01
     },
     "destination_bin": {
       "path": "/World/DestBin",
-      "position": [0, -0.45, 0.80],
-      "size": [0.25, 0.25, 0.20],
+      "position": [
+        0,
+        -0.45,
+        0.8
+      ],
+      "size": [
+        0.25,
+        0.25,
+        0.2
+      ],
       "wall_thickness": 0.01
     },
     "workpiece": {
       "path": "/World/SourceBin/Workpiece",
       "kind": "cube",
       "size": 0.06,
-      "initial_position": [0, 0.40, 0.835],
-      "initial_orientation": [0.7071, 0.7071, 0, 0],
-      "final_orientation_target": [1, 0, 0, 0]
+      "initial_position": [
+        0,
+        0.4,
+        0.835
+      ],
+      "initial_orientation": [
+        0.7071,
+        0.7071,
+        0,
+        0
+      ],
+      "final_orientation_target": [
+        1,
+        0,
+        0,
+        0
+      ]
     },
     "arrival_sensor": {
       "path": "/World/ArrivalSensor",
-      "position": [0, -0.45, 0.86],
-      "size": [0.22, 0.22, 0.08]
+      "position": [
+        0,
+        -0.45,
+        0.86
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.08
+      ]
     },
     "flip_waypoint": {
-      "position": [0.0, 0.0, 1.20],
-      "orientation": [0.0, 1.0, 0.0, 0.0]
+      "position": [
+        0.0,
+        0.0,
+        1.2
+      ],
+      "orientation": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ]
     }
   },
-  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_bin(\n    prim_path={{source_bin.path}},\n    size={{source_bin.size}},\n    position={{source_bin.position}},\n    wall_thickness={{source_bin.wall_thickness}},\n)\n\ncreate_bin(\n    prim_path={{destination_bin.path}},\n    size={{destination_bin.size}},\n    position={{destination_bin.position}},\n    wall_thickness={{destination_bin.wall_thickness}},\n)\n\ncreate_prim(\n    prim_path={{workpiece.path}},\n    prim_type=\"Cube\",\n    position={{workpiece.initial_position}},\n    size={{workpiece.size}},\n)\nset_attribute(\n    prim_path={{workpiece.path}},\n    attr_name=\"xformOp:orient\",\n    value={{workpiece.initial_orientation}},\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpiece.path}}, schema_name=api)\n\nbulk_set_attribute(prim_paths=[{{workpiece.path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[{{workpiece.path}}], attr=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path={{workpiece.path}}, material_name=\"rubber\")\n\nadd_proximity_sensor(\n    sensor_path={{arrival_sensor.path}},\n    position={{arrival_sensor.position}},\n    size={{arrival_sensor.size}},\n)\n\ndefine_grasp_pose(\n    robot_path={{primary_robot.path}},\n    object_path={{workpiece.path}},\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0.04],\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpiece.path}}],\n    destination_path=\"/World/Cell\",\n    drop_targets={{'{'}}{{workpiece.path}}: {{flip_waypoint.position}}{{'}'}},\n    planning_obstacles=[\"/World/Table\", {{source_bin.path}}, {{destination_bin.path}}],\n    sensor_path={{arrival_sensor.path}},\n)\n\ncheck_collisions(\n    prim_path={{primary_robot.path}},\n)\n\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position={{flip_waypoint.position}},\n    target_orientation={{flip_waypoint.orientation}},\n    planner=\"rmpflow\",\n    robot_type={{primary_robot.class}},\n)\n\nget_world_transform(prim_path={{workpiece.path}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpiece.path}}],\n    destination_path={{destination_bin.path}},\n    drop_targets={{'{'}}{{workpiece.path}}: {{arrival_sensor.position}}{{'}'}},\n    planning_obstacles=[\"/World/Table\", {{source_bin.path}}, {{destination_bin.path}}],\n    sensor_path={{arrival_sensor.path}},\n)\n\nget_world_transform(prim_path={{workpiece.path}})",
+  "code_template": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.7, 0.7, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_bin(\n    prim_path={{source_bin.path}},\n    size={{source_bin.size}},\n    position={{source_bin.position}},\n    wall_thickness={{source_bin.wall_thickness}},\n)\n\ncreate_bin(\n    prim_path={{destination_bin.path}},\n    size={{destination_bin.size}},\n    position={{destination_bin.position}},\n    wall_thickness={{destination_bin.wall_thickness}},\n)\n\ncreate_prim(\n    prim_path={{workpiece.path}},\n    prim_type=\"Cube\",\n    position={{workpiece.initial_position}},\n    size={{workpiece.size}},\n)\nset_attribute(\n    prim_path={{workpiece.path}},\n    attr_name=\"xformOp:orient\",\n    value={{workpiece.initial_orientation}},\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpiece.path}}, schema_name=api)\n\nbulk_set_attribute(prim_paths=[{{workpiece.path}}], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=[{{workpiece.path}}], attr=\"physxRigidBody:enableCCD\", value=True)\napply_physics_material(prim_path={{workpiece.path}}, material_name=\"rubber\")\n\nadd_proximity_sensor(\n    sensor_path={{arrival_sensor.path}},\n    position={{arrival_sensor.position}},\n    size={{arrival_sensor.size}},\n)\n\ndefine_grasp_pose(\n    robot_path={{primary_robot.path}},\n    object_path={{workpiece.path}},\n    approach_direction=[0, 0, -1],\n    gripper_offset=[0, 0, 0.04],\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpiece.path}}],\n    destination_path=\"/World/Cell\",\n    drop_targets={{{workpiece.path}}: {{flip_waypoint.position}}},\n    planning_obstacles=[\"/World/Table\", {{source_bin.path}}, {{destination_bin.path}}],\n    sensor_path={{arrival_sensor.path}},\n)\n\ncheck_collisions(\n    prim_path={{primary_robot.path}},\n)\n\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position={{flip_waypoint.position}},\n    target_orientation={{flip_waypoint.orientation}},\n    planner=\"rmpflow\",\n    robot_type={{primary_robot.class}},\n)\n\nget_world_transform(prim_path={{workpiece.path}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=[{{workpiece.path}}],\n    destination_path={{destination_bin.path}},\n    drop_targets={{{workpiece.path}}: {{arrival_sensor.position}}},\n    planning_obstacles=[\"/World/Table\", {{source_bin.path}}, {{destination_bin.path}}],\n    sensor_path={{arrival_sensor.path}},\n)\n\nget_world_transform(prim_path={{workpiece.path}})",
   "motion_controllers": {
     "verified": [],
-    "untested": ["curobo", "rmpflow"],
+    "untested": [
+      "curobo",
+      "rmpflow"
+    ],
     "failed": {}
   },
-  "verified_status": "drafted-2026-05-16; form-gate-schema ⏳; function-gate ⏳"
+  "verified_status": "drafted-2026-05-16; form-gate-schema \u23f3; function-gate \u23f3"
 }

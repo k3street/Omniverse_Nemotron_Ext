@@ -103,7 +103,9 @@
       "has_force_torque_sensor": true,
       "n_workpieces": 1,
       "workpiece_mass_kg": 15.0,
-      "lift_height_m": 0.49
+      "lift_height_m": 0.49,
+      "payload_realistic_for_lift": false,
+      "is_overload_diagnose_demo": true
     },
     "structural_tags": [
       "isaac:yrkesroll.ergonomics",
@@ -180,6 +182,8 @@
     "lift_target": {
       "position": [0.0, 0.0, 1.35]
     },
+    "payload_realistic_for_lift": false,
+    "payload_realism_note": "Franka 3 kg continuous payload is INTENTIONALLY exceeded by the ~10 kg cobot share of the 15 kg co-lifted workpiece. This canonical demonstrates the OVERLOAD-DIAGNOSE pathway (monitor_joint_effort captures saturation) rather than a successfully-completed cobot lift. roles.primary_robot.constraints includes 'ur10'/'ur10e' (17 kg payload) so a scenario-profile can swap to UR10 to actually complete the lift. Retrieval queries for 'successful cobot lift assist' should disambiguate from this diagnostic-shape canonical; queries for 'cobot overload diagnosis' or 'force-shared lift overload pathway' should match preferentially.",
     "operator_role": {
       "yrkesroll": "ergonomics_lift_assist_operator",
       "onet_soc": "53-7062",

@@ -372,6 +372,21 @@ def substitute_template_params(
 _ROLE_INDEXED_PAT = __import__("re").compile(r"\{\{(\w+)\[(\d+)\]\.(\w+)\}\}")
 _ROLE_DOTTED_PAT = __import__("re").compile(r"\{\{(\w+)\.(\w+)\}\}")
 
+# Repair Wave 2 (2026-05-17): support bare role refs and indexed refs
+# without `.field`. Templates that pre-build cube lists do
+# `for item in {{workpieces}}:` or `[{{handoff_trays[0]}}, ...]`. The two
+# new patterns below let those substitute to Python list/dict literals.
+_ROLE_BARE_PAT = __import__("re").compile(r"\{\{(\w+)\}\}")
+_ROLE_INDEXED_NOFIELD_PAT = __import__("re").compile(r"\{\{(\w+)\[(\d+)\]\}\}")
+# Nested dotted access — e.g. `{{box_assembly.bottom.path}}` walks two
+# levels into a nested dict-of-dicts spec. Required by CP-NEW-yrkesroll-
+# packer-box-seal and CP-NEW-rtx-sponge-bowl variants.
+_ROLE_NESTED_PAT = __import__("re").compile(r"\{\{(\w+)\.(\w+)\.(\w+)\}\}")
+# Field-then-index access — `{{destination_bin.position[0]}}` picks the
+# first element of the substituted list. Used by canonicals that need
+# only one axis of a position vector (e.g. CP-NEW-rtx-sponge-bowl).
+_ROLE_DOTTED_INDEX_PAT = __import__("re").compile(r"\{\{(\w+)\.(\w+)\[(\d+)\]\}\}")
+
 # Matches {{#each role.listfield}} ... {{/each}} blocks.
 # Group 1 = role name, group 2 = field name (may be empty → role itself is the list).
 _EACH_OPEN_PAT = __import__("re").compile(r"\{\{#each (\w+)(?:\.(\w+))?\}\}")
@@ -506,6 +521,83 @@ def _format_for_code(v: Any) -> str:
     return repr(v)
 
 
+def _strip_inner_quotes_within_string_literals(code: str) -> str:
+    """Walk *code* as Python source, treat anything inside an outer quote
+    (single- or double-quoted) as a string literal, and strip any nested
+    quote-of-the-opposite-style pair embedded inside that literal.
+
+    Required for the Round 8 path-concat substitution bug: a template like
+
+        ee_link="{{primary_robot.path}}/panda_hand"
+
+    after substitution becomes
+
+        ee_link="'/World/Franka'/panda_hand"
+
+    because ``_format_for_code`` always returns ``repr(s)`` (single-quoted).
+    The token-scanner approach is strictly more correct than a regex pass:
+    it understands which characters are inside vs. outside an outer string
+    literal, so dicts like ``{"red": '/World/RedBin', "blue": '/World/BlueBin'}``
+    are left untouched (the inner ``'/World/RedBin'`` lives between OUTER
+    literals, not inside one).
+
+    Backslash escapes are NOT honoured — canonicals don't use escaped quotes
+    inside template strings, and adding escape handling would only obscure
+    the intent. Triple-quoted strings are similarly not special-cased; they
+    don't appear in canonical templates.
+    """
+    if not code:
+        return code
+
+    out: list[str] = []
+    i = 0
+    n = len(code)
+    while i < n:
+        ch = code[i]
+        if ch == '"' or ch == "'":
+            outer = ch
+            inner = "'" if outer == '"' else '"'
+            # Find matching outer close on the same line (canonicals don't
+            # author multi-line string literals inside tool-call args).
+            j = i + 1
+            literal_chars: list[str] = []
+            while j < n and code[j] != outer and code[j] != "\n":
+                literal_chars.append(code[j])
+                j += 1
+            if j >= n or code[j] == "\n":
+                # No matching close on this line — emit as-is, advance one char.
+                out.append(ch)
+                i += 1
+                continue
+            # We have an outer literal from i..j (inclusive). Strip every
+            # matched pair of `inner` quotes inside literal_chars.
+            cleaned: list[str] = []
+            k = 0
+            while k < len(literal_chars):
+                c = literal_chars[k]
+                if c == inner:
+                    # look for the matching inner close
+                    m_ = k + 1
+                    while m_ < len(literal_chars) and literal_chars[m_] != inner:
+                        m_ += 1
+                    if m_ < len(literal_chars):
+                        # Inner pair found — emit the content between them
+                        # without the inner quotes.
+                        cleaned.extend(literal_chars[k + 1 : m_])
+                        k = m_ + 1
+                        continue
+                cleaned.append(c)
+                k += 1
+            out.append(outer)
+            out.extend(cleaned)
+            out.append(outer)
+            i = j + 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def substitute_role_placeholders(
     code_template: str,
     role_defaults: Dict[str, Any],
@@ -553,6 +645,45 @@ def substitute_role_placeholders(
             return m.group(0)
         return _format_for_code(entry[field])
 
+    def _indexed_nofield(m):
+        """Substitute ``{{role[N]}}`` placeholders (no .field) — formats
+        the whole list element as a Python literal."""
+        role, idx_str = m.group(1), m.group(2)
+        spec = role_defaults.get(role)
+        if not isinstance(spec, list):
+            return m.group(0)
+        idx = int(idx_str)
+        if idx < 0 or idx >= len(spec):
+            return m.group(0)
+        return _format_for_code(spec[idx])
+
+    def _nested(m):
+        """Substitute ``{{role.field.subfield}}`` for a dict-of-dicts spec."""
+        role, field, subfield = m.group(1), m.group(2), m.group(3)
+        spec = role_defaults.get(role)
+        if not isinstance(spec, dict):
+            return m.group(0)
+        inner = spec.get(field)
+        if not isinstance(inner, dict) or subfield not in inner:
+            return m.group(0)
+        return _format_for_code(inner[subfield])
+
+    def _dotted_index(m):
+        """Substitute ``{{role.field[N]}}`` — index into a list-typed
+        sub-field. E.g. ``{{destination_bin.position[0]}}`` returns the
+        x coordinate of the bin's position vector."""
+        role, field, idx_str = m.group(1), m.group(2), m.group(3)
+        spec = role_defaults.get(role)
+        if not isinstance(spec, dict):
+            return m.group(0)
+        inner = spec.get(field)
+        if not isinstance(inner, (list, tuple)):
+            return m.group(0)
+        idx = int(idx_str)
+        if idx < 0 or idx >= len(inner):
+            return m.group(0)
+        return _format_for_code(inner[idx])
+
     def _dotted(m):
         """Substitute ``{{role.field}}`` placeholders from a dict-typed role spec."""
         role, field = m.group(1), m.group(2)
@@ -561,8 +692,48 @@ def substitute_role_placeholders(
             return m.group(0)
         return _format_for_code(spec[field])
 
+    def _bare(m):
+        """Substitute ``{{role}}`` (no field) — formats the whole role
+        value as a Python literal. Used for `for x in {{workpieces}}:`
+        and similar list-consuming patterns."""
+        role = m.group(1)
+        if role not in role_defaults:
+            return m.group(0)
+        return _format_for_code(role_defaults[role])
+
+    # Apply substitutions in priority order: most-specific first so
+    # `{{role.field.subfield}}` is not consumed by the simpler dotted
+    # pattern (which would leave `.subfield` dangling).
     out = _ROLE_INDEXED_PAT.sub(_indexed, code_template)
+    out = _ROLE_NESTED_PAT.sub(_nested, out)
+    out = _ROLE_DOTTED_INDEX_PAT.sub(_dotted_index, out)
+    out = _ROLE_INDEXED_NOFIELD_PAT.sub(_indexed_nofield, out)
     out = _ROLE_DOTTED_PAT.sub(_dotted, out)
+    out = _ROLE_BARE_PAT.sub(_bare, out)
+
+    # Round 2 repair (2026-05-17): unwrap doubly-quoted strings produced
+    # when a template author wraps a string placeholder in literal quotes,
+    # e.g. `robot_name="{{primary_robot.class}}"`. `_format_for_code`
+    # always returns `repr(s)` ('franka_panda' with quotes), so the naive
+    # substitution yields `robot_name="'franka_panda'"` — a literal
+    # containing a quoted token, which then arrives at the handler as
+    # `"'franka_panda'"` (no registry match → robot_wizard rejects with
+    # "either robot_name or asset_path must be provided"). Templates can't
+    # be retrofitted easily (the lint passes both shapes); the deterministic
+    # fix is at the substitution layer.
+    #
+    # Round 8 repair (2026-05-18): extend to handle CONCATENATED path
+    # placeholders such as `ee_link="{{primary_robot.path}}/panda_hand"`.
+    # After substitution this becomes `ee_link="'/World/Franka'/panda_hand"`
+    # — the inner-quoted token is no longer at both ends of the outer
+    # literal. The fix runs as a token scanner: walk through the substituted
+    # code, track when we are inside a string literal, and when a quoted
+    # value of the OPPOSITE quote style appears INSIDE such a literal,
+    # strip those inner quotes (since `_format_for_code` always wraps the
+    # substituted string token in quotes). A regex-only solution mis-fires
+    # on valid `destination_map={"red": '/World/RedBin', ...}` dicts where
+    # adjacent string-key/string-value pairs trick the pattern.
+    out = _strip_inner_quotes_within_string_literals(out)
     return out
 
 
@@ -633,14 +804,94 @@ async def execute_template_canonical(
 
     captured: List[tuple] = []  # list of (tool_name, kwargs)
 
+    # Repair Wave 3 (2026-05-17): templates that consume tool return values
+    # (e.g. `active_topics = ros2_list_topics(); set(active_topics) - ...`)
+    # crashed under the old capture loop because the no-op capturer returned
+    # `None`. To keep the capture pure (no real tool execution) while still
+    # letting the Python body of the template finish to completion, return a
+    # permissive sentinel that pretends to be an empty list / dict / set:
+    #   - iterable (for `for x in result`, `set(result)`, list comprehensions)
+    #   - dict-like (.get/.keys/.values/[key] all return another sentinel)
+    #   - supports `result - other_set` and `result | other_set`
+    #   - truthy=False so `if result:` short-circuits to skip side effects
+    class _SandboxResult:
+        """Permissive proxy returned by the no-op capturer so downstream code
+        in template bodies (`set(result) - expected`, `result.get("foo")`,
+        iteration, etc.) does not crash during the capture pass."""
+
+        __slots__ = ()
+
+        def __bool__(self):
+            return False
+
+        def __iter__(self):
+            return iter(())
+
+        def __len__(self):
+            return 0
+
+        def __contains__(self, _item):
+            return False
+
+        def __getitem__(self, _key):
+            return _SandboxResult()
+
+        def __getattr__(self, _name):
+            # Any attribute access returns another callable proxy so chained
+            # `result.foo.bar()` patterns also succeed.
+            return _SandboxResult()
+
+        def __call__(self, *args, **kwargs):
+            return _SandboxResult()
+
+        def __sub__(self, _other):
+            return set()
+
+        def __rsub__(self, other):
+            # E.g. `required_set - active_topics`: drop the sentinel side.
+            try:
+                return set(other)
+            except TypeError:
+                return set()
+
+        def __or__(self, other):
+            try:
+                return set(other)
+            except TypeError:
+                return set()
+
+        __ror__ = __or__
+
+        def __and__(self, _other):
+            return set()
+
+        __rand__ = __and__
+
+        def __eq__(self, other):
+            return isinstance(other, _SandboxResult)
+
+        def __hash__(self):
+            return 0
+
+        def __repr__(self):
+            return "<SandboxResult>"
+
     def _make_capturer(tool_name: str):
         """Return a no-op callable that records calls into ``captured`` instead of executing them."""
         def _capture(**kwargs):
             """Record a sandboxed tool call without executing it."""
             captured.append((tool_name, dict(kwargs)))
+            return _SandboxResult()
         return _capture
 
-    tool_names = set(DATA_HANDLERS.keys()) | set(CODE_GEN_HANDLERS.keys())
+    # Tool name set: include both registered handlers AND tool_executor's
+    # special-cased dispatch tools (`run_usd_script`) which are valid tools
+    # but live outside the DATA/CODE_GEN registries. Without `run_usd_script`
+    # here, canonical templates that embed raw USD scripts (e.g. e-stop
+    # callbacks, ISO10218 graded SSM, safety-clearance monitors) crash with
+    # `NameError: name 'run_usd_script' is not defined` during build-phase
+    # exec — caught by repair-wave-2 (2026-05-17).
+    tool_names = set(DATA_HANDLERS.keys()) | set(CODE_GEN_HANDLERS.keys()) | {"run_usd_script"}
     sandbox: Dict[str, Any] = {"__builtins__": dict(_SAFE_BUILTINS)}
     for name in tool_names:
         sandbox[name] = _make_capturer(name)
@@ -650,15 +901,38 @@ async def execute_template_canonical(
     # to discover the tool-call sequence. Sandbox restricts builtins to
     # _SAFE_BUILTINS and replaces every tool name with a capturer that records
     # rather than invokes. No untrusted user input reaches this exec.
+    #
+    # Repair Wave 3 (2026-05-17): templates that include in-flight validation
+    # logic (e.g. `if missing_topics: raise RuntimeError(...)`) used to abort
+    # the entire capture pass on the FIRST raise, dropping every subsequent
+    # tool call. We now split the module into top-level statements via ast
+    # and exec them one at a time. Errors in any single statement are
+    # logged but do not halt the capture — this is acceptable because the
+    # capture pass is *not* execution; the real semantics run in the
+    # downstream execute_tool_call loop.
+    import ast as _ast
+
     try:
-        exec(compile(code, f"<{task_id}>", "exec"), sandbox)  # noqa: audit-Q9
-    except Exception as e:
-        logger.warning(f"[CanonicalInst] {task_id} sandbox exec failed: {e}")
+        _module = _ast.parse(code, filename=f"<{task_id}>", mode="exec")
+    except SyntaxError as e:
+        logger.warning(f"[CanonicalInst] {task_id} sandbox parse failed: {e}")
         return {
             "task_id": task_id, "n_calls": 0, "executed": [],
-            "errors": [f"sandbox exec failed: {type(e).__name__}: {e}"],
+            "errors": [f"sandbox parse failed: {type(e).__name__}: {e}"],
             "instantiated": False,
         }
+
+    sandbox_errors: List[str] = []
+    for _stmt in _module.body:
+        _stmt_module = _ast.Module(body=[_stmt], type_ignores=[])
+        try:
+            exec(compile(_stmt_module, f"<{task_id}>", "exec"), sandbox)  # noqa: audit-Q9
+        except Exception as e:
+            # Permissive: keep capturing remaining statements. Record the
+            # first few errors so the caller knows the template body had
+            # validation-style raises tripped by sandbox sentinel values.
+            if len(sandbox_errors) < 3:
+                sandbox_errors.append(f"line {_stmt.lineno}: {type(e).__name__}: {e}")
 
     if not captured:
         return {

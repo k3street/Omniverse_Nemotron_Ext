@@ -179,8 +179,30 @@ def _teleop_physics_step(dt):
     elapsed = now - _teleop_state['last_cmd_time']
     targets = _teleop_state['last_joint_targets']
 
-    robot = stage.GetPrimAtPath(ROBOT_PATH)
-    if not robot.IsValid():
+    # Round 7 repair (2026-05-18): Kit RPC pumps physics_step on every
+    # template build. A stale teleop callback from a previous template
+    # invalidly re-enters here with ROBOT_PATH pointing at a now-cleared
+    # /World/<prev> subtree, raising Boost.Python.ArgumentError in
+    # GetPrimAtPath on str -> Sdf.Path coercion when the path got
+    # mutated. Guard the lookup with a try/except + Sdf.Path explicit
+    # conversion + early-return on stage swap.
+    try:
+        from pxr import Sdf as _Sdf_tp
+        _rp = _Sdf_tp.Path(ROBOT_PATH) if isinstance(ROBOT_PATH, str) else ROBOT_PATH
+        robot = stage.GetPrimAtPath(_rp)
+    except Exception:
+        # Stage swapped or path invalid — auto-unsubscribe so we don't
+        # keep ticking against a dead context.
+        try:
+            _sub_te = _teleop_state.get('physics_sub')
+            if _sub_te is not None and hasattr(_sub_te, 'unsubscribe'):
+                _sub_te.unsubscribe()
+            _teleop_state['physics_sub'] = None
+            _teleop_state['active'] = False
+        except Exception:
+            pass
+        return
+    if not robot or not robot.IsValid():
         return
 
     # Iterate joints and apply targets
@@ -430,40 +452,67 @@ def _get_joint_velocities():
     return velocities
 
 def _get_ee_pose():
-    # Attempt to find end-effector (last link or named ee_link/panda_hand)
-    ee_names = ['ee_link', 'panda_hand', 'tool0', 'link_ee']
-    ee_prim = None
-    for name in ee_names:
-        candidate = stage.GetPrimAtPath(f'{{ROBOT_PATH}}/{{name}}')
-        if candidate.IsValid():
-            ee_prim = candidate
-            break
-    if ee_prim is None:
-        # Fallback: use last child with xform
-        for child in robot_prim.GetAllChildren():
-            if child.IsA(UsdGeom.Xformable):
-                ee_prim = child
-    if ee_prim is None:
-        return [0.0] * 7  # pos(3) + quat(4)
-    xf = UsdGeom.Xformable(ee_prim).ComputeLocalToWorldTransform(0)
-    pos = xf.ExtractTranslation()
-    rot = xf.ExtractRotation().GetQuat()
-    return [float(pos[0]), float(pos[1]), float(pos[2]),
-            float(rot.GetReal()), float(rot.GetImaginary()[0]),
-            float(rot.GetImaginary()[1]), float(rot.GetImaginary()[2])]
+    # Round 9 repair (2026-05-18): wrap the entire body in try/except —
+    # a long-lived physics-step subscription can outlive its stage
+    # (Kit recycles the USD stage between exec_sync calls when prims
+    # are deleted/replaced), which makes ``stage.GetPrimAtPath`` raise
+    # a Boost.Python.ArgumentError on the dead handle. Return zeros so
+    # the record loop doesn't kill subsequent unrelated tools.
+    try:
+        # Attempt to find end-effector (last link or named ee_link/panda_hand)
+        ee_names = ['ee_link', 'panda_hand', 'tool0', 'link_ee']
+        ee_prim = None
+        for name in ee_names:
+            try:
+                candidate = stage.GetPrimAtPath(f'{{ROBOT_PATH}}/{{name}}')
+            except Exception:
+                candidate = None
+            if candidate is not None and candidate.IsValid():
+                ee_prim = candidate
+                break
+        if ee_prim is None:
+            # Fallback: use last child with xform — robot_prim may be expired
+            try:
+                children = list(robot_prim.GetAllChildren()) if robot_prim and robot_prim.IsValid() else []
+            except Exception:
+                children = []
+            for child in children:
+                if child.IsA(UsdGeom.Xformable):
+                    ee_prim = child
+        if ee_prim is None:
+            return [0.0] * 7  # pos(3) + quat(4)
+        xf = UsdGeom.Xformable(ee_prim).ComputeLocalToWorldTransform(0)
+        pos = xf.ExtractTranslation()
+        rot = xf.ExtractRotation().GetQuat()
+        return [float(pos[0]), float(pos[1]), float(pos[2]),
+                float(rot.GetReal()), float(rot.GetImaginary()[0]),
+                float(rot.GetImaginary()[1]), float(rot.GetImaginary()[2])]
+    except Exception:
+        return [0.0] * 7
 
 def _record_physics_step(dt):
-    if not _rec_data['active']:
-        return
-    now = time.time()
-    if now - _rec_data['last_record_time'] < RECORD_INTERVAL:
-        return
-    _rec_data['last_record_time'] = now
+    # Round 9 repair (2026-05-18): wrap entire callback in try/except so
+    # a stale physics-step subscription cannot break exec_sync calls
+    # made AFTER the recording session was closed (or its stage tossed).
+    try:
+        if not _rec_data['active']:
+            return
+        now = time.time()
+        if now - _rec_data['last_record_time'] < RECORD_INTERVAL:
+            return
+        _rec_data['last_record_time'] = now
 
-    _rec_data['timestamps'].append(now - _rec_data['start_time'])
-    _rec_data['joint_positions'].append(_get_joint_positions())
-    _rec_data['joint_velocities'].append(_get_joint_velocities())
-    _rec_data['ee_poses'].append(_get_ee_pose())
+        _rec_data['timestamps'].append(now - _rec_data['start_time'])
+        _rec_data['joint_positions'].append(_get_joint_positions())
+        _rec_data['joint_velocities'].append(_get_joint_velocities())
+        _rec_data['ee_poses'].append(_get_ee_pose())
+    except Exception:
+        # Auto-disarm the recorder on any error so the callback stops
+        # interfering with subsequent unrelated tools.
+        try:
+            _rec_data['active'] = False
+        except Exception:
+            pass
 
 # Register recording callback
 _rec_sub = omni.physx.get_physx_interface().subscribe_physics_step_events(_record_physics_step)

@@ -113,4 +113,4 @@ pytest tests/test_diagnose_*.py tests/test_auto_judge_feasibility.py tests/test_
 - Master plan Phase 1: `docs/specs/2026-05-09-master-execution-plan.md`
 - Industrial-expansion (downstream consumer): `docs/specs/2026-05-09-industrial-expansion-spec.md`
 - Phase 2 triage: `scripts/qa/phase2_triage.py`
-- Pattern reference (private): `robotics_lab/lib/constraint_handler.py:90-98` for Constraint/Violation/severity (reimplemented, not imported)
+- Schema shape: Constraint / Violation / severity / verdict — self-contained reimplementation

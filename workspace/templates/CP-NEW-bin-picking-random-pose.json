@@ -17,19 +17,35 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Design rationale for CP-NEW-bin-picking-random-pose:\n\n1) Distinctiveness: This canonical is the ONLY one in the new library to use overlap_sphere (scene-query candidate enumeration), define_grasp_pose (YAML grasp spec), and setup_grasp_pose_sampler (antipodal SDG prep) together. Heap-zone-unstack uses heap_zone + bounding_box but NOT the grasp-spec tools. Palletizer and kit-prep use a fixed source list. Here the source list is discovered at runtime via physics query.\n\n2) Scene layout: Franka at [0, 0, 0.75] on a 0.75m table. Source bin at [0, 0.42, 0.80]: bin external [0.35, 0.35, 0.20], walls 10mm thick, interior 0.33x0.33x0.19m. Bin floor z = 0.80. 6 cubes (0.08m) tumbled into bin: expected random pile, top cube z ≈ 0.80 + 0.08*3 = 1.04 at most. Outfeed bin at [0, -0.48, 0.80]: same dimensions, placed behind robot for drop destination.\n\n3) overlap_sphere query: center=[0, 0.42, 0.92] (bin interior mid-height), radius=0.22m (covers full bin interior volume). PhysX AABB overlaps return all rigid-body prim paths currently colliding with the query sphere. This is the runtime mechanism for finding unsorted cubes — no pre-built path list needed. Filter results to paths matching /World/Bin/Cube_* pattern to exclude bin walls.\n\n4) define_grasp_pose: called once per cube path with approach_direction=[0, 0, -1] (top-down) and gripper_offset=[0, 0, 0.05] (5cm above object centroid for open-jaw approach). Writes workspace/grasp_poses/Cube_N.isaac_grasp YAML. This is a pre-run setup step; the grasp spec is referenced by the pick-place controller in production use.\n\n5) setup_grasp_pose_sampler: configured for the source-bin prim (/World/SourceBin), n_samples=60, sampling_mode='antipodal'. This attaches a marker attribute set to the bin prim for downstream SDG Replicator use. Does not affect the current pick-place execution path — it is a preparatory step.\n\n6) Height-ranked pick selection: get_bounding_box called for each candidate path returned by overlap_sphere. Sort by bbox max_z descending. Pass sorted list as source_paths to setup_pick_place_controller with curobo. This is the correct runtime pattern per heap-zone-unstack precedent (A8).\n\n7) drop_targets: all 6 cubes map to [0, -0.48, 0.89] — interior floor of outfeed bin (z = 0.80 bin_pos + 0.08 wall_height + 0.005 = 0.885 ≈ 0.89 with cube half-size buffer).\n\n8) Physics: CPU dynamics (MBP broadphase) for deterministic bin contacts. sleepThreshold=0.0 on cubes. rubber material reduces inter-cube sliding. Settle time: 3s before first overlap_sphere call so cubes are at rest in the bin.\n\n9) Franka reach check: source bin at [0, +0.42], outfeed bin at [0, -0.48]. Max horizontal reach to far outfeed bin edge corner: sqrt(0.48^2 + 0.175^2) ≈ 0.51m. Well inside Franka 0.855m reach. Transit height = 1.18m clears all bin walls.",
-  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Robot table platform ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic bin contacts ──────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\n# Mounted on 0.75m table. Source bin at y=+0.42, outfeed bin at y=-0.48.\n# Max horizontal reach to far outfeed corner ~0.51m — inside 0.855m Franka reach.\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Source bin: open-top container for tumbled cubes ─────────────────────────\n# External 0.35x0.35x0.20m. Interior 0.33x0.33x0.19m. Floor at z=0.80.\n# Walls 10mm thick (PhysX reliable minimum for contained objects).\ncreate_bin(\n    prim_path=\"/World/SourceBin\",\n    size=[0.35, 0.35, 0.20],\n    position=[0, 0.42, 0.80],\n    wall_thickness=0.01,\n)\n\n# ── Outfeed bin: drop destination ────────────────────────────────────────────\n# Same geometry, placed behind robot (y=-0.48). Cubes drop to interior floor.\ncreate_bin(\n    prim_path=\"/World/OutfeedBin\",\n    size=[0.35, 0.35, 0.20],\n    position=[0, -0.48, 0.80],\n    wall_thickness=0.01,\n)\n\n# ── 6 tumbled cubes (0.08m) in source bin ────────────────────────────────────\n# Spawn at staggered XY positions within bin interior; random orientations\n# emerge when PhysX settles them under gravity. Each cube is 0.08m — three\n# layers fit inside the 0.19m interior height before stacking overflows.\ncube_paths = [f\"/World/SourceBin/Cube_{i+1}\" for i in range(6)]\ncube_spawn_offsets = [\n    [-0.08, -0.08, 0.15], [ 0.08, -0.08, 0.17],\n    [-0.08,  0.08, 0.22], [ 0.08,  0.08, 0.24],\n    [ 0.00, -0.04, 0.29], [ 0.00,  0.04, 0.31],\n]\n\nfor i, (path, offset) in enumerate(zip(cube_paths, cube_spawn_offsets)):\n    # World position: bin base [0, 0.42, 0.80] + local offset\n    world_pos = [0 + offset[0], 0.42 + offset[1], 0.80 + offset[2]]\n    create_prim(prim_path=path, prim_type=\"Cube\", position=world_pos, size=0.08)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── setup_grasp_pose_sampler: pre-configure antipodal grasp SDG library ───────\n# Attaches grasp:* attributes to SourceBin for downstream Replicator SDG use.\n# Does NOT affect live pick-place execution — preparatory step only.\nsetup_grasp_pose_sampler(\n    sampler_path=\"/World/GraspSampler\",\n    target_path=\"/World/SourceBin\",\n    n_samples=60,\n    sampling_mode=\"antipodal\",\n)\n\n# ── Arrival confirmation sensor in outfeed bin ────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.48, 0.895],\n    size=[0.28, 0.28, 0.08],\n)\n\n# ── Runtime: overlap_sphere candidate discovery + height-ranked pick ──────────\n# Step 1: query PhysX AABB overlaps within source bin volume.\n# Sphere center at bin interior mid-height; radius covers full interior.\n_candidates_raw = overlap_sphere(\n    center=[0, 0.42, 0.92],\n    radius=0.22,\n)\n# Filter to cube paths (exclude bin wall prims)\n_cube_set = set(cube_paths)\n_candidates = [\n    p for p in (_candidates_raw.get(\"prim_paths\") or [])\n    if p in _cube_set\n]\n# Fallback to full list if query returns empty (physics not yet stepped)\nif not _candidates:\n    _candidates = cube_paths\n\n# Step 2: define top-down grasp spec for each candidate\nfor _path in _candidates:\n    define_grasp_pose(\n        robot_path=\"/World/Franka\",\n        object_path=_path,\n        approach_direction=[0, 0, -1],\n        gripper_offset=[0, 0, 0.05],\n    )\n\n# Step 3: height-rank candidates using bounding box\n_bboxes = []\nfor _path in _candidates:\n    _bb = get_bounding_box(prim_path=_path)\n    _max_z = _bb.get(\"max\", [0, 0, 0])[2] if isinstance(_bb, dict) else 0.0\n    _bboxes.append((_path, _max_z))\n_bboxes.sort(key=lambda x: x[1], reverse=True)\nsorted_cube_paths = [p for p, _ in _bboxes]\n\n# Step 4: all cubes drop to outfeed bin interior centre at z=0.89\n# (bin_base_z=0.80 + floor_t=0.01 + cube_half=0.04 + small_gap=0.04 = 0.89)\ndrop_targets = {p: [0, -0.48, 0.89] for p in sorted_cube_paths}\n\n# ── cuRobo pick-place controller ──────────────────────────────────────────────\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=sorted_cube_paths,\n    destination_path=\"/World/OutfeedBin\",\n    drop_targets=drop_targets,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/SourceBin\",\n        \"/World/OutfeedBin\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
+  "thoughts": "Design rationale for CP-NEW-bin-picking-random-pose:\n\n1) Distinctiveness: This canonical is the ONLY one in the new library to use overlap_sphere (scene-query candidate enumeration), define_grasp_pose (YAML grasp spec), and setup_grasp_pose_sampler (antipodal SDG prep) together. Heap-zone-unstack uses heap_zone + bounding_box but NOT the grasp-spec tools. Palletizer and kit-prep use a fixed source list. Here the source list is discovered at runtime via physics query.\n\n2) Scene layout: Franka at [0, 0, 0.75] on a 0.75m table. Source bin at [0, 0.42, 0.80]: bin external [0.35, 0.35, 0.20], walls 10mm thick, interior 0.33x0.33x0.19m. Bin floor z = 0.80. 6 cubes (0.08m) tumbled into bin: expected random pile, top cube z \u2248 0.80 + 0.08*3 = 1.04 at most. Outfeed bin at [0, -0.48, 0.80]: same dimensions, placed behind robot for drop destination.\n\n3) overlap_sphere query: center=[0, 0.42, 0.92] (bin interior mid-height), radius=0.22m (covers full bin interior volume). PhysX AABB overlaps return all rigid-body prim paths currently colliding with the query sphere. This is the runtime mechanism for finding unsorted cubes \u2014 no pre-built path list needed. Filter results to paths matching /World/Bin/Cube_* pattern to exclude bin walls.\n\n4) define_grasp_pose: called once per cube path with approach_direction=[0, 0, -1] (top-down) and gripper_offset=[0, 0, 0.05] (5cm above object centroid for open-jaw approach). Writes workspace/grasp_poses/Cube_N.isaac_grasp YAML. This is a pre-run setup step; the grasp spec is referenced by the pick-place controller in production use.\n\n5) setup_grasp_pose_sampler: configured for the source-bin prim (/World/SourceBin), n_samples=60, sampling_mode='antipodal'. This attaches a marker attribute set to the bin prim for downstream SDG Replicator use. Does not affect the current pick-place execution path \u2014 it is a preparatory step.\n\n6) Height-ranked pick selection: get_bounding_box called for each candidate path returned by overlap_sphere. Sort by bbox max_z descending. Pass sorted list as source_paths to setup_pick_place_controller with curobo. This is the correct runtime pattern per heap-zone-unstack precedent (A8).\n\n7) drop_targets: all 6 cubes map to [0, -0.48, 0.89] \u2014 interior floor of outfeed bin (z = 0.80 bin_pos + 0.08 wall_height + 0.005 = 0.885 \u2248 0.89 with cube half-size buffer).\n\n8) Physics: CPU dynamics (MBP broadphase) for deterministic bin contacts. sleepThreshold=0.0 on cubes. rubber material reduces inter-cube sliding. Settle time: 3s before first overlap_sphere call so cubes are at rest in the bin.\n\n9) Franka reach check: source bin at [0, +0.42], outfeed bin at [0, -0.48]. Max horizontal reach to far outfeed bin edge corner: sqrt(0.48^2 + 0.175^2) \u2248 0.51m. Well inside Franka 0.855m reach. Transit height = 1.18m clears all bin walls.",
+  "code": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# \u2500\u2500 Robot table platform \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics: CPU dynamics for deterministic bin contacts \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Franka arm \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Mounted on 0.75m table. Source bin at y=+0.42, outfeed bin at y=-0.48.\n# Max horizontal reach to far outfeed corner ~0.51m \u2014 inside 0.855m Franka reach.\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# \u2500\u2500 Source bin: open-top container for tumbled cubes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# External 0.35x0.35x0.20m. Interior 0.33x0.33x0.19m. Floor at z=0.80.\n# Walls 10mm thick (PhysX reliable minimum for contained objects).\ncreate_bin(\n    prim_path=\"/World/SourceBin\",\n    size=[0.35, 0.35, 0.20],\n    position=[0, 0.42, 0.80],\n    wall_thickness=0.01,\n)\n\n# \u2500\u2500 Outfeed bin: drop destination \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Same geometry, placed behind robot (y=-0.48). Cubes drop to interior floor.\ncreate_bin(\n    prim_path=\"/World/OutfeedBin\",\n    size=[0.35, 0.35, 0.20],\n    position=[0, -0.48, 0.80],\n    wall_thickness=0.01,\n)\n\n# \u2500\u2500 6 tumbled cubes (0.08m) in source bin \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Spawn at staggered XY positions within bin interior; random orientations\n# emerge when PhysX settles them under gravity. Each cube is 0.08m \u2014 three\n# layers fit inside the 0.19m interior height before stacking overflows.\ncube_paths = [f\"/World/SourceBin/Cube_{i+1}\" for i in range(6)]\ncube_spawn_offsets = [\n    [-0.08, -0.08, 0.15], [ 0.08, -0.08, 0.17],\n    [-0.08,  0.08, 0.22], [ 0.08,  0.08, 0.24],\n    [ 0.00, -0.04, 0.29], [ 0.00,  0.04, 0.31],\n]\n\nfor i, (path, offset) in enumerate(zip(cube_paths, cube_spawn_offsets)):\n    # World position: bin base [0, 0.42, 0.80] + local offset\n    world_pos = [0 + offset[0], 0.42 + offset[1], 0.80 + offset[2]]\n    create_prim(prim_path=path, prim_type=\"Cube\", position=world_pos, size=0.08)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# \u2500\u2500 setup_grasp_pose_sampler: pre-configure antipodal grasp SDG library \u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Attaches grasp:* attributes to SourceBin for downstream Replicator SDG use.\n# Does NOT affect live pick-place execution \u2014 preparatory step only.\nsetup_grasp_pose_sampler(\n    sampler_path=\"/World/GraspSampler\",\n    target_path=\"/World/SourceBin\",\n    n_samples=60,\n    sampling_mode=\"antipodal\",\n)\n\n# \u2500\u2500 Arrival confirmation sensor in outfeed bin \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.48, 0.895],\n    size=[0.28, 0.28, 0.08],\n)\n\n# \u2500\u2500 Runtime: overlap_sphere candidate discovery + height-ranked pick \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Step 1: query PhysX AABB overlaps within source bin volume.\n# Sphere center at bin interior mid-height; radius covers full interior.\n_candidates_raw = overlap_sphere(\n    center=[0, 0.42, 0.92],\n    radius=0.22,\n)\n# Filter to cube paths (exclude bin wall prims)\n_cube_set = set(cube_paths)\n_candidates = [\n    p for p in ((_candidates_raw or {}).get(\"prim_paths\") or [])\n    if p in _cube_set\n]\n# Fallback to full list if query returns empty (physics not yet stepped)\nif not _candidates:\n    _candidates = cube_paths\n\n# Step 2: define top-down grasp spec for each candidate\nfor _path in _candidates:\n    define_grasp_pose(\n        robot_path=\"/World/Franka\",\n        object_path=_path,\n        approach_direction=[0, 0, -1],\n        gripper_offset=[0, 0, 0.05],\n    )\n\n# Step 3: height-rank candidates using bounding box\n_bboxes = []\nfor _path in _candidates:\n    _bb = get_bounding_box(prim_path=_path)\n    _max_z = (_bb or {}).get(\"max\", [0, 0, 0])[2] if isinstance(_bb, dict) else 0.0\n    _bboxes.append((_path, _max_z))\n_bboxes.sort(key=lambda x: x[1], reverse=True)\nsorted_cube_paths = [p for p, _ in _bboxes]\n\n# Step 4: all cubes drop to outfeed bin interior centre at z=0.89\n# (bin_base_z=0.80 + floor_t=0.01 + cube_half=0.04 + small_gap=0.04 = 0.89)\ndrop_targets = {p: [0, -0.48, 0.89] for p in sorted_cube_paths}\n\n# \u2500\u2500 cuRobo pick-place controller \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=sorted_cube_paths,\n    destination_path=\"/World/OutfeedBin\",\n    drop_targets=drop_targets,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/SourceBin\",\n        \"/World/OutfeedBin\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
   "settle_state": {
     "source_bin": {
       "/World/SourceBin": {
-        "position": [0, 0.42, 0.80],
-        "size": [0.35, 0.35, 0.20]
+        "position": [
+          0,
+          0.42,
+          0.8
+        ],
+        "size": [
+          0.35,
+          0.35,
+          0.2
+        ]
       }
     },
     "outfeed_bin": {
       "/World/OutfeedBin": {
-        "position": [0, -0.48, 0.80],
-        "size": [0.35, 0.35, 0.20]
+        "position": [
+          0,
+          -0.48,
+          0.8
+        ],
+        "size": [
+          0.35,
+          0.35,
+          0.2
+        ]
       }
     },
     "robot": {
@@ -69,16 +85,23 @@
   },
   "diagnose_args": {
     "robot_path": "/World/Franka",
-    "obstacles": ["/World/SourceBin", "/World/OutfeedBin"],
+    "obstacles": [
+      "/World/SourceBin",
+      "/World/OutfeedBin"
+    ],
     "sensor_path": "/World/ArrivalSensor",
-    "robot_base": [0.0, 0.0, 0.75]
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
   },
   "failure_modes": [
-    "overlap_sphere returns empty list before physics step — the overlap_sphere query fires at scene-build time before cubes have settled. The code falls back to the static cube_paths list; if overlap_sphere returns paths to bin wall prims (floor/walls), the filter `if p in _cube_set` removes them. If cubes are not yet rigid-body-initialized, the fallback ensures no pick is skipped.",
-    "define_grasp_pose YAML write fails — workspace/grasp_poses/ may not exist if the working directory differs from project root. The _gen_define_grasp_pose handler calls os.makedirs(..., exist_ok=True), so the directory is created automatically. If a filesystem permission error occurs, the tool prints an error and pick execution continues (grasp YAML is advisory, not required for curobo execution).",
-    "Cube resting against bin wall occludes grasp — cubes in contact with a wall may be inaccessible for top-down approach. cuRobo collision checking with SourceBin in planning_obstacles will reject paths that clip the wall. Mitigation: increase gripper_offset z from 0.05 to 0.08m; alternatively, add a pre-grasp lateral nudge by reducing approach height clearance check.",
-    "Height-ranked sort stale — get_bounding_box is called after overlap_sphere; if cubes are still settling at query time, bbox_max_z may reflect mid-fall positions. sleepThreshold=0.0 and 3s settle time in the function-gate harness mitigate this; in live use, add a sim.step(n=60) before the sort.",
-    "OutfeedBin wall collision on drop — drop target [0, -0.48, 0.89] is 0.04m above the bin interior floor. If cuRobo approaches from the side (non-top-down), EE may clip the 0.20m tall bin wall. Planning_obstacles includes '/World/OutfeedBin' so cuRobo avoids the walls; EE approaches from above at transit height 1.18m and descends vertically."
+    "overlap_sphere returns empty list before physics step \u2014 the overlap_sphere query fires at scene-build time before cubes have settled. The code falls back to the static cube_paths list; if overlap_sphere returns paths to bin wall prims (floor/walls), the filter `if p in _cube_set` removes them. If cubes are not yet rigid-body-initialized, the fallback ensures no pick is skipped.",
+    "define_grasp_pose YAML write fails \u2014 workspace/grasp_poses/ may not exist if the working directory differs from project root. The _gen_define_grasp_pose handler calls os.makedirs(..., exist_ok=True), so the directory is created automatically. If a filesystem permission error occurs, the tool prints an error and pick execution continues (grasp YAML is advisory, not required for curobo execution).",
+    "Cube resting against bin wall occludes grasp \u2014 cubes in contact with a wall may be inaccessible for top-down approach. cuRobo collision checking with SourceBin in planning_obstacles will reject paths that clip the wall. Mitigation: increase gripper_offset z from 0.05 to 0.08m; alternatively, add a pre-grasp lateral nudge by reducing approach height clearance check.",
+    "Height-ranked sort stale \u2014 get_bounding_box is called after overlap_sphere; if cubes are still settling at query time, bbox_max_z may reflect mid-fall positions. sleepThreshold=0.0 and 3s settle time in the function-gate harness mitigate this; in live use, add a sim.step(n=60) before the sort.",
+    "OutfeedBin wall collision on drop \u2014 drop target [0, -0.48, 0.89] is 0.04m above the bin interior floor. If cuRobo approaches from the side (non-top-down), EE may clip the 0.20m tall bin wall. Planning_obstacles includes '/World/OutfeedBin' so cuRobo avoids the walls; EE approaches from above at transit height 1.18m and descends vertically."
   ],
   "intent": {
     "pattern_hint": "pick_place",
@@ -103,23 +126,36 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "franka", "ur10"],
+      "constraints": [
+        "franka_panda",
+        "franka",
+        "ur10"
+      ],
       "expected_count": 1,
       "required": true,
       "disambiguator": "medium_payload_preferred"
     },
     "source_bin": {
-      "constraints": ["bin", "container"],
+      "constraints": [
+        "bin",
+        "container"
+      ],
       "expected_count": 1,
       "required": true
     },
     "destination_bin": {
-      "constraints": ["bin", "container"],
+      "constraints": [
+        "bin",
+        "container"
+      ],
       "expected_count": 1,
       "required": true
     },
     "workpieces": {
-      "constraints": ["cube", "box"],
+      "constraints": [
+        "cube",
+        "box"
+      ],
       "min": 1,
       "max": 6,
       "param_name": "n_cubes",
@@ -130,35 +166,104 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka",
-      "position": [0, 0, 0.75],
-      "orientation": [1, 0, 0, 0]
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        1,
+        0,
+        0,
+        0
+      ]
     },
     "source_bin": {
       "path": "/World/SourceBin",
-      "position": [0, 0.42, 0.80],
-      "size": [0.35, 0.35, 0.20],
+      "position": [
+        0,
+        0.42,
+        0.8
+      ],
+      "size": [
+        0.35,
+        0.35,
+        0.2
+      ],
       "wall_thickness": 0.01
     },
     "destination_bin": {
       "path": "/World/OutfeedBin",
-      "position": [0, -0.48, 0.80],
-      "size": [0.35, 0.35, 0.20],
+      "position": [
+        0,
+        -0.48,
+        0.8
+      ],
+      "size": [
+        0.35,
+        0.35,
+        0.2
+      ],
       "wall_thickness": 0.01
     },
     "workpieces": [
-      {"path": "/World/SourceBin/Cube_1", "spawn_offset": [-0.08, -0.08, 0.15]},
-      {"path": "/World/SourceBin/Cube_2", "spawn_offset": [ 0.08, -0.08, 0.17]},
-      {"path": "/World/SourceBin/Cube_3", "spawn_offset": [-0.08,  0.08, 0.22]},
-      {"path": "/World/SourceBin/Cube_4", "spawn_offset": [ 0.08,  0.08, 0.24]},
-      {"path": "/World/SourceBin/Cube_5", "spawn_offset": [ 0.00, -0.04, 0.29]},
-      {"path": "/World/SourceBin/Cube_6", "spawn_offset": [ 0.00,  0.04, 0.31]}
+      {
+        "path": "/World/SourceBin/Cube_1",
+        "spawn_offset": [
+          -0.08,
+          -0.08,
+          0.15
+        ]
+      },
+      {
+        "path": "/World/SourceBin/Cube_2",
+        "spawn_offset": [
+          0.08,
+          -0.08,
+          0.17
+        ]
+      },
+      {
+        "path": "/World/SourceBin/Cube_3",
+        "spawn_offset": [
+          -0.08,
+          0.08,
+          0.22
+        ]
+      },
+      {
+        "path": "/World/SourceBin/Cube_4",
+        "spawn_offset": [
+          0.08,
+          0.08,
+          0.24
+        ]
+      },
+      {
+        "path": "/World/SourceBin/Cube_5",
+        "spawn_offset": [
+          0.0,
+          -0.04,
+          0.29
+        ]
+      },
+      {
+        "path": "/World/SourceBin/Cube_6",
+        "spawn_offset": [
+          0.0,
+          0.04,
+          0.31
+        ]
+      }
     ]
   },
-  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_bin(\n    prim_path={{source_bin.path}},\n    size={{source_bin.size}},\n    position={{source_bin.position}},\n    wall_thickness={{source_bin.wall_thickness}},\n)\n\ncreate_bin(\n    prim_path={{destination_bin.path}},\n    size={{destination_bin.size}},\n    position={{destination_bin.position}},\n    wall_thickness={{destination_bin.wall_thickness}},\n)\n\ncube_paths = [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}]\n\n# Spawn each cube at bin_base + spawn_offset\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position=[0+{{workpieces[0].spawn_offset}}[0], 0.42+{{workpieces[0].spawn_offset}}[1], 0.80+{{workpieces[0].spawn_offset}}[2]], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\nsetup_grasp_pose_sampler(\n    sampler_path=\"/World/GraspSampler\",\n    target_path={{source_bin.path}},\n    n_samples=60,\n    sampling_mode=\"antipodal\",\n)\n\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.48, 0.895],\n    size=[0.28, 0.28, 0.08],\n)\n\n_candidates_raw = overlap_sphere(\n    center=[0, 0.42, 0.92],\n    radius=0.22,\n)\n_cube_set = set(cube_paths)\n_candidates = [p for p in (_candidates_raw.get(\"prim_paths\") or []) if p in _cube_set]\nif not _candidates:\n    _candidates = cube_paths\n\nfor _path in _candidates:\n    define_grasp_pose(\n        robot_path={{primary_robot.path}},\n        object_path=_path,\n        approach_direction=[0, 0, -1],\n        gripper_offset=[0, 0, 0.05],\n    )\n\n_bboxes = []\nfor _path in _candidates:\n    _bb = get_bounding_box(prim_path=_path)\n    _max_z = _bb.get(\"max\", [0, 0, 0])[2] if isinstance(_bb, dict) else 0.0\n    _bboxes.append((_path, _max_z))\n_bboxes.sort(key=lambda x: x[1], reverse=True)\nsorted_cube_paths = [p for p, _ in _bboxes]\n\ndrop_targets = {p: [0, -0.48, 0.89] for p in sorted_cube_paths}\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=sorted_cube_paths,\n    destination_path={{destination_bin.path}},\n    drop_targets=drop_targets,\n    planning_obstacles=[\"/World/Table\", {{source_bin.path}}, {{destination_bin.path}}],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
+  "code_template": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_bin(\n    prim_path={{source_bin.path}},\n    size={{source_bin.size}},\n    position={{source_bin.position}},\n    wall_thickness={{source_bin.wall_thickness}},\n)\n\ncreate_bin(\n    prim_path={{destination_bin.path}},\n    size={{destination_bin.size}},\n    position={{destination_bin.position}},\n    wall_thickness={{destination_bin.wall_thickness}},\n)\n\ncube_paths = [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}]\n\n# Spawn each cube at bin_base + spawn_offset\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position=[0+{{workpieces[0].spawn_offset}}[0], 0.42+{{workpieces[0].spawn_offset}}[1], 0.80+{{workpieces[0].spawn_offset}}[2]], size=0.08)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=cube_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in cube_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\nsetup_grasp_pose_sampler(\n    sampler_path=\"/World/GraspSampler\",\n    target_path={{source_bin.path}},\n    n_samples=60,\n    sampling_mode=\"antipodal\",\n)\n\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.48, 0.895],\n    size=[0.28, 0.28, 0.08],\n)\n\n_candidates_raw = overlap_sphere(\n    center=[0, 0.42, 0.92],\n    radius=0.22,\n)\n_cube_set = set(cube_paths)\n_candidates = [p for p in ((_candidates_raw or {}).get(\"prim_paths\") or []) if p in _cube_set]\nif not _candidates:\n    _candidates = cube_paths\n\nfor _path in _candidates:\n    define_grasp_pose(\n        robot_path={{primary_robot.path}},\n        object_path=_path,\n        approach_direction=[0, 0, -1],\n        gripper_offset=[0, 0, 0.05],\n    )\n\n_bboxes = []\nfor _path in _candidates:\n    _bb = get_bounding_box(prim_path=_path)\n    _max_z = (_bb or {}).get(\"max\", [0, 0, 0])[2] if isinstance(_bb, dict) else 0.0\n    _bboxes.append((_path, _max_z))\n_bboxes.sort(key=lambda x: x[1], reverse=True)\nsorted_cube_paths = [p for p, _ in _bboxes]\n\ndrop_targets = {p: [0, -0.48, 0.89] for p in sorted_cube_paths}\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=sorted_cube_paths,\n    destination_path={{destination_bin.path}},\n    drop_targets=drop_targets,\n    planning_obstacles=[\"/World/Table\", {{source_bin.path}}, {{destination_bin.path}}],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
   "motion_controllers": {
     "verified": [],
-    "untested": ["curobo"],
+    "untested": [
+      "curobo"
+    ],
     "failed": {}
   },
-  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳"
+  "verified_status": "drafted-2026-05-16; form-gate-schema \u2713; function-gate \u23f3"
 }

@@ -3792,7 +3792,8 @@ ISAAC_SIM_TOOLS = [
                                 "(10) 'osc' — Isaac Lab operational-space impedance (experimental, contact-rich tasks)."
                             ),
                             "enum": ["auto", "native", "spline", "curobo", "diffik", "osc",
-                                     "sensor_gated", "fixed_poses", "cube_tracking", "ros2_cmd"],
+                                     "sensor_gated", "fixed_poses", "cube_tracking", "ros2_cmd",
+                                     "builtin"],
                         },
                         "source_paths": {"type": "array", "items": {"type": "string"}, "description": "native/cube_tracking mode: objects to pick (in priority order)"},
                         "destination_path": {"type": "string", "description": "native/cube_tracking mode: bin prim — controller drops at its top-center + 0.05m clearance unless drop_target overrides"},

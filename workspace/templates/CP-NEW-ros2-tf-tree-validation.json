@@ -42,7 +42,7 @@
     "max_age_seconds": 1.0,
     "root_frame": "panda_link0"
   },
-  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending",
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending; env_blocked: rclpy_abi — /opt/ros/humble/site-packages/_rclpy_pybind11.cpython-311 vs Kit Python 3.10 ABI mismatch",
   "failure_modes": [
     "ROS2 environment not sourced — precheck_ros2_environment returns ok=False; source /opt/ros/humble/setup.bash before launching Kit and re-run.",
     "configure_ros2_time called AFTER setup_ros2_bridge — /tf_static is latched with timestamp=0 for the first publish, so check_tf_health then reports every static transform as stale; always call configure_ros2_time first.",

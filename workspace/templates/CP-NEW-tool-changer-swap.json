@@ -1,0 +1,208 @@
+{
+  "task_id": "CP-NEW-tool-changer-swap",
+  "goal": "Automated end-effector changeover at a tool stand: a UR10 starts with a parallel-jaw gripper mounted at its wrist, navigates to a 2-dock tool stand, releases the parallel-jaw into Dock_1 (by removing the wrist↔tool FixedJoint), repositions the wrist over Dock_2, and engages the vacuum gripper (by creating a new wrist↔tool FixedJoint). Tools are modeled as labelled Cube proxies (parallel_jaw and vacuum_cup) — geometry is intentionally minimal so the canonical exercises the swap *mechanism* rather than tool fidelity. Pattern_hint is 'other' because the success criterion is structural (which tool is parented to the wrist via FixedJoint at the end) rather than a workpiece-delivery criterion. First tool-changer canonical — establishes the shape for industrial-tool-changer-swap-001.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "create_articulated_joint",
+    "move_to_pose",
+    "get_world_transform",
+    "prim_exists",
+    "set_physics_scene_config",
+    "list_relationships"
+  ],
+  "thoughts": "Design rationale for CP-NEW-tool-changer-swap (first tool-changer canonical):\n\n1) Pattern_hint = 'other' — tool-swap is infrastructure, not a positive-motion canonical with workpiece delivery. Success is verified by inspecting which tool prim is parented to the wrist via FixedJoint at end-of-sequence (vacuum_cup present, parallel_jaw absent), NOT by checking a workpiece position. This is exactly the long-tail case the schema's pattern_hint='other' bucket is meant to absorb (canonical_schema.py §VALID_PATTERN_HINTS).\n\n2) Topology — single station: UR10 base on 0.75m table at world origin; tool stand to the right at x=+0.55 with two docks separated along Y (Dock_1 at y=+0.10, Dock_2 at y=-0.10, both at z=0.85 atop the stand plate). Parallel-jaw tool starts mounted at the UR10 wrist (i.e. at the wrist's world pose); vacuum_cup tool starts parked in Dock_2. UR10 reach to stand is ~0.55m, well inside the 1.3m envelope.\n\n3) Tool-stand modelling — /World/ToolStand is an Xform at [0.55, 0.0, 0.80] containing:\n   • /World/ToolStand/Plate — flat Cube platform (scale 0.10×0.30×0.025)\n   • /World/ToolStand/Dock_1 — visual receptacle Cube at [0.55, +0.10, 0.84] (scale 0.04×0.04×0.005); collision-only, no rigid body. Serves as the parked-tool position.\n   • /World/ToolStand/Dock_2 — visual receptacle Cube at [0.55, -0.10, 0.84]; same shape as Dock_1.\n   These dock prims are visual/collision proxies — they do NOT model real auto-tool-changer mechanical latches. The 'engagement' is purely a USD FixedJoint between wrist and tool prim, not a kinematic latch.\n\n4) Tool prims (Cube proxies):\n   • /World/Tools/ParallelJaw — Cube at the wrist position (initial). Scale 0.05×0.08×0.04; PhysicsRigidBodyAPI + PhysicsCollisionAPI + PhysicsMassAPI; primvars:displayColor=blue (visual distinction).\n   • /World/Tools/VacuumCup — Cube parked in Dock_2 at [0.55, -0.10, 0.86]. Same physics apis; primvars:displayColor=orange.\n   Tools live under /World/Tools/, NOT under the robot — the parent-child wrist relationship is established by FixedJoint, not USD hierarchy. This is the standard pattern used elsewhere for grasp-attach (cf. CP-30 FixedJoint at grip_close, CP-69 raycast→FixedJoint workaround).\n\n5) FixedJoint engagement model:\n   • Initial state: /World/ToolJoints/Wrist_to_ParallelJaw — FixedJoint between /World/UR10/tool0 (wrist link, end-effector anchor on UR10) and /World/Tools/ParallelJaw. This is the 'currently mounted' tool.\n   • Disengage step: re-author the FixedJoint to point at an unused anchor (or use a sentinel non-existent body1) — we model release by simply not creating the joint in the new state, and by physically moving the parallel-jaw prim into Dock_1 via set_attribute(xformOp:translate). USD-side: leave the original FixedJoint prim in place but break its semantic role; runtime release can also be modeled by setting joint:state:linear:enabled = False, but for the canonical-build phase we represent the END state (after swap completes), where:\n     - /World/ToolJoints/Wrist_to_ParallelJaw is REMOVED (no longer exists / is set inactive)\n     - /World/ToolJoints/Wrist_to_VacuumCup EXISTS as a FixedJoint between /World/UR10/tool0 and /World/Tools/VacuumCup\n   This matches the verify_args.expected_state field which lists the post-swap relationships.\n\n6) Tool-changer 'sequence' represented as code phases:\n   PHASE 0: Build scene — UR10 at home, stand placed, both tool prims placed (parallel_jaw at wrist, vacuum_cup in Dock_2), initial FixedJoint Wrist_to_ParallelJaw active.\n   PHASE 1: Approach dock 1 — move_to_pose to a pre-release pose above Dock_1 (so the parallel-jaw bottom hovers over the dock receptacle). target_position = [0.55, +0.10, 0.95] (10 cm above dock top).\n   PHASE 2: Release parallel-jaw — set_attribute on FixedJoint to disable it (or destroy and recreate the tool prim's xformOp:translate to the dock position), then teleport-park /World/Tools/ParallelJaw to [0.55, +0.10, 0.86] via set_attribute(xformOp:translate).\n   PHASE 3: Reposition over dock 2 — move_to_pose to [0.55, -0.10, 0.95] (above vacuum_cup in Dock_2).\n   PHASE 4: Engage vacuum — create a NEW FixedJoint /World/ToolJoints/Wrist_to_VacuumCup with body0=/World/UR10/tool0, body1=/World/Tools/VacuumCup. Move the vacuum-cup prim up to the wrist (via xformOp:translate to wrist position) to model the engagement. From this point on, vacuum follows wrist.\n\n7) Failure modes (4 critical):\n   F1: docking position drift — if the move_to_pose pre-release pose is more than ~5mm off the dock center, the released tool falls under gravity and ends up off-target (or rolls off the stand). Mitigation: pass tight target_position [0.55, +0.10, 0.95] and check with get_world_transform that the wrist actually arrived before issuing release.\n   F2: FixedJoint not properly removed — if the old Wrist_to_ParallelJaw joint is not removed/disabled, both joints exist simultaneously and PhysX over-constrains the wrist (visible as the wrist locking up or both tools dragging behind it). Mitigation: explicit set_attribute(.../Wrist_to_ParallelJaw, 'physics:jointEnabled', False) before creating the new joint, and list_relationships to verify no two FixedJoints share the wrist body0.\n   F3: Wrist-to-tool alignment too imprecise — vacuum_cup is placed at Dock_2 [0.55, -0.10, 0.86]; if the wrist is at [0.55, -0.10, 0.95] (9cm above), creating the FixedJoint without first moving the tool to the wrist results in a 9cm rigid offset baked into the joint. The tool then floats below the wrist. Mitigation: BEFORE create_articulated_joint, teleport the tool to the wrist position via set_attribute(xformOp:translate) so the joint's resting frame is zero-offset.\n   F4: Simultaneous-tool race — if the engage step (create new FixedJoint) is issued in the same tool-call batch as the release step (disable old FixedJoint), and the executor runs them out of order, both joints exist at once. Mitigation: enforce sequential ordering via sim_control(action='step', step_count=2) between release and engage; OR insert get_world_transform call as a synchronization barrier.\n\n8) Structural tags:\n   • isaac:industry.tool_changer — new tag for tool-changer canonicals (this is the first; future tool-changer variants extend this cluster).\n   • isaac:gesture.eoat_swap — gesture-axis tag for end-of-arm-tooling swap motion.\n   • isaac:infra.tool_stand — infrastructure tag for the 2-dock tool stand.\n   • isaac:robot.ur10 + isaac:robot.fixed_base.arm — robot lineage.\n   • isaac:topology.single_station — single-cell layout.\n   • isaac:pattern.fixed_joint_swap — swap mechanism is FixedJoint reattachment.\n\n9) Yrkesroll-axis: the tool-changer is INFRASTRUCTURE not a human-role canonical, so no operator_role block (unlike CP-NEW-yrkesroll-machinist-cnc-load). The role-trio (roles/role_defaults/code_template) is still authored because this is a T1 canonical, but operator_role is omitted.\n\n10) Motion-controllers — uses move_to_pose, which is in MOTION_PLANNING_TOOL_PREFIXES. Declare motion_controllers={verified:[], untested:[rmpflow, curobo], failed:{}} so the WARN for missing motion-controllers tag is satisfied.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Work table ───────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.8, 0.8, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU deterministic for FixedJoint reattach experiments ───────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── UR10 robot ────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Tool stand (Xform with plate + 2 docks) ──────────────────────────────────\n# Plate at x=+0.55, two docks separated along Y (Dock_1 at +0.10, Dock_2 at -0.10).\ncreate_prim(prim_path=\"/World/ToolStand\", prim_type=\"Xform\")\ncreate_prim(\n    prim_path=\"/World/ToolStand/Plate\",\n    prim_type=\"Cube\",\n    position=[0.55, 0.0, 0.80],\n    scale=[0.05, 0.15, 0.0125],\n)\napply_api_schema(prim_path=\"/World/ToolStand/Plate\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/ToolStand/Plate\", attr_name=\"primvars:displayColor\", value=[[0.35, 0.35, 0.40]])\n\n# Dock_1 — parking position for the parallel-jaw tool after release.\ncreate_prim(\n    prim_path=\"/World/ToolStand/Dock_1\",\n    prim_type=\"Cube\",\n    position=[0.55, 0.10, 0.84],\n    scale=[0.02, 0.02, 0.0025],\n)\napply_api_schema(prim_path=\"/World/ToolStand/Dock_1\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/ToolStand/Dock_1\", attr_name=\"primvars:displayColor\", value=[[0.2, 0.6, 0.9]])  # blue = parallel-jaw dock\n\n# Dock_2 — parking position for the vacuum tool (initial state holds it here).\ncreate_prim(\n    prim_path=\"/World/ToolStand/Dock_2\",\n    prim_type=\"Cube\",\n    position=[0.55, -0.10, 0.84],\n    scale=[0.02, 0.02, 0.0025],\n)\napply_api_schema(prim_path=\"/World/ToolStand/Dock_2\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/ToolStand/Dock_2\", attr_name=\"primvars:displayColor\", value=[[0.9, 0.5, 0.2]])  # orange = vacuum-cup dock\n\n# ── Tool prims (Cube proxies) ────────────────────────────────────────────────\n# Both live under /World/Tools/ — the wrist parent-child relationship is\n# expressed via FixedJoint (PhysX), NOT via USD hierarchy.\ncreate_prim(prim_path=\"/World/Tools\", prim_type=\"Xform\")\n\n# Parallel-jaw tool — starts mounted at the UR10 wrist (tool0 frame is ~1.20m up).\n# Approximate wrist world pose with UR10 in home pose: [0.50, 0.0, 1.20] (a\n# reasonable Z above the base; cuRobo/RMPflow handle the exact transform at runtime).\ncreate_prim(\n    prim_path=\"/World/Tools/ParallelJaw\",\n    prim_type=\"Cube\",\n    position=[0.50, 0.0, 1.20],\n    scale=[0.025, 0.04, 0.02],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Tools/ParallelJaw\", schema_name=api)\nset_attribute(prim_path=\"/World/Tools/ParallelJaw\", attr_name=\"physics:mass\", value=0.30)\nset_attribute(prim_path=\"/World/Tools/ParallelJaw\", attr_name=\"primvars:displayColor\", value=[[0.2, 0.6, 0.9]])  # blue\n\n# Vacuum-cup tool — starts parked in Dock_2.\ncreate_prim(\n    prim_path=\"/World/Tools/VacuumCup\",\n    prim_type=\"Cube\",\n    position=[0.55, -0.10, 0.86],\n    scale=[0.025, 0.025, 0.02],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Tools/VacuumCup\", schema_name=api)\nset_attribute(prim_path=\"/World/Tools/VacuumCup\", attr_name=\"physics:mass\", value=0.30)\nset_attribute(prim_path=\"/World/Tools/VacuumCup\", attr_name=\"primvars:displayColor\", value=[[0.9, 0.5, 0.2]])  # orange\n\n# ── Initial FixedJoint: wrist ↔ parallel-jaw (tool is currently mounted) ─────\ncreate_prim(prim_path=\"/World/ToolJoints\", prim_type=\"Xform\")\ncreate_articulated_joint(\n    joint_path=\"/World/ToolJoints/Wrist_to_ParallelJaw\",\n    body0_path=\"/World/UR10/tool0\",\n    body1_path=\"/World/Tools/ParallelJaw\",\n    joint_type=\"fixed\",\n)\n\n# ── PHASE 1: approach Dock_1 (pre-release pose above the dock) ───────────────\n# Wrist moves to [0.55, +0.10, 0.95] — 9cm above Dock_1 top — so the parallel-jaw\n# hangs directly above the dock receptacle ready for release.\nmove_to_pose(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.55, 0.10, 0.95],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"ur10\",\n)\n# Synchronization barrier — confirm wrist actually arrived before issuing release.\nget_world_transform(prim_path=\"/World/UR10/tool0\")\n\n# ── PHASE 2: release parallel-jaw into Dock_1 ────────────────────────────────\n# (a) Disable the wrist↔parallel-jaw FixedJoint so PhysX no longer constrains them.\nset_attribute(\n    prim_path=\"/World/ToolJoints/Wrist_to_ParallelJaw\",\n    attr_name=\"physics:jointEnabled\",\n    value=False,\n)\n# (b) Teleport the parallel-jaw prim to its parked pose in Dock_1.\nset_attribute(\n    prim_path=\"/World/Tools/ParallelJaw\",\n    attr_name=\"xformOp:translate\",\n    value=[0.55, 0.10, 0.86],\n)\n\n# ── PHASE 3: reposition wrist over Dock_2 ────────────────────────────────────\nmove_to_pose(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.55, -0.10, 0.95],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"ur10\",\n)\nget_world_transform(prim_path=\"/World/UR10/tool0\")\n\n# ── PHASE 4: engage vacuum-cup tool ──────────────────────────────────────────\n# (a) Teleport vacuum-cup to the wrist position FIRST (F3 mitigation — avoids\n# baking a 9cm rigid offset into the FixedJoint resting frame).\nset_attribute(\n    prim_path=\"/World/Tools/VacuumCup\",\n    attr_name=\"xformOp:translate\",\n    value=[0.55, -0.10, 0.95],\n)\n# (b) Create the new wrist↔vacuum FixedJoint. From here on, vacuum follows wrist.\ncreate_articulated_joint(\n    joint_path=\"/World/ToolJoints/Wrist_to_VacuumCup\",\n    body0_path=\"/World/UR10/tool0\",\n    body1_path=\"/World/Tools/VacuumCup\",\n    joint_type=\"fixed\",\n)\n\n# ── Verification: post-swap state inspection ─────────────────────────────────\n# Expected end-state:\n#   • /World/Tools/ParallelJaw at ~[0.55, +0.10, 0.86] (parked in Dock_1)\n#   • /World/Tools/VacuumCup at ~[0.55, -0.10, 0.95] (mounted on wrist)\n#   • Wrist_to_ParallelJaw exists but physics:jointEnabled=False\n#   • Wrist_to_VacuumCup exists and is the active engagement\nprim_exists(prim_path=\"/World/ToolJoints/Wrist_to_VacuumCup\")\nprim_exists(prim_path=\"/World/ToolJoints/Wrist_to_ParallelJaw\")\nget_world_transform(prim_path=\"/World/Tools/ParallelJaw\")\nget_world_transform(prim_path=\"/World/Tools/VacuumCup\")\nlist_relationships(prim_path=\"/World/ToolJoints/Wrist_to_VacuumCup\")",
+  "settle_state": {
+    "tool_stand": {
+      "/World/ToolStand/Plate": [0.55, 0.0, 0.80],
+      "/World/ToolStand/Dock_1": [0.55, 0.10, 0.84],
+      "/World/ToolStand/Dock_2": [0.55, -0.10, 0.84]
+    },
+    "tools_initial": {
+      "/World/Tools/ParallelJaw": [0.50, 0.0, 1.20],
+      "/World/Tools/VacuumCup": [0.55, -0.10, 0.86]
+    },
+    "tools_final": {
+      "/World/Tools/ParallelJaw": [0.55, 0.10, 0.86],
+      "/World/Tools/VacuumCup": [0.55, -0.10, 0.95]
+    },
+    "joints_initial": {
+      "/World/ToolJoints/Wrist_to_ParallelJaw": "enabled"
+    },
+    "joints_final": {
+      "/World/ToolJoints/Wrist_to_ParallelJaw": "disabled",
+      "/World/ToolJoints/Wrist_to_VacuumCup": "enabled"
+    },
+    "robot": {
+      "/World/UR10": "wrist_above_dock_2"
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/Tools/ParallelJaw",
+        "place_path": "/World/ToolStand/Dock_1",
+        "robot_kind": "ur10",
+        "stage_kind": "release"
+      },
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/Tools/VacuumCup",
+        "place_path": "/World/UR10/tool0",
+        "robot_kind": "ur10",
+        "stage_kind": "engage"
+      }
+    ],
+    "cube_path": "/World/Tools/VacuumCup",
+    "expected_active_joint": "/World/ToolJoints/Wrist_to_VacuumCup",
+    "expected_inactive_joint": "/World/ToolJoints/Wrist_to_ParallelJaw",
+    "expected_parked_tool": "/World/Tools/ParallelJaw",
+    "expected_mounted_tool": "/World/Tools/VacuumCup",
+    "parked_position_tolerance_m": 0.02,
+    "mounted_position_tolerance_m": 0.02
+  },
+  "simulate_args": {
+    "target_path": "/World/UR10/tool0",
+    "cube_path": "/World/Tools/VacuumCup",
+    "duration_s": 60,
+    "xy_tolerance": 0.05,
+    "expected_swap_sequence": ["release_parallel_jaw", "engage_vacuum_cup"]
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/Table",
+      "/World/ToolStand/Plate",
+      "/World/ToolStand/Dock_1",
+      "/World/ToolStand/Dock_2"
+    ],
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "Docking position drift — if move_to_pose pre-release pose is more than ~5mm off Dock_1 center, the released parallel-jaw tool falls under gravity and lands off-target (or rolls off the stand). The tool is teleported to the dock pose via set_attribute(xformOp:translate) in PHASE 2, which masks the drift visually, but a real auto-tool-changer would rely on the wrist's accuracy. Mitigation: insert get_world_transform(/World/UR10/tool0) as a synchronization barrier and check the wrist xy is within 0.005m of [0.55, +0.10] before issuing release; if the planner fell short, retry move_to_pose with a tighter tolerance.",
+    "FixedJoint not properly removed — if the old Wrist_to_ParallelJaw FixedJoint is not disabled before the new Wrist_to_VacuumCup is created, BOTH joints constrain the wrist simultaneously. PhysX over-constrains: wrist locks up or both tools drag behind it. Mitigation: explicit set_attribute(.../Wrist_to_ParallelJaw, 'physics:jointEnabled', False) is issued in PHASE 2 step (a) BEFORE PHASE 4 creates the new joint; list_relationships at the end is a verification probe — exactly one of the two ToolJoints should be observed as active (jointEnabled=True).",
+    "Wrist-to-tool alignment too imprecise — when creating the new FixedJoint, PhysX bakes the CURRENT relative pose of body0 and body1 into the joint's resting frame. If the vacuum-cup is still at Dock_2 [0.55, -0.10, 0.86] when the wrist is at [0.55, -0.10, 0.95] (9 cm above), the joint encodes a 9-cm rigid offset and the tool floats below the wrist for the rest of the sim. Mitigation: PHASE 4 step (a) explicitly teleports VacuumCup to the wrist position [0.55, -0.10, 0.95] via set_attribute(xformOp:translate) BEFORE create_articulated_joint, guaranteeing a zero-offset rest frame.",
+    "Simultaneous-tool race — if the executor schedules PHASE 2 (release) and PHASE 4 (engage) tool calls in parallel rather than sequentially, both FixedJoints are alive at once during the gap. Mitigation: PHASE 3 (move_to_pose + get_world_transform) is interposed between release and engage, acting as a synchronization barrier; the get_world_transform call forces the executor to await PhysX state before issuing the next set_attribute or create_articulated_joint call. Additionally, sim_control(action='step', step_count=2) can be inserted between PHASE 2 and PHASE 4 if the executor's barrier behaviour is uncertain.",
+    "FixedJoint body0=/World/UR10/tool0 assumes the UR10 articulation actually exposes a 'tool0' link prim. robot_wizard for UR10 typically creates the standard UR10 link hierarchy with tool0 as the wrist-flange frame, but if a future Isaac Sim Kit version changes the URDF naming to 'flange' or 'ee_link' the create_articulated_joint will silently bind body0 to a non-existent prim and the joint will be a no-op. Mitigation: prim_exists(/World/UR10/tool0) after robot_wizard returns; if absent, fall back to /World/UR10/ee_link or /World/UR10/wrist_3_link. (UR10 standard URDF: tool0 is the wrist-flange frame; ee_link is its alias in some descriptions.)",
+    "Disabled-joint semantics may vary by PhysX version — physics:jointEnabled=False is the canonical way to disable an existing joint at runtime in USDPhysics schema, but older Isaac Sim Kit (pre-2024.1) used an attribute-overrides approach where jointEnabled defaulted to True with no override. If physics:jointEnabled is not respected (joint stays active), an alternative is to teleport body1 (the parallel-jaw) far away to break the natural rest pose, OR to author the joint prim with set_attribute(active, False). Detection: after PHASE 2, get_world_transform on /World/Tools/ParallelJaw — if the parallel-jaw position lags the wrist when the wrist moves to Dock_2 in PHASE 3, the joint is still active."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_tool_changer": true,
+      "n_tools": 2,
+      "n_docks": 2,
+      "swap_mechanism": "fixed_joint_reattach",
+      "has_workpiece_delivery": false
+    },
+    "structural_tags": [
+      "isaac:industry.tool_changer",
+      "isaac:gesture.eoat_swap",
+      "isaac:infra.tool_stand",
+      "isaac:robot.ur10",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:pattern.fixed_joint_swap"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["ur10", "ur10e", "ur5e"],
+      "expected_count": 1,
+      "required": true
+    },
+    "tool_stand_plate": {
+      "constraints": ["platform", "cube"],
+      "expected_count": 1,
+      "required": true
+    },
+    "dock_1": {
+      "constraints": ["cube", "receptacle"],
+      "expected_count": 1,
+      "required": true
+    },
+    "dock_2": {
+      "constraints": ["cube", "receptacle"],
+      "expected_count": 1,
+      "required": true
+    },
+    "tool_parallel_jaw": {
+      "constraints": ["cube", "tool_proxy", "parallel_jaw_gripper"],
+      "expected_count": 1,
+      "required": true,
+      "starts_mounted": true
+    },
+    "tool_vacuum_cup": {
+      "constraints": ["cube", "tool_proxy", "vacuum_gripper"],
+      "expected_count": 1,
+      "required": true,
+      "starts_docked": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0],
+      "wrist_link": "/World/UR10/tool0"
+    },
+    "tool_stand_plate": {
+      "path": "/World/ToolStand/Plate",
+      "position": [0.55, 0.0, 0.80],
+      "scale": [0.05, 0.15, 0.0125]
+    },
+    "dock_1": {
+      "path": "/World/ToolStand/Dock_1",
+      "position": [0.55, 0.10, 0.84],
+      "scale": [0.02, 0.02, 0.0025],
+      "role_for": "tool_parallel_jaw"
+    },
+    "dock_2": {
+      "path": "/World/ToolStand/Dock_2",
+      "position": [0.55, -0.10, 0.84],
+      "scale": [0.02, 0.02, 0.0025],
+      "role_for": "tool_vacuum_cup"
+    },
+    "tool_parallel_jaw": {
+      "path": "/World/Tools/ParallelJaw",
+      "initial_position": [0.50, 0.0, 1.20],
+      "parked_position": [0.55, 0.10, 0.86],
+      "scale": [0.025, 0.04, 0.02],
+      "mass": 0.30,
+      "color": [0.2, 0.6, 0.9],
+      "initial_joint_path": "/World/ToolJoints/Wrist_to_ParallelJaw"
+    },
+    "tool_vacuum_cup": {
+      "path": "/World/Tools/VacuumCup",
+      "initial_position": [0.55, -0.10, 0.86],
+      "mounted_position": [0.55, -0.10, 0.95],
+      "scale": [0.025, 0.025, 0.02],
+      "mass": 0.30,
+      "color": [0.9, 0.5, 0.2],
+      "engage_joint_path": "/World/ToolJoints/Wrist_to_VacuumCup"
+    }
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.8, 0.8, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(prim_path=\"/World/ToolStand\", prim_type=\"Xform\")\ncreate_prim(prim_path={{tool_stand_plate.path}}, prim_type=\"Cube\", position={{tool_stand_plate.position}}, scale={{tool_stand_plate.scale}})\napply_api_schema(prim_path={{tool_stand_plate.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path={{dock_1.path}}, prim_type=\"Cube\", position={{dock_1.position}}, scale={{dock_1.scale}})\napply_api_schema(prim_path={{dock_1.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path={{dock_2.path}}, prim_type=\"Cube\", position={{dock_2.position}}, scale={{dock_2.scale}})\napply_api_schema(prim_path={{dock_2.path}}, schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Tools\", prim_type=\"Xform\")\n\ncreate_prim(prim_path={{tool_parallel_jaw.path}}, prim_type=\"Cube\", position={{tool_parallel_jaw.initial_position}}, scale={{tool_parallel_jaw.scale}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{tool_parallel_jaw.path}}, schema_name=api)\nset_attribute(prim_path={{tool_parallel_jaw.path}}, attr_name=\"physics:mass\", value={{tool_parallel_jaw.mass}})\n\ncreate_prim(prim_path={{tool_vacuum_cup.path}}, prim_type=\"Cube\", position={{tool_vacuum_cup.initial_position}}, scale={{tool_vacuum_cup.scale}})\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{tool_vacuum_cup.path}}, schema_name=api)\nset_attribute(prim_path={{tool_vacuum_cup.path}}, attr_name=\"physics:mass\", value={{tool_vacuum_cup.mass}})\n\ncreate_prim(prim_path=\"/World/ToolJoints\", prim_type=\"Xform\")\ncreate_articulated_joint(\n    joint_path={{tool_parallel_jaw.initial_joint_path}},\n    body0_path={{primary_robot.wrist_link}},\n    body1_path={{tool_parallel_jaw.path}},\n    joint_type=\"fixed\",\n)\n\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position=[0.55, 0.10, 0.95],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"ur10\",\n)\nget_world_transform(prim_path={{primary_robot.wrist_link}})\n\nset_attribute(prim_path={{tool_parallel_jaw.initial_joint_path}}, attr_name=\"physics:jointEnabled\", value=False)\nset_attribute(prim_path={{tool_parallel_jaw.path}}, attr_name=\"xformOp:translate\", value={{tool_parallel_jaw.parked_position}})\n\nmove_to_pose(\n    articulation_path={{primary_robot.path}},\n    target_position=[0.55, -0.10, 0.95],\n    target_orientation=[1.0, 0.0, 0.0, 0.0],\n    planner=\"rmpflow\",\n    robot_type=\"ur10\",\n)\nget_world_transform(prim_path={{primary_robot.wrist_link}})\n\nset_attribute(prim_path={{tool_vacuum_cup.path}}, attr_name=\"xformOp:translate\", value={{tool_vacuum_cup.mounted_position}})\ncreate_articulated_joint(\n    joint_path={{tool_vacuum_cup.engage_joint_path}},\n    body0_path={{primary_robot.wrist_link}},\n    body1_path={{tool_vacuum_cup.path}},\n    joint_type=\"fixed\",\n)\n\nprim_exists(prim_path={{tool_vacuum_cup.engage_joint_path}})\nprim_exists(prim_path={{tool_parallel_jaw.initial_joint_path}})\nget_world_transform(prim_path={{tool_parallel_jaw.path}})\nget_world_transform(prim_path={{tool_vacuum_cup.path}})\nlist_relationships(prim_path={{tool_vacuum_cup.engage_joint_path}})",
+  "simulate_args_template": {
+    "target_path": "{{primary_robot.wrist_link}}",
+    "cube_path": "{{tool_vacuum_cup.path}}",
+    "duration_s": 60,
+    "xy_tolerance": 0.05
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema pending; smoke-test pending",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["rmpflow", "curobo"],
+    "failed": {}
+  },
+  "extends": "industrial-tool-changer-swap-001",
+  "extension_notes": "First tool-changer canonical — establishes the swap-via-FixedJoint pattern (parallel_jaw → vacuum_cup) at a 2-dock tool stand. Pattern_hint='other' because the success criterion is structural (post-swap FixedJoint identity), not workpiece-delivery. Reuses the FixedJoint reattach pattern already verified in CP-30 (grip_close FixedJoint) and CP-69 (raycast→FixedJoint), applied at the wrist-to-EE seam rather than the EE-to-workpiece seam. Backlog notes that real auto-tool-changer hardware uses surface_gripper / setup_pick_place_controller for engagement, but for the first canonical we deliberately model the mechanism explicitly with create_articulated_joint to make the swap topology legible. A follow-up canonical (industrial-tool-changer-pneumatic-001 or similar) can layer surface_gripper on top once this baseline lands."
+}

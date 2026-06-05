@@ -483,3 +483,37 @@ def test_role_substitute_with_orientation_vec():
     defaults = {"r": {"orientation": [0.7071068, 0, 0, 0.7071068]}}
     out = sub("ori={{r.orientation}}", defaults)
     assert out == "ori=[0.7071068, 0, 0, 0.7071068]"
+
+
+# Round 8 regression — path placeholder embedded inside a string-concat
+# context (`"{{role.path}}/suffix"`) must NOT inject extra quotes.
+def test_role_substitute_concat_path_strips_inner_quotes():
+    sub, _, _ = _imp_roles()
+    defaults = {"primary_robot": {"path": "/World/Franka"}}
+    out = sub('ee_link="{{primary_robot.path}}/panda_hand"', defaults)
+    assert out == 'ee_link="/World/Franka/panda_hand"'
+
+
+def test_role_substitute_concat_path_prefix_and_suffix():
+    sub, _, _ = _imp_roles()
+    defaults = {"primary_robot": {"path": "/World/Franka"}}
+    out = sub(
+        'graph_path="{{primary_robot.path}}/SuctionGraph"',
+        defaults,
+    )
+    assert out == 'graph_path="/World/Franka/SuctionGraph"'
+
+
+def test_role_substitute_full_wrap_still_unwrapped():
+    sub, _, _ = _imp_roles()
+    defaults = {"primary_robot": {"class": "franka_panda"}}
+    out = sub('robot_name="{{primary_robot.class}}"', defaults)
+    assert out == 'robot_name="franka_panda"'
+
+
+def test_role_substitute_apostrophe_preserved():
+    """Outer string with a single apostrophe (no matching pair) must NOT be
+    altered by the inner-quote stripper."""
+    sub, _, _ = _imp_roles()
+    out = sub('msg="don\'t"', {})
+    assert out == 'msg="don\'t"'

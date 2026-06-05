@@ -156,8 +156,28 @@ def _gen_add_domain_randomizer(args: Dict) -> str:
 
     if rand_type == "pose":
         surface = params.get("surface_prim", "/World/Ground")
-        min_angle = params.get("min_angle", -180)
-        max_angle = params.get("max_angle", 180)
+        # rep.randomizer.rotation expects float3 (Euler XYZ degrees).
+        # Templates often pass a scalar (yaw-only) — promote to 3-tuple so
+        # OgnSampleRotation.inputs:minAngle/maxAngle accept it.
+        raw_min = params.get("min_angle", -180)
+        raw_max = params.get("max_angle", 180)
+        def _as_float3(v, default=0.0):
+            if isinstance(v, (list, tuple)):
+                if len(v) >= 3:
+                    return (float(v[0]), float(v[1]), float(v[2]))
+                if len(v) == 1:
+                    s = float(v[0])
+                    return (default, default, s)  # yaw-only
+                # 2-tuple: treat as (pitch, yaw) fallback
+                return (float(v[0]), float(v[1]) if len(v) > 1 else default, default)
+            try:
+                s = float(v)
+            except Exception:
+                s = float(default)
+            # Scalar -> yaw-only Z rotation (most common DR case)
+            return (0.0, 0.0, s)
+        min_angle = _as_float3(raw_min, default=-180.0)
+        max_angle = _as_float3(raw_max, default=180.0)
         lines.extend([
             "with rep.trigger.on_frame():",
             f"    with rep.get.prims(path_pattern=\"{target}\"):",
@@ -165,7 +185,7 @@ def _gen_add_domain_randomizer(args: Dict) -> str:
             f"            surface_prims=rep.get.prims(path_pattern=\"{surface}\")",
             f"        )",
             f"        rep.randomizer.rotation(",
-            f"            min_angle={min_angle}, max_angle={max_angle}",
+            f"            min_angle={min_angle!r}, max_angle={max_angle!r}",
             f"        )",
         ])
 
@@ -746,14 +766,36 @@ async def _handle_preview_sdg(args: Dict) -> Dict:
     from .. import kit_tools
     num_samples = args.get("num_samples", 3)
 
+    # Round 7 repair (2026-05-18): rep.orchestrator.step() is the
+    # standalone-workflow API and raises 'Synchronous call to step'
+    # inside Kit. Use the Kit-facing app.update() loop so preview frames
+    # still trigger the Replicator graph without crashing on the sync
+    # step gate.
     code = f"""\
 import omni.replicator.core as rep
 import json
 
 num_samples = {num_samples}
-for i in range(num_samples):
-    rep.orchestrator.step()
-    print(f"Preview frame {{i + 1}}/{num_samples} generated")
+try:
+    import omni.kit.app as _kit_app_psdg
+    _app_psdg = _kit_app_psdg.get_app()
+    for i in range(num_samples):
+        for _ in range(2):
+            _app_psdg.update()
+        print(f"Preview frame {{i + 1}}/{num_samples} generated (kit.app.update)")
+except Exception as _exc_psdg:
+    print(f"preview_sdg: kit.app.update fallback failed: {{_exc_psdg}}")
+    # Last-resort: try step_async via asyncio.ensure_future so we at
+    # least surface the right error message rather than the sync-step
+    # standalone-workflow one.
+    try:
+        import asyncio as _asyncio_psdg
+        _loop_psdg = _asyncio_psdg.get_event_loop()
+        for i in range(num_samples):
+            _loop_psdg.run_until_complete(rep.orchestrator.step_async())
+            print(f"Preview frame {{i + 1}}/{num_samples} generated (step_async)")
+    except Exception as _exc2_psdg:
+        print(f"preview_sdg: step_async also failed: {{_exc2_psdg}}")
 
 print(json.dumps({{"preview_frames": num_samples, "status": "done"}}))
 """
@@ -795,15 +837,66 @@ async def _handle_benchmark_sdg(args: Dict) -> Dict:
     code = f"""\
 import json
 import time
-import omni.replicator.core as rep
 
 ANNOTATORS = {list(annotators)!r}
 NUM_FRAMES = {num_frames}
 RESOLUTION = ({resolution[0]}, {resolution[1]})
 
+# Round 9 repair (2026-05-18): wrap the full replicator import + run in a
+# try/except so missing extensions or empty stages produce a structured
+# diagnostic instead of an empty error string.
+try:
+    import omni.replicator.core as rep
+except Exception as _e_imp:
+    print(json.dumps({{
+        'error': 'omni.replicator.core unavailable: ' + str(_e_imp),
+        'hint': 'enable omni.replicator.core extension before benchmarking SDG',
+    }}))
+    raise SystemExit(0)
+
+# Find any camera prim on the stage; if none exists, create a temporary
+# scratch camera so the benchmark can still measure render throughput.
+import omni.usd as _usd
+from pxr import UsdGeom as _UsdGeom
+_stage = _usd.get_context().get_stage()
+_cam_path = None
+if _stage is not None:
+    for _p in _stage.Traverse():
+        if _p.GetTypeName() == 'Camera':
+            _cam_path = str(_p.GetPath())
+            break
+    if _cam_path is None:
+        _scratch = '/World/_BenchmarkSdgCamera'
+        _UsdGeom.Camera.Define(_stage, _scratch)
+        _cam_path = _scratch
+if _cam_path is None:
+    print(json.dumps({{'error': 'no USD stage available for SDG benchmark'}}))
+    raise SystemExit(0)
+
 with rep.new_layer():
-    camera = rep.get.camera()
-    rp = rep.create.render_product(camera, RESOLUTION)
+    # Round 9 repair (2026-05-18): render_product accepts either a USD prim
+    # path OR a rep.create.camera() handle. The USD path variant rejects
+    # cameras that aren't registered in replicator's internal world model
+    # with "No valid sensor paths provided". Fall back to wrapping the prim
+    # path via rep.get.prims() if available, then to a fresh rep camera.
+    rp = None
+    try:
+        rp = rep.create.render_product(_cam_path, RESOLUTION)
+    except Exception as _rp_err1:
+        try:
+            _wrapped = rep.get.prims(path_pattern=_cam_path)
+            rp = rep.create.render_product(_wrapped, RESOLUTION)
+        except Exception as _rp_err2:
+            try:
+                _rep_cam = rep.create.camera()
+                rp = rep.create.render_product(_rep_cam, RESOLUTION)
+            except Exception as _rp_err3:
+                print(json.dumps({{
+                    'error': 'render_product creation failed: ' + str(_rp_err1),
+                    'fallback1_error': str(_rp_err2),
+                    'fallback2_error': str(_rp_err3),
+                }}))
+                raise SystemExit(0)
 
     for a in ANNOTATORS:
         try:
@@ -812,7 +905,21 @@ with rep.new_layer():
             pass
 
     t0 = time.time()
-    rep.orchestrator.run_until_complete(num_frames=NUM_FRAMES)
+    # Round 9 repair (2026-05-18): rep.orchestrator.run_until_complete is a
+    # standalone-workflow API; inside Kit it raises 'Synchronous call to
+    # run_until_complete can only be performed in a standalone workflow'.
+    # Drive frames via Kit's own app.update() loop instead, the same way
+    # capture_camera_image does it.
+    try:
+        try:
+            rep.orchestrator.run_until_complete(num_frames=NUM_FRAMES)
+        except Exception:
+            import omni.kit.app as _kit_app_bs
+            for _ in range(NUM_FRAMES):
+                _kit_app_bs.get_app().update()
+    except Exception as _run_err:
+        print(json.dumps({{'error': 'benchmark frame loop failed: ' + str(_run_err)}}))
+        raise SystemExit(0)
     elapsed = max(time.time() - t0, 1e-6)
 
 fps = NUM_FRAMES / elapsed
@@ -848,8 +955,9 @@ print(json.dumps({{
     result = await kit_tools.queue_exec_patch(
         code, f"Benchmark SDG ({num_frames} frames, {len(annotators)} annotators)"
     )
-    return {
-        "success": bool(result.get("success", False)),
+    success = bool(result.get("success", False))
+    out: Dict[str, Any] = {
+        "success": success,
         "queued": result.get("queued", False),
         "pipeline_id": pipeline_id,
         "num_frames": num_frames,
@@ -858,6 +966,15 @@ print(json.dumps({{
         "expected_fps_range": list(baseline) if baseline else None,
         "note": "Actual FPS is printed by the Kit-side benchmark once the patch is approved and executed.",
     }
+    # Round 9 repair (2026-05-18): surface error + output so build-gate
+    # callers don't see an empty error string when the underlying queue
+    # patch failed (e.g. extension off, replicator missing, sandboxed FS).
+    if not success:
+        err = (result.get("error") or result.get("output") or "").strip()
+        out["error"] = err or "benchmark_sdg: Kit RPC patch failed (no diagnostic returned)"
+        if result.get("output"):
+            out["output"] = result.get("output")
+    return out
 
 
 # ---------------------------------------------------------------------------

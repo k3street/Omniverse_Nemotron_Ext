@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-y-merge-singulation",
-  "goal": "Build a Y-merge conveyor singulation: two upstream belts merge into one downstream belt; cubes from each must alternate (no double-stacking at merge). Realizes Phase 9 yrkesroll #9 (logistics — postal sorter pattern).",
+  "goal": "Build a Y-merge conveyor singulation: two upstream belts merge into one downstream belt; cubes from each must alternate (no double-stacking at merge). Realizes Phase 9 yrkesroll #9 (logistics \u2014 postal sorter pattern).",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -12,13 +12,13 @@
     "add_proximity_sensor"
   ],
   "thoughts": [
-    "Two upstream belts at angles ±30° merging into one downstream belt. Geometry: 3 conveyors total. Singulation = ensuring 1 cube at a time on downstream.",
+    "Two upstream belts at angles \u00b130\u00b0 merging into one downstream belt. Geometry: 3 conveyors total. Singulation = ensuring 1 cube at a time on downstream.",
     "For V0: no actual claim-mutex on merge; cubes physically jam if conflict. Tests merge geometry + physics.",
     "Robot at downstream end picks any cube reaching pick zone; delivers to single bin.",
     "Function-gate: ANY cube delivered counts (cube_paths over both belt feeds).",
     "Merge zone: belts converge at y=0.40 from y=0.10 (left) and y=0.70 (right) to y=0.40 single. Coordinate by belt direction vectors."
   ],
-  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[2.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltLeft\",\n    position=[-1.0, 0.10, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, 0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltRight\",\n    position=[-1.0, 0.70, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, -0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltMerge\",\n    position=[0.0, 0.40, 0.78],\n    size=[1.0, 0.30, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\nfor i in range(3):\n    path = f\"/World/Cube_L{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.5 + i*0.40, 0.10, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nfor i in range(3):\n    path = f\"/World/Cube_R{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.5 + i*0.40, 0.70, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_L{i+1}\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.5, 0.75], size=[0.30, 0.30, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.40, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/BeltMerge\",\n    source_paths=[f\"/World/Cube_L{i+1}\" for i in range(3)] + [f\"/World/Cube_R{i+1}\" for i in range(3)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/BeltMerge\", \"/World/Bin\"],\n)",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[2.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0.5, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltLeft\",\n    position=[-1.0, 0.10, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, 0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltRight\",\n    position=[-1.0, 0.70, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, -0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltMerge\",\n    position=[0.0, 0.40, 0.78],\n    size=[1.0, 0.30, 0.05],\n    surface_velocity=[0.15, 0, 0],\n)\n\nfor i in range(3):\n    path = f\"/World/Cube_L{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.5 + i*0.40, 0.10, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nfor i in range(3):\n    path = f\"/World/Cube_R{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[-1.5 + i*0.40, 0.70, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_L{i+1}\" for i in range(3)],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.5, 0.75], size=[0.30, 0.30, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.40, 0.835], size=[0.06, 0.06, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/BeltMerge\",\n    source_paths=[f\"/World/Cube_L{i+1}\" for i in range(3)] + [f\"/World/Cube_R{i+1}\" for i in range(3)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/BeltMerge\", \"/World/Bin\"],\n)",
   "verify_args": null,
   "simulate_args": {
     "cube_paths": [
@@ -34,11 +34,11 @@
   },
   "diagnose_args": null,
   "extends": "phase9-yrkesroll-#9",
-  "extension_notes": "Y-merge geometry — 2 upstream feeders converging to 1 downstream. Physics-only singulation (no controller-side mutex). Cubes may jam if simultaneous arrivals at merge.",
+  "extension_notes": "Y-merge geometry \u2014 2 upstream feeders converging to 1 downstream. Physics-only singulation (no controller-side mutex). Cubes may jam if simultaneous arrivals at merge.",
   "failure_modes": [
     "Belt junctions create gaps where cubes fall off-grid",
-    "Surface velocity vectors don't smoothly transition at merge — cubes may stop at junction",
-    "Singulation conflict at merge causes one cube to push another out of belt — that one is lost"
+    "Surface velocity vectors don't smoothly transition at merge \u2014 cubes may stop at junction",
+    "Singulation conflict at merge causes one cube to push another out of belt \u2014 that one is lost"
   ],
   "intent": {
     "pattern_hint": "pick_place",
@@ -57,27 +57,39 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
       "expected_count": 1,
       "required": true
     },
     "merge_conveyor": {
-      "constraints": ["conveyor"],
+      "constraints": [
+        "conveyor"
+      ],
       "expected_count": 1,
       "required": true
     },
     "primary_destination": {
-      "constraints": ["bin"],
+      "constraints": [
+        "bin"
+      ],
       "expected_count": 1,
       "required": true
     },
     "pick_sensor": {
-      "constraints": ["proximity_sensor"],
+      "constraints": [
+        "proximity_sensor"
+      ],
       "expected_count": 1,
       "required": true
     },
     "workpieces": {
-      "constraints": ["cube"],
+      "constraints": [
+        "cube"
+      ],
       "min": 2,
       "max": 8,
       "param_name": "n_cubes",
@@ -88,41 +100,127 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka_panda",
-      "position": [0.5, 0, 0.75],
-      "orientation": [0.7071068, 0, 0, 0.7071068]
+      "position": [
+        0.5,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
     },
     "merge_conveyor": {
       "path": "/World/BeltMerge",
-      "position": [0.0, 0.40, 0.78],
-      "size": [1.0, 0.30, 0.05],
-      "surface_velocity": [0.15, 0, 0]
+      "position": [
+        0.0,
+        0.4,
+        0.78
+      ],
+      "size": [
+        1.0,
+        0.3,
+        0.05
+      ],
+      "surface_velocity": [
+        0.15,
+        0,
+        0
+      ]
     },
     "primary_destination": {
       "path": "/World/Bin",
-      "position": [0.5, -0.5, 0.75],
-      "size": [0.30, 0.30, 0.15]
+      "position": [
+        0.5,
+        -0.5,
+        0.75
+      ],
+      "size": [
+        0.3,
+        0.3,
+        0.15
+      ]
     },
     "pick_sensor": {
       "path": "/World/PickSensor",
-      "position": [0.4, 0.40, 0.835],
-      "size": [0.06, 0.06, 0.06]
+      "position": [
+        0.4,
+        0.4,
+        0.835
+      ],
+      "size": [
+        0.06,
+        0.06,
+        0.06
+      ]
     },
     "workpieces": [
-      {"path": "/World/Cube_L1", "position": [-1.5, 0.10, 0.835]},
-      {"path": "/World/Cube_L2", "position": [-1.1, 0.10, 0.835]},
-      {"path": "/World/Cube_L3", "position": [-0.7, 0.10, 0.835]},
-      {"path": "/World/Cube_R1", "position": [-1.5, 0.70, 0.835]},
-      {"path": "/World/Cube_R2", "position": [-1.1, 0.70, 0.835]},
-      {"path": "/World/Cube_R3", "position": [-0.7, 0.70, 0.835]}
+      {
+        "path": "/World/Cube_L1",
+        "position": [
+          -1.5,
+          0.1,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_L2",
+        "position": [
+          -1.1,
+          0.1,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_L3",
+        "position": [
+          -0.7,
+          0.1,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_R1",
+        "position": [
+          -1.5,
+          0.7,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_R2",
+        "position": [
+          -1.1,
+          0.7,
+          0.835
+        ]
+      },
+      {
+        "path": "/World/Cube_R3",
+        "position": [
+          -0.7,
+          0.7,
+          0.835
+        ]
+      }
     ]
   },
-  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[2.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltLeft\",\n    position=[-1.0, 0.10, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, 0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltRight\",\n    position=[-1.0, 0.70, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, -0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path={{merge_conveyor.path}},\n    position={{merge_conveyor.position}},\n    size={{merge_conveyor.size}},\n    surface_velocity={{merge_conveyor.surface_velocity}},\n)\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[4].path}}, prim_type=\"Cube\", position={{workpieces[4].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[4].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[5].path}}, prim_type=\"Cube\", position={{workpieces[5].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[5].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_L{i+1}\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\ncreate_bin(prim_path={{primary_destination.path}}, position={{primary_destination.position}}, size={{primary_destination.size}})\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{merge_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}],\n    destination_path={{primary_destination.path}},\n    planning_obstacles=[\"/World/Table\", {{merge_conveyor.path}}, {{primary_destination.path}}],\n)",
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[2.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltLeft\",\n    position=[-1.0, 0.10, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, 0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/BeltRight\",\n    position=[-1.0, 0.70, 0.78],\n    size=[1.5, 0.30, 0.05],\n    surface_velocity=[0.15, -0.10, 0],\n)\n\ncreate_conveyor(\n    prim_path={{merge_conveyor.path}},\n    position={{merge_conveyor.position}},\n    size={{merge_conveyor.size}},\n    surface_velocity={{merge_conveyor.surface_velocity}},\n)\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[1].path}}, prim_type=\"Cube\", position={{workpieces[1].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[1].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[2].path}}, prim_type=\"Cube\", position={{workpieces[2].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[2].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[3].path}}, prim_type=\"Cube\", position={{workpieces[3].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[3].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[4].path}}, prim_type=\"Cube\", position={{workpieces[4].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[4].path}}, schema_name=api)\n\ncreate_prim(prim_path={{workpieces[5].path}}, prim_type=\"Cube\", position={{workpieces[5].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[5].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_L{i+1}\" for i in range(3)],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\ncreate_bin(prim_path={{primary_destination.path}}, position={{primary_destination.position}}, size={{primary_destination.size}})\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path={{merge_conveyor.path}},\n    source_paths=[{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}],\n    destination_path={{primary_destination.path}},\n    planning_obstacles=[\"/World/Table\", {{merge_conveyor.path}}, {{primary_destination.path}}],\n)",
   "simulate_args_template": {
-    "cube_paths": ["{{workpieces[0].path}}", "{{workpieces[1].path}}", "{{workpieces[2].path}}", "{{workpieces[3].path}}", "{{workpieces[4].path}}", "{{workpieces[5].path}}"],
+    "cube_paths": [
+      "{{workpieces[0].path}}",
+      "{{workpieces[1].path}}",
+      "{{workpieces[2].path}}",
+      "{{workpieces[3].path}}",
+      "{{workpieces[4].path}}",
+      "{{workpieces[5].path}}"
+    ],
     "target_path": "{{primary_destination.path}}",
     "duration_s": 180
   },
-  "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (53s); 6 cubes via Y-merge",
+  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (53s); 6 cubes via Y-merge",
   "motion_controllers": {
     "verified": [],
     "untested": [

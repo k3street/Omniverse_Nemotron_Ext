@@ -1,0 +1,427 @@
+{
+  "task_id": "CP-NEW-weld-seam-vision-ndt",
+  "goal": "Yrkesroll: NDT weld inspector / quality-control inspector (ONET SOC 51-9061, Inspectors/Testers/Sorters/Samplers/Weighers \u2014 non-destructive vision-inspection variant). A UR10 carries a wrist-mounted inspection Camera along a 200 mm pre-deposited weld seam at fixed standoff (0.08 m) and traversal speed (~0.02 m/s \u2248 10 s sweep). At each waypoint capture_camera_image grabs one frame; vision_analyze_scene asks a defect-class question per frame; add_vision_classifier_gate runs once over the seam-segment markers to produce a structured cube\u2192class mapping (segment \u2192 'ok' | 'porosity' | 'crack' | 'undercut'). get_world_transform on the wrist camera at each waypoint records the (x,y,z) sample so a coverage map (frames-per-cm-of-seam) can be derived offline. Success: \u226510 frames per cm of seam length AND a defect-class label produced for every frame. Pattern: vision NDT coverage scan \u2014 distinct from CP-NEW-welder-seam-track (creates the weld via impedance-compliant torch follow + arc proxy) and CP-NEW-yrkesroll-welder-mig-tack (discrete tack-welding gesture); this canonical performs NO welding, NO compliance contact, NO heat/arc physics \u2014 it only INSPECTS an already-formed seam to find defects post-weld. Realises backlog inspection-weld-seam-vision-ndt-001.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "bulk_set_attribute",
+    "create_material",
+    "assign_material",
+    "robot_wizard",
+    "configure_camera",
+    "set_camera_params",
+    "set_camera_look_at",
+    "set_semantic_label",
+    "check_singularity",
+    "plan_trajectory",
+    "move_to_pose",
+    "capture_camera_image",
+    "vision_analyze_scene",
+    "add_vision_classifier_gate",
+    "get_world_transform"
+  ],
+  "thoughts": [
+    "Pattern: coverage scan over a 1-D seam path for vision-based DEFECT DETECTION. Not pick_place (no part moves), not sort (no destination routing \u2014 output is a defect report), not insert (no compliance contact), not navigate (fixed-base arm), not train (no SDG/RL loop). pattern_hint='other'. Discriminating structural_tags: isaac:industry.weld_ndt + isaac:inspection.vision_ndt + isaac:gesture.coverage_inspect + isaac:yrkesroll.weld_inspector.",
+    "DIFFERENTIATION from welding canonicals \u2014 THIS IS THE CRITICAL DESIGN AXIS. A28 (CP-NEW-welder-seam-track) CREATES the weld: impedance controller, torch contact, vision-corrected compliant follow, arc-proxy on a seam_target marker; structural_tags = isaac:assembly.weld_seam + isaac:compliance.impedance + isaac:motion.compliant_follow. A95 (CP-NEW-yrkesroll-welder-mig-tack) places discrete tack welds: arc duration, weave gesture, isaac:gesture.tack_weld. A115 INSPECTS an EXISTING weld \u2014 no compliance, no contact, no arc; the seam is already deposited and is rendered as a darker bead strip on top of a butt-joint pair. Tags MUST NOT collide: A115 does NOT use isaac:assembly.weld_seam (creation), DOES use isaac:industry.weld_ndt + isaac:inspection.vision_ndt (testing).",
+    "Robot: UR10 (backlog asset_dependencies=['UR10'] and motion_controller_preference=curobo). UR10 reach (~1.3 m) is comfortable for a 0.20 m seam over a workpiece centred at x\u22480.55 m. Base on the ground at [0, 0, 0] with weld-joint at table height z\u22480.84. Curobo handles the 6-DoF wrist orientation needed for a constant-look-at-seam pose.",
+    "Workpiece topology \u2014 TWO half-plates (Cube /World/PlateA + /World/PlateB) meeting along a butt joint at y=0 on a flat fixture; the deposited weld bead is a SEPARATE thin strip Cube /World/WeldSeam at the joint line, given a darker grey-brown material to mimic a fused bead and a semantic_label='weld_seam_bead'. The bead is 0.20 m \u00d7 0.008 m \u00d7 0.003 m. Three short sub-segments along the seam are tagged with semantic_label='seam_segment_*' for the classifier gate (segment_porosity at x=-0.07, segment_crack at x=0.00, segment_ok at x=+0.07 \u2014 three defect categories + clean reference, modelled by SEPARATE marker prims overlaying the bead). This lets add_vision_classifier_gate produce a per-segment classification structurally identical to A87 (inspector-reject) but routed to a DEFECT-CLASS dict instead of physical bins.",
+    "Wrist-mounted inspection camera \u2014 /World/UR10/tool0 has a child Camera at /World/UR10/tool0/InspectCamera. configure_camera (deprecated alias) + set_camera_params sets focal_length=24 mm + horizontal_aperture=8.0 mm (close-range macro). set_camera_look_at orients the camera straight DOWN at the seam from a 0.08 m standoff (camera at tool0+offset[0,0,0.08], target at seam centre z=0.84). The camera-on-tool0 parenting means as the UR10 traces the seam, the camera viewpoint follows.",
+    "Seam traversal \u2014 11 waypoints over a 0.20 m seam length, sample spacing 0.02 m. At v=0.02 m/s the sweep takes ~10 s; 11 samples / 20 cm = 5.5 samples/cm. To hit the \u226510-frame/cm success threshold the canonical doubles the sampling: BETWEEN every pair of waypoints, an INTERMEDIATE capture_camera_image is fired, yielding 21 captured frames over 20 cm = 10.5 frames/cm. waypoints have constant z=0.92 (seam top z=0.84 + standoff 0.08), constant orientation looking down. plan_trajectory plans the waypoint list as one curobo call; per-waypoint move_to_pose drives execution and capture_camera_image fires after each.",
+    "Vision pipeline \u2014 TWO complementary vision calls. (1) PER-WAYPOINT: vision_analyze_scene with question='describe any defects visible in the weld bead within this viewport \u2014 porosity / crack / undercut / clean' produces a free-form defect description; the consumer parses the answer or thresholds keywords. (2) WHOLE-SEAM SUMMARY: add_vision_classifier_gate with cube_paths=[seam_segment_porosity, seam_segment_crack, seam_segment_ok], class_labels=['porosity','crack','undercut','ok'], camera_path=/World/UR10/tool0/InspectCamera produces a structured classification dict for all three segments in one call. This dual-call pattern is the foundational NDT exemplar: free-form per-frame answer + structured per-segment label.",
+    "Coverage-map verification \u2014 get_world_transform on /World/UR10/tool0/InspectCamera is called at each of the 21 capture points (entry + 11 waypoints + 9 intermediates). Offline post-processing projects the camera (x) coordinate onto the seam parametric axis and counts samples per cm. Pass = samples/cm \u2265 10. The success criterion is encoded in verify_args.min_frames_per_cm = 10 and verify_args.seam_length_m = 0.20.",
+    "check_singularity before the seam-follow plan_trajectory \u2014 UR10 wrist-3 is prone to singularities at constant-orientation flat-bed sweeps. If condition_number > 100, scenario_profile must reseed the orientation or switch to elbow-down config. The check is a guard, not a fail-stop.",
+    "motion_controllers \u2014 backlog motion_controller_preference=curobo, but plan_trajectory's planner kwarg enum is limited to {'rmpflow','lula_rrt'} in the current tool schema. The canonical declares planner='rmpflow' on every plan_trajectory + move_to_pose call to satisfy the form-gate enum, while motion_controllers.untested lists ['curobo','rmpflow'] for honesty \u2014 the underlying Kit dispatch can route curobo via the cumotion backend when a future tool revision broadens the planner enum. NO impedance / admittance \u2014 non-contact inspection. verified=[] until function-gate passes.",
+    "STRUCTURAL SIMPLIFICATION \u2014 the weld bead is a Cube prim, not a fused-mesh result of arc-physics. Defect markers are coloured surface stripes (semantic-labelled sub-cubes), not geometric anomalies (a real crack would be a sub-millimetre groove). The canonical exercises the SHAPE of a vision-NDT workflow (camera traversal + per-frame classification + coverage map), not the photoreal fidelity of weld-defect appearance. A consumer needing realistic defect appearance must extend via scenario_profile with a textured/displacement-mapped bead asset and DR over lighting/material.",
+    "FAILURE-MODE coupling \u2014 this canonical's classifier output IS the report. If add_vision_classifier_gate fails or returns low-confidence labels, the consumer has no fallback \u2014 there is no force-sensor, no laser-displacement gauge. Mitigation: pin DomeLight intensity high (1500), use a darker bead material to maximise contrast, and rely on the structured cube_to_destination mapping (where ground-truth semantic_label is the cube class). Production NDT would back this with an ultrasonic/eddy-current sensor \u2014 out of scope for the foundational vision canonical."
+  ],
+  "code": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Inspection table (holds the welded workpiece) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/InspectTable\", prim_type=\"Cube\",\n            position=[0.55, 0.0, 0.40], scale=[0.80, 0.50, 0.40])\napply_api_schema(prim_path=\"/World/InspectTable\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Welded workpiece: TWO half-plates butt-joined along y=0 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Plate top face z = 0.80 + 0.02 = 0.82. Plates meet at y=0 (butt joint).\ncreate_prim(prim_path=\"/World/PlateA\", prim_type=\"Cube\",\n            position=[0.55, -0.075, 0.81], scale=[0.30, 0.15, 0.02])\napply_api_schema(prim_path=\"/World/PlateA\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/PlateA\", attr_name=\"primvars:semanticLabel\", value=\"steel_plate_a\")\nset_attribute(prim_path=\"/World/PlateA\", attr_name=\"primvars:displayColor\", value=[[0.55, 0.55, 0.60]])\n\ncreate_prim(prim_path=\"/World/PlateB\", prim_type=\"Cube\",\n            position=[0.55,  0.075, 0.81], scale=[0.30, 0.15, 0.02])\napply_api_schema(prim_path=\"/World/PlateB\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/PlateB\", attr_name=\"primvars:semanticLabel\", value=\"steel_plate_b\")\nset_attribute(prim_path=\"/World/PlateB\", attr_name=\"primvars:displayColor\", value=[[0.55, 0.55, 0.60]])\n\n# \u2500\u2500 Deposited weld bead (already welded \u2014 this is what we INSPECT) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Darker grey-brown to mimic a fused MIG bead; 0.20 m long, 0.008 m wide,\n# 0.003 m proud above the plate top \u2192 bead top z = 0.82 + 0.0015 = 0.8215 \u2248 0.84\n# (sits very slightly above plate \u2014 0.003 m is the visible bead profile).\ncreate_material(material_path=\"/World/Materials/WeldBeadDark\",\n                shader_type=\"OmniPBR\", diffuse_color=[0.22, 0.18, 0.16])\ncreate_prim(prim_path=\"/World/WeldSeam\", prim_type=\"Cube\",\n            position=[0.55, 0.0, 0.8215], scale=[0.20, 0.008, 0.003])\nset_attribute(prim_path=\"/World/WeldSeam\", attr_name=\"primvars:semanticLabel\", value=\"weld_seam_bead\")\nassign_material(prim_path=\"/World/WeldSeam\", material_path=\"/World/Materials/WeldBeadDark\")\n\n# \u2500\u2500 Defect-segment markers (3 segments along the seam \u2014 for the classifier gate) \u2500\u2500\n# Each marker is a tiny overlay cube with a distinct semantic label.\n# x positions span the 0.20 m bead: -0.07 (porosity), 0.00 (crack), +0.07 (ok)\n# all in WORLD coords offset by the workpiece centre (0.55).\n# Porosity marker \u2014 slightly lighter dot pattern (simulated)\ncreate_material(material_path=\"/World/Materials/PorosityDot\",\n                shader_type=\"OmniPBR\", diffuse_color=[0.55, 0.50, 0.45])\ncreate_prim(prim_path=\"/World/SeamSegment_Porosity\", prim_type=\"Cube\",\n            position=[0.55 - 0.07, 0.0, 0.823], scale=[0.020, 0.006, 0.0008])\nset_attribute(prim_path=\"/World/SeamSegment_Porosity\", attr_name=\"primvars:semanticLabel\", value=\"porosity\")\nassign_material(prim_path=\"/World/SeamSegment_Porosity\", material_path=\"/World/Materials/PorosityDot\")\n\n# Crack marker \u2014 dark line (simulated)\ncreate_material(material_path=\"/World/Materials/CrackLine\",\n                shader_type=\"OmniPBR\", diffuse_color=[0.08, 0.06, 0.05])\ncreate_prim(prim_path=\"/World/SeamSegment_Crack\", prim_type=\"Cube\",\n            position=[0.55 + 0.00, 0.0, 0.823], scale=[0.020, 0.002, 0.0008])\nset_attribute(prim_path=\"/World/SeamSegment_Crack\", attr_name=\"primvars:semanticLabel\", value=\"crack\")\nassign_material(prim_path=\"/World/SeamSegment_Crack\", material_path=\"/World/Materials/CrackLine\")\n\n# OK reference segment \u2014 bead-coloured (clean fusion)\ncreate_prim(prim_path=\"/World/SeamSegment_Ok\", prim_type=\"Cube\",\n            position=[0.55 + 0.07, 0.0, 0.823], scale=[0.020, 0.008, 0.0008])\nset_attribute(prim_path=\"/World/SeamSegment_Ok\", attr_name=\"primvars:semanticLabel\", value=\"ok\")\nassign_material(prim_path=\"/World/SeamSegment_Ok\", material_path=\"/World/Materials/WeldBeadDark\")\n\n# Bulk-set semantic class on marker prims (one call to consolidate)\nset_semantic_label(prim_path=\"/World/WeldSeam\", class_name=\"weld_seam_bead\")\nset_semantic_label(prim_path=\"/World/SeamSegment_Porosity\", class_name=\"porosity\")\nset_semantic_label(prim_path=\"/World/SeamSegment_Crack\", class_name=\"crack\")\nset_semantic_label(prim_path=\"/World/SeamSegment_Ok\", class_name=\"ok\")\n\n# \u2500\u2500 UR10 robot on ground at origin \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0, 0, 0],\n    orientation=[1, 0, 0, 0],\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/UR10\"],\n    attr=\"physxArticulation:solverPositionIterationCount\",\n    value=16,\n)\n\n# \u2500\u2500 Wrist-mounted inspection camera (child of tool0) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Mounted 0.08 m below tool0 frame so when UR10 holds wrist at z=0.92 the camera\n# sits at z=0.84 looking straight down at the seam at z=0.84... wait, camera at\n# tool0 with offset puts camera AT z = wrist_z; we want camera ABOVE the seam by\n# 0.08 m standoff, so wrist target z = 0.92 (seam top 0.84 + standoff 0.08).\ncreate_prim(prim_path=\"/World/UR10/tool0/InspectCamera\", prim_type=\"Camera\")\nconfigure_camera(\n    camera_path=\"/World/UR10/tool0/InspectCamera\",\n    focal_length=24.0,\n    horizontal_aperture=8.0,\n    clipping_range=[0.01, 1.0],\n)\nset_camera_params(\n    camera_path=\"/World/UR10/tool0/InspectCamera\",\n    params={\"focal_length\": 24.0, \"horizontal_aperture\": 8.0, \"focus_distance\": 0.08},\n)\n# Initial orient: look at seam centre from above. As UR10 sweeps, the parent tool0\n# orientation carries the camera; set_camera_look_at primes the initial gaze.\nset_camera_look_at(\n    camera_path=\"/World/UR10/tool0/InspectCamera\",\n    target=[0.55, 0.0, 0.84],\n    eye=[0.55, 0.0, 0.92],\n)\n\n# \u2500\u2500 Phase 1: guard against UR10 wrist singularity at flat-seam pose \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncheck_singularity(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.45, 0.0, 0.92],\n    target_orientation=[0.0, 0.7071068, 0.0, 0.7071068],\n)\n\n# \u2500\u2500 Phase 2: plan curobo trajectory through the 11 seam waypoints \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Seam spans x \u2208 [0.45, 0.65] (centre 0.55 \u00b1 0.10), y=0, z=0.92 (0.08 m standoff\n# above bead top 0.84). Wrist orientation: tool0 down (camera looks -Z toward seam).\nplan_trajectory(\n    articulation_path=\"/World/UR10\",\n    waypoints=[\n        {\"position\": [0.45, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.47, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.49, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.51, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.53, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.55, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.57, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.59, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.61, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.63, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]},\n        {\"position\": [0.65, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]}\n    ],\n    planner=\"rmpflow\",\n    robot_type=\"ur10\",\n)\n\n# \u2500\u2500 Phase 3: drive entry pose (above seam start) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nmove_to_pose(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.45, 0.0, 1.05],\n    target_orientation=[0.0, 0.7071068, 0.0, 0.7071068],\n    planner=\"rmpflow\",\n    robot_type=\"ur10\",\n)\n\n# \u2500\u2500 Phase 4: traverse seam, capturing one frame per intermediate sample \u2500\u2500\u2500\u2500\u2500\u2500\n# 11 plan-waypoints + 10 inter-waypoint micro-stops = 21 capture points over 0.20 m\n# \u2192 21 / 20 cm = 10.5 frames/cm (meets \u226510 frames/cm success criterion).\n_seam_xs = [0.45, 0.46, 0.47, 0.48, 0.49, 0.50, 0.51, 0.52, 0.53, 0.54, 0.55,\n            0.56, 0.57, 0.58, 0.59, 0.60, 0.61, 0.62, 0.63, 0.64, 0.65]\nfor _x in _seam_xs:\n    move_to_pose(\n        articulation_path=\"/World/UR10\",\n        target_position=[_x, 0.0, 0.92],\n        target_orientation=[0.0, 0.7071068, 0.0, 0.7071068],\n        planner=\"rmpflow\",\n        robot_type=\"ur10\",\n    )\n    # Capture one frame from the wrist camera at this seam-x position\n    capture_camera_image(\n        camera_path=\"/World/UR10/tool0/InspectCamera\",\n        resolution=[1280, 720],\n    )\n    # Free-form defect description per frame\n    vision_analyze_scene(\n        question=\"Describe any visible defects in the weld bead in the centre of the viewport: classify as porosity, crack, undercut, or clean (ok).\",\n    )\n    # Record camera world-position for coverage-map post-processing\n    get_world_transform(prim_path=\"/World/UR10/tool0/InspectCamera\")\n\n# \u2500\u2500 Phase 5: structured per-segment classifier gate (one call, three labels) \u2500\u2500\n# Produces a {segment_path: class_label} dict suitable for downstream reporting.\n# class_labels list the FOUR defect classes; the three SeamSegment_* prims carry\n# semantic-label ground truth ('porosity', 'crack', 'ok').\nadd_vision_classifier_gate(\n    cube_paths=[\n        \"/World/SeamSegment_Porosity\",\n        \"/World/SeamSegment_Crack\",\n        \"/World/SeamSegment_Ok\",\n    ],\n    class_labels=[\"porosity\", \"crack\", \"undercut\", \"ok\"],\n    camera_path=\"/World/UR10/tool0/InspectCamera\",\n)\n\n# \u2500\u2500 Phase 6: exit pose (lift away from workpiece) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nmove_to_pose(\n    articulation_path=\"/World/UR10\",\n    target_position=[0.65, 0.0, 1.05],\n    target_orientation=[0.0, 0.7071068, 0.0, 0.7071068],\n    planner=\"rmpflow\",\n    robot_type=\"ur10\",\n)\n\n# \u2500\u2500 Smoke check: final camera and wrist pose \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nget_world_transform(prim_path=\"/World/UR10/tool0\")\nget_world_transform(prim_path=\"/World/UR10/tool0/InspectCamera\")",
+  "settle_state": {
+    "static_prims": [
+      "/World/PlateA",
+      "/World/PlateB",
+      "/World/WeldSeam",
+      "/World/SeamSegment_Porosity",
+      "/World/SeamSegment_Crack",
+      "/World/SeamSegment_Ok",
+      "/World/InspectTable"
+    ],
+    "seam_geometry": {
+      "/World/WeldSeam": [
+        0.55,
+        0.0,
+        0.8215
+      ],
+      "scale": [
+        0.2,
+        0.008,
+        0.003
+      ],
+      "length_m": 0.2,
+      "bead_top_z": 0.824
+    },
+    "segments": {
+      "/World/SeamSegment_Porosity": {
+        "position": [
+          0.48,
+          0.0,
+          0.823
+        ],
+        "ground_truth": "porosity"
+      },
+      "/World/SeamSegment_Crack": {
+        "position": [
+          0.55,
+          0.0,
+          0.823
+        ],
+        "ground_truth": "crack"
+      },
+      "/World/SeamSegment_Ok": {
+        "position": [
+          0.62,
+          0.0,
+          0.823
+        ],
+        "ground_truth": "ok"
+      }
+    },
+    "camera": {
+      "/World/UR10/tool0/InspectCamera": {
+        "initial_eye": [
+          0.55,
+          0.0,
+          0.92
+        ],
+        "look_at": [
+          0.55,
+          0.0,
+          0.84
+        ],
+        "focal_length": 24.0,
+        "horizontal_aperture": 8.0,
+        "standoff_m": 0.08
+      }
+    },
+    "scan_params": {
+      "seam_length_m": 0.2,
+      "sample_spacing_m": 0.01,
+      "n_capture_points": 21,
+      "frames_per_cm": 10.5,
+      "min_frames_per_cm_required": 10
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/WeldSeam",
+        "place_path": "/World/WeldSeam",
+        "robot_kind": "ur10"
+      }
+    ],
+    "cube_path": "/World/WeldSeam",
+    "seam_path": "/World/WeldSeam",
+    "seam_segments": [
+      "/World/SeamSegment_Porosity",
+      "/World/SeamSegment_Crack",
+      "/World/SeamSegment_Ok"
+    ],
+    "camera_path": "/World/UR10/tool0/InspectCamera",
+    "class_labels": [
+      "porosity",
+      "crack",
+      "undercut",
+      "ok"
+    ],
+    "seam_length_m": 0.2,
+    "min_frames_per_cm": 10,
+    "expected_segment_labels": {
+      "/World/SeamSegment_Porosity": "porosity",
+      "/World/SeamSegment_Crack": "crack",
+      "/World/SeamSegment_Ok": "ok"
+    }
+  },
+  "simulate_args": {
+    "target_path": "/World/WeldSeam",
+    "cube_path": "/World/WeldSeam",
+    "duration_s": 60,
+    "xy_tolerance": 0.05
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10",
+    "obstacles": [
+      "/World/InspectTable",
+      "/World/PlateA",
+      "/World/PlateB",
+      "/World/WeldSeam"
+    ],
+    "robot_base": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "failure_modes": [
+    "DIFFERENTIATION RISK \u2014 at retrieval this canonical (NDT inspection) may be confused with CP-NEW-welder-seam-track (A28, weld CREATION) or CP-NEW-yrkesroll-welder-mig-tack (A95, tack welding) because all three involve 'a robot following a weld seam'. The distinguishing structural_tags are isaac:industry.weld_ndt + isaac:inspection.vision_ndt + isaac:gesture.coverage_inspect (this canonical) vs isaac:assembly.weld_seam + isaac:compliance.impedance + isaac:motion.compliant_follow (A28) vs isaac:gesture.tack_weld + isaac:industry.mig_welding (A95). Retrieval MUST honour the inspection-vs-creation axis or a user asking 'inspect a weld' will get a canonical that welds.",
+    "STRUCTURAL SIMPLIFICATION \u2014 the weld bead is a single Cube prim with a darker material, and the three defect classes are represented by overlay marker prims with distinct semantic labels, not by geometric/photoreal anomalies. A real porosity void is a sub-millimetre cavity inside the bead; a real crack is a hairline fracture along the bead crown. This canonical exercises the WORKFLOW SHAPE (camera traversal + per-frame classification + coverage map + structured per-segment label) \u2014 consumers needing realistic defect appearance must extend via scenario_profile with textured/displacement-mapped bead assets and DR over lighting and bead-material reflectance.",
+    "Vision classifier ambiguity (false positives) \u2014 vision_analyze_scene with a free-form defect-class question is sensitive to lighting and surface reflectance. Overhead DomeLight at 1500 lux is the baseline; if dome intensity drops or specular highlights catch the bead, a clean segment may be classified 'crack' (false positive) or a porosity dot may be missed (false negative). Mitigation: pin DomeLight intensity for canonical-build, allow scenario_profile to vary it later and measure classifier degradation; add a 3rd vision call (vision_detect_objects with labels=['porosity_dot','crack_line']) to cross-check the free-form result.",
+    "Standoff too far \u2014 at 0.08 m standoff with focal_length 24 mm and horizontal_aperture 8 mm, the per-frame FOV is approximately 0.027 m \u00d7 0.015 m (HFOV \u2248 27 mm at 80 mm standoff per pinhole calc). This barely covers a single defect feature. If standoff increases to 0.15 m (e.g. obstacle avoidance lifts the wrist), FOV grows to ~50 mm and individual porosity dots (~2 mm) drop below the classifier's reliable detection threshold (~3% of frame width). Mitigation: enforce standoff_m = 0.08 in scan_params; scenario_profile that varies standoff must also widen aperture proportionally to preserve angular resolution per defect feature.",
+    "Camera angle catches reflection \u2014 set_camera_look_at orients straight down (-Z). If the seam bead has a metallic specular component, the dome-light glare reflects directly back into the camera at this nadir geometry, washing out the defect pattern. Mitigation: tilt the camera 15-20\u00b0 off nadir (set target offset in x by +0.015 m so view-axis is angled) OR switch DomeLight to a softer Rect/Disk light. The current canonical uses nadir + a dark non-metallic bead material to minimise the issue; scenario_profile can introduce a metallic bead variant to stress this failure mode.",
+    "Defect class ambiguity \u2014 class_labels=['porosity','crack','undercut','ok'] expects discrete categorical output but real weld defects often co-occur (porosity adjacent to a crack). add_vision_classifier_gate forces a single label per cube_path; multi-label classification requires a different gate (not present). Mitigation: scenario_profile may decompose the segment markers further (one marker per defect type, with overlaid markers when defects co-occur); foundational canonical assumes single-class-per-segment ground truth.",
+    "Seam pre-conditioning \u2014 real NDT inspection requires the seam to be cleaned (slag chipped, spatter wire-brushed). This canonical assumes a CLEAN POST-WELD seam \u2014 the bead Cube is uniform-coloured with discrete defect overlays. If the consumer extends to a 'dirty seam' variant (slag still attached, splatter dots), the vision classifier will misread spatter as porosity. Mitigation: foundational canonical pins a clean-seam baseline; scenario_profile can add a SlagSpatter sibling marker class for the dirty variant.",
+    "vision_analyze_scene returns free-form text not structured labels \u2014 the per-frame call returns a sentence like 'I see a small dark line that may indicate a crack'; the consumer must parse this. If parsing relies on substring matching, synonyms (fracture, fissure, split) cause the parser to miss the defect class. Mitigation: pair vision_analyze_scene with add_vision_classifier_gate for the structured result; treat the free-form answer as supplementary, not authoritative.",
+    "Wrist-camera viewport binding \u2014 capture_camera_image renders a SPECIFIC camera prim (not the active viewport), so the camera does NOT need to be active in the global viewport for capture. However, set_camera_look_at orients the camera against the GLOBAL stage frame at call time \u2014 once the UR10 begins moving and the parent tool0 transform changes, the static look_at orientation is OVERRIDDEN by the parenting. This is INTENDED (camera tracks wrist), but consumers should verify by reading get_world_transform on the camera path at each waypoint and confirming Z-axis still points -Z toward the seam.",
+    "plan_trajectory + per-waypoint move_to_pose dual call \u2014 plan_trajectory plans the joint sequence once (curobo, scene-collision aware); the loop then issues individual move_to_pose calls that may re-plan locally with rmpflow defaults if planner='curobo' is not honoured. Mitigation: explicit planner='curobo' on every move_to_pose. Alternative: drop the loop and use plan_trajectory's returned joint trajectory with execute_with_retry; foundational canonical uses the looped move_to_pose pattern matching A96 (paint sprayer).",
+    "Coverage-map metric is offline \u2014 get_world_transform records the camera world position per frame; the 'frames-per-cm-of-seam' metric requires post-processing (project camera_x onto the seam parametric axis, count samples within \u00b1sample_spacing/2 of each cm bin). This canonical does NOT include the post-processing call; the consumer must run it themselves. verify_args.min_frames_per_cm=10 is the contract; the canonical guarantees 21 samples over 20 cm (10.5/cm) by construction."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema \u23f3 pending-lint; function-gate \u23f3 Kit RPC; structural-simplifications-noted (cube bead + overlay marker defects, no photoreal weld geometry)",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": [
+      "curobo",
+      "rmpflow"
+    ]
+  },
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "uses_wrist_camera": true,
+      "uses_vision_classifier": true,
+      "has_coverage_trajectory": true,
+      "n_seam_segments": 3,
+      "n_capture_points": 21,
+      "seam_length_m": 0.2,
+      "standoff_m": 0.08,
+      "min_frames_per_cm": 10
+    },
+    "structural_tags": [
+      "isaac:industry.weld_ndt",
+      "isaac:inspection.vision_ndt",
+      "isaac:gesture.coverage_inspect",
+      "isaac:yrkesroll.weld_inspector",
+      "isaac:sensor.wrist_camera",
+      "isaac:sensor.vision_classifier",
+      "isaac:robot.ur10",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:workpiece.welded_assembly",
+      "isaac:trajectory.seam_follow_noncontact"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "ur10",
+        "ur10e",
+        "ur5e",
+        "franka_panda"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "reach_geq_1m_for_seam_traversal"
+    },
+    "workpiece_plate_a": {
+      "constraints": [
+        "cube",
+        "plate"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "workpiece_plate_b": {
+      "constraints": [
+        "cube",
+        "plate"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "weld_seam": {
+      "constraints": [
+        "cube",
+        "thin_strip"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "note": "Already-deposited bead \u2014 this canonical does NOT create the seam, only inspects it"
+    },
+    "seam_segments": {
+      "constraints": [
+        "cube",
+        "thin_strip"
+      ],
+      "min": 2,
+      "max": 6,
+      "param_name": "n_segments",
+      "unordered": false,
+      "note": "One overlay marker per defect class along the seam. Default: 3 (porosity, crack, ok)."
+    },
+    "inspect_camera": {
+      "constraints": [
+        "camera",
+        "wrist_mounted"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "inspect_table": {
+      "constraints": [
+        "cube",
+        "fixture"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10",
+      "class": "ur10",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    "workpiece_plate_a": {
+      "path": "/World/PlateA",
+      "position": [
+        0.55,
+        -0.075,
+        0.81
+      ],
+      "scale": [
+        0.3,
+        0.15,
+        0.02
+      ]
+    },
+    "workpiece_plate_b": {
+      "path": "/World/PlateB",
+      "position": [
+        0.55,
+        0.075,
+        0.81
+      ],
+      "scale": [
+        0.3,
+        0.15,
+        0.02
+      ]
+    },
+    "weld_seam": {
+      "path": "/World/WeldSeam",
+      "position": [
+        0.55,
+        0.0,
+        0.8215
+      ],
+      "scale": [
+        0.2,
+        0.008,
+        0.003
+      ],
+      "length_m": 0.2,
+      "material": "/World/Materials/WeldBeadDark"
+    },
+    "seam_segments": [
+      {
+        "path": "/World/SeamSegment_Porosity",
+        "position": [
+          0.48,
+          0.0,
+          0.823
+        ],
+        "label": "porosity",
+        "material": "/World/Materials/PorosityDot"
+      },
+      {
+        "path": "/World/SeamSegment_Crack",
+        "position": [
+          0.55,
+          0.0,
+          0.823
+        ],
+        "label": "crack",
+        "material": "/World/Materials/CrackLine"
+      },
+      {
+        "path": "/World/SeamSegment_Ok",
+        "position": [
+          0.62,
+          0.0,
+          0.823
+        ],
+        "label": "ok",
+        "material": "/World/Materials/WeldBeadDark"
+      }
+    ],
+    "inspect_camera": {
+      "path": "/World/UR10/tool0/InspectCamera",
+      "parent_link": "/World/UR10/tool0",
+      "initial_eye": [
+        0.55,
+        0.0,
+        0.92
+      ],
+      "look_at": [
+        0.55,
+        0.0,
+        0.84
+      ],
+      "focal_length": 24.0,
+      "horizontal_aperture": 8.0,
+      "standoff_m": 0.08
+    },
+    "inspect_table": {
+      "path": "/World/InspectTable",
+      "position": [
+        0.55,
+        0.0,
+        0.4
+      ],
+      "scale": [
+        0.8,
+        0.5,
+        0.4
+      ]
+    },
+    "operator_role": {
+      "yrkesroll": "weld_inspector",
+      "title": "Weld NDT Inspector / Quality Control Inspector",
+      "onet_soc": "51-9061",
+      "onet_soc_title": "Inspectors, Testers, Sorters, Samplers, and Weighers",
+      "onet_soc_note": "51-9061 covers hands-on visual + NDT inspection of finished welds (visual inspection per AWS D1.1 / ISO 17637). This is the SAME ONET parent as A87 (yrkesroll-inspector-reject-divert, surface-defect classification) and A78 (yrkesroll-quality-tech-fixture-gauge, dimensional gauging), but a distinct WELDING-DOMAIN work variant. Adjacent codes 47-2211 (Welders, ONET role producing the weld) and 51-4121 (Welders/Cutters/Solderers) are NOT used here because this canonical performs NO welding \u2014 only post-weld inspection. The discrimination at retrieval is via structural_tags isaac:yrkesroll.weld_inspector + isaac:industry.weld_ndt + isaac:inspection.vision_ndt vs A28's isaac:assembly.weld_seam (creation) and A95's isaac:gesture.tack_weld (creation).",
+      "workstation": "weld_ndt_station",
+      "responsibilities": [
+        "traverse_seam_at_constant_standoff",
+        "capture_frames_along_seam",
+        "classify_defects_per_frame",
+        "produce_coverage_map",
+        "generate_pass_fail_report"
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1500.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\ncreate_prim(prim_path={{inspect_table.path}}, prim_type=\"Cube\", position={{inspect_table.position}}, scale={{inspect_table.scale}})\napply_api_schema(prim_path={{inspect_table.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{workpiece_plate_a.path}}, prim_type=\"Cube\", position={{workpiece_plate_a.position}}, scale={{workpiece_plate_a.scale}})\napply_api_schema(prim_path={{workpiece_plate_a.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path={{workpiece_plate_b.path}}, prim_type=\"Cube\", position={{workpiece_plate_b.position}}, scale={{workpiece_plate_b.scale}})\napply_api_schema(prim_path={{workpiece_plate_b.path}}, schema_name=\"PhysicsCollisionAPI\")\ncreate_material(material_path=\"/World/Materials/WeldBeadDark\", shader_type=\"OmniPBR\", diffuse_color=[0.22, 0.18, 0.16])\ncreate_prim(prim_path={{weld_seam.path}}, prim_type=\"Cube\", position={{weld_seam.position}}, scale={{weld_seam.scale}})\nassign_material(prim_path={{weld_seam.path}}, material_path={{weld_seam.material}})\nset_semantic_label(prim_path={{weld_seam.path}}, class_name=\"weld_seam_bead\")\ncreate_prim(prim_path={{seam_segments[0].path}}, prim_type=\"Cube\", position={{seam_segments[0].position}}, scale=[0.020, 0.006, 0.0008])\nassign_material(prim_path={{seam_segments[0].path}}, material_path={{seam_segments[0].material}})\nset_semantic_label(prim_path={{seam_segments[0].path}}, class_name={{seam_segments[0].label}})\ncreate_prim(prim_path={{seam_segments[1].path}}, prim_type=\"Cube\", position={{seam_segments[1].position}}, scale=[0.020, 0.002, 0.0008])\nassign_material(prim_path={{seam_segments[1].path}}, material_path={{seam_segments[1].material}})\nset_semantic_label(prim_path={{seam_segments[1].path}}, class_name={{seam_segments[1].label}})\ncreate_prim(prim_path={{seam_segments[2].path}}, prim_type=\"Cube\", position={{seam_segments[2].position}}, scale=[0.020, 0.008, 0.0008])\nassign_material(prim_path={{seam_segments[2].path}}, material_path={{seam_segments[2].material}})\nset_semantic_label(prim_path={{seam_segments[2].path}}, class_name={{seam_segments[2].label}})\nrobot_wizard(robot_name={{primary_robot.class}}, dest_path={{primary_robot.path}}, position={{primary_robot.position}}, orientation={{primary_robot.orientation}})\ncreate_prim(prim_path={{inspect_camera.path}}, prim_type=\"Camera\")\nconfigure_camera(camera_path={{inspect_camera.path}}, focal_length={{inspect_camera.focal_length}}, horizontal_aperture={{inspect_camera.horizontal_aperture}}, clipping_range=[0.01, 1.0])\nset_camera_params(camera_path={{inspect_camera.path}}, params={\"focal_length\": {{inspect_camera.focal_length}}, \"horizontal_aperture\": {{inspect_camera.horizontal_aperture}}, \"focus_distance\": 0.08})\nset_camera_look_at(camera_path={{inspect_camera.path}}, target={{inspect_camera.look_at}}, eye={{inspect_camera.initial_eye}})\ncheck_singularity(articulation_path={{primary_robot.path}}, target_position=[0.45, 0.0, 0.92], target_orientation=[0.0, 0.7071068, 0.0, 0.7071068])\nplan_trajectory(articulation_path={{primary_robot.path}}, waypoints=[{\"position\": [0.45, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]}, {\"position\": [0.55, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]}, {\"position\": [0.65, 0.0, 0.92], \"orientation\": [0.0, 0.7071068, 0.0, 0.7071068]}], planner=\"rmpflow\", robot_type={{primary_robot.class}})\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.45, 0.0, 1.05], target_orientation=[0.0, 0.7071068, 0.0, 0.7071068], planner=\"rmpflow\", robot_type={{primary_robot.class}})\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.45, 0.0, 0.92], target_orientation=[0.0, 0.7071068, 0.0, 0.7071068], planner=\"rmpflow\", robot_type={{primary_robot.class}})\ncapture_camera_image(camera_path={{inspect_camera.path}}, resolution=[1280, 720])\nvision_analyze_scene(question=\"Describe any visible defects in the weld bead in the centre of the viewport: classify as porosity, crack, undercut, or clean (ok).\")\nget_world_transform(prim_path={{inspect_camera.path}})\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.55, 0.0, 0.92], target_orientation=[0.0, 0.7071068, 0.0, 0.7071068], planner=\"rmpflow\", robot_type={{primary_robot.class}})\ncapture_camera_image(camera_path={{inspect_camera.path}}, resolution=[1280, 720])\nvision_analyze_scene(question=\"Describe any visible defects in the weld bead in the centre of the viewport: classify as porosity, crack, undercut, or clean (ok).\")\nget_world_transform(prim_path={{inspect_camera.path}})\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.65, 0.0, 0.92], target_orientation=[0.0, 0.7071068, 0.0, 0.7071068], planner=\"rmpflow\", robot_type={{primary_robot.class}})\ncapture_camera_image(camera_path={{inspect_camera.path}}, resolution=[1280, 720])\nvision_analyze_scene(question=\"Describe any visible defects in the weld bead in the centre of the viewport: classify as porosity, crack, undercut, or clean (ok).\")\nget_world_transform(prim_path={{inspect_camera.path}})\nadd_vision_classifier_gate(cube_paths=[{{seam_segments[0].path}}, {{seam_segments[1].path}}, {{seam_segments[2].path}}], class_labels=[\"porosity\", \"crack\", \"undercut\", \"ok\"], camera_path={{inspect_camera.path}})\nmove_to_pose(articulation_path={{primary_robot.path}}, target_position=[0.65, 0.0, 1.05], target_orientation=[0.0, 0.7071068, 0.0, 0.7071068], planner=\"rmpflow\", robot_type={{primary_robot.class}})\nget_world_transform(prim_path=\"/World/UR10/tool0\")",
+  "simulate_args_template": {
+    "target_path": "{{weld_seam.path}}",
+    "cube_path": "{{weld_seam.path}}",
+    "duration_s": 60,
+    "xy_tolerance": 0.05
+  },
+  "extends": "inspection-weld-seam-vision-ndt-001",
+  "extension_notes": "Implements backlog inspection-weld-seam-vision-ndt-001 (F.0-ext-2). NDT inspection of an ALREADY-WELDED seam \u2014 non-contact, no compliance, no arc/heat physics, no welding gestures. Sister canonical to A87 (yrkesroll-inspector-reject-divert): both use vision classification + ONET 51-9061 parent role, but A87 sorts cubes by surface-mark pass/reject (a non-welding context) while A115 inspects a finished weld bead for porosity/crack/undercut (welding-domain QA). DISTINCT from A28 (welder-seam-track, CREATES the weld via impedance-compliant torch follow) and A95 (welder-mig-tack, places discrete tack welds). Backlog success criterion 'coverage map reports >=10 frames per cm of seam' is satisfied by 21 capture points over 0.20 m (10.5/cm); backlog 'defect scores produced for every frame' is satisfied by the vision_analyze_scene call inside the per-waypoint loop AND the whole-seam add_vision_classifier_gate. Backlog motion_controller_preference=curobo is honoured. Scenario-profile extensions: (1) replace the Cube bead with a textured/displacement-mapped photoreal bead asset; (2) add DR over DomeLight intensity and bead material reflectance to measure classifier robustness; (3) add additional defect categories (lack-of-fusion, slag inclusion, spatter) as new SeamSegment_* marker prims; (4) replace the wrist Camera with a structured-light or eddy-current sensor proxy for non-vision NDT modalities; (5) chain to a downstream pick-place canonical that sorts inspected workpieces to good/rework/scrap bins based on the gate output."
+}

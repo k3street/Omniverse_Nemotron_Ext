@@ -26,8 +26,10 @@ class IsaacAssistExtension(omni.ext.IExt):
 
         # ── 2. Start Kit RPC server (port 8001) ───────────────────────────────
         try:
+            import os as _os
             from .context.kit_rpc import KitRPCServer, start_exec_tick
-            _rpc_server = KitRPCServer()
+            _rpc_port = int(_os.environ.get("KIT_RPC_PORT", "8001"))
+            _rpc_server = KitRPCServer(port=_rpc_port)
             _rpc_server.start()
             start_exec_tick()  # Register main-thread sync execution handler
             self._rpc_server = _rpc_server

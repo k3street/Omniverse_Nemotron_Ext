@@ -31,7 +31,7 @@
     "success_criterion": "rsi_cfg.initial_state_cfg is not null AND stats.approved_turns >= 5",
     "result_file": "/tmp/rsi_from_demos_result.json"
   },
-  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate BLOCKED (requires demo HDF5 at workspace/demos/ + GR00T advisor extension + live MCP)",
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate BLOCKED (requires demo HDF5 at workspace/demos/ + GR00T advisor extension + live MCP); env_blocked: isaaclab_envs — InitialStateCfg not exported from isaaclab.envs in current IsaacLab build",
   "failure_modes": [
     "setup_rsi_from_demos demo_path: file must exist and contain at least 1 recorded trajectory with keys joint_positions, joint_velocities (standard IsaacLab HDF5 schema); missing keys raise a schema validation error in the handler",
     "setup_rsi_from_demos env_cfg mismatch: 'FrankaPickPlaceEnvCfg' must be importable in the IsaacLab environment; if the env is in a custom extension use the fully-qualified dotted path e.g. 'my_ext.envs.FrankaPickPlaceEnvCfg'",
@@ -101,5 +101,5 @@
       "format": "openai"
     }
   },
-  "code_template": "import json, os\nDEMO_PATH = {{demo_corpus.path}}\nENV_CFG = {{env_config.class_path}}\nOUTPUT_PATH = {{export_output.output_path}}\nRESULT_FILE = \"/tmp/rsi_from_demos_result.json\"\nconfig_advice = suggest_finetune_config(task_type=\"similar_to_pretrain\", hardware=\"RTX 4090\", data_size=10)\nrsi_cfg = setup_rsi_from_demos(demo_path=DEMO_PATH, env_cfg=ENV_CFG, noise_std=0.03)\nstats = finetune_stats()\nexport_result = export_finetune_data(format=\"openai\", min_quality=\"approved_successful\", output_path=OUTPUT_PATH)\npipeline_ok = isinstance(rsi_cfg, dict) and rsi_cfg.get(\"initial_state_cfg\") is not None\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump({\"pipeline_ok\": pipeline_ok, \"approved_turns\": stats.get(\"approved_turns\", 0) if isinstance(stats, dict) else 0, \"rsi_cfg\": rsi_cfg}, f, indent=2)\nassert os.path.exists(RESULT_FILE)"
+  "code_template": "DEMO_PATH = {{demo_corpus.path}}\nENV_CFG = {{env_config.class_path}}\nOUTPUT_PATH = {{export_output.output_path}}\nRESULT_FILE = \"/tmp/rsi_from_demos_result.json\"\nconfig_advice = suggest_finetune_config(task_type=\"similar_to_pretrain\", hardware=\"RTX 4090\", data_size=10)\nrsi_cfg = setup_rsi_from_demos(demo_path=DEMO_PATH, env_cfg=ENV_CFG, noise_std=0.03)\nstats = finetune_stats()\nexport_result = export_finetune_data(format=\"openai\", min_quality=\"approved_successful\", output_path=OUTPUT_PATH)\npipeline_ok = isinstance(rsi_cfg, dict) and rsi_cfg.get(\"initial_state_cfg\") is not None\npass  # removed sandbox-illegal `with open(...)` block"
 }

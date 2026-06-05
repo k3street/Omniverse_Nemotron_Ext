@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-dr-curriculum",
-  "goal": "Build a domain-randomization curriculum for Franka pick-place: 4 difficulty levels stage progressive randomization (cube position → cube color → lighting → texture). Realizes Phase 9 yrkesroll #10 (RL/sim-to-real engineer persona).",
+  "goal": "Build a domain-randomization curriculum for Franka pick-place: 4 difficulty levels stage progressive randomization (cube position \u2192 cube color \u2192 lighting \u2192 texture). Realizes Phase 9 yrkesroll #10 (RL/sim-to-real engineer persona).",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -20,7 +20,7 @@
     "Function-gate: cube delivered to bin (single-cube); randomization shouldn't break delivery for stage 1-2; may stress controller at stages 3-4.",
     "Realizes the 'fix-then-randomize' iteration pattern from sim-to-real literature."
   ],
-  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[0.4, 0.2, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_1\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\ncreate_bin(prim_path=\"/World/Bin\", position=[-0.4, 0, 0.75], size=[0.30, 0.30, 0.15])\n\napply_dr_preset(\n    preset_name=\"sim_to_real_stage_2\",\n    target_paths=[\"/World/Cube_1\"],\n)\n\nadd_domain_randomizer(\n    target_paths=[\"/World/Cube_1\"],\n    attribute=\"position\",\n    randomization_type=\"continuous\",\n    range_min=[-0.05, -0.05, 0],\n    range_max=[0.05, 0.05, 0],\n)\n\nadd_domain_randomizer(\n    target_paths=[\"/World/Cube_1\"],\n    attribute=\"color\",\n    randomization_type=\"continuous\",\n    range_min=[0, 0, 0],\n    range_max=[1, 1, 1],\n)\n\nadd_domain_randomizer(\n    target_paths=[\"/World/DomeLight\"],\n    attribute=\"inputs:intensity\",\n    randomization_type=\"continuous\",\n    range_min=[600],\n    range_max=[1500],\n)\n\nconfigure_correlated_dr(\n    correlation_groups=[\n        {\"params\": [\"position\", \"color\"], \"correlation\": 0.0},\n    ],\n)\n\npreview_dr(n_samples=5)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.2, 0.835], size=[0.10, 0.10, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=None,\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/Bin\"],\n)",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[0.4, 0.2, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Cube_1\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\ncreate_bin(prim_path=\"/World/Bin\", position=[-0.4, 0, 0.75], size=[0.30, 0.30, 0.15])\n\napply_dr_preset(preset=\"aggressive_sim2real\")\n\nadd_domain_randomizer(\n    target=\"/World/Cube_1\",\n    randomizer_type=\"pose\",\n    params={\"min_angle\": [-0.05, -0.05, 0], \"max_angle\": [0.05, 0.05, 0]},\n)\n\nadd_domain_randomizer(\n    target=\"/World/Cube_1\",\n    randomizer_type=\"color\",\n    params={\"color_min\": [0, 0, 0], \"color_max\": [1, 1, 1]},\n)\n\nadd_domain_randomizer(\n    target=\"/World/DomeLight\",\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": 600, \"intensity_max\": 1500},\n)\n\nconfigure_correlated_dr(\n    parameter_groups=[\n        {\"params\": [\"color\", \"lighting\"], \"correlation\": 0.8},\n        {\"params\": [\"pose\"], \"correlation\": 0.0},\n    ],\n)\n\npreview_dr(n_samples=5)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.2, 0.835], size=[0.10, 0.10, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=None,\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/Bin\"],\n)",
   "verify_args": null,
   "simulate_args": {
     "cube_path": "/World/Cube_1",
@@ -31,7 +31,7 @@
   "extends": "phase9-yrkesroll-#10",
   "extension_notes": "RL/sim-to-real canonical. Stage 2 of 4 difficulty curriculum. Higher stages (3-4) add texture/bump that requires Mdl materials. Stage 2 keeps base controller working while exercising DR pipeline.",
   "failure_modes": [
-    "DR randomization happens at episode-reset, not within episode — single cube delivery may be unaffected by mid-run randomization",
+    "DR randomization happens at episode-reset, not within episode \u2014 single cube delivery may be unaffected by mid-run randomization",
     "preview_dr requires omni.replicator (heavy)",
     "Cube position randomized at start; sensor zone fixed; if cube spawns outside sensor zone (5cm range vs 10cm zone), sensor may miss",
     "configure_correlated_dr arg signature is speculative; handler may not exist"
@@ -52,22 +52,32 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
       "expected_count": 1,
       "required": true
     },
     "primary_destination": {
-      "constraints": ["bin"],
+      "constraints": [
+        "bin"
+      ],
       "expected_count": 1,
       "required": true
     },
     "pick_sensor": {
-      "constraints": ["proximity_sensor"],
+      "constraints": [
+        "proximity_sensor"
+      ],
       "expected_count": 1,
       "required": true
     },
     "workpieces": {
-      "constraints": ["cube"],
+      "constraints": [
+        "cube"
+      ],
       "min": 1,
       "max": 1,
       "param_name": "n_cubes",
@@ -78,30 +88,62 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka_panda",
-      "position": [0, 0, 0.75],
-      "orientation": [0.7071068, 0, 0, 0.7071068]
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
     },
     "primary_destination": {
       "path": "/World/Bin",
-      "position": [-0.4, 0, 0.75],
-      "size": [0.30, 0.30, 0.15]
+      "position": [
+        -0.4,
+        0,
+        0.75
+      ],
+      "size": [
+        0.3,
+        0.3,
+        0.15
+      ]
     },
     "pick_sensor": {
       "path": "/World/PickSensor",
-      "position": [0.4, 0.2, 0.835],
-      "size": [0.10, 0.10, 0.06]
+      "position": [
+        0.4,
+        0.2,
+        0.835
+      ],
+      "size": [
+        0.1,
+        0.1,
+        0.06
+      ]
     },
     "workpieces": [
-      {"path": "/World/Cube_1", "position": [0.4, 0.2, 0.835]}
+      {
+        "path": "/World/Cube_1",
+        "position": [
+          0.4,
+          0.2,
+          0.835
+        ]
+      }
     ]
   },
-  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\ncreate_bin(prim_path={{primary_destination.path}}, position={{primary_destination.position}}, size={{primary_destination.size}})\n\napply_dr_preset(\n    preset_name=\"sim_to_real_stage_2\",\n    target_paths=[{{workpieces[0].path}}],\n)\n\nadd_domain_randomizer(\n    target_paths=[{{workpieces[0].path}}],\n    attribute=\"position\",\n    randomization_type=\"continuous\",\n    range_min=[-0.05, -0.05, 0],\n    range_max=[0.05, 0.05, 0],\n)\n\nadd_domain_randomizer(\n    target_paths=[{{workpieces[0].path}}],\n    attribute=\"color\",\n    randomization_type=\"continuous\",\n    range_min=[0, 0, 0],\n    range_max=[1, 1, 1],\n)\n\nadd_domain_randomizer(\n    target_paths=[\"/World/DomeLight\"],\n    attribute=\"inputs:intensity\",\n    randomization_type=\"continuous\",\n    range_min=[600],\n    range_max=[1500],\n)\n\nconfigure_correlated_dr(\n    correlation_groups=[\n        {\"params\": [\"position\", \"color\"], \"correlation\": 0.0},\n    ],\n)\n\npreview_dr(n_samples=5)\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path=None,\n    source_paths=[{{workpieces[0].path}}],\n    destination_path={{primary_destination.path}},\n    planning_obstacles=[\"/World/Table\", {{primary_destination.path}}],\n)",
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(prim_path={{workpieces[0].path}}, prim_type=\"Cube\", position={{workpieces[0].position}}, size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{workpieces[0].path}}, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=[{{workpieces[0].path}}],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\ncreate_bin(prim_path={{primary_destination.path}}, position={{primary_destination.position}}, size={{primary_destination.size}})\n\napply_dr_preset(preset=\"aggressive_sim2real\")\n\nadd_domain_randomizer(\n    target=\"/World/Cube_1\",\n    randomizer_type=\"pose\",\n    params={\"min_angle\": [-0.05, -0.05, 0], \"max_angle\": [0.05, 0.05, 0]},\n)\n\nadd_domain_randomizer(\n    target=\"/World/Cube_1\",\n    randomizer_type=\"color\",\n    params={\"color_min\": [0, 0, 0], \"color_max\": [1, 1, 1]},\n)\n\nadd_domain_randomizer(\n    target=\"/World/DomeLight\",\n    randomizer_type=\"lighting\",\n    params={\"intensity_min\": 600, \"intensity_max\": 1500},\n)\n\nconfigure_correlated_dr(\n    parameter_groups=[\n        {\"params\": [\"color\", \"lighting\"], \"correlation\": 0.8},\n        {\"params\": [\"pose\"], \"correlation\": 0.0},\n    ],\n)\n\npreview_dr(n_samples=5)\n\nadd_proximity_sensor(sensor_path={{pick_sensor.path}}, position={{pick_sensor.position}}, size={{pick_sensor.size}})\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path=None,\n    source_paths=[{{workpieces[0].path}}],\n    destination_path={{primary_destination.path}},\n    planning_obstacles=[\"/World/Table\", {{primary_destination.path}}],\n)",
   "simulate_args_template": {
     "cube_path": "{{workpieces[0].path}}",
     "target_path": "{{primary_destination.path}}",
     "duration_s": 180
   },
-  "verified_status": "build-spec-2026-05-10; smoke-test ✓ 1/1 (34s); DR Stage 2 of 4",
+  "verified_status": "build-spec-2026-05-10; smoke-test \u2713 1/1 (34s); DR Stage 2 of 4",
   "motion_controllers": {
     "verified": [],
     "untested": [

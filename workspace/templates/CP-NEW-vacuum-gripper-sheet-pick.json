@@ -15,19 +15,35 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Design rationale for CP-NEW-vacuum-gripper-sheet-pick:\n\n1) Distinctiveness: This is the ONLY canonical in the library that uses surface_gripper (OgnSurfaceGripper suction-cup). All other pick-place canonicals use the parallel-jaw Franka gripper or UR10 RmpFlow. The vacuum pattern is essential for thin flat sheets that cannot be grasped by a parallel jaw without precise finger positioning.\n\n2) Sheet geometry: Sheets are 0.30 x 0.22 x 0.003m (thin aluminium blanks, industrial laser-cut pattern). They are stacked vertically in a sheet stack holder at [0, 0.38, 0.78]. Stack holder: simple Cube prim 0.32x0.24x0.10m at [0, 0.38, 0.75] as a rigid collision stand. 6 sheets stacked; sheet_i centre z = holder_top(0.80) + 0.003*(i+0.5). Top sheet z ≈ 0.818.\n\n3) Output tray: A shallow flat tray at [0, -0.45, 0.78] with 3 slots arranged in a row. Each slot accepts one sheet: slot_1=[-0.12, -0.45, 0.803], slot_2=[0.00, -0.45, 0.803], slot_3=[0.12, -0.45, 0.803]. 3 of the 6 sheets go into slots (demonstrating 3-cycle pick); remaining sheets stay in stack.\n\n4) surface_gripper: called once at scene setup to install the OgnSurfaceGripper OmniGraph node on /World/Franka. ee_link='/World/Franka/panda_hand', grip_threshold=0.005 (5 mm, matches sheet thickness tolerance), force_limit=80.0 (aluminium sheet ~0.5 kg, 80N well above requirement). graph_path='/World/Franka/SuctionGraph'.\n\n5) overlap_sphere for stack presence: center=[0, 0.38, 0.820] (just above holder top), radius=0.08m. Confirms /World/Sheet_* prims are in range before executing pick. If overlap_sphere returns empty (stack exhausted), controller exits gracefully.\n\n6) Franka reach: stack at [0, +0.38], tray at [0, -0.45]. Max horizontal distance to tray far slot: sqrt(0.12^2 + 0.45^2) = 0.466m. Well inside Franka 0.855m reach. Transit height: z=1.10m clears holder top (0.90m) and tray walls.\n\n7) Physics: CPU dynamics (MBP broadphase) for deterministic sheet-stack contacts. Sheets are thin; enable_ccd=True on each sheet rigid body to prevent tunnelling through tray floor.\n\n8) setup_pick_place_controller: target_source='curobo', source_paths = top 3 sheets by z-sort (Sheet_6, Sheet_5, Sheet_4), drop_targets mapping each sheet to its tray slot. planning_obstacles include holder, tray, and table. approach_height=0.08 (approach 80 mm above sheet before descending for suction contact).\n\n9) Why curobo not native: curobo handles the narrow vertical approach to the thin stack (avoiding holder rim collisions) better than the native spline planner. diffik would also work but lacks collision awareness around the holder rim.\n\n10) Arrival sensor: /World/ArrivalSensor at tray centre [0, -0.45, 0.815], size [0.40, 0.30, 0.05] — detects any sheet landing in tray zone.",
-  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# ── Work table ────────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.8, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics, CCD for thin sheets ───────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\n# Stack at y=+0.38, tray at y=-0.45; max reach 0.47m — inside 0.855m envelope.\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Surface gripper (vacuum cup on panda_hand) ────────────────────────────────\n# grip_threshold=0.005m matches sheet thickness tolerance (3mm sheet).\n# force_limit=80N comfortably lifts 0.5kg aluminium blank.\nsurface_gripper(\n    robot_path=\"/World/Franka\",\n    ee_link=\"/World/Franka/panda_hand\",\n    grip_threshold=0.005,\n    force_limit=80.0,\n    torque_limit=50.0,\n    graph_path=\"/World/Franka/SuctionGraph\",\n)\n\n# ── Sheet stack holder ────────────────────────────────────────────────────────\n# Rigid stand 0.32 x 0.24 x 0.05m; top surface at z=0.80.\n# Holder acts as stack guide walls — sheets are placed inside.\ncreate_prim(\n    prim_path=\"/World/StackHolder\",\n    prim_type=\"Cube\",\n    position=[0, 0.38, 0.775],\n    scale=[0.16, 0.12, 0.025],  # 0.32 x 0.24 x 0.05m\n)\napply_api_schema(prim_path=\"/World/StackHolder\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── 6 flat sheets stacked in holder ──────────────────────────────────────────\n# Sheet: 0.30 x 0.22 x 0.003m (thin aluminium blank).\n# Bottom sheet centre z = holder_top(0.80) + 0.0015 = 0.8015.\n# Each subsequent sheet sits 0.003m above the previous.\nsheet_paths = [f\"/World/Sheet_{i+1}\" for i in range(6)]\nfor i, path in enumerate(sheet_paths):\n    sheet_z = 0.80 + 0.003 * i + 0.0015\n    create_prim(\n        prim_path=path,\n        prim_type=\"Cube\",\n        position=[0, 0.38, sheet_z],\n        scale=[0.15, 0.11, 0.0015],  # 0.30 x 0.22 x 0.003m\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=sheet_paths,\n    attr=\"physics:mass\",\n    value=0.5,\n)\nbulk_set_attribute(\n    prim_paths=sheet_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=sheet_paths,\n    attr=\"physxRigidBody:enableCCD\",\n    value=True,\n)\nfor path in sheet_paths:\n    apply_physics_material(prim_path=path, material_name=\"metal\")\n\n# ── Output tray (3-slot flat tray) ───────────────────────────────────────────\n# Tray at [0, -0.45, 0.78]: shallow lip, 0.45 x 0.18 x 0.03m.\ncreate_bin(\n    prim_path=\"/World/OutputTray\",\n    size=[0.45, 0.18, 0.03],\n    position=[0, -0.45, 0.78],\n    wall_thickness=0.005,\n)\n\n# ── Arrival sensor at output tray ────────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.815],\n    size=[0.40, 0.16, 0.04],\n)\n\n# ── Runtime: overlap_sphere stack-presence check ──────────────────────────────\n# Query just above holder top to confirm sheets are available before pick.\n_stack_query = overlap_sphere(\n    center=[0, 0.38, 0.820],\n    radius=0.08,\n)\n_sheet_set = set(sheet_paths)\n_available = [\n    p for p in (_stack_query.get(\"prim_paths\") or [])\n    if p in _sheet_set\n]\n# Fallback to known list sorted top-first if query fires before physics step\nif not _available:\n    _available = list(reversed(sheet_paths))  # Sheet_6 is topmost\n\n# Pick top 3 sheets: sort by path index descending (Sheet_6 > Sheet_5 > Sheet_4)\n_pick_order = sorted(_available, key=lambda p: int(p.split(\"_\")[-1]), reverse=True)[:3]\n\n# ── Tray slot drop targets (3 slots in a row, 0.12m spacing) ─────────────────\n# Slot centres: x = -0.12, 0.00, +0.12; y = -0.45; z = tray_top(0.81) + 0.0015\nslot_positions = [\n    [-0.12, -0.45, 0.8115],\n    [ 0.00, -0.45, 0.8115],\n    [ 0.12, -0.45, 0.8115],\n]\ndrop_targets = {\n    path: slot_positions[i]\n    for i, path in enumerate(_pick_order)\n}\n\n# ── cuRobo pick-place controller ──────────────────────────────────────────────\n# approach_height=0.08 gives 80mm clearance above sheet before vertical descent\n# for suction contact — avoids clipping the holder rim on approach.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=_pick_order,\n    destination_path=\"/World/OutputTray\",\n    drop_targets=drop_targets,\n    approach_height=0.08,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/StackHolder\",\n        \"/World/OutputTray\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
+  "thoughts": "Design rationale for CP-NEW-vacuum-gripper-sheet-pick:\n\n1) Distinctiveness: This is the ONLY canonical in the library that uses surface_gripper (OgnSurfaceGripper suction-cup). All other pick-place canonicals use the parallel-jaw Franka gripper or UR10 RmpFlow. The vacuum pattern is essential for thin flat sheets that cannot be grasped by a parallel jaw without precise finger positioning.\n\n2) Sheet geometry: Sheets are 0.30 x 0.22 x 0.003m (thin aluminium blanks, industrial laser-cut pattern). They are stacked vertically in a sheet stack holder at [0, 0.38, 0.78]. Stack holder: simple Cube prim 0.32x0.24x0.10m at [0, 0.38, 0.75] as a rigid collision stand. 6 sheets stacked; sheet_i centre z = holder_top(0.80) + 0.003*(i+0.5). Top sheet z \u2248 0.818.\n\n3) Output tray: A shallow flat tray at [0, -0.45, 0.78] with 3 slots arranged in a row. Each slot accepts one sheet: slot_1=[-0.12, -0.45, 0.803], slot_2=[0.00, -0.45, 0.803], slot_3=[0.12, -0.45, 0.803]. 3 of the 6 sheets go into slots (demonstrating 3-cycle pick); remaining sheets stay in stack.\n\n4) surface_gripper: called once at scene setup to install the OgnSurfaceGripper OmniGraph node on /World/Franka. ee_link='/World/Franka/panda_hand', grip_threshold=0.005 (5 mm, matches sheet thickness tolerance), force_limit=80.0 (aluminium sheet ~0.5 kg, 80N well above requirement). graph_path='/World/Franka/SuctionGraph'.\n\n5) overlap_sphere for stack presence: center=[0, 0.38, 0.820] (just above holder top), radius=0.08m. Confirms /World/Sheet_* prims are in range before executing pick. If overlap_sphere returns empty (stack exhausted), controller exits gracefully.\n\n6) Franka reach: stack at [0, +0.38], tray at [0, -0.45]. Max horizontal distance to tray far slot: sqrt(0.12^2 + 0.45^2) = 0.466m. Well inside Franka 0.855m reach. Transit height: z=1.10m clears holder top (0.90m) and tray walls.\n\n7) Physics: CPU dynamics (MBP broadphase) for deterministic sheet-stack contacts. Sheets are thin; enable_ccd=True on each sheet rigid body to prevent tunnelling through tray floor.\n\n8) setup_pick_place_controller: target_source='curobo', source_paths = top 3 sheets by z-sort (Sheet_6, Sheet_5, Sheet_4), drop_targets mapping each sheet to its tray slot. planning_obstacles include holder, tray, and table. approach_height=0.08 (approach 80 mm above sheet before descending for suction contact).\n\n9) Why curobo not native: curobo handles the narrow vertical approach to the thin stack (avoiding holder rim collisions) better than the native spline planner. diffik would also work but lacks collision awareness around the holder rim.\n\n10) Arrival sensor: /World/ArrivalSensor at tray centre [0, -0.45, 0.815], size [0.40, 0.30, 0.05] \u2014 detects any sheet landing in tray zone.",
+  "code": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# \u2500\u2500 Work table \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.8, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics: CPU dynamics, CCD for thin sheets \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Franka arm \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Stack at y=+0.38, tray at y=-0.45; max reach 0.47m \u2014 inside 0.855m envelope.\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# \u2500\u2500 Surface gripper (vacuum cup on panda_hand) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# grip_threshold=0.005m matches sheet thickness tolerance (3mm sheet).\n# force_limit=80N comfortably lifts 0.5kg aluminium blank.\nsurface_gripper(\n    robot_path=\"/World/Franka\",\n    ee_link=\"/World/Franka/panda_hand\",\n    grip_threshold=0.005,\n    force_limit=80.0,\n    torque_limit=50.0,\n    graph_path=\"/World/Franka/SuctionGraph\",\n)\n\n# \u2500\u2500 Sheet stack holder \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Rigid stand 0.32 x 0.24 x 0.05m; top surface at z=0.80.\n# Holder acts as stack guide walls \u2014 sheets are placed inside.\ncreate_prim(\n    prim_path=\"/World/StackHolder\",\n    prim_type=\"Cube\",\n    position=[0, 0.38, 0.775],\n    scale=[0.16, 0.12, 0.025],  # 0.32 x 0.24 x 0.05m\n)\napply_api_schema(prim_path=\"/World/StackHolder\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 6 flat sheets stacked in holder \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Sheet: 0.30 x 0.22 x 0.003m (thin aluminium blank).\n# Bottom sheet centre z = holder_top(0.80) + 0.0015 = 0.8015.\n# Each subsequent sheet sits 0.003m above the previous.\nsheet_paths = [f\"/World/Sheet_{i+1}\" for i in range(6)]\nfor i, path in enumerate(sheet_paths):\n    sheet_z = 0.80 + 0.003 * i + 0.0015\n    create_prim(\n        prim_path=path,\n        prim_type=\"Cube\",\n        position=[0, 0.38, sheet_z],\n        scale=[0.15, 0.11, 0.0015],  # 0.30 x 0.22 x 0.003m\n    )\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(\n    prim_paths=sheet_paths,\n    attr=\"physics:mass\",\n    value=0.5,\n)\nbulk_set_attribute(\n    prim_paths=sheet_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=sheet_paths,\n    attr=\"physxRigidBody:enableCCD\",\n    value=True,\n)\nfor path in sheet_paths:\n    apply_physics_material(prim_path=path, material_name=\"metal\")\n\n# \u2500\u2500 Output tray (3-slot flat tray) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Tray at [0, -0.45, 0.78]: shallow lip, 0.45 x 0.18 x 0.03m.\ncreate_bin(\n    prim_path=\"/World/OutputTray\",\n    size=[0.45, 0.18, 0.03],\n    position=[0, -0.45, 0.78],\n    wall_thickness=0.005,\n)\n\n# \u2500\u2500 Arrival sensor at output tray \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.815],\n    size=[0.40, 0.16, 0.04],\n)\n\n# \u2500\u2500 Runtime: overlap_sphere stack-presence check \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Query just above holder top to confirm sheets are available before pick.\n_stack_query = overlap_sphere(\n    center=[0, 0.38, 0.820],\n    radius=0.08,\n)\n_sheet_set = set(sheet_paths)\n_available = [\n    p for p in ((_stack_query or {}).get(\"prim_paths\") or [])\n    if p in _sheet_set\n]\n# Fallback to known list sorted top-first if query fires before physics step\nif not _available:\n    _available = list(reversed(sheet_paths))  # Sheet_6 is topmost\n\n# Pick top 3 sheets: sort by path index descending (Sheet_6 > Sheet_5 > Sheet_4)\n_pick_order = sorted(_available, key=lambda p: int(p.split(\"_\")[-1]), reverse=True)[:3]\n\n# \u2500\u2500 Tray slot drop targets (3 slots in a row, 0.12m spacing) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Slot centres: x = -0.12, 0.00, +0.12; y = -0.45; z = tray_top(0.81) + 0.0015\nslot_positions = [\n    [-0.12, -0.45, 0.8115],\n    [ 0.00, -0.45, 0.8115],\n    [ 0.12, -0.45, 0.8115],\n]\ndrop_targets = {\n    path: slot_positions[i]\n    for i, path in enumerate(_pick_order)\n}\n\n# \u2500\u2500 cuRobo pick-place controller \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# approach_height=0.08 gives 80mm clearance above sheet before vertical descent\n# for suction contact \u2014 avoids clipping the holder rim on approach.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=_pick_order,\n    destination_path=\"/World/OutputTray\",\n    drop_targets=drop_targets,\n    approach_height=0.08,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/StackHolder\",\n        \"/World/OutputTray\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
   "settle_state": {
     "stack_holder": {
       "/World/StackHolder": {
-        "position": [0, 0.38, 0.775],
-        "scale": [0.16, 0.12, 0.025]
+        "position": [
+          0,
+          0.38,
+          0.775
+        ],
+        "scale": [
+          0.16,
+          0.12,
+          0.025
+        ]
       }
     },
     "output_tray": {
       "/World/OutputTray": {
-        "position": [0, -0.45, 0.78],
-        "size": [0.45, 0.18, 0.03]
+        "position": [
+          0,
+          -0.45,
+          0.78
+        ],
+        "size": [
+          0.45,
+          0.18,
+          0.03
+        ]
       }
     },
     "robot": {
@@ -66,20 +82,27 @@
       "/World/Sheet_4"
     ],
     "duration_s": 120,
-    "xy_tolerance": 0.20
+    "xy_tolerance": 0.2
   },
   "diagnose_args": {
     "robot_path": "/World/Franka",
-    "obstacles": ["/World/StackHolder", "/World/OutputTray"],
+    "obstacles": [
+      "/World/StackHolder",
+      "/World/OutputTray"
+    ],
     "sensor_path": "/World/ArrivalSensor",
-    "robot_base": [0.0, 0.0, 0.75]
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ]
   },
   "failure_modes": [
-    "surface_gripper seal fails on thin sheet — grip_threshold=0.005m may be too tight if the EE hovers at 6-7mm above the sheet. Increase grip_threshold to 0.008 if seal-check reports no attachment. The OgnSurfaceGripper uses AABB proximity, not normals, so any approach within threshold from any direction triggers seal.",
-    "overlap_sphere fires before PhysX settles sheets — sheets may still be in mid-fall when the query runs at scene-build time. Fallback to reversed(sheet_paths) ensures pick order is always top-first regardless of query result.",
-    "CCD tunnelling on thin sheets — enableCCD=True is set per sheet; if PhysX CCD is globally disabled in scene config, sheets may pass through tray floor. Ensure set_physics_scene_config does not set enable_gpu_dynamics=True (CCD is CPU-path only in MBP broadphase).",
-    "Holder rim collision during pick — curobo approach_height=0.08 provides 80mm clearance. If the holder stands 0.10m tall (top at z=0.90) and the sheet top is at z=0.818, the EE at approach (z=0.818+0.08=0.898) is within 2mm of the rim. Increase approach_height to 0.12 if cuRobo IK fails to find a collision-free approach.",
-    "Drop target z too low — sheets land at z=0.8115 (tray_top + half-sheet). If tray floor is higher than nominal due to wall_thickness rounding, sheets stack on each other. Add 0.003m per sheet placed (cumulative offset) by adjusting drop_targets[sheet_path][2] in a loop if stacking is observed."
+    "surface_gripper seal fails on thin sheet \u2014 grip_threshold=0.005m may be too tight if the EE hovers at 6-7mm above the sheet. Increase grip_threshold to 0.008 if seal-check reports no attachment. The OgnSurfaceGripper uses AABB proximity, not normals, so any approach within threshold from any direction triggers seal.",
+    "overlap_sphere fires before PhysX settles sheets \u2014 sheets may still be in mid-fall when the query runs at scene-build time. Fallback to reversed(sheet_paths) ensures pick order is always top-first regardless of query result.",
+    "CCD tunnelling on thin sheets \u2014 enableCCD=True is set per sheet; if PhysX CCD is globally disabled in scene config, sheets may pass through tray floor. Ensure set_physics_scene_config does not set enable_gpu_dynamics=True (CCD is CPU-path only in MBP broadphase).",
+    "Holder rim collision during pick \u2014 curobo approach_height=0.08 provides 80mm clearance. If the holder stands 0.10m tall (top at z=0.90) and the sheet top is at z=0.818, the EE at approach (z=0.818+0.08=0.898) is within 2mm of the rim. Increase approach_height to 0.12 if cuRobo IK fails to find a collision-free approach.",
+    "Drop target z too low \u2014 sheets land at z=0.8115 (tray_top + half-sheet). If tray floor is higher than nominal due to wall_thickness rounding, sheets stack on each other. Add 0.003m per sheet placed (cumulative offset) by adjusting drop_targets[sheet_path][2] in a loop if stacking is observed."
   ],
   "intent": {
     "pattern_hint": "pick_place",
@@ -106,23 +129,37 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "franka", "ur5e"],
+      "constraints": [
+        "franka_panda",
+        "franka",
+        "ur5e"
+      ],
       "expected_count": 1,
       "required": true,
       "disambiguator": "surface_gripper_compatible"
     },
     "stack_holder": {
-      "constraints": ["stand", "holder", "fixture"],
+      "constraints": [
+        "stand",
+        "holder",
+        "fixture"
+      ],
       "expected_count": 1,
       "required": true
     },
     "output_tray": {
-      "constraints": ["tray", "bin"],
+      "constraints": [
+        "tray",
+        "bin"
+      ],
       "expected_count": 1,
       "required": true
     },
     "workpieces": {
-      "constraints": ["sheet", "flat_part"],
+      "constraints": [
+        "sheet",
+        "flat_part"
+      ],
       "min": 1,
       "max": 6,
       "param_name": "n_sheets",
@@ -133,33 +170,78 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka",
-      "position": [0, 0, 0.75],
-      "orientation": [1, 0, 0, 0]
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        1,
+        0,
+        0,
+        0
+      ]
     },
     "stack_holder": {
       "path": "/World/StackHolder",
-      "position": [0, 0.38, 0.775],
-      "scale": [0.16, 0.12, 0.025]
+      "position": [
+        0,
+        0.38,
+        0.775
+      ],
+      "scale": [
+        0.16,
+        0.12,
+        0.025
+      ]
     },
     "output_tray": {
       "path": "/World/OutputTray",
-      "position": [0, -0.45, 0.78],
-      "size": [0.45, 0.18, 0.03]
+      "position": [
+        0,
+        -0.45,
+        0.78
+      ],
+      "size": [
+        0.45,
+        0.18,
+        0.03
+      ]
     },
     "workpieces": [
-      {"path": "/World/Sheet_1", "stack_index": 0},
-      {"path": "/World/Sheet_2", "stack_index": 1},
-      {"path": "/World/Sheet_3", "stack_index": 2},
-      {"path": "/World/Sheet_4", "stack_index": 3},
-      {"path": "/World/Sheet_5", "stack_index": 4},
-      {"path": "/World/Sheet_6", "stack_index": 5}
+      {
+        "path": "/World/Sheet_1",
+        "stack_index": 0
+      },
+      {
+        "path": "/World/Sheet_2",
+        "stack_index": 1
+      },
+      {
+        "path": "/World/Sheet_3",
+        "stack_index": 2
+      },
+      {
+        "path": "/World/Sheet_4",
+        "stack_index": 3
+      },
+      {
+        "path": "/World/Sheet_5",
+        "stack_index": 4
+      },
+      {
+        "path": "/World/Sheet_6",
+        "stack_index": 5
+      }
     ]
   },
-  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.8, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nsurface_gripper(\n    robot_path={{primary_robot.path}},\n    ee_link=\"{{primary_robot.path}}/panda_hand\",\n    grip_threshold=0.005,\n    force_limit=80.0,\n    torque_limit=50.0,\n    graph_path=\"{{primary_robot.path}}/SuctionGraph\",\n)\n\ncreate_prim(\n    prim_path={{stack_holder.path}},\n    prim_type=\"Cube\",\n    position={{stack_holder.position}},\n    scale={{stack_holder.scale}},\n)\napply_api_schema(prim_path={{stack_holder.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nsheet_paths = [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}]\nfor i, path in enumerate(sheet_paths):\n    sheet_z = 0.80 + 0.003 * i + 0.0015\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[0, 0.38, sheet_z], scale=[0.15, 0.11, 0.0015])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(prim_paths=sheet_paths, attr=\"physics:mass\", value=0.5)\nbulk_set_attribute(prim_paths=sheet_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=sheet_paths, attr=\"physxRigidBody:enableCCD\", value=True)\nfor path in sheet_paths:\n    apply_physics_material(prim_path=path, material_name=\"metal\")\n\ncreate_bin(\n    prim_path={{output_tray.path}},\n    size={{output_tray.size}},\n    position={{output_tray.position}},\n    wall_thickness=0.005,\n)\n\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.815],\n    size=[0.40, 0.16, 0.04],\n)\n\n_stack_query = overlap_sphere(center=[0, 0.38, 0.820], radius=0.08)\n_sheet_set = set(sheet_paths)\n_available = [p for p in (_stack_query.get(\"prim_paths\") or []) if p in _sheet_set]\nif not _available:\n    _available = list(reversed(sheet_paths))\n_pick_order = sorted(_available, key=lambda p: int(p.split(\"_\")[-1]), reverse=True)[:3]\n\ndrop_targets = {\n    _pick_order[0]: [-0.12, -0.45, 0.8115],\n    _pick_order[1]: [ 0.00, -0.45, 0.8115],\n    _pick_order[2]: [ 0.12, -0.45, 0.8115],\n}\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=_pick_order,\n    destination_path={{output_tray.path}},\n    drop_targets=drop_targets,\n    approach_height=0.08,\n    planning_obstacles=[\"/World/Table\", {{stack_holder.path}}, {{output_tray.path}}],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
+  "code_template": "# \u2500\u2500 Scene skeleton \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.8, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\nsurface_gripper(\n    robot_path={{primary_robot.path}},\n    ee_link=\"{{primary_robot.path}}/panda_hand\",\n    grip_threshold=0.005,\n    force_limit=80.0,\n    torque_limit=50.0,\n    graph_path=\"{{primary_robot.path}}/SuctionGraph\",\n)\n\ncreate_prim(\n    prim_path={{stack_holder.path}},\n    prim_type=\"Cube\",\n    position={{stack_holder.position}},\n    scale={{stack_holder.scale}},\n)\napply_api_schema(prim_path={{stack_holder.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nsheet_paths = [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}]\nfor i, path in enumerate(sheet_paths):\n    sheet_z = 0.80 + 0.003 * i + 0.0015\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[0, 0.38, sheet_z], scale=[0.15, 0.11, 0.0015])\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\nbulk_set_attribute(prim_paths=sheet_paths, attr=\"physics:mass\", value=0.5)\nbulk_set_attribute(prim_paths=sheet_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nbulk_set_attribute(prim_paths=sheet_paths, attr=\"physxRigidBody:enableCCD\", value=True)\nfor path in sheet_paths:\n    apply_physics_material(prim_path=path, material_name=\"metal\")\n\ncreate_bin(\n    prim_path={{output_tray.path}},\n    size={{output_tray.size}},\n    position={{output_tray.position}},\n    wall_thickness=0.005,\n)\n\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.815],\n    size=[0.40, 0.16, 0.04],\n)\n\n_stack_query = overlap_sphere(center=[0, 0.38, 0.820], radius=0.08)\n_sheet_set = set(sheet_paths)\n_available = [p for p in ((_stack_query or {}).get(\"prim_paths\") or []) if p in _sheet_set]\nif not _available:\n    _available = list(reversed(sheet_paths))\n_pick_order = sorted(_available, key=lambda p: int(p.split(\"_\")[-1]), reverse=True)[:3]\n\ndrop_targets = {\n    _pick_order[0]: [-0.12, -0.45, 0.8115],\n    _pick_order[1]: [ 0.00, -0.45, 0.8115],\n    _pick_order[2]: [ 0.12, -0.45, 0.8115],\n}\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=_pick_order,\n    destination_path={{output_tray.path}},\n    drop_targets=drop_targets,\n    approach_height=0.08,\n    planning_obstacles=[\"/World/Table\", {{stack_holder.path}}, {{output_tray.path}}],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
   "motion_controllers": {
     "verified": [],
-    "untested": ["curobo"],
+    "untested": [
+      "curobo"
+    ],
     "failed": {}
   },
-  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳"
+  "verified_status": "drafted-2026-05-16; form-gate-schema \u2713; function-gate \u23f3"
 }
