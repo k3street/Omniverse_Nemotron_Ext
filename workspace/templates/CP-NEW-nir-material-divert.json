@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-nir-material-divert",
-  "goal": "Build a NIR material-classification divert station: items travel on a conveyor, a nir_material_sensor classifies each passing item's simulated material type (metal, plastic, glass), and a Franka arm routes each item to the matching divert bin. Exercises nir_material_sensor as the routing oracle — distinct from vision-classifier (CP-34) and barcode-reader (A33) patterns. ONET-adjacent: recycling/sortation line operator SOC 51-9199.",
+  "goal": "Build a NIR material-classification divert station: items travel on a conveyor, a nir_material_sensor classifies each passing item's simulated material type (metal, plastic, glass), and a Franka arm routes each item to the matching divert bin. Exercises nir_material_sensor as the routing oracle \u2014 distinct from vision-classifier (CP-34) and barcode-reader (A33) patterns. ONET-adjacent: recycling/sortation line operator SOC 51-9199.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -16,15 +16,15 @@
     "add_proximity_sensor",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Design rationale for CP-NEW-nir-material-divert:\n\n1) Sensor novelty: nir_material_sensor reads the 'material:type' attribute from each prim inside its scan radius. No existing canonical uses this sensor — barcode-scanner-divert uses barcode_reader_sensor (label-string read), inspect-reject uses vision-gate (classifier). NIR sensor is a distinct modality used in real recycling/sortation lines.\n\n2) Material tagging strategy: set_semantic_label with semantic_type='material' attaches 'metal'/'plastic'/'glass' to each item. The NIR sensor reads this attribute within its scan_radius. This mirrors how real NIR spectrometers identify material composition from surface reflectance.\n\n3) Scene geometry:\n   - Franka at [0, 0, 0.75] on table [0,0,0.375].\n   - Conveyor belt: 3m length, top surface z=0.805. Items travel in +x direction at 0.12 m/s.\n   - NIR sensor mounted at [0.0, 0.45, 0.94]: scan_radius=0.12m covers full belt width (0.35m) at item centre height.\n   - Proximity sensor at [0.40, 0.45, 0.855] triggers pick sequence.\n   - Three bins: Metal at x=-0.30, Plastic at x=0.0, Glass at x=+0.30, all at y=-0.40.\n\n4) Item layout: 6 items spaced 0.28m on belt: 2x metal (grey), 2x plastic (yellow), 2x glass (cyan). Belt velocity 0.12 m/s → ~2.3s gap at pick zone. Items approach NIR sensor first (~0.4m before pick trigger), sensor fires before pick trigger.\n\n5) Physics: CPU dynamics for determinism. Rubber material prevents slipping.\n\n6) Function-gate: Metal items should reach Metal bin. simulate_args: cube_path=/World/Item_1 (metal), target_path=/World/BinMetal, duration_s=180.",
-  "code": "# ── Lighting + ground ─────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics scene: CPU determinism ───────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Robot table + Franka ─────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Franka\", prim_type=\"Xform\", position=[0, 0, 0.75])\n\n# ── Conveyor belt ─────────────────────────────────────────────────────────────\n# Belt top surface z = 0.78 + 0.025 = 0.805; item centre z = 0.855\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.45, 0.78],\n    size=[3.0, 0.35, 0.05],\n    surface_velocity=[0.12, 0, 0],\n)\n\n# ── Materials: visual cue for 3 material classes ──────────────────────────────\ncreate_material(material_path=\"/World/Materials/MatMetal\",   shader_type=\"OmniPBR\",\n                diffuse_color=[0.65, 0.65, 0.70], metallic=0.8, roughness=0.2)\ncreate_material(material_path=\"/World/Materials/MatPlastic\", shader_type=\"OmniPBR\",\n                diffuse_color=[0.95, 0.90, 0.10], metallic=0.0, roughness=0.8)\ncreate_material(material_path=\"/World/Materials/MatGlass\",   shader_type=\"OmniPBR\",\n                diffuse_color=[0.55, 0.85, 0.95], metallic=0.0, roughness=0.1)\n\n# ── 6 items: 2x metal, 2x plastic, 2x glass ──────────────────────────────────\n# Spaced 0.28m apart on belt. Item centre z = 0.855.\nitem_specs = [\n    (\"/World/Item_1\", -1.40, \"metal\",   \"/World/Materials/MatMetal\"),\n    (\"/World/Item_2\", -1.12, \"plastic\",  \"/World/Materials/MatPlastic\"),\n    (\"/World/Item_3\", -0.84, \"glass\",    \"/World/Materials/MatGlass\"),\n    (\"/World/Item_4\", -0.56, \"metal\",   \"/World/Materials/MatMetal\"),\n    (\"/World/Item_5\", -0.28, \"plastic\",  \"/World/Materials/MatPlastic\"),\n    (\"/World/Item_6\",  0.00, \"glass\",    \"/World/Materials/MatGlass\"),\n]\nitem_paths = [s[0] for s in item_specs]\n\nfor path, x, mat_type, mat_path in item_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\",\n                position=[x, 0.45, 0.855], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=mat_path)\n    # NIR sensor reads this attribute to determine routing\n    set_semantic_label(prim_path=path, class_name=mat_type, semantic_type=\"material\")\n    set_attribute(prim_path=path, attr_name=\"physics:mass\", value=0.4)\n    set_attribute(prim_path=path, attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Three divert bins ────────────────────────────────────────────────────────\n# Arranged at y=-0.40, spread in x within Franka reach (<=0.85m from base).\ncreate_bin(prim_path=\"/World/BinMetal\",   position=[-0.30, -0.40, 0.75], size=[0.22, 0.22, 0.14])\ncreate_bin(prim_path=\"/World/BinPlastic\", position=[ 0.00, -0.40, 0.75], size=[0.22, 0.22, 0.14])\ncreate_bin(prim_path=\"/World/BinGlass\",   position=[ 0.30, -0.40, 0.75], size=[0.22, 0.22, 0.14])\nassign_material(prim_path=\"/World/BinMetal\",   material_path=\"/World/Materials/MatMetal\")\nassign_material(prim_path=\"/World/BinPlastic\", material_path=\"/World/Materials/MatPlastic\")\nassign_material(prim_path=\"/World/BinGlass\",   material_path=\"/World/Materials/MatGlass\")\n\n# ── NIR material sensor ──────────────────────────────────────────────────────\n# Mounted above belt: reads semantic_type='material' within scan_radius=0.12m.\n# Items pass under sensor ~0.40m before the pick trigger fires.\nnir_material_sensor(\n    sensor_path=\"/World/NirScanner\",\n    position=[0.0, 0.45, 0.94],\n    scan_radius=0.12,\n)\n\n# ── Pick-zone proximity sensor ────────────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.40, 0.45, 0.855],\n    size=[0.07, 0.07, 0.07],\n)\n\n# ── Franka pick-place controller with NIR-driven routing ─────────────────────\n# color_routing keys match semantic_type='material' values.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=item_paths,\n    destination_path=\"/World/BinPlastic\",\n    color_routing={\n        \"metal\":   \"/World/BinMetal\",\n        \"glass\":   \"/World/BinGlass\",\n    },\n    drop_target=[0.0, -0.40, 0.92],\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\",\n                        \"/World/BinMetal\", \"/World/BinPlastic\", \"/World/BinGlass\"],\n)",
-  "code_template": "# ── Lighting + ground ─────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"{{primary_robot.path}}\", prim_type=\"Xform\", position={{primary_robot.position}})\n\ncreate_conveyor(\n    prim_path=\"{{input_conveyor.path}}\",\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_material(material_path=\"/World/Materials/MatMetal\",   shader_type=\"OmniPBR\", diffuse_color=[0.65, 0.65, 0.70], metallic=0.8, roughness=0.2)\ncreate_material(material_path=\"/World/Materials/MatPlastic\", shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.90, 0.10], metallic=0.0, roughness=0.8)\ncreate_material(material_path=\"/World/Materials/MatGlass\",   shader_type=\"OmniPBR\", diffuse_color=[0.55, 0.85, 0.95], metallic=0.0, roughness=0.1)\n\nfor item in {{workpieces}}:\n    create_prim(prim_path=item['path'], prim_type=\"Cube\", position=item['position'], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n        apply_api_schema(prim_path=item['path'], schema_name=api)\n    assign_material(prim_path=item['path'], material_path=f\"/World/Materials/Mat{item['material'].capitalize()}\")\n    set_semantic_label(prim_path=item['path'], class_name=item['material'], semantic_type=\"material\")\n    set_attribute(prim_path=item['path'], attr_name=\"physics:mass\", value=0.4)\n    set_attribute(prim_path=item['path'], attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n    apply_physics_material(prim_path=item['path'], material_name=\"rubber\")\n\ncreate_bin(prim_path={{metal_bin.path}}, position={{metal_bin.position}}, size=[0.22, 0.22, 0.14])\ncreate_bin(prim_path={{plastic_bin.path}}, position={{plastic_bin.position}}, size=[0.22, 0.22, 0.14])\ncreate_bin(prim_path={{glass_bin.path}}, position={{glass_bin.position}}, size=[0.22, 0.22, 0.14])\n\nnir_material_sensor(\n    sensor_path={{nir_sensor.path}},\n    position={{nir_sensor.position}},\n    scan_radius={{nir_sensor.scan_radius}},\n)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.40, 0.45, 0.855], size=[0.07, 0.07, 0.07])\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path={{input_conveyor.path}},\n    source_paths=[i['path'] for i in {{workpieces}}],\n    destination_path={{plastic_bin.path}},\n    color_routing={\n        {{metal_bin.routing_key}}: {{metal_bin.path}},\n        {{glass_bin.routing_key}}: {{glass_bin.path}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}},\n                        {{metal_bin.path}}, {{plastic_bin.path}}, {{glass_bin.path}}],\n)",
+  "thoughts": "Design rationale for CP-NEW-nir-material-divert:\n\n1) Sensor novelty: nir_material_sensor reads the 'material:type' attribute from each prim inside its scan radius. No existing canonical uses this sensor \u2014 barcode-scanner-divert uses barcode_reader_sensor (label-string read), inspect-reject uses vision-gate (classifier). NIR sensor is a distinct modality used in real recycling/sortation lines.\n\n2) Material tagging strategy: set_semantic_label with semantic_type='class' attaches 'metal'/'plastic'/'glass' to each item under the USD instance 'Semantics_class'. The pick-place controller's color_routing dispatch (_cube_semantic_class) reads exactly the 'Semantics_class', 'Semantics_color', or 'Semantics_colour' USD instances \u2014 it does NOT read 'Semantics_material'. Using semantic_type='class' ensures the NIR routing keys are found by the controller. The NIR sensor itself is the upstream oracle that announces the classification; the class label is what drives the sort.\n\n3) Scene geometry:\n   - Franka at [0, 0, 0.75] on table [0,0,0.375].\n   - Conveyor belt: 3m length, top surface z=0.805. Items travel in +x direction at 0.12 m/s.\n   - NIR sensor mounted at [0.0, 0.45, 0.94]: scan_radius=0.12m covers full belt width (0.35m) at item centre height.\n   - Proximity sensor at [0.40, 0.45, 0.855] triggers pick sequence.\n   - Three bins: Metal at x=-0.30, Plastic at x=0.0, Glass at x=+0.30, all at y=-0.40.\n\n4) Item layout: 6 items spaced 0.28m on belt: 2x metal (grey), 2x plastic (yellow), 2x glass (cyan). Belt velocity 0.12 m/s \u2192 ~2.3s gap at pick zone. Items approach NIR sensor first (~0.4m before pick trigger), sensor fires before pick trigger.\n\n5) Physics: CPU dynamics for determinism. Rubber material prevents slipping.\n\n6) Function-gate: Metal items should reach Metal bin. simulate_args: cube_path=/World/Item_1 (metal), target_path=/World/BinMetal, duration_s=180.",
+  "code": "# \u2500\u2500 Lighting + ground \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics scene: CPU determinism \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Robot table + Franka \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Franka\", prim_type=\"Xform\", position=[0, 0, 0.75])\n\n# \u2500\u2500 Conveyor belt \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Belt top surface z = 0.78 + 0.025 = 0.805; item centre z = 0.855\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.45, 0.78],\n    size=[3.0, 0.35, 0.05],\n    surface_velocity=[0.12, 0, 0],\n)\n\n# \u2500\u2500 Materials: visual cue for 3 material classes \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_material(material_path=\"/World/Materials/MatMetal\",   shader_type=\"OmniPBR\",\n                diffuse_color=[0.65, 0.65, 0.70], metallic=0.8, roughness=0.2)\ncreate_material(material_path=\"/World/Materials/MatPlastic\", shader_type=\"OmniPBR\",\n                diffuse_color=[0.95, 0.90, 0.10], metallic=0.0, roughness=0.8)\ncreate_material(material_path=\"/World/Materials/MatGlass\",   shader_type=\"OmniPBR\",\n                diffuse_color=[0.55, 0.85, 0.95], metallic=0.0, roughness=0.1)\n\n# \u2500\u2500 6 items: 2x metal, 2x plastic, 2x glass \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Spaced 0.28m apart on belt. Item centre z = 0.855.\nitem_specs = [\n    (\"/World/Item_1\", -1.40, \"metal\",   \"/World/Materials/MatMetal\"),\n    (\"/World/Item_2\", -1.12, \"plastic\",  \"/World/Materials/MatPlastic\"),\n    (\"/World/Item_3\", -0.84, \"glass\",    \"/World/Materials/MatGlass\"),\n    (\"/World/Item_4\", -0.56, \"metal\",   \"/World/Materials/MatMetal\"),\n    (\"/World/Item_5\", -0.28, \"plastic\",  \"/World/Materials/MatPlastic\"),\n    (\"/World/Item_6\",  0.00, \"glass\",    \"/World/Materials/MatGlass\"),\n]\nitem_paths = [s[0] for s in item_specs]\n\nfor path, x, mat_type, mat_path in item_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\",\n                position=[x, 0.45, 0.855], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=mat_path)\n    # NIR sensor reads this attribute to determine routing\n    set_semantic_label(prim_path=path, class_name=mat_type, semantic_type=\"class\")\n    set_attribute(prim_path=path, attr_name=\"physics:mass\", value=0.4)\n    set_attribute(prim_path=path, attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# \u2500\u2500 Three divert bins \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Arranged at y=-0.40, spread in x within Franka reach (<=0.85m from base).\ncreate_bin(prim_path=\"/World/BinMetal\",   position=[-0.30, -0.40, 0.75], size=[0.22, 0.22, 0.14])\ncreate_bin(prim_path=\"/World/BinPlastic\", position=[ 0.00, -0.40, 0.75], size=[0.22, 0.22, 0.14])\ncreate_bin(prim_path=\"/World/BinGlass\",   position=[ 0.30, -0.40, 0.75], size=[0.22, 0.22, 0.14])\nassign_material(prim_path=\"/World/BinMetal\",   material_path=\"/World/Materials/MatMetal\")\nassign_material(prim_path=\"/World/BinPlastic\", material_path=\"/World/Materials/MatPlastic\")\nassign_material(prim_path=\"/World/BinGlass\",   material_path=\"/World/Materials/MatGlass\")\n\n# \u2500\u2500 NIR material sensor \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Mounted above belt: reads semantic_type='material' within scan_radius=0.12m.\n# Items pass under sensor ~0.40m before the pick trigger fires.\nnir_material_sensor(\n    sensor_path=\"/World/NirScanner\",\n    position=[0.0, 0.45, 0.94],\n    scan_radius=0.12,\n)\n\n# \u2500\u2500 Pick-zone proximity sensor \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.40, 0.45, 0.855],\n    size=[0.07, 0.07, 0.07],\n)\n\n# \u2500\u2500 Franka pick-place controller with NIR-driven routing \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# color_routing keys match semantic_type='material' values.\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=item_paths,\n    destination_path=\"/World/BinPlastic\",\n    color_routing={\n        \"metal\":   \"/World/BinMetal\",\n        \"glass\":   \"/World/BinGlass\",\n    },\n    drop_target=[0.0, -0.40, 0.92],\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\",\n                        \"/World/BinMetal\", \"/World/BinPlastic\", \"/World/BinGlass\"],\n)",
+  "code_template": "# \u2500\u2500 Lighting + ground \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"{{primary_robot.path}}\", prim_type=\"Xform\", position={{primary_robot.position}})\n\ncreate_conveyor(\n    prim_path=\"{{input_conveyor.path}}\",\n    position={{input_conveyor.position}},\n    size={{input_conveyor.size}},\n    surface_velocity={{input_conveyor.surface_velocity}},\n)\n\ncreate_material(material_path=\"/World/Materials/MatMetal\",   shader_type=\"OmniPBR\", diffuse_color=[0.65, 0.65, 0.70], metallic=0.8, roughness=0.2)\ncreate_material(material_path=\"/World/Materials/MatPlastic\", shader_type=\"OmniPBR\", diffuse_color=[0.95, 0.90, 0.10], metallic=0.0, roughness=0.8)\ncreate_material(material_path=\"/World/Materials/MatGlass\",   shader_type=\"OmniPBR\", diffuse_color=[0.55, 0.85, 0.95], metallic=0.0, roughness=0.1)\n\nfor item in {{workpieces}}:\n    create_prim(prim_path=item['path'], prim_type=\"Cube\", position=item['position'], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n        apply_api_schema(prim_path=item['path'], schema_name=api)\n    assign_material(prim_path=item['path'], material_path=f\"/World/Materials/Mat{item['material'].capitalize()}\")\n    set_semantic_label(prim_path=item['path'], class_name=item['material'], semantic_type=\"class\")\n    set_attribute(prim_path=item['path'], attr_name=\"physics:mass\", value=0.4)\n    set_attribute(prim_path=item['path'], attr_name=\"physxRigidBody:sleepThreshold\", value=0.0)\n    apply_physics_material(prim_path=item['path'], material_name=\"rubber\")\n\ncreate_bin(prim_path={{metal_bin.path}}, position={{metal_bin.position}}, size=[0.22, 0.22, 0.14])\ncreate_bin(prim_path={{plastic_bin.path}}, position={{plastic_bin.position}}, size=[0.22, 0.22, 0.14])\ncreate_bin(prim_path={{glass_bin.path}}, position={{glass_bin.position}}, size=[0.22, 0.22, 0.14])\n\nnir_material_sensor(\n    sensor_path={{nir_sensor.path}},\n    position={{nir_sensor.position}},\n    scan_radius={{nir_sensor.scan_radius}},\n)\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.40, 0.45, 0.855], size=[0.07, 0.07, 0.07])\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path={{input_conveyor.path}},\n    source_paths=[i['path'] for i in {{workpieces}}],\n    destination_path={{plastic_bin.path}},\n    color_routing={\n        {{metal_bin.routing_key}}: {{metal_bin.path}},\n        {{glass_bin.routing_key}}: {{glass_bin.path}},\n    },\n    planning_obstacles=[\"/World/Table\", {{input_conveyor.path}},\n                        {{metal_bin.path}}, {{plastic_bin.path}}, {{glass_bin.path}}],\n)",
   "failure_modes": [
-    "nir_material_sensor scan_radius too small — items at belt edge may miss the scan volume. Use scan_radius >= half the belt width (0.175m for a 0.35m belt). The 0.12m radius used here covers the belt centre; set_semantic_label ensures sensor can read by attr even at centre-path.",
-    "semantic_type mismatch — nir_material_sensor reads 'material' type; set_semantic_label must be called with semantic_type='material' (not the default 'class'). Verify both calls use the same type token.",
-    "NIR scan fires AFTER pick trigger if belt is too fast — at 0.12 m/s the sensor at x=0.0 fires ~3.3s before pick trigger at x=0.40. Keep belt at <=0.20 m/s to maintain scan-before-pick ordering.",
-    "Franka reach to BinMetal at x=-0.30 — distance from base sqrt(0.30^2+0.40^2)=0.50m, well within 0.85m reach. Planning obstacle list must include Table and ConveyorBelt to prevent wrist collision.",
-    "color_routing key 'plastic' omitted intentionally — plastic is the fallthrough (destination_path). If all three materials are listed in color_routing the fall-through bin goes unused; always leave one class as the default destination."
+    "nir_material_sensor scan_radius too small \u2014 items at belt edge may miss the scan volume. Use scan_radius >= half the belt width (0.175m for a 0.35m belt). The 0.12m radius used here covers the belt centre; set_semantic_label ensures sensor can read by attr even at centre-path.",
+    "semantic_type mismatch \u2014 set_semantic_label MUST use semantic_type='class' (not 'material'). The pick-place controller's color_routing lookup (_cube_semantic_class) only reads USD instances named 'Semantics_class', 'Semantics_color', or 'Semantics_colour'. A 'Semantics_material' instance is silently ignored and every item falls through to the default destination_path (BinPlastic). nir_material_sensor may internally read the 'material:type' attribute, but the sort routing is driven by the 'class' semantic label.",
+    "NIR scan fires AFTER pick trigger if belt is too fast \u2014 at 0.12 m/s the sensor at x=0.0 fires ~3.3s before pick trigger at x=0.40. Keep belt at <=0.20 m/s to maintain scan-before-pick ordering.",
+    "Franka reach to BinMetal at x=-0.30 \u2014 distance from base sqrt(0.30^2+0.40^2)=0.50m, well within 0.85m reach. Planning obstacle list must include Table and ConveyorBelt to prevent wrist collision.",
+    "color_routing key 'plastic' omitted intentionally \u2014 plastic is the fallthrough (destination_path). If all three materials are listed in color_routing the fall-through bin goes unused; always leave one class as the default destination."
   ],
   "intent": {
     "pattern_hint": "sort",
@@ -49,37 +49,53 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["franka_panda", "ur5e", "kinova_gen3"],
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
       "expected_count": 1,
       "required": true
     },
     "input_conveyor": {
-      "constraints": ["conveyor"],
+      "constraints": [
+        "conveyor"
+      ],
       "expected_count": 1,
       "required": true
     },
     "nir_sensor": {
-      "constraints": ["nir_material_sensor"],
+      "constraints": [
+        "nir_material_sensor"
+      ],
       "expected_count": 1,
       "required": true
     },
     "metal_bin": {
-      "constraints": ["bin"],
+      "constraints": [
+        "bin"
+      ],
       "expected_count": 1,
       "required": true
     },
     "plastic_bin": {
-      "constraints": ["bin"],
+      "constraints": [
+        "bin"
+      ],
       "expected_count": 1,
       "required": true
     },
     "glass_bin": {
-      "constraints": ["bin"],
+      "constraints": [
+        "bin"
+      ],
       "expected_count": 1,
       "required": true
     },
     "workpieces": {
-      "constraints": ["cube"],
+      "constraints": [
+        "cube"
+      ],
       "min": 3,
       "max": 12,
       "unordered": true
@@ -89,42 +105,162 @@
     "primary_robot": {
       "path": "/World/Franka",
       "class": "franka_panda",
-      "position": [0, 0, 0.75]
+      "position": [
+        0,
+        0,
+        0.75
+      ]
     },
     "input_conveyor": {
       "path": "/World/ConveyorBelt",
-      "position": [0.0, 0.45, 0.78],
-      "size": [3.0, 0.35, 0.05],
-      "surface_velocity": [0.12, 0, 0]
+      "position": [
+        0.0,
+        0.45,
+        0.78
+      ],
+      "size": [
+        3.0,
+        0.35,
+        0.05
+      ],
+      "surface_velocity": [
+        0.12,
+        0,
+        0
+      ]
     },
     "nir_sensor": {
       "path": "/World/NirScanner",
-      "position": [0.0, 0.45, 0.94],
+      "position": [
+        0.0,
+        0.45,
+        0.94
+      ],
       "scan_radius": 0.12
     },
-    "metal_bin":   {"path": "/World/BinMetal",   "position": [-0.30, -0.40, 0.75], "routing_key": "metal"},
-    "plastic_bin": {"path": "/World/BinPlastic", "position": [ 0.00, -0.40, 0.75], "routing_key": null},
-    "glass_bin":   {"path": "/World/BinGlass",   "position": [ 0.30, -0.40, 0.75], "routing_key": "glass"},
+    "metal_bin": {
+      "path": "/World/BinMetal",
+      "position": [
+        -0.3,
+        -0.4,
+        0.75
+      ],
+      "routing_key": "metal"
+    },
+    "plastic_bin": {
+      "path": "/World/BinPlastic",
+      "position": [
+        0.0,
+        -0.4,
+        0.75
+      ],
+      "routing_key": null
+    },
+    "glass_bin": {
+      "path": "/World/BinGlass",
+      "position": [
+        0.3,
+        -0.4,
+        0.75
+      ],
+      "routing_key": "glass"
+    },
     "workpieces": [
-      {"path": "/World/Item_1", "position": [-1.40, 0.45, 0.855], "material": "metal"},
-      {"path": "/World/Item_2", "position": [-1.12, 0.45, 0.855], "material": "plastic"},
-      {"path": "/World/Item_3", "position": [-0.84, 0.45, 0.855], "material": "glass"},
-      {"path": "/World/Item_4", "position": [-0.56, 0.45, 0.855], "material": "metal"},
-      {"path": "/World/Item_5", "position": [-0.28, 0.45, 0.855], "material": "plastic"},
-      {"path": "/World/Item_6", "position": [ 0.00, 0.45, 0.855], "material": "glass"}
+      {
+        "path": "/World/Item_1",
+        "position": [
+          -1.4,
+          0.45,
+          0.855
+        ],
+        "material": "metal"
+      },
+      {
+        "path": "/World/Item_2",
+        "position": [
+          -1.12,
+          0.45,
+          0.855
+        ],
+        "material": "plastic"
+      },
+      {
+        "path": "/World/Item_3",
+        "position": [
+          -0.84,
+          0.45,
+          0.855
+        ],
+        "material": "glass"
+      },
+      {
+        "path": "/World/Item_4",
+        "position": [
+          -0.56,
+          0.45,
+          0.855
+        ],
+        "material": "metal"
+      },
+      {
+        "path": "/World/Item_5",
+        "position": [
+          -0.28,
+          0.45,
+          0.855
+        ],
+        "material": "plastic"
+      },
+      {
+        "path": "/World/Item_6",
+        "position": [
+          0.0,
+          0.45,
+          0.855
+        ],
+        "material": "glass"
+      }
     ]
   },
   "settle_state": {
     "items": {
-      "/World/Item_1": [-1.40, 0.45, 0.855],
-      "/World/Item_2": [-1.12, 0.45, 0.855],
-      "/World/Item_3": [-0.84, 0.45, 0.855],
-      "/World/Item_4": [-0.56, 0.45, 0.855],
-      "/World/Item_5": [-0.28, 0.45, 0.855],
-      "/World/Item_6": [ 0.00, 0.45, 0.855]
+      "/World/Item_1": [
+        -1.4,
+        0.45,
+        0.855
+      ],
+      "/World/Item_2": [
+        -1.12,
+        0.45,
+        0.855
+      ],
+      "/World/Item_3": [
+        -0.84,
+        0.45,
+        0.855
+      ],
+      "/World/Item_4": [
+        -0.56,
+        0.45,
+        0.855
+      ],
+      "/World/Item_5": [
+        -0.28,
+        0.45,
+        0.855
+      ],
+      "/World/Item_6": [
+        0.0,
+        0.45,
+        0.855
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.12, 0, 0]
+      "/World/ConveyorBelt": [
+        0.12,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
@@ -146,13 +282,24 @@
   "diagnose_args": {
     "robot_path": "/World/Franka",
     "sensor_path": "/World/PickSensor",
-    "robot_base": [0.0, 0.0, 0.75],
-    "drop_pose": [-0.30, -0.40, 0.75]
+    "robot_base": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "drop_pose": [
+      -0.3,
+      -0.4,
+      0.75
+    ]
   },
   "motion_controllers": {
     "verified": [],
-    "untested": ["curobo", "rmpflow"],
+    "untested": [
+      "curobo",
+      "rmpflow"
+    ],
     "failed": {}
   },
-  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending (requires Franka USD + cuRobo live Kit)"
+  "verified_status": "patched-r-a40-fix; semantic_type-material-to-class fixed; form-gate pending"
 }

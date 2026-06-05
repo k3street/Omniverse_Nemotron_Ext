@@ -1,0 +1,166 @@
+{
+  "task_id": "CP-NEW-vision-depalletize",
+  "goal": "Vision-guided depalletization: a Franka arm depallettizes a 2x3 grid of 0.10m boxes from a pallet, layer by layer. An overhead camera is positioned above the pallet; vision_detect_objects scans the top-layer boxes each cycle and returns their normalized viewport positions. compute_stack_placement pre-computes the 6 grid pick positions (grid_2x3, anchor='top') as world coords. These are passed as source_paths + drop_targets to setup_pick_place_controller. After each box is cleared, a new vision_detect_objects call verifies the slot is vacated before the next pick. Exercises vision_detect_objects for runtime pallet-state polling, compute_stack_placement for grid geometry, and set_camera_look_at for nadir overhead camera alignment.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "set_semantic_label",
+    "set_camera_params",
+    "set_camera_look_at",
+    "compute_stack_placement",
+    "vision_detect_objects",
+    "add_proximity_sensor",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "Design rationale for CP-NEW-vision-depalletize:\n\n1) Distinctiveness: Depalletization is the INVERSE of palletizing. The key novelty is vision_detect_objects polling the pallet top-surface each cycle to locate the topmost visible boxes, combined with compute_stack_placement to pre-compute expected pick positions. No existing canonical combines vision polling with compute_stack_placement as the geometric oracle. CP-43 (palletizer-layer-stack) builds up; this breaks down. Overlap with CP-43 is minimal: different tool chain, different pattern direction.\n\n2) Robot and reach: Franka (reach 0.85m) on a 0.75m table. Pallet at [0, 0.50, 0.775] (in front of robot). 6 boxes (0.10m each) in grid_2x3. Grid centre at pallet centre. Max horizontal reach to far pallet corner: sqrt(0.15^2 + (0.50+0.10)^2) = 0.618m — inside 0.85m. outfeed_bin at [0, -0.45, 0.80] (behind robot), reach sqrt(0^2+0.45^2)=0.45m — fine.\n\n3) compute_stack_placement call: target='/World/Pallet', pattern='grid_2x3', n_items=6, cube_size=0.10, spacing=0.12, anchor='top'. Pallet top_z = 0.775+0.025=0.800. Drop_z (box centre on pallet) = 0.800+0.05=0.850. Grid: col offsets x=[-0.12,+0.12], row offsets y=[0.42, 0.50, 0.58] (pallet_y=0.50, rows at -0.08,0,+0.08). Source pick-z = same 0.850 (single-layer canonical).\n\n4) Overhead camera: placed at [0, 0.50, 1.80] (2m above pallet surface). set_camera_look_at(eye=[0,0.50,1.80], target=[0,0.50,0.850]). set_camera_params(focal_length=18.0, horizontal_aperture=20.955) gives ~60deg HFOV at 1.80m height, covering the full 0.35m-wide pallet. semantic labels on boxes ('box_1'..'box_6') — vision_detect_objects(labels=['box']) returns all visible box positions.\n\n5) source_paths ordering: compute_stack_placement returns positions in row-major order (row0 first = farthest from robot at y=0.58 in this layout). Use that order as source_paths so the robot picks row-far first (avoids arm-over-box collision for near rows).\n\n6) Vision poll pattern: vision_detect_objects(labels=['box'], max_objects=6) is called once before setup_pick_place_controller as a pre-check. The real runtime iteration logic lives inside the pick-place controller; the canonical shows the single-call pattern that an agent would use for state-check between cycles.\n\n7) drop_targets: all 6 boxes map to outfeed_bin interior at [0, -0.45, 0.85] (single drop zone — depalletizer unloads to one zone).\n\n8) Physics: CPU dynamics (MBP), rubber material, sleepThreshold=0.0. Boxes settled before first pick.\n\n9) Proximity sensor at outfeed_bin confirms box arrival.",
+  "code": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Robot table\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for determinism ─────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Franka arm (reach 0.85m) ──────────────────────────────────────────────────\n# Pallet at y=0.50 (in front). Max grid corner reach ~0.62m — inside 0.85m.\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Pallet (0.70x0.50x0.05m platform) ────────────────────────────────────────\n# scale=[0.35, 0.25, 0.025]: USD Cube 2m unit -> half-extents.\n# Pallet top z = 0.775 + 0.025 = 0.800.\ncreate_prim(\n    prim_path=\"/World/Pallet\",\n    prim_type=\"Cube\",\n    position=[0, 0.50, 0.775],\n    scale=[0.35, 0.25, 0.025],\n)\napply_api_schema(prim_path=\"/World/Pallet\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── 6 boxes (0.10m) in 2x3 grid on pallet ────────────────────────────────────\n# compute_stack_placement: grid_2x3, cube_size=0.10, spacing=0.12, anchor='top'\n# pallet_top_z=0.800; box_centre_z=0.800+0.05=0.850.\n# col_x: [-0.12, +0.12]; row_y: [0.42, 0.50, 0.58] (pallet_cy=0.50, offsets -0.08,0,+0.08)\n_stack = compute_stack_placement(\n    target_path=\"/World/Pallet\",\n    n_items=6,\n    pattern=\"grid_2x3\",\n    cube_size=0.10,\n    spacing=0.12,\n    anchor=\"top\",\n)\n\n# Fallback grid if compute returns no data at build time\n_grid_positions = [\n    [-0.12, 0.42, 0.850], [ 0.12, 0.42, 0.850],\n    [-0.12, 0.50, 0.850], [ 0.12, 0.50, 0.850],\n    [-0.12, 0.58, 0.850], [ 0.12, 0.58, 0.850],\n]\nif isinstance(_stack, dict) and _stack.get(\"positions\"):\n    _grid_positions = [p[\"position\"] for p in _stack[\"positions\"]]\n\nbox_paths = [f\"/World/Box_{i+1}\" for i in range(6)]\n\nfor i, (path, pos) in enumerate(zip(box_paths, _grid_positions)):\n    create_prim(prim_path=path, prim_type=\"Cube\", position=pos, size=0.10)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_semantic_label(prim_path=path, class_name=\"box\")\n\nbulk_set_attribute(\n    prim_paths=box_paths,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in box_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# ── Outfeed bin (behind robot) ────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"/World/OutfeedBin\",\n    prim_type=\"Cube\",\n    position=[0, -0.45, 0.775],\n    scale=[0.30, 0.20, 0.025],\n)\napply_api_schema(prim_path=\"/World/OutfeedBin\", schema_name=\"PhysicsCollisionAPI\")\n\n# Outfeed arrival sensor\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.870],\n    size=[0.25, 0.25, 0.08],\n)\n\n# ── Overhead inspection camera ────────────────────────────────────────────────\n# Nadir view from 1.80m above pallet. ~60deg HFOV covers full 0.70m pallet width.\ncreate_prim(prim_path=\"/World/PalletCam\", prim_type=\"Camera\")\nset_camera_params(\n    camera_path=\"/World/PalletCam\",\n    params={\"focal_length\": 18.0, \"horizontal_aperture\": 20.955},\n)\nset_camera_look_at(\n    camera_path=\"/World/PalletCam\",\n    target=[0.0, 0.50, 0.850],\n    eye=[0.0, 0.50, 1.80],\n)\n\n# ── Vision poll: verify boxes are visible before pick sequence ────────────────\n# Returns normalized 2D points and labels for up to 6 boxes.\n# In live use: agent calls this between pick cycles to track remaining boxes.\n_vision_result = vision_detect_objects(\n    labels=[\"box\"],\n    max_objects=6,\n)\n\n# ── cuRobo pick-place — row-far first (y=0.58 row), row-near last ─────────────\n# source_paths in row-major far-to-near order avoids arm-over-box collision.\nsource_order = [\n    \"/World/Box_5\", \"/World/Box_6\",\n    \"/World/Box_3\", \"/World/Box_4\",\n    \"/World/Box_1\", \"/World/Box_2\",\n]\ndrop_targets = {p: [0, -0.45, 0.850] for p in source_order}\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    source_paths=source_order,\n    destination_path=\"/World/OutfeedBin\",\n    drop_targets=drop_targets,\n    planning_obstacles=[\n        \"/World/Table\",\n        \"/World/Pallet\",\n        \"/World/OutfeedBin\",\n    ],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
+  "settle_state": {
+    "pallet": {
+      "/World/Pallet": {
+        "position": [0, 0.50, 0.775],
+        "scale": [0.35, 0.25, 0.025]
+      }
+    },
+    "boxes": {
+      "/World/Box_1": [-0.12, 0.42, 0.850],
+      "/World/Box_2": [ 0.12, 0.42, 0.850],
+      "/World/Box_3": [-0.12, 0.50, 0.850],
+      "/World/Box_4": [ 0.12, 0.50, 0.850],
+      "/World/Box_5": [-0.12, 0.58, 0.850],
+      "/World/Box_6": [ 0.12, 0.58, 0.850]
+    },
+    "robot": {"/World/Franka": "home_pose"}
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Pallet",
+        "place_path": "/World/OutfeedBin",
+        "robot_kind": "franka"
+      }
+    ],
+    "cube_paths": [
+      "/World/Box_1", "/World/Box_2", "/World/Box_3",
+      "/World/Box_4", "/World/Box_5", "/World/Box_6"
+    ]
+  },
+  "simulate_args": {
+    "target_path": "/World/OutfeedBin",
+    "cube_paths": [
+      "/World/Box_1", "/World/Box_2", "/World/Box_3",
+      "/World/Box_4", "/World/Box_5", "/World/Box_6"
+    ],
+    "duration_s": 240,
+    "xy_tolerance": 0.14
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/Pallet", "/World/OutfeedBin"],
+    "sensor_path": "/World/ArrivalSensor",
+    "robot_base": [0.0, 0.0, 0.75]
+  },
+  "failure_modes": [
+    "compute_stack_placement returns empty at build time — positions fallback to baked _grid_positions list. Ensure pallet has authored bbox (PhysicsCollisionAPI applied) before calling compute_stack_placement.",
+    "vision_detect_objects called before overhead camera is active — the PalletCam is created at build time but may not be the active render product. set_viewport_camera('/World/PalletCam') before calling vision_detect_objects ensures the correct view. In CI harness, set viewport camera first.",
+    "Far-row boxes (y=0.58) unreachable at table height — Franka EE reaches y=0.58+0.12 pallet_half = 0.70m from robot base. At table z=0.75, full reach envelope is 0.85m. Adding table height to max_h gives 0.85m — still feasible. If cuRobo rejects, raise table 0.05m to z=0.80 and adjust pallet z accordingly.",
+    "Box slides off pallet before pick — low rubber friction at edges. Apply rubber physics_material on Pallet too; boxes land with sufficient friction. Alternatively increase pallet scale y from 0.25 to 0.30 to widen landing area.",
+    "source_order out of sync with _grid_positions — if compute_stack_placement reorders positions (e.g. row-near first), source_order hardcoded as far-to-near may mismatch. In production use, sort returned positions by descending y then x to guarantee consistent order."
+  ],
+  "intent": {
+    "pattern_hint": "pick_place",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "single_bin",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_vision_poll": true,
+      "has_grid_placement": true,
+      "has_overhead_camera": true
+    },
+    "structural_tags": [
+      "isaac:transport.pallet_to_bin",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:sensing.vision_detect_objects",
+      "isaac:placement.grid_2x3",
+      "isaac:sensing.overhead_camera",
+      "isaac:robot.franka",
+      "isaac:industry.depalletizing"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "franka", "ur10"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "medium_payload_preferred"
+    },
+    "source_pallet": {
+      "constraints": ["pallet", "platform"],
+      "expected_count": 1,
+      "required": true
+    },
+    "destination_bin": {
+      "constraints": ["bin", "platform", "container"],
+      "expected_count": 1,
+      "required": true
+    },
+    "overhead_camera": {
+      "constraints": ["camera"],
+      "expected_count": 1,
+      "required": false
+    },
+    "workpieces": {
+      "constraints": ["cube", "box"],
+      "min": 1,
+      "max": 6,
+      "param_name": "n_boxes",
+      "unordered": false
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "position": [0, 0, 0.75],
+      "orientation": [1, 0, 0, 0]
+    },
+    "source_pallet": {
+      "path": "/World/Pallet",
+      "position": [0, 0.50, 0.775],
+      "scale": [0.35, 0.25, 0.025]
+    },
+    "destination_bin": {
+      "path": "/World/OutfeedBin",
+      "position": [0, -0.45, 0.775],
+      "scale": [0.30, 0.20, 0.025]
+    },
+    "overhead_camera": {
+      "path": "/World/PalletCam",
+      "eye": [0.0, 0.50, 1.80],
+      "target": [0.0, 0.50, 0.850]
+    },
+    "workpieces": [
+      {"path": "/World/Box_1", "position": [-0.12, 0.42, 0.850]},
+      {"path": "/World/Box_2", "position": [ 0.12, 0.42, 0.850]},
+      {"path": "/World/Box_3", "position": [-0.12, 0.50, 0.850]},
+      {"path": "/World/Box_4", "position": [ 0.12, 0.50, 0.850]},
+      {"path": "/World/Box_5", "position": [-0.12, 0.58, 0.850]},
+      {"path": "/World/Box_6", "position": [ 0.12, 0.58, 0.850]}
+    ]
+  },
+  "code_template": "# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[0.6, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\ncreate_prim(\n    prim_path={{source_pallet.path}},\n    prim_type=\"Cube\",\n    position={{source_pallet.position}},\n    scale={{source_pallet.scale}},\n)\napply_api_schema(prim_path={{source_pallet.path}}, schema_name=\"PhysicsCollisionAPI\")\n\n_stack = compute_stack_placement(\n    target_path={{source_pallet.path}},\n    n_items=6,\n    pattern=\"grid_2x3\",\n    cube_size=0.10,\n    spacing=0.12,\n    anchor=\"top\",\n)\n\nbox_paths = [{{workpieces[0].path}}, {{workpieces[1].path}}, {{workpieces[2].path}}, {{workpieces[3].path}}, {{workpieces[4].path}}, {{workpieces[5].path}}]\n\nfor i, (path, pos) in enumerate(zip(box_paths, [{{workpieces[0].position}}, {{workpieces[1].position}}, {{workpieces[2].position}}, {{workpieces[3].position}}, {{workpieces[4].position}}, {{workpieces[5].position}}])):\n    create_prim(prim_path=path, prim_type=\"Cube\", position=pos, size=0.10)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    set_semantic_label(prim_path=path, class_name=\"box\")\n\nbulk_set_attribute(prim_paths=box_paths, attr=\"physxRigidBody:sleepThreshold\", value=0.0)\nfor path in box_paths:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_prim(\n    prim_path={{destination_bin.path}},\n    prim_type=\"Cube\",\n    position={{destination_bin.position}},\n    scale={{destination_bin.scale}},\n)\napply_api_schema(prim_path={{destination_bin.path}}, schema_name=\"PhysicsCollisionAPI\")\n\nadd_proximity_sensor(\n    sensor_path=\"/World/ArrivalSensor\",\n    position=[0, -0.45, 0.870],\n    size=[0.25, 0.25, 0.08],\n)\n\ncreate_prim(prim_path={{overhead_camera.path}}, prim_type=\"Camera\")\nset_camera_params(\n    camera_path={{overhead_camera.path}},\n    params={\"focal_length\": 18.0, \"horizontal_aperture\": 20.955},\n)\nset_camera_look_at(\n    camera_path={{overhead_camera.path}},\n    target={{overhead_camera.target}},\n    eye={{overhead_camera.eye}},\n)\n\n_vision_result = vision_detect_objects(\n    labels=[\"box\"],\n    max_objects=6,\n)\n\ndrop_targets = {p: [0, -0.45, 0.850] for p in box_paths}\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    source_paths=box_paths,\n    destination_path={{destination_bin.path}},\n    drop_targets=drop_targets,\n    planning_obstacles=[\"/World/Table\", {{source_pallet.path}}, {{destination_bin.path}}],\n    sensor_path=\"/World/ArrivalSensor\",\n)",
+  "motion_controllers": {
+    "verified": [],
+    "untested": ["curobo"],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳"
+}

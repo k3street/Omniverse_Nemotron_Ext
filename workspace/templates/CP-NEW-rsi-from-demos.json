@@ -1,0 +1,105 @@
+{
+  "task_id": "CP-NEW-rsi-from-demos",
+  "goal": "Configure Reference State Initialization (RSI) for a Franka pick-place RL environment using recorded demonstration trajectories. suggest_finetune_config advises on a compatible finetune strategy given the demo corpus size. setup_rsi_from_demos attaches an InitialStateCfg that samples episode start states from the demo file with small Gaussian noise. finetune_stats verifies the recorded demo count meets a minimum threshold before training. export_finetune_data packages the filtered demos as an OpenAI-compatible JSONL. SUCCESS: setup_rsi_from_demos returns a non-null InitialStateCfg dict and finetune_stats reports >= 5 approved demos. Exercises the GR00T / Isaac Lab RSI pipeline (suggest_finetune_config, setup_rsi_from_demos, finetune_stats, export_finetune_data). Realizes GR00T / RL engineer persona.",
+  "tools_used": [
+    "suggest_finetune_config",
+    "setup_rsi_from_demos",
+    "finetune_stats",
+    "export_finetune_data"
+  ],
+  "thoughts": [
+    "Pattern is gr00t-finetune / RSI. No cube delivery criterion — success is a config object returned by setup_rsi_from_demos plus a minimum demo count from finetune_stats. verify_args and simulate_args are null.",
+    "RSI (Reference State Initialization) is the highest-impact technique for locomotion and loco-manipulation convergence. It replaces the default fixed-pose reset with a uniformly-sampled demo state + small noise, collapsing the exploration horizon from O(T) to O(1).",
+    "suggest_finetune_config is called first to determine whether the 10-demo corpus warrants full fine-tuning or adapter-only. task_type='similar_to_pretrain' (pick-place is within GR00T pretraining distribution), hardware='RTX 4090', data_size=10.",
+    "setup_rsi_from_demos requires demo_path and env_cfg. env_cfg is the Python class path 'FrankaPickPlaceEnvCfg'. noise_std=0.03 (tight noise preserves start-state diversity without blowing up joint limits).",
+    "finetune_stats is called after RSI setup to confirm the demo corpus has sufficient approved turns. The RSI pipeline is only worth running if demos are high-quality; fewer than 5 approved demos is a red-flag.",
+    "export_finetune_data packages the approved demos as 'openai' JSONL with min_quality='approved_successful'. This output can feed directly into a GR00T finetuning job or be stored for offline analysis.",
+    "No robot arm is spawned and no USD stage is loaded — this is an offline data-pipeline canonical. motion_controllers left empty.",
+    "Distinct from CP-NEW-physics-calibrate-actuator (sensor-loop calibration), CP-NEW-groot-finetune-n10-demos (online finetuning with weights), and CP-NEW-curriculum-object-complexity (multi-stage DR). This is the ONLY canonical that exercises setup_rsi_from_demos."
+  ],
+  "code": "# ── Step 1: Advise on finetune strategy given corpus size ─────────────────────\n_config_advice = suggest_finetune_config(\n    task_type=\"similar_to_pretrain\",\n    hardware=\"RTX 4090\",\n    data_size=10,\n)\n# Returns: {strategy: str, freeze_layers: [...], learning_rate: float, epochs: int, notes: str}\n# strategy is typically 'adapter_only' for <= 15 demos, 'full_finetune' for > 50\n# task_type='similar_to_pretrain' — pick-place is within GR00T pretraining distribution\n\n# ── Step 2: Configure RSI — attach InitialStateCfg from demo file ─────────────\n_rsi_cfg = setup_rsi_from_demos(\n    demo_path=\"workspace/demos/franka_pick_place_10demos.hdf5\",\n    env_cfg=\"FrankaPickPlaceEnvCfg\",\n    noise_std=0.03,\n)\n# Returns: {initial_state_cfg: {demo_path, env_cfg, noise_std, num_demo_states: int}, status: str}\n# SUCCESS criterion: initial_state_cfg is non-null dict\n\n# ── Step 3: Verify demo corpus quality ────────────────────────────────────────\n_stats = finetune_stats()\n# Returns: {total_turns: int, approved_turns: int, approval_rate: float,\n#           tool_distribution: {...}, error_rate: float, date_range: [str, str]}\n# GATE: approved_turns >= 5 (otherwise RSI will undersample and overfit to < 5 states)\n\n# ── Step 4: Export approved demos to JSONL for downstream use ─────────────────\n_export = export_finetune_data(\n    format=\"openai\",\n    min_quality=\"approved_successful\",\n    output_path=\"workspace/demos/franka_rsi_demos_openai.jsonl\",\n)\n# Returns: {exported_count: int, output_path: str, format: str}\n# exported_count should match _stats[\"approved_turns\"] modulo any format-filter drops",
+  "verify_args": null,
+  "simulate_args": null,
+  "settle_state": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "config_advice",
+      "rsi_cfg",
+      "stats",
+      "export_result"
+    ],
+    "success_criterion": "rsi_cfg.initial_state_cfg is not null AND stats.approved_turns >= 5",
+    "result_file": "/tmp/rsi_from_demos_result.json"
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate BLOCKED (requires demo HDF5 at workspace/demos/ + GR00T advisor extension + live MCP)",
+  "failure_modes": [
+    "setup_rsi_from_demos demo_path: file must exist and contain at least 1 recorded trajectory with keys joint_positions, joint_velocities (standard IsaacLab HDF5 schema); missing keys raise a schema validation error in the handler",
+    "setup_rsi_from_demos env_cfg mismatch: 'FrankaPickPlaceEnvCfg' must be importable in the IsaacLab environment; if the env is in a custom extension use the fully-qualified dotted path e.g. 'my_ext.envs.FrankaPickPlaceEnvCfg'",
+    "noise_std=0.03 may be too tight for demos with high joint-velocity diversity (fast motions); increase to 0.05-0.08 if training collapses to a single mode during early rollout",
+    "finetune_stats approved_turns < 5: record more teleop demos via record_teleop_demo + validate_teleop_demo before running RSI; fewer than 5 distinct states causes the RSI sampler to repeat states every episode",
+    "export_finetune_data format='openai': ensure the recorded turns include at least one assistant-tool-call pair per demo; sessions with only user messages produce empty JSONL output",
+    "suggest_finetune_config with data_size=10 will recommend adapter_only strategy; if caller wants full_finetune they must override by passing data_size=50 or adjusting the strategy field manually post-call"
+  ],
+  "extends": "gr00t-finetune-category / rsi-pipeline",
+  "extension_notes": "First canonical to exercise setup_rsi_from_demos. RSI is the highest-impact initialization technique for Isaac Lab RL — distinct from all existing pick-place and DR canonicals which use fixed-pose reset. Pairs naturally with CP-NEW-groot-finetune-n10-demos (upstream demo recording) and CP-NEW-curriculum-object-complexity (downstream training run).",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "uses_rsi_initialization": true,
+      "uses_demo_corpus": true
+    },
+    "structural_tags": [
+      "isaac:training.rsi_from_demos",
+      "isaac:training.suggest_finetune_config",
+      "isaac:training.demo_export",
+      "isaac:model.foundation",
+      "isaac:topology.offline_training",
+      "isaac:training.finetune_stats"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "demo_corpus": {
+      "constraints": [
+        "hdf5_demo_file"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "env_config": {
+      "constraints": [
+        "isaaclab_env_cfg_class"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "export_output": {
+      "constraints": [
+        "jsonl_openai"
+      ],
+      "expected_count": 1,
+      "required": false
+    }
+  },
+  "role_defaults": {
+    "demo_corpus": {
+      "path": "workspace/demos/franka_pick_place_10demos.hdf5",
+      "num_demos": 10
+    },
+    "env_config": {
+      "class_path": "FrankaPickPlaceEnvCfg"
+    },
+    "export_output": {
+      "output_path": "workspace/demos/franka_rsi_demos_openai.jsonl",
+      "format": "openai"
+    }
+  },
+  "code_template": "import json, os\nDEMO_PATH = {{demo_corpus.path}}\nENV_CFG = {{env_config.class_path}}\nOUTPUT_PATH = {{export_output.output_path}}\nRESULT_FILE = \"/tmp/rsi_from_demos_result.json\"\nconfig_advice = suggest_finetune_config(task_type=\"similar_to_pretrain\", hardware=\"RTX 4090\", data_size=10)\nrsi_cfg = setup_rsi_from_demos(demo_path=DEMO_PATH, env_cfg=ENV_CFG, noise_std=0.03)\nstats = finetune_stats()\nexport_result = export_finetune_data(format=\"openai\", min_quality=\"approved_successful\", output_path=OUTPUT_PATH)\npipeline_ok = isinstance(rsi_cfg, dict) and rsi_cfg.get(\"initial_state_cfg\") is not None\nwith open(RESULT_FILE, \"w\") as f:\n    json.dump({\"pipeline_ok\": pipeline_ok, \"approved_turns\": stats.get(\"approved_turns\", 0) if isinstance(stats, dict) else 0, \"rsi_cfg\": rsi_cfg}, f, indent=2)\nassert os.path.exists(RESULT_FILE)"
+}

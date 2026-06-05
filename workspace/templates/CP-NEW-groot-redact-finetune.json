@@ -1,0 +1,85 @@
+{
+  "task_id": "CP-NEW-groot-redact-finetune",
+  "goal": "Redact sensitive frames from a GR00T teleop demo dataset before export: (1) export_finetune_data writes the raw JSONL from recorded chat turns to /tmp/groot_raw_demos.jsonl; (2) redact_finetune_data strips API keys, external file paths, and user-identifiable information, writing the cleaned output to /tmp/groot_redacted_demos.jsonl; (3) finetune_stats reports aggregate corpus statistics after redaction. SUCCESS criterion: /tmp/groot_redacted_demos.jsonl exists and the redact result contains 'output_path' key pointing to it.",
+  "tools_used": [
+    "export_finetune_data",
+    "redact_finetune_data",
+    "finetune_stats"
+  ],
+  "thoughts": [
+    "Pure data-pipeline task — no robot, no physics. Privacy-filter pattern unique in the gr00t-finetune category.",
+    "export_finetune_data required args: format (str). output_path optional. format='openai' is safe default; handler always produces JSONL.",
+    "redact_finetune_data required args: input_path (str). output_path optional; defaults to <input>_redacted.jsonl, but we supply explicit path for deterministic assertion.",
+    "finetune_stats takes no args (FinetuneStatsArgs has pass body) — informational audit of remaining corpus after redaction.",
+    "SUCCESS gate is file-existence + dict-key check on redact result: 'output_path' must be present in returned dict.",
+    "Distinct from CP-NEW-groot-suggest-config (hyperparameter advisory), CP-NEW-groot-finetune-n10-demos (LoRA training), CP-NEW-groot-export-dataset-hdf5 (HDF5 pipeline), CP-NEW-groot-load-eval-live (evaluation).",
+    "Backlog source: groot-redact-finetune-data-001 (priority_tier=2, no blockers, simple complexity, category=gr00t-finetune)."
+  ],
+  "code": "import json\nimport os\n\n# ── Step 1: Export raw recorded turns to JSONL ─────────────────────────────\n# Required: format (str). Optional: min_quality (str), output_path (str).\nexport_result = export_finetune_data(\n    format=\"openai\",\n    output_path=\"/tmp/groot_raw_demos.jsonl\",\n)\n\n# ── Step 2: Redact sensitive content ──────────────────────────────────\n# Required: input_path (str). Optional: output_path (str).\nredact_result = redact_finetune_data(\n    input_path=\"/tmp/groot_raw_demos.jsonl\",\n    output_path=\"/tmp/groot_redacted_demos.jsonl\",\n)\n\n# ── Step 3: Audit corpus statistics after redaction (informational) ──────────\n# FinetuneStatsArgs requires no fields.\nstats_result = finetune_stats()\n\n# ── Persist summary ──────────────────────────────────────────────────────────\nos.makedirs(\"/tmp\", exist_ok=True)\nresult_payload = {\n    \"export_finetune_data\": export_result if isinstance(export_result, dict) else {},\n    \"redact_finetune_data\": redact_result if isinstance(redact_result, dict) else {},\n    \"finetune_stats\": stats_result if isinstance(stats_result, dict) else {},\n}\nwith open(\"/tmp/groot_redact_result.json\", \"w\") as f:\n    json.dump(result_payload, f, indent=2)\n\n# ── Success gate ──────────────────────────────────────────────────────────────\nredact_dict = result_payload[\"redact_finetune_data\"]\nif \"output_path\" not in redact_dict:\n    print(\n        f\"[WARN] redact_finetune_data result missing 'output_path' key. \"\n        f\"Got keys: {list(redact_dict.keys())}\"\n    )\nelse:\n    print(\n        f\"[OK] Redacted dataset written to: {redact_dict['output_path']}. \"\n        f\"Summary: /tmp/groot_redact_result.json\"\n    )\n\nassert os.path.exists(\"/tmp/groot_redact_result.json\"), \"Result summary file must exist\"",
+  "verify_args": null,
+  "simulate_args": null,
+  "settle_state": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "output_path"
+    ],
+    "success_condition": "redact_finetune_data returns dict with output_path key; /tmp/groot_redacted_demos.jsonl written",
+    "result_file": "/tmp/groot_redact_result.json"
+  },
+  "verified_status": "drafted-2026-05-16-A42; form-gate-schema pending",
+  "failure_modes": [
+    "export_finetune_data returns None: no recorded chat turns in session DB; treat as empty JSONL — handler should still write an empty file",
+    "redact_finetune_data raises FileNotFoundError on input_path: export step produced no file; guard by checking os.path.exists('/tmp/groot_raw_demos.jsonl') before redact call",
+    "redact_finetune_data returns dict without 'output_path': handler may use 'path' or 'file' key instead; add alias fallback in assertion",
+    "finetune_stats returns None: no corpus in session database — informational, not a hard failure",
+    "format='openai' not accepted: handler may require lowercase 'openai_chat' or 'openai_finetune'; try 'anthropic' or 'alpaca' as fallbacks"
+  ],
+  "extends": "gr00t-finetune-category",
+  "extension_notes": "Privacy-filter canonical: redact_finetune_data is the primary exercised tool. Distinct from all other gr00t-finetune canonicals: suggest-config (hyperparameter advisory), finetune-n10-demos (LoRA training), export-dataset-hdf5 (HDF5 pipeline), load-eval-live (policy eval). Backlog source: groot-redact-finetune-data-001 (priority_tier=2, no blockers, simple, gr00t-finetune).",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:training.groot_finetune",
+      "isaac:model.foundation_vla",
+      "isaac:topology.advisory_only",
+      "isaac:training.data_privacy_redaction"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "data_exporter": {
+      "constraints": [
+        "export_finetune_data"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "privacy_filter": {
+      "constraints": [
+        "redact_finetune_data"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "data_exporter": {
+      "format": "openai",
+      "output_path": "/tmp/groot_raw_demos.jsonl"
+    },
+    "privacy_filter": {
+      "input_path": "/tmp/groot_raw_demos.jsonl",
+      "output_path": "/tmp/groot_redacted_demos.jsonl"
+    }
+  },
+  "code_template": "import json, os\nexport_result = export_finetune_data(\n    format={{data_exporter.format}},\n    output_path={{data_exporter.output_path}},\n)\nredact_result = redact_finetune_data(\n    input_path={{privacy_filter.input_path}},\n    output_path={{privacy_filter.output_path}},\n)\nstats_result = finetune_stats()\nwith open(\"/tmp/groot_redact_result.json\", \"w\") as f:\n    json.dump({\"export\": export_result or {}, \"redact\": redact_result or {}, \"stats\": stats_result or {}}, f, indent=2)\nredact_dict = redact_result if isinstance(redact_result, dict) else {}\nassert \"output_path\" in redact_dict, f\"Missing output_path in redact result: {list(redact_dict.keys())}\""
+}

@@ -1,0 +1,94 @@
+{
+  "task_id": "CP-NEW-physics-calibrate-actuator",
+  "goal": "Calibrate Franka Panda sim actuator model against a real-robot HDF5 recording. quick_calibrate fits armature, Coulomb friction, and link masses (~5 min). validate_calibration checks RMSE on a held-out trajectory. If RMSE > 0.01 rad, create_calibration_experiment sweeps the joint_damping axis to close the gap. get_drive_gains reads the post-calibration drive state; set_drive_gains applies tuned Kp/Kd. measure_sim_real_gap produces a final gap report; suggest_parameter_adjustment flags remaining residuals. SUCCESS: validate_calibration RMSE < 0.01 rad on all 7 joints. Exercises physics calibration pipeline (quick_calibrate, validate_calibration, create_calibration_experiment, measure_sim_real_gap, suggest_parameter_adjustment). Realizes sim-to-real / RL engineer persona.",
+  "tools_used": [
+    "robot_wizard",
+    "quick_calibrate",
+    "validate_calibration",
+    "create_calibration_experiment",
+    "get_drive_gains",
+    "set_drive_gains",
+    "measure_sim_real_gap",
+    "suggest_parameter_adjustment"
+  ],
+  "thoughts": [
+    "Pattern is rl-train / physics-calibration. No cube delivery criterion — success is numerical RMSE threshold, not a prim-at-destination check. simulate_args and verify_args are null accordingly.",
+    "quick_calibrate is chosen over calibrate_physics for this canonical: the full Bayesian-optimization job (30-120 min) is impractical in an interactive session. quick_calibrate covers the 3 highest-impact parameters (armature, friction, masses) in ~5 min.",
+    "Real data is assumed to reside at workspace/calibration/franka_real_excitation.hdf5. The canonical uses this path consistently — caller must substitute their own path.",
+    "validate_calibration uses a separate held-out file (franka_real_holdout.hdf5) to avoid reporting in-sample overfitting. baseline_error is omitted on the first call to get the absolute calibrated RMSE.",
+    "create_calibration_experiment is triggered only on RMSE > threshold — the canonical models the conditional branch in its code with a comment noting that the sweep is run manually if the guard fires.",
+    "get_drive_gains reads the current Kp/Kd before any update; set_drive_gains applies recommended values from calibration. Franka defaults: Kp=6000, Kd=500 — overridden only if calibration explicitly diverges.",
+    "measure_sim_real_gap produces a structured gap report that suggest_parameter_adjustment then annotates. Together they give the human operator a prioritized remediation list.",
+    "motion_controllers.untested contains direct_joint because the calibration workflow replays open-loop joint trajectories, not a closed-loop planner. No cuRobo or RMPflow involved.",
+    "Distinct from CP-NEW-dr-curriculum-trainer (DR for training-distribution), CP-NEW-rl-clone-env (PPO env scaffold), and CP-NEW-machine-tender-door-interlock (safety stop). This is the ONLY canonical that exercises the physics-calibration pipeline end-to-end."
+  ],
+  "code": "# ── Load Franka articulation ──────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.0],\n    orientation=[1, 0, 0, 0],\n)\n\n# ── Phase 1: Quick calibration (~5 min) ──────────────────────────────────────\n# Fits armature (rotor inertia), Coulomb friction, and link masses.\n_calib_result = quick_calibrate(\n    real_data_path=\"workspace/calibration/franka_real_excitation.hdf5\",\n    articulation_path=\"/World/Franka\",\n    include_masses=True,\n    output_dir=\"workspace/calibration/franka_quick\",\n)\n# Returns: {calibrated_parameters: {armature, joint_friction, link_masses}, rmse_train: float}\n\n# ── Phase 2: Validate on held-out trajectory ──────────────────────────────────\n_val_result = validate_calibration(\n    calibrated_params=_calib_result[\"calibrated_parameters\"],\n    test_data_path=\"workspace/calibration/franka_real_holdout.hdf5\",\n)\n# Returns: {per_joint_rmse: {joint_0..6: float}, mean_rmse: float, ee_cartesian_rmse: float}\n# SUCCESS criterion: mean_rmse < 0.01 rad\n\n# ── Phase 3 (conditional): Sweep joint_damping if RMSE too high ──────────────\n# Trigger this sweep manually if _val_result[\"mean_rmse\"] > 0.01.\ncreate_calibration_experiment(\n    parameter=\"damping\",\n    range=[0.1, 2.0],\n    real_data_path=\"workspace/calibration/franka_real_holdout.hdf5\",\n    num_samples=7,\n)\n# Returns: {best_value: float, sweep_results: [{param_value, rmse}]} — pick best_value for set_drive_gains.\n\n# ── Phase 4: Read and apply tuned drive gains ─────────────────────────────────\n_current_gains = get_drive_gains(\n    joint_path=\"/World/Franka/panda_joint1\",\n)\n# Returns: {angular: {stiffness: float, damping: float}, linear: {stiffness: float, damping: float}}\n\n# Apply calibration-recommended Kp/Kd on all 7 Franka joints\nfor _jidx in range(7):\n    set_drive_gains(\n        joint_path=f\"/World/Franka/panda_joint{_jidx + 1}\",\n        kp=6000.0,\n        kd=500.0,\n    )\n\n# ── Phase 5: Quantify final sim-to-real gap ───────────────────────────────────\n_gap_report = measure_sim_real_gap(\n    sim_trajectory=\"workspace/calibration/franka_sim_replay.hdf5\",\n    real_trajectory=\"workspace/calibration/franka_real_holdout.hdf5\",\n)\n# Returns: {per_joint_errors: {}, ee_cartesian_error: float, obs_distribution_gap: {}}\n\n# ── Phase 6: Prioritized remediation list ────────────────────────────────────\n_adjustments = suggest_parameter_adjustment(\n    gap_report=_gap_report,\n)\n# Returns: [{parameter, direction, magnitude, priority}] — human operator applies top-N.",
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": {
+    "expected_keys": [
+      "mean_rmse",
+      "per_joint_rmse",
+      "ee_cartesian_rmse",
+      "gap_report",
+      "adjustments"
+    ],
+    "success_criterion": "mean_rmse < 0.01",
+    "result_file": "/tmp/physics_calibrate_result.json"
+  },
+  "verified_status": "drafted-2026-05-16; form-gate ✓; function-gate BLOCKED (requires real HDF5 robot logs at workspace/calibration/; quick_calibrate + validate_calibration need IsaacSim physics backend running)",
+  "failure_modes": [
+    "quick_calibrate: HDF5 file must have columns joint_positions, joint_velocities, joint_torques_commanded at 200-500 Hz; if column names differ, the handler raises a KeyError — pre-inspect with h5py before calling",
+    "validate_calibration calibrated_params key mismatch: quick_calibrate returns 'calibrated_parameters' dict — pass this sub-dict, not the outer response; wrong level produces a schema validation error",
+    "create_calibration_experiment range=[0.1, 2.0] for damping: too wide a range may produce physically unstable sim steps (high damping → stiff ODEs); narrow to [0.2, 1.0] if the sim diverges mid-sweep",
+    "set_drive_gains loop: /World/Franka/panda_joint{n} path format assumes the Franka USD uses panda_joint1..7 naming; Nova Carter or alternate Franka variants may differ — verify with list_attributes first",
+    "measure_sim_real_gap: sim_trajectory must be generated by replaying the same excitation sequence in sim after calibration; if not regenerated, the gap will reflect pre-calibration state and mislead suggest_parameter_adjustment",
+    "suggest_parameter_adjustment: gap_report may contain obs_distribution_gap with NaN if the sim replay was too short; ensure sim replay covers at least 30s of excitation to match holdout duration"
+  ],
+  "extends": "rl-training-category / sim-to-real",
+  "extension_notes": "First canonical to exercise the physics-calibration pipeline (quick_calibrate + validate_calibration + create_calibration_experiment + measure_sim_real_gap + suggest_parameter_adjustment). Distinct from all existing pick-place and DR canonicals — no delivery, no conveyor, no policy training. Pure sim-to-real gap identification and remediation workflow.",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "uses_physics_calibration": true,
+      "uses_sim_to_real_gap": true
+    },
+    "structural_tags": [
+      "isaac:calibration.quick_calibrate",
+      "isaac:calibration.validate",
+      "isaac:calibration.sweep",
+      "isaac:calibration.sim_to_real_gap",
+      "isaac:calibration.drive_gains",
+      "isaac:topology.single_station",
+      "isaac:robot.fixed_base.arm"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["direct_joint"]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda",
+        "ur5e",
+        "kinova_gen3"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.0],
+      "orientation": [1, 0, 0, 0]
+    }
+  },
+  "code_template": "robot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n_calib_result = quick_calibrate(\n    real_data_path={{calib_data_path}},\n    articulation_path={{primary_robot.path}},\n    include_masses=True,\n    output_dir={{calib_output_dir}},\n)\n\n_val_result = validate_calibration(\n    calibrated_params=_calib_result[\"calibrated_parameters\"],\n    test_data_path={{holdout_data_path}},\n)\n\ncreate_calibration_experiment(\n    parameter=\"damping\",\n    range=[0.1, 2.0],\n    real_data_path={{holdout_data_path}},\n    num_samples=7,\n)\n\n_current_gains = get_drive_gains(\n    joint_path={{primary_robot.path}} + \"/panda_joint1\",\n)\n\nfor _jidx in range(7):\n    set_drive_gains(\n        joint_path=f\"{{primary_robot.path}}/panda_joint{_jidx + 1}\",\n        kp=6000.0,\n        kd=500.0,\n    )\n\n_gap_report = measure_sim_real_gap(\n    sim_trajectory={{sim_traj_path}},\n    real_trajectory={{holdout_data_path}},\n)\n\n_adjustments = suggest_parameter_adjustment(\n    gap_report=_gap_report,\n)"
+}

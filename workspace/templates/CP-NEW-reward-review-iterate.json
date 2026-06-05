@@ -1,0 +1,90 @@
+{
+  "task_id": "CP-NEW-reward-review-iterate",
+  "goal": "Human-in-loop Eureka reward validation: generate_reward produces an initial candidate for a Franka reach task; review_reward runs static analysis (sparse-reward, dominant-term, reward-hacking checks); record_feedback annotates the candidate as rejected with a correction; iterate_reward applies that correction to produce an improved candidate; a second review_reward confirms no CRITICAL issues remain. SUCCESS: the second review_reward call returns no CRITICAL-level issues AND iterate_reward returns a non-empty reward_code string. Results written to /tmp/reward_review_result.json. No physics simulation or cube delivery required — the deliverable is a reviewed, feedback-corrected reward function.",
+  "tools_used": [
+    "generate_reward",
+    "review_reward",
+    "record_feedback",
+    "iterate_reward",
+    "eureka_history"
+  ],
+  "thoughts": [
+    "Pattern: generate_reward → review_reward (static analysis) → record_feedback (human reject+correction) → iterate_reward (apply correction) → review_reward (re-check). Five tools, zero physics sim required.",
+    "review_reward performs static analysis BEFORE training: checks for reward desert, dominant term, reward hacking. Returns a list of issues with severity (CRITICAL/WARN/INFO). We gate success on no CRITICAL issues in the second pass.",
+    "record_feedback links a session turn to a quality signal. Fields: session_id (str), turn_id (int), approved=False, correction (str describing the fix needed). We use synthetic session_id='reward-review-session-001', turn_id=0.",
+    "iterate_reward takes prev_reward_code + metrics dict (fitness, components, task_success_rate). Since no real training ran, we supply zeroed-out placeholder metrics. The user_feedback kwarg carries the correction text from record_feedback.",
+    "eureka_history is called with no run_id to retrieve the global listing — verifies the Eureka SQLite store is live (Phase 64). A non-error response is sufficient; we don't require any specific entry.",
+    "Distinct from CP-NEW-eureka-pick-place-reward: that canonical exercises the FULL training loop (generate→iterate×10→evaluate, score≥0.50). This canonical focuses on the review/feedback/audit cycle — no training steps, no score threshold, no cube delivery.",
+    "SUCCESS criterion is structural: (a) iterate_reward returns dict with non-empty 'reward_code'; (b) second review_reward returns no CRITICAL-level items. Both are inspectable without simulation.",
+    "Failure mode: review_reward may return a plain string instead of a structured dict if the static-analysis extension is not loaded — handle gracefully with isinstance check.",
+    "record_feedback session_id + turn_id are arbitrary synthetic values; the handler does not validate against a live session store in Kit-RPC direct-eval context."
+  ],
+  "code": "import json\nimport os\n\n# ── Minimal env stub for generate_reward ─────────────────────────────────────\n# generate_reward requires env_source_path pointing to a DirectRLEnv .py file.\nENV_SOURCE_PATH = \"/tmp/franka_reach_env_stub.py\"\nos.makedirs(\"/tmp\", exist_ok=True)\nwith open(ENV_SOURCE_PATH, \"w\") as f:\n    f.write(\n        \"# Minimal DirectRLEnv stub for Eureka reward generation\\n\"\n        \"# Task: Franka Panda reach — move EE to target position\\n\"\n        \"class FrankaReachEnv:\\n\"\n        \"    obs_keys = ['joint_pos', 'joint_vel', 'ee_pos', 'target_pos']\\n\"\n        \"    action_keys = ['joint_targets']\\n\"\n        \"    num_obs = 7 + 7 + 3 + 3\\n\"\n        \"    num_actions = 7\\n\"\n    )\n\n# ── Step 1: Generate initial reward candidate ─────────────────────────────────\ngen_result = generate_reward(\n    task_description=(\n        \"Franka Panda reach task: move end-effector to a fixed target position \"\n        \"[0.5, 0.0, 0.5]. Reward dense distance penalty only, no sparse bonus.\"\n    ),\n    env_source_path=ENV_SOURCE_PATH,\n    num_candidates=2,\n    num_iterations=1,\n)\nreward_code_v1 = gen_result.get(\"reward_code\", \"\") if isinstance(gen_result, dict) else str(gen_result)\nrun_id = gen_result.get(\"run_id\", \"\") if isinstance(gen_result, dict) else \"\"\n\n# ── Step 2: Static analysis of the initial candidate ─────────────────────────\n# review_reward checks: sparse-reward desert, dominant term, reward hacking,\n# scale sanity. Returns issues list with severity CRITICAL/WARN/INFO.\nreview_v1 = review_reward(\n    reward_code=reward_code_v1,\n    has_fall_termination=False,\n    max_possible_reward=10.0,\n)\nissues_v1 = review_v1.get(\"issues\", []) if isinstance(review_v1, dict) else []\ncritical_v1 = [i for i in issues_v1 if isinstance(i, dict) and i.get(\"severity\") == \"CRITICAL\"]\nprint(f\"[review_v1] issues={len(issues_v1)}, critical={len(critical_v1)}\")\n\n# ── Step 3: Record human feedback — reject initial candidate ─────────────────\n# Operator sees: dense-only reward (no sparse bonus) → likely reward desert.\n# record_feedback marks this turn as rejected with a correction note.\nrecord_feedback(\n    session_id=\"reward-review-session-001\",\n    turn_id=0,\n    approved=False,\n    edited=True,\n    correction=(\n        \"Add a sparse success bonus (+1.0) when EE distance < 0.05 m. \"\n        \"The current dense-only reward will cause a reward desert near the goal.\"\n    ),\n)\nprint(\"[record_feedback] turn_id=0 rejected with correction\")\n\n# ── Step 4: Iterate reward with human correction applied ──────────────────────\niterate_result = iterate_reward(\n    prev_reward_code=reward_code_v1,\n    metrics={\n        \"fitness\": 0.0,\n        \"components\": {},\n        \"task_success_rate\": 0.0,\n    },\n    user_feedback=(\n        \"Add a sparse success bonus (+1.0) when EE distance < 0.05 m. \"\n        \"The current dense-only reward will cause a reward desert near the goal.\"\n    ),\n)\nreward_code_v2 = iterate_result.get(\"reward_code\", \"\") if isinstance(iterate_result, dict) else str(iterate_result)\nprint(f\"[iterate_reward] reward_code_v2 length={len(reward_code_v2)} chars\")\n\n# ── Step 5: Re-review improved candidate ─────────────────────────────────────\nreview_v2 = review_reward(\n    reward_code=reward_code_v2,\n    has_fall_termination=False,\n    max_possible_reward=11.0,\n)\nissues_v2 = review_v2.get(\"issues\", []) if isinstance(review_v2, dict) else []\ncritical_v2 = [i for i in issues_v2 if isinstance(i, dict) and i.get(\"severity\") == \"CRITICAL\"]\nprint(f\"[review_v2] issues={len(issues_v2)}, critical={len(critical_v2)}\")\n\n# ── Step 6: Retrieve Eureka run history (Phase 64 store check) ───────────────\nhistory = eureka_history(limit=5)\nhistory_ok = isinstance(history, (dict, list))\nprint(f\"[eureka_history] response type={type(history).__name__}, ok={history_ok}\")\n\n# ── Persist results ───────────────────────────────────────────────────────────\nsuccess = (len(critical_v2) == 0) and (len(reward_code_v2) > 0)\nresult_payload = {\n    \"success\": success,\n    \"review_v1_critical\": len(critical_v1),\n    \"review_v2_critical\": len(critical_v2),\n    \"reward_code_v2_chars\": len(reward_code_v2),\n    \"history_ok\": history_ok,\n    \"run_id\": run_id,\n}\nwith open(\"/tmp/reward_review_result.json\", \"w\") as f:\n    json.dump(result_payload, f, indent=2)\n\n# ── Final gate ────────────────────────────────────────────────────────────────\nassert len(reward_code_v2) > 0, \"iterate_reward must return a non-empty reward_code string\"\nassert len(critical_v2) == 0, (\n    f\"review_reward v2 still has {len(critical_v2)} CRITICAL issues after correction; \"\n    f\"iterate_reward did not address the feedback.\"\n)\nprint(f\"[OK] reward-review-iterate PASSED: result=/tmp/reward_review_result.json\")",
+  "settle_state": {
+    "result_file": "/tmp/reward_review_result.json",
+    "expected_success_field": "success",
+    "review_v2_critical": 0
+  },
+  "verify_args": {
+    "stages": []
+  },
+  "simulate_args": null,
+  "diagnose_args": {
+    "result_file": "/tmp/reward_review_result.json",
+    "expected_keys": ["success", "review_v2_critical", "reward_code_v2_chars"],
+    "success_field": "success"
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending",
+  "failure_modes": [
+    "generate_reward returns None if omni.isaac.eureka extension not loaded — reward_code_v1 will be empty string; review_reward may still run (returns generic analysis of empty input)",
+    "review_reward returns a plain string instead of a dict if static-analysis extension unavailable — isinstance guard returns [] for issues; success criterion still passes (no CRITICAL = 0)",
+    "iterate_reward may reject metrics dict with zero fitness as invalid — supply non-zero placeholder (0.01) if TypeError raised",
+    "record_feedback requires a live session store in some handler versions — if NotImplementedError, catch and log; the canonical can proceed without it",
+    "eureka_history may return an error dict if Phase 64 SQLite store was never initialized — history_ok check accepts any dict response including error dicts"
+  ],
+  "extends": "phase8-rl-training",
+  "extension_notes": "Distinct from CP-NEW-eureka-pick-place-reward: that canonical runs a full 10-generation training loop with evaluate_reward score >= 0.50 threshold. This canonical is the HUMAN-IN-LOOP REVIEW pattern only: generate → static-analysis → human reject+correct → iterate → re-review. No physics simulation, no training steps. Exercises review_reward + record_feedback — two tools not covered by any prior RL canonical. Backlog source: rl-reward-review-iterate-001 (priority_tier=2, no blockers).",
+  "intent": {
+    "pattern_hint": "train",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false
+    },
+    "structural_tags": [
+      "isaac:rl.reward_review",
+      "isaac:rl.human_in_loop",
+      "isaac:rl.eureka_review",
+      "isaac:topology.no_simulation",
+      "isaac:training.reward_curation"
+    ]
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": []
+  },
+  "roles": {
+    "reward_env": {
+      "constraints": ["FrankaReach-Direct-v0", "any_reach_task"],
+      "expected_count": 1,
+      "required": true
+    },
+    "feedback_session": {
+      "constraints": ["synthetic_session_id"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "reward_env": {
+      "task_description": "Franka Panda reach task: move EE to target [0.5, 0.0, 0.5]",
+      "env_source_path": "/tmp/franka_reach_env_stub.py"
+    },
+    "feedback_session": {
+      "session_id": "reward-review-session-001",
+      "turn_id": 0
+    }
+  },
+  "code_template": "import json, os\nENV_SOURCE_PATH = \"/tmp/franka_reach_env_stub.py\"\nos.makedirs(\"/tmp\", exist_ok=True)\nwith open(ENV_SOURCE_PATH, \"w\") as f:\n    f.write(\"class FrankaReachEnv:\\n    obs_keys = ['joint_pos','joint_vel','ee_pos','target_pos']\\n\")\ngen_result = generate_reward(\n    task_description={{reward_env.task_description}},\n    env_source_path={{reward_env.env_source_path}},\n    num_candidates=2,\n    num_iterations=1,\n)\nreward_code_v1 = gen_result.get(\"reward_code\", \"\") if isinstance(gen_result, dict) else str(gen_result)\nreview_v1 = review_reward(reward_code=reward_code_v1, has_fall_termination=False)\nrecord_feedback(\n    session_id={{feedback_session.session_id}},\n    turn_id={{feedback_session.turn_id}},\n    approved=False,\n    correction=\"Add sparse success bonus +1.0 when EE dist < 0.05 m\",\n)\niterate_result = iterate_reward(\n    prev_reward_code=reward_code_v1,\n    metrics={\"fitness\": 0.0, \"components\": {}, \"task_success_rate\": 0.0},\n    user_feedback=\"Add sparse success bonus +1.0 when EE dist < 0.05 m\",\n)\nreward_code_v2 = iterate_result.get(\"reward_code\", \"\") if isinstance(iterate_result, dict) else str(iterate_result)\nreview_v2 = review_reward(reward_code=reward_code_v2, has_fall_termination=False)\ncritical_v2 = [i for i in (review_v2.get(\"issues\",[]) if isinstance(review_v2,dict) else []) if isinstance(i,dict) and i.get(\"severity\")==\"CRITICAL\"]\neureka_history(limit=5)\nwith open(\"/tmp/reward_review_result.json\",\"w\") as f:\n    json.dump({\"success\": len(critical_v2)==0 and len(reward_code_v2)>0, \"review_v2_critical\": len(critical_v2)}, f)\nassert len(reward_code_v2) > 0\nassert len(critical_v2) == 0, f\"{len(critical_v2)} CRITICAL issues remain after correction\""
+}

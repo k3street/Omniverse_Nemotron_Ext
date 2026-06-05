@@ -1,0 +1,84 @@
+{
+  "task_id": "CP-NEW-ros2control-hw-mock",
+  "goal": "Register a UR10e arm as a ros2_control hardware interface mock using the velocity_controllers path. Step 1: precheck_ros2_environment to confirm rclpy available. Step 2: robot_wizard to load UR10e at /World/UR10e. Step 3: setup_ros2_control_compat with controller_type='velocity_controllers' to wire /isaac_joint_states + /isaac_joint_commands for velocity-control clients. Step 4: emit_ros2_control_yaml with controller_type='velocity_controllers' + update_rate_hz=500 to write the hardware-interface YAML. Step 5: setup_ros2_bridge profile=ur10e_moveit2 to build the OmniGraph with velocity-command subscriber. Step 6: configure_ros2_time mode='sim_time'. Step 7: ros2_list_topics to verify /isaac_joint_states and /isaac_joint_commands present. Step 8: diagnose_ros2 to confirm QoS + domain health. Distinct from CP-NEW-ros2-moveit2-franka: exercises velocity_controllers branch (not joint_trajectory_controller) + UR10e (not Franka) + omits cumotion plugin (hardware-interface mock path only, no motion planner).",
+  "tools_used": [
+    "precheck_ros2_environment",
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "setup_ros2_control_compat",
+    "emit_ros2_control_yaml",
+    "setup_ros2_bridge",
+    "configure_ros2_time",
+    "ros2_list_topics",
+    "diagnose_ros2"
+  ],
+  "thoughts": "Distinctness argument:\n\n1) CP-NEW-ros2-moveit2-franka covers joint_trajectory_controller + Franka + cumotion plugin (M1+M4). This template covers velocity_controllers + UR10e + no planner (hardware-interface mock only). The controller_type branch in setup_ros2_control_compat and emit_ros2_control_yaml changes the generated YAML (controller class + interface types); both code paths need separate canonical coverage.\n\n2) Hardware-interface mock use-case: external velocity-control clients (e.g. impedance controllers, force-control nodes) connect to /isaac_joint_commands expecting velocity setpoints, not trajectory segments. The mock YAML declares velocity command interface for all 6 joints instead of position+velocity.\n\n3) Tool-chain order: precheck_ros2_environment → robot_wizard → setup_ros2_control_compat (needs live articulation for joint-name discovery) → emit_ros2_control_yaml (reads compat config) → setup_ros2_bridge (builds OmniGraph) → configure_ros2_time (must precede first sim step) → verify.\n\n4) UR10e at [0, 0, 0.8] on table (0.4 m half-height). CPU dynamics (MBP, no GPU) for stable joint-state output.\n\n5) update_rate_hz=500 (vs 1000 in moveit2 template) — typical for velocity-control loops; covers the parameter variant.\n\n6) Verification: ros2_list_topics (topic existence) + diagnose_ros2 (QoS + DDS domain). No sim_control play required — bridge is middleware.",
+  "code": "# ── Preflight ─────────────────────────────────────────────────────────────────\nprecheck_ros2_environment(rosbridge_port=9090)\n\n# ── Scene skeleton ────────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.2], scale=[0.8, 0.6, 0.4])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU determinism ──────────────────────────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Robot ─────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"ur10e\",\n    dest_path=\"/World/UR10e\",\n    position=[0, 0, 0.8],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── M1: velocity_controllers compat ──────────────────────────────────────────\n# Wires /isaac_joint_states + /isaac_joint_commands for velocity-control clients.\nsetup_ros2_control_compat(\n    robot_path=\"/World/UR10e\",\n    joint_states_topic=\"/isaac_joint_states\",\n    joint_commands_topic=\"/isaac_joint_commands\",\n    controller_type=\"velocity_controllers\",\n)\n\n# ── M1: emit hardware-interface YAML ─────────────────────────────────────────\n# velocity_controllers branch: declares velocity command interface for all joints.\nemit_ros2_control_yaml(\n    robot_path=\"/World/UR10e\",\n    controller_type=\"velocity_controllers\",\n    output_path=\"/tmp/ur10e_ros2_control_velocity.yaml\",\n    joint_states_topic=\"/isaac_joint_states\",\n    joint_commands_topic=\"/isaac_joint_commands\",\n    update_rate_hz=500,\n)\n\n# ── ROS2 clock — must precede OmniGraph build ─────────────────────────────────\nconfigure_ros2_time(mode=\"sim_time\")\n\n# ── OmniGraph bridge ──────────────────────────────────────────────────────────\nsetup_ros2_bridge(\n    profile=\"ur10e_moveit2\",\n    robot_path=\"/World/UR10e\",\n    graph_path=\"/World/ROS2_Velocity_Bridge\",\n)\n\n# ── Verification ──────────────────────────────────────────────────────────────\nros2_list_topics()\ndiagnose_ros2()",
+  "failure_modes": [
+    "robot_wizard called with robot_name='ur10e' but UR10e USD not in Isaac Sim asset cache — returns asset_not_found; fall back to asset_path pointing to local URDF.",
+    "setup_ros2_control_compat called before robot_wizard — no articulation at /World/UR10e; joint-name discovery returns empty list; always call robot_wizard first.",
+    "velocity_controllers YAML declares only velocity command interface — downstream joint_trajectory_controller nodes will reject it; use controller_type='joint_trajectory_controller' for MoveIt2 trajectory execution.",
+    "configure_ros2_time called after setup_ros2_bridge — /clock messages emit timestamp=0 for first N sim steps; always call configure_ros2_time before setup_ros2_bridge.",
+    "ur10e_moveit2 profile not found in older Isaac Sim versions — setup_ros2_bridge raises KeyError; use configure_ros2_bridge manually instead.",
+    "QoS mismatch on /isaac_joint_commands — velocity-control client uses BEST_EFFORT, bridge publishes RELIABLE; diagnose_ros2 reports qos_mismatch; add QoS override in client node params."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": false,
+      "uses_moveit2": false,
+      "uses_velocity_controllers": true,
+      "controller_type": "velocity_controllers",
+      "ros2_profile": "ur10e_moveit2"
+    },
+    "structural_tags": [
+      "isaac:bridge.ros2",
+      "isaac:integration.ros2_control_compat",
+      "isaac:integration.velocity_controllers",
+      "isaac:topology.single_station",
+      "isaac:robot.fixed_base.arm",
+      "isaac:middleware.hardware_interface_mock"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["ur10e", "ur5e", "franka_panda"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/UR10e",
+      "class": "ur10e",
+      "position": [0, 0, 0.8],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    }
+  },
+  "code_template": "precheck_ros2_environment(rosbridge_port=9090)\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.2], scale=[0.8, 0.6, 0.4])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\nsetup_ros2_control_compat(\n    robot_path={{primary_robot.path}},\n    joint_states_topic=\"/isaac_joint_states\",\n    joint_commands_topic=\"/isaac_joint_commands\",\n    controller_type=\"velocity_controllers\",\n)\nemit_ros2_control_yaml(\n    robot_path={{primary_robot.path}},\n    controller_type=\"velocity_controllers\",\n    output_path=\"/tmp/ur10e_ros2_control_velocity.yaml\",\n    joint_states_topic=\"/isaac_joint_states\",\n    joint_commands_topic=\"/isaac_joint_commands\",\n    update_rate_hz=500,\n)\nconfigure_ros2_time(mode=\"sim_time\")\nsetup_ros2_bridge(profile=\"ur10e_moveit2\", robot_path={{primary_robot.path}}, graph_path=\"/World/ROS2_Velocity_Bridge\")\nros2_list_topics()\ndiagnose_ros2()",
+  "settle_state": {},
+  "verify_args": {
+    "stages": [],
+    "expected_topics": ["/isaac_joint_states", "/isaac_joint_commands", "/clock"],
+    "robot_path": "/World/UR10e"
+  },
+  "simulate_args": {
+    "cube_path": "/World/UR10e",
+    "target_path": "/World/UR10e",
+    "duration_s": 5
+  },
+  "diagnose_args": {
+    "robot_path": "/World/UR10e"
+  },
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["ros2_control", "velocity_controllers"]
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending"
+}

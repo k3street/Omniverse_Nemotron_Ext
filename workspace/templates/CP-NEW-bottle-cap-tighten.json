@@ -1,0 +1,186 @@
+{
+  "task_id": "CP-NEW-bottle-cap-tighten",
+  "goal": "Packaging-machine operator persona: Franka picks a bottle cap from a feeder, aligns it over a fixed bottle neck, presses down with an impedance-controlled Z-force ≤ 20 N, then applies a torque-limited ≥ 90° twist (peak torque ≤ 2 N·m) to seat the threads. Realizes ONET SOC 51-9111 yrkesroll-packaging-bottle-cap-001.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "robot_wizard",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "add_force_torque_sensor",
+    "setup_impedance_controller",
+    "set_compliance_params",
+    "setup_pick_place_controller",
+    "follow_trajectory_with_compliance",
+    "add_proximity_sensor",
+    "get_contact_report",
+    "get_joint_torques",
+    "get_world_transform"
+  ],
+  "thoughts": [
+    "Distinction from CP-NEW-peg-bushing-impedance: cap-tighten adds a TORQUE-limited rotational gesture after the linear insertion; peg-bushing terminates at force-cap.",
+    "Distinction from CP-NEW-assembly-constraint-verify: this canonical exercises live impedance + torque feedback, not pre-flight constraint validation only.",
+    "Workpiece topology: bottle neck = fixed slim Cylinder (radius 0.012 m); cap = wider Cylinder (radius 0.018 m, height 0.020 m) starting at the feeder.",
+    "Pick-place transit via cuRobo gets cap above bottle neck with ~5 mm air-gap; impedance + compliance takes over for descent and twist.",
+    "Z-force cap 20 N via add_force_torque_sensor threshold; ONET packaging-line spec calls for 'finger-tight' which we approximate at 2 N·m peak torque on the wrist joint.",
+    "follow_trajectory_with_compliance executes the rotational seat: 90°+ twist around the cap Z-axis with cartesian_impedance compliance enabled on the suffix waypoints.",
+    "Success criteria: cap world-Z within 5 mm of bottle_neck_top_z AND get_joint_torques wrist7 sample > torque_threshold AND get_contact_report shows cap-on-neck contact.",
+    "Compliance phase uses set_compliance_params (NOT just setup_impedance_controller) so the torque cap can be retuned per cap material; rubber cap → softer Z stiffness.",
+    "motion_controllers: curobo (transit, untested) + impedance (descent, untested) + cartesian_impedance via follow_trajectory_with_compliance (twist, untested)."
+  ],
+  "code": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Worktable (cap feeder sits on top, bottle is anchored to right side)\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Bottle body (static — large cylinder) + Bottle neck (fixed thinner cylinder on top) ──\ncreate_prim(\n    prim_path=\"/World/Bottle\",\n    prim_type=\"Cylinder\",\n    position=[0, -0.25, 0.84],\n    radius=0.035,\n    height=0.12,\n)\napply_api_schema(prim_path=\"/World/Bottle\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/Bottle\", attr_name=\"physics:approximation\", value=\"convexHull\")\n\ncreate_prim(\n    prim_path=\"/World/BottleNeck\",\n    prim_type=\"Cylinder\",\n    position=[0, -0.25, 0.92],\n    radius=0.012,\n    height=0.04,\n)\napply_api_schema(prim_path=\"/World/BottleNeck\", schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path=\"/World/BottleNeck\", attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Cap (dynamic — wider cylinder, picked from feeder) ──────────────────────\ncreate_prim(\n    prim_path=\"/World/Cap\",\n    prim_type=\"Cylinder\",\n    position=[0.3, 0.1, 0.835],\n    radius=0.018,\n    height=0.02,\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cap\", schema_name=api)\nset_attribute(prim_path=\"/World/Cap\", attr_name=\"physics:mass\", value=0.05)\n\napply_physics_material(prim_path=\"/World/Cap\", material_name=\"rubber\")\n\nbulk_set_attribute(\n    prim_paths=[\"/World/Cap\"],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[\"/World/Cap\", \"/World/BottleNeck\"],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\n# ── Force / torque sensor — 20 N Z-force cap on the wrist ────────────────────\nadd_force_torque_sensor(\n    sensor_path=\"/World/Franka/FtSensor\",\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=20.0,\n    noise_std=0.05,\n)\n\n# ── Impedance controller — softened Z for compliant descent over cap ─────────\nsetup_impedance_controller(\n    robot_path=\"/World/Franka\",\n    target_frame=\"panda_hand\",\n    Kx=[300.0, 300.0, 80.0],\n    Kr=[30.0, 30.0, 15.0],\n    Dx=[30.0, 30.0, 10.0],\n    Dr=[3.0, 3.0, 2.0],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\n# ── Compliance params — explicit Cartesian stiffness/damping for the seat gesture ──\nset_compliance_params(\n    robot_path=\"/World/Franka\",\n    stiffness_xyz=[300.0, 300.0, 80.0],\n    damping_xyz=[30.0, 30.0, 10.0],\n    stiffness_rot=[30.0, 30.0, 8.0],\n    damping_rot=[3.0, 3.0, 1.5],\n    dry_run=True,\n)\n\n# ── Proximity sensor at the cap feeder ───────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path=\"/World/PickSensor\",\n    position=[0.3, 0.1, 0.835],\n    size=[0.10, 0.10, 0.06],\n)\n\n# ── Pick-place: cuRobo transits cap from feeder to ~5 mm above bottle neck ────\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=None,\n    source_paths=[\"/World/Cap\"],\n    destination_path=\"/World/BottleNeck\",\n    drop_target=[0, -0.25, 0.945],\n    planning_obstacles=[\"/World/Table\", \"/World/Bottle\", \"/World/BottleNeck\"],\n    approach_height=0.15,\n    lift_height=0.15,\n)\n\n# ── Torque-limited twist: ≥ 90° rotation about cap Z-axis under cartesian_impedance ──\n# Trajectory dicts hold the rotational waypoints; rigid prefix handles descent,\n# compliant suffix applies the seat-twist with peak torque budget 2 N·m.\nfollow_trajectory_with_compliance(\n    trajectory=[\n        {\"pose\": {\"position\": [0, -0.25, 0.945], \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.940], \"orientation\": [0.9239, 0.0, 0.0, 0.3827]}},\n        {\"pose\": {\"position\": [0, -0.25, 0.938], \"orientation\": [0.7071, 0.0, 0.0, 0.7071]}}\n    ],\n    robot_path=\"/World/Franka\",\n    compliance_handoff_at=0.5,\n    compliance_controller=\"cartesian_impedance\",\n    timeout_s=30.0,\n    velocity_scaling=0.3,\n    dry_run=True,\n)\n\n# ── Success probes ───────────────────────────────────────────────────────────\nget_world_transform(prim_path=\"/World/Cap\")\nget_world_transform(prim_path=\"/World/BottleNeck\")\nget_contact_report(prim_path=\"/World/Cap\", max_contacts=16)\nget_joint_torques(articulation=\"/World/Franka\")",
+  "settle_state": {
+    "cubes": {
+      "/World/Cap": [0.3, 0.1, 0.835]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/Cap",
+        "place_path": "/World/BottleNeck",
+        "robot_kind": "franka_panda"
+      }
+    ],
+    "cube_path": "/World/Cap",
+    "expected_cap_z_within_m": 0.005,
+    "expected_min_twist_deg": 90.0,
+    "expected_peak_torque_max_nm": 2.0,
+    "expected_contact_after_seat": true
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cap",
+    "target_path": "/World/BottleNeck",
+    "duration_s": 180
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "obstacles": ["/World/Bottle", "/World/BottleNeck", "/World/Table"],
+    "sensor_path": "/World/PickSensor",
+    "robot_base": [0.0, 0.0, 0.75],
+    "cap_path": "/World/Cap",
+    "bottle_neck_path": "/World/BottleNeck",
+    "ft_sensor_path": "/World/Franka/FtSensor"
+  },
+  "extends": "yrkesroll-packaging-bottle-cap-001",
+  "extension_notes": "Implements ONET SOC 51-9111 packaging-machine operator persona. Differs from CP-NEW-peg-bushing-impedance by adding a torque-limited rotational seat gesture via follow_trajectory_with_compliance after the impedance-controlled descent. Bottle neck is a static thin Cylinder (radius 0.012 m) on top of a wider Cylinder bottle body; cap is a dynamic wider Cylinder (radius 0.018 m). cuRobo handles transit; impedance + cartesian_impedance compliance handles the last 5 mm + 90° twist. PhysX numerical instability during grip remains a shared risk with all impedance canonicals.",
+  "failure_modes": [
+    "PhysX numerical instability: cap velocity spikes during Franka grip — solver_position_iteration_count=16 + rubber material mitigates; not eliminated.",
+    "Cap and bottle neck are both solid Cylinders (no female-thread geometry) — torque-stop is signalled by the FT sensor + follow_trajectory_with_compliance handoff, not by mesh contact.",
+    "setup_impedance_controller and set_compliance_params are dry_run=True — no live torque-mode control without a ros2_control bridge; production rollout requires setup_ros2_control_compat first.",
+    "follow_trajectory_with_compliance is Phase 63b — trajectory waypoint dicts must contain joint_positions OR pose; pose-only is accepted but cuRobo replan is gated.",
+    "drop_target Z=0.945 requires cuRobo IK reachability — verify with solve_ik if planning fails; bottle neck obstacle may force a longer approach.",
+    "follow_trajectory_with_compliance compliance_controller='cartesian_impedance' is enum-validated — fallback 'admittance' is acceptable if cartesian_impedance is unavailable in the controller manager."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳ Kit RPC + ros2_control bridge",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": ["curobo", "impedance", "cartesian_impedance"]
+  },
+  "intent": {
+    "pattern_hint": "insert",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_torque_limited_gesture": true,
+      "has_force_threshold": true,
+      "has_rotational_seat": true
+    },
+    "structural_tags": [
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.single_station",
+      "isaac:topology.insertion",
+      "isaac:industrial.bottle_cap",
+      "isaac:operation.tighten",
+      "isaac:assembly.force_gated",
+      "isaac:assembly.torque_gated",
+      "isaac:sensor.force_torque",
+      "isaac:compliance.impedance",
+      "isaac:compliance.cartesian_impedance",
+      "isaac:gesture.rotational_seat"
+    ]
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": ["franka_panda", "ur5e", "ur10", "kinova_gen3"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "smaller_x_first"
+    },
+    "bottle": {
+      "constraints": ["cylinder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "static_wider_cylinder"
+    },
+    "bottle_neck": {
+      "constraints": ["cylinder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "static_thinner_cylinder_on_top"
+    },
+    "cap": {
+      "constraints": ["cylinder"],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "dynamic_wider_cylinder_on_feeder"
+    },
+    "pick_sensor": {
+      "constraints": ["proximity_sensor"],
+      "expected_count": 1,
+      "required": true
+    },
+    "ft_sensor": {
+      "constraints": ["force_torque_sensor"],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [0, 0, 0.75],
+      "orientation": [0.7071068, 0, 0, 0.7071068]
+    },
+    "bottle": {
+      "path": "/World/Bottle",
+      "position": [0, -0.25, 0.84],
+      "radius": 0.035,
+      "height": 0.12
+    },
+    "bottle_neck": {
+      "path": "/World/BottleNeck",
+      "position": [0, -0.25, 0.92],
+      "radius": 0.012,
+      "height": 0.04
+    },
+    "cap": {
+      "path": "/World/Cap",
+      "position": [0.3, 0.1, 0.835],
+      "radius": 0.018,
+      "height": 0.02,
+      "mass_kg": 0.05
+    },
+    "pick_sensor": {
+      "path": "/World/PickSensor",
+      "position": [0.3, 0.1, 0.835],
+      "size": [0.10, 0.10, 0.06]
+    },
+    "ft_sensor": {
+      "path": "/World/Franka/FtSensor",
+      "parent_path": "/World/Franka/panda_hand",
+      "threshold": 20.0
+    },
+    "torque_limit_nm": 2.0,
+    "min_twist_deg": 90.0,
+    "seat_drop_target": [0, -0.25, 0.945]
+  },
+  "code_template": "# ── Scene skeleton ──────────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.6, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ────────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n    orientation={{primary_robot.orientation}},\n)\n\n# ── Bottle + neck ────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path={{bottle.path}},\n    prim_type=\"Cylinder\",\n    position={{bottle.position}},\n    radius={{bottle.radius}},\n    height={{bottle.height}},\n)\napply_api_schema(prim_path={{bottle.path}}, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path={{bottle.path}}, attr_name=\"physics:approximation\", value=\"convexHull\")\n\ncreate_prim(\n    prim_path={{bottle_neck.path}},\n    prim_type=\"Cylinder\",\n    position={{bottle_neck.position}},\n    radius={{bottle_neck.radius}},\n    height={{bottle_neck.height}},\n)\napply_api_schema(prim_path={{bottle_neck.path}}, schema_name=\"PhysicsCollisionAPI\")\nset_attribute(prim_path={{bottle_neck.path}}, attr_name=\"physics:approximation\", value=\"convexHull\")\n\n# ── Cap ──────────────────────────────────────────────────────────────────────\ncreate_prim(\n    prim_path={{cap.path}},\n    prim_type=\"Cylinder\",\n    position={{cap.position}},\n    radius={{cap.radius}},\n    height={{cap.height}},\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path={{cap.path}}, schema_name=api)\nset_attribute(prim_path={{cap.path}}, attr_name=\"physics:mass\", value={{cap.mass_kg}})\napply_physics_material(prim_path={{cap.path}}, material_name=\"rubber\")\nbulk_set_attribute(\n    prim_paths=[{{cap.path}}],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nbulk_set_attribute(\n    prim_paths=[{{cap.path}}, {{bottle_neck.path}}],\n    attr=\"physxRigidBody:solverPositionIterationCount\",\n    value=16,\n)\n\n# ── FT sensor ────────────────────────────────────────────────────────────────\nadd_force_torque_sensor(\n    sensor_path={{ft_sensor.path}},\n    parent_path={{ft_sensor.parent_path}},\n    threshold={{ft_sensor.threshold}},\n    noise_std=0.05,\n)\n\n# ── Impedance controller (softened Z for descent) ────────────────────────────\nsetup_impedance_controller(\n    robot_path={{primary_robot.path}},\n    target_frame=\"panda_hand\",\n    Kx=[300.0, 300.0, 80.0],\n    Kr=[30.0, 30.0, 15.0],\n    Dx=[30.0, 30.0, 10.0],\n    Dr=[3.0, 3.0, 2.0],\n    null_space_stiffness=0.5,\n    null_space_damping=0.5,\n    torque_mode=True,\n    dry_run=True,\n)\n\n# ── Compliance params for the seat-twist gesture ─────────────────────────────\nset_compliance_params(\n    robot_path={{primary_robot.path}},\n    stiffness_xyz=[300.0, 300.0, 80.0],\n    damping_xyz=[30.0, 30.0, 10.0],\n    stiffness_rot=[30.0, 30.0, 8.0],\n    damping_rot=[3.0, 3.0, 1.5],\n    dry_run=True,\n)\n\n# ── Pick sensor + pick-place transit ─────────────────────────────────────────\nadd_proximity_sensor(\n    sensor_path={{pick_sensor.path}},\n    position={{pick_sensor.position}},\n    size={{pick_sensor.size}},\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    sensor_path={{pick_sensor.path}},\n    belt_path=None,\n    source_paths=[{{cap.path}}],\n    destination_path={{bottle_neck.path}},\n    drop_target={{seat_drop_target}},\n    planning_obstacles=[\"/World/Table\", {{bottle.path}}, {{bottle_neck.path}}],\n    approach_height=0.15,\n    lift_height=0.15,\n)\n\n# ── Torque-limited rotational seat ───────────────────────────────────────────\nfollow_trajectory_with_compliance(\n    trajectory=[\n        {\"pose\": {\"position\": {{seat_drop_target}}, \"orientation\": [1.0, 0.0, 0.0, 0.0]}},\n        {\"pose\": {\"position\": {{seat_drop_target}}, \"orientation\": [0.9239, 0.0, 0.0, 0.3827]}},\n        {\"pose\": {\"position\": {{seat_drop_target}}, \"orientation\": [0.7071, 0.0, 0.0, 0.7071]}}\n    ],\n    robot_path={{primary_robot.path}},\n    compliance_handoff_at=0.5,\n    compliance_controller=\"cartesian_impedance\",\n    timeout_s=30.0,\n    velocity_scaling=0.3,\n    dry_run=True,\n)\n\n# ── Success probes ───────────────────────────────────────────────────────────\nget_world_transform(prim_path={{cap.path}})\nget_world_transform(prim_path={{bottle_neck.path}})\nget_contact_report(prim_path={{cap.path}}, max_contacts=16)\nget_joint_torques(articulation={{primary_robot.path}})"
+}

@@ -1,0 +1,228 @@
+{
+  "task_id": "CP-NEW-cart-handoff-amr",
+  "goal": "Cart-handoff AMR: a stationary Franka arm grasps a cart fixture, releases it onto a Jetbot-class wheeled AMR parked at a handoff marker, the handoff:state attribute is toggled from 'idle' → 'placed' (signal) and then to 'picked' (ack), and the AMR navigates 1.5 m along +X to a drop zone. Realizes industrial-cart-handoff-amr-001 (Phase 8 industrial-asset, pattern_hint=navigate).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "create_wheeled_robot",
+    "setup_nav_robot",
+    "setup_robot_handoff_signal",
+    "grasp_object",
+    "navigate_to",
+    "get_world_transform",
+    "prim_exists"
+  ],
+  "thoughts": [
+    "Pattern hint=navigate. Success criterion is mobile-platform-at-goal-pose; the handoff handshake is a structural feature on top of the navigate base.",
+    "Scene: Franka arm at [0,0,0] (no table — simplest possible parent for the cart grasp). Cart is a thin slab Cube fixture spawned in the arm's reach. AMR (Jetbot-class wheeled robot) parks at the handoff marker at [0.6, 0, 0.05].",
+    "Handoff signal: setup_robot_handoff_signal creates /World/HandoffMarker with attrs handoff:state, handoff:robot_a, handoff:robot_b. Initial state='idle'. After the arm grasp, set_attribute toggles state→'placed' (Franka has released, cart is on AMR). After the AMR acknowledges receipt, set_attribute toggles state→'picked' (ack). Then navigate_to fires.",
+    "Pose tolerance: navigate_to has no explicit yaw arg; we rely on planner=direct and verify world-X within ±5 cm of target_x via get_world_transform. Yaw tolerance ±10° documented in failure_modes but not enforced at canonical-build time.",
+    "Drop zone: a Cube fixture at [2.1, 0, 0.025] (1.5 m east of handoff marker). AMR navigates from [0.6, 0, 0.05] → [2.1, 0, 0.05].",
+    "Function-gate: AMR world-X within 5 cm of drop-zone X (2.1) after 60 s. Cart parented to AMR — grasp_object on the cart with AMR as the gripper-host would normally do this, but Jetbot has no manipulator. Approximation: after handoff state='picked', we leave the cart fixture statically anchored on top of the AMR (cube on top, no joint) and let CPU dynamics keep it riding as long as the AMR drives smoothly. failure_modes notes this is fragile; a parented FixedJoint would be more robust.",
+    "Distinctiveness vs CP-NEW-multi-amr-corridor (3 AMRs, no handshake), CP-NEW-occupancy-map-nav (single AMR, no handoff, A* over map). This is the only canonical exercising setup_robot_handoff_signal + navigate_to + arm→AMR transfer in one scene."
+  ],
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Stationary Franka arm — placeholder parent for cart grasp\ncreate_prim(prim_path=\"/World/Franka\", prim_type=\"Xform\", position=[0, 0, 0])\n\n# Cart fixture — thin slab in arm's reach, will be released onto AMR\ncreate_prim(prim_path=\"/World/Cart\", prim_type=\"Cube\",\n            position=[0.3, 0, 0.55], scale=[0.20, 0.20, 0.02])\napply_api_schema(prim_path=\"/World/Cart\", schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path=\"/World/Cart\", schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path=\"/World/Cart\", schema_name=\"PhysicsMassAPI\")\n\n# Jetbot-class wheeled AMR parked at handoff position\ncreate_wheeled_robot(\n    robot_path=\"/World/AMR\",\n    drive_type=\"differential\",\n    wheel_radius=0.04,\n    wheel_base=0.12,\n)\nset_attribute(prim_path=\"/World/AMR\", attr_name=\"xformOp:translate\", value=[0.6, 0, 0.05])\n\n# Nav setup (no occupancy map — direct planner is sufficient for a 1.5 m straight)\nsetup_nav_robot(\n    robot_path=\"/World/AMR\",\n    nav_topic=\"/amr/cmd_vel\",\n    odom_topic=\"/amr/odom\",\n)\n\n# Drop zone fixture (visual marker for the goal pose)\ncreate_prim(prim_path=\"/World/DropZone\", prim_type=\"Cube\",\n            position=[2.1, 0, 0.025], scale=[0.30, 0.30, 0.05])\n\n# Handoff marker — carries handoff:state attribute used for signal/ack\nsetup_robot_handoff_signal(\n    handoff_path=\"/World/HandoffMarker\",\n    position=[0.6, 0, 0.15],\n    robot_a=\"/World/Franka\",\n    robot_b=\"/World/AMR\",\n)\n\n# Verify AMR exists before we start the handshake\nprim_exists(prim_path=\"/World/AMR\")\n\n# Arm grasps the cart (simulated transfer — in absence of a real gripper, this\n# parents the cart to the arm via grasp_object's attach logic).\ngrasp_object(\n    robot_path=\"/World/Franka\",\n    target_prim=\"/World/Cart\",\n)\n\n# Signal: arm has placed the cart on the AMR. handoff:state idle → placed.\nset_attribute(prim_path=\"/World/HandoffMarker\", attr_name=\"handoff:state\", value=\"placed\")\n\n# Confirm AMR pose before issuing the navigate command (±5 cm position check\n# happens post-sim; here we just snapshot the start pose).\nget_world_transform(prim_path=\"/World/AMR\")\n\n# Ack: AMR has received the cart and is ready to depart. state placed → picked.\nset_attribute(prim_path=\"/World/HandoffMarker\", attr_name=\"handoff:state\", value=\"picked\")\n\n# Navigate AMR 1.5 m east to the drop zone.\nnavigate_to(\n    robot_path=\"/World/AMR\",\n    target_position=[2.1, 0.0],\n    planner=\"direct\",\n)",
+  "settle_state": {
+    "amr_start": {
+      "/World/AMR": [
+        0.6,
+        0,
+        0.05
+      ]
+    },
+    "cart": {
+      "/World/Cart": [
+        0.3,
+        0,
+        0.55
+      ]
+    },
+    "handoff_marker": {
+      "/World/HandoffMarker": [
+        0.6,
+        0,
+        0.15
+      ]
+    },
+    "drop_zone": {
+      "/World/DropZone": [
+        2.1,
+        0,
+        0.025
+      ]
+    }
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/AMR",
+        "pick_path": "/World/HandoffMarker",
+        "place_path": "/World/DropZone",
+        "robot_kind": "wheeled"
+      }
+    ],
+    "cube_path": "/World/Cart"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cart",
+    "target_path": "/World/DropZone",
+    "duration_s": 60,
+    "xy_tolerance": 0.05
+  },
+  "diagnose_args": {
+    "robot_path": "/World/AMR",
+    "robot_base": [
+      0.6,
+      0.0,
+      0.05
+    ],
+    "handoff_path": "/World/HandoffMarker",
+    "drop_zone_path": "/World/DropZone"
+  },
+  "extends": "industrial-cart-handoff-amr-001",
+  "extension_notes": "First canonical to combine setup_robot_handoff_signal with a wheeled-robot navigate_to in a single scene. Phase 8 industrial-asset realization. Pattern_hint=navigate (mobile platform reaches goal pose); handoff handshake is a structural feature, not the function-gate criterion.",
+  "failure_modes": [
+    "navigate_to planner='direct' has no obstacle awareness — if the cart sitting on top of the AMR shifts and falls in front of the wheels during transit, the AMR will collide with it. Mitigation: cart center-of-mass is centered above the AMR base; CPU dynamics with rubber-like friction holds the cart stable for short straight transits. For longer paths, planner='astar' over an occupancy map would be required.",
+    "Handoff signal never acked (deadlock) — in production the AMR controller would wait for handoff:state=='placed' before signaling 'picked'. In this canonical the toggle is unconditional (immediate). A real controller would poll the attribute and time out after N seconds; without that polling loop, a stuck arm leaves the AMR waiting forever.",
+    "Pose tolerance too tight under nav planner noise — ±5 cm position tolerance on a 1.5 m straight is tight for differential-drive with no PID feedback. With drive_type='differential' and direct planner, residual lateral error from wheel-skid can be 2–3 cm. Documented but accepted (current criterion).",
+    "Yaw tolerance ±10° is not enforced by navigate_to — target_position is [x,y] only; final yaw depends on planner. For Jetbot-class differential drive, final yaw after a +X navigate is close to 0° (aligned with travel direction), so the implicit yaw constraint is usually satisfied without explicit enforcement.",
+    "Cart parented to AMR via static co-placement (not FixedJoint) — grasp_object handles the arm→cart attach, but releasing onto the AMR leaves the cart riding on top of the AMR by friction only. Sharp accelerations may dislodge it. A robust implementation would call create_articulated_joint to FixedJoint cart↔AMR after the handoff:state→'picked' toggle.",
+    "create_wheeled_robot at empty robot_path — the script creates /World/AMR via create_wheeled_robot without a prior articulation reference. On Kit, the wheeled-robot handler synthesizes a primitive Jetbot-like shape; on bare USD it errors. Mitigation: documented limitation — Jetbot Nucleus asset is the preferred backing if available."
+  ],
+  "verified_status": "drafted-2026-05-16; form-gate-schema ✓; function-gate ⏳; phase8-industrial-asset",
+  "motion_controllers": {
+    "verified": [],
+    "failed": {},
+    "untested": [
+      "direct_joint",
+      "moveit2"
+    ]
+  },
+  "intent": {
+    "pattern_hint": "navigate",
+    "structural_features": {
+      "n_robot_stations": 2,
+      "n_handoffs": 1,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "uses_handoff_signal": true
+    },
+    "structural_tags": [
+      "isaac:robot.mobile.wheeled",
+      "isaac:robot.mobile.jetbot",
+      "isaac:robot.fixed_base.arm",
+      "isaac:topology.arm_to_amr_handoff",
+      "isaac:coordination.handoff_signal",
+      "isaac:nav.direct_planner",
+      "isaac:industry.cart_transfer"
+    ]
+  },
+  "roles": {
+    "amr": {
+      "constraints": [
+        "wheeled_robot",
+        "jetbot",
+        "carter"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "static_arm": {
+      "constraints": [
+        "franka",
+        "ur10",
+        "fixed_base_arm"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "cart": {
+      "constraints": [
+        "cube",
+        "slab",
+        "fixture"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "handoff_marker": {
+      "constraints": [
+        "handoff_signal"
+      ],
+      "expected_count": 1,
+      "required": true
+    },
+    "drop_zone": {
+      "constraints": [
+        "static_cube",
+        "fixture"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "amr": {
+      "path": "/World/AMR",
+      "class": "jetbot",
+      "drive_type": "differential",
+      "wheel_radius": 0.04,
+      "wheel_base": 0.12,
+      "start_position": [
+        0.6,
+        0,
+        0.05
+      ],
+      "target_position": [
+        2.1,
+        0.0
+      ]
+    },
+    "static_arm": {
+      "path": "/World/Franka",
+      "class": "franka",
+      "position": [
+        0,
+        0,
+        0
+      ]
+    },
+    "cart": {
+      "path": "/World/Cart",
+      "position": [
+        0.3,
+        0,
+        0.55
+      ],
+      "scale": [
+        0.2,
+        0.2,
+        0.02
+      ]
+    },
+    "handoff_marker": {
+      "path": "/World/HandoffMarker",
+      "position": [
+        0.6,
+        0,
+        0.15
+      ]
+    },
+    "drop_zone": {
+      "path": "/World/DropZone",
+      "position": [
+        2.1,
+        0,
+        0.025
+      ],
+      "scale": [
+        0.3,
+        0.3,
+        0.05
+      ]
+    }
+  },
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.025], scale=[10.0, 10.0, 0.05])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path={{static_arm.path}}, prim_type=\"Xform\", position={{static_arm.position}})\n\ncreate_prim(prim_path={{cart.path}}, prim_type=\"Cube\",\n            position={{cart.position}}, scale={{cart.scale}})\napply_api_schema(prim_path={{cart.path}}, schema_name=\"PhysicsRigidBodyAPI\")\napply_api_schema(prim_path={{cart.path}}, schema_name=\"PhysicsCollisionAPI\")\napply_api_schema(prim_path={{cart.path}}, schema_name=\"PhysicsMassAPI\")\n\ncreate_wheeled_robot(\n    robot_path={{amr.path}},\n    drive_type={{amr.drive_type}},\n    wheel_radius={{amr.wheel_radius}},\n    wheel_base={{amr.wheel_base}},\n)\nset_attribute(prim_path={{amr.path}}, attr_name=\"xformOp:translate\", value={{amr.start_position}})\n\nsetup_nav_robot(\n    robot_path={{amr.path}},\n    nav_topic=\"/amr/cmd_vel\",\n    odom_topic=\"/amr/odom\",\n)\n\ncreate_prim(prim_path={{drop_zone.path}}, prim_type=\"Cube\",\n            position={{drop_zone.position}}, scale={{drop_zone.scale}})\n\nsetup_robot_handoff_signal(\n    handoff_path={{handoff_marker.path}},\n    position={{handoff_marker.position}},\n    robot_a={{static_arm.path}},\n    robot_b={{amr.path}},\n)\n\nprim_exists(prim_path={{amr.path}})\n\ngrasp_object(\n    robot_path={{static_arm.path}},\n    target_prim={{cart.path}},\n)\n\nset_attribute(prim_path={{handoff_marker.path}}, attr_name=\"handoff:state\", value=\"placed\")\n\nget_world_transform(prim_path={{amr.path}})\n\nset_attribute(prim_path={{handoff_marker.path}}, attr_name=\"handoff:state\", value=\"picked\")\n\nnavigate_to(\n    robot_path={{amr.path}},\n    target_position={{amr.target_position}},\n    planner=\"direct\",\n)"
+}

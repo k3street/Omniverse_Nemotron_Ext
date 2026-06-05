@@ -141,7 +141,7 @@
   description: >
     After kitting, overhead camera verifies all 5 slots are occupied; missing
     part triggers re-pick. Exercises setup_pick_place_with_vision and
-    validate_annotations.
+    add_vision_classifier_gate with overhead nadir camera.
   priority_tier: 2
   complexity: complex
   asset_dependencies: ["Franka", "omni.replicator"]
@@ -149,7 +149,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-kit-prep-vision-gate.json
+  drafted_date: "2026-05-16"
 
 - id: yrkesroll-assembler-peg-bushing-001
   source: ONET
@@ -685,7 +687,11 @@
   motion_controller_preference: none
   pattern_hint: sort
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-sbend-sortation.json
+  drafted_date: "2026-05-16"
+  drafted_by: A54
+  draft_notes: "A54; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library use of create_conveyor_track; S-bend multi-segment merge→divert pattern; no robot arm; function-gate pending live Kit"
 
 - id: industrial-plc-conveyor-io-001
   source: industrial-asset
@@ -702,7 +708,10 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-88.json
+  drafted_date: "2026-05-16"
+  drafted_by: A41
 
 - id: industrial-vision-pick-depalletize-001
   source: industrial-asset
@@ -718,7 +727,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-vision-depalletize.json
+  drafted_date: "2026-05-16"
 
 - id: industrial-zone-partition-safety-001
   source: industrial-asset
@@ -755,7 +766,11 @@
   motion_controller_preference: ros2_control
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-multi-rate-sensor-fusion.json
+  drafted_date: "2026-05-16"
+  drafted_by: A44
+  draft_notes: "A44; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library use of setup_multi_rate; dual-rate VecEnv + F/T sensor fusion + ROS2 sim_time bridge pattern; function-gate pending live Kit + ROS2"
 
 - id: industrial-ik-singularity-avoidance-001
   source: industrial-asset
@@ -769,10 +784,14 @@
   complexity: complex
   asset_dependencies: ["UR10"]
   blockers: []
-  motion_controller_preference: curobo
+  motion_controller_preference: lula_rrt
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-ik-singularity-avoidance.json
+  drafted_date: "2026-05-16"
+  drafted_by: A55
+  draft_notes: "A55; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library use of check_singularity; 3-waypoint conditional-replan pattern (safe→lula_rrt→rmpflow); function-gate pending live Kit + UR10 USD"
 
 - id: industrial-conveyor-tracking-moving-pick-001
   source: industrial-asset
@@ -788,7 +807,9 @@
   motion_controller_preference: curobo
   pattern_hint: pick_place
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-moving-conveyor-pick.json
+  drafted_date: "2026-05-16"
 
 - id: industrial-assembly-constraint-verify-001
   source: industrial-asset
@@ -878,7 +899,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-scene-sdg-full-pipeline.json
+  drafted_date: "2026-05-16"
+  drafted_by: A49
+  draft_notes: "A49; form-gate 0 ERROR 2 WARN (settle_state absent + configure_camera extra kwargs, both non-blocking); first use of export_dataset + benchmark_sdg as primary tools; function-gate BLOCKED (requires omni.replicator + live Kit GPU render)"
 
 - id: industrial-occupancy-map-nav-001
   source: industrial-asset
@@ -1298,9 +1323,11 @@
   asset_dependencies: ["Franka"]
   blockers: []
   motion_controller_preference: direct_joint
-  pattern_hint: rl-train
+  pattern_hint: train
   estimated_agent_minutes: 240
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-actuator-net-training.json
+  drafted_date: "2026-05-16"
 
 - id: rl-curriculum-object-complexity-001
   source: retrieval-miss
@@ -1317,7 +1344,11 @@
   motion_controller_preference: curobo
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-curriculum-object-complexity.json
+  drafted_date: "2026-05-16"
+  drafted_by: A50
+  draft_notes: "A50 milestone; form-gate 1 OK 0 ERROR 1 WARN (settle_state absent — expected for rl-train non-delivery canonical); first use of multi-object-class shape curriculum (cube+sphere+cylinder) + 5x add_domain_randomizer in one sequence; function-gate BLOCKED (requires IsaacLab install; DR authoring through preview_dr smokeable without it)"
 
 - id: rl-detect-ood-distribution-shift-001
   source: retrieval-miss
@@ -1334,7 +1365,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-ood-detect-monitor.json
+  drafted_date: "2026-05-16"
+  drafted_by: A58
+  draft_notes: "A58; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library use of detect_ood (Tier 1+2) + monitor_forgetting as primary tools; inference-time OOD safety-guard pattern; function-gate BLOCKED (requires GR00T weights + live Kit)"
 
 - id: rl-loco-manip-whole-body-001
   source: retrieval-miss
@@ -1404,7 +1439,9 @@
   motion_controller_preference: none
   pattern_hint: rl-train
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-reward-review-iterate.json
+  drafted_date: "2026-05-16"
 
 - id: rl-groot-eval-harness-001
   source: retrieval-miss
@@ -1420,7 +1457,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-eval-harness-ntask.json
+  drafted_date: "2026-05-16"
+  drafted_by: A51
+  draft_notes: "A51; form-gate 0 ERROR 1 WARN (settle_state absent — expected for train canonical with no delivery criterion); function-gate BLOCKED (GR00T weights + omni.isaac.groot ext)"
 
 - id: rl-calibrate-physics-actuator-001
   source: retrieval-miss
@@ -1437,7 +1478,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: rl-train
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-physics-calibrate-actuator.json
+  drafted_date: "2026-05-16"
+  drafted_by: "A46"
+  draft_notes: "A46; form-gate 0 ERROR 1 WARN (settle_state absent — expected for non-delivery train canonical); function-gate BLOCKED (requires real HDF5 robot logs + IsaacSim physics backend)"
 
 - id: rl-checkpoint-resume-001
   source: retrieval-miss
@@ -1495,7 +1540,9 @@
   motion_controller_preference: direct_joint
   pattern_hint: finetune
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-forgetting-monitor.json
+  drafted_date: "2026-05-16"
 
 - id: groot-suggest-config-001
   source: retrieval-miss
@@ -1531,7 +1578,9 @@
   motion_controller_preference: none
   pattern_hint: finetune
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-redact-finetune.json
+  drafted_date: "2026-05-16"
 
 - id: groot-export-dataset-hdf5-001
   source: retrieval-miss
@@ -1586,7 +1635,11 @@
   motion_controller_preference: none
   pattern_hint: finetune
   estimated_agent_minutes: 30
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-data-mix-multitask.json
+  drafted_date: "2026-05-16"
+  drafted_by: A59
+  draft_notes: "A59; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first library canonical making suggest_data_mix primary×3 (one call per task); multi-task continual-learning balance pattern; pure advisory, no robot, no stage; function-gate BLOCKED (requires groot advisor extension + live MCP)"
 
 - id: groot-rsi-from-demos-001
   source: retrieval-miss
@@ -1603,7 +1656,11 @@
   motion_controller_preference: direct_joint
   pattern_hint: finetune
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-rsi-from-demos.json
+  drafted_date: "2026-05-16"
+  drafted_by: A61
+  draft_notes: "A61; form-gate 1 OK 0 ERROR 0 WARN 0 INFO (--validate-tool-calls); first library canonical exercising setup_rsi_from_demos; suggest_finetune_config+setup_rsi_from_demos+finetune_stats+export_finetune_data pipeline; function-gate BLOCKED (requires demo HDF5 + GR00T advisor ext + live MCP)"
 
 - id: groot-attention-maps-visualize-001
   source: retrieval-miss
@@ -1620,7 +1677,11 @@
   motion_controller_preference: none
   pattern_hint: finetune
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-groot-attention-maps.json
+  drafted_date: "2026-05-16"
+  drafted_by: A57
+  draft_notes: "A57; form-gate 0 ERROR 0 WARN; first GR00T interpretability canonical; function-gate BLOCKED (requires groot_policy checkpoint + live Kit)"
 
 - id: groot-load-policy-eval-live-001
   source: retrieval-miss
@@ -1680,7 +1741,9 @@
   motion_controller_preference: moveit2
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-ros2-moveit2-franka.json
+  drafted_date: "2026-05-16"
 
 - id: ros2-opcua-conveyor-12-001
   source: industrial-asset
@@ -1697,7 +1760,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-opcua-12conveyors.json
+  drafted_date: "2026-05-10"
+  drafted_by: prior-session
+  draft_notes: "Template existed as CP-NEW-opcua-12conveyors.json (built 2026-05-10); backlog entry retroactively marked drafted by A57 audit"
 
 - id: ros2-modbus-plc-fixture-001
   source: industrial-asset
@@ -1714,7 +1781,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-modbus-plc-fixture-io.json
+  drafted_date: "2026-05-16"
+  drafted_by: A45
+  draft_notes: "A45; form-gate 0 ERROR 0 WARN; function-gate pending (requires pymodbus mock server on 127.0.0.1:5022)"
 
 - id: ros2-mqtt-sparkplug-001
   source: industrial-asset
@@ -1731,7 +1802,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 120
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-mqtt-sparkplug-iot.json
+  drafted_date: "2026-05-16"
+  drafted_by: A60
+  draft_notes: "A60; form-gate 1 OK 0 ERROR 0 WARN (--validate-tool-calls); first MQTT Sparkplug-B canonical in library; attach→diagnose→list→detach lifecycle; function-gate pending (requires Mosquitto on 127.0.0.1:1883)"
 
 - id: ros2-multi-rate-setup-001
   source: retrieval-miss
@@ -1748,7 +1823,9 @@
   motion_controller_preference: ros2_control
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-ros2-multi-rate.json
+  drafted_date: "2026-05-16"
 
 - id: ros2-zmq-stream-viz-001
   source: retrieval-miss
@@ -1765,7 +1842,11 @@
   motion_controller_preference: none
   pattern_hint: other
   estimated_agent_minutes: 60
-  status: queued
+  status: drafted
+  template_file: workspace/templates/CP-NEW-zmq-stream-pointcloud.json
+  drafted_date: "2026-05-16"
+  drafted_by: A56
+  draft_notes: "A56; form-gate 1 OK, 0 ERROR, 0 WARN, 0 INFO (--validate-tool-calls); first use of configure_zmq_stream in library; pure sensor-bridge canonical, no robot/ROS required; function-gate BLOCKED (requires OmniGraph ZMQ node extension)"
 
 - id: ros2-rosbag-replay-001
   source: retrieval-miss
@@ -1816,4 +1897,562 @@
   motion_controller_preference: ros2_control
   pattern_hint: other
   estimated_agent_minutes: 120
+  status: drafted
+  template_file: workspace/templates/CP-NEW-ros2control-hw-mock.json
+  drafted_date: "2026-05-16"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# F.0-EXTENSION — 25 new tier-1-locally-runnable candidates (2026-05-16)
+# All vetted: no Nucleus assets, no PhysX-instability, no external dataset deps,
+# no novel tools. Mappable to existing ISAAC_SIM_TOOLS surface.
+# ──────────────────────────────────────────────────────────────────────────────
+
+- id: industrial-bottle-cap-tighten-001
+  source: ONET
+  category: industrial
+  title: "Bottle-cap tighten — pre-place cap with torque-limited twist"
+  description: >
+    Franka picks a bottle cap from feeder and places onto a fixed bottle neck;
+    follow_trajectory_with_compliance applies a torque-limited rotation to
+    seat the cap. Exercises pick-place + compliant twist gesture.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: impedance
+  pattern_hint: insert
+  estimated_agent_minutes: 60
   status: queued
+  tier: tier-1-locally-runnable
+  goal: "Place a bottle cap on a bottle neck and apply a torque-limited twist to seat it."
+  key_tools: ["setup_pick_place_controller", "setup_impedance_controller", "follow_trajectory_with_compliance", "set_compliance_params", "get_contact_report"]
+  success_criterion: "Cap world-pose Z within 5 mm of bottle-neck Z and angular twist >= 90 degrees with peak torque <= 2 N·m."
+  notes: "ONET SOC 51-9111 packaging-machine operator; verify_args should hit get_world_transform + get_contact_report; no Nucleus assets."
+
+- id: industrial-label-applicator-pose-001
+  source: ONET
+  category: industrial
+  title: "Label applicator — apply flat label onto curved bottle surface"
+  description: >
+    UR10 with surface-suction end-effector picks a labelled patch from a tray
+    and presses it onto a cylindrical bottle at a specified angular pose.
+    Exercises surface_gripper + curved-surface pose targeting.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["UR10"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Pick a flat label patch and press it onto a cylindrical bottle at a fixed yaw."
+  key_tools: ["surface_gripper", "setup_pick_place_controller", "set_compliance_params", "follow_trajectory_with_compliance", "get_world_transform"]
+  success_criterion: "Label parent set to bottle prim and angular alignment within 5 degrees of target yaw."
+  notes: "Companion to industrial-bottle-cap-tighten; uses primitive bottle (Cylinder prim), no Nucleus dependency."
+
+- id: industrial-screw-driving-impedance-001
+  source: ONET
+  category: industrial
+  title: "Screw-driving — torque-limited fastener with impedance hold"
+  description: >
+    Franka with simulated driver bit drives a screw into a tapped plate using
+    setup_impedance_controller; setup_assembly_constraint registers the screw
+    once driven below a depth threshold. Exercises impedance-driven assembly.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: impedance
+  pattern_hint: insert
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Drive a screw prim into a tapped-plate hole and register the assembly constraint."
+  key_tools: ["setup_impedance_controller", "follow_trajectory_with_compliance", "setup_assembly_constraint", "validate_assembly_constraint", "monitor_joint_effort"]
+  success_criterion: "Screw Z-depth >= 10 mm below plate top and assembly_constraint reports valid."
+  notes: "Rigid-only fastener (no thread physics); ONET SOC 51-9061 quality-control fastening; no PhysX deformables."
+
+- id: industrial-wire-harness-route-001
+  source: ISO-10218
+  category: industrial
+  title: "Wire-harness routing — follow a fixed waypoint path"
+  description: >
+    Franka with pinch-grip holds a rigid wire-segment end and follows a
+    pre-recorded 6-waypoint route through a panel cutout fixture; uses
+    record_waypoints + interpolate_trajectory + replay_trajectory.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Replay a 6-waypoint wire-routing trajectory while grasping a rigid wire end."
+  key_tools: ["record_waypoints", "interpolate_trajectory", "replay_trajectory", "grasp_object", "check_path_clearance"]
+  success_criterion: "End-effector visits all 6 waypoints within 1 cm tolerance and final pose matches last waypoint."
+  notes: "Rigid-rod approximation; ISO 10218 cobot routing pattern; no cable physics required."
+
+- id: industrial-tray-stack-unstack-001
+  source: industrial-asset
+  category: industrial
+  title: "Empty-tray destack — pick top tray from a column"
+  description: >
+    UR10 picks the topmost empty tray from a vertical stack of 5 identical
+    trays and places it on an outfeed conveyor. Uses bounding-box height
+    query to identify top-of-stack each iteration.
+  priority_tier: 1
+  complexity: simple
+  asset_dependencies: ["UR10"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 30
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Pick the highest tray in a 5-tray stack and place it on the outfeed conveyor."
+  key_tools: ["setup_pick_place_controller", "get_bounding_box", "find_prims_by_name", "grasp_object", "get_world_transform"]
+  success_criterion: "Removed tray world-Y on outfeed and remaining stack height reduced by exactly one tray thickness."
+  notes: "Companion to industrial-heap-zone-unstack; simpler determined-pose variant."
+
+- id: industrial-cart-handoff-amr-001
+  source: industrial-asset
+  category: industrial
+  title: "Cart-handoff AMR — receive cart from arm and depart"
+  description: >
+    Stationary arm releases a cart onto a Jetbot-class AMR; AMR navigates a
+    1.5 m straight path to a drop zone. Exercises handoff signal + navigate_to.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka", "jetbot_primitives"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: navigate
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Hand off a cart from a fixed arm to an AMR and have the AMR drive 1.5 m to a drop zone."
+  key_tools: ["setup_robot_handoff_signal", "navigate_to", "grasp_object", "create_wheeled_robot", "get_world_transform"]
+  success_criterion: "AMR world-X within 5 cm of drop-zone target and cart parented to AMR throughout transit."
+  notes: "Uses jetbot primitive (no Carter Nucleus asset); plumbing-style AMR navigate canonical."
+
+- id: industrial-bin-picking-with-flip-001
+  source: industrial-asset
+  category: industrial
+  title: "Bin-pick with re-grasp flip — pick + reorient before placement"
+  description: >
+    Franka picks an upside-down part from bin, places it on a regrip station,
+    re-picks in correct orientation, then places into outfeed. Exercises
+    pick_place chained with reorient.
+  priority_tier: 2
+  complexity: complex
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: reorient
+  estimated_agent_minutes: 120
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Pick a flipped part, set it down on a regrip pad, re-pick it in correct orientation, then place in outfeed bin."
+  key_tools: ["setup_pick_place_controller", "grasp_object", "place_on_top_of", "get_world_transform", "set_joint_targets"]
+  success_criterion: "Final part orientation within 10 degrees of target Euler and located inside outfeed bin AABB."
+  notes: "Two-stage pick_place; deterministic part poses (no PhysX-uncertainty)."
+
+- id: industrial-conveyor-merge-vision-priority-001
+  source: industrial-asset
+  category: industrial
+  title: "Y-merge with vision priority — vision picks lane to release"
+  description: >
+    Two infeed conveyors merge into one outfeed; an overhead camera tags items
+    arriving simultaneously and a vision classifier decides which lane releases
+    first. Exercises add_vision_classifier_gate + conveyor pause/resume.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: sort
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Release the higher-priority lane first when two items arrive at a Y-merge simultaneously."
+  key_tools: ["create_conveyor", "add_vision_classifier_gate", "configure_camera", "capture_camera_image", "sim_control"]
+  success_criterion: "First item to cross merge point matches the vision-tagged priority class."
+  notes: "Companion to yrkesroll-y-merge-singulation; adds vision decision instead of FIFO."
+
+- id: sdg-multi-cam-correlated-dr-001
+  source: retrieval-miss
+  category: sdg
+  title: "Correlated DR SDG — multi-camera scene with seed-shared lighting"
+  description: >
+    create_sdg_pipeline with configure_correlated_dr ensures the same light/HDRI
+    seed across 4 cameras while object pose randomization stays per-frame.
+    Exercises correlated DR for stereo/multi-view consistency.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["omni.replicator"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Generate a 200-frame SDG dataset with correlated lighting across 4 cameras and per-frame object DR."
+  key_tools: ["create_sdg_pipeline", "configure_correlated_dr", "sample_correlated_dr", "configure_camera", "export_dataset"]
+  success_criterion: "All 4 cameras share identical light-seed per frame; object-pose seed differs per frame."
+  notes: "Builds on industrial-scene-sdg-full-pipeline; adds correlation axis."
+
+- id: sdg-class-balance-rebalance-001
+  source: retrieval-miss
+  category: sdg
+  title: "SDG class-balance — auto-rebalance imbalanced annotation distribution"
+  description: >
+    enforce_class_balance corrects under-represented object classes in an SDG
+    run by extending pose sampling until each class hits a target count.
+    Exercises class-balance enforcement + dataset audit.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["omni.replicator"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Generate an SDG dataset with at least 500 instances per class after class-balance enforcement."
+  key_tools: ["create_sdg_pipeline", "enforce_class_balance", "validate_annotations", "export_dataset", "benchmark_sdg"]
+  success_criterion: "validate_annotations reports minimum class count >= 500 across all configured classes."
+  notes: "Pure dataset-engineering canonical; no robot."
+
+- id: sdg-differential-render-pass-001
+  source: retrieval-miss
+  category: sdg
+  title: "Differential SDG — same scene rendered with and without DR variant"
+  description: >
+    configure_differential_sdg produces paired clean+randomized frames from
+    identical scene state; useful for contrastive sim2real training.
+    Exercises differential SDG capture mode.
+  priority_tier: 3
+  complexity: medium
+  asset_dependencies: ["omni.replicator"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Capture 100 frame pairs where each pair shares object poses but differs in lighting/material DR."
+  key_tools: ["create_sdg_pipeline", "configure_differential_sdg", "preview_sdg", "export_dataset", "validate_annotations"]
+  success_criterion: "Output dataset contains 100 paired records and object pose deltas across pairs are within 1 mm."
+  notes: "Builds on industrial-scene-sdg-full-pipeline with differential mode."
+
+- id: sim2real-actuator-net-calibration-001
+  source: retrieval-miss
+  category: sim2real
+  title: "Actuator-net calibration — fit Franka joint dynamics to a CSV log"
+  description: >
+    train_actuator_net fits a small MLP to a recorded torque-vs-angle CSV;
+    calibrate_physics applies the resulting damping/stiffness deltas;
+    validate_calibration confirms within-tolerance roll-out.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: train
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Train an actuator-net on a torque/angle CSV and apply calibration deltas to a Franka."
+  key_tools: ["train_actuator_net", "calibrate_physics", "validate_calibration", "create_calibration_experiment", "monitor_joint_effort"]
+  success_criterion: "validate_calibration reports RMS error <= 0.05 rad across 5 test trajectories."
+  notes: "Builds on rl-calibrate-physics-actuator with explicit CSV input path; data file packaged with canonical (small)."
+
+- id: sim2real-gap-controlled-injection-001
+  source: retrieval-miss
+  category: sim2real
+  title: "Sim-real gap — controlled noise injection and re-measure"
+  description: >
+    Inject incremental joint-noise via set_drive_gains perturbation;
+    measure_sim_real_gap reports how policy success degrades as noise grows.
+    Exercises gap measurement under controlled perturbation.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Sweep joint-gain noise across 5 levels and chart sim-real gap metric vs noise."
+  key_tools: ["set_drive_gains", "measure_sim_real_gap", "load_rl_policy", "launch_training", "diagnose_domain_gap"]
+  success_criterion: "Gap metric reported for all 5 perturbation levels and saved to artifact path."
+  notes: "Companion to yrkesroll-sim2real-gap-measure-001; isolates noise axis."
+
+- id: rl-eureka-locomotion-reward-002
+  source: retrieval-miss
+  category: rl-training
+  title: "Eureka reward iterate — wheeled-robot follow-line variant"
+  description: >
+    iterate_reward with generate_reward for a 1-DOF wheeled follow-line task;
+    evaluate_reward across 3 candidate functions; pick best. Companion to
+    rl-eureka-locomotion-reward-001 but for wheeled robots, no humanoid.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["jetbot_primitives"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: train
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Iterate 3 candidate Eureka reward functions for a wheeled-robot follow-line task and pick the highest-scoring one."
+  key_tools: ["generate_reward", "iterate_reward", "evaluate_reward", "review_reward", "create_wheeled_robot"]
+  success_criterion: "Top-scoring reward function exported and eureka_status reports iter_count >= 3."
+  notes: "Wheel-only physics (no humanoid asset); jetbot primitive avoids Nucleus."
+
+- id: rl-isaaclab-anymal-locomotion-baseline-001
+  source: retrieval-miss
+  category: rl-training
+  title: "IsaacLab Anymal locomotion — clone 64 envs and run 1k steps PPO baseline"
+  description: >
+    create_isaaclab_env with Anymal-like quadruped; clone_envs 64; PPO training
+    loop for 1000 steps via launch_training; profile_training_throughput.
+    Locally runnable: small step count, primitive quadruped scaffold.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["isaaclab"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: train
+  estimated_agent_minutes: 120
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Launch a PPO baseline on a 64-env Anymal-class quadruped for 1000 training steps and report throughput."
+  key_tools: ["create_isaaclab_env", "clone_envs", "launch_training", "profile_training_throughput", "checkpoint_training"]
+  success_criterion: "Training completes 1000 steps and profile_training_throughput reports >= 5k env-steps/sec."
+  notes: "Companion to rl-isaaclab-humanoid-locomotion-001 (which is queued); quadruped uses primitive box-body, no Nucleus."
+
+- id: rl-policy-export-onnx-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Policy export — RL checkpoint to ONNX with verification"
+  description: >
+    export_policy converts a trained RL checkpoint to ONNX; load_rl_policy
+    re-loads it and verifies action parity vs the original checkpoint over
+    20 sampled observations. Exercises export+round-trip verification.
+  priority_tier: 1
+  complexity: simple
+  asset_dependencies: []
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 30
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Export an RL checkpoint to ONNX and verify action parity vs the source over 20 observations."
+  key_tools: ["export_policy", "load_rl_policy", "checkpoint_training", "compare_policies", "evaluate_reward"]
+  success_criterion: "Mean absolute action delta between ONNX and source policy <= 1e-4 across 20 obs."
+  notes: "Pure ML-engineering canonical, no Kit scene needed."
+
+- id: rl-domain-randomization-correlated-001
+  source: retrieval-miss
+  category: rl-training
+  title: "Correlated DR rollout — friction-mass joint distribution for training"
+  description: >
+    configure_correlated_dr sets friction and mass to share a seed (high
+    friction => high mass); apply_dr_preset 'manufacturing'; roll 100 episodes
+    and chart per-axis variance. Exercises correlated-axis DR for training.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: train
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Generate 100 DR-randomized rollouts where friction and mass are correlated and validate the joint distribution."
+  key_tools: ["configure_correlated_dr", "sample_correlated_dr", "apply_dr_preset", "preview_dr", "analyze_randomization"]
+  success_criterion: "Pearson correlation between sampled friction and mass series >= 0.8 across 100 rollouts."
+  notes: "Companion to rl-sim2real-domain-rand-transfer; isolates correlated-axis behavior."
+
+- id: ros2-tf-tree-validation-001
+  source: retrieval-miss
+  category: ros2-bridge
+  title: "ROS2 TF-tree validation — Franka publishes; consumer verifies"
+  description: >
+    configure_ros2_bridge for Franka; publish_robot_description; show_tf_tree
+    and check_tf_health verify the tree is complete and consistent.
+    Plumbing-only canonical with no motion.
+  priority_tier: 1
+  complexity: simple
+  asset_dependencies: ["Franka", "ROS2"]
+  blockers: []
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 30
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Publish Franka URDF over ROS2 and verify the TF tree is healthy and complete."
+  key_tools: ["configure_ros2_bridge", "publish_robot_description", "show_tf_tree", "check_tf_health", "diagnose_ros2"]
+  success_criterion: "check_tf_health reports no missing transforms and tf tree contains >= 7 frames."
+  notes: "ROS2 plumbing without Nucleus; no Nav2 stack."
+
+- id: ros2-qos-mismatch-repair-001
+  source: retrieval-miss
+  category: ros2-bridge
+  title: "ROS2 QoS repair — detect publisher/subscriber mismatch and fix"
+  description: >
+    Configure ROS2 bridge with intentional QoS mismatch (Reliable pub vs
+    BestEffort sub); diagnose_ros2 detects the gap; fix_ros2_qos applies
+    matching profile. Exercises QoS-diagnostic loop.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka", "ROS2"]
+  blockers: []
+  motion_controller_preference: ros2_control
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Detect a QoS mismatch on a ROS2 topic and apply a matching QoS profile, then verify messages flow."
+  key_tools: ["configure_ros2_bridge", "diagnose_ros2", "fix_ros2_qos", "ros2_subscribe_once", "precheck_ros2_environment"]
+  success_criterion: "After fix_ros2_qos, ros2_subscribe_once receives at least 1 message within a 5 s window."
+  notes: "Companion to ros2-multi-rate-setup; focuses on diagnostic-and-repair pattern."
+
+- id: safety-clearance-monitor-stop-001
+  source: ISO-15066
+  category: safety
+  title: "Clearance monitor — robot stops when human proxy enters envelope"
+  description: >
+    set_clearance_monitor defines a 0.5 m envelope around the wrist;
+    a moving 'human' proxy sphere enters the envelope; sim_control should
+    pause arm motion. Exercises clearance-based safety stop.
+  priority_tier: 1
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Pause robot motion when a moving human-proxy sphere breaches a 0.5 m wrist envelope."
+  key_tools: ["set_clearance_monitor", "visualize_clearance", "register_moving_obstacle", "sim_control", "get_world_transform"]
+  success_criterion: "Joint velocities go to zero within 1 simulated second of the sphere entering the envelope."
+  notes: "ISO 15066 cobot speed-and-separation monitoring; pure proxy geometry (no human asset)."
+
+- id: safety-emergency-stop-state-001
+  source: ISO-15066
+  category: safety
+  title: "Emergency-stop state — articulation drops drive on e-stop signal"
+  description: >
+    Custom OmniGraph emits an e-stop trigger; set_drive_gains drops stiffness
+    to zero on receipt; get_articulation_state confirms zero torque commands.
+    Exercises e-stop reaction chain.
+  priority_tier: 1
+  complexity: simple
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: direct_joint
+  pattern_hint: other
+  estimated_agent_minutes: 30
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Trigger an e-stop and confirm all joint drives go to zero stiffness within one sim step."
+  key_tools: ["create_omnigraph", "set_drive_gains", "get_articulation_state", "monitor_joint_effort", "sim_control"]
+  success_criterion: "All Franka joint stiffness values report zero after e-stop trigger fires."
+  notes: "Pure plumbing canonical; companion to safety-clearance-monitor."
+
+- id: interpretability-policy-attention-001
+  source: retrieval-miss
+  category: interpretability
+  title: "Policy attention map — extract attention over wrist-cam frames"
+  description: >
+    load_rl_policy + extract_attention_maps on a 50-frame wrist-cam sequence;
+    save heatmaps as a video via render_video. Exercises attention extraction
+    + visualization.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: none
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Extract per-frame attention heatmaps from a loaded policy and render them as a video."
+  key_tools: ["load_rl_policy", "extract_attention_maps", "capture_camera_image", "render_video", "configure_camera"]
+  success_criterion: "Output video has 50 frames matching wrist-cam input and attention pixel sums > 0 per frame."
+  notes: "Companion to groot-attention-maps-visualize but for an RL policy, not GR00T."
+
+- id: interpretability-ood-rollout-detect-001
+  source: retrieval-miss
+  category: interpretability
+  title: "OOD rollout detection — flag observations off training manifold"
+  description: >
+    detect_ood on 20 rollout observations from a Franka pick-place; baseline
+    distribution from prior 100 in-distribution rollouts. Exercises OOD
+    detector wiring with monitor_forgetting.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["Franka"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: other
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Detect out-of-distribution observations in a 20-step Franka pick-place rollout."
+  key_tools: ["detect_ood", "monitor_forgetting", "load_rl_policy", "evaluate_reward", "get_env_observations"]
+  success_criterion: "detect_ood returns a flag per observation and at least one observation is correctly tagged OOD vs baseline."
+  notes: "Companion to rl-detect-ood-distribution-shift; tighter local-runnable scope (no full training)."
+
+- id: yrkesroll-machinist-cnc-load-001
+  source: ONET
+  category: yrkesroll
+  title: "CNC machine tender — load blank, close door, unload finished part"
+  description: >
+    UR10 picks a blank from infeed, places into a CNC chuck-proxy, triggers
+    door-close via set_attribute on a hinge joint, waits for a 'finished'
+    signal, then unloads. Exercises machine-tending door interlock variant
+    with explicit blank/part swap.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["UR10"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: pick_place
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Load a blank into a CNC fixture, close the door, then unload the finished part to outfeed."
+  key_tools: ["setup_pick_place_controller", "set_joint_targets", "grasp_object", "create_omnigraph", "get_world_transform"]
+  success_criterion: "Finished part delivered to outfeed AABB and door joint position = closed during simulated cycle."
+  notes: "Companion to yrkesroll-machine-tender-door-interlock-002; explicit blank/part swap not just door interlock; ONET SOC 51-4011."
+
+- id: yrkesroll-quality-tech-fixture-gauge-001
+  source: ONET
+  category: yrkesroll
+  title: "Quality technician — gauge a part with overhead camera + caliper proxy"
+  description: >
+    Part arrives on conveyor; overhead camera measures bounding-box; a virtual
+    caliper proxy (two parallel raycasts) measures width; if outside tolerance
+    the part is diverted to reject. Exercises raycast-as-gauge + dual-divert.
+  priority_tier: 2
+  complexity: medium
+  asset_dependencies: ["UR10", "conveyor_primitives"]
+  blockers: []
+  motion_controller_preference: curobo
+  pattern_hint: sort
+  estimated_agent_minutes: 60
+  status: queued
+  tier: tier-1-locally-runnable
+  goal: "Measure a part's width via parallel raycasts and divert it to reject if outside the configured tolerance."
+  key_tools: ["raycast", "get_bounding_box", "capture_camera_image", "configure_camera", "setup_pick_place_controller"]
+  success_criterion: "Parts with width >= tolerance arrive in reject bin; parts within tolerance arrive in accept bin (10 trials)."
+  notes: "ONET SOC 17-3026 quality-control technician; raycast-gauge pattern is novel; reuses dual-bin divert from inspector canonical."

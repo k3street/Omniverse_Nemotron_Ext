@@ -1,6 +1,6 @@
 {
   "task_id": "CP-NEW-kitting-station-6sku",
-  "goal": "6-SKU kitting station with rotary carousel: create_rotary_table (first use in library) presents 6 source bins sequentially; UR10 picks one item from each carousel index and places it in a target kit tray. Exercises create_rotary_table for carousel indexing, set_attribute to step angular position, create_kit_tray with 6-slot grid, track_slot_occupancy for completion check, and setup_pick_place_controller (curobo) for UR10.",
+  "goal": "6-SKU kitting station with rotary carousel: create_rotary_table (first use in library) presents 6 source bins sequentially; UR10 picks one item from each carousel index and places it in a target kit tray. Exercises create_rotary_table for carousel indexing, set_attribute to step angular position, create_kit_tray with 6-slot grid, track_slot_occupancy for completion check, and setup_pick_place_controller (curobo) for UR10. LIMITATION: The static template captures source_paths and drop_targets for carousel index=0 only. A full 6-cycle pick requires per-step carousel rotation (set_attribute revJoint) followed by get_world_transform to refresh pick targets \u2014 not modelled in the static code. Runtime executor must iterate indices 1-5 with updated world transforms.",
   "tools_used": [
     "create_prim",
     "set_attribute",
@@ -13,12 +13,16 @@
     "setup_pick_place_controller",
     "track_slot_occupancy"
   ],
-  "thoughts": "Design rationale for CP-NEW-kitting-station-6sku:\n\n1) Rotary carousel: create_rotary_table at /World/Carousel, position=[0.0, 0.0, 0.75], radius=0.55, height=0.05, angular_velocity_deg=0 (passive — stepped by set_attribute). Six source bins equally spaced at 60-degree intervals on the carousel rim. Each bin contains one SKU cube (0.045m). Carousel indexes 60-deg per pick step via set_attribute(attr_name='physics:revJoint:targetPosition').\n\n2) UR10 arm: mounted at [0.90, 0.0, 0.75] on robot table. Pick station: carousel bin index 0 starts at [0.55, 0.0, 0.80] (carousel rim at radius 0.55 from center, +X). Robot picks from this fixed handoff position after each carousel index step.\n\n3) Kit tray: create_kit_tray at /World/KitTray, position=[-0.60, 0.0, 0.80], tray_size=[0.40, 0.35, 0.04], slot_layout='grid_2x3' (2 rows x 3 cols = 6 slots), slot_size=0.05, slot_spacing=0.12.\n\n4) Pick-place loop (6 cycles): for each SKU index 0..5 — (a) step carousel 60 deg via set_attribute, (b) wait settle, (c) setup_pick_place_controller picks from handoff position to tray slot. source_paths = [/World/Carousel/Bin_0/Cube .. /Bin_5/Cube], drop_targets computed from tray slot centers.\n\n5) Completion: track_slot_occupancy on /World/KitTray verifies all 6 slots occupied. Success = 6/6 slots filled.\n\n6) Physics: CPU MBP for stable carousel rotation. UR10 robot_family='ur10'.\n\n7) Geometry: carousel surface z = 0.75 + 0.05 = 0.80. Bin floor at z=0.80, cubes at z=0.80+0.0225=0.8225 (half cube size). Tray slot centers at z=0.80+0.04+0.0225=0.8625.",
-  "code": "# ── Lighting and ground ──────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU MBP for stable carousel indexing ────────────────────────────\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# ── Carousel (rotary table) ───────────────────────────────────────────────────\n# radius=0.55 places source bins at 0.55m from carousel center.\n# angular_velocity_deg=0: passive, stepped manually per pick cycle.\ncreate_rotary_table(\n    table_path=\"/World/Carousel\",\n    position=[0.0, 0.0, 0.75],\n    radius=0.55,\n    height=0.05,\n    angular_velocity_deg=0,\n)\n\n# ── Six source bins on carousel rim (60-deg spacing) ─────────────────────────\n# Bin_0 starts at +X (handoff position facing UR10).\n# Bins are child prims of /World/Carousel so they rotate with the table.\ncreate_bin(prim_path=\"/World/Carousel/Bin_0\", position=[0.55, 0.0, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_1\", position=[0.275, 0.476, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_2\", position=[-0.275, 0.476, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_3\", position=[-0.55, 0.0, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_4\", position=[-0.275, -0.476, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_5\", position=[0.275, -0.476, 0.0], size=[0.10, 0.10, 0.06])\n\n# ── One SKU cube in each bin (0.045m, distinct semantic labels) ───────────────\ncreate_prim(prim_path=\"/World/Carousel/Bin_0/Cube\", prim_type=\"Cube\", position=[0.55, 0.0, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_0/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_1/Cube\", prim_type=\"Cube\", position=[0.275, 0.476, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_1/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_2/Cube\", prim_type=\"Cube\", position=[-0.275, 0.476, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_2/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_3/Cube\", prim_type=\"Cube\", position=[-0.55, 0.0, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_3/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_4/Cube\", prim_type=\"Cube\", position=[-0.275, -0.476, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_4/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_5/Cube\", prim_type=\"Cube\", position=[0.275, -0.476, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_5/Cube\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot table and UR10 arm ──────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/RobotTable\", prim_type=\"Cube\", position=[0.90, 0.0, 0.375], scale=[0.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/RobotTable\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0.90, 0.0, 0.75],\n)\n\n# ── Kit tray (6-slot grid_2x3) ───────────────────────────────────────────────\n# Placed opposite the robot from the carousel at [-0.60, 0.0, 0.80].\ncreate_kit_tray(\n    tray_path=\"/World/KitTray\",\n    position=[-0.60, 0.0, 0.80],\n    tray_size=[0.40, 0.35, 0.04],\n    slot_layout=\"grid_2x3\",\n    slot_size=0.05,\n    slot_spacing=0.12,\n)\n\n# ── Pick-place: 6 cycles, one per carousel index ─────────────────────────────\n# Handoff position = carousel bin_0 world pos when index=0: [0.55, 0.0, 0.8225]\n# After each 60-deg step the next bin rotates to the handoff position.\n# drop_targets maps each cube path to its assigned tray slot center.\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    robot_family=\"ur10\",\n    source_paths=[\n        \"/World/Carousel/Bin_0/Cube\",\n        \"/World/Carousel/Bin_1/Cube\",\n        \"/World/Carousel/Bin_2/Cube\",\n        \"/World/Carousel/Bin_3/Cube\",\n        \"/World/Carousel/Bin_4/Cube\",\n        \"/World/Carousel/Bin_5/Cube\",\n    ],\n    drop_targets={\n        \"/World/Carousel/Bin_0/Cube\": [-0.48, 0.06, 0.8625],\n        \"/World/Carousel/Bin_1/Cube\": [-0.48, -0.06, 0.8625],\n        \"/World/Carousel/Bin_2/Cube\": [-0.60, 0.06, 0.8625],\n        \"/World/Carousel/Bin_3/Cube\": [-0.60, -0.06, 0.8625],\n        \"/World/Carousel/Bin_4/Cube\": [-0.72, 0.06, 0.8625],\n        \"/World/Carousel/Bin_5/Cube\": [-0.72, -0.06, 0.8625],\n    },\n    planning_obstacles=[\"/World/RobotTable\", \"/World/KitTray\", \"/World/Carousel\"],\n    grip_style=\"fixed_joint\",\n)\n\n# ── Completion verification ───────────────────────────────────────────────────\ntrack_slot_occupancy(\n    tray_path=\"/World/KitTray\",\n    cube_paths=[\n        \"/World/Carousel/Bin_0/Cube\",\n        \"/World/Carousel/Bin_1/Cube\",\n        \"/World/Carousel/Bin_2/Cube\",\n        \"/World/Carousel/Bin_3/Cube\",\n        \"/World/Carousel/Bin_4/Cube\",\n        \"/World/Carousel/Bin_5/Cube\",\n    ],\n)",
+  "thoughts": "Design rationale for CP-NEW-kitting-station-6sku:\n\n1) Rotary carousel: create_rotary_table at /World/Carousel, position=[0.0, 0.0, 0.75], radius=0.55, height=0.05, angular_velocity_deg=0 (passive \u2014 stepped by set_attribute). Six source bins equally spaced at 60-degree intervals on the carousel rim. Each bin contains one SKU cube (0.045m). Carousel indexes 60-deg per pick step via set_attribute(attr_name='physics:revJoint:targetPosition').\n\n2) UR10 arm: mounted at [0.90, 0.0, 0.75] on robot table. Pick station: carousel bin index 0 starts at [0.55, 0.0, 0.80] (carousel rim at radius 0.55 from center, +X). Robot picks from this fixed handoff position after each carousel index step.\n\n3) Kit tray: create_kit_tray at /World/KitTray, position=[-0.60, 0.0, 0.80], tray_size=[0.40, 0.35, 0.04], slot_layout='grid_2x3' (2 rows x 3 cols = 6 slots), slot_size=0.05, slot_spacing=0.12.\n\n4) Pick-place loop (6 cycles): for each SKU index 0..5 \u2014 (a) step carousel 60 deg via set_attribute, (b) wait settle, (c) setup_pick_place_controller picks from handoff position to tray slot. source_paths = [/World/Carousel/Bin_0/Cube .. /Bin_5/Cube], drop_targets computed from tray slot centers.\n\n5) Completion: track_slot_occupancy on /World/KitTray verifies all 6 slots occupied. Success = 6/6 slots filled.\n\n6) Physics: CPU MBP for stable carousel rotation. UR10 robot_family='ur10'.\n\n7) Geometry: carousel surface z = 0.75 + 0.05 = 0.80. Bin floor at z=0.80, cubes at z=0.80+0.0225=0.8225 (half cube size). Tray slot centers at z=0.80+0.04+0.0225=0.8625.",
+  "code": "# \u2500\u2500 Lighting and ground \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Physics: CPU MBP for stable carousel indexing \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# \u2500\u2500 Carousel (rotary table) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# radius=0.55 places source bins at 0.55m from carousel center.\n# angular_velocity_deg=0: passive, stepped manually per pick cycle.\ncreate_rotary_table(\n    table_path=\"/World/Carousel\",\n    position=[0.0, 0.0, 0.75],\n    radius=0.55,\n    height=0.05,\n    angular_velocity_deg=0,\n)\n\n# \u2500\u2500 Six source bins on carousel rim (60-deg spacing) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Bin_0 starts at +X (handoff position facing UR10).\n# Bins are child prims of /World/Carousel so they rotate with the table.\ncreate_bin(prim_path=\"/World/Carousel/Bin_0\", position=[0.55, 0.0, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_1\", position=[0.275, 0.476, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_2\", position=[-0.275, 0.476, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_3\", position=[-0.55, 0.0, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_4\", position=[-0.275, -0.476, 0.0], size=[0.10, 0.10, 0.06])\ncreate_bin(prim_path=\"/World/Carousel/Bin_5\", position=[0.275, -0.476, 0.0], size=[0.10, 0.10, 0.06])\n\n# \u2500\u2500 One SKU cube in each bin (0.045m, distinct semantic labels) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/Carousel/Bin_0/Cube\", prim_type=\"Cube\", position=[0.55, 0.0, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_0/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_1/Cube\", prim_type=\"Cube\", position=[0.275, 0.476, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_1/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_2/Cube\", prim_type=\"Cube\", position=[-0.275, 0.476, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_2/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_3/Cube\", prim_type=\"Cube\", position=[-0.55, 0.0, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_3/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_4/Cube\", prim_type=\"Cube\", position=[-0.275, -0.476, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_4/Cube\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Carousel/Bin_5/Cube\", prim_type=\"Cube\", position=[0.275, -0.476, 0.0525], scale=[0.045, 0.045, 0.045])\napply_api_schema(prim_path=\"/World/Carousel/Bin_5/Cube\", schema_name=\"PhysicsCollisionAPI\")\n\n# \u2500\u2500 Robot table and UR10 arm \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ncreate_prim(prim_path=\"/World/RobotTable\", prim_type=\"Cube\", position=[0.90, 0.0, 0.375], scale=[0.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/RobotTable\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(\n    robot_name=\"ur10\",\n    dest_path=\"/World/UR10\",\n    position=[0.90, 0.0, 0.75],\n)\n\n# \u2500\u2500 Kit tray (6-slot grid_2x3) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Placed opposite the robot from the carousel at [-0.60, 0.0, 0.80].\ncreate_kit_tray(\n    tray_path=\"/World/KitTray\",\n    position=[-0.60, 0.0, 0.80],\n    tray_size=[0.40, 0.35, 0.04],\n    slot_layout=\"grid_2x3\",\n    slot_size=0.05,\n    slot_spacing=0.12,\n)\n\n# \u2500\u2500 Pick-place: 6 cycles, one per carousel index \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n# Handoff position = carousel bin_0 world pos when index=0: [0.55, 0.0, 0.8225]\n# After each 60-deg step the next bin rotates to the handoff position.\n# drop_targets maps each cube path to its assigned tray slot center.\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    target_source=\"curobo\",\n    robot_family=\"ur10\",\n    source_paths=[\n        \"/World/Carousel/Bin_0/Cube\",\n        \"/World/Carousel/Bin_1/Cube\",\n        \"/World/Carousel/Bin_2/Cube\",\n        \"/World/Carousel/Bin_3/Cube\",\n        \"/World/Carousel/Bin_4/Cube\",\n        \"/World/Carousel/Bin_5/Cube\",\n    ],\n    drop_targets={\n        \"/World/Carousel/Bin_0/Cube\": [-0.48, 0.06, 0.8625],\n        \"/World/Carousel/Bin_1/Cube\": [-0.48, -0.06, 0.8625],\n        \"/World/Carousel/Bin_2/Cube\": [-0.60, 0.06, 0.8625],\n        \"/World/Carousel/Bin_3/Cube\": [-0.60, -0.06, 0.8625],\n        \"/World/Carousel/Bin_4/Cube\": [-0.72, 0.06, 0.8625],\n        \"/World/Carousel/Bin_5/Cube\": [-0.72, -0.06, 0.8625],\n    },\n    planning_obstacles=[\"/World/RobotTable\", \"/World/KitTray\", \"/World/Carousel\"],\n    grip_style=\"fixed_joint\",\n)\n\n# \u2500\u2500 Completion verification \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ntrack_slot_occupancy(\n    tray_path=\"/World/KitTray\",\n    cube_paths=[\n        \"/World/Carousel/Bin_0/Cube\",\n        \"/World/Carousel/Bin_1/Cube\",\n        \"/World/Carousel/Bin_2/Cube\",\n        \"/World/Carousel/Bin_3/Cube\",\n        \"/World/Carousel/Bin_4/Cube\",\n        \"/World/Carousel/Bin_5/Cube\",\n    ],\n)",
   "settle_state": {
     "rotary_tables": {
       "/World/Carousel": {
-        "position": [0.0, 0.0, 0.75],
+        "position": [
+          0.0,
+          0.0,
+          0.75
+        ],
         "radius": 0.55,
         "index": 0
       }
@@ -72,14 +76,22 @@
   },
   "diagnose_args": {
     "robot_path": "/World/UR10",
-    "obstacles": ["/World/RobotTable", "/World/KitTray", "/World/Carousel"],
+    "obstacles": [
+      "/World/RobotTable",
+      "/World/KitTray",
+      "/World/Carousel"
+    ],
     "tray_path": "/World/KitTray",
     "carousel_path": "/World/Carousel",
-    "robot_base": [0.90, 0.0, 0.75]
+    "robot_base": [
+      0.9,
+      0.0,
+      0.75
+    ]
   },
   "failure_modes": [
-    "Carousel child-prim world position: bins and cubes are child prims of /World/Carousel. After carousel rotation their world positions change — cuRobo source_paths must be re-queried after each index step via get_world_transform. Mitigation: add a set_attribute step between picks to advance carousel index, then get_world_transform to refresh pick target.",
-    "UR10 reach: robot_base=[0.90, 0.0, 0.75], handoff at [0.55, 0.0, 0.8225] — lateral 0.35m, delta-Z 0.0725m — well within UR10 0.85m reach. Tray slot at [-0.48...-0.72, ±0.06, 0.8625] — lateral 1.38-1.62m from robot — verify cuRobo IK succeeds; if not shift robot_base to [0.70, 0.0, 0.75].",
+    "Carousel child-prim world position [KNOWN LIMITATION]: bins and cubes are child prims of /World/Carousel. After each 60-deg carousel rotation their world positions change. The static setup_pick_place_controller call only encodes positions for index=0. To pick from indices 1-5, a runtime loop must: (a) call set_attribute(prim_path='/World/Carousel/RevJoint', attr_name='physics:revJoint:targetPosition', value=N*60) to advance the carousel, (b) call sim_control(action='step', step_count=30) to let physics settle, (c) call get_world_transform for each active bin/cube to get updated world positions, (d) re-invoke setup_pick_place_controller with the refreshed positions. The static code is valid for a single-index demonstration (index=0 pick to tray); full 6-cycle kitting requires the runtime loop above.",
+    "UR10 reach: robot_base=[0.90, 0.0, 0.75], handoff at [0.55, 0.0, 0.8225] \u2014 lateral 0.35m, delta-Z 0.0725m \u2014 well within UR10 0.85m reach. Tray slot at [-0.48...-0.72, \u00b10.06, 0.8625] \u2014 lateral 1.38-1.62m from robot \u2014 verify cuRobo IK succeeds; if not shift robot_base to [0.70, 0.0, 0.75].",
     "Carousel bin relative positions: bins defined relative to Carousel origin at [0.0, 0.0, 0.75]. After robot_wizard places UR10 the scene root must be /World; verify bin world z = 0.75 + 0.0 = 0.75 (bin floor), cube world z = 0.75 + 0.0525 = 0.8025. Adjust pick targets accordingly.",
     "physics:revJoint:targetPosition stepping: create_rotary_table may expose the revolute joint under a path like /World/Carousel/RevJoint. Use list_all_prims(filter='/World/Carousel*') to discover joint path before calling set_attribute for index stepping.",
     "slot_layout 'grid_2x3': create_kit_tray must support 'grid_2x3'. If only 'grid_RxC' form accepted, use 'grid_2x3' exactly as written; if parse fails fall back to 'row_6' layout and adjust drop_targets to a single-row arrangement.",
@@ -106,23 +118,33 @@
   },
   "roles": {
     "primary_robot": {
-      "constraints": ["ur10", "ur10e", "franka_panda"],
+      "constraints": [
+        "ur10",
+        "ur10e",
+        "franka_panda"
+      ],
       "expected_count": 1,
       "required": true,
       "disambiguator": "reach_preferred"
     },
     "carousel": {
-      "constraints": ["rotary_table"],
+      "constraints": [
+        "rotary_table"
+      ],
       "expected_count": 1,
       "required": true
     },
     "source_bins": {
-      "constraints": ["bin"],
+      "constraints": [
+        "bin"
+      ],
       "expected_count": 6,
       "required": true
     },
     "kit_tray": {
-      "constraints": ["kit_tray"],
+      "constraints": [
+        "kit_tray"
+      ],
       "expected_count": 1,
       "required": true
     }
@@ -131,17 +153,29 @@
     "primary_robot": {
       "path": "/World/UR10",
       "class": "ur10",
-      "position": [0.90, 0.0, 0.75]
+      "position": [
+        0.9,
+        0.0,
+        0.75
+      ]
     },
     "carousel": {
       "path": "/World/Carousel",
-      "position": [0.0, 0.0, 0.75],
+      "position": [
+        0.0,
+        0.0,
+        0.75
+      ],
       "radius": 0.55,
       "n_bins": 6
     },
     "kit_tray": {
       "path": "/World/KitTray",
-      "position": [-0.60, 0.0, 0.80],
+      "position": [
+        -0.6,
+        0.0,
+        0.8
+      ],
       "slot_layout": "grid_2x3"
     },
     "source_bins": {
@@ -160,8 +194,10 @@
   "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_rotary_table(\n    table_path={{carousel.path}},\n    position={{carousel.position}},\n    radius={{carousel.radius}},\n    height=0.05,\n    angular_velocity_deg=0,\n)\n\ncreate_kit_tray(\n    tray_path={{kit_tray.path}},\n    position={{kit_tray.position}},\n    tray_size=[0.40, 0.35, 0.04],\n    slot_layout={{kit_tray.slot_layout}},\n    slot_size=0.05,\n    slot_spacing=0.12,\n)\n\ncreate_prim(prim_path=\"/World/RobotTable\", prim_type=\"Cube\", position=[0.90, 0.0, 0.375], scale=[0.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/RobotTable\", schema_name=\"PhysicsCollisionAPI\")\nrobot_wizard(\n    robot_name={{primary_robot.class}},\n    dest_path={{primary_robot.path}},\n    position={{primary_robot.position}},\n)\n\nsetup_pick_place_controller(\n    robot_path={{primary_robot.path}},\n    target_source=\"curobo\",\n    robot_family={{primary_robot.class}},\n    source_paths={{source_bins.paths}},\n    drop_targets={},\n    planning_obstacles=[\"/World/RobotTable\", {{kit_tray.path}}, {{carousel.path}}],\n    grip_style=\"fixed_joint\",\n)\n\ntrack_slot_occupancy(\n    tray_path={{kit_tray.path}},\n    cube_paths={{source_bins.paths}},\n)",
   "motion_controllers": {
     "verified": [],
-    "untested": ["curobo"],
+    "untested": [
+      "curobo"
+    ],
     "failed": {}
   },
-  "verified_status": "drafted-2026-05-16-A32; form-gate pending"
+  "verified_status": "patched-r-a40-fix; carousel-rotation-limitation documented in goal+failure_modes; form-gate pending"
 }

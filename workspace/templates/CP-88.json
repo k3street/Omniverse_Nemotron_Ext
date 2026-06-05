@@ -1,0 +1,110 @@
+{
+  "task_id": "CP-88",
+  "goal": "Build an OpenPLC-in-the-loop conveyor station: openplc_runtime_attach wires an OpenPLC Runtime process to Isaac Sim via the Modbus convenience wrapper; ladder-logic coil state drives conveyor start/stop. Isaac Sim reads the run-coil register every 100 ms; belt pauses within 250 ms of the coil going LOW. Exercises openplc_runtime_attach (Phase 10 M5 P3) and diagnose_modbus_bridge. Plumbing-only canonical (no cube delivery, no robot arm).",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "create_conveyor",
+    "openplc_runtime_attach",
+    "diagnose_modbus_bridge",
+    "modbus_tcp_bridge_detach",
+    "list_bridges"
+  ],
+  "thoughts": [
+    "openplc_runtime_attach is the Phase-10 M5 P3 convenience wrapper over modbus_tcp_bridge_attach that auto-maps OpenPLC I/O coils. It uses the same subprocess pattern but separates input_map (Isaac reads from PLC outputs) from output_map (Isaac writes to PLC inputs). Register address convention: output coils at +0, input registers at +1000.",
+    "Scene: single conveyor belt on the floor, no robot arm. The belt's run_command USD attribute is mapped to OpenPLC output coil 0 (Q0.0 in IEC 61131-3 notation, Modbus holding register 0 on the default port 502).",
+    "Test workflow: (1) openplc_runtime_attach with input_map={belt_attr: 0} at rate_hz=10; (2) list_bridges confirms bridge alive; (3) diagnose_modbus_bridge checks n_register_updates>0; (4) modbus_tcp_bridge_detach cleans up. PLC process must be running externally (OpenPLC Runtime on port 502) or pymodbus mock server.",
+    "Distinct from CP-NEW-plc-conveyor (which uses raw modbus_tcp_bridge_attach). This canonical uses the openplc_runtime_attach wrapper that also configures the register address offset convention and provides a cleaner API for PLC-authoring workflows.",
+    "No simulate_args/verify_args: plumbing-only, same class as CP-NEW-plc-conveyor."
+  ],
+  "code": "# -- Lighting + ground -------------------------------------------------------\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# -- Conveyor belt: 2 m long, top surface z=0.805, belt runs in +x direction --\ncreate_conveyor(\n    prim_path=\"/World/PLCConveyor\",\n    position=[0.0, 0.0, 0.78],\n    size=[2.0, 0.4, 0.05],\n    surface_velocity=[0.3, 0, 0],\n)\n\n# -- OpenPLC bridge: output_map reads run-coil from PLC (register 0) ----------\n# input_map drives a sensor-reset coil that the PLC reads back at register 1000.\n# rate_hz=10 -> 100 ms poll, well under 250 ms reaction-time spec.\nbridge_result = openplc_runtime_attach(\n    host=\"127.0.0.1\",\n    port=502,\n    output_map={\"/World/PLCConveyor/run_command\": 0},\n    input_map={\"/World/PLCConveyor/sensor_reset\": 1000},\n    rate_hz=10.0,\n)\n# Capture the assigned bridge_id — do not hard-code; the handler generates it.\nbid = bridge_result[\"bridge_id\"]\n\n# -- Verify bridge is alive ---------------------------------------------------\nlist_bridges()\ndiagnose_modbus_bridge(bridge_id=bid)\n\n# -- Cleanup (call after validation) -----------------------------------------\nmodbus_tcp_bridge_detach(bridge_id=bid)\n",
+  "code_template": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_conveyor(\n    prim_path={{plc_conveyor.path}},\n    position={{plc_conveyor.position}},\n    size={{plc_conveyor.size}},\n    surface_velocity={{plc_conveyor.surface_velocity}},\n)\n\nbridge_result = openplc_runtime_attach(\n    host={{openplc_bridge.host}},\n    port={{openplc_bridge.port}},\n    output_map={{openplc_bridge.output_map}},\n    input_map={{openplc_bridge.input_map}},\n    rate_hz={{openplc_bridge.rate_hz}},\n)\nbid = bridge_result[\"bridge_id\"]\n\nlist_bridges()\ndiagnose_modbus_bridge(bridge_id=bid)\n\nmodbus_tcp_bridge_detach(bridge_id=bid)",
+  "failure_modes": [
+    "OpenPLC Runtime not running on port 502 — bridge attach succeeds but diagnose shows alive=false + connection_refused in log_tail. Use pymodbus mock server for offline testing.",
+    "bridge_id is assigned by the handler at attach time — always capture bridge_result[\"bridge_id\"] and use that variable for diagnose_modbus_bridge and modbus_tcp_bridge_detach. Never hard-code a guessed bridge_id string.",
+    "output_map register 0 vs 1 — OpenPLC coil Q0.0 maps to Modbus coil 0 (address 0x0001 in Modbus PDU). The openplc_runtime_attach wrapper uses holding-register semantics; confirm against PLC project's Modbus address table.",
+    "input_map offset +1000 — OpenPLC inputs (I0.x) are mapped at holding registers 1000+. Mismatched offset causes sensor_reset feedback to never reach the PLC.",
+    "Conflicting modbus_tcp_bridge_attach — if a raw modbus_tcp_bridge_attach to the same host:port is already running, openplc_runtime_attach will fail with port conflict. Call list_bridges first and detach stale bridges."
+  ],
+  "verified_status": "draft",
+  "extends": "CP-NEW-plc-conveyor",
+  "extension_notes": "Upgrades CP-NEW-plc-conveyor (raw modbus_tcp_bridge_attach) to the openplc_runtime_attach convenience wrapper. Adds bidirectional I/O map (output_map + input_map) and confirms the Phase-10 M5 P3 register-offset convention (+1000 for inputs). Plumbing-only — no robot arm, no cube delivery.",
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 0,
+      "n_handoffs": 0,
+      "uses_conveyor_transport": true,
+      "has_stacking": false,
+      "uses_plc_bridge": true,
+      "bridge_kind": "openplc"
+    },
+    "structural_tags": [
+      "isaac:bridge.openplc",
+      "isaac:bridge.modbus_tcp",
+      "isaac:integration.plc_in_the_loop",
+      "isaac:topology.no_robot",
+      "isaac:transport.conveyor",
+      "isaac:topology.industrial_bridge_validation"
+    ]
+  },
+  "roles": {
+    "plc_conveyor": {
+      "constraints": [
+        "conveyor"
+      ],
+      "expected_count": 1,
+      "required": true
+    }
+  },
+  "role_defaults": {
+    "plc_conveyor": {
+      "path": "/World/PLCConveyor",
+      "position": [
+        0.0,
+        0.0,
+        0.78
+      ],
+      "size": [
+        2.0,
+        0.4,
+        0.05
+      ],
+      "surface_velocity": [
+        0.3,
+        0,
+        0
+      ]
+    },
+    "openplc_bridge": {
+      "host": "127.0.0.1",
+      "port": 502,
+      "bridge_id": "openplc_127.0.0.1_502",
+      "output_map": {
+        "/World/PLCConveyor/run_command": 0
+      },
+      "input_map": {
+        "/World/PLCConveyor/sensor_reset": 1000
+      },
+      "rate_hz": 10.0
+    }
+  },
+  "settle_state": {
+    "conveyors": {
+      "/World/PLCConveyor": [
+        0.3,
+        0,
+        0
+      ]
+    }
+  },
+  "verify_args": null,
+  "simulate_args": null,
+  "diagnose_args": null,
+  "motion_controllers": {
+    "verified": [],
+    "untested": [],
+    "failed": {}
+  }
+}

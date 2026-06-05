@@ -1,0 +1,123 @@
+{
+  "task_id": "CP-NEW-multi-rate-sensor-fusion",
+  "goal": "Configure a Franka pick-place cell with dual-rate sensor fusion: setup_multi_rate sets lower_rate_hz=30 (camera/env render) and upper_rate_hz=1000 (force-torque control loop); add_force_torque_sensor attaches a wrist F/T sensor with noise_std=0.05; configure_ros2_time enables sim_time so downstream fusion nodes receive a consistent /clock; configure_ros2_bridge wires both the wrist camera and F/T sensor topics through the OmniGraph bridge. The canonical exercises the multi-rate VecEnv wrapper pattern — first use of setup_multi_rate in the library — and demonstrates timestamp-aligned sensor fusion distinct from all sort, pick-place delivery, RL-training, and SDG canonicals.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "set_physics_scene_config",
+    "robot_wizard",
+    "add_force_torque_sensor",
+    "setup_multi_rate",
+    "configure_ros2_time",
+    "configure_ros2_bridge",
+    "sim_control"
+  ],
+  "thoughts": "Design rationale for CP-NEW-multi-rate-sensor-fusion:\n\n1) Pattern gap: setup_multi_rate has 0 uses across all 127+ library templates. This is the first canonical to exercise the dual-rate VecEnv wrapper. Pairing it with add_force_torque_sensor + configure_ros2_bridge + configure_ros2_time creates a 4-tool chain that is structurally novel.\n\n2) Rate mapping:\n   - lower_rate_hz=30: camera + physics env step rate (30 fps is standard for visual observation).\n   - upper_rate_hz=1000: force-torque control loop rate (1 kHz matches real robot force controllers, e.g. KUKA/ABB typical ~1 kHz).\n   - upper_dof=7: Franka has 7 DOF; the 'upper body' maps to the full arm (proprioception + FT).\n\n3) add_force_torque_sensor:\n   - sensor_path='/World/Franka/panda_hand/WristFTSensor'\n   - parent_path='/World/Franka/panda_hand'\n   - threshold=10.0 N (trigger on contact force > 10 N for grasp detection)\n   - noise_std=0.05 (5% noise, realistic sim-to-real gap emulation)\n   - publish_topic='/franka/wrist_ft' (ROS2 stub for fusion node)\n\n4) configure_ros2_time mode='sim_time': critical for sensor fusion — /clock must be consistent across all subscribers so camera frame timestamps and FT timestamps can be aligned by the fusion node.\n\n5) configure_ros2_bridge: two sensors — wrist camera (RGB, 30 Hz) and FT sensor (already configured with publish_topic). sensors list format per ConfigureRos2BridgeArgs: type + prim_path + topic + hz.\n\n6) Scene: table + Franka + overhead DomeLight. No cube spawning needed — this canonical is infrastructure/setup only. Target object is a simple cube for context but no delivery gate.\n\n7) Physics: CPU dynamics (enable_gpu_dynamics=False) for deterministic FT readings.\n\n8) Verified_status: drafted — function gate requires live Kit RPC + ROS2 domain.",
+  "code": "# ── Ground and lighting ───────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=900.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[20, 20, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Physics: CPU dynamics for deterministic F/T readings ─────────────────────\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\n# ── Robot mounting table ───────────────────────────────────────────────────────\ncreate_prim(\n    prim_path=\"/World/Table\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.375],\n    scale=[0.7, 0.7, 0.375],\n)\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Target object (provides contact surface for F/T calibration) ─────────────\ncreate_prim(\n    prim_path=\"/World/Cube\",\n    prim_type=\"Cube\",\n    position=[0.4, 0.0, 0.78],\n    scale=[0.05, 0.05, 0.05],\n)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube\", schema_name=api)\nset_attribute(prim_path=\"/World/Cube\", attr_name=\"physics:mass\", value=0.3)\n\n# ── Franka arm ────────────────────────────────────────────────────────────────\n# Base at z=0.75 (table top). Faces +Y.\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── Wrist F/T sensor ──────────────────────────────────────────────────────────────\n# Attaches force/torque sensor to panda_hand; publishes on /franka/wrist_ft.\n# threshold=10.0 N: trigger event on contact > 10 N (grasp onset detection).\n# noise_std=0.05 N/N·m: realistic sim-to-real F/T noise model.\nadd_force_torque_sensor(\n    sensor_path=\"/World/Franka/panda_hand/WristFTSensor\",\n    parent_path=\"/World/Franka/panda_hand\",\n    threshold=10.0,\n    noise_std=0.05,\n    publish_topic=\"/franka/wrist_ft\",\n)\n\n# ── Dual-rate VecEnv wrapper ───────────────────────────────────────────────────\n# lower_rate_hz=30: camera + physics env step (visual observation pipeline).\n# upper_rate_hz=1000: force-torque control loop (matches real robot F/T rate).\n# upper_dof=7: Franka 7-DOF arm — all joints map to the high-rate control path.\nsetup_multi_rate(\n    lower_rate_hz=30.0,\n    upper_rate_hz=1000.0,\n    upper_dof=7,\n)\n\n# ── ROS2 sim-time clock ──────────────────────────────────────────────────────────\n# mode='sim_time': publish Isaac Sim /clock so all fusion-node subscribers\n# can stamp their messages from the same monotonic clock regardless of rate.\nconfigure_ros2_time(mode=\"sim_time\")\n\n# ── WristCamera prim (not present in default Franka USD) ──────────────────────\n# Must be authored before configure_ros2_bridge or the bridge reports missing prim.\ncreate_prim(\n    prim_path=\"/World/Franka/panda_hand/WristCamera\",\n    prim_type=\"Camera\",\n    position=[0, 0, 0],\n)\n\n# ── OmniGraph ROS2 bridge for camera + F/T sensor ──────────────────────────\n# Camera: RGB image at 30 Hz from a wrist-mount perspective prim.\n# FT sensor: already has publish_topic set; listed here so bridge validates QoS.\nconfigure_ros2_bridge(\n    sensors=[\n        {\n            \"type\": \"camera\",\n            \"prim_path\": \"/World/Franka/panda_hand/WristCamera\",\n            \"topic_name\": \"/franka/wrist_rgb\",\n        },\n    ],\n    ros2_domain_id=0,\n)\n# NOTE: force_torque is NOT a registered bridge sensor type; the F/T sensor\n# publishes via its own publish_topic (set in add_force_torque_sensor above).\n# Per-sensor hz and qos keys are silently ignored by the handler — all sensors\n# share the OnPlaybackTick clock; true per-sensor rate control is not supported.\n\n# ── Start simulation ────────────────────────────────────────────────────────────────\nsim_control(action=\"play\")\n# After play: camera publishes on /franka/wrist_rgb;\n# WristFTSensor publishes at physics-step rate on /franka/wrist_ft\n# (rate set by add_force_torque_sensor, not by the ROS2 bridge);\n# both timestamps derive from the /clock published by configure_ros2_time.\n# The fusion node (external to sim) can align frames by /clock header.",
+  "code_template": "# ── Ground and lighting ───────────────────────────────────────────────────────\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\", intensity=900.0)\ncreate_prim(\n    prim_path=\"/World/Ground\",\n    prim_type=\"Cube\",\n    position=[0, 0, -0.5],\n    scale=[20, 20, 1],\n)\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(\n    config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"}\n)\n\ncreate_prim(\n    prim_path=\"/World/Table\",\n    prim_type=\"Cube\",\n    position=[0, 0, 0.375],\n    scale=[0.7, 0.7, 0.375],\n)\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# ── Robot ───────────────────────────────────────────────────────────────────\nrobot_wizard(\n    robot_name=\"{{primary_robot.class}}\",\n    dest_path=\"{{primary_robot.path}}\",\n    position={{primary_robot.position}},\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# ── F/T sensor ────────────────────────────────────────────────────────────────\nadd_force_torque_sensor(\n    sensor_path=\"{{ft_sensor.path}}\",\n    parent_path=\"{{ft_sensor.parent_path}}\",\n    threshold={{ft_sensor.threshold}},\n    noise_std={{ft_sensor.noise_std}},\n    publish_topic=\"{{ft_sensor.topic}}\",\n)\n\n# ── Dual-rate wrapper ────────────────────────────────────────────────────────────\nsetup_multi_rate(\n    lower_rate_hz={{multi_rate.lower_hz}},\n    upper_rate_hz={{multi_rate.upper_hz}},\n    upper_dof={{multi_rate.upper_dof}},\n)\n\n# ── ROS2 clock + bridge ─────────────────────────────────────────────────────────\n# ── WristCamera prim (not present in default Franka USD) ────────────────────────\ncreate_prim(\n    prim_path=\"{{wrist_camera.path}}\",\n    prim_type=\"Camera\",\n    position=[0, 0, 0],\n)\n\nconfigure_ros2_time(mode=\"sim_time\")\nconfigure_ros2_bridge(\n    sensors=[\n        {\n            \"type\": \"camera\",\n            \"prim_path\": \"{{wrist_camera.path}}\",\n            \"topic_name\": \"{{wrist_camera.topic}}\",\n        },\n    ],\n    ros2_domain_id=0,\n)\n\nsim_control(action=\"play\")",
+  "settle_state": {
+    "robot_path": "/World/Franka",
+    "ft_sensor_path": "/World/Franka/panda_hand/WristFTSensor",
+    "camera_path": "/World/Franka/panda_hand/WristCamera",
+    "lower_rate_hz": 30.0,
+    "upper_rate_hz": 1000.0,
+    "ros2_domain_id": 0
+  },
+  "verify_args": {
+    "stages": [],
+    "robot_path": "/World/Franka",
+    "ft_sensor_path": "/World/Franka/panda_hand/WristFTSensor",
+    "ros2_clock_mode": "sim_time"
+  },
+  "simulate_args": {
+    "target_path": "/World/Franka/panda_hand/WristFTSensor",
+    "cube_path": "/World/Cube",
+    "robot_path": "/World/Franka",
+    "ft_sensor_path": "/World/Franka/panda_hand/WristFTSensor",
+    "camera_topic": "/franka/wrist_rgb",
+    "ft_topic": "/franka/wrist_ft",
+    "duration_s": 5
+  },
+  "diagnose_args": {
+    "robot_path": "/World/Franka",
+    "sensor_paths": [
+      "/World/Franka/panda_hand/WristFTSensor",
+      "/World/Franka/panda_hand/WristCamera"
+    ],
+    "ros2_domain_id": 0
+  },
+  "failure_modes": [
+    "setup_multi_rate upper_rate_hz must be an integer multiple of lower_rate_hz for clean decimation — 1000/30 is not exact; in practice use 960 or accept fractional drop at decimation boundary.",
+    "configure_ros2_bridge per-sensor 'hz', 'qos', and 'publish_rate' keys are silently ignored by the handler — all bridge sensors share the single OnPlaybackTick clock. True per-sensor rate control is NOT supported; the multi-rate description in the goal refers to the VecEnv wrapper (setup_multi_rate), not the ROS2 bridge.",
+    "configure_ros2_bridge type='force_torque' is NOT a registered sensor type and will cause a handler error. The F/T sensor publishes independently via publish_topic set in add_force_torque_sensor — do not include it in the bridge sensors list.",
+    "configure_ros2_time must be called before configure_ros2_bridge so the ROS2Context node is created first; reversing the order causes a missing-clock-node error.",
+    "add_force_torque_sensor parent_path must point to a prim that exists after robot_wizard completes — verify panda_hand USD path with list_all_prims if the sensor attach fails.",
+    "WristCamera prim must be authored via create_prim before configure_ros2_bridge — the default Franka USD does not include a wrist camera at panda_hand/WristCamera."
+  ],
+  "intent": {
+    "pattern_hint": "other",
+    "structural_features": {
+      "n_robot_stations": 1,
+      "n_handoffs": 0,
+      "destination_kind": "fixture",
+      "uses_conveyor_transport": false,
+      "has_stacking": false,
+      "has_multi_rate": true,
+      "has_force_torque_sensor": true,
+      "has_ros2_bridge": true,
+      "first_library_use_setup_multi_rate": true
+    }
+  },
+  "roles": {
+    "primary_robot": {
+      "constraints": [
+        "franka_panda"
+      ],
+      "expected_count": 1,
+      "required": true,
+      "disambiguator": "franka_with_panda_hand_link"
+    }
+  },
+  "role_defaults": {
+    "primary_robot": {
+      "path": "/World/Franka",
+      "class": "franka_panda",
+      "position": [
+        0,
+        0,
+        0.75
+      ],
+      "orientation": [
+        0.7071068,
+        0,
+        0,
+        0.7071068
+      ]
+    },
+    "ft_sensor": {
+      "path": "/World/Franka/panda_hand/WristFTSensor",
+      "parent_path": "/World/Franka/panda_hand",
+      "threshold": 10.0,
+      "noise_std": 0.05,
+      "topic": "/franka/wrist_ft"
+    },
+    "wrist_camera": {
+      "path": "/World/Franka/panda_hand/WristCamera",
+      "topic": "/franka/wrist_rgb"
+    },
+    "multi_rate": {
+      "lower_hz": 30.0,
+      "upper_hz": 1000.0,
+      "upper_dof": 7
+    }
+  },
+  "motion_controllers": {
+    "verified": [],
+    "untested": [
+      "ros2_control"
+    ],
+    "failed": {}
+  },
+  "verified_status": "drafted-2026-05-16; form-gate pending; function-gate pending (requires live Kit + ROS2 domain)"
+}
