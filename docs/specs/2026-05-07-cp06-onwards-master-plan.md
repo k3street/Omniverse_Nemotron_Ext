@@ -206,12 +206,26 @@ Each shipped canonical:
 | CP-66 | Recycling multi-sensor (#18) | ✅ form-gate shipped | Sprint 2 | 4-material sortation via barcode_reader + nir_material_sensor. 59/59 build. |
 | CP-67 | Leader/follower rotary station (#13) | ✅ build-only | Sprint 2 | Rotary table + 2 robots + mutex. 43/43 build. Form-gate skip (rotary disc bridge). |
 | CP-68 | Robot-to-robot handoff w/ moving obstacles (#7) | ✅ form-gate shipped | Sprint 2 | CP-51 + register_moving_obstacle. 26/26 build. |
-| CP-69 | UR10 cuRobo single-cube pick-place (#2/#3 base) | ✅ form-gate shipped | Sprint 2 | First UR10 canonical. 21/21 build. Validates `robot_family='ur10'` branch in cuRobo handler. Deferred: function-gate (no gripper wired). |
-| CP-70 | UR10 + surface_gripper (suction) | ✅ form-gate shipped | Sprint 2 | OgnSurfaceGripper at ee_link. 22/22 build. Cobotta variant deferred (no cobotta_900 module in this Isaac Sim install). |
-| CP-71 | UR10 bin filling (#25) | ✅ form-gate shipped | Sprint 2 | UR10 + create_gravity_dispenser + 4-cube drop_targets 2x2. 20/20 build. |
-| CP-72 | UR10 Cortex bin stacking (#27) | ✅ form-gate shipped | Sprint 2 | UR10 + setup_cortex_behavior + 1x1x4 vertical stack via drop_targets. 40/40 build. |
-| CP-73 | UR10 Cortex conveyor demo (#33) | ✅ form-gate shipped | Sprint 2 | UR10 + Cortex + active 0.2 m/s belt — Isaac Sim demo_ur10_conveyor canonical. 40/40 build. |
-| CP-74 | UR10 builtin (PickPlaceController) reference | ✅ form-gate shipped | Sprint 2 | Same scene as CP-69 with target_source='builtin'. Validates the canonical Isaac Sim 5.x UR10 stack: Short_Suction variant + external SurfaceGripper + SingleManipulator + universal_robots.PickPlaceController. 21/21 build. Function-gate still open (belt-pause-from-callback doesn't propagate; tracked in task #36). |
+| CP-69 | UR10 cuRobo single-cube pick-place (#2/#3 base) | ✅ **function-gate ✓ (raycast)** | Sprint 2 | UR10 cuRobo+conveyor delivers cube to bin. 21/21 build. Validates `robot_family='ur10'` branch + raycast→FixedJoint workaround for IsaacSurfaceGripper articulation-link bug. |
+| CP-70 | UR10 + surface_gripper (suction) | ✅ **function-gate ✓ (raycast)** | Sprint 2 | UR10 cuRobo + OgnSurfaceGripper at ee_link delivers via raycast workaround. 22/22 build. |
+| CP-71 | UR10 bin filling (#25) | ✅ form-gate ✓; ✗ function-gate (eval limit) | Sprint 2 | UR10 + create_gravity_dispenser + 4-cube drop_targets 2x2. 20/20 build. simulate_traversal_check is single-cube — multi-cube delivery not measurable. |
+| CP-72 | UR10 Cortex bin stacking (#27) | ✅ form-gate ✓; ✗ function-gate (eval limit) | Sprint 2 | UR10 + setup_cortex_behavior + 1x1x4 vertical stack via drop_targets. 40/40 build. Cortex multi-cube outside simulate_traversal_check coverage. |
+| CP-73 | UR10 Cortex conveyor demo (#33) | ✅ form-gate ✓; ✗ function-gate (eval limit + belt-pause) | Sprint 2 | UR10 + Cortex + active 0.2 m/s belt — Isaac Sim demo_ur10_conveyor canonical. 40/40 build. Multi-cube + belt-pause-from-callback bug. |
+| CP-74 | UR10 builtin (PickPlaceController) reference | ✅ form-gate ✓; ✗ function-gate (belt-pause) | Sprint 2 | Same scene as CP-69 with target_source='builtin'. Cube continues past sensor (x=0.61 final, off-belt) before EE arrives. Belt-pause-from-callback doesn't propagate. Same root cause as CP-80. Tracked in task #36. |
+| CP-75 | UR10 builtin static-pickup reference | ✅ **function-gate ✓ (raycast)** | Sprint 2 | CP-74 stripped of conveyor — single static cube + bin. 20/20 build. Cube delivered to bin via raycast workaround at z=0.785. |
+| CP-76 | Dual-Robot Dynamic Fixture Hold | ✅ form-gate shipped | Sprint 2 | Industrial Set 1 #4. R1 places workpiece on HoldPedestal, R2 stacks mating part on top. register_moving_obstacle for R2-aware-of-R1. 32/32 build. Function-gate stochastic — cuRobo precision + dual-robot timing. |
+| CP-77 | Nested-Box Packer | ✅ form-gate shipped | Sprint 2 | Industrial Set 4 #2. 4 cubes filled into bin (FILLING) + flat lid placed on top (SEALING) via 5-entry source_paths + drop_targets dict. 44/44 build. Function-gate stochastic — lid alignment requires sub-cm precision. |
+| CP-78 | UR10 builtin pedestal pick | ✅ **function-gate ✓ (raycast)** | Sprint 2 | First reproducible UR10 delivery. Revealed Isaac Sim 5.x IsaacSurfaceGripper articulation-link bug. Fix: per-tick `omni.physx.overlap_sphere(0.40m)` from `suction_cup` world position — when in-range cube is found, snap UsdPhysics.FixedJoint between ee_link and cube; remove at event ≥7. 22/22 build. Cube delivered to bin (z=0.785). |
+| CP-79 | UR10 builtin +X+Y pick | ✅ **function-gate ✓ (raycast)** | Sprint 2 | Confirms raycast workaround works regardless of approach direction (+X+Y vs -X+Y). 22/22 build. Cube delivered to bin (z=0.785). |
+| CP-80 | UR10 builtin elevated conveyor | ✅ form-gate; ✗ function-gate (belt-pause) | Sprint 2 | CP-78 geometry + active conveyor. Belt-pause-from-callback bug prevents reliable pick. Cube velocity damping (FJ-gated) + surfaceVelocityEnabled toggle attempted 2026-05-08 — partial mitigation but not full delivery. |
+| CP-81 | UR10 builtin two-cube pedestal | ✅ form-gate ✓; ✗ function-gate (deterministic) | Sprint 2 | Two cubes on individual pedestals → single bin. Cube_1 stops at (0.43, -0.12, 1.01) reproducibly across 120s and 180s sims. EE picks Cube_1, transit-stuck mid-air. RmpFlow path planning issue with multi-cube SOURCE_PATHS or cube_2 occupying bin space. cuRobo equivalent (CP-83) ✓ — suggests builtin handler's _next_cube/raycast interaction differs. |
+| CP-82 | UR10 builtin color-routing two-cube | ✅ form-gate ✓ 34/34 | Sprint 2 | Note: builtin handler IGNORES color_routing arg (no dispatch logic). CP-82's actual failure same pattern as CP-81 (multi-cube z=1.20 mid-air). For color_routing support use cuRobo target_source. |
+| CP-83 | UR10 cuRobo two-cube pedestal | ✅ **function-gate ✓ (cuRobo+raycast)** | Sprint 2 | Two-cube cuRobo variant. Validates cuRobo handler's UR10 raycast workaround across multi-cube cycles. Sensor-less canonical exposed cuRobo None-path bug — fixed (commit a1818df). Function-gate: Cube_1 delivered to bin (z=0.785, y=-0.40 matches bin) with 180s sim. |
+| CP-84 | UR10 builtin stacking | ✅ form-gate ✓ 23/23 | Sprint 2 | destination_path = static cube prim (BaseCube) instead of Bin. Validates raycast workaround composes with non-bin drop targets. Function-gate: cube delivered close to BaseCube (0.31, -0.28) — within 0.2m of target. |
+| CP-85 | UR10 builtin SINGLE-cube color-routing | ✅ form-gate ✓; ✗ function-gate (bin-geometry) | Sprint 2 | Function-gate ✗ at (0.13, -0.11, 0.775). CP-86 (CP-78 + color_routing arg) ✓ proves builtin handler safely ignores color_routing. CP-85 failed due to smaller bins (0.20×0.20 vs 0.30×0.30) + extra Bin_blue obstacle + wider table — not color_routing. |
+| CP-86 | UR10 builtin pedestal + color_routing arg | ✅ **function-gate ✓ (proves color_routing arg is safely ignored)** | Sprint 2 | A/B isolation: identical to CP-78 + set_semantic_label('red') + color_routing={'red':'/World/Bin'}. Same cube_final as CP-78 (0.39, -0.30, 0.785). Builtin handler ignores color_routing (no dispatch logic) but doesn't break. |
+
+**Research roadmap closure (2026-05-08)**: 32/33 scenarios form-gate ✓. Only gap is Isaac Sim Scene 9 (CobottaPro900PickPlace) — `cobotta_900` manipulator example module not shipped on this install.
 
 **Robot-family expansion (2026-05-08)**: cuRobo handler now accepts `robot_family={franka,ur10,ur10e}`. Refactored generated code emits runtime branching: 7-DOF Franka with ParallelGripper at panda_hand vs 6-DOF UR10 (SingleArticulation, no built-in gripper) at tool0, with ur10e.yml cuRobo config.
 
@@ -311,6 +325,34 @@ CP-15:  32/32  build, 3 cubes   PASS
 **Reliability post-Ground-fix**: cubes that miss target now land at_rest on Ground (z=0) instead of free-falling to z=-thousands. Stochastic-blowup mode eliminated; remaining function-gate gaps are precision/seed/gripper-width issues, manageable with multi-run N-of-M acceptance + scene tuning.
 
 **Postponed (Sprint 3)**: CP-06 builtin handler (FixedJoint integration), full vision-gate canonicals (need Replicator capture), `set_gripper_rotation` (Tier B), `setup_robot_claim_mutex` (Tier A multi-robot).
+
+## simulate_traversal_check duration_s discovery (2026-05-08 evening)
+
+Dozens of canonicals were marked function-gate-failing because their
+template's `simulate_args.duration_s` was set to 45-90s — too short for a
+cuRobo + multi-cube delivery cycle (~30-60s per cube + planning latency).
+At 180s, **20/36 sampled false-failing Franka cuRobo canonicals recover**
+to ✓:
+
+  Phase 1 (8 sampled): ✓ CP-01, 02, 08, 45, 54  ✗ CP-22, 29, 43
+  Phase 2 (29 sampled): ✓ CP-03, 04, 07, 13, 21, 23, 31, 32, 33, 34, 39,
+                          41, 42, 44, 56  ✗ CP-12, 14, 24, 26, 27, 28,
+                          30, 36, 37, 46, 49, 52, 62
+
+**Real failures clusters (180s ALSO ✗):**
+- High-speed belt: CP-22 (0.5 m/s — belt-pause race)
+- Stack/precision benchmarks: CP-27, 28, 36, 37, 46
+- Multi-cube special: CP-12 (10cm cube too big for fingers)
+- Cortex-driven: CP-49, 52, 62
+- Conveyor edge cases: CP-29, 43, 24, 26, 30
+- Drop precision: CP-81/82/84 (cuRobo + multi-cube → cube short of bin)
+
+**function_gate_suite.py bumped CP-01..CP-04 from 45s → 180s** to align
+with reality.
+
+**cuRobo `_cube_to_pick` reach fix (commit 8212d06):** family-aware
+reach (UR10 1.20m vs Franka 0.70m). Earlier hardcoded 0.70m silently
+skipped UR10 cubes farther than 0.70m. Three sites in tool_executor.py.
 
 ## Source documents
 

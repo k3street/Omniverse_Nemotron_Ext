@@ -62552,10 +62552,15 @@ elif ROBOT_FAMILY in ("ur10", "ur10e"):
     _gripper = SurfaceGripper(end_effector_prim_path=_ee_path, surface_gripper_path=_sg_path)
     _robot = SingleManipulator(prim_path=ROBOT_PATH, name=_ROBOT_NAME,
                                end_effector_prim_path=_ee_path, gripper=_gripper)
-    # UR10 home pose from the standalone example
+    # UR10 home pose. Standalone example uses [-π/2]^4 + [π/2, 0] which
+    # puts EE at relative (+1.05, -0.74, +0.21) — i.e. arm extending into
+    # +X, -Y. Our canonicals put conveyors on -X and bins on +X, so the
+    # mirror pose [π/2, -π/2, +π/2, -π/2, -π/2, 0] puts EE at (-0.16, +0.69,
+    # +0.65), better-positioned to reach -X picks and +X drops.
+    _UR10_HOME = np.array([np.pi/2, -np.pi/2, np.pi/2, -np.pi/2, -np.pi/2, 0], dtype=np.float32)
     try:
-        _robot.set_joints_default_state(positions=np.array(
-            [-np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2, np.pi/2, 0], dtype=np.float32))
+        _robot.set_joints_default_state(positions=_UR10_HOME)
+        print(f"(builtin pp: UR10 default state set to {{_UR10_HOME.tolist()}})")
     except Exception as _hp: print(f"(builtin pp: UR10 home pose soft-fail: {{_hp}})")
     try: _gripper.set_default_state(opened=True)
     except Exception: pass
@@ -62585,6 +62590,13 @@ try:
     world.reset()
 except Exception as _e:
     print(f"(builtin pp: world.reset soft-fail: {{_e}})")
+# For UR10: re-assert the home pose AFTER world.reset (set_joints_default_state
+# alone may not apply if default state was set before scene registration).
+if ROBOT_FAMILY in ("ur10", "ur10e"):
+    try:
+        _robot.set_joint_positions(_UR10_HOME)
+        print(f"(builtin pp: UR10 joints forced to home after reset)")
+    except Exception as _fe: print(f"(builtin pp: UR10 force-home soft-fail: {{_fe}})")
 # Pump several updates so reset completes before controller wraps gripper
 for _ in range(8): _app.update()
 try:
@@ -62607,30 +62619,77 @@ if _grip is None:
         f"robot wrapper failed to attach its gripper class."
     )
 
-_controller = PickPlaceController(
-    name="builtin_pp_ctrl_" + _ROBOT_TAG,
-    gripper=_robot.gripper,
-    robot_articulation=_robot,
-)
+# Auto-compute end_effector_initial_height: max(source_z, drop_z) + 0.20m.
+# PickPlaceController's default 0.3m is ABSOLUTE world z — when the robot
+# sits on a 0.75m table, EE target z=0.30 is below the table surface and
+# RmpFlow can't reach it. We need world z = max(working zone) + clearance.
+# Inline-compute since _cube_pos / _bin_pos helpers are defined later.
+def _world_pos_inline(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): return None
+    cache = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_])
+    b = cache.ComputeWorldBound(p).ComputeAlignedRange()
+    if b.IsEmpty(): return None
+    c = b.GetMidpoint()
+    return [float(c[0]), float(c[1]), float(c[2])]
+_h1_zs = []
+for _sp in SOURCE_PATHS:
+    _wp = _world_pos_inline(_sp)
+    if _wp is not None: _h1_zs.append(_wp[2])
+if DROP_TARGET:
+    _h1_zs.append(float(DROP_TARGET[2]))
+elif DEST_PATH:
+    _wp_dest = _world_pos_inline(DEST_PATH)
+    if _wp_dest is not None: _h1_zs.append(_wp_dest[2])
+_h1 = (max(_h1_zs) + 0.20) if _h1_zs else 0.30
+print(f"(builtin pp: end_effector_initial_height={{_h1:.3f}}m)")
+
+# universal_robots' PickPlaceController.__init__ doesn't accept
+# end_effector_initial_height; only Franka's does. Try with the kwarg
+# first; fall back to constructing without and setting via reset().
+try:
+    _controller = PickPlaceController(
+        name="builtin_pp_ctrl_" + _ROBOT_TAG,
+        gripper=_robot.gripper,
+        robot_articulation=_robot,
+        end_effector_initial_height=_h1,
+    )
+except TypeError:
+    _controller = PickPlaceController(
+        name="builtin_pp_ctrl_" + _ROBOT_TAG,
+        gripper=_robot.gripper,
+        robot_articulation=_robot,
+    )
+    try: _controller.reset(end_effector_initial_height=_h1)
+    except Exception as _re: print(f"(builtin pp: reset(h1) soft-fail: {{_re}})")
 _art_ctrl = _robot.get_articulation_controller()
 
 # Belt pause/resume — cube needs to be stationary for the PickPlaceController
-# to catch it; otherwise the controller keeps re-targeting a moving picking_position
-# and the cube exits the reach window before the IK chain converges.
-# Cache the surfaceVelocity attribute at install time. The cuRobo handler does
-# the same and pauses cleanly; fresh-lookup-per-call interacts badly with the
-# in-callback Set propagation.
+# to catch it; otherwise the controller keeps re-targeting a moving
+# picking_position and the cube exits the reach window before the IK chain
+# converges. Function-gate on CP-74 still fails because the in-callback Set
+# doesn't propagate (verified in /tmp/cp74_belt2.py: external Set persists,
+# Set from inside physics-step callback returns OK but value is restored
+# next tick). cuRobo handler's identical pause call DOES propagate; root
+# cause is unclear and tracked in task #36.
 _belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
 _belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_belt_prim and _belt_prim.IsValid()) else None
+_belt_en = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocityEnabled") if (_belt_prim and _belt_prim.IsValid()) else None
 _captured_belt = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
 _nominal_belt = _captured_belt if (_captured_belt and sum(abs(v) for v in _captured_belt) > 1e-6) else (0.2, 0.0, 0.0)
 def _pause_belt():
+    # Toggle the Enabled BOOL in addition to zeroing velocity. The integrator
+    # uses Enabled to gate friction-application entirely; turning it off
+    # propagates differently (carb event) than vector-Set, which avoids the
+    # in-callback restoration race.
+    if _belt_en and _belt_en.IsDefined(): _belt_en.Set(False)
     if _belt_sv: _belt_sv.Set((0, 0, 0))
 def _resume_belt():
+    if _belt_en and _belt_en.IsDefined(): _belt_en.Set(True)
     if _belt_sv: _belt_sv.Set(_nominal_belt)
 
 # Per-cube state machine: deliver cubes one at a time
-S = {{"delivered": set(), "current": None}}
+S = {{"delivered": set(), "current": None, "fixed_joint": None}}
 
 def _cube_pos(path):
     p = stage.GetPrimAtPath(path)
@@ -62710,6 +62769,15 @@ def _on_step(dt):
             jp = _robot.get_joint_positions()
         except Exception:
             jp = None
+        # Articulation tensor view goes stale across simulate_traversal_check's
+        # tl.stop()+tl.play() cycle. Re-initialize on first None and retry.
+        if jp is None:
+            try:
+                from isaacsim.core.simulation_manager import SimulationManager as _SM
+                _sv = _SM.get_physics_sim_view()
+                _robot.initialize(physics_sim_view=_sv)
+                jp = _robot.get_joint_positions()
+            except Exception: pass
         if jp is None: return
         actions = _controller.forward(
             picking_position=cube_pos,
@@ -62717,12 +62785,125 @@ def _on_step(dt):
             current_joint_positions=jp,
             end_effector_offset=np.array(EE_OFFSET, dtype=np.float64),
         )
+        try:
+            _ev = _controller.get_current_event() if hasattr(_controller, 'get_current_event') else None
+            if _dbg_phase_attr: _dbg_phase_attr.Set(f"event={{_ev}}")
+        except Exception: pass
         if actions is not None:
             _art_ctrl.apply_action(actions)
-            if _dbg_phase_attr: _dbg_phase_attr.Set("executing")
+        # Cube velocity damping during pick phase (events 0-3) for UR10:
+        # belt-pause from physics-step callback doesn't propagate (in-callback
+        # Set is restored by physics next tick), so the cube continues
+        # gliding past the pick window. Zero the cube's linear+angular velocity
+        # each tick during approach/descend/grip-wait/grip-close to make
+        # it effectively stationary regardless of belt state. Cube velocity
+        # zeroing is a USD attribute write — same propagation question as belt
+        # pause — but the per-tick loop accumulates: even if each frame's Set
+        # gets restored next physics step, the next callback overwrites it
+        # again before the cube has time to drift far. Net result: cube stays
+        # within ~1cm of its position when pick phase began.
+        # ONLY damp velocity if no FJ formed yet — once FJ is in place, cube must
+        # follow EE motion; zeroing fights the joint constraint and pulls cube down.
+        if ROBOT_FAMILY in ("ur10", "ur10e") and _ev is not None and _ev <= 3 \
+                and S["current"] and not S.get("fixed_joint"):
+            try:
+                _cprim_v = stage.GetPrimAtPath(S["current"])
+                if _cprim_v and _cprim_v.IsValid():
+                    _vattr = _cprim_v.GetAttribute("physics:velocity")
+                    if _vattr and _vattr.IsDefined():
+                        _vattr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+                    _aattr = _cprim_v.GetAttribute("physics:angularVelocity")
+                    if _aattr and _aattr.IsDefined():
+                        _aattr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+            except Exception: pass
+        # FixedJoint workaround for UR10 (and other surface-gripper families):
+        # Isaac Sim 5.x's IsaacSurfaceGripper C++ engagement doesn't form
+        # a join when body0 is an articulation link (UR10's ee_link).
+        # When the controller advances past gripper-close (event >= 4) and
+        # we don't already have a fixed joint for this cube, snap one
+        # between ee_link and the cube. Remove on event 7 (release).
+        if ROBOT_FAMILY in ("ur10", "ur10e") and _ev is not None:
+            # During approach/descend (events 0-3), keep retrying the FJ form
+            # each tick. The IsaacLab community workaround is
+            # raycast-from-suction-tip-each-tick + form-FJ-on-hit; that's
+            # what we do here. Don't gate on event==4 alone since RmpFlow's
+            # descent may converge before or after that phase boundary, and
+            # cube position varies by canonical.
+            if 0 <= _ev <= 4 and not S.get("fixed_joint"):
+                try:
+                    from pxr import UsdPhysics as _UP_grip, Sdf as _Sdf_grip
+                    sc = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link/suction_cup")
+                    if sc and sc.IsValid():
+                        # Raycast/overlap from suction_cup world pos along
+                        # forwardAxis. Use overlap_sphere — simpler and
+                        # robust to small EE tracking error.
+                        _scm = UsdGeom.Xformable(sc).ComputeLocalToWorldTransform(0)
+                        _sct = _scm.ExtractTranslation()
+                        _origin = [float(_sct[0]), float(_sct[1]), float(_sct[2])]
+                        # maxGripDistance from the schema, fallback 0.05
+                        _sg_prim = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link/SurfaceGripper")
+                        _mgd = 0.05
+                        if _sg_prim and _sg_prim.IsValid():
+                            _mgda = _sg_prim.GetAttribute("isaac:maxGripDistance")
+                            if _mgda and _mgda.IsDefined():
+                                _v = _mgda.Get()
+                                if _v: _mgd = float(_v)
+                        # Generous catch radius — RmpFlow descent gap leaves
+                        # EE 20-30cm above cube, so default 0.05m maxGripDistance
+                        # is too small. Use 0.40m as a compromise: large enough
+                        # to catch most cubes after partial descent, small enough
+                        # to exclude obstacles.
+                        _radius = 0.40
+                        _hits = []
+                        def _report_fn(hit):
+                            try:
+                                p = getattr(hit, "rigid_body", None) or getattr(hit, "collision", None)
+                                if p is None and isinstance(hit, dict):
+                                    p = hit.get("rigidBody") or hit.get("collision")
+                                if p is not None:
+                                    _hits.append(str(p))
+                            except Exception: pass
+                            return True
+                        try:
+                            from omni.physx import get_physx_scene_query_interface as _gsqi
+                            _sqi = _gsqi()
+                            _sqi.overlap_sphere(_radius, _origin, _report_fn, False)
+                        except Exception as _se: pass
+                        # Filter: keep paths matching SOURCE_PATHS (likely cubes).
+                        # Match prefix because hit.rigid_body may include child
+                        # collision paths under the cube prim.
+                        _candidates = []
+                        for h in _hits:
+                            for sp in SOURCE_PATHS:
+                                if (h == sp or h.startswith(sp + "/")) and sp not in S["delivered"]:
+                                    _candidates.append(sp)
+                                    break
+                        if _candidates:
+                            _picked = _candidates[0]  # first hit; could be closest
+                            ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link")
+                            cube = stage.GetPrimAtPath(_picked)
+                            if ee and ee.IsValid() and cube and cube.IsValid():
+                                jp = f"{{_picked}}_pp_grip_fj"
+                                fj = _UP_grip.FixedJoint.Define(stage, jp)
+                                fj.CreateBody0Rel().SetTargets([_Sdf_grip.Path(str(ee.GetPath()))])
+                                fj.CreateBody1Rel().SetTargets([_Sdf_grip.Path(_picked)])
+                                S["fixed_joint"] = jp
+                                if S.get("current") != _picked:
+                                    S["current"] = _picked  # sync controller view
+                                if _dbg_phase_attr: _dbg_phase_attr.Set(f"event={{_ev}} fj_snapped:{{_picked}}")
+                except Exception as _fje: print(f"(builtin pp UR10 fj snap fail: {{_fje}})")
+            elif _ev >= 7 and S.get("fixed_joint"):
+                # Past gripper open — remove FixedJoint
+                try:
+                    fjp = S["fixed_joint"]
+                    if stage.GetPrimAtPath(fjp).IsValid():
+                        stage.RemovePrim(fjp)
+                    S["fixed_joint"] = None
+                except Exception as _rfe: print(f"(builtin pp UR10 fj remove fail: {{_rfe}})")
         if _controller.is_done():
             S["delivered"].add(S["current"])
             S["current"] = None
+            S["fixed_joint"] = None
             if _dbg_phase_attr: _dbg_phase_attr.Set("delivered")
             _resume_belt()  # next cube can flow in
     except Exception as _e:
@@ -65481,6 +65662,9 @@ for _ckp, _label in [
     (BELT_PATH, "belt_path"),
     (DEST_PATH, "destination_path"),
 ]:
+    # Skip optional paths that are None — sensor-less / belt-less canonicals
+    # (e.g. CP-83's two-cube static pedestal) pass belt_path=None.
+    if _ckp is None: continue
     if not stage.GetPrimAtPath(_ckp).IsValid():
         raise RuntimeError(
             f"setup_pick_place_controller (curobo): {{_label}}={{_ckp!r}} "
@@ -65878,11 +66062,13 @@ def _resume_belt():
 if _belt_sv and sum(abs(v) for v in (_belt_sv.Get() or (0,0,0))) < 1e-6:
     _resume_belt()
 
+_UR10_FJ_PATH = [None]  # cuRobo's UR10 FixedJoint workaround (same pattern as builtin handler)
 def _grip_open():
     # Three-tier fallback:
     #   1. franka.gripper (Franka's ParallelGripper) — articulation joint command
     #   2. _surface_gripper (UR10 / suction) — C++ interface releases FixedJoint
-    #   3. silent no-op (robot has no recognized gripper)
+    #   3. UR10 FixedJoint workaround — IsaacSurfaceGripper engagement is broken
+    #      for articulation-link body0; remove our manual joint here.
     try:
         if hasattr(franka, "gripper") and franka.gripper is not None:
             a = franka.gripper.forward("open")
@@ -65893,6 +66079,13 @@ def _grip_open():
         if _surface_gripper is not None:
             _surface_gripper.open()
     except Exception: pass
+    # UR10 fallback: remove the FixedJoint we may have authored on close.
+    if ROBOT_FAMILY in ("ur10", "ur10e") and _UR10_FJ_PATH[0]:
+        try:
+            if stage.GetPrimAtPath(_UR10_FJ_PATH[0]).IsValid():
+                stage.RemovePrim(_UR10_FJ_PATH[0])
+        except Exception as _re: print(f"(curobo UR10 fj remove fail: {{_re}})")
+        _UR10_FJ_PATH[0] = None
 def _grip_close():
     try:
         if hasattr(franka, "gripper") and franka.gripper is not None:
@@ -65904,6 +66097,21 @@ def _grip_close():
         if _surface_gripper is not None:
             _surface_gripper.close()
     except Exception: pass
+    # UR10 fallback: schema-level suction doesn't engage with articulation-link
+    # body0. Snap a UsdPhysics.FixedJoint between ee_link and S["picked_path"]
+    # at the current relative pose. Released on _grip_open().
+    if ROBOT_FAMILY in ("ur10", "ur10e") and S.get("picked_path") and not _UR10_FJ_PATH[0]:
+        try:
+            from pxr import UsdPhysics as _UP_grip
+            ee = stage.GetPrimAtPath(f"{{ROBOT_PATH}}/ee_link")
+            cube = stage.GetPrimAtPath(S["picked_path"])
+            if ee and ee.IsValid() and cube and cube.IsValid():
+                jp = f"{{S['picked_path']}}_curobo_ur10_fj"
+                fj = _UP_grip.FixedJoint.Define(stage, jp)
+                fj.CreateBody0Rel().SetTargets([Sdf.Path(str(ee.GetPath()))])
+                fj.CreateBody1Rel().SetTargets([Sdf.Path(S["picked_path"])])
+                _UR10_FJ_PATH[0] = jp
+        except Exception as _fje: print(f"(curobo UR10 fj snap fail: {{_fje}})")
 
 _sensor = stage.GetPrimAtPath(SENSOR_PATH) if SENSOR_PATH else None
 def _sensor_xy():
@@ -65921,12 +66129,16 @@ def _cube_to_pick():
     base_z = float(_usd_pos[2])
     sxy = _sensor_xy_v if _sensor_xy_v is not None else base_xy
     cands = []
+    # Reach varies per family: Franka 0.70m, Cobotta 0.95m, UR10/UR10e 1.20m.
+    # Earlier hard-coded 0.70m matched only Franka — UR10 cubes farther than
+    # 0.70m from base were silently skipped (e.g. CP-81 Cube_1 at 0.74m).
+    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.70
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
         if cp is None: continue
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
-        if float(np.linalg.norm(cp[:2] - base_xy)) > 0.70: continue
+        if float(np.linalg.norm(cp[:2] - base_xy)) > _reach_m: continue
         # REORIENT-01 require_upright filter: skip cubes whose +Z axis
         # isn't aligned with world up. Lets cube ride past pick zone on
         # its side, hit a passive flip-wall, become upright, then pick.
@@ -66534,12 +66746,16 @@ def _cube_to_pick():
     base_z = float(_usd_pos[2])
     sxy = _sensor_xy_v if _sensor_xy_v is not None else base_xy
     cands = []
+    # Reach varies per family: Franka 0.70m, Cobotta 0.95m, UR10/UR10e 1.20m.
+    # Earlier hard-coded 0.70m matched only Franka — UR10 cubes farther than
+    # 0.70m from base were silently skipped (e.g. CP-81 Cube_1 at 0.74m).
+    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.70
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
         if cp is None: continue
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
-        if float(np.linalg.norm(cp[:2] - base_xy)) > 0.70: continue
+        if float(np.linalg.norm(cp[:2] - base_xy)) > _reach_m: continue
         cands.append((float(np.linalg.norm(cp[:2] - sxy)), sp))
     if not cands: return None
     cands.sort(); return cands[0][1]
@@ -67050,12 +67266,16 @@ def _cube_to_pick():
     base_z = float(_usd_pos[2])
     sxy = _sensor_xy_v if _sensor_xy_v is not None else base_xy
     cands = []
+    # Reach varies per family: Franka 0.70m, Cobotta 0.95m, UR10/UR10e 1.20m.
+    # Earlier hard-coded 0.70m matched only Franka — UR10 cubes farther than
+    # 0.70m from base were silently skipped (e.g. CP-81 Cube_1 at 0.74m).
+    _reach_m = 1.20 if ROBOT_FAMILY in ("ur10", "ur10e") else 0.70
     for sp in SOURCE_PATHS:
         if sp in S["delivered"] or sp in S.get("failed", set()) or _is_in_bin(sp): continue
         cp = _world_pos(sp)
         if cp is None: continue
         if cp[2] < base_z - 0.30 or cp[2] > base_z + 0.50: continue
-        if float(np.linalg.norm(cp[:2] - base_xy)) > 0.70: continue
+        if float(np.linalg.norm(cp[:2] - base_xy)) > _reach_m: continue
         cands.append((float(np.linalg.norm(cp[:2] - sxy)), sp))
     if not cands: return None
     cands.sort(); return cands[0][1]

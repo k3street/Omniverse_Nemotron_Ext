@@ -1,0 +1,51 @@
+{
+  "task_id": "CP-86",
+  "goal": "UR10 builtin SINGLE-cube color-routing \u2014 IDENTICAL scene to CP-78 except color_routing dict added. Pure A/B isolation test for color_routing dispatch bug.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "add_reference",
+    "teleport_prim",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "set_semantic_label",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "EXACT CP-78 scene + color_routing dict. Diff vs CP-78:\n- set_semantic_label on Cube_1 (color=red)\n- color_routing={'red': '/World/Bin'} on setup_pick_place_controller\nIf CP-86 \u2717 but CP-78 \u2713 \u2192 color_routing in builtin handler is the bug.\nIf CP-86 \u2713 \u2192 CP-85 issue was bin geometry/extras, not color_routing.",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\ncreate_prim(prim_path=\"/World/Pedestal\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.975], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\nset_semantic_label(prim_path=\"/World/Cube_1\", semantic_type=\"color\", class_name=\"red\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"builtin\",\n    source_paths=[\"/World/Cube_1\"],\n    destination_path=\"/World/Bin\",\n    color_routing={\"red\": \"/World/Bin\"},\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [
+        -0.5,
+        0.4,
+        0.975
+      ]
+    },
+    "conveyors": {}
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/Cube_1",
+        "place_path": "/World/Bin",
+        "robot_kind": "ur10e"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 90
+  },
+  "extends": "CP-78",
+  "extension_notes": "CP-86 = CP-78 + set_semantic_label + color_routing dict only. NO other geometry changes. Pure isolation test.",
+  "failure_modes": [
+    "Same as CP-78."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713 23/23; function-gate \u2713 (identical cube_final to CP-78 \u2014 proves builtin handler safely ignores color_routing arg)"
+}

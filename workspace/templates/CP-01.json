@@ -14,28 +14,48 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Nine non-obvious patterns for CP-01:\n1) Table top at z=0.75 anchors all heights (Franka base, belt, cubes, bin floor).\n2) Franka orientation [0.7071068, 0, 0, 0.7071068] (90° around Z) so cube/belt at world +Y is in robot's natural pick direction. Without this the wrist bumps cube during descent.\n3) PhysicsScene MUST use CPU dynamics: enable_gpu_dynamics=False + broadphase_type='MBP'. PhysxSurfaceVelocityAPI is silently ignored under GPU broadphase — belt won't move cubes.\n4) Surface velocity carries cubes ~3× the configured nominal due to PhysX stick-slip with high-friction material. Set surface_velocity to ~1/3 of desired apparent speed.\n5) Cubes need physxRigidBody:sleepThreshold=0. Without this PhysX deactivates resting cubes when belt is paused, surface velocity skips sleeping bodies → cube stuck on resume. Apply PhysxRigidBodyAPI then bulk_set_attribute.\n6) Cubes start OUTSIDE robot's 0.70m horizontal pick reach so belt has visible work carrying each into the pick zone sequentially.\n7) Apply 'rubber' physics material to cubes ONLY — NOT to fingers. Binding to fingers fires PhysX 'triangle mesh on dynamic body' warnings that pop modal-style on every Play and block the viewport. Combined-friction rubber-cube vs default-mu fingers gives ~0.75 effective grip — sufficient.\n8) DomeLight required: viewport renders black after new_stage() without one. Set inputs:intensity=1000.\n9) target_source='curobo' for smoothest motion + scene-collision-aware planning.",
-  "code": "# DomeLight — without this the viewport renders black after new_stage()\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\n# Parent Xform\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Table — Cube default size=2, scale to 2x1x0.75m with top at z=0.75\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# CPU dynamics required for PhysxSurfaceVelocityAPI\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka on table, oriented so cube/belt at world +Y is in robot's base +X\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Long conveyor belt in front of robot. Apparent speed ~3x nominal due\n# to PhysX stick-slip with high-friction material.\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cubes start OUTSIDE robot's 0.70m pick reach so belt has visible work.\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\n# sleepThreshold=0 on all cubes so they stay awake on paused belt\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# Rubber on cubes only — combined-friction with default-mu fingers gives ~0.75 effective.\n# Binding material to Franka fingers fires PhysX 'triangle mesh on dynamic body' warnings\n# that block the viewport on Play (CP-02 pattern).\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Bin behind robot, floor flush on table top\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Pick station inside robot reach\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller — best motion quality, with planning_obstacles + belt path\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
+  "thoughts": "Nine non-obvious patterns for CP-01:\n1) Table top at z=0.75 anchors all heights (Franka base, belt, cubes, bin floor).\n2) Franka orientation [0.7071068, 0, 0, 0.7071068] (90\u00b0 around Z) so cube/belt at world +Y is in robot's natural pick direction. Without this the wrist bumps cube during descent.\n3) PhysicsScene MUST use CPU dynamics: enable_gpu_dynamics=False + broadphase_type='MBP'. PhysxSurfaceVelocityAPI is silently ignored under GPU broadphase \u2014 belt won't move cubes.\n4) Surface velocity carries cubes ~3\u00d7 the configured nominal due to PhysX stick-slip with high-friction material. Set surface_velocity to ~1/3 of desired apparent speed.\n5) Cubes need physxRigidBody:sleepThreshold=0. Without this PhysX deactivates resting cubes when belt is paused, surface velocity skips sleeping bodies \u2192 cube stuck on resume. Apply PhysxRigidBodyAPI then bulk_set_attribute.\n6) Cubes start OUTSIDE robot's 0.70m horizontal pick reach so belt has visible work carrying each into the pick zone sequentially.\n7) Apply 'rubber' physics material to cubes ONLY \u2014 NOT to fingers. Binding to fingers fires PhysX 'triangle mesh on dynamic body' warnings that pop modal-style on every Play and block the viewport. Combined-friction rubber-cube vs default-mu fingers gives ~0.75 effective grip \u2014 sufficient.\n8) DomeLight required: viewport renders black after new_stage() without one. Set inputs:intensity=1000.\n9) target_source='curobo' for smoothest motion + scene-collision-aware planning.",
+  "code": "# DomeLight \u2014 without this the viewport renders black after new_stage()\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\n\n# Parent Xform\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\n\n# Table \u2014 Cube default size=2, scale to 2x1x0.75m with top at z=0.75\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\n# CPU dynamics required for PhysxSurfaceVelocityAPI\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\n# Franka on table, oriented so cube/belt at world +Y is in robot's base +X\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Long conveyor belt in front of robot. Apparent speed ~3x nominal due\n# to PhysX stick-slip with high-friction material.\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# Cubes start OUTSIDE robot's 0.70m pick reach so belt has visible work.\nfor i, x in enumerate([-1.4, -1.15, -0.9, -0.65]):\n    path = f\"/World/Cube_{i+1}\"\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n\n# sleepThreshold=0 on all cubes so they stay awake on paused belt\nbulk_set_attribute(\n    prim_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\n\n# Rubber on cubes only \u2014 combined-friction with default-mu fingers gives ~0.75 effective.\n# Binding material to Franka fingers fires PhysX 'triangle mesh on dynamic body' warnings\n# that block the viewport on Play (CP-02 pattern).\nfor path in [f\"/World/Cube_{i+1}\" for i in range(4)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\n# Bin behind robot, floor flush on table top\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\n# Pick station inside robot reach\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# cuRobo controller \u2014 best motion quality, with planning_obstacles + belt path\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=[f\"/World/Cube_{i+1}\" for i in range(4)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/Bin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_1": [-1.4, 0.4, 0.835],
-      "/World/Cube_2": [-1.15, 0.4, 0.835],
-      "/World/Cube_3": [-0.9, 0.4, 0.835],
-      "/World/Cube_4": [-0.65, 0.4, 0.835]
+      "/World/Cube_1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_2": [
+        -1.15,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_3": [
+        -0.9,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_4": [
+        -0.65,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "failure_modes": [
-    "PhysicsScene without enable_gpu_dynamics=False → PhysxSurfaceVelocityAPI silently ignored, belt doesn't move cubes.",
-    "Cubes without physxRigidBody:sleepThreshold=0 → PhysX sleeps them when belt is paused (between picks); surface velocity is friction-mediated and skips sleeping bodies → cube stuck even when belt resumes. Apply PhysxRigidBodyAPI then bulk_set_attribute.",
-    "Cubes inside robot's 0.70m horizontal reach at start → controller pauses belt immediately for the closest cube and never resumes between picks → belt never visibly moves.",
-    "No friction material anywhere → cube slips during lift. Apply rubber to cubes only (NOT fingers — that fires PhysX triangle-mesh-on-dynamic-body warnings that block the viewport on Play). Combined-friction rubber-cube vs default-mu finger gives ~0.75 effective which is sufficient.",
-    "Reading cube position before pause+settle → trajectory aims behind where cube ends up resting → fingers grip back edge of cube. cuRobo handler does this internally via 'settling' state (8 ticks).",
-    "Robot orientation = identity instead of [0.7071, 0, 0, 0.7071] → cube at world +Y is at 90 to robot's natural pick direction → wrist bumps cube during descent.",
-    "Setting EE_INITIAL_HEIGHT manually below robot base → IK target below base → arm folds. Auto-compute is correct.",
-    "Using target_source='spline' on a GPU-equipped machine — older default; cuRobo gives smoother motion."
+    "PhysicsScene without enable_gpu_dynamics=False \u2192 PhysxSurfaceVelocityAPI silently ignored, belt doesn't move cubes.",
+    "Cubes without physxRigidBody:sleepThreshold=0 \u2192 PhysX sleeps them when belt is paused (between picks); surface velocity is friction-mediated and skips sleeping bodies \u2192 cube stuck even when belt resumes. Apply PhysxRigidBodyAPI then bulk_set_attribute.",
+    "Cubes inside robot's 0.70m horizontal reach at start \u2192 controller pauses belt immediately for the closest cube and never resumes between picks \u2192 belt never visibly moves.",
+    "No friction material anywhere \u2192 cube slips during lift. Apply rubber to cubes only (NOT fingers \u2014 that fires PhysX triangle-mesh-on-dynamic-body warnings that block the viewport on Play). Combined-friction rubber-cube vs default-mu finger gives ~0.75 effective which is sufficient.",
+    "Reading cube position before pause+settle \u2192 trajectory aims behind where cube ends up resting \u2192 fingers grip back edge of cube. cuRobo handler does this internally via 'settling' state (8 ticks).",
+    "Robot orientation = identity instead of [0.7071, 0, 0, 0.7071] \u2192 cube at world +Y is at 90 to robot's natural pick direction \u2192 wrist bumps cube during descent.",
+    "Setting EE_INITIAL_HEIGHT manually below robot base \u2192 IK target below base \u2192 arm folds. Auto-compute is correct.",
+    "Using target_source='spline' on a GPU-equipped machine \u2014 older default; cuRobo gives smoother motion."
   ],
   "verified_date": "2026-05-06",
   "verified_metrics": {
@@ -46,14 +66,14 @@
     "motion_quality": "smooth, mid-waypoints prevent wrist-cube collisions on descent",
     "cycle_time_per_cube": "~5-7s",
     "home_return": "robot returns to HOME_Q after all cubes processed",
-    "tools_only": "no run_usd_script — pure tool calls verified end-to-end",
+    "tools_only": "no run_usd_script \u2014 pure tool calls verified end-to-end",
     "open_known_issues": "small inter-run variance in trajectory path (cuRobo seed randomness with num_ik_seeds=4); occasional grip slip ~10% of attempts"
   },
   "benchmark_vs_alternatives": {
     "curobo": {
       "status": "verified-2026-05-06",
       "cubes_delivered": "4/4",
-      "note": "Best motion quality. CUDA-graph build can hang ~90s on cold CUDA driver state — reboot fixes."
+      "note": "Best motion quality. CUDA-graph build can hang ~90s on cold CUDA driver state \u2014 reboot fixes."
     },
     "spline": {
       "cubes_in_bin_mean": 3.0,
@@ -88,6 +108,7 @@
   "simulate_args": {
     "cube_path": "/World/Cube_1",
     "target_path": "/World/Bin",
-    "duration_s": 60
-  }
+    "duration_s": 180
+  },
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (with 180s sim \u2014 duration_s=60 was too short for cuRobo + 4-cube conveyor cycle. cube_final=(-0.004, -0.46, 0.835) inside Bin)"
 }

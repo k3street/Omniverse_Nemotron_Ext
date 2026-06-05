@@ -17,23 +17,52 @@
     "bulk_set_attribute",
     "setup_pick_place_controller"
   ],
-  "thoughts": "Six inspect-and-reject specifics for CP-18 (extends CP-17 — uses semantic class but adds fall-through path):\n1) 5 cubes total: 4 tagged with set_semantic_label(class_name='good', semantic_type='class'), 1 untagged (no Semantics API applied). Untagged cube has _cube_semantic_class returning None.\n2) color_routing dict has ONE entry: {'good': '/World/GoodBin'}. Untagged cube finds no match → handler falls through to destination_path (DEST_PATH = '/World/RejectBin').\n3) Visual: 'good' cubes green (passed inspection), bad cube red (rejected). Physical color is independent of semantic class — visual aid only.\n4) RejectBin acts as the fall-through destination. setup_pick_place_controller's destination_path arg = '/World/RejectBin'. color_routing only fires for 'good' cubes; everything else goes to RejectBin.\n5) Bin layout: GoodBin behind robot at +X side (y=-0.4, x=0.3), RejectBin at -X side (y=-0.4, x=-0.3). Both within reach.\n6) The 1 unmarked cube simulates a defect detected by inspection station. Real-world use: vision_classify_cubes upstream tags 'good' cubes; defective cubes left unlabeled trigger reject path.",
-  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 5 cubes — 4 good (green + 'good' class), 1 defective (red, no class)\ngood_specs = [\n    (\"/World/Cube_g1\", -1.4),\n    (\"/World/Cube_g2\", -1.1),\n    (\"/World/Cube_g3\", -0.5),\n    (\"/World/Cube_g4\", -0.2),\n]\nbad_spec = (\"/World/Cube_bad\", -0.8)\n\ncreate_material(material_path=\"/World/Materials/Green\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 1.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Red\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\n\nfor path, x in good_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=\"/World/Materials/Green\")\n    set_semantic_label(prim_path=path, class_name=\"good\", semantic_type=\"class\")\n\n# Bad cube — red, NO semantic label (will fall through color_routing)\nbad_path, bad_x = bad_spec\ncreate_prim(prim_path=bad_path, prim_type=\"Cube\", position=[bad_x, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=bad_path, schema_name=api)\nassign_material(prim_path=bad_path, material_path=\"/World/Materials/Red\")\n# (intentionally NO set_semantic_label here)\n\nall_cubes = [s[0] for s in good_specs] + [bad_path]\nbulk_set_attribute(\n    prim_paths=all_cubes,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in all_cubes:\n    apply_physics_material(prim_path=c, material_name=\"rubber\")\n\n# Two bins\ncreate_bin(prim_path=\"/World/GoodBin\",   position=[ 0.3, -0.4, 0.75], size=[0.25, 0.25, 0.15])\ncreate_bin(prim_path=\"/World/RejectBin\", position=[-0.3, -0.4, 0.75], size=[0.25, 0.25, 0.15])\nassign_material(prim_path=\"/World/GoodBin\",   material_path=\"/World/Materials/Green\")\nassign_material(prim_path=\"/World/RejectBin\", material_path=\"/World/Materials/Red\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# color_routing has ONLY 'good' — bad cube falls through to destination_path (RejectBin)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=all_cubes,\n    destination_path=\"/World/RejectBin\",\n    color_routing={\n        \"good\": \"/World/GoodBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/GoodBin\", \"/World/RejectBin\"],\n)",
+  "thoughts": "Six inspect-and-reject specifics for CP-18 (extends CP-17 \u2014 uses semantic class but adds fall-through path):\n1) 5 cubes total: 4 tagged with set_semantic_label(class_name='good', semantic_type='class'), 1 untagged (no Semantics API applied). Untagged cube has _cube_semantic_class returning None.\n2) color_routing dict has ONE entry: {'good': '/World/GoodBin'}. Untagged cube finds no match \u2192 handler falls through to destination_path (DEST_PATH = '/World/RejectBin').\n3) Visual: 'good' cubes green (passed inspection), bad cube red (rejected). Physical color is independent of semantic class \u2014 visual aid only.\n4) RejectBin acts as the fall-through destination. setup_pick_place_controller's destination_path arg = '/World/RejectBin'. color_routing only fires for 'good' cubes; everything else goes to RejectBin.\n5) Bin layout: GoodBin behind robot at +X side (y=-0.4, x=0.3), RejectBin at -X side (y=-0.4, x=-0.3). Both within reach.\n6) The 1 unmarked cube simulates a defect detected by inspection station. Real-world use: vision_classify_cubes upstream tags 'good' cubes; defective cubes left unlabeled trigger reject path.",
+  "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\ncreate_conveyor(\n    prim_path=\"/World/ConveyorBelt\",\n    position=[0.0, 0.4, 0.78],\n    size=[3.0, 0.4, 0.05],\n    surface_velocity=[0.2, 0, 0],\n)\n\n# 5 cubes \u2014 4 good (green + 'good' class), 1 defective (red, no class)\ngood_specs = [\n    (\"/World/Cube_g1\", -1.4),\n    (\"/World/Cube_g2\", -1.1),\n    (\"/World/Cube_g3\", -0.5),\n    (\"/World/Cube_g4\", -0.2),\n]\nbad_spec = (\"/World/Cube_bad\", -0.8)\n\ncreate_material(material_path=\"/World/Materials/Green\", shader_type=\"OmniPBR\", diffuse_color=[0.0, 1.0, 0.0])\ncreate_material(material_path=\"/World/Materials/Red\", shader_type=\"OmniPBR\", diffuse_color=[1.0, 0.0, 0.0])\n\nfor path, x in good_specs:\n    create_prim(prim_path=path, prim_type=\"Cube\", position=[x, 0.4, 0.835], size=0.05)\n    for api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n        apply_api_schema(prim_path=path, schema_name=api)\n    assign_material(prim_path=path, material_path=\"/World/Materials/Green\")\n    set_semantic_label(prim_path=path, class_name=\"good\", semantic_type=\"class\")\n\n# Bad cube \u2014 red, NO semantic label (will fall through color_routing)\nbad_path, bad_x = bad_spec\ncreate_prim(prim_path=bad_path, prim_type=\"Cube\", position=[bad_x, 0.4, 0.835], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=bad_path, schema_name=api)\nassign_material(prim_path=bad_path, material_path=\"/World/Materials/Red\")\n# (intentionally NO set_semantic_label here)\n\nall_cubes = [s[0] for s in good_specs] + [bad_path]\nbulk_set_attribute(\n    prim_paths=all_cubes,\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor c in all_cubes:\n    apply_physics_material(prim_path=c, material_name=\"rubber\")\n\n# Two bins\ncreate_bin(prim_path=\"/World/GoodBin\",   position=[ 0.3, -0.4, 0.75], size=[0.25, 0.25, 0.15])\ncreate_bin(prim_path=\"/World/RejectBin\", position=[-0.3, -0.4, 0.75], size=[0.25, 0.25, 0.15])\nassign_material(prim_path=\"/World/GoodBin\",   material_path=\"/World/Materials/Green\")\nassign_material(prim_path=\"/World/RejectBin\", material_path=\"/World/Materials/Red\")\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.4, 0.835], size=[0.06, 0.06, 0.06])\n\n# color_routing has ONLY 'good' \u2014 bad cube falls through to destination_path (RejectBin)\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/ConveyorBelt\",\n    source_paths=all_cubes,\n    destination_path=\"/World/RejectBin\",\n    color_routing={\n        \"good\": \"/World/GoodBin\",\n    },\n    planning_obstacles=[\"/World/Table\", \"/World/ConveyorBelt\", \"/World/GoodBin\", \"/World/RejectBin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/Cube_g1":  [-1.4, 0.4, 0.835],
-      "/World/Cube_g2":  [-1.1, 0.4, 0.835],
-      "/World/Cube_bad": [-0.8, 0.4, 0.835],
-      "/World/Cube_g3":  [-0.5, 0.4, 0.835],
-      "/World/Cube_g4":  [-0.2, 0.4, 0.835]
+      "/World/Cube_g1": [
+        -1.4,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_g2": [
+        -1.1,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_bad": [
+        -0.8,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_g3": [
+        -0.5,
+        0.4,
+        0.835
+      ],
+      "/World/Cube_g4": [
+        -0.2,
+        0.4,
+        0.835
+      ]
     },
     "conveyors": {
-      "/World/ConveyorBelt": [0.2, 0, 0]
+      "/World/ConveyorBelt": [
+        0.2,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/ConveyorBelt", "place_path": "/World/GoodBin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/ConveyorBelt",
+        "place_path": "/World/GoodBin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/Cube_g1"
   },
@@ -45,10 +74,10 @@
   "extends": "CP-17",
   "extension_notes": "CP-18 demonstrates the fall-through behavior of color_routing: when a cube's semantic class isn't in the routing dict (or has no semantic class at all), the controller routes to destination_path. Useful for binary inspection (good/reject) or any 'default + exceptions' pattern. Future: use add_vision_classifier_gate (when render-flush is fixed) to dynamically tag cubes upstream of the pick station instead of pre-tagging.",
   "failure_modes": [
-    "Bad cube has Semantics_color or Semantics_colour applied accidentally — set_semantic_label MUST not be called for the bad cube. Checked at canonical-author time.",
-    "color_routing match key mismatch (e.g. 'Good' instead of 'good') — handler lowercases cube's class_name before lookup but exact match preferred.",
-    "Bad cube path not in source_paths — controller wouldn't see it, would never pick. Must include in source_paths.",
-    "Both bins identical color — visual ambiguity. Use distinct color materials (green + red here)."
+    "Bad cube has Semantics_color or Semantics_colour applied accidentally \u2014 set_semantic_label MUST not be called for the bad cube. Checked at canonical-author time.",
+    "color_routing match key mismatch (e.g. 'Good' instead of 'good') \u2014 handler lowercases cube's class_name before lookup but exact match preferred.",
+    "Bad cube path not in source_paths \u2014 controller wouldn't see it, would never pick. Must include in source_paths.",
+    "Both bins identical color \u2014 visual ambiguity. Use distinct color materials (green + red here)."
   ],
-  "verified_status": "build-spec-2026-05-08; form-gate verification pending"
+  "verified_status": "build-spec-2026-04-XX; form-gate \u2713; function-gate \u2713 (150s sim. cube_final=(0.23, -0.49, 0.785) in Bin)"
 }

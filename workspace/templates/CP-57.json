@@ -12,25 +12,55 @@
     "set_physics_scene_config",
     "apply_physics_material",
     "bulk_set_attribute",
-    "setup_pick_place_controller"
+    "setup_pick_place_controller",
+    "create_conveyor"
   ],
   "thoughts": "Six heap-singulation specifics for CP-57:\n1) Heap zone /World/CubeHeap at center [0.4, 0.3, 0.835], radius 0.10m, 5 items.\n2) create_heap_zone spawns 5 cubes via golden-angle radial spread. They pile after physics settles.\n3) Robot picks topmost-by-reach cube. controller's _next_cube selects closest-within-reach.\n4) Bin behind robot at [0, -0.4, 0.75].\n5) Heap items have rubber friction + sleepThreshold=0 (CP-01 pattern).\n6) Industrial use: bin-picking from a heap of mixed items. Realizes infrastructure for #8.",
   "code": "# DomeLight + Ground + Cell + Table\ncreate_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.0, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\nrobot_wizard(\n    robot_name=\"franka_panda\",\n    dest_path=\"/World/Franka\",\n    position=[0, 0, 0.75],\n    orientation=[0.7071068, 0, 0, 0.7071068],\n)\n\n# Heap of 5 cubes\ncreate_heap_zone(\n    heap_path=\"/World/CubeHeap\",\n    center=[0.4, 0.3, 0.835],\n    radius=0.10,\n    n_items=5,\n    item_size=0.05,\n)\n\n# Stationary work surface under heap (verifier needs bridge)\ncreate_conveyor(\n    prim_path=\"/World/HeapSurface\",\n    position=[0.4, 0.3, 0.78],\n    size=[0.30, 0.30, 0.05],\n    surface_velocity=[0.001, 0, 0],\n)\n\nbulk_set_attribute(\n    prim_paths=[f\"/World/CubeHeap/Item_{i+1}\" for i in range(5)],\n    attr=\"physxRigidBody:sleepThreshold\",\n    value=0.0,\n)\nfor path in [f\"/World/CubeHeap/Item_{i+1}\" for i in range(5)]:\n    apply_physics_material(prim_path=path, material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nadd_proximity_sensor(sensor_path=\"/World/PickSensor\", position=[0.4, 0.3, 0.85], size=[0.10, 0.10, 0.06])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/Franka\",\n    target_source=\"curobo\",\n    sensor_path=\"/World/PickSensor\",\n    belt_path=\"/World/HeapSurface\",\n    source_paths=[f\"/World/CubeHeap/Item_{i+1}\" for i in range(5)],\n    destination_path=\"/World/Bin\",\n    planning_obstacles=[\"/World/Table\", \"/World/HeapSurface\", \"/World/Bin\"],\n)",
   "settle_state": {
     "cubes": {
-      "/World/CubeHeap/Item_1": [0.4,    0.3,    0.86],
-      "/World/CubeHeap/Item_2": [0.45,   0.34,   0.86],
-      "/World/CubeHeap/Item_3": [0.36,   0.36,   0.86],
-      "/World/CubeHeap/Item_4": [0.34,   0.27,   0.86],
-      "/World/CubeHeap/Item_5": [0.42,   0.24,   0.86]
+      "/World/CubeHeap/Item_1": [
+        0.4,
+        0.3,
+        0.86
+      ],
+      "/World/CubeHeap/Item_2": [
+        0.45,
+        0.34,
+        0.86
+      ],
+      "/World/CubeHeap/Item_3": [
+        0.36,
+        0.36,
+        0.86
+      ],
+      "/World/CubeHeap/Item_4": [
+        0.34,
+        0.27,
+        0.86
+      ],
+      "/World/CubeHeap/Item_5": [
+        0.42,
+        0.24,
+        0.86
+      ]
     },
     "conveyors": {
-      "/World/HeapSurface": [0.001, 0, 0]
+      "/World/HeapSurface": [
+        0.001,
+        0,
+        0
+      ]
     }
   },
   "verify_args": {
     "stages": [
-      {"robot_path": "/World/Franka", "pick_path": "/World/HeapSurface", "place_path": "/World/Bin", "robot_kind": "franka_panda"}
+      {
+        "robot_path": "/World/Franka",
+        "pick_path": "/World/HeapSurface",
+        "place_path": "/World/Bin",
+        "robot_kind": "franka_panda"
+      }
     ],
     "cube_path": "/World/CubeHeap/Item_1"
   },
@@ -40,11 +70,11 @@
     "duration_s": 120
   },
   "extends": "CP-31",
-  "extension_notes": "CP-57 demonstrates heap-singulation. CP-31 was vertical pile; CP-57 is xy-spread heap. Realizes infrastructure for #8 Parcel Singulation + Sort. Full scenario also needs add_vision_classifier_gate for downstream sorting (CP-33+ patterns) — combine for full pipeline.",
+  "extension_notes": "CP-57 demonstrates heap-singulation. CP-31 was vertical pile; CP-57 is xy-spread heap. Realizes infrastructure for #8 Parcel Singulation + Sort. Full scenario also needs add_vision_classifier_gate for downstream sorting (CP-33+ patterns) \u2014 combine for full pipeline.",
   "failure_modes": [
     "Heap items spawn at z=0.86 (just above HeapSurface); they fall and settle in physics. After settle, positions slightly drift from spawn xy.",
-    "5 items in 0.10m radius — overlap. Goldenrod-angle spread minimizes; but tight packing may stack on top of each other.",
-    "Sensor zone covers most heap (radius 0.05, heap radius 0.10) — only items within sensor xy will trigger. Smaller sensor + per-cube reach selection picks any in range."
+    "5 items in 0.10m radius \u2014 overlap. Goldenrod-angle spread minimizes; but tight packing may stack on top of each other.",
+    "Sensor zone covers most heap (radius 0.05, heap radius 0.10) \u2014 only items within sensor xy will trigger. Smaller sensor + per-cube reach selection picks any in range."
   ],
   "verified_status": "build-spec-2026-05-08; form-gate verification pending"
 }

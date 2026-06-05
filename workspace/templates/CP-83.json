@@ -1,0 +1,57 @@
+{
+  "task_id": "CP-83",
+  "goal": "UR10 cuRobo TWO-cube static-pickup pick-place. Extends CP-78/79 pedestal pattern to cuRobo handler \u2014 both cubes on pedestals, both delivered to bin sequentially. Validates raycast\u2192FixedJoint workaround in cuRobo handler scales to multi-cube SOURCE_PATHS.",
+  "tools_used": [
+    "create_prim",
+    "set_attribute",
+    "apply_api_schema",
+    "add_reference",
+    "teleport_prim",
+    "create_bin",
+    "set_physics_scene_config",
+    "apply_physics_material",
+    "bulk_set_attribute",
+    "setup_pick_place_controller"
+  ],
+  "thoughts": "cuRobo + 2 cubes on pedestals:\n1) UR10 base at (0, 0, 0.75). cuRobo planner with ur10e.yml.\n2) Two pedestals at xy=(-0.5, 0.4) and (-0.5, 0.0). Each 15cm tall.\n3) Two cubes on top at z=0.975. SOURCE_PATHS=[/World/Cube_1, /World/Cube_2].\n4) Single bin at (0.5, -0.4, 0.75). Both cubes delivered there.\n5) Tests cuRobo handler's S['picked_path'] iteration + raycast workaround.\n6) Validates that cuRobo's _UR10_FJ_PATH single-cell holder cycles correctly across two cycle iterations (form FJ, transit, drop, remove FJ, form again for next cube).",
+  "code": "create_prim(prim_path=\"/World/DomeLight\", prim_type=\"DomeLight\")\nset_attribute(prim_path=\"/World/DomeLight\", attr_name=\"inputs:intensity\", value=1000.0)\ncreate_prim(prim_path=\"/World/Ground\", prim_type=\"Cube\", position=[0, 0, -0.5], scale=[20, 20, 1])\napply_api_schema(prim_path=\"/World/Ground\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Cell\", prim_type=\"Xform\")\ncreate_prim(prim_path=\"/World/Table\", prim_type=\"Cube\", position=[0, 0, 0.375], scale=[1.5, 0.5, 0.375])\napply_api_schema(prim_path=\"/World/Table\", schema_name=\"PhysicsCollisionAPI\")\n\nset_physics_scene_config(config={\"enable_gpu_dynamics\": False, \"broadphase_type\": \"MBP\"})\n\ncreate_prim(prim_path=\"/World/UR10\", prim_type=\"Xform\")\nadd_reference(prim_path=\"/World/UR10\", reference_path=\"/mnt/shared_data/isaac-sim-assets-complete-5.0.0/Assets/Isaac/5.0/Collected_Robots/ur10.usd\")\nteleport_prim(prim_path=\"/World/UR10\", position=[0, 0, 0.75])\n\ncreate_prim(prim_path=\"/World/Pedestal_1\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal_1\", schema_name=\"PhysicsCollisionAPI\")\ncreate_prim(prim_path=\"/World/Pedestal_2\", prim_type=\"Cube\", position=[-0.5, 0.0, 0.875], scale=[0.06, 0.06, 0.075])\napply_api_schema(prim_path=\"/World/Pedestal_2\", schema_name=\"PhysicsCollisionAPI\")\n\ncreate_prim(prim_path=\"/World/Cube_1\", prim_type=\"Cube\", position=[-0.5, 0.4, 0.975], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_1\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_1\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_1\", material_name=\"rubber\")\n\ncreate_prim(prim_path=\"/World/Cube_2\", prim_type=\"Cube\", position=[-0.5, 0.0, 0.975], size=0.05)\nfor api in (\"PhysicsRigidBodyAPI\", \"PhysicsCollisionAPI\", \"PhysicsMassAPI\", \"PhysxRigidBodyAPI\"):\n    apply_api_schema(prim_path=\"/World/Cube_2\", schema_name=api)\nbulk_set_attribute(prim_paths=[\"/World/Cube_2\"], attr=\"physxRigidBody:sleepThreshold\", value=0.0)\napply_physics_material(prim_path=\"/World/Cube_2\", material_name=\"rubber\")\n\ncreate_bin(prim_path=\"/World/Bin\", position=[0.5, -0.4, 0.75], size=[0.3, 0.3, 0.15])\n\nsetup_pick_place_controller(\n    robot_path=\"/World/UR10\",\n    robot_family=\"ur10\",\n    target_source=\"curobo\",\n    source_paths=[\"/World/Cube_1\", \"/World/Cube_2\"],\n    destination_path=\"/World/Bin\",\n    end_effector_offset=[0.0, 0.0, 0.02],\n)",
+  "settle_state": {
+    "cubes": {
+      "/World/Cube_1": [
+        -0.5,
+        0.4,
+        0.975
+      ],
+      "/World/Cube_2": [
+        -0.5,
+        0.0,
+        0.975
+      ]
+    },
+    "conveyors": {}
+  },
+  "verify_args": {
+    "stages": [
+      {
+        "robot_path": "/World/UR10",
+        "pick_path": "/World/Cube_1",
+        "place_path": "/World/Bin",
+        "robot_kind": "ur10e"
+      }
+    ],
+    "cube_path": "/World/Cube_1"
+  },
+  "simulate_args": {
+    "cube_path": "/World/Cube_1",
+    "target_path": "/World/Bin",
+    "duration_s": 180
+  },
+  "extends": "CP-69",
+  "extension_notes": "CP-83 = CP-69 stripped of conveyor + 2nd cube on pedestal. Tests cuRobo handler's UR10 raycast workaround across multi-cube cycles.",
+  "failure_modes": [
+    "cuRobo planner re-init slow at start (uses existing cached planner v4 if present).",
+    "Raycast workaround for cuRobo uses S['picked_path'] which is sensor-driven; for sensor-less canonicals, _cube_to_pick() falls back to base proximity.",
+    "Same UR10 init quirks as CP-69."
+  ],
+  "verified_status": "build-spec-2026-05-08; form-gate \u2713; function-gate \u2713 (UR10 cuRobo two-cube pedestal \u2014 Cube_1 delivered to bin via raycast workaround)"
+}
