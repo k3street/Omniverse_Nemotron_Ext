@@ -90,6 +90,52 @@ def test_reasoner_normalizes_robot_on_table_to_mount_with_warning():
     assert [d.code for d in result.diagnostics] == ["relation.robot_on_support"]
 
 
+def test_relation_geometry_verifier_passes_nested_predictions():
+    from service.isaac_assist_service.multimodal.relation_reasoning import (
+        verify_relation_geometry,
+    )
+
+    report = verify_relation_geometry(
+        [
+            _obj("table", "table_medium", w=1.2, h=0.8),
+            _obj("bowl", "bowl", w=0.25, h=0.25),
+            _obj("fruit", "fruit", w=0.07, h=0.07),
+        ],
+        [
+            {"subject_id": "bowl", "relation": "on_top_of", "object_id": "table"},
+            {"subject_id": "fruit", "relation": "inside", "object_id": "bowl"},
+        ],
+    )
+
+    assert report["status"] == "pass"
+    assert report["check_count"] == 2
+    assert report["failed_count"] == 0
+
+
+def test_relation_geometry_verifier_fails_bad_actual_position():
+    from service.isaac_assist_service.multimodal.relation_reasoning import (
+        verify_relation_geometry,
+    )
+
+    report = verify_relation_geometry(
+        [
+            _obj("table", "table_medium", w=1.2, h=0.8),
+            _obj("bowl", "bowl", w=0.25, h=0.25),
+        ],
+        [
+            {"subject_id": "bowl", "relation": "on_top_of", "object_id": "table"},
+        ],
+        actual_positions={
+            "table": [0.0, 0.0, 0.0],
+            "bowl": [2.0, 0.0, 0.0],
+        },
+    )
+
+    assert report["status"] == "fail"
+    assert report["failed_count"] == 1
+    assert report["checks"][0]["status"] == "fail"
+
+
 def test_instantiator_uses_reasoned_robot_mount_relation():
     from service.isaac_assist_service.multimodal.instantiator import instantiate
 
@@ -120,3 +166,7 @@ def test_instantiator_uses_reasoned_robot_mount_relation():
     assert "# relation_diagnostic: relation.robot_on_support warning" in result.generated_code
     assert result.relation_summary[0]["relation"] == "mounted_to"
     assert result.relation_diagnostics[0]["code"] == "relation.robot_on_support"
+    assert result.relation_verification["status"] == "warning"
+    assert "isaac_assist:relation_verification" in result.generated_code
+    assert "[Isaac Assist] relation verification:" in result.generated_code
+    compile(result.generated_code, "generated_relation_scene.py", "exec")

@@ -346,6 +346,8 @@ def test_build_route_returns_relation_summary(tmp_path):
             }
         ]
         assert response["instantiation"]["relation_diagnostics"] == []
+        assert response["instantiation"]["relation_verification"]["status"] == "pass"
+        assert response["instantiation"]["relation_verification"]["check_count"] == 1
         assert "# relation: burger_1 on_top_of plate_1" in response["instantiation"]["generated_code"]
     finally:
         routes._store.close()

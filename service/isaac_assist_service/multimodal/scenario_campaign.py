@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .instantiator import instantiate
+from .relation_reasoning import verify_relation_geometry
 
 
 DEFAULT_WORKSPACE = Path("workspace") / "scenario_campaigns"
@@ -116,6 +117,7 @@ def build_campaign_plan(
         "workspace_dir": str(campaign_dir),
         "variant_count": len(variants),
         "summary": summary,
+        "relation_verification": verify_relation_geometry(spec),
         "variants": variants,
         "execution": {
             "status": "planned",
@@ -233,7 +235,11 @@ async def materialize_campaign(
             **plan["execution"],
             "status": "materialized",
             "generated_code_status": instantiation.status,
+            "relation_verification_status": (
+                instantiation.relation_verification or {}
+            ).get("status"),
         },
+        "relation_verification": instantiation.relation_verification,
     }
     (campaign_dir / "campaign_plan.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True),

@@ -648,6 +648,7 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
             "generated_code": instantiation.generated_code if body.dry_run else None,
             "relation_summary": instantiation.relation_summary,
             "relation_diagnostics": instantiation.relation_diagnostics,
+            "relation_verification": instantiation.relation_verification,
             "variant_summary": instantiation.variant_summary,
         }
     elif result.status == "needs_choice":

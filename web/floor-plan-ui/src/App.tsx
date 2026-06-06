@@ -287,6 +287,7 @@ function BuildPreviewPanel({
     const assets = result?.asset_resolutions ?? [];
     const relations = result?.instantiation?.relation_summary ?? [];
     const relationDiagnostics = result?.instantiation?.relation_diagnostics ?? [];
+    const relationVerification = result?.instantiation?.relation_verification;
     const variants = result?.instantiation?.variant_summary;
     const code = result?.instantiation?.generated_code ?? "";
     const status = result?.instantiation?.status ?? result?.status ?? state;
@@ -383,6 +384,23 @@ function BuildPreviewPanel({
                                     <span> · {diag.message}</span>
                                 </div>
                             ))}
+                        </div>
+                    )}
+                    {!error && relationVerification && relationVerification.check_count > 0 && (
+                        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #2E3237" }}>
+                            <div
+                                style={{
+                                    color: relationVerification.status === "pass" ? ACCENT : "#FFCC66",
+                                    fontWeight: 700,
+                                    marginBottom: 6,
+                                }}
+                            >
+                                Relation geometry {relationVerification.status}
+                            </div>
+                            <div>
+                                {relationVerification.check_count - relationVerification.failed_count}
+                                /{relationVerification.check_count} checks passed
+                            </div>
                         </div>
                     )}
                     {!error && variants && (

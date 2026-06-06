@@ -14,11 +14,12 @@ Per specs/IA_FULL_SPEC_2026-05-10.md Phase 19.
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .asset_resolution import resolve_object_asset
-from .relation_reasoning import normalize_spatial_relations
+from .relation_reasoning import normalize_spatial_relations, verify_relation_geometry
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +191,8 @@ class LayoutSpecCodeGenerator:
         if self._use_get_context:
             header_lines = [
                 "import omni.usd",
-                "from pxr import UsdGeom, UsdLux, Gf, Sdf",
+                "import json",
+                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd",
                 "stage = omni.usd.get_context().get_stage()",
                 "UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)",
                 "UsdGeom.SetStageMetersPerUnit(stage, 1.0)",
@@ -198,7 +200,8 @@ class LayoutSpecCodeGenerator:
             ]
         else:
             header_lines = [
-                "from pxr import UsdGeom, UsdLux, Gf, Sdf",
+                "import json",
+                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd",
                 "# stage must be provided by caller",
                 "UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)",
                 "UsdGeom.SetStageMetersPerUnit(stage, 1.0)",
@@ -296,6 +299,7 @@ class InstantiateResult:
     missing: List[str] = field(default_factory=list)
     relation_summary: List[Dict[str, Any]] = field(default_factory=list)
     relation_diagnostics: List[Dict[str, Any]] = field(default_factory=list)
+    relation_verification: Optional[Dict[str, Any]] = None
     variant_summary: Optional[Dict[str, Any]] = None
     raw_result: Optional[Dict[str, Any]] = None
 
@@ -603,11 +607,90 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         p.pop("_source_id", None)
         p.pop("_source_name", None)
     body = generator.generate_full_script(prims)
+    verification = verify_relation_geometry(spec)
+    live_verifier = _live_relation_verifier_code(verification)
     comments = "\n".join(
         part for part in (source_comments, relation_comments, diagnostic_comments)
         if part
     )
-    return header_comment + (comments + "\n" if comments else "") + body
+    return header_comment + (comments + "\n" if comments else "") + body + "\n\n" + live_verifier
+
+
+def _live_relation_verifier_code(verification: Dict[str, Any]) -> str:
+    """Return Kit-executable code that checks relation positions on the stage."""
+    payload = {
+        "checks": verification.get("checks", []),
+        "predicted_positions": verification.get("predicted_positions", {}),
+        "planner_status": verification.get("status"),
+    }
+    return f"""\
+# Isaac Assist live relation readback.  The planner-side relation verifier
+# predicts positions before execution; this block checks the actual USD stage
+# after materialization and stores the report on /World custom data.
+try:
+    _relation_payload = {json.dumps(payload, sort_keys=True)!r}
+    _relation_spec = json.loads(_relation_payload)
+    _layout_positions = {{}}
+    for _prim in stage.Traverse():
+        try:
+            _layout_id = _prim.GetCustomDataByKey("isaac_assist:layout_id")
+        except Exception:
+            _layout_id = None
+        if not _layout_id:
+            continue
+        try:
+            _xf = UsdGeom.Xformable(_prim)
+            _mat = _xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            _tr = _mat.ExtractTranslation()
+            _layout_positions[str(_layout_id)] = [float(_tr[0]), float(_tr[1]), float(_tr[2])]
+        except Exception as _exc:
+            _layout_positions[str(_layout_id)] = {{"error": str(_exc)}}
+    _live_checks = []
+    _failed = 0
+    for _check in _relation_spec.get("checks", []):
+        _subject_id = str(_check.get("subject_id", ""))
+        _actual = _layout_positions.get(_subject_id)
+        _expected = (
+            _check.get("expected_position")
+            or _relation_spec.get("predicted_positions", {{}}).get(_subject_id)
+        )
+        _status = "pass"
+        _error_m = 0.0
+        if not isinstance(_actual, list) or not isinstance(_expected, list):
+            _status = "fail"
+            _error_m = None
+        else:
+            _error_m = max(abs(float(_actual[_i]) - float(_expected[_i])) for _i in range(3))
+            if _error_m > 0.02:
+                _status = "fail"
+        if _status == "fail":
+            _failed += 1
+        _live_checks.append({{
+            "subject_id": _subject_id,
+            "relation": _check.get("relation"),
+            "object_id": _check.get("object_id"),
+            "status": _status,
+            "error_m": None if _error_m is None else round(float(_error_m), 4),
+            "expected_position": _expected,
+            "actual_position": _actual,
+        }})
+    _live_report = {{
+        "status": "fail" if _failed else _relation_spec.get("planner_status", "pass"),
+        "check_count": len(_live_checks),
+        "failed_count": _failed,
+        "checks": _live_checks,
+        "actual_positions": _layout_positions,
+    }}
+    _world = stage.GetPrimAtPath("/World")
+    if _world:
+        _world.SetCustomDataByKey(
+            "isaac_assist:relation_verification",
+            json.dumps(_live_report, sort_keys=True),
+        )
+    print("[Isaac Assist] relation verification:", json.dumps(_live_report, sort_keys=True))
+except Exception as _exc:
+    print("[Isaac Assist] relation verification warning:", _exc)
+"""
 
 
 def relation_summary(spec: Any) -> List[Dict[str, Any]]:
@@ -646,6 +729,11 @@ def relation_summary(spec: Any) -> List[Dict[str, Any]]:
 def relation_diagnostics(spec: Any) -> List[Dict[str, Any]]:
     """Return deterministic relation-reasoning diagnostics."""
     return normalize_spatial_relations(spec).diagnostics_as_dicts()
+
+
+def relation_verification(spec: Any) -> Dict[str, Any]:
+    """Return deterministic relation geometry verification."""
+    return verify_relation_geometry(spec)
 
 
 def variant_summary(spec: Any) -> Dict[str, Any]:
@@ -723,6 +811,7 @@ async def instantiate(
             message="dry_run — code generated, not executed",
             relation_summary=relation_summary(spec),
             relation_diagnostics=relation_diagnostics(spec),
+            relation_verification=relation_verification(spec),
             variant_summary=variant_summary(spec),
         )
 
@@ -733,6 +822,7 @@ async def instantiate(
         outcome = InstantiateResult.from_exec(result if isinstance(result, dict) else {"output": str(result)})
         outcome.relation_summary = relation_summary(spec)
         outcome.relation_diagnostics = relation_diagnostics(spec)
+        outcome.relation_verification = relation_verification(spec)
         outcome.variant_summary = variant_summary(spec)
         return outcome
     except Exception as e:  # noqa: BLE001
@@ -743,5 +833,6 @@ async def instantiate(
             generated_code=code,
             relation_summary=relation_summary(spec),
             relation_diagnostics=relation_diagnostics(spec),
+            relation_verification=relation_verification(spec),
             variant_summary=variant_summary(spec),
         )

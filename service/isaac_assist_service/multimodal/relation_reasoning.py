@@ -67,6 +67,26 @@ SMALL_OBJECT_CLASSES = {
     "sphere", "fruit", "apple", "orange", "hamburger",
     "screw", "nut", "bolt",
 }
+CLASS_HEIGHTS_M = {
+    "table_small": 0.75, "table_medium": 0.75, "table_large": 0.75,
+    "counter": 0.9, "kitchen_counter": 0.9,
+    "bin": 0.3, "bin_large": 0.45, "bowl": 0.12, "plate": 0.03,
+    "microwave": 0.35,
+    "cube": 0.05, "cube_small": 0.05, "cube_medium": 0.08, "cube_large": 0.15,
+    "fruit": 0.07, "apple": 0.07, "orange": 0.08, "hamburger": 0.08,
+    "sphere": 0.05,
+    "conveyor": 0.35, "conveyor_short": 0.35, "conveyor_long": 0.35,
+    "franka_panda": 1.0, "ur5e": 1.0, "ur10e": 1.1, "ur10": 1.1,
+}
+SUPPORT_TOP_M = {
+    "table_small": 0.75, "table_medium": 0.75, "table_large": 0.75,
+    "counter": 0.9, "kitchen_counter": 0.9,
+    "plate": 0.03,
+    "conveyor": 0.35, "conveyor_short": 0.35, "conveyor_long": 0.35,
+}
+INTERIOR_FLOOR_OFFSET_M = {
+    "bin": 0.05, "bin_large": 0.07, "bowl": 0.03, "microwave": 0.08,
+}
 
 
 @dataclass
@@ -194,6 +214,73 @@ def _is_small_object(obj: Any) -> bool:
 def _relation_metadata(rel: Any) -> Dict[str, Any]:
     value = _rel_get(rel, "metadata", {}) or {}
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _metadata(obj: Any) -> Dict[str, Any]:
+    value = _obj_get(obj, "metadata", {}) or {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _position3(obj: Any) -> List[float]:
+    pos = _obj_get(obj, "position", [0.0, 0.0, 0.0])
+    if hasattr(pos, "x") and hasattr(pos, "y"):
+        return [float(pos.x), float(pos.y), 0.0]
+    if isinstance(pos, dict):
+        return [
+            float(pos.get("x", 0.0)),
+            float(pos.get("y", 0.0)),
+            float(pos.get("z", 0.0)),
+        ]
+    try:
+        seq = list(pos)
+    except Exception:
+        seq = [0.0, 0.0, 0.0]
+    while len(seq) < 3:
+        seq.append(0.0)
+    return [float(seq[0]), float(seq[1]), float(seq[2])]
+
+
+def _scale3(obj: Any) -> List[float]:
+    size = _obj_get(obj, "size", None)
+    if hasattr(size, "w") and hasattr(size, "h"):
+        return [float(size.w), float(size.h), _height_m(obj)]
+    if isinstance(size, dict) and "w" in size and "h" in size:
+        return [float(size["w"]), float(size["h"]), _height_m(obj)]
+    scale = _obj_get(obj, "scale", [1.0, 1.0, 1.0])
+    try:
+        seq = list(scale)
+    except Exception:
+        seq = [1.0, 1.0, _height_m(obj)]
+    while len(seq) < 3:
+        seq.append(_height_m(obj))
+    return [float(seq[0]), float(seq[1]), float(seq[2])]
+
+
+def _height_m(obj: Any) -> float:
+    metadata = _metadata(obj)
+    value = metadata.get("height_m") or metadata.get("asset_height_m")
+    if isinstance(value, (int, float)) and value > 0:
+        return float(value)
+    cls = object_class(obj)
+    if cls in CLASS_HEIGHTS_M:
+        return CLASS_HEIGHTS_M[cls]
+    return 0.1
+
+
+def _support_top_m(obj: Any) -> float:
+    metadata = _metadata(obj)
+    value = metadata.get("support_surface_z_m") or metadata.get("top_z_m")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return SUPPORT_TOP_M.get(object_class(obj), _height_m(obj))
+
+
+def _interior_floor_offset_m(obj: Any) -> float:
+    metadata = _metadata(obj)
+    value = metadata.get("interior_floor_z_m")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return INTERIOR_FLOOR_OFFSET_M.get(object_class(obj), 0.02)
 
 
 def normalize_spatial_relations(spec_or_objects: Any, relations: Optional[Iterable[Any]] = None) -> RelationReasoningResult:
@@ -370,11 +457,188 @@ def normalize_spatial_relations(spec_or_objects: Any, relations: Optional[Iterab
     return RelationReasoningResult(relations=normalized, diagnostics=diagnostics)
 
 
+def predict_relation_positions(spec_or_objects: Any, relations: Optional[Iterable[Any]] = None) -> Dict[str, List[float]]:
+    """Predict 3D positions from the normalized relation graph."""
+    if relations is None and hasattr(spec_or_objects, "objects"):
+        objects = getattr(spec_or_objects, "objects", None) or []
+    else:
+        objects = spec_or_objects or []
+
+    reasoning = normalize_spatial_relations(spec_or_objects, relations)
+    object_by_id = {
+        str(_obj_get(obj, "id", "")): obj
+        for obj in objects
+        if str(_obj_get(obj, "id", ""))
+    }
+    parent_relation_by_subject = {
+        rel.subject_id: rel
+        for rel in reasoning.relations
+        if rel.relation in PARENT_RELATIONS
+    }
+    computed: Dict[str, List[float]] = {}
+
+    def resolve(obj: Any, stack: Optional[set[str]] = None) -> List[float]:
+        obj_id = str(_obj_get(obj, "id", ""))
+        if obj_id in computed:
+            return computed[obj_id]
+        if stack is None:
+            stack = set()
+        if obj_id in stack:
+            return _position3(obj)
+        stack.add(obj_id)
+
+        own_position = _position3(obj)
+        relation = parent_relation_by_subject.get(obj_id)
+        if not relation:
+            computed[obj_id] = own_position
+            return own_position
+
+        parent = object_by_id.get(relation.object_id)
+        if parent is None:
+            computed[obj_id] = own_position
+            return own_position
+
+        parent_position = resolve(parent, stack)
+        child_height = _height_m(obj)
+        if relation.relation in {"on_top_of", "stacked_above", "mounted_to"}:
+            z = parent_position[2] + _support_top_m(parent) + child_height / 2.0
+            computed[obj_id] = [parent_position[0], parent_position[1], round(z, 4)]
+        elif relation.relation == "inside":
+            parent_height = _height_m(parent)
+            z = (
+                parent_position[2]
+                - parent_height / 2.0
+                + _interior_floor_offset_m(parent)
+                + child_height / 2.0
+            )
+            computed[obj_id] = [parent_position[0], parent_position[1], round(z, 4)]
+        elif relation.relation == "beside":
+            parent_scale = _scale3(parent)
+            child_scale = _scale3(obj)
+            x = parent_position[0] + parent_scale[0] / 2.0 + child_scale[0] / 2.0 + 0.15
+            computed[obj_id] = [round(x, 4), parent_position[1], own_position[2]]
+        else:
+            computed[obj_id] = own_position
+        return computed[obj_id]
+
+    for obj in objects:
+        resolve(obj)
+    return computed
+
+
+def verify_relation_geometry(
+    spec_or_objects: Any,
+    relations: Optional[Iterable[Any]] = None,
+    *,
+    actual_positions: Optional[Dict[str, Iterable[float]]] = None,
+    tolerance_m: float = 0.02,
+) -> Dict[str, Any]:
+    """Verify normalized spatial relations against predicted or actual positions.
+
+    ``actual_positions`` is intentionally optional.  Current dry-run/campaign
+    flows use predicted positions; a later Isaac live-stage readback can pass
+    measured prim translations through the same verifier.
+    """
+    if relations is None and hasattr(spec_or_objects, "objects"):
+        objects = getattr(spec_or_objects, "objects", None) or []
+    else:
+        objects = spec_or_objects or []
+    object_by_id = {
+        str(_obj_get(obj, "id", "")): obj
+        for obj in objects
+        if str(_obj_get(obj, "id", ""))
+    }
+    reasoning = normalize_spatial_relations(spec_or_objects, relations)
+    predicted = predict_relation_positions(spec_or_objects, relations)
+    positions: Dict[str, List[float]] = {}
+    if actual_positions:
+        for key, value in actual_positions.items():
+            seq = list(value)
+            while len(seq) < 3:
+                seq.append(0.0)
+            positions[str(key)] = [float(seq[0]), float(seq[1]), float(seq[2])]
+    else:
+        positions = predicted
+
+    checks: List[Dict[str, Any]] = []
+    for rel in reasoning.relations:
+        subject = object_by_id.get(rel.subject_id)
+        parent = object_by_id.get(rel.object_id)
+        child_pos = positions.get(rel.subject_id)
+        parent_pos = positions.get(rel.object_id)
+        status = "pass"
+        error_m = 0.0
+        expected: Optional[List[float]] = None
+        if subject is None or parent is None or child_pos is None or parent_pos is None:
+            status = "fail"
+            message = "relation endpoint missing from position set"
+        elif rel.relation in {"on_top_of", "stacked_above", "mounted_to"}:
+            expected = [
+                parent_pos[0],
+                parent_pos[1],
+                parent_pos[2] + _support_top_m(parent) + _height_m(subject) / 2.0,
+            ]
+            error_m = max(abs(child_pos[i] - expected[i]) for i in range(3))
+            message = "support relation position verified"
+        elif rel.relation == "inside":
+            expected = [
+                parent_pos[0],
+                parent_pos[1],
+                parent_pos[2] - _height_m(parent) / 2.0
+                + _interior_floor_offset_m(parent)
+                + _height_m(subject) / 2.0,
+            ]
+            error_m = max(abs(child_pos[i] - expected[i]) for i in range(3))
+            message = "container relation position verified"
+        elif rel.relation == "beside":
+            parent_scale = _scale3(parent)
+            child_scale = _scale3(subject)
+            min_dx = parent_scale[0] / 2.0 + child_scale[0] / 2.0
+            actual_dx = abs(child_pos[0] - parent_pos[0])
+            error_m = max(0.0, min_dx - actual_dx, abs(child_pos[1] - parent_pos[1]))
+            message = "beside relation clearance verified"
+        else:
+            message = "relation has no deterministic geometry check"
+
+        if error_m > tolerance_m:
+            status = "fail"
+        checks.append({
+            "subject_id": rel.subject_id,
+            "relation": rel.relation,
+            "object_id": rel.object_id,
+            "status": status,
+            "message": message,
+            "error_m": round(error_m, 4),
+            "expected_position": [round(v, 4) for v in expected] if expected else None,
+            "actual_position": [round(v, 4) for v in child_pos] if child_pos else None,
+        })
+
+    failed = [check for check in checks if check["status"] == "fail"]
+    error_diags = [diag for diag in reasoning.diagnostics if diag.severity == "error"]
+    warning_diags = [diag for diag in reasoning.diagnostics if diag.severity == "warning"]
+    if failed or error_diags:
+        status = "fail"
+    elif warning_diags:
+        status = "warning"
+    else:
+        status = "pass"
+    return {
+        "status": status,
+        "check_count": len(checks),
+        "failed_count": len(failed),
+        "checks": checks,
+        "predicted_positions": predicted,
+        "diagnostics": reasoning.diagnostics_as_dicts(),
+    }
+
+
 __all__ = [
     "NormalizedRelation",
     "RelationDiagnostic",
     "RelationReasoningResult",
     "normalize_relation_kind",
     "normalize_spatial_relations",
+    "predict_relation_positions",
+    "verify_relation_geometry",
     "VALID_RELATION_KINDS",
 ]

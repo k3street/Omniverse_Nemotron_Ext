@@ -60,6 +60,7 @@ def test_build_campaign_plan_cycles_deterministically():
     assert plan["variants"][0]["launch_command"].startswith("SCENE_SETUP_SCRIPT=")
     assert "./launch_canvas_scene.sh " in plan["variants"][0]["launch_command"]
     assert plan["variants"][0]["validation"]["require_relations"] is True
+    assert plan["relation_verification"]["status"] == "pass"
 
 
 def test_campaign_plan_route_returns_current_session_plan(tmp_path, monkeypatch):
@@ -98,6 +99,8 @@ def test_materialize_campaign_writes_manifest_usda_and_setup(tmp_path):
 
     campaign_dir = tmp_path / "runs" / "mat_session_rev7_seed5"
     assert manifest["execution"]["status"] == "materialized"
+    assert manifest["execution"]["relation_verification_status"] == "pass"
+    assert manifest["relation_verification"]["status"] == "pass"
     assert (campaign_dir / "campaign_plan.json").exists()
     assert (campaign_dir / "layout_spec.json").exists()
     first = manifest["variants"][0]

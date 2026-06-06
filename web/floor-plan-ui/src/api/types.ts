@@ -269,6 +269,23 @@ export interface BuildResponse {
             relation?: string;
             normalized_relation?: string | null;
         }>;
+        relation_verification?: {
+            status: string;
+            check_count: number;
+            failed_count: number;
+            checks: Array<{
+                subject_id: string;
+                relation: string;
+                object_id: string;
+                status: string;
+                message: string;
+                error_m: number;
+                expected_position?: [number, number, number] | null;
+                actual_position?: [number, number, number] | null;
+            }>;
+            predicted_positions?: Record<string, [number, number, number]>;
+            diagnostics?: unknown[];
+        };
         variant_summary?: ScenarioVariants;
     };
 }
