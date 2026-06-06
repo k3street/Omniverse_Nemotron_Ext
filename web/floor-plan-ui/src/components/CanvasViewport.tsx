@@ -714,7 +714,12 @@ function relationDisplayPositions(
     const parentBySubject = new Map<string, string>();
 
     for (const rel of relations) {
-        if (rel.relation === "inside" || rel.relation === "on_top_of" || rel.relation === "stacked_above") {
+        if (
+            rel.relation === "inside"
+            || rel.relation === "on_top_of"
+            || rel.relation === "stacked_above"
+            || rel.relation === "mounted_to"
+        ) {
             parentBySubject.set(rel.subject_id, rel.object_id);
         } else if (rel.relation === "contains" || rel.relation === "supports") {
             parentBySubject.set(rel.object_id, rel.subject_id);
@@ -749,7 +754,13 @@ function relationBadgesForSubjects(
     const nameById = new Map(objects.map((obj) => [obj.id, obj.name]));
     const badges: Record<string, string> = {};
     for (const rel of relations) {
-        if (rel.relation === "inside" || rel.relation === "on_top_of" || rel.relation === "stacked_above") {
+        if (
+            rel.relation === "inside"
+            || rel.relation === "on_top_of"
+            || rel.relation === "stacked_above"
+            || rel.relation === "mounted_to"
+            || rel.relation === "beside"
+        ) {
             badges[rel.subject_id] = `${rel.relation.replaceAll("_", " ")} ${nameById.get(rel.object_id) ?? rel.object_id}`;
         } else if (rel.relation === "contains") {
             badges[rel.object_id] = `inside ${nameById.get(rel.subject_id) ?? rel.subject_id}`;
@@ -767,7 +778,12 @@ function relationDepthsForObjects(
     const ids = new Set(objects.map((obj) => obj.id));
     const parentBySubject = new Map<string, string>();
     for (const rel of relations) {
-        if (rel.relation === "inside" || rel.relation === "on_top_of" || rel.relation === "stacked_above") {
+        if (
+            rel.relation === "inside"
+            || rel.relation === "on_top_of"
+            || rel.relation === "stacked_above"
+            || rel.relation === "mounted_to"
+        ) {
             parentBySubject.set(rel.subject_id, rel.object_id);
         } else if (rel.relation === "contains" || rel.relation === "supports") {
             parentBySubject.set(rel.object_id, rel.subject_id);

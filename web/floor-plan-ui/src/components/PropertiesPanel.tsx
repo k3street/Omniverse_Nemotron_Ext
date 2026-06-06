@@ -39,6 +39,8 @@ type ParentSpatialRelation = SpatialRelation & { relation: ParentRelationKind };
 const PARENT_RELATION_OPTIONS: Array<{ value: ParentRelationKind; label: string }> = [
     { value: "inside", label: "inside" },
     { value: "on_top_of", label: "on top of" },
+    { value: "mounted_to", label: "mounted to" },
+    { value: "beside", label: "beside" },
     { value: "attached_to", label: "attached to" },
     { value: "near", label: "near" },
     { value: "left_of", label: "left of" },
@@ -925,6 +927,7 @@ function relationDisplaySubject(relation: SpatialRelation): string {
 
 function relationLabel(relation: SpatialRelationKind): string {
     if (relation === "on_top_of") return "on top of";
+    if (relation === "mounted_to") return "mounted to";
     if (relation === "front_of") return "in front of";
     return relation.replaceAll("_", " ");
 }

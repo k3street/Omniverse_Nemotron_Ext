@@ -63,7 +63,30 @@ def test_cosmos_observation_maps_to_reviewable_layout_spec():
     assert spec.objects[0].object_class == "franka_panda"
     assert spec.bindings["primary_robot"].object_id == spec.objects[0].id
     assert spec.bindings["workpiece"].object_id == spec.objects[1].id
-    assert spec.constraints[0]["type"] == "cosmos_relation"
+    assert spec.constraints[0]["type"] == "cosmos_relation_unresolved"
+
+
+def test_cosmos_relation_proposals_become_typed_relations():
+    observation = CosmosSceneObservation(
+        input_kind="photo",
+        objects=[
+            CosmosObjectProposal(label="table", asset_hint="table_medium"),
+            CosmosObjectProposal(label="bowl", asset_hint="bowl"),
+            CosmosObjectProposal(label="apple", asset_hint="fruit"),
+        ],
+        relations=[
+            CosmosRelationProposal(subject="bowl", predicate="on", object="table", confidence=0.8),
+            CosmosRelationProposal(subject="apple", predicate="in", object="bowl", confidence=0.7),
+        ],
+    )
+
+    spec = cosmos_observation_to_layout_spec(observation, session_id="cosmos_rel")
+
+    assert spec.constraints is None
+    assert [(r.relation, r.source) for r in spec.relations] == [
+        ("on_top_of", "cosmos_reasoner"),
+        ("inside", "cosmos_reasoner"),
+    ]
 
 
 def test_cosmos_class_normalization_prefers_palette_asset_hint():

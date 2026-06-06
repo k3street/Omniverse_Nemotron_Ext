@@ -93,6 +93,8 @@ SpatialRelationKind = Literal[
     "contains",
     "supports",
     "attached_to",
+    "mounted_to",
+    "beside",
     "near",
     "left_of",
     "right_of",

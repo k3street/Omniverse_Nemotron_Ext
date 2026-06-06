@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .asset_resolution import resolve_object_asset
+from .relation_reasoning import normalize_spatial_relations
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +295,7 @@ class InstantiateResult:
     placed: List[str] = field(default_factory=list)
     missing: List[str] = field(default_factory=list)
     relation_summary: List[Dict[str, Any]] = field(default_factory=list)
+    relation_diagnostics: List[Dict[str, Any]] = field(default_factory=list)
     variant_summary: Optional[Dict[str, Any]] = None
     raw_result: Optional[Dict[str, Any]] = None
 
@@ -449,36 +451,13 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
             return float(value)
         return _INTERIOR_FLOOR_OFFSET_M.get(_object_class(obj).lower(), 0.02)
 
-    def _relation_get(rel: Any, attr: str, default: Any = None) -> Any:
-        if isinstance(rel, dict):
-            return rel.get(attr, default)
-        return getattr(rel, attr, default)
-
-    def _semantic_relations() -> List[Dict[str, Any]]:
-        raw = getattr(spec, "relations", None) or []
-        normalized: List[Dict[str, Any]] = []
-        for rel in raw:
-            subject_id = str(_relation_get(rel, "subject_id", ""))
-            object_id = str(_relation_get(rel, "object_id", ""))
-            relation = str(_relation_get(rel, "relation", ""))
-            if subject_id and object_id and relation:
-                if relation == "contains":
-                    subject_id, object_id, relation = object_id, subject_id, "inside"
-                elif relation == "supports":
-                    subject_id, object_id, relation = object_id, subject_id, "on_top_of"
-                normalized.append({
-                    "subject_id": subject_id,
-                    "object_id": object_id,
-                    "relation": relation,
-                })
-        return normalized
-
-    relations = _semantic_relations()
+    reasoning = normalize_spatial_relations(spec)
+    relations = [rel.as_dict() for rel in reasoning.relations]
     object_by_id = {_object_id(obj): obj for obj in objects if _object_id(obj)}
     parent_relation_by_subject = {
         rel["subject_id"]: rel
         for rel in relations
-        if rel["relation"] in {"on_top_of", "inside", "stacked_above"}
+        if rel["relation"] in {"on_top_of", "inside", "stacked_above", "mounted_to", "beside"}
     }
 
     def _base_position_for_object(
@@ -511,7 +490,7 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         parent_height = _height_m(parent)
         child_height = _height_m(obj, scale)
         relation_kind = relation["relation"]
-        if relation_kind in {"on_top_of", "supports", "stacked_above"}:
+        if relation_kind in {"on_top_of", "supports", "stacked_above", "mounted_to"}:
             z = parent_position[2] + _support_top_m(parent) + child_height / 2.0
         elif relation_kind in {"inside", "contains"}:
             z = (
@@ -520,6 +499,12 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
                 + _interior_floor_offset_m(parent)
                 + child_height / 2.0
             )
+        elif relation_kind == "beside":
+            parent_scale = _scale3(parent, _obj_get(parent, "scale", [1.0, 1.0, 1.0]))
+            clearance = 0.15
+            x = parent_position[0] + parent_scale[0] / 2.0 + scale[0] / 2.0 + clearance
+            computed[obj_id] = [round(x, 4), parent_position[1], own_position[2]]
+            return computed[obj_id]
         else:
             z = own_position[2]
 
@@ -609,12 +594,19 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         f"# relation: {rel['subject_id']} {rel['relation']} {rel['object_id']}"
         for rel in relations
     )
+    diagnostic_comments = "\n".join(
+        f"# relation_diagnostic: {diag.code} {diag.severity}: {diag.message}"
+        for diag in reasoning.diagnostics
+    )
     for p in prims:
         p.pop("_source_class", None)
         p.pop("_source_id", None)
         p.pop("_source_name", None)
     body = generator.generate_full_script(prims)
-    comments = "\n".join(part for part in (source_comments, relation_comments) if part)
+    comments = "\n".join(
+        part for part in (source_comments, relation_comments, diagnostic_comments)
+        if part
+    )
     return header_comment + (comments + "\n" if comments else "") + body
 
 
@@ -633,15 +625,11 @@ def relation_summary(spec: Any) -> List[Dict[str, Any]]:
             object_names[obj_id] = name
 
     rows: List[Dict[str, Any]] = []
-    for rel in getattr(spec, "relations", None) or []:
-        if isinstance(rel, dict):
-            subject_id = str(rel.get("subject_id", ""))
-            object_id = str(rel.get("object_id", ""))
-            relation = str(rel.get("relation", ""))
-        else:
-            subject_id = str(getattr(rel, "subject_id", ""))
-            object_id = str(getattr(rel, "object_id", ""))
-            relation = str(getattr(rel, "relation", ""))
+    reasoning = normalize_spatial_relations(spec)
+    for rel in reasoning.relations:
+        subject_id = rel.subject_id
+        object_id = rel.object_id
+        relation = rel.relation
         if subject_id and object_id and relation:
             rows.append({
                 "subject_id": subject_id,
@@ -649,8 +637,15 @@ def relation_summary(spec: Any) -> List[Dict[str, Any]]:
                 "relation": relation,
                 "object_id": object_id,
                 "object_name": object_names.get(object_id, object_id),
+                "source": rel.source,
+                "confidence": rel.confidence,
             })
     return rows
+
+
+def relation_diagnostics(spec: Any) -> List[Dict[str, Any]]:
+    """Return deterministic relation-reasoning diagnostics."""
+    return normalize_spatial_relations(spec).diagnostics_as_dicts()
 
 
 def variant_summary(spec: Any) -> Dict[str, Any]:
@@ -727,6 +722,7 @@ async def instantiate(
             generated_code=code,
             message="dry_run — code generated, not executed",
             relation_summary=relation_summary(spec),
+            relation_diagnostics=relation_diagnostics(spec),
             variant_summary=variant_summary(spec),
         )
 
@@ -736,6 +732,7 @@ async def instantiate(
         result = await kit_tools.queue_exec_patch(code, description=f"Phase 19: instantiate {template_id or 'spec'}")
         outcome = InstantiateResult.from_exec(result if isinstance(result, dict) else {"output": str(result)})
         outcome.relation_summary = relation_summary(spec)
+        outcome.relation_diagnostics = relation_diagnostics(spec)
         outcome.variant_summary = variant_summary(spec)
         return outcome
     except Exception as e:  # noqa: BLE001
@@ -745,5 +742,6 @@ async def instantiate(
             message=f"{type(e).__name__}: {e}",
             generated_code=code,
             relation_summary=relation_summary(spec),
+            relation_diagnostics=relation_diagnostics(spec),
             variant_summary=variant_summary(spec),
         )

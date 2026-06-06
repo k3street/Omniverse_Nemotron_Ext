@@ -236,13 +236,17 @@ def test_instantiate_dry_run_computes_nested_spatial_relations(monkeypatch, tmp_
             "relation": "on_top_of",
             "object_id": "table_1",
             "object_name": "Table",
+            "source": "reasoned",
+            "confidence": 1.0,
         },
         {
-            "subject_id": "bowl_1",
-            "subject_name": "Bowl",
-            "relation": "contains",
-            "object_id": "fruit_1",
-            "object_name": "Fruit",
+            "subject_id": "fruit_1",
+            "subject_name": "Fruit",
+            "relation": "inside",
+            "object_id": "bowl_1",
+            "object_name": "Bowl",
+            "source": "reasoned",
+            "confidence": 1.0,
         },
     ]
 
@@ -337,8 +341,11 @@ def test_build_route_returns_relation_summary(tmp_path):
                 "relation": "on_top_of",
                 "object_id": "plate_1",
                 "object_name": "Plate",
+                "source": "user_explicit",
+                "confidence": 1.0,
             }
         ]
+        assert response["instantiation"]["relation_diagnostics"] == []
         assert "# relation: burger_1 on_top_of plate_1" in response["instantiation"]["generated_code"]
     finally:
         routes._store.close()

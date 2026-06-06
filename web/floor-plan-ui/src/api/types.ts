@@ -116,6 +116,8 @@ export type SpatialRelationKind =
     | "contains"
     | "supports"
     | "attached_to"
+    | "mounted_to"
+    | "beside"
     | "near"
     | "left_of"
     | "right_of"
@@ -255,6 +257,17 @@ export interface BuildResponse {
             relation: string;
             object_id: string;
             object_name: string;
+            source?: string;
+            confidence?: number;
+        }>;
+        relation_diagnostics?: Array<{
+            severity: string;
+            code: string;
+            message: string;
+            subject_id?: string;
+            object_id?: string;
+            relation?: string;
+            normalized_relation?: string | null;
         }>;
         variant_summary?: ScenarioVariants;
     };

@@ -50,6 +50,7 @@ from .render import render_layout_spec_to_file
 from .scenario_campaign import build_campaign_plan, materialize_campaign
 from .types import LayoutSpec
 from .validate import validate_layout_spec
+from .relation_reasoning import normalize_spatial_relations
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +275,7 @@ async def propose_canvas_from_cosmos(
         body.observation,
         session_id=session_id,
     )
+    relation_reasoning = normalize_spatial_relations(spec)
 
     validation = validate_layout_spec(spec)
     if not validation.valid:
@@ -304,11 +306,13 @@ async def propose_canvas_from_cosmos(
         "revision": saved.revision,
         "input_kind": body.observation.input_kind,
         "object_count": len(saved.objects or []),
+        "relation_diagnostics": relation_reasoning.diagnostics_as_dicts(),
     })
     return {
         "valid": True,
         "revision": saved.revision,
         "spec": saved.model_dump(mode="json"),
+        "relation_diagnostics": relation_reasoning.diagnostics_as_dicts(),
     }
 
 
@@ -643,6 +647,7 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
             "dry_run": body.dry_run,
             "generated_code": instantiation.generated_code if body.dry_run else None,
             "relation_summary": instantiation.relation_summary,
+            "relation_diagnostics": instantiation.relation_diagnostics,
             "variant_summary": instantiation.variant_summary,
         }
     elif result.status == "needs_choice":

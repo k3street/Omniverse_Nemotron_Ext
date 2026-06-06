@@ -26,9 +26,11 @@ from .types import (
     RoleBinding,
     Size,
     Source,
+    SpatialRelation,
     StructuralFeatures,
     TypedObject,
 )
+from .relation_reasoning import VALID_RELATION_KINDS, normalize_relation_kind
 
 
 CosmosInputKind = Literal["photo", "screenshot", "render", "video_frame", "prompt"]
@@ -113,18 +115,27 @@ class CosmosSceneObservation(BaseModel):
 
 LABEL_CLASS_ALIASES: Dict[str, str] = {
     "bin": "bin",
+    "bowl": "bowl",
     "box": "obstacle_box",
     "conveyor": "conveyor_short",
     "cube": "cube_medium",
     "floor": "groundplane",
     "franka": "franka_panda",
     "franka panda": "franka_panda",
+    "fruit": "fruit",
+    "apple": "fruit",
+    "orange": "fruit",
+    "hamburger": "hamburger",
     "light": "distant_light",
     "panda": "franka_panda",
     "plane": "groundplane",
     "robot arm": "franka_panda",
     "shelf": "shelf",
     "table": "table_medium",
+    "counter": "kitchen_counter",
+    "kitchen counter": "kitchen_counter",
+    "microwave": "microwave",
+    "plate": "plate",
     "target bin": "bin",
     "ur10": "ur10",
     "ur5": "ur5e",
@@ -278,6 +289,7 @@ def cosmos_observation_to_layout_spec(
 
     typed_objects: List[TypedObject] = []
     bindings: Dict[str, RoleBinding] = {}
+    object_ids_by_label: Dict[str, str] = {}
     timestamp = datetime.now(timezone.utc)
 
     for index, proposal in enumerate(observation.objects):
@@ -306,6 +318,10 @@ def cosmos_observation_to_layout_spec(
             },
         )
         typed_objects.append(typed)
+        object_ids_by_label[proposal.label.strip().lower()] = object_id
+        object_ids_by_label[typed.name.strip().lower()] = object_id
+        if proposal.asset_hint:
+            object_ids_by_label[proposal.asset_hint.strip().lower()] = object_id
         if role:
             bindings[role] = RoleBinding(
                 object_id=object_id,
@@ -314,16 +330,37 @@ def cosmos_observation_to_layout_spec(
                 timestamp=timestamp,
             )
 
-    constraints: List[Dict[str, Any]] = [
-        {
-            "type": "cosmos_relation",
-            "subject": rel.subject,
-            "predicate": rel.predicate,
-            "object": rel.object,
-            "confidence": rel.confidence,
-        }
-        for rel in observation.relations
-    ]
+    spatial_relations: List[SpatialRelation] = []
+    constraints: List[Dict[str, Any]] = []
+    for rel in observation.relations:
+        subject_key = rel.subject.strip().lower()
+        object_key = rel.object.strip().lower()
+        subject_id = object_ids_by_label.get(subject_key)
+        object_id = object_ids_by_label.get(object_key)
+        normalized_predicate = normalize_relation_kind(rel.predicate)
+        if subject_id and object_id and normalized_predicate in VALID_RELATION_KINDS:
+            spatial_relations.append(SpatialRelation(
+                subject_id=subject_id,
+                relation=normalized_predicate,
+                object_id=object_id,
+                confidence=rel.confidence,
+                source="cosmos_reasoner",
+                metadata={
+                    "cosmos_subject": rel.subject,
+                    "cosmos_predicate": rel.predicate,
+                    "cosmos_object": rel.object,
+                },
+            ))
+        else:
+            constraints.append({
+                "type": "cosmos_relation_unresolved",
+                "subject": rel.subject,
+                "predicate": rel.predicate,
+                "normalized_predicate": normalized_predicate,
+                "object": rel.object,
+                "confidence": rel.confidence,
+                "reason": "relation endpoint label did not match an object proposal",
+            })
 
     intent = Intent(
         pattern_hint=(
@@ -352,6 +389,7 @@ def cosmos_observation_to_layout_spec(
         intent=intent,
         objects=typed_objects,
         constraints=constraints or None,
+        relations=spatial_relations or None,
         bindings=bindings or None,
         parameters={
             "workspace_size_xy_m": observation.workspace_size_xy_m,

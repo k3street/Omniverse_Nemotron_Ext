@@ -286,6 +286,7 @@ function BuildPreviewPanel({
 }) {
     const assets = result?.asset_resolutions ?? [];
     const relations = result?.instantiation?.relation_summary ?? [];
+    const relationDiagnostics = result?.instantiation?.relation_diagnostics ?? [];
     const variants = result?.instantiation?.variant_summary;
     const code = result?.instantiation?.generated_code ?? "";
     const status = result?.instantiation?.status ?? result?.status ?? state;
@@ -361,12 +362,25 @@ function BuildPreviewPanel({
                     ))}
                     {!error && relations.length > 0 && (
                         <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #2E3237" }}>
-                            <div style={{ color: ACCENT, fontWeight: 700, marginBottom: 6 }}>Relations</div>
+                            <div style={{ color: ACCENT, fontWeight: 700, marginBottom: 6 }}>Relations verified</div>
                             {relations.map((rel, index) => (
                                 <div key={`${rel.subject_id}-${rel.relation}-${rel.object_id}-${index}`} style={{ marginBottom: 6 }}>
                                     <span style={{ color: TEXT_PRIMARY }}>{rel.subject_name}</span>
                                     <span> {rel.relation.replaceAll("_", " ")} </span>
                                     <span style={{ color: TEXT_PRIMARY }}>{rel.object_name}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {!error && relationDiagnostics.length > 0 && (
+                        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #2E3237" }}>
+                            <div style={{ color: "#FFCC66", fontWeight: 700, marginBottom: 6 }}>Relation review</div>
+                            {relationDiagnostics.map((diag, index) => (
+                                <div key={`${diag.code}-${index}`} style={{ marginBottom: 6 }}>
+                                    <span style={{ color: diag.severity === "error" ? "#FF6B6B" : "#FFCC66" }}>
+                                        {diag.severity}
+                                    </span>
+                                    <span> · {diag.message}</span>
                                 </div>
                             ))}
                         </div>
