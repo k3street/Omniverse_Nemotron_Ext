@@ -321,6 +321,23 @@ export interface CampaignPlanResponse {
     };
 }
 
+export interface CampaignLaunchResponse {
+    campaign: CampaignPlanResponse;
+    launch: {
+        variant_id: string;
+        status: string;
+        timestamp: number;
+        usd_path: string;
+        setup_script_path: string;
+        log_path: string;
+        command: string;
+        pid?: number;
+        returncode?: number;
+        preflight: Record<string, unknown>;
+        verification: Record<string, unknown>;
+    };
+}
+
 export interface CosmosObserveRequest {
     prompt: string;
     image_base64?: string;

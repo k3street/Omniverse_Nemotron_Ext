@@ -137,6 +137,17 @@ class CampaignPlanRequest(BaseModel):
     workspace_root: Optional[str] = Field(default=None)
 
 
+class CampaignLaunchRequest(BaseModel):
+    """Materialize and launch one local scenario variant."""
+
+    workspace_root: Optional[str] = Field(default=None)
+    variant_index: int = Field(default=1, ge=1)
+    variant_id: Optional[str] = Field(default=None)
+    dry_run: bool = Field(default=False)
+    wait: bool = Field(default=False)
+    startup_grace_s: float = Field(default=3.0, ge=0.0, le=120.0)
+
+
 class CosmosProposalRequest(BaseModel):
     """Save a Cosmos 3 Reasoner scene observation as a canvas proposal."""
 
@@ -720,6 +731,58 @@ async def materialize_canvas_campaign(
         "workspace_dir": manifest["workspace_dir"],
     })
     return manifest
+
+
+@router.post("/{session_id}/campaign/launch")
+async def launch_canvas_campaign_variant(
+    session_id: str,
+    body: CampaignLaunchRequest,
+) -> Dict[str, Any]:
+    """Materialize then launch one local scenario variant through the runner."""
+    store = get_store()
+    spec = store.get_latest(session_id)
+    if spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no LayoutSpec to launch variants from",
+        )
+
+    manifest = await materialize_campaign(
+        spec,
+        session_id=session_id,
+        workspace_root=Path(body.workspace_root) if body.workspace_root else None,
+    )
+    try:
+        from scripts.run_materialized_variant import launch_variant, select_variant
+
+        variant = select_variant(
+            manifest,
+            index=body.variant_index,
+            variant_id=body.variant_id,
+        )
+        launch = launch_variant(
+            variant,
+            dry_run=body.dry_run,
+            wait=body.wait,
+            startup_grace_s=body.startup_grace_s,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"campaign launch failed: {exc}",
+        ) from exc
+
+    store.append_event(session_id, "canvas_campaign_launched", {
+        "revision": spec.revision,
+        "campaign_id": manifest["campaign_id"],
+        "variant_id": launch.get("variant_id"),
+        "status": launch.get("status"),
+        "dry_run": body.dry_run,
+    })
+    return {
+        "campaign": manifest,
+        "launch": launch,
+    }
 
 
 @router.delete("/{session_id}")

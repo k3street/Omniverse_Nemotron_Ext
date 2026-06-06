@@ -141,6 +141,32 @@ def test_campaign_materialize_route_writes_current_session_files(tmp_path, monke
     assert (tmp_path / "runs" / "materialize_route_rev1_seed12" / "campaign_plan.json").exists()
 
 
+def test_campaign_launch_route_dry_run_selects_first_variant(tmp_path, monkeypatch):
+    from service.isaac_assist_service.multimodal import routes
+    from service.isaac_assist_service.multimodal.persistence import MultimodalStore
+
+    store = MultimodalStore(db_path=tmp_path / "canvas.sqlite")
+    monkeypatch.setattr(routes, "_store", store)
+    spec = _minimal_spec(enabled=True, variant_count=1, seed=22)
+    asyncio.run(store.save_with_cas("launch_route", spec, 0))
+
+    response = asyncio.run(
+        routes.launch_canvas_campaign_variant(
+            "launch_route",
+            routes.CampaignLaunchRequest(
+                workspace_root=str(tmp_path / "runs"),
+                variant_index=1,
+                dry_run=True,
+            ),
+        )
+    )
+
+    assert response["campaign"]["campaign_id"] == "launch_route_rev1_seed22"
+    assert response["launch"]["status"] == "dry_run"
+    assert response["launch"]["variant_id"] == "launch_route_rev1_seed22_v001"
+    assert (tmp_path / "runs" / "launch_route_rev1_seed22" / "launch_route_rev1_seed22_v001_result.json").exists()
+
+
 def test_run_materialized_variant_dry_run_writes_result(tmp_path):
     from scripts.run_materialized_variant import (
         launch_variant,

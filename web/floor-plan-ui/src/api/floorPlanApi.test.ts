@@ -221,4 +221,57 @@ describe("createCanvasApi", () => {
         );
         expect(response.execution.status).toBe("materialized");
     });
+
+    it("posts campaign launch requests", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                campaign: {
+                    campaign_id: "session_rev1_seed1",
+                    session_id: "session one",
+                    revision: 1,
+                    enabled: true,
+                    workspace_dir: "workspace/scenario_campaigns/session_rev1_seed1",
+                    variant_count: 1,
+                    summary: {},
+                    variants: [],
+                    execution: {
+                        status: "materialized",
+                        local_supported: true,
+                        remote_supported: false,
+                        remote_note: "",
+                    },
+                },
+                launch: {
+                    variant_id: "session_rev1_seed1_v001",
+                    status: "dry_run",
+                    timestamp: 1,
+                    usd_path: "scene.usda",
+                    setup_script_path: "scene_setup.py",
+                    log_path: "scene_launch.log",
+                    command: "SCENE_SETUP_SCRIPT=scene_setup.py ./launch_canvas_scene.sh scene.usda",
+                    preflight: {},
+                    verification: {},
+                },
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const api = createCanvasApi("");
+        const response = await api.launchCampaign("session one", {
+            variant_index: 1,
+            dry_run: true,
+            wait: false,
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/v1/canvas/session%20one/campaign/launch",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ variant_index: 1, dry_run: true, wait: false }),
+            },
+        );
+        expect(response.launch.status).toBe("dry_run");
+    });
 });

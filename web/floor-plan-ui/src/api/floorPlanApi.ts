@@ -10,6 +10,7 @@
 import {
     BuildResponse,
     CanvasGetResponse,
+    CampaignLaunchResponse,
     CampaignPlanResponse,
     ConflictDetail,
     CosmosObserveRequest,
@@ -51,6 +52,14 @@ export interface CanvasApi {
     build(sessionId: string, opts?: { template_id?: string; force_freeform?: boolean; dry_run?: boolean }): Promise<BuildResponse>;
     planCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;
     materializeCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;
+    launchCampaign(sessionId: string, opts?: {
+        workspace_root?: string;
+        variant_index?: number;
+        variant_id?: string;
+        dry_run?: boolean;
+        wait?: boolean;
+        startup_grace_s?: number;
+    }): Promise<CampaignLaunchResponse>;
     cosmosObserve(sessionId: string, req: CosmosObserveRequest): Promise<CosmosObserveResponse>;
     cosmosObserveViewport(
         sessionId: string,
@@ -187,6 +196,15 @@ export function createCanvasApi(baseUrl: string = ""): CanvasApi {
                 body: JSON.stringify(opts),
             });
             if (!r.ok) throw new Error(`POST campaign materialize failed: ${r.status}`);
+            return r.json();
+        },
+        async launchCampaign(sessionId, opts = {}) {
+            const r = await fetch(url(`/${encodeURIComponent(sessionId)}/campaign/launch`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(opts),
+            });
+            if (!r.ok) throw new Error(`POST campaign launch failed: ${r.status}`);
             return r.json();
         },
         async cosmosObserve(sessionId, req) {

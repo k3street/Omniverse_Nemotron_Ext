@@ -17,6 +17,7 @@ import {
     CircumstancePreset,
     LightingPreset,
     ScenarioVariants,
+    CampaignLaunchResponse,
     SpatialRelation,
     SpatialRelationKind,
     TypedObject,
@@ -554,8 +555,10 @@ function ScenarioVariantsPanel() {
     const variants = useFloorPlanStore((s) => s.spec?.scenario_variants) ?? DEFAULT_SCENARIO_VARIANTS;
     const setScenarioVariants = useFloorPlanStore((s) => s.setScenarioVariants);
     const [plan, setPlan] = useState<CampaignPlanResponse | null>(null);
+    const [launch, setLaunch] = useState<CampaignLaunchResponse["launch"] | null>(null);
     const [planState, setPlanState] = useState<"idle" | "loading" | "failed">("idle");
     const [materializeState, setMaterializeState] = useState<"idle" | "loading" | "failed">("idle");
+    const [launchState, setLaunchState] = useState<"idle" | "loading" | "failed">("idle");
     const update = (patch: Partial<ScenarioVariants>) => {
         setScenarioVariants({
             ...variants,
@@ -584,6 +587,7 @@ function ScenarioVariantsPanel() {
             await flushPendingPatch(api);
             const response = await api.planCampaign(sessionId);
             setPlan(response);
+            setLaunch(null);
             setPlanState("idle");
         } catch {
             setPlanState("failed");
@@ -595,9 +599,26 @@ function ScenarioVariantsPanel() {
             await flushPendingPatch(api);
             const response = await api.materializeCampaign(sessionId);
             setPlan(response);
+            setLaunch(null);
             setMaterializeState("idle");
         } catch {
             setMaterializeState("failed");
+        }
+    };
+    const launchFirst = async () => {
+        setLaunchState("loading");
+        try {
+            await flushPendingPatch(api);
+            const response = await api.launchCampaign(sessionId, {
+                variant_index: 1,
+                dry_run: false,
+                wait: false,
+            });
+            setPlan(response.campaign);
+            setLaunch(response.launch);
+            setLaunchState("idle");
+        } catch {
+            setLaunchState("failed");
         }
     };
 
@@ -744,6 +765,11 @@ function ScenarioVariantsPanel() {
                     Campaign materialization failed. Check the backend log.
                 </div>
             )}
+            {launchState === "failed" && (
+                <div style={{ marginTop: 8, color: "#FF6B6B" }}>
+                    Scene launch failed. Check the backend log.
+                </div>
+            )}
             {plan && (
                 <div
                     style={{
@@ -763,6 +789,32 @@ function ScenarioVariantsPanel() {
                         <div style={{ marginTop: 6, color: TEXT_DIM }}>
                             <div style={{ color: ACCENT }}>first launch</div>
                             <code style={{ wordBreak: "break-word" }}>{plan.variants[0].launch_command}</code>
+                            <button
+                                type="button"
+                                onClick={() => void launchFirst()}
+                                disabled={launchState === "loading"}
+                                style={{
+                                    width: "100%",
+                                    marginTop: 8,
+                                    background: launchState === "loading" ? "#2E3237" : ACCENT,
+                                    color: launchState === "loading" ? TEXT_DIM : "#071007",
+                                    border: "none",
+                                    borderRadius: 4,
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    padding: "6px 8px",
+                                    cursor: launchState === "loading" ? "default" : "pointer",
+                                }}
+                            >
+                                {launchState === "loading" ? "Launching..." : "Launch scene"}
+                            </button>
+                        </div>
+                    )}
+                    {launch && (
+                        <div style={{ marginTop: 8, color: TEXT_DIM }}>
+                            <KV k="launch" v={launch.status} />
+                            {launch.pid !== undefined && <KV k="pid" v={launch.pid} />}
+                            <KV k="log" v={launch.log_path} />
                         </div>
                     )}
                 </div>
