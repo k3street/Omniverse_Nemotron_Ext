@@ -159,10 +159,12 @@ class LayoutSpecCodeGenerator:
         if (sx, sy, sz) != (1.0, 1.0, 1.0):
             lines.append(f"_set_xform_scale(prim, {sx!r}, {sy!r}, {sz!r})")
 
+        physics = (extra_attrs or {}).get("_isaac_assist_physics", {})
+
         # Extra attributes
         if extra_attrs:
             for attr_name, attr_value in extra_attrs.items():
-                if attr_name == "asset_path":
+                if attr_name in {"asset_path", "_isaac_assist_physics"}:
                     continue  # already handled above
                 if attr_name == "custom_data" and isinstance(attr_value, dict):
                     for key, value in attr_value.items():
@@ -173,6 +175,13 @@ class LayoutSpecCodeGenerator:
                 lines.append(
                     f"prim.GetPrim().GetAttribute({attr_name!r}).Set({attr_value!r})"
                 )
+
+        if isinstance(physics, dict):
+            if physics.get("collision"):
+                lines.append(f"_apply_collision(prim.GetPrim(), {prim_path!r})")
+            if physics.get("rigid_body"):
+                mass_kg = float(physics.get("mass_kg") or 0.05)
+                lines.append(f"_apply_rigid_body(prim.GetPrim(), {mass_kg!r})")
 
         return "\n".join(lines)
 
@@ -192,7 +201,7 @@ class LayoutSpecCodeGenerator:
             header_lines = [
                 "import omni.usd",
                 "import json",
-                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd",
+                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd, UsdPhysics",
                 "stage = omni.usd.get_context().get_stage()",
                 "UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)",
                 "UsdGeom.SetStageMetersPerUnit(stage, 1.0)",
@@ -201,7 +210,7 @@ class LayoutSpecCodeGenerator:
         else:
             header_lines = [
                 "import json",
-                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd",
+                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd, UsdPhysics",
                 "# stage must be provided by caller",
                 "UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)",
                 "UsdGeom.SetStageMetersPerUnit(stage, 1.0)",
@@ -220,6 +229,34 @@ class LayoutSpecCodeGenerator:
             "                attr.Set(Gf.Vec3f(sx, sy, sz))",
             "            return",
             "    UsdGeom.XformCommonAPI(prim).SetScale(Gf.Vec3f(sx, sy, sz))",
+            "",
+            "def _ensure_physics_scene():",
+            "    scene = UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')",
+            "    scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(0.0, 0.0, -1.0))",
+            "    scene.CreateGravityMagnitudeAttr().Set(9.81)",
+            "    return scene",
+            "",
+            "def _apply_collision(prim, label):",
+            "    try:",
+            "        UsdPhysics.CollisionAPI.Apply(prim)",
+            "    except Exception as exc:",
+            "        print(f'[Isaac Assist] collision warning for {label}: {exc}')",
+            "",
+            "def _apply_rigid_body(prim, mass_kg):",
+            "    try:",
+            "        UsdPhysics.RigidBodyAPI.Apply(prim)",
+            "        mass_api = UsdPhysics.MassAPI.Apply(prim)",
+            "        mass_api.CreateMassAttr().Set(float(mass_kg))",
+            "    except Exception as exc:",
+            "        print(f'[Isaac Assist] rigid-body warning for {prim.GetPath()}: {exc}')",
+            "",
+            "_ensure_physics_scene()",
+            "ground = UsdGeom.Cube.Define(stage, '/World/GroundPlane')",
+            "UsdGeom.XformCommonAPI(ground).SetTranslate(Gf.Vec3d(0.0, 0.0, -0.025))",
+            "_set_xform_scale(ground, 10.0, 10.0, 0.025)",
+            "ground.GetPrim().SetCustomDataByKey('isaac_assist:object_class', 'groundplane')",
+            "ground.GetPrim().SetCustomDataByKey('isaac_assist:physics_enabled', True)",
+            "_apply_collision(ground.GetPrim(), '/World/GroundPlane')",
             "",
         ])
 
@@ -377,6 +414,24 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         "camera_overhead": "Camera", "camera_side": "Camera",
     }
 
+    _ROBOT_CLASSES = {
+        "franka_panda", "ur5e", "ur10e", "ur10",
+        "kinova_gen3", "carter", "jetbot", "spot", "h1",
+    }
+    _STATIC_COLLIDER_CLASSES = {
+        "table_small", "table_medium", "table_large",
+        "counter", "kitchen_counter", "bin", "bin_large", "shelf",
+        "conveyor", "conveyor_short", "conveyor_long", "rotary_table",
+        "kit_tray", "fence", "wall", "obstacle_box", "obstacle_cylinder",
+        "microwave", "plate", "bowl",
+    }
+    _RIGID_WORKPIECE_CLASSES = {
+        "cube", "cube_small", "cube_medium", "cube_large",
+        "cylinder_small", "cylinder_medium", "cylinder_large",
+        "sphere", "fruit", "apple", "orange", "hamburger",
+        "screw", "nut", "bolt",
+    }
+
     def _obj_get(obj: Any, attr: str, default: Any = None) -> Any:
         if isinstance(obj, dict):
             return obj.get(attr, default)
@@ -494,7 +549,9 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         parent_height = _height_m(parent)
         child_height = _height_m(obj, scale)
         relation_kind = relation["relation"]
-        if relation_kind in {"on_top_of", "supports", "stacked_above", "mounted_to"}:
+        if relation_kind == "mounted_to" and _object_class(obj).lower() in _ROBOT_CLASSES:
+            z = parent_position[2] + _support_top_m(parent)
+        elif relation_kind in {"on_top_of", "supports", "stacked_above", "mounted_to"}:
             z = parent_position[2] + _support_top_m(parent) + child_height / 2.0
         elif relation_kind in {"inside", "contains"}:
             z = (
@@ -578,8 +635,23 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
             "_source_class": str(obj_class),
             "_source_name": object_name,
             "_source_id": object_id,
-            "extra_attrs": {"custom_data": custom_data},
+            "extra_attrs": {
+                "custom_data": custom_data,
+                "_isaac_assist_physics": {
+                    "collision": (
+                        str(obj_class).lower() in _STATIC_COLLIDER_CLASSES
+                        or str(obj_class).lower() in _RIGID_WORKPIECE_CLASSES
+                    ),
+                    "rigid_body": str(obj_class).lower() in _RIGID_WORKPIECE_CLASSES,
+                    "mass_kg": float(_metadata(obj).get("mass_kg") or 0.05),
+                },
+            },
         }
+        if str(obj_class).lower() in _ROBOT_CLASSES:
+            prim_desc["extra_attrs"]["_isaac_assist_physics"] = {
+                "collision": False,
+                "rigid_body": False,
+            }
         if normalized_class == "Reference" and asset_ref:
             prim_desc["extra_attrs"]["asset_path"] = str(asset_ref)
         prims.append(prim_desc)

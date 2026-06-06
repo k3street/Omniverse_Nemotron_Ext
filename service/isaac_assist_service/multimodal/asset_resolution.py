@@ -19,6 +19,32 @@ _ASSET_ROOTS_ENV = "ISAAC_ASSIST_ASSET_ROOTS"
 _DEFAULT_ASSET_ROOT = Path("/home/kimate/Desktop/assets")
 
 _LOCAL_ASSET_OVERRIDES = {
+    "franka_panda": [
+        "Lightwheel_OpenSource/Locomotion/Grass/E/InteractiveAsset/omron_franka.usd",
+    ],
+    "bowl": [
+        "SimReady_Furniture_Misc_01_NVD/Assets/simready_content/common_assets/props/serving_bowl/serving_bowl.usd",
+        "Residential_NVD/Assets/ArchVis/Residential/Kitchen/Kitchenware/Serving/serving_bowl.usd",
+        "Residential_NVD/Assets/ArchVis/Residential/Kitchen/Kitchenware/StorageAndOrganization/fruit_bowl.usd",
+        "Residential_NVD/Assets/ArchVis/Residential/Decor/Kitchenware/Brass_Bowl_Small.usd",
+    ],
+    "plate": [
+        "SimReady_Furniture_Misc_01_NVD/Assets/simready_content/common_assets/props/plate_small/plate_small.usd",
+        "Residential_NVD/Assets/ArchVis/Residential/Kitchen/Kitchenware/Dinnerware/plate_small.usd",
+    ],
+    "fruit": [
+        "SimReady_Furniture_Misc_01_NVD/Assets/simready_content/common_assets/props/orange_02/orange_02.usd",
+        "Residential_NVD/Assets/ArchVis/Residential/Food/Fruit/Apple.usd",
+        "Lightwheel_OpenSource/Locomotion/KitchenRoom/Kitchen_Other/Kitchen_Orange002.usd",
+    ],
+    "apple": [
+        "Residential_NVD/Assets/ArchVis/Residential/Food/Fruit/Apple.usd",
+    ],
+    "orange": [
+        "SimReady_Furniture_Misc_01_NVD/Assets/simready_content/common_assets/props/orange_02/orange_02.usd",
+        "SimReady_Furniture_Misc_01_NVD/Assets/simready_content/common_assets/props/orange_01/orange_01.usd",
+        "Residential_NVD/Assets/ArchVis/Residential/Decor/Tchotchkes/Orange_02.usd",
+    ],
     "bin": [
         "SimReady_Containers_Shipping_02_NVD/Assets/simready_content/common_assets/props/box_a01/box_a01.usd",
         "SimReady_Containers_Shipping_02_NVD/Assets/simready_content/common_assets/props/standardwoodcrate_a22/standardwoodcrate_a22.usd",
@@ -61,6 +87,12 @@ _LOCAL_ASSET_OVERRIDES = {
 }
 
 _CATALOG_QUERIES = {
+    "franka_panda": ("franka", "panda", "robot arm", "omron_franka"),
+    "bowl": ("serving_bowl", "bowl", "fruit_bowl"),
+    "plate": ("plate_small", "plate", "dinnerware"),
+    "fruit": ("orange", "apple", "fruit"),
+    "apple": ("apple", "fruit"),
+    "orange": ("orange", "fruit"),
     "bin": ("box", "crate", "container"),
     "bin_large": ("crate", "container", "box"),
     "conveyor": ("conveyorbelt", "conveyor"),
@@ -195,9 +227,9 @@ def resolve_object_asset(obj: Any) -> Optional[AssetResolution]:
     )
     palette_entry = get_class(object_class)
     palette_ref = palette_entry.usd_ref if palette_entry else ""
-    local_ref = "" if explicit or palette_ref else (_existing_override_for_class(object_class) or "")
-    catalog_ref = "" if explicit or palette_ref or local_ref else (_catalog_asset_for_class(object_class) or "")
-    usd_ref = str(explicit or palette_ref or local_ref or catalog_ref or "")
+    local_ref = "" if explicit else (_existing_override_for_class(object_class) or "")
+    catalog_ref = "" if explicit or local_ref else (_catalog_asset_for_class(object_class) or "")
+    usd_ref = str(explicit or local_ref or catalog_ref or palette_ref or "")
     if not usd_ref:
         return None
 
@@ -207,12 +239,12 @@ def resolve_object_asset(obj: Any) -> Optional[AssetResolution]:
     label = str(metadata.get("cosmos_label") or "")
     if explicit:
         source = "explicit"
-    elif palette_ref:
-        source = "palette"
     elif local_ref:
         source = "local_assets"
-    else:
+    elif catalog_ref:
         source = "asset_catalog"
+    else:
+        source = "palette"
     needs_review = bool(
         metadata.get("requires_asset_review")
         or (confidence is not None and confidence < 0.7)

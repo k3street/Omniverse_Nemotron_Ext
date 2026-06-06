@@ -112,6 +112,26 @@ def test_relation_geometry_verifier_passes_nested_predictions():
     assert report["failed_count"] == 0
 
 
+def test_relation_geometry_verifier_mounts_robot_root_on_support_surface():
+    from service.isaac_assist_service.multimodal.relation_reasoning import (
+        verify_relation_geometry,
+    )
+
+    report = verify_relation_geometry(
+        [
+            _obj("table", "table_medium", w=1.2, h=0.8),
+            _obj("franka", "franka_panda", w=0.4, h=0.4),
+        ],
+        [
+            {"subject_id": "franka", "relation": "mounted_to", "object_id": "table"},
+        ],
+    )
+
+    assert report["status"] == "pass"
+    assert report["checks"][0]["expected_position"] == [0.0, 0.0, 0.75]
+    assert report["predicted_positions"]["franka"] == [0.0, 0.0, 0.75]
+
+
 def test_relation_geometry_verifier_fails_bad_actual_position():
     from service.isaac_assist_service.multimodal.relation_reasoning import (
         verify_relation_geometry,
@@ -163,6 +183,8 @@ def test_instantiator_uses_reasoned_robot_mount_relation():
     result = asyncio.run(instantiate(Spec(), dry_run=True))
 
     assert "# relation: franka mounted_to table" in result.generated_code
+    assert "Gf.Vec3d(0.0, 0.0, 0.75)" in result.generated_code
+    assert "Gf.Vec3d(0.0, 0.0, 1.25)" not in result.generated_code
     assert "# relation_diagnostic: relation.robot_on_support warning" in result.generated_code
     assert result.relation_summary[0]["relation"] == "mounted_to"
     assert result.relation_diagnostics[0]["code"] == "relation.robot_on_support"

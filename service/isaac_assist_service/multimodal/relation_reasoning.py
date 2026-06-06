@@ -500,7 +500,10 @@ def predict_relation_positions(spec_or_objects: Any, relations: Optional[Iterabl
 
         parent_position = resolve(parent, stack)
         child_height = _height_m(obj)
-        if relation.relation in {"on_top_of", "stacked_above", "mounted_to"}:
+        if relation.relation == "mounted_to" and _is_robot(obj):
+            z = parent_position[2] + _support_top_m(parent)
+            computed[obj_id] = [parent_position[0], parent_position[1], round(z, 4)]
+        elif relation.relation in {"on_top_of", "stacked_above", "mounted_to"}:
             z = parent_position[2] + _support_top_m(parent) + child_height / 2.0
             computed[obj_id] = [parent_position[0], parent_position[1], round(z, 4)]
         elif relation.relation == "inside":
@@ -572,6 +575,14 @@ def verify_relation_geometry(
         if subject is None or parent is None or child_pos is None or parent_pos is None:
             status = "fail"
             message = "relation endpoint missing from position set"
+        elif rel.relation == "mounted_to" and _is_robot(subject):
+            expected = [
+                parent_pos[0],
+                parent_pos[1],
+                parent_pos[2] + _support_top_m(parent),
+            ]
+            error_m = max(abs(child_pos[i] - expected[i]) for i in range(3))
+            message = "robot mount root position verified"
         elif rel.relation in {"on_top_of", "stacked_above", "mounted_to"}:
             expected = [
                 parent_pos[0],

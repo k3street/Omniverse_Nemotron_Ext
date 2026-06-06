@@ -5,9 +5,11 @@ import pytest
 pytestmark = pytest.mark.l0
 
 
-def test_resolve_object_asset_uses_reviewed_palette_class():
-    from service.isaac_assist_service.multimodal.asset_resolution import resolve_object_asset
+def test_resolve_object_asset_uses_reviewed_palette_class(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import asset_resolution
 
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path / "missing"))
+    asset_resolution._load_asset_catalog.cache_clear()
     obj = {
         "id": "obj-1",
         "object_class": "franka_panda",
@@ -17,7 +19,7 @@ def test_resolve_object_asset_uses_reviewed_palette_class():
         },
     }
 
-    resolved = resolve_object_asset(obj)
+    resolved = asset_resolution.resolve_object_asset(obj)
 
     assert resolved is not None
     assert resolved.object_class == "franka_panda"
@@ -44,8 +46,34 @@ def test_resolve_object_asset_preserves_explicit_override():
     assert resolved.usd_ref == "omniverse://assets/custom_fixture.usd"
 
 
-def test_instantiate_dry_run_references_reviewed_palette_assets():
+def test_resolve_object_asset_prefers_local_robot_override(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import asset_resolution
+
+    franka = (
+        tmp_path
+        / "Lightwheel_OpenSource/Locomotion/Grass/E/InteractiveAsset/omron_franka.usd"
+    )
+    franka.parent.mkdir(parents=True, exist_ok=True)
+    franka.write_text("#usda 1.0\n")
+
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path))
+    asset_resolution._load_asset_catalog.cache_clear()
+
+    resolved = asset_resolution.resolve_object_asset(
+        {"id": "robot", "object_class": "franka_panda"}
+    )
+
+    assert resolved is not None
+    assert resolved.source == "local_assets"
+    assert resolved.usd_ref == str(franka)
+
+
+def test_instantiate_dry_run_references_reviewed_palette_assets(monkeypatch, tmp_path):
     from service.isaac_assist_service.multimodal.instantiator import instantiate
+    from service.isaac_assist_service.multimodal import asset_resolution
+
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path / "missing"))
+    asset_resolution._load_asset_catalog.cache_clear()
 
     class Spec:
         objects = [
@@ -66,6 +94,25 @@ def test_instantiate_dry_run_references_reviewed_palette_assets():
 def test_resolve_object_asset_uses_local_asset_overrides(monkeypatch, tmp_path):
     from service.isaac_assist_service.multimodal import asset_resolution
 
+    franka = (
+        tmp_path
+        / "Lightwheel_OpenSource/Locomotion/Grass/E/InteractiveAsset/omron_franka.usd"
+    )
+    bowl = (
+        tmp_path
+        / "SimReady_Furniture_Misc_01_NVD/Assets/simready_content/common_assets/"
+        "props/serving_bowl/serving_bowl.usd"
+    )
+    orange = (
+        tmp_path
+        / "SimReady_Furniture_Misc_01_NVD/Assets/simready_content/common_assets/"
+        "props/orange_02/orange_02.usd"
+    )
+    plate = (
+        tmp_path
+        / "SimReady_Furniture_Misc_01_NVD/Assets/simready_content/common_assets/"
+        "props/plate_small/plate_small.usd"
+    )
     conveyor = (
         tmp_path
         / "Warehouse_NVD/Assets/DigitalTwin/Assets/Warehouse/Equipment/Conveyors/"
@@ -82,13 +129,25 @@ def test_resolve_object_asset_uses_local_asset_overrides(monkeypatch, tmp_path):
         "omniverse-content-production.s3.us-west-2.amazonaws.com/"
         "Assets/Extensions/Samples/Paint/cube.usd"
     )
-    for path in (conveyor, box, cube):
+    for path in (franka, bowl, orange, plate, conveyor, box, cube):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("#usda 1.0\n")
 
     monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path))
     asset_resolution._load_asset_catalog.cache_clear()
 
+    assert asset_resolution.resolve_object_asset(
+        {"id": "robot", "object_class": "franka_panda"}
+    ).usd_ref == str(franka)
+    assert asset_resolution.resolve_object_asset(
+        {"id": "bowl", "object_class": "bowl"}
+    ).usd_ref == str(bowl)
+    assert asset_resolution.resolve_object_asset(
+        {"id": "fruit", "object_class": "fruit"}
+    ).usd_ref == str(orange)
+    assert asset_resolution.resolve_object_asset(
+        {"id": "plate", "object_class": "plate"}
+    ).usd_ref == str(plate)
     assert asset_resolution.resolve_object_asset(
         {"id": "conv", "object_class": "conveyor_short"}
     ).usd_ref == str(conveyor)
@@ -251,6 +310,52 @@ def test_instantiate_dry_run_computes_nested_spatial_relations(monkeypatch, tmp_
     ]
 
 
+def test_instantiate_dry_run_enables_physics_scene_ground_and_workpiece_body(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import asset_resolution
+    from service.isaac_assist_service.multimodal.instantiator import instantiate
+
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path / "missing"))
+    asset_resolution._load_asset_catalog.cache_clear()
+
+    class Spec:
+        objects = [
+            {
+                "id": "table_1",
+                "object_class": "table_medium",
+                "name": "Table",
+                "position": [0.0, 0.0, 0.0],
+                "size": {"w": 1.2, "h": 0.8},
+            },
+            {
+                "id": "fruit_1",
+                "object_class": "fruit",
+                "name": "Fruit",
+                "position": [0.0, 0.0, 0.0],
+                "size": {"w": 0.07, "h": 0.07},
+            },
+            {
+                "id": "franka_1",
+                "object_class": "franka_panda",
+                "name": "Franka",
+                "position": [0.0, 0.0, 0.0],
+                "size": {"w": 0.4, "h": 0.4},
+            },
+        ]
+
+    result = asyncio.run(instantiate(Spec(), dry_run=True))
+
+    assert "UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')" in result.generated_code
+    assert "UsdGeom.Cube.Define(stage, '/World/GroundPlane')" in result.generated_code
+    assert "_apply_collision(ground.GetPrim(), '/World/GroundPlane')" in result.generated_code
+    assert "_apply_collision(prim.GetPrim(), '/World/Table')" in result.generated_code
+    assert "_apply_collision(prim.GetPrim(), '/World/Fruit')" in result.generated_code
+    assert "_apply_rigid_body(prim.GetPrim(), 0.05)" in result.generated_code
+    franka_section = result.generated_code.split(
+        "prim = UsdGeom.Xform.Define(stage, '/World/Franka')", 1
+    )[1].split("# Isaac Assist live relation readback", 1)[0]
+    assert "_apply_rigid_body(prim.GetPrim()" not in franka_section
+
+
 def test_build_route_returns_asset_resolution_summary(tmp_path):
     from service.isaac_assist_service.multimodal import routes
     from service.isaac_assist_service.multimodal.cosmos3_adapter import (
@@ -282,10 +387,14 @@ def test_build_route_returns_asset_resolution_summary(tmp_path):
 
         assert response["asset_resolutions"]
         assert response["asset_resolutions"][0]["object_class"] == "franka_panda"
-        assert response["asset_resolutions"][0]["usd_ref"].endswith("franka.usd")
+        assert "franka" in response["asset_resolutions"][0]["usd_ref"].lower()
         assert response["instantiation"]["status"] == "dry_run"
         assert response["instantiation"]["dry_run"] is True
-        assert "AddReference('Isaac/" in response["instantiation"]["generated_code"]
+        generated = response["instantiation"]["generated_code"]
+        assert "AddReference(" in generated
+        assert "franka" in generated.lower()
+        assert "UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')" in generated
+        assert "UsdGeom.Cube.Define(stage, '/World/GroundPlane')" in generated
     finally:
         routes._store.close()
         routes._store = old_store
