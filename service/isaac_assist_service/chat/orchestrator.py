@@ -17,7 +17,6 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from .provider_factory import get_llm_provider, get_distiller_provider
 from .intent_router import classify_intent
 from ..runtime_profiles import get_runtime_profile
 from ..config import config
@@ -555,6 +554,17 @@ _CREATION_VERB_PAT = _re_mod.compile(
     _re_mod.I,
 )
 _BACKTICK_NAME_PAT = _re_mod.compile(r"`([A-Z][A-Za-z0-9_]{0,40})`")
+_ROBOT_FAMILY_TERMS = {
+    "franka": ("franka", "panda"),
+    "ur10": ("ur10", "ur10e"),
+    "ur5": ("ur5", "ur5e"),
+    "nova_carter": ("nova carter", "carter"),
+    "jetbot": ("jetbot",),
+}
+_ROBOT_CLAIM_PAT = _re_mod.compile(
+    r"\b(?:robot|arm|manipulator|franka|panda|ur10e?|ur5e?|carter|jetbot)\b",
+    _re_mod.I,
+)
 
 
 def _extract_bare_prim_name_claims(reply: str) -> List[str]:
@@ -592,6 +602,33 @@ def _extract_bare_prim_name_claims(reply: str) -> List[str]:
             continue
         seen.add(path)
         out.append(path)
+    return out
+
+
+def _extract_robot_family_claims(reply: str) -> List[str]:
+    """Extract robot families the reply claims to have placed/imported.
+
+    This complements path verification. Models often say "I placed a Franka
+    Panda robot" even when the only literal path in the reply is stale or the
+    import silently produced no visible articulation.
+    """
+    text = (reply or "").lower()
+    if not text or not _ROBOT_CLAIM_PAT.search(text):
+        return []
+    # Only verify action-like robot claims; explanatory text about what a
+    # Franka is should not trigger a stage probe.
+    action_text = _re_mod.sub(r"\bpick[- ]and[- ]place\b", "", text, flags=_re_mod.I)
+    if not _CREATION_VERB_PAT.search(action_text) and not _re_mod.search(
+        r"\b(?:imported?|loaded?|spawned?|instantiated|anchored)\b", action_text, _re_mod.I
+    ):
+        return []
+
+    out: List[str] = []
+    for family, terms in _ROBOT_FAMILY_TERMS.items():
+        if any(term in text for term in terms):
+            out.append(family)
+    if not out and "robot" in text:
+        out.append("robot")
     return out
 
 
@@ -667,6 +704,8 @@ class ChatOrchestrator:
     """
 
     def __init__(self):
+        from .provider_factory import get_llm_provider, get_distiller_provider
+
         self.llm_provider = get_llm_provider()
         try:
             self._distiller_provider = get_distiller_provider()
@@ -677,6 +716,8 @@ class ChatOrchestrator:
 
     def refresh_provider(self):
         """Reinitialize the LLM provider from current config (after settings change)."""
+        from .provider_factory import get_llm_provider, get_distiller_provider
+
         self.llm_provider = get_llm_provider()
         try:
             self._distiller_provider = get_distiller_provider()
@@ -1837,6 +1878,98 @@ class ChatOrchestrator:
                             verify_warnings.append(f"`{p}` does not exist in the stage")
                     except Exception as e:
                         logger.debug(f"[{session_id}] verify prim_exists({p}) failed: {e}")
+
+                # (a2) Semantic robot claims: "I placed a Franka Panda robot"
+                # should be backed by a visible, non-empty robot/articulation
+                # in the stage, even if path extraction misses the issue.
+                robot_claims = _extract_robot_family_claims(reply)
+                if robot_claims:
+                    try:
+                        from .tools import kit_tools as _kit_tools
+
+                        _robot_claim_script = f"""
+import json
+import omni.usd
+
+stage = omni.usd.get_context().get_stage()
+claims = {json.dumps(robot_claims)}
+term_map = {{
+    "franka": ["franka", "panda"],
+    "ur10": ["ur10", "ur10e"],
+    "ur5": ["ur5", "ur5e"],
+    "nova_carter": ["nova", "carter"],
+    "jetbot": ["jetbot"],
+    "robot": ["robot", "franka", "panda", "ur5", "ur10", "carter", "jetbot"],
+}}
+found = {{claim: [] for claim in claims}}
+for prim in stage.Traverse():
+    path = prim.GetPath().pathString
+    name = prim.GetName()
+    schemas = [str(s) for s in prim.GetAppliedSchemas()]
+    custom_bits = []
+    for key in (
+        "isaac_assist:layout_id",
+        "isaac_assist:layout_name",
+        "isaac_assist:object_class",
+        "isaac_assist:role_hint",
+    ):
+        try:
+            value = prim.GetCustomDataByKey(key)
+        except Exception:
+            value = None
+        if value:
+            custom_bits.append(str(value))
+    haystack = " ".join([path, name, str(prim.GetTypeName())] + schemas + custom_bits).lower()
+    child_count = len(list(prim.GetAllChildren()))
+    has_articulation = any("Articulation" in s for s in schemas)
+    for claim in claims:
+        terms = term_map.get(claim, [claim])
+        if any(term in haystack for term in terms):
+            found[claim].append({{
+                "path": path,
+                "type": str(prim.GetTypeName()),
+                "child_count": child_count,
+                "has_articulation": has_articulation,
+                "valid_robot": bool(has_articulation or child_count > 0),
+            }})
+print(json.dumps({{"found": found}}))
+"""
+                        _robot_ver = await _kit_tools.exec_sync(_robot_claim_script, timeout=15)
+                        _out = (_robot_ver.get("output") or "").strip()
+                        _parsed = {}
+                        for _line in reversed(_out.splitlines()):
+                            _line = _line.strip()
+                            if _line.startswith("{"):
+                                try:
+                                    _parsed = json.loads(_line)
+                                except Exception:
+                                    _parsed = {}
+                                break
+                        _found = _parsed.get("found") if isinstance(_parsed, dict) else {}
+                        if isinstance(_found, dict):
+                            for _claim in robot_claims[:3]:
+                                _rows = _found.get(_claim) or []
+                                _valid = [
+                                    row for row in _rows
+                                    if isinstance(row, dict) and row.get("valid_robot")
+                                ]
+                                if not _valid:
+                                    if _rows:
+                                        _paths = ", ".join(
+                                            str(row.get("path")) for row in _rows[:2]
+                                            if isinstance(row, dict)
+                                        )
+                                        verify_warnings.append(
+                                            f"reply claims a {_claim} robot was placed, "
+                                            f"but matching prim(s) {_paths} have no children/articulation"
+                                        )
+                                    else:
+                                        verify_warnings.append(
+                                            f"reply claims a {_claim} robot was placed, "
+                                            "but no matching robot prim was found in the stage"
+                                        )
+                    except Exception as e:
+                        logger.debug(f"[{session_id}] verify robot claim failed: {e}")
 
                 # (b) Count claims: "N arms", "N robots", "N clones", etc.
                 # Extraction is deduped + path-filtered in _extract_count_claims;

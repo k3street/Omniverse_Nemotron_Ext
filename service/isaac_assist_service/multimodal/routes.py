@@ -47,6 +47,7 @@ from .asset_resolution import resolve_layout_assets
 from .instantiator import instantiate
 from .ratify import ratify
 from .render import render_layout_spec_to_file
+from .scenario_campaign import build_campaign_plan, materialize_campaign
 from .types import LayoutSpec
 from .validate import validate_layout_spec
 
@@ -127,6 +128,12 @@ class BuildRequest(BaseModel):
     template_id: Optional[str] = None
     force_freeform: bool = False
     dry_run: bool = True
+
+
+class CampaignPlanRequest(BaseModel):
+    """Request a deterministic scenario-variant execution plan."""
+
+    workspace_root: Optional[str] = Field(default=None)
 
 
 class CosmosProposalRequest(BaseModel):
@@ -635,6 +642,8 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
             "build_id": instantiation.build_id,
             "dry_run": body.dry_run,
             "generated_code": instantiation.generated_code if body.dry_run else None,
+            "relation_summary": instantiation.relation_summary,
+            "variant_summary": instantiation.variant_summary,
         }
     elif result.status == "needs_choice":
         payload["ambiguous_roles"] = [
@@ -650,6 +659,61 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
         "template_id": body.template_id,
     })
     return payload
+
+
+@router.post("/{session_id}/campaign/plan")
+async def plan_canvas_campaign(
+    session_id: str,
+    body: CampaignPlanRequest,
+) -> Dict[str, Any]:
+    """Expand the current LayoutSpec into a scenario variant campaign plan."""
+    store = get_store()
+    spec = store.get_latest(session_id)
+    if spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no LayoutSpec to plan variants from",
+        )
+
+    plan = build_campaign_plan(
+        spec,
+        session_id=session_id,
+        workspace_root=Path(body.workspace_root) if body.workspace_root else None,
+    )
+    store.append_event(session_id, "canvas_campaign_plan", {
+        "revision": spec.revision,
+        "campaign_id": plan["campaign_id"],
+        "variant_count": plan["variant_count"],
+    })
+    return plan
+
+
+@router.post("/{session_id}/campaign/materialize")
+async def materialize_canvas_campaign(
+    session_id: str,
+    body: CampaignPlanRequest,
+) -> Dict[str, Any]:
+    """Materialize the current LayoutSpec campaign to local files."""
+    store = get_store()
+    spec = store.get_latest(session_id)
+    if spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no LayoutSpec to materialize variants from",
+        )
+
+    manifest = await materialize_campaign(
+        spec,
+        session_id=session_id,
+        workspace_root=Path(body.workspace_root) if body.workspace_root else None,
+    )
+    store.append_event(session_id, "canvas_campaign_materialized", {
+        "revision": spec.revision,
+        "campaign_id": manifest["campaign_id"],
+        "variant_count": manifest["variant_count"],
+        "workspace_dir": manifest["workspace_dir"],
+    })
+    return manifest
 
 
 @router.delete("/{session_id}")

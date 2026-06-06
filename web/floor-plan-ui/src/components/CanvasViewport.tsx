@@ -26,7 +26,7 @@ import {
     Group,
 } from "react-konva";
 import Konva from "konva";
-import { TypedObject, Position } from "../api/types";
+import { SpatialRelation, TypedObject, Position } from "../api/types";
 import { useFloorPlanStore } from "../store/floorPlanStore";
 import { CLASS_META } from "../canvas/objectClasses";
 import { compositeSnap, GuideLine } from "../canvas/snap";
@@ -78,15 +78,28 @@ const CLASS_COLORS: Record<string, string> = {
 };
 
 const PX_PER_M = 100;
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 3;
+const ZOOM_STEP = 1.2;
+const zoomButtonStyle = {
+    height: 28,
+    border: "1px solid #303843",
+    borderRadius: 4,
+    background: "#20252C",
+    color: TEXT_PRIMARY,
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+} as const;
 
 // ─── Coord helpers ───────────────────────────────────────────────────
 
-function worldToScreen(p: Position, cx: number, cy: number): { x: number; y: number } {
-    return { x: cx + p.x * PX_PER_M, y: cy - p.y * PX_PER_M };
+function worldToScreen(p: Position, cx: number, cy: number, pxPerM: number): { x: number; y: number } {
+    return { x: cx + p.x * pxPerM, y: cy - p.y * pxPerM };
 }
 
-function screenToWorld(p: { x: number; y: number }, cx: number, cy: number): Position {
-    return { x: (p.x - cx) / PX_PER_M, y: (cy - p.y) / PX_PER_M };
+function screenToWorld(p: { x: number; y: number }, cx: number, cy: number, pxPerM: number): Position {
+    return { x: (p.x - cx) / pxPerM, y: (cy - p.y) / pxPerM };
 }
 
 // ─── Component ───────────────────────────────────────────────────────
@@ -96,10 +109,18 @@ export function CanvasViewport() {
     const stageRef = useRef<Konva.Stage>(null);
     const transformerRef = useRef<Konva.Transformer>(null);
     const [size, setSize] = useState({ w: 800, h: 600 });
+    const [zoom, setZoom] = useState(1);
+    const [pan, setPan] = useState({ x: 0, y: 0 });
+    const [spaceDown, setSpaceDown] = useState(false);
+    const [panDrag, setPanDrag] = useState<{
+        startPointer: { x: number; y: number };
+        startPan: { x: number; y: number };
+    } | null>(null);
     const [guides, setGuides] = useState<GuideLine[]>([]);
     const [marquee, setMarquee] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
 
     const objects = useFloorPlanStore((s) => s.spec?.objects ?? []);
+    const relations = useFloorPlanStore((s) => s.spec?.relations ?? []);
     const selectedIds = useFloorPlanStore((s) => s.selectedIds);
     const setSelection = useFloorPlanStore((s) => s.setSelection);
     const clearSelection = useFloorPlanStore((s) => s.clearSelection);
@@ -124,6 +145,21 @@ export function CanvasViewport() {
 
     const cx = size.w / 2;
     const cy = size.h / 2;
+    const viewCx = cx + pan.x;
+    const viewCy = cy + pan.y;
+    const pxPerM = PX_PER_M * zoom;
+    const displayPositions = useMemo(
+        () => relationDisplayPositions(objects, relations),
+        [objects, relations],
+    );
+    const relationBadges = useMemo(
+        () => relationBadgesForSubjects(objects, relations),
+        [objects, relations],
+    );
+    const relationDepths = useMemo(
+        () => relationDepthsForObjects(objects, relations),
+        [objects, relations],
+    );
 
     // ─── Transformer attach ──────────────────────────────────────────
     useEffect(() => {
@@ -136,14 +172,20 @@ export function CanvasViewport() {
             if (node) nodes.push(node);
         }
         tr.nodes(nodes);
+        tr.forceUpdate();
         tr.getLayer()?.batchDraw();
-    }, [selectedIds, objects]);
+    }, [selectedIds, objects, displayPositions, pxPerM, viewCx, viewCy]);
 
     // ─── Keyboard shortcuts ──────────────────────────────────────────
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
             if (tag === "input" || tag === "textarea") return;
+            if (e.code === "Space") {
+                e.preventDefault();
+                setSpaceDown(true);
+                return;
+            }
             if ((e.metaKey || e.ctrlKey) && e.key === "z" && !e.shiftKey) {
                 e.preventDefault(); undo(); return;
             }
@@ -160,8 +202,15 @@ export function CanvasViewport() {
                 return;
             }
         };
+        const release = (e: KeyboardEvent) => {
+            if (e.code === "Space") setSpaceDown(false);
+        };
         window.addEventListener("keydown", handler);
-        return () => window.removeEventListener("keydown", handler);
+        window.addEventListener("keyup", release);
+        return () => {
+            window.removeEventListener("keydown", handler);
+            window.removeEventListener("keyup", release);
+        };
     }, [undo, redo, deleteObjects, clearSelection, setSelection, selectedIds, objects]);
 
     // ─── HTML5 drop from palette ─────────────────────────────────────
@@ -181,10 +230,10 @@ export function CanvasViewport() {
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
         const screenPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-        const world = screenToWorld(screenPos, cx, cy);
+        const world = screenToWorld(screenPos, viewCx, viewCy, pxPerM);
 
         // Snap drop position
-        const snap = compositeSnap(world, "__new__", objects, PX_PER_M);
+        const snap = compositeSnap(world, "__new__", objects, pxPerM);
         const finalPos = snap.snapped;
 
         const existingNames = objects.map((o) => o.name);
@@ -214,9 +263,9 @@ export function CanvasViewport() {
     ) => {
         const node = e.target;
         const screenPos = { x: node.x(), y: node.y() };
-        const world = screenToWorld(screenPos, cx, cy);
-        const snap = compositeSnap(world, obj.id, objects, PX_PER_M);
-        const screenSnapped = worldToScreen(snap.snapped, cx, cy);
+        const world = screenToWorld(screenPos, viewCx, viewCy, pxPerM);
+        const snap = compositeSnap(world, obj.id, objects, pxPerM);
+        const screenSnapped = worldToScreen(snap.snapped, viewCx, viewCy, pxPerM);
         node.x(screenSnapped.x);
         node.y(screenSnapped.y);
         setGuides(snap.guideLines);
@@ -227,7 +276,7 @@ export function CanvasViewport() {
         obj: TypedObject,
     ) => {
         const node = e.target;
-        const world = screenToWorld({ x: node.x(), y: node.y() }, cx, cy);
+        const world = screenToWorld({ x: node.x(), y: node.y() }, viewCx, viewCy, pxPerM);
         const dest = { x: round(world.x), y: round(world.y) };
         if (dest.x !== obj.position.x || dest.y !== obj.position.y) {
             moveObject(obj.id, obj.position, dest);
@@ -255,7 +304,7 @@ export function CanvasViewport() {
             rotateObject(obj.id, obj.rotation, round(newRot, 1));
         }
         // Reposition: Transformer may shift center if user drags from a corner
-        const world = screenToWorld({ x: node.x(), y: node.y() }, cx, cy);
+        const world = screenToWorld({ x: node.x(), y: node.y() }, viewCx, viewCy, pxPerM);
         const dest = { x: round(world.x), y: round(world.y) };
         if (dest.x !== obj.position.x || dest.y !== obj.position.y) {
             moveObject(obj.id, obj.position, dest);
@@ -264,20 +313,41 @@ export function CanvasViewport() {
 
     // ─── Stage click — empty area clears selection / starts marquee ──
     const onStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+        const stage = e.target.getStage();
+        const pos = stage?.getPointerPosition();
+        if (pos && (e.evt.button === 1 || spaceDown)) {
+            e.evt.preventDefault();
+            setMarquee(null);
+            setPanDrag({ startPointer: pos, startPan: pan });
+            return;
+        }
         if (e.target === e.target.getStage()) {
             clearSelection();
-            const stage = e.target.getStage()!;
-            const pos = stage.getPointerPosition();
             if (pos) setMarquee({ x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
         }
     };
     const onStageMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
+        if (panDrag) {
+            const stage = e.target.getStage()!;
+            const pos = stage.getPointerPosition();
+            if (pos) {
+                setPan({
+                    x: panDrag.startPan.x + pos.x - panDrag.startPointer.x,
+                    y: panDrag.startPan.y + pos.y - panDrag.startPointer.y,
+                });
+            }
+            return;
+        }
         if (!marquee) return;
         const stage = e.target.getStage()!;
         const pos = stage.getPointerPosition();
         if (pos) setMarquee({ ...marquee, x2: pos.x, y2: pos.y });
     };
     const onStageMouseUp = () => {
+        if (panDrag) {
+            setPanDrag(null);
+            return;
+        }
         if (marquee) {
             const minX = Math.min(marquee.x1, marquee.x2);
             const maxX = Math.max(marquee.x1, marquee.x2);
@@ -286,7 +356,7 @@ export function CanvasViewport() {
             if (Math.abs(maxX - minX) > 4 && Math.abs(maxY - minY) > 4) {
                 const hits: string[] = [];
                 for (const o of objects) {
-                    const s = worldToScreen(o.position, cx, cy);
+                    const s = worldToScreen(displayPositions[o.id] ?? o.position, viewCx, viewCy, pxPerM);
                     if (s.x >= minX && s.x <= maxX && s.y >= minY && s.y <= maxY) {
                         hits.push(o.id);
                     }
@@ -307,13 +377,28 @@ export function CanvasViewport() {
             setSelection([id]);
         }
     };
+    const adjustZoom = (factor: number) => {
+        setZoom((current) => clamp(current * factor, MIN_ZOOM, MAX_ZOOM));
+    };
+    const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        adjustZoom(e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+    };
 
     return (
         <div
             ref={containerRef}
             onDragOver={onDragOver}
             onDrop={onDrop}
-            style={{ flex: 1, position: "relative", background: CANVAS_BG, minWidth: 0 }}
+            onWheel={onWheel}
+            onMouseLeave={() => setPanDrag(null)}
+            style={{
+                flex: 1,
+                position: "relative",
+                background: CANVAS_BG,
+                minWidth: 0,
+                cursor: panDrag ? "grabbing" : spaceDown ? "grab" : "default",
+            }}
             data-testid="canvas-viewport"
         >
             <Stage
@@ -325,16 +410,20 @@ export function CanvasViewport() {
                 onMouseUp={onStageMouseUp}
             >
                 <Layer listening={false}>
-                    <Grid w={size.w} h={size.h} cx={cx} cy={cy} />
-                    <OriginCross cx={cx} cy={cy} />
+                    <Grid w={size.w} h={size.h} cx={viewCx} cy={viewCy} pxPerM={pxPerM} />
+                    <OriginCross cx={viewCx} cy={viewCy} />
                 </Layer>
                 <Layer>
                     {objects.map((o) => (
                         <ObjectGroup
                             key={o.id}
                             obj={o}
-                            cx={cx}
-                            cy={cy}
+                            displayPosition={displayPositions[o.id] ?? o.position}
+                            relationBadge={relationBadges[o.id]}
+                            relationDepth={relationDepths[o.id] ?? 0}
+                            cx={viewCx}
+                            cy={viewCy}
+                            pxPerM={pxPerM}
                             selected={selectedIds.includes(o.id)}
                             onClick={(e) => onObjectClick(e, o.id)}
                             onDragMove={(e) => handleDragMove(e, o)}
@@ -359,7 +448,7 @@ export function CanvasViewport() {
                     />
                 </Layer>
                 <Layer listening={false}>
-                    <GuideLines guides={guides} cx={cx} cy={cy} />
+                    <GuideLines guides={guides} cx={viewCx} cy={viewCy} pxPerM={pxPerM} />
                 </Layer>
                 <Layer listening={false}>
                     {marquee && (
@@ -392,6 +481,35 @@ export function CanvasViewport() {
                     Drag a class from the palette, or describe the layout in chat.
                 </div>
             )}
+            <div
+                aria-label="Canvas zoom controls"
+                style={{
+                    position: "absolute",
+                    right: 12,
+                    bottom: 12,
+                    display: "grid",
+                    gridTemplateColumns: "32px 58px 32px 32px",
+                    gap: 4,
+                    padding: 4,
+                    background: "#171A1FCC",
+                    border: "1px solid #2A3038",
+                    borderRadius: 6,
+                    boxShadow: "0 8px 24px #00000055",
+                }}
+            >
+                <button type="button" title="Zoom out" onClick={() => adjustZoom(1 / ZOOM_STEP)} style={zoomButtonStyle}>
+                    -
+                </button>
+                <button type="button" title="Reset zoom" onClick={() => setZoom(1)} style={zoomButtonStyle}>
+                    {Math.round(zoom * 100)}%
+                </button>
+                <button type="button" title="Zoom in" onClick={() => adjustZoom(ZOOM_STEP)} style={zoomButtonStyle}>
+                    +
+                </button>
+                <button type="button" title="Center view" onClick={() => setPan({ x: 0, y: 0 })} style={zoomButtonStyle}>
+                    0
+                </button>
+            </div>
         </div>
     );
 }
@@ -400,8 +518,12 @@ export function CanvasViewport() {
 
 function ObjectGroup({
     obj,
+    displayPosition,
+    relationBadge,
+    relationDepth,
     cx,
     cy,
+    pxPerM,
     selected,
     onClick,
     onDragMove,
@@ -409,8 +531,12 @@ function ObjectGroup({
     onTransformEnd,
 }: {
     obj: TypedObject;
+    displayPosition: Position;
+    relationBadge?: string;
+    relationDepth: number;
     cx: number;
     cy: number;
+    pxPerM: number;
     selected: boolean;
     onClick: (e: Konva.KonvaEventObject<MouseEvent>) => void;
     onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => void;
@@ -419,11 +545,18 @@ function ObjectGroup({
 }) {
     const stroke = obj.color ?? CLASS_COLORS[obj.class] ?? "#888";
     const fill = stroke + "26";
-    const w = obj.size.w * PX_PER_M;
-    const h = obj.size.h * PX_PER_M;
-    const screen = worldToScreen(obj.position, cx, cy);
+    const w = obj.size.w * pxPerM;
+    const h = obj.size.h * pxPerM;
+    const screen = worldToScreen(displayPosition, cx, cy, pxPerM);
     const isRobot = ["franka_panda", "ur5e", "ur10e", "kinova_gen3", "iiwa", "jaco7"].includes(obj.class);
     const reachM = CLASS_META[obj.class]?.reachRadiusM;
+    const labelWidth = Math.max(w, 72);
+    const labelX = -labelWidth / 2;
+    const isRelationChild = relationDepth > 0;
+    const labelY = isRelationChild
+        ? -h / 2 - 18 - (relationDepth - 1) * 28
+        : h / 2 + 4;
+    const badgeY = labelY + 12;
 
     return (
         <Group
@@ -442,7 +575,7 @@ function ObjectGroup({
                 <Circle
                     x={0}
                     y={0}
-                    radius={reachM * PX_PER_M}
+                    radius={reachM * pxPerM}
                     stroke={stroke + "55"}
                     strokeWidth={1}
                     dash={[3, 3]}
@@ -468,22 +601,38 @@ function ObjectGroup({
                 />
             )}
             <Text
-                x={-w / 2}
-                y={h / 2 + 4}
-                width={w}
+                x={labelX}
+                y={labelY}
+                width={labelWidth}
                 text={obj.name}
                 fontSize={11}
                 fill={TEXT_PRIMARY}
                 align="center"
+                wrap="none"
+                ellipsis
                 listening={false}
             />
+            {relationBadge && (
+                <Text
+                    x={labelX}
+                    y={badgeY}
+                    width={labelWidth}
+                    text={relationBadge}
+                    fontSize={10}
+                    fill={TEXT_SECONDARY}
+                    align="center"
+                    wrap="none"
+                    ellipsis
+                    listening={false}
+                />
+            )}
         </Group>
     );
 }
 
-function Grid({ w, h, cx, cy }: { w: number; h: number; cx: number; cy: number }) {
-    const minor = PX_PER_M * 0.25;
-    const major = PX_PER_M * 1.0;
+function Grid({ w, h, cx, cy, pxPerM }: { w: number; h: number; cx: number; cy: number; pxPerM: number }) {
+    const minor = pxPerM * 0.25;
+    const major = pxPerM * 1.0;
     const lines: JSX.Element[] = [];
     for (let x = cx % minor; x < w; x += minor) {
         lines.push(<Line key={`mvx${x}`} points={[x, 0, x, h]} stroke={GRID_MINOR} strokeWidth={1} />);
@@ -511,14 +660,14 @@ function OriginCross({ cx, cy }: { cx: number; cy: number }) {
     );
 }
 
-function GuideLines({ guides, cx, cy }: { guides: GuideLine[]; cx: number; cy: number }) {
+function GuideLines({ guides, cx, cy, pxPerM }: { guides: GuideLine[]; cx: number; cy: number; pxPerM: number }) {
     return (
         <>
             {guides.map((g, i) => {
                 if (g.axis === "x") {
-                    const sx = cx + g.coord * PX_PER_M;
-                    const sy1 = cy - (g.toY ?? 5) * PX_PER_M;
-                    const sy2 = cy - (g.fromY ?? -5) * PX_PER_M;
+                    const sx = cx + g.coord * pxPerM;
+                    const sy1 = cy - (g.toY ?? 5) * pxPerM;
+                    const sy2 = cy - (g.fromY ?? -5) * pxPerM;
                     return (
                         <Line
                             key={i}
@@ -529,9 +678,9 @@ function GuideLines({ guides, cx, cy }: { guides: GuideLine[]; cx: number; cy: n
                         />
                     );
                 }
-                const sy = cy - g.coord * PX_PER_M;
-                const sx1 = cx + (g.fromX ?? -5) * PX_PER_M;
-                const sx2 = cx + (g.toX ?? 5) * PX_PER_M;
+                const sy = cy - g.coord * pxPerM;
+                const sx1 = cx + (g.fromX ?? -5) * pxPerM;
+                const sx2 = cx + (g.toX ?? 5) * pxPerM;
                 return (
                     <Line
                         key={i}
@@ -551,4 +700,94 @@ function GuideLines({ guides, cx, cy }: { guides: GuideLine[]; cx: number; cy: n
 function round(v: number, decimals: number = 3): number {
     const m = Math.pow(10, decimals);
     return Math.round(v * m) / m;
+}
+
+function clamp(v: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, v));
+}
+
+function relationDisplayPositions(
+    objects: TypedObject[],
+    relations: SpatialRelation[],
+): Record<string, Position> {
+    const byId = new Map(objects.map((obj) => [obj.id, obj]));
+    const parentBySubject = new Map<string, string>();
+
+    for (const rel of relations) {
+        if (rel.relation === "inside" || rel.relation === "on_top_of" || rel.relation === "stacked_above") {
+            parentBySubject.set(rel.subject_id, rel.object_id);
+        } else if (rel.relation === "contains" || rel.relation === "supports") {
+            parentBySubject.set(rel.object_id, rel.subject_id);
+        }
+    }
+
+    const resolved: Record<string, Position> = {};
+    const resolve = (obj: TypedObject, seen: Set<string> = new Set()): Position => {
+        if (resolved[obj.id]) return resolved[obj.id];
+        if (seen.has(obj.id)) return obj.position;
+        seen.add(obj.id);
+
+        const parentId = parentBySubject.get(obj.id);
+        const parent = parentId ? byId.get(parentId) : undefined;
+        if (!parent) {
+            resolved[obj.id] = obj.position;
+            return obj.position;
+        }
+        const parentPos = resolve(parent, seen);
+        resolved[obj.id] = { x: parentPos.x, y: parentPos.y };
+        return resolved[obj.id];
+    };
+
+    for (const obj of objects) resolve(obj);
+    return resolved;
+}
+
+function relationBadgesForSubjects(
+    objects: TypedObject[],
+    relations: SpatialRelation[],
+): Record<string, string> {
+    const nameById = new Map(objects.map((obj) => [obj.id, obj.name]));
+    const badges: Record<string, string> = {};
+    for (const rel of relations) {
+        if (rel.relation === "inside" || rel.relation === "on_top_of" || rel.relation === "stacked_above") {
+            badges[rel.subject_id] = `${rel.relation.replaceAll("_", " ")} ${nameById.get(rel.object_id) ?? rel.object_id}`;
+        } else if (rel.relation === "contains") {
+            badges[rel.object_id] = `inside ${nameById.get(rel.subject_id) ?? rel.subject_id}`;
+        } else if (rel.relation === "supports") {
+            badges[rel.object_id] = `on top of ${nameById.get(rel.subject_id) ?? rel.subject_id}`;
+        }
+    }
+    return badges;
+}
+
+function relationDepthsForObjects(
+    objects: TypedObject[],
+    relations: SpatialRelation[],
+): Record<string, number> {
+    const ids = new Set(objects.map((obj) => obj.id));
+    const parentBySubject = new Map<string, string>();
+    for (const rel of relations) {
+        if (rel.relation === "inside" || rel.relation === "on_top_of" || rel.relation === "stacked_above") {
+            parentBySubject.set(rel.subject_id, rel.object_id);
+        } else if (rel.relation === "contains" || rel.relation === "supports") {
+            parentBySubject.set(rel.object_id, rel.subject_id);
+        }
+    }
+
+    const depths: Record<string, number> = {};
+    const depthOf = (id: string, seen: Set<string> = new Set()): number => {
+        if (depths[id] !== undefined) return depths[id];
+        if (seen.has(id)) return 0;
+        seen.add(id);
+        const parentId = parentBySubject.get(id);
+        if (!parentId || !ids.has(parentId)) {
+            depths[id] = 0;
+            return 0;
+        }
+        depths[id] = depthOf(parentId, seen) + 1;
+        return depths[id];
+    };
+
+    for (const id of ids) depthOf(id);
+    return depths;
 }

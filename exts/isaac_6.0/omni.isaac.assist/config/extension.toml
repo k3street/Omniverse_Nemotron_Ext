@@ -13,7 +13,6 @@ icon = "" # Add an icon later
 [dependencies]
 "omni.kit.uiapp" = {}
 "omni.ui" = {}
-"omni.ext" = {}
 "omni.kit.viewport.utility" = {} # Required for LiveKit WebRTC viewport grabbing
 
 [[python.module]]

@@ -183,6 +183,9 @@ The `launch_isaac.sh` script configures the correct ROS2 environment and registe
 
 # Launch Isaac Sim 6.0 with Isaac Assist via the desktop-friendly wrapper
 ./launch_isaac_assist_desktop.sh
+
+# Launch one canvas/generated scene with Isaac Assist loaded
+./launch_canvas_scene.sh /path/to/scene.usd
 ```
 
 To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` in your `.env` file or export it before launching:
@@ -301,6 +304,7 @@ See [`.env.local.example`](.env.local.example) for the full annotated template.
 | `CLOUD_MODEL_NAME` | `claude-opus-4-6` | Model name for cloud providers |
 | `ANTHROPIC_API_KEY` | `sk-ant-xxx` | API key for your chosen provider |
 | `ASSETS_ROOT_PATH` | `/home/user/assets` | Path to Isaac Sim USD assets (local or Nucleus) |
+| `ISAAC_ASSIST_ASSET_ROOTS` | `/home/user/Desktop/assets` | One or more local USD asset roots for floor-plan build previews; separate multiple roots with `:` on Linux |
 | `ASSETS_ROBOTS_SUBDIR` | `Collected_Robots` | Subdirectory containing robot USD files |
 | `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server (optional, for voice/vision) |
 | `CONTRIBUTE_DATA` | `false` | Log approved patches for fine-tuning |
@@ -328,6 +332,90 @@ build goes through `POST /api/v1/canvas/{session_id}/build`. Builds default to
 set `dry_run=false` only when ready to queue the patch into live Isaac Sim. See
 [Cosmos 3 to Floor-Plan Flow](docs/architecture/cosmos3-floor-plan-flow.md).
 
+Floor-plan builds can also carry semantic spatial relations such as
+`on_top_of`, `inside`, `contains`, and `supports`. The instantiator normalizes
+those relations into approximate 3D placement, using support surfaces and
+container/interior affordance hints to compute Z offsets. This is the first
+step toward rebuilding scenes like "fruit in a bowl on a table" or "a plate in
+a microwave on a counter" from a 2D review surface plus vision/Cosmos relation
+proposals.
+
+#### Scenario variant campaigns
+
+`LayoutSpec` also carries a `scenario_variants` contract for controlled
+multi-scene generation. The floor-plan UI exposes this in the **Scenario
+Variants** panel:
+
+- `variant_count` and `seed` control campaign size and repeatability.
+- Lighting presets cover studio, warehouse, dome, backlit, and low-angle setups.
+- Camera presets cover overhead, robot-view, side-view, and wide-context views.
+- Optional actors/circumstances add humans, mobile robots, occlusion,
+  distractors, moved targets, and tight-clearance cases.
+- Perturbations control pose jitter, rotation jitter, material randomization,
+  and sensor noise.
+- Validation flags request relation, visibility, and physics checks before
+  accepting a generated variant.
+
+Today this is a declarative contract surfaced in **Preview Build** and saved
+with the canvas spec. The next execution layer can consume the same contract
+locally, through Isaac Automator, or on Brev/DGX to fan out one reviewed
+floor-plan into many tested Isaac/Cosmos scenes.
+
+The backend can already expand the saved contract into a deterministic campaign
+plan:
+
+```text
+POST /api/v1/canvas/{session_id}/campaign/plan
+POST /api/v1/canvas/{session_id}/campaign/materialize
+```
+
+The response includes a `campaign_id`, per-variant seeds, lighting/camera/actor
+and circumstance selections, validation requirements, planned USD paths, and a
+`launch_command` for each variant. The floor-plan UI's **Plan campaign** button
+flushes pending edits, calls this route, and shows the first launch command.
+The **Materialize campaign** button writes the campaign manifest, the saved
+`LayoutSpec`, one minimal `.usda` stage per variant, and one Isaac Sim setup
+script per variant under `workspace/scenario_campaigns/<campaign_id>/`.
+
+To automatically open one generated or saved USD scene with the extension
+already loaded, use:
+
+```bash
+./launch_canvas_scene.sh /path/to/scene.usd
+```
+
+For a materialized variant, use the launch command emitted in the campaign
+manifest. It includes the setup script that applies the generated Kit scene
+patch after the minimal stage opens:
+
+```bash
+SCENE_SETUP_SCRIPT=workspace/scenario_campaigns/<campaign>/<variant>_setup.py \
+  ./launch_canvas_scene.sh workspace/scenario_campaigns/<campaign>/<variant>.usda
+```
+
+Or use the local runner, which selects a variant from `campaign_plan.json`,
+writes `<variant>_result.json`, tails launcher output into
+`<variant>_launch.log`, and starts Isaac Sim with the correct setup script:
+
+```bash
+./scripts/run_materialized_variant.sh workspace/scenario_campaigns/<campaign>/campaign_plan.json --index 1
+
+# No Isaac launch; write/inspect the result artifact only
+./scripts/run_materialized_variant.sh workspace/scenario_campaigns/<campaign>/campaign_plan.json --index 1 --dry-run
+```
+
+This wrapper starts the backend if needed through
+`launch_isaac_assist_desktop.sh`, selects Isaac Sim 6.0 by default, registers
+`exts/isaac_6.0`, enables `omni.isaac.assist`, and opens the USD through the
+startup hook in `launch_isaac.sh`.
+
+Cosmos 3 Reasoner belongs before this materialization step. Use
+`/cosmos/observe`, `/cosmos/observe_viewport`, or `/cosmos/propose` to infer
+objects, asset hints, and spatial relations from prompts, photos, renders, or
+the live Isaac viewport. The floor-plan UI remains the review surface; once the
+relations and asset choices are accepted, the campaign planner/materializer
+turns that reviewed spec into deterministic variant jobs.
+
 For scale-out, Isaac Assist treats DGX Spark, Brev, and
 [isaac-sim/IsaacAutomator](https://github.com/isaac-sim/IsaacAutomator) as
 remote capacity providers. See
@@ -339,6 +427,7 @@ planned extension/backend contract.
 ```bash
 # Local filesystem (recommended — works offline)
 ASSETS_ROOT_PATH=/home/user/Desktop/assets
+ISAAC_ASSIST_ASSET_ROOTS=/home/user/Desktop/assets
 
 # NVIDIA Omniverse Nucleus server
 ASSETS_ROOT_PATH=omniverse://localhost/NVIDIA/Assets/Isaac/5.1
@@ -346,6 +435,34 @@ ASSETS_ROOT_PATH=omniverse://localhost/NVIDIA/Assets/Isaac/5.1
 # NVIDIA S3 hosted (requires network access)
 ASSETS_ROOT_PATH=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1
 ```
+
+#### Gather local assets for floor-plan builds
+
+The floor-plan canvas becomes much more useful when the backend can resolve
+reviewed classes to real USD assets instead of primitive placeholder geometry.
+For local/offline work, gather Isaac Sim, SimReady, Warehouse, robot, and
+customer USD assets under a common folder such as:
+
+```text
+/home/<user>/Desktop/assets/
+```
+
+Set `ISAAC_ASSIST_ASSET_ROOTS` to that folder before launching the service. The
+asset resolver checks explicit user overrides first, then palette references,
+then known local asset paths, and finally any `asset_catalog.json` files found
+under the configured roots. This is what lets **Preview Build** turn floor-plan
+objects such as `conveyor_short`, `bin`, and `cube` into real USD references.
+
+Good asset packs to collect include:
+
+- NVIDIA Isaac Sim robot and sample assets for robot references and baseline props.
+- SimReady Containers / Shipping assets for bins, crates, boxes, pallets, and workpieces.
+- Warehouse / Digital Twin assets for conveyors, racks, facility equipment, and layout props.
+- Project-specific customer assets that should appear in recreated scenes.
+
+Keep `asset_catalog.json` files next to downloaded asset packs when available.
+They improve fallback matching when a class does not have a hard-coded local
+override yet.
 
 ---
 

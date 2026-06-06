@@ -25,6 +25,13 @@ def _helper():
     return _partition_path_existence
 
 
+def _robot_claim_helper():
+    from service.isaac_assist_service.chat.orchestrator import (
+        _extract_robot_family_claims,
+    )
+    return _extract_robot_family_claims
+
+
 def test_absent_prim_from_data_handler_json_output():
     """prim_exists data-handler returns output as a JSON string."""
     fn = _helper()
@@ -160,3 +167,29 @@ def test_inversion_of_meaning_scenario():
         "through verify-contract (a) because the dumb substring check used to see "
         "the path in the tool output blob and skip re-verification."
     )
+
+
+def test_robot_family_claim_extractor_catches_franka_success_claim():
+    fn = _robot_claim_helper()
+
+    claims = fn(
+        "I created a table and placed a Franka Panda robot at `/World/Franka`."
+    )
+
+    assert claims == ["franka"]
+
+
+def test_robot_family_claim_extractor_ignores_explanatory_text():
+    fn = _robot_claim_helper()
+
+    claims = fn("A Franka Panda is a common manipulator for pick-and-place demos.")
+
+    assert claims == []
+
+
+def test_robot_family_claim_extractor_handles_generic_robot_placement():
+    fn = _robot_claim_helper()
+
+    claims = fn("I spawned the robot on the table.")
+
+    assert claims == ["robot"]

@@ -1004,13 +1004,13 @@ class ChatViewWindow(ui.Window):
     def _build_chips(self):
         """Canonical quick prompts. Clicking a chip fills the input field."""
         self.chips_container = ui.ScrollingFrame(
-            height=24,
+            height=34,
             horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
             vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF,
         )
         self._chips_shown = True
         with self.chips_container:
-            self.chips_row = ui.HStack(spacing=6)
+            self.chips_row = ui.HStack(height=28, spacing=6)
             self._refresh_quick_prompts()
 
     def _refresh_quick_prompts(self):
@@ -1044,7 +1044,7 @@ class ChatViewWindow(ui.Window):
             for label, prompt in prompts:
                 ui.Button(
                     label,
-                    height=20,
+                    height=24,
                     clicked_fn=lambda t=prompt: self._on_chip(t),
                     style={
                         "font_size": 10,
@@ -2123,7 +2123,7 @@ class ChatViewWindow(ui.Window):
         self._undoable_bubbles = []
         self._chips_shown = True
         self.chips_container.visible = True
-        self.chips_container.height = ui.Pixel(22)
+        self.chips_container.height = ui.Pixel(34)
         self._collapse_live_strip()
         self._clear_chat_confirm = False
         self.btn_clear.text = "Clear"
@@ -2206,7 +2206,7 @@ class ChatViewWindow(ui.Window):
         # Re-show the empty-state chips after a wipe — feels like a fresh start.
         self._chips_shown = True
         self.chips_container.visible = True
-        self.chips_container.height = ui.Pixel(22)
+        self.chips_container.height = ui.Pixel(34)
         # Defense in depth: even if a turn is mid-flight on the server,
         # New Scene resets the local UI to idle so the user is never
         # stuck staring at "Stopping..." that never resolves.

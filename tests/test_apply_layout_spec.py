@@ -157,10 +157,9 @@ class TestLayoutSpecCodeGeneratorXformArgs:
         assert "Gf.Vec3d(0" in code
 
     def test_non_default_scale_emitted(self):
-        """Non-unit scale is emitted as SetScale."""
+        """Non-unit scale is emitted through the version-tolerant helper."""
         code = self._gen().generate_for_prim("Cube", "/W/C", scale=(2.0, 2.0, 2.0))
-        assert "SetScale(" in code
-        assert "Gf.Vec3f(2.0, 2.0, 2.0)" in code
+        assert "_set_xform_scale(prim, 2.0, 2.0, 2.0)" in code
 
     def test_default_scale_omitted(self):
         """Unit scale (1,1,1) is NOT emitted to keep snippets compact."""

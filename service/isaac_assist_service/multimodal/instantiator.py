@@ -155,16 +155,19 @@ class LayoutSpecCodeGenerator:
         # Xform ops — scale
         sx, sy, sz = scale
         if (sx, sy, sz) != (1.0, 1.0, 1.0):
-            lines.append(
-                f"UsdGeom.XformCommonAPI(prim).SetScale("
-                f"Gf.Vec3f({sx!r}, {sy!r}, {sz!r}))"
-            )
+            lines.append(f"_set_xform_scale(prim, {sx!r}, {sy!r}, {sz!r})")
 
         # Extra attributes
         if extra_attrs:
             for attr_name, attr_value in extra_attrs.items():
                 if attr_name == "asset_path":
                     continue  # already handled above
+                if attr_name == "custom_data" and isinstance(attr_value, dict):
+                    for key, value in attr_value.items():
+                        lines.append(
+                            f"prim.GetPrim().SetCustomDataByKey({str(key)!r}, {value!r})"
+                        )
+                    continue
                 lines.append(
                     f"prim.GetPrim().GetAttribute({attr_name!r}).Set({attr_value!r})"
                 )
@@ -188,14 +191,33 @@ class LayoutSpecCodeGenerator:
                 "import omni.usd",
                 "from pxr import UsdGeom, UsdLux, Gf, Sdf",
                 "stage = omni.usd.get_context().get_stage()",
+                "UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)",
+                "UsdGeom.SetStageMetersPerUnit(stage, 1.0)",
                 "",
             ]
         else:
             header_lines = [
                 "from pxr import UsdGeom, UsdLux, Gf, Sdf",
                 "# stage must be provided by caller",
+                "UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)",
+                "UsdGeom.SetStageMetersPerUnit(stage, 1.0)",
                 "",
             ]
+        header_lines.extend([
+            "def _set_xform_scale(prim, sx, sy, sz):",
+            "    xformable = UsdGeom.Xformable(prim.GetPrim())",
+            "    for op in xformable.GetOrderedXformOps():",
+            "        if op.GetOpName() == 'xformOp:scale':",
+            "            attr = op.GetAttr()",
+            "            type_name = str(attr.GetTypeName()).lower()",
+            "            if 'double' in type_name:",
+            "                attr.Set(Gf.Vec3d(sx, sy, sz))",
+            "            else:",
+            "                attr.Set(Gf.Vec3f(sx, sy, sz))",
+            "            return",
+            "    UsdGeom.XformCommonAPI(prim).SetScale(Gf.Vec3f(sx, sy, sz))",
+            "",
+        ])
 
         sections: List[str] = ["\n".join(header_lines)]
 
@@ -271,6 +293,8 @@ class InstantiateResult:
     generated_code: Optional[str] = None
     placed: List[str] = field(default_factory=list)
     missing: List[str] = field(default_factory=list)
+    relation_summary: List[Dict[str, Any]] = field(default_factory=list)
+    variant_summary: Optional[Dict[str, Any]] = None
     raw_result: Optional[Dict[str, Any]] = None
 
     @classmethod
@@ -303,6 +327,28 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
     """
     objects = getattr(spec, "objects", None) or []
 
+    _CLASS_HEIGHTS_M = {
+        "table_small": 0.75, "table_medium": 0.75, "table_large": 0.75,
+        "counter": 0.9, "kitchen_counter": 0.9,
+        "bin": 0.3, "bin_large": 0.45, "bowl": 0.12, "plate": 0.03,
+        "microwave": 0.35,
+        "cube": 0.05, "cube_small": 0.05, "cube_medium": 0.08, "cube_large": 0.15,
+        "fruit": 0.07, "apple": 0.07, "orange": 0.08, "hamburger": 0.08,
+        "conveyor": 0.35, "conveyor_short": 0.35, "conveyor_long": 0.35,
+        "franka_panda": 1.0, "ur5e": 1.0, "ur10e": 1.1, "ur10": 1.1,
+    }
+
+    _SUPPORT_TOP_M = {
+        "table_small": 0.75, "table_medium": 0.75, "table_large": 0.75,
+        "counter": 0.9, "kitchen_counter": 0.9,
+        "plate": 0.03,
+        "conveyor": 0.35, "conveyor_short": 0.35, "conveyor_long": 0.35,
+    }
+
+    _INTERIOR_FLOOR_OFFSET_M = {
+        "bin": 0.05, "bin_large": 0.07, "bowl": 0.03, "microwave": 0.08,
+    }
+
     _CLASS_NORMALIZER = {
         "cube": "Cube", "sphere": "Sphere", "cylinder": "Cylinder",
         "cone": "Cone", "plane": "Plane",
@@ -312,7 +358,12 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         "dome_light": "DomeLight", "domelight": "DomeLight",
         "cube_small": "Cube", "cube_medium": "Cube", "cube_large": "Cube",
         "table_small": "Cube", "table_medium": "Cube", "table_large": "Cube",
+        "counter": "Cube", "kitchen_counter": "Cube",
         "bin": "Cube", "bin_large": "Cube", "shelf": "Cube",
+        "microwave": "Cube",
+        "bowl": "Cylinder", "plate": "Cylinder",
+        "fruit": "Sphere", "apple": "Sphere", "orange": "Sphere",
+        "hamburger": "Cylinder",
         "conveyor_short": "Cube", "conveyor_long": "Cube",
         "wall": "Cube", "fence": "Cube", "obstacle_box": "Cube",
         "obstacle_cylinder": "Cylinder",
@@ -350,7 +401,134 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
             seq.append(1.0)
         return [float(seq[0]), float(seq[1]), float(seq[2])]
 
+    def _metadata(obj: Any) -> Dict[str, Any]:
+        value = _obj_get(obj, "metadata", {}) or {}
+        return value if isinstance(value, dict) else {}
+
+    def _object_id(obj: Any) -> str:
+        return str(_obj_get(obj, "id", ""))
+
+    def _object_class(obj: Any) -> str:
+        return str(_obj_get(obj, "object_class", "") or _obj_get(obj, "class", "") or "")
+
+    def _object_name(obj: Any) -> str:
+        return str(_obj_get(obj, "name", "") or _object_id(obj) or _object_class(obj))
+
+    def _usd_identifier(value: str, fallback: str) -> str:
+        cleaned = "".join(ch if ch.isalnum() else "_" for ch in value.strip())
+        cleaned = "_".join(part for part in cleaned.split("_") if part)
+        if not cleaned:
+            cleaned = fallback
+        if cleaned and cleaned[0].isdigit():
+            cleaned = f"Obj_{cleaned}"
+        return cleaned or fallback
+
+    def _height_m(obj: Any, scale: Optional[List[float]] = None) -> float:
+        metadata = _metadata(obj)
+        value = metadata.get("height_m") or metadata.get("asset_height_m")
+        if isinstance(value, (int, float)) and value > 0:
+            return float(value)
+        obj_class = _object_class(obj).lower()
+        if obj_class in _CLASS_HEIGHTS_M:
+            return _CLASS_HEIGHTS_M[obj_class]
+        if scale and len(scale) >= 3 and scale[2] > 0:
+            return float(scale[2])
+        return 0.1
+
+    def _support_top_m(obj: Any) -> float:
+        metadata = _metadata(obj)
+        value = metadata.get("support_surface_z_m") or metadata.get("top_z_m")
+        if isinstance(value, (int, float)):
+            return float(value)
+        return _SUPPORT_TOP_M.get(_object_class(obj).lower(), _height_m(obj))
+
+    def _interior_floor_offset_m(obj: Any) -> float:
+        metadata = _metadata(obj)
+        value = metadata.get("interior_floor_z_m")
+        if isinstance(value, (int, float)):
+            return float(value)
+        return _INTERIOR_FLOOR_OFFSET_M.get(_object_class(obj).lower(), 0.02)
+
+    def _relation_get(rel: Any, attr: str, default: Any = None) -> Any:
+        if isinstance(rel, dict):
+            return rel.get(attr, default)
+        return getattr(rel, attr, default)
+
+    def _semantic_relations() -> List[Dict[str, Any]]:
+        raw = getattr(spec, "relations", None) or []
+        normalized: List[Dict[str, Any]] = []
+        for rel in raw:
+            subject_id = str(_relation_get(rel, "subject_id", ""))
+            object_id = str(_relation_get(rel, "object_id", ""))
+            relation = str(_relation_get(rel, "relation", ""))
+            if subject_id and object_id and relation:
+                if relation == "contains":
+                    subject_id, object_id, relation = object_id, subject_id, "inside"
+                elif relation == "supports":
+                    subject_id, object_id, relation = object_id, subject_id, "on_top_of"
+                normalized.append({
+                    "subject_id": subject_id,
+                    "object_id": object_id,
+                    "relation": relation,
+                })
+        return normalized
+
+    relations = _semantic_relations()
+    object_by_id = {_object_id(obj): obj for obj in objects if _object_id(obj)}
+    parent_relation_by_subject = {
+        rel["subject_id"]: rel
+        for rel in relations
+        if rel["relation"] in {"on_top_of", "inside", "stacked_above"}
+    }
+
+    def _base_position_for_object(
+        obj: Any,
+        computed: Dict[str, List[float]],
+        stack: Optional[set[str]] = None,
+    ) -> List[float]:
+        obj_id = _object_id(obj)
+        if obj_id in computed:
+            return computed[obj_id]
+        if stack is None:
+            stack = set()
+        if obj_id in stack:
+            return _position3(_obj_get(obj, "position", [0.0, 0.0, 0.0]))
+        stack.add(obj_id)
+
+        own_position = _position3(_obj_get(obj, "position", [0.0, 0.0, 0.0]))
+        scale = _scale3(obj, _obj_get(obj, "scale", [1.0, 1.0, 1.0]))
+        relation = parent_relation_by_subject.get(obj_id)
+        if not relation:
+            computed[obj_id] = own_position
+            return own_position
+
+        parent = object_by_id.get(relation["object_id"])
+        if parent is None:
+            computed[obj_id] = own_position
+            return own_position
+
+        parent_position = _base_position_for_object(parent, computed, stack)
+        parent_height = _height_m(parent)
+        child_height = _height_m(obj, scale)
+        relation_kind = relation["relation"]
+        if relation_kind in {"on_top_of", "supports", "stacked_above"}:
+            z = parent_position[2] + _support_top_m(parent) + child_height / 2.0
+        elif relation_kind in {"inside", "contains"}:
+            z = (
+                parent_position[2]
+                - parent_height / 2.0
+                + _interior_floor_offset_m(parent)
+                + child_height / 2.0
+            )
+        else:
+            z = own_position[2]
+
+        computed[obj_id] = [parent_position[0], parent_position[1], round(z, 4)]
+        return computed[obj_id]
+
     prims: List[Dict[str, Any]] = []
+    computed_positions: Dict[str, List[float]] = {}
+    used_prim_names: Dict[str, int] = {}
     for i, obj in enumerate(objects):
         asset_resolution = resolve_object_asset(obj)
         if hasattr(obj, "object_class"):
@@ -366,7 +544,7 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
             scale = obj.get("scale", [1.0, 1.0, 1.0])
             asset_ref = obj.get("asset_path") or obj.get("asset_ref")
 
-        position = _position3(position)
+        position = _base_position_for_object(obj, computed_positions)
         scale = _scale3(obj, scale)
 
         normalized_class = _CLASS_NORMALIZER.get(
@@ -380,17 +558,41 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
                 normalized_class = "Reference"
             else:
                 normalized_class = "Xform"
+        if normalized_class in {"Cube", "Sphere", "Cylinder", "Cone"}:
+            scale[2] = _height_m(obj, scale)
+
+        object_id = _object_id(obj)
+        object_name = _object_name(obj)
+        fallback_name = f"{normalized_class}_{i + 1}"
+        prim_name = _usd_identifier(object_name, fallback_name)
+        count = used_prim_names.get(prim_name, 0)
+        used_prim_names[prim_name] = count + 1
+        if count:
+            prim_name = f"{prim_name}_{count + 1}"
+
+        custom_data = {
+            "isaac_assist:layout_id": object_id,
+            "isaac_assist:layout_name": object_name,
+            "isaac_assist:object_class": str(obj_class),
+            "isaac_assist:role_hint": str(obj_class),
+        }
+        if asset_resolution:
+            custom_data["isaac_assist:asset_source"] = asset_resolution.source
+            custom_data["isaac_assist:asset_ref"] = asset_resolution.usd_ref
 
         prim_desc: Dict[str, Any] = {
             "prim_class": normalized_class,
-            "prim_path": f"/World/{normalized_class}_{i + 1}",
+            "prim_path": f"/World/{prim_name}",
             "position": position,
             "rotation_euler_deg": rotation,
             "scale": scale,
             "_source_class": str(obj_class),
+            "_source_name": object_name,
+            "_source_id": object_id,
+            "extra_attrs": {"custom_data": custom_data},
         }
         if normalized_class == "Reference" and asset_ref:
-            prim_desc["extra_attrs"] = {"asset_path": str(asset_ref)}
+            prim_desc["extra_attrs"]["asset_path"] = str(asset_ref)
         prims.append(prim_desc)
 
     generator = LayoutSpecCodeGenerator(use_get_context=True)
@@ -398,14 +600,100 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         f"# Phase 19 code-gen: {len(prims)} prims, template_id={template_id!r}\n"
     )
     source_comments = "\n".join(
-        f"# object[{i}]: source_class={p['_source_class']!r} -> "
+        f"# object[{i}]: source_id={p['_source_id']!r}, source_name={p['_source_name']!r}, "
+        f"source_class={p['_source_class']!r} -> "
         f"prim_class={p['prim_class']!r}, path={p['prim_path']!r}"
         for i, p in enumerate(prims)
     )
+    relation_comments = "\n".join(
+        f"# relation: {rel['subject_id']} {rel['relation']} {rel['object_id']}"
+        for rel in relations
+    )
     for p in prims:
         p.pop("_source_class", None)
+        p.pop("_source_id", None)
+        p.pop("_source_name", None)
     body = generator.generate_full_script(prims)
-    return header_comment + (source_comments + "\n" if source_comments else "") + body
+    comments = "\n".join(part for part in (source_comments, relation_comments) if part)
+    return header_comment + (comments + "\n" if comments else "") + body
+
+
+def relation_summary(spec: Any) -> List[Dict[str, Any]]:
+    """Return a concise relation list for Preview Build diagnostics."""
+    objects = getattr(spec, "objects", None) or []
+    object_names: Dict[str, str] = {}
+    for obj in objects:
+        if isinstance(obj, dict):
+            obj_id = str(obj.get("id", ""))
+            name = str(obj.get("name") or obj_id)
+        else:
+            obj_id = str(getattr(obj, "id", ""))
+            name = str(getattr(obj, "name", "") or obj_id)
+        if obj_id:
+            object_names[obj_id] = name
+
+    rows: List[Dict[str, Any]] = []
+    for rel in getattr(spec, "relations", None) or []:
+        if isinstance(rel, dict):
+            subject_id = str(rel.get("subject_id", ""))
+            object_id = str(rel.get("object_id", ""))
+            relation = str(rel.get("relation", ""))
+        else:
+            subject_id = str(getattr(rel, "subject_id", ""))
+            object_id = str(getattr(rel, "object_id", ""))
+            relation = str(getattr(rel, "relation", ""))
+        if subject_id and object_id and relation:
+            rows.append({
+                "subject_id": subject_id,
+                "subject_name": object_names.get(subject_id, subject_id),
+                "relation": relation,
+                "object_id": object_id,
+                "object_name": object_names.get(object_id, object_id),
+            })
+    return rows
+
+
+def variant_summary(spec: Any) -> Dict[str, Any]:
+    """Return the variant campaign knobs in build-response form."""
+    variants = getattr(spec, "scenario_variants", None)
+    if variants is None:
+        return {
+            "enabled": False,
+            "variant_count": 1,
+            "seed": 1,
+            "lighting": ["studio"],
+            "cameras": ["overhead"],
+            "actors": [],
+            "circumstances": ["nominal"],
+            "perturbations": {
+                "enabled": True,
+                "pose_jitter_m": 0.03,
+                "rotation_jitter_deg": 5.0,
+                "material_randomization": True,
+                "sensor_noise": False,
+            },
+            "validation": {
+                "require_relations": True,
+                "require_visibility": True,
+                "require_physics": True,
+            },
+        }
+    if hasattr(variants, "model_dump"):
+        data = variants.model_dump(mode="json")
+    elif isinstance(variants, dict):
+        data = dict(variants)
+    else:
+        data = {}
+    data.setdefault("enabled", False)
+    data.setdefault("variant_count", 1)
+    data.setdefault("seed", 1)
+    data.setdefault("lighting", ["studio"])
+    data.setdefault("cameras", ["overhead"])
+    data.setdefault("actors", [])
+    data.setdefault("circumstances", ["nominal"])
+    data.setdefault("perturbations", {})
+    data.setdefault("validation", {})
+    return data
 
 
 async def instantiate(
@@ -438,17 +726,24 @@ async def instantiate(
             status="dry_run",
             generated_code=code,
             message="dry_run — code generated, not executed",
+            relation_summary=relation_summary(spec),
+            variant_summary=variant_summary(spec),
         )
 
     # Live path
     try:
         from ..chat.tools import kit_tools
         result = await kit_tools.queue_exec_patch(code, description=f"Phase 19: instantiate {template_id or 'spec'}")
-        return InstantiateResult.from_exec(result if isinstance(result, dict) else {"output": str(result)})
+        outcome = InstantiateResult.from_exec(result if isinstance(result, dict) else {"output": str(result)})
+        outcome.relation_summary = relation_summary(spec)
+        outcome.variant_summary = variant_summary(spec)
+        return outcome
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[Phase19 instantiate] queue_exec_patch failed: {type(e).__name__}: {e}")
         return InstantiateResult(
             status="error",
             message=f"{type(e).__name__}: {e}",
             generated_code=code,
+            relation_summary=relation_summary(spec),
+            variant_summary=variant_summary(spec),
         )

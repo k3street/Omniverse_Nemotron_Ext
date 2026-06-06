@@ -19,7 +19,7 @@ import {
     SetAttrKey,
     BulkUpdate,
 } from "./commands";
-import { LayoutSpec, Position, Size, TypedObject } from "../api/types";
+import { LayoutSpec, Position, ScenarioVariants, Size, SpatialRelation, TypedObject } from "../api/types";
 
 // ─── Persistence helpers ─────────────────────────────────────────────
 
@@ -119,6 +119,8 @@ export interface FloorPlanState {
     resizeObject: (id: string, from: Size, to: Size) => void;
     rotateObject: (id: string, from: number, to: number) => void;
     setAttr: (id: string, attr: SetAttrKey, from: unknown, to: unknown) => void;
+    setRelations: (relations: SpatialRelation[]) => void;
+    setScenarioVariants: (variants: ScenarioVariants) => void;
 
     applyAgentBulkUpdate: (after: TypedObject[], description?: string) => void;
 
@@ -195,6 +197,20 @@ export const useFloorPlanStore = create<FloorPlanState>((set, get) => {
         rotateObject: (id, from, to) => pushCommand(new RotateObject(id, from, to)),
         setAttr: (id, attr, from, to) =>
             pushCommand(new SetAttr(id, attr, from, to)),
+        setRelations: (relations) => {
+            const state = get();
+            if (!state.spec) return;
+            const newSpec: LayoutSpec = { ...state.spec, relations };
+            set({ spec: newSpec });
+            writeWAL(state.sessionId, newSpec);
+        },
+        setScenarioVariants: (variants) => {
+            const state = get();
+            if (!state.spec) return;
+            const newSpec: LayoutSpec = { ...state.spec, scenario_variants: variants };
+            set({ spec: newSpec });
+            writeWAL(state.sessionId, newSpec);
+        },
 
         applyAgentBulkUpdate: (after, description) => {
             const before = get().spec?.objects ?? [];

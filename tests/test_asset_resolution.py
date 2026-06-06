@@ -63,8 +63,84 @@ def test_instantiate_dry_run_references_reviewed_palette_assets():
     assert "franka_panda" in result.generated_code
 
 
-def test_instantiate_dry_run_uses_primitive_fallback_for_fixture_classes():
+def test_resolve_object_asset_uses_local_asset_overrides(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import asset_resolution
+
+    conveyor = (
+        tmp_path
+        / "Warehouse_NVD/Assets/DigitalTwin/Assets/Warehouse/Equipment/Conveyors/"
+        "ConveyorBelt_A/ConveyorBelt_A12_PR_NVD_01.usd"
+    )
+    box = (
+        tmp_path
+        / "SimReady_Containers_Shipping_02_NVD/Assets/simready_content/"
+        "common_assets/props/box_a01/box_a01.usd"
+    )
+    cube = (
+        tmp_path
+        / "Lightwheel_oz5iukPxYq_KitchenRoom/"
+        "omniverse-content-production.s3.us-west-2.amazonaws.com/"
+        "Assets/Extensions/Samples/Paint/cube.usd"
+    )
+    for path in (conveyor, box, cube):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#usda 1.0\n")
+
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path))
+    asset_resolution._load_asset_catalog.cache_clear()
+
+    assert asset_resolution.resolve_object_asset(
+        {"id": "conv", "object_class": "conveyor_short"}
+    ).usd_ref == str(conveyor)
+    assert asset_resolution.resolve_object_asset(
+        {"id": "bin", "object_class": "bin"}
+    ).usd_ref == str(box)
+    assert asset_resolution.resolve_object_asset(
+        {"id": "cube", "object_class": "cube"}
+    ).usd_ref == str(cube)
+
+
+def test_resolve_object_asset_uses_catalog_fallback(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import asset_resolution
+
+    catalog_asset = tmp_path / "catalog_assets" / "warehouse_bin.usd"
+    catalog_asset.parent.mkdir(parents=True)
+    catalog_asset.write_text("#usda 1.0\n")
+    catalog = tmp_path / "asset_catalog.json"
+    catalog.write_text(
+        """
+        {
+          "assets": [
+            {
+              "name": "warehouse_bin",
+              "usd_path": "%s",
+              "category": "container",
+              "tags": ["box", "bin", "simready"]
+            }
+          ]
+        }
+        """
+        % str(catalog_asset)
+    )
+
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path))
+    asset_resolution._load_asset_catalog.cache_clear()
+
+    resolved = asset_resolution.resolve_object_asset(
+        {"id": "bin", "object_class": "bin"}
+    )
+
+    assert resolved is not None
+    assert resolved.source == "asset_catalog"
+    assert resolved.usd_ref == str(catalog_asset)
+
+
+def test_instantiate_dry_run_uses_primitive_fallback_for_fixture_classes(monkeypatch, tmp_path):
     from service.isaac_assist_service.multimodal.instantiator import instantiate
+    from service.isaac_assist_service.multimodal import asset_resolution
+
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path / "missing"))
+    asset_resolution._load_asset_catalog.cache_clear()
 
     class Spec:
         objects = [
@@ -78,8 +154,9 @@ def test_instantiate_dry_run_uses_primitive_fallback_for_fixture_classes():
     result = asyncio.run(instantiate(Spec(), dry_run=True))
 
     assert result.status == "dry_run"
-    assert "UsdGeom.Cube.Define(stage, '/World/Cube_1')" in result.generated_code
+    assert "UsdGeom.Cube.Define(stage, '/World/table_medium')" in result.generated_code
     assert "source_class='table_medium' -> prim_class='Cube'" in result.generated_code
+    assert "isaac_assist:object_class', 'table_medium'" in result.generated_code
 
 
 def test_instantiate_dry_run_handles_pydantic_position_and_size():
@@ -102,6 +179,72 @@ def test_instantiate_dry_run_handles_pydantic_position_and_size():
 
     assert result.status == "dry_run"
     assert "Gf.Vec3d(0.25, -0.5, 0.0)" in result.generated_code
+
+
+def test_instantiate_dry_run_computes_nested_spatial_relations(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import asset_resolution
+    from service.isaac_assist_service.multimodal.instantiator import instantiate
+
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path / "missing"))
+    asset_resolution._load_asset_catalog.cache_clear()
+
+    class Spec:
+        objects = [
+            {
+                "id": "table_1",
+                "object_class": "table_medium",
+                "name": "Table",
+                "position": [1.0, 2.0, 0.0],
+                "size": {"w": 1.2, "h": 0.8},
+            },
+            {
+                "id": "bowl_1",
+                "object_class": "bowl",
+                "name": "Bowl",
+                "position": [0.0, 0.0, 0.0],
+                "size": {"w": 0.25, "h": 0.25},
+            },
+            {
+                "id": "fruit_1",
+                "object_class": "fruit",
+                "name": "Fruit",
+                "position": [0.0, 0.0, 0.0],
+                "size": {"w": 0.07, "h": 0.07},
+            },
+        ]
+        relations = [
+            {"subject_id": "bowl_1", "relation": "on_top_of", "object_id": "table_1"},
+            {"subject_id": "bowl_1", "relation": "contains", "object_id": "fruit_1"},
+        ]
+
+    result = asyncio.run(instantiate(Spec(), dry_run=True))
+
+    assert result.status == "dry_run"
+    assert "# relation: bowl_1 on_top_of table_1" in result.generated_code
+    assert "# relation: fruit_1 inside bowl_1" in result.generated_code
+    assert "UsdGeom.Cube.Define(stage, '/World/Table')" in result.generated_code
+    assert "UsdGeom.Cylinder.Define(stage, '/World/Bowl')" in result.generated_code
+    assert "UsdGeom.Sphere.Define(stage, '/World/Fruit')" in result.generated_code
+    assert "isaac_assist:layout_id', 'table_1'" in result.generated_code
+    assert "isaac_assist:layout_name', 'Table'" in result.generated_code
+    assert "Gf.Vec3d(1.0, 2.0, 0.81)" in result.generated_code
+    assert "Gf.Vec3d(1.0, 2.0, 0.815)" in result.generated_code
+    assert result.relation_summary == [
+        {
+            "subject_id": "bowl_1",
+            "subject_name": "Bowl",
+            "relation": "on_top_of",
+            "object_id": "table_1",
+            "object_name": "Table",
+        },
+        {
+            "subject_id": "bowl_1",
+            "subject_name": "Bowl",
+            "relation": "contains",
+            "object_id": "fruit_1",
+            "object_name": "Fruit",
+        },
+    ]
 
 
 def test_build_route_returns_asset_resolution_summary(tmp_path):
@@ -139,6 +282,64 @@ def test_build_route_returns_asset_resolution_summary(tmp_path):
         assert response["instantiation"]["status"] == "dry_run"
         assert response["instantiation"]["dry_run"] is True
         assert "AddReference('Isaac/" in response["instantiation"]["generated_code"]
+    finally:
+        routes._store.close()
+        routes._store = old_store
+
+
+def test_build_route_returns_relation_summary(tmp_path):
+    from service.isaac_assist_service.multimodal import routes
+    from service.isaac_assist_service.multimodal.persistence import MultimodalStore
+    from service.isaac_assist_service.multimodal.types import LayoutSpec
+
+    old_store = routes._store
+    routes._store = MultimodalStore(tmp_path / "state.db")
+    try:
+        spec = LayoutSpec.model_validate({
+            "version": "1.0",
+            "intent": {
+                "pattern_hint": "pick_place",
+                "counts": {"robots": 0, "conveyors": 0, "bins": 0, "cubes": 0, "sensors": 0, "humans": 0},
+                "structural_features": {},
+                "structural_tags": [],
+            },
+            "objects": [
+                {
+                    "id": "plate_1",
+                    "class": "plate",
+                    "name": "Plate",
+                    "position": {"x": 0.0, "y": 0.0},
+                    "size": {"w": 0.25, "h": 0.25},
+                },
+                {
+                    "id": "burger_1",
+                    "class": "hamburger",
+                    "name": "Hamburger",
+                    "position": {"x": 0.0, "y": 0.0},
+                    "size": {"w": 0.12, "h": 0.12},
+                },
+            ],
+            "relations": [
+                {"subject_id": "burger_1", "relation": "on_top_of", "object_id": "plate_1"}
+            ],
+            "source": {"modality": "drag_drop", "confidence": 1.0, "metadata": {}},
+        })
+        asyncio.run(routes.get_store().save_with_cas("relations_build", spec, 0))
+
+        response = asyncio.run(
+            routes.build_canvas("relations_build", routes.BuildRequest())
+        )
+
+        assert response["instantiation"]["relation_summary"] == [
+            {
+                "subject_id": "burger_1",
+                "subject_name": "Hamburger",
+                "relation": "on_top_of",
+                "object_id": "plate_1",
+                "object_name": "Plate",
+            }
+        ]
+        assert "# relation: burger_1 on_top_of plate_1" in response["instantiation"]["generated_code"]
     finally:
         routes._store.close()
         routes._store = old_store

@@ -10,6 +10,7 @@
 import {
     BuildResponse,
     CanvasGetResponse,
+    CampaignPlanResponse,
     ConflictDetail,
     CosmosObserveRequest,
     CosmosObserveResponse,
@@ -19,6 +20,7 @@ import {
     PatchSuccessResponse,
     PatchValidationFailureResponse,
     TypedObject,
+    ScenarioVariants,
 } from "./types";
 
 export class CanvasConflictError extends Error {
@@ -47,6 +49,8 @@ export interface CanvasApi {
     commit(sessionId: string): Promise<{ committed: true; revision: number }>;
     previewRender(sessionId: string): Promise<{ rendered: true; path: string; revision: number }>;
     build(sessionId: string, opts?: { template_id?: string; force_freeform?: boolean; dry_run?: boolean }): Promise<BuildResponse>;
+    planCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;
+    materializeCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;
     cosmosObserve(sessionId: string, req: CosmosObserveRequest): Promise<CosmosObserveResponse>;
     cosmosObserveViewport(
         sessionId: string,
@@ -61,10 +65,44 @@ type BackendTypedObject = Record<string, unknown> & {
     class?: string;
 };
 
+export const DEFAULT_SCENARIO_VARIANTS: ScenarioVariants = {
+    enabled: false,
+    variant_count: 1,
+    seed: 1,
+    lighting: ["studio"],
+    cameras: ["overhead"],
+    actors: [],
+    circumstances: ["nominal"],
+    perturbations: {
+        enabled: true,
+        pose_jitter_m: 0.03,
+        rotation_jitter_deg: 5,
+        material_randomization: true,
+        sensor_noise: false,
+    },
+    validation: {
+        require_relations: true,
+        require_visibility: true,
+        require_physics: true,
+    },
+};
+
 export function normalizeLayoutSpec(spec: LayoutSpec | null): LayoutSpec | null {
     if (!spec) return spec;
     return {
         ...spec,
+        scenario_variants: {
+            ...DEFAULT_SCENARIO_VARIANTS,
+            ...(spec.scenario_variants ?? {}),
+            perturbations: {
+                ...DEFAULT_SCENARIO_VARIANTS.perturbations,
+                ...(spec.scenario_variants?.perturbations ?? {}),
+            },
+            validation: {
+                ...DEFAULT_SCENARIO_VARIANTS.validation,
+                ...(spec.scenario_variants?.validation ?? {}),
+            },
+        },
         objects: (spec.objects ?? []).map((raw) => {
             const obj = raw as unknown as BackendTypedObject;
             const objectClass = obj.class ?? obj.object_class;
@@ -131,6 +169,24 @@ export function createCanvasApi(baseUrl: string = ""): CanvasApi {
                 body: JSON.stringify(opts),
             });
             if (!r.ok) throw new Error(`POST build failed: ${r.status}`);
+            return r.json();
+        },
+        async planCampaign(sessionId, opts = {}) {
+            const r = await fetch(url(`/${encodeURIComponent(sessionId)}/campaign/plan`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(opts),
+            });
+            if (!r.ok) throw new Error(`POST campaign plan failed: ${r.status}`);
+            return r.json();
+        },
+        async materializeCampaign(sessionId, opts = {}) {
+            const r = await fetch(url(`/${encodeURIComponent(sessionId)}/campaign/materialize`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(opts),
+            });
+            if (!r.ok) throw new Error(`POST campaign materialize failed: ${r.status}`);
             return r.json();
         },
         async cosmosObserve(sessionId, req) {

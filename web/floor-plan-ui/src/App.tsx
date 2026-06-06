@@ -285,6 +285,8 @@ function BuildPreviewPanel({
     onClose: () => void;
 }) {
     const assets = result?.asset_resolutions ?? [];
+    const relations = result?.instantiation?.relation_summary ?? [];
+    const variants = result?.instantiation?.variant_summary;
     const code = result?.instantiation?.generated_code ?? "";
     const status = result?.instantiation?.status ?? result?.status ?? state;
     return (
@@ -357,6 +359,28 @@ function BuildPreviewPanel({
                             <div>{asset.source}{asset.needs_review ? " · review" : ""}</div>
                         </div>
                     ))}
+                    {!error && relations.length > 0 && (
+                        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #2E3237" }}>
+                            <div style={{ color: ACCENT, fontWeight: 700, marginBottom: 6 }}>Relations</div>
+                            {relations.map((rel, index) => (
+                                <div key={`${rel.subject_id}-${rel.relation}-${rel.object_id}-${index}`} style={{ marginBottom: 6 }}>
+                                    <span style={{ color: TEXT_PRIMARY }}>{rel.subject_name}</span>
+                                    <span> {rel.relation.replaceAll("_", " ")} </span>
+                                    <span style={{ color: TEXT_PRIMARY }}>{rel.object_name}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {!error && variants && (
+                        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #2E3237" }}>
+                            <div style={{ color: ACCENT, fontWeight: 700, marginBottom: 6 }}>Variants</div>
+                            <div>{variants.enabled ? "enabled" : "disabled"} · {variants.variant_count} scene{variants.variant_count === 1 ? "" : "s"}</div>
+                            <div>lighting: {variants.lighting.join(", ")}</div>
+                            <div>cameras: {variants.cameras.join(", ")}</div>
+                            {variants.actors.length > 0 && <div>actors: {variants.actors.join(", ")}</div>}
+                            <div>circumstances: {variants.circumstances.join(", ")}</div>
+                        </div>
+                    )}
                 </div>
                 <pre
                     style={{

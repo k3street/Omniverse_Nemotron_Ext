@@ -110,6 +110,80 @@ export interface RoleBinding {
     timestamp: string;         // ISO 8601
 }
 
+export type SpatialRelationKind =
+    | "on_top_of"
+    | "inside"
+    | "contains"
+    | "supports"
+    | "attached_to"
+    | "near"
+    | "left_of"
+    | "right_of"
+    | "front_of"
+    | "behind"
+    | "stacked_above";
+
+export type LightingPreset =
+    | "studio"
+    | "warehouse_dim"
+    | "warehouse_bright"
+    | "backlit"
+    | "dome_overcast"
+    | "low_angle";
+
+export type CameraPreset =
+    | "overhead"
+    | "robot_view"
+    | "side_view"
+    | "wide_context";
+
+export type ActorPreset =
+    | "human_observer"
+    | "forklift_nearby"
+    | "mobile_robot_crossing";
+
+export type CircumstancePreset =
+    | "nominal"
+    | "occluded_target"
+    | "distractor_objects"
+    | "moved_target"
+    | "tight_clearance";
+
+export interface SpatialRelation {
+    subject_id: string;
+    relation: SpatialRelationKind;
+    object_id: string;
+    confidence: number;
+    source: string;
+    metadata: Record<string, unknown>;
+}
+
+export interface PerturbationSpec {
+    enabled: boolean;
+    pose_jitter_m: number;
+    rotation_jitter_deg: number;
+    material_randomization: boolean;
+    sensor_noise: boolean;
+}
+
+export interface ValidationSpec {
+    require_relations: boolean;
+    require_visibility: boolean;
+    require_physics: boolean;
+}
+
+export interface ScenarioVariants {
+    enabled: boolean;
+    variant_count: number;
+    seed: number;
+    lighting: LightingPreset[];
+    cameras: CameraPreset[];
+    actors: ActorPreset[];
+    circumstances: CircumstancePreset[];
+    perturbations: PerturbationSpec;
+    validation: ValidationSpec;
+}
+
 export interface Source {
     modality: Modality;
     confidence: number;
@@ -125,6 +199,8 @@ export interface LayoutSpec {
     intent: Intent;
     objects?: TypedObject[];
     constraints?: unknown[];   // typed in v1.1
+    relations?: SpatialRelation[];
+    scenario_variants?: ScenarioVariants;
     bindings?: Record<string, RoleBinding>;
     parameters: Record<string, unknown>;
     source: Source;
@@ -173,6 +249,45 @@ export interface BuildResponse {
         build_id?: string | null;
         dry_run: boolean;
         generated_code?: string | null;
+        relation_summary?: Array<{
+            subject_id: string;
+            subject_name: string;
+            relation: string;
+            object_id: string;
+            object_name: string;
+        }>;
+        variant_summary?: ScenarioVariants;
+    };
+}
+
+export interface CampaignVariantPlan {
+    variant_id: string;
+    index: number;
+    seed: number;
+    lighting: string;
+    camera: string;
+    actor: string;
+    circumstance: string;
+    perturbations: PerturbationSpec;
+    validation: ValidationSpec;
+    usd_path: string;
+    launch_command: string;
+}
+
+export interface CampaignPlanResponse {
+    campaign_id: string;
+    session_id: string;
+    revision: number;
+    enabled: boolean;
+    workspace_dir: string;
+    variant_count: number;
+    summary: ScenarioVariants;
+    variants: CampaignVariantPlan[];
+    execution: {
+        status: string;
+        local_supported: boolean;
+        remote_supported: boolean;
+        remote_note: string;
     };
 }
 

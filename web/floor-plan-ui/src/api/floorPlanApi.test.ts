@@ -149,4 +149,76 @@ describe("createCanvasApi", () => {
         expect(response.revision).toBe(2);
         expect(response.viewport_capture?.height).toBe(720);
     });
+
+    it("posts campaign planning requests", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                campaign_id: "session_rev1_seed1",
+                session_id: "session one",
+                revision: 1,
+                enabled: true,
+                workspace_dir: "workspace/scenario_campaigns/session_rev1_seed1",
+                variant_count: 1,
+                summary: {},
+                variants: [],
+                execution: {
+                    status: "planned",
+                    local_supported: true,
+                    remote_supported: false,
+                    remote_note: "",
+                },
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const api = createCanvasApi("");
+        const response = await api.planCampaign("session one", { workspace_root: "/tmp/runs" });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/v1/canvas/session%20one/campaign/plan",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ workspace_root: "/tmp/runs" }),
+            },
+        );
+        expect(response.execution.status).toBe("planned");
+    });
+
+    it("posts campaign materialization requests", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                campaign_id: "session_rev1_seed1",
+                session_id: "session one",
+                revision: 1,
+                enabled: true,
+                workspace_dir: "workspace/scenario_campaigns/session_rev1_seed1",
+                variant_count: 1,
+                summary: {},
+                variants: [],
+                execution: {
+                    status: "materialized",
+                    local_supported: true,
+                    remote_supported: false,
+                    remote_note: "",
+                },
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const api = createCanvasApi("");
+        const response = await api.materializeCampaign("session one");
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/v1/canvas/session%20one/campaign/materialize",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({}),
+            },
+        );
+        expect(response.execution.status).toBe("materialized");
+    });
 });

@@ -32,6 +32,8 @@ floor-plan UI review + correction
         |
 canvas commit/build
         |
+scenario campaign plan/materialize
+        |
 Isaac Sim 5.1 or 6.0 harness
 ```
 
@@ -53,6 +55,16 @@ POST /api/v1/canvas/{session_id}/cosmos/propose
 
 It uses the same compare-and-swap revision store as the normal canvas patch
 route, so Cosmos proposals behave like ordinary floor-plan edits.
+
+For asset placement, Cosmos Reasoner should be used before campaign
+materialization. It proposes object classes, asset hints, support/containment
+relations, and physical plausibility notes from prompts, photos, renders, or the
+live viewport. The floor-plan UI then acts as the correction surface for those
+probabilistic guesses. Once the user or agent accepts the placement semantics,
+the deterministic campaign planner expands the reviewed `LayoutSpec` into
+variant jobs and the materializer writes local `.usda` stages plus setup scripts.
+This keeps "Cosmos reasons about where things are" separate from "Isaac Sim
+executes exact USD/API mutations."
 
 The first runtime route is:
 

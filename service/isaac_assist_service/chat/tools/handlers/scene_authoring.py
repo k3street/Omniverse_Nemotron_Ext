@@ -3152,13 +3152,14 @@ else:
                 continue
     result['match_count'] = len(matches)
     result['matches'] = matches
+    result['match_paths'] = matches
     result['truncated'] = len(matches) >= limit
     print(json.dumps(result, default=str))
 """
     return await kit_tools.queue_exec_patch(code, f"find_prims_by_schema {schema_name}")
 
 async def _handle_find_prims_by_name(args: Dict) -> Dict:
-    """Regex search on prim paths."""
+    """Regex search on prim paths and Isaac Assist semantic metadata."""
     from .. import kit_tools
     pattern = args["pattern"]
     root_path = args.get("root_path") or "/"
@@ -3186,14 +3187,36 @@ else:
     if not root_prim or not root_prim.IsValid():
         root_prim = stage.GetPseudoRoot()
     matches = []
+    metadata_keys = [
+        'isaac_assist:layout_id',
+        'isaac_assist:layout_name',
+        'isaac_assist:object_class',
+        'isaac_assist:role_hint',
+    ]
     for p in Usd.PrimRange(root_prim):
         path_str = str(p.GetPath())
-        if rx.search(path_str):
-            matches.append(path_str)
+        fields = [path_str, p.GetName()]
+        for key in metadata_keys:
+            try:
+                value = p.GetCustomDataByKey(key)
+            except Exception:
+                value = None
+            if value:
+                fields.append(str(value))
+        if any(rx.search(field) for field in fields):
+            matches.append({
+                'path': path_str,
+                'type': p.GetTypeName(),
+                'name': p.GetName(),
+                'layout_id': p.GetCustomDataByKey('isaac_assist:layout_id'),
+                'layout_name': p.GetCustomDataByKey('isaac_assist:layout_name'),
+                'object_class': p.GetCustomDataByKey('isaac_assist:object_class'),
+            })
             if len(matches) >= limit:
                 break
     result['match_count'] = len(matches)
     result['matches'] = matches
+    result['match_paths'] = [m['path'] for m in matches]
     result['truncated'] = len(matches) >= limit
     print(json.dumps(result, default=str))
 """

@@ -87,6 +87,50 @@ BindingSource = Literal[
     "user_correction",  # rebind_role tool call
 ]
 
+SpatialRelationKind = Literal[
+    "on_top_of",
+    "inside",
+    "contains",
+    "supports",
+    "attached_to",
+    "near",
+    "left_of",
+    "right_of",
+    "front_of",
+    "behind",
+    "stacked_above",
+]
+
+LightingPreset = Literal[
+    "studio",
+    "warehouse_dim",
+    "warehouse_bright",
+    "backlit",
+    "dome_overcast",
+    "low_angle",
+]
+
+CameraPreset = Literal[
+    "overhead",
+    "robot_view",
+    "side_view",
+    "wide_context",
+]
+
+ActorPreset = Literal[
+    "human_observer",
+    "forklift_nearby",
+    "mobile_robot_crossing",
+]
+
+CircumstancePreset = Literal[
+    "nominal",
+    "occluded_target",
+    "distractor_objects",
+    "moved_target",
+    "tight_clearance",
+]
+
 
 # ---------------------------------------------------------------------------
 # L0 — counts
@@ -298,6 +342,72 @@ class RoleBinding(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# SpatialRelation — semantic placement constraints between objects
+# ---------------------------------------------------------------------------
+
+class SpatialRelation(BaseModel):
+    """
+    A directed semantic relation between two LayoutSpec objects.
+
+    Example:
+        subject_id="fruit_1", relation="inside", object_id="bowl_1"
+        subject_id="bowl_1", relation="on_top_of", object_id="table_1"
+
+    The floor-plan canvas owns editable XY placement. Relations add the missing
+    3D semantics needed by the instantiator: support surfaces, container
+    nesting, and approximate Z offsets.
+    """
+    subject_id: str
+    relation: SpatialRelationKind
+    object_id: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    source: str = "user_explicit"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# ScenarioVariants — controlled multi-scene generation knobs
+# ---------------------------------------------------------------------------
+
+class PerturbationSpec(BaseModel):
+    """Randomization bounds for scene variant generation.
+
+    These are intentionally declarative.  Isaac Sim/Cosmos execution layers can
+    consume the same contract locally, through Isaac Automator, or on Brev/DGX.
+    """
+    enabled: bool = True
+    pose_jitter_m: float = Field(default=0.03, ge=0.0, le=1.0)
+    rotation_jitter_deg: float = Field(default=5.0, ge=0.0, le=180.0)
+    material_randomization: bool = True
+    sensor_noise: bool = False
+
+
+class ValidationSpec(BaseModel):
+    """Checks that generated variants should satisfy before being accepted."""
+    require_relations: bool = True
+    require_visibility: bool = True
+    require_physics: bool = True
+
+
+class ScenarioVariants(BaseModel):
+    """Controls for generating multiple Isaac/Cosmos scene variants.
+
+    The floor-plan canvas owns the base semantic layout.  This model describes
+    how an agent or tool runner may fan that base layout out into a campaign of
+    lighting, camera, actor, circumstance, and perturbation variants.
+    """
+    enabled: bool = False
+    variant_count: int = Field(default=1, ge=1, le=500)
+    seed: int = Field(default=1, ge=0)
+    lighting: List[LightingPreset] = Field(default_factory=lambda: ["studio"])
+    cameras: List[CameraPreset] = Field(default_factory=lambda: ["overhead"])
+    actors: List[ActorPreset] = Field(default_factory=list)
+    circumstances: List[CircumstancePreset] = Field(default_factory=lambda: ["nominal"])
+    perturbations: PerturbationSpec = Field(default_factory=PerturbationSpec)
+    validation: ValidationSpec = Field(default_factory=ValidationSpec)
+
+
+# ---------------------------------------------------------------------------
 # LayoutSpec — top-level
 # ---------------------------------------------------------------------------
 
@@ -318,6 +428,8 @@ class LayoutSpec(BaseModel):
     intent: Intent
     objects: Optional[List[TypedObject]] = None
     constraints: Optional[List[Dict[str, Any]]] = None  # full schema in v1.1
+    relations: Optional[List[SpatialRelation]] = None
+    scenario_variants: ScenarioVariants = Field(default_factory=ScenarioVariants)
     bindings: Optional[Dict[str, RoleBinding]] = None  # role_name -> binding
 
     parameters: Dict[str, Any] = Field(default_factory=dict)

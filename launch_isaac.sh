@@ -215,20 +215,41 @@ if [ -n "$USD_FILE" ] && [ -f "$USD_FILE" ]; then
     cat > "$STARTUP_SCRIPT" << PYEOF
 import asyncio
 import omni.usd
-asyncio.ensure_future(omni.usd.get_context().open_stage_async(r'${USD_FILE}'))
-PYEOF
 
-    if [ -n "${SCENE_SETUP_SCRIPT:-}" ] && [ -f "$SCENE_SETUP_SCRIPT" ]; then
-        echo "🔧 Post-load setup: $SCENE_SETUP_SCRIPT"
-        cat >> "$STARTUP_SCRIPT" << PYEOF2
+async def _wait_for_viewport(max_frames=1800):
+    try:
+        import omni.kit.app
+        app = omni.kit.app.get_app()
+        for frame in range(max_frames):
+            try:
+                from omni.kit.viewport.utility import get_active_viewport
+                if get_active_viewport() is not None:
+                    print(f"[Isaac Assist] viewport ready after {frame} frames")
+                    return True
+            except Exception:
+                pass
+            await app.next_update_async()
+    except Exception as exc:
+        print(f"[Isaac Assist] viewport wait warning: {exc}")
+    return False
 
-async def _run_post_load_setup():
+async def _open_stage_and_setup():
     import omni.usd as _usd
+    print("[Isaac Assist] waiting for viewport before opening stage")
+    await _wait_for_viewport()
+    print(r"[Isaac Assist] opening stage: ${USD_FILE}")
+    await _usd.get_context().open_stage_async(r'${USD_FILE}')
     for _ in range(600):
         await asyncio.sleep(0.1)
         ctx = _usd.get_context()
         if ctx and ctx.get_stage() and ctx.get_stage_state() == _usd.StageState.OPENED:
             break
+    print("[Isaac Assist] stage state:", _usd.get_context().get_stage_state())
+PYEOF
+
+    if [ -n "${SCENE_SETUP_SCRIPT:-}" ] && [ -f "$SCENE_SETUP_SCRIPT" ]; then
+        echo "🔧 Post-load setup: $SCENE_SETUP_SCRIPT"
+        cat >> "$STARTUP_SCRIPT" << PYEOF2
     try:
         import omni.kit.app
         _mgr = omni.kit.app.get_app().get_extension_manager()
@@ -247,9 +268,12 @@ async def _run_post_load_setup():
         exec(open(r'${SCENE_SETUP_SCRIPT}').read(), {"__name__": "__main__"})
     except Exception as e:
         print(f"⚠️  Post-load setup error: {e}")
-asyncio.ensure_future(_run_post_load_setup())
 PYEOF2
     fi
+    cat >> "$STARTUP_SCRIPT" << PYEOF3
+
+asyncio.ensure_future(_open_stage_and_setup())
+PYEOF3
 
     shift
     exec "$ISAAC_SIM_PATH/isaac-sim.sh" \
