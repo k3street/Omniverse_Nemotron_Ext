@@ -50,7 +50,12 @@ export interface CanvasApi {
     patch(sessionId: string, spec: LayoutSpec, parentRevision: number): Promise<PatchSuccessResponse>;
     commit(sessionId: string): Promise<{ committed: true; revision: number }>;
     previewRender(sessionId: string): Promise<{ rendered: true; path: string; revision: number }>;
-    build(sessionId: string, opts?: { template_id?: string; force_freeform?: boolean; dry_run?: boolean }): Promise<BuildResponse>;
+    build(sessionId: string, opts?: {
+        template_id?: string;
+        force_freeform?: boolean;
+        dry_run?: boolean;
+        execute_direct?: boolean;
+    }): Promise<BuildResponse>;
     assetOptions(opts?: { q?: string; limit?: number }): Promise<LocalAssetOptionsResponse>;
     planCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;
     materializeCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;

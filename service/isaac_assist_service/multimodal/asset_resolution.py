@@ -18,6 +18,9 @@ from .object_palette import get_class
 _ASSET_ROOTS_ENV = "ISAAC_ASSIST_ASSET_ROOTS"
 _LEGACY_ASSET_ROOT_ENV = "ASSETS_ROOT_PATH"
 _DEFAULT_ASSET_ROOT = Path("/home/kimate/Desktop/assets")
+_DEFAULT_ISAAC_ASSET_BASE = (
+    "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1"
+)
 
 _LOCAL_ASSET_OVERRIDES = {
     "franka_panda": [
@@ -346,6 +349,14 @@ def local_asset_options_payload(query: str = "", limit: int = 80) -> dict:
     }
 
 
+def _normalize_usd_ref(usd_ref: str) -> str:
+    """Return a Kit-resolvable USD reference for palette-relative Isaac paths."""
+    if usd_ref.startswith("Isaac/"):
+        base = os.getenv("OMNI_SERVER", _DEFAULT_ISAAC_ASSET_BASE).rstrip("/")
+        return f"{base}/{usd_ref}"
+    return usd_ref
+
+
 def resolve_object_asset(obj: Any) -> Optional[AssetResolution]:
     """Resolve one LayoutSpec object to a USD reference, if known."""
 
@@ -363,9 +374,9 @@ def resolve_object_asset(obj: Any) -> Optional[AssetResolution]:
     )
     palette_entry = get_class(object_class)
     palette_ref = palette_entry.usd_ref if palette_entry else ""
-    local_ref = "" if explicit else (_existing_override_for_class(object_class) or "")
-    catalog_ref = "" if explicit or local_ref else (_catalog_asset_for_class(object_class) or "")
-    usd_ref = str(explicit or local_ref or catalog_ref or palette_ref or "")
+    local_ref = "" if explicit or palette_ref else (_existing_override_for_class(object_class) or "")
+    catalog_ref = "" if explicit or palette_ref or local_ref else (_catalog_asset_for_class(object_class) or "")
+    usd_ref = _normalize_usd_ref(str(explicit or palette_ref or local_ref or catalog_ref or ""))
     if not usd_ref:
         return None
 
