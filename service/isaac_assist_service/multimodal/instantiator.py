@@ -844,6 +844,20 @@ async def instantiate(
     try:
         from ..chat.tools import kit_tools
         if execute_direct:
+            if not await kit_tools.is_kit_rpc_alive():
+                return InstantiateResult(
+                    status="error",
+                    message=(
+                        "Isaac Assist Kit RPC is not reachable on port 8001. "
+                        "Start Isaac Sim with the omni.isaac.assist extension enabled "
+                        "before applying this build."
+                    ),
+                    generated_code=code,
+                    relation_summary=relation_summary(spec),
+                    relation_diagnostics=relation_diagnostics(spec),
+                    relation_verification=relation_verification(spec),
+                    variant_summary=variant_summary(spec),
+                )
             result = await kit_tools.exec_sync(code, timeout=600)
         else:
             result = await kit_tools.queue_exec_patch(code, description=f"Phase 19: instantiate {template_id or 'spec'}")
