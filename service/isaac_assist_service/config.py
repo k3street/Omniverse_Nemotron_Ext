@@ -57,6 +57,21 @@ class Config:
         self.api_key_grok      = os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
         self.api_key_moonshot  = os.environ.get("MOONSHOT_API_KEY", "")
 
+        # ── Cloud reasoner fallback ──────────────────────────────────────────
+        # Gemini Robotics-ER is used as a cloud backup for Cosmos 3 Reasoner
+        # scene observation, not as a direct Isaac scene mutator.
+        self.gemini_robotics_er_fallback = (
+            os.environ.get("GEMINI_ROBOTICS_ER_FALLBACK", "false").lower() == "true"
+        )
+        self.gemini_robotics_er_model = os.environ.get(
+            "GEMINI_ROBOTICS_ER_MODEL",
+            self.vision_model_name or "gemini-robotics-er-1.6-preview",
+        )
+        self.gemini_robotics_er_base_url = os.environ.get(
+            "GEMINI_ROBOTICS_ER_BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta/models",
+        )
+
         # ── LiveKit ──────────────────────────────────────────────────────────
         self.livekit_url        = os.environ.get("LIVEKIT_URL", "")
         self.livekit_api_key    = os.environ.get("LIVEKIT_API_KEY", "")

@@ -112,6 +112,35 @@ def test_relation_geometry_verifier_passes_nested_predictions():
     assert report["failed_count"] == 0
 
 
+def test_relation_position_prediction_preserves_tabletop_xy_offsets():
+    from service.isaac_assist_service.multimodal.relation_reasoning import (
+        verify_relation_geometry,
+    )
+
+    report = verify_relation_geometry(
+        [
+            _obj("table", "table_medium", x=0.5, y=0.0, w=1.2, h=0.8),
+            _obj("cube_a", "cube_small", x=0.32, y=0.18, w=0.05, h=0.05),
+            _obj("cube_b", "cube_small", x=0.44, y=0.18, w=0.05, h=0.05),
+            _obj("cube_c", "cube_small", x=0.56, y=0.18, w=0.05, h=0.05),
+        ],
+        [
+            {"subject_id": "cube_a", "relation": "on_top_of", "object_id": "table"},
+            {"subject_id": "cube_b", "relation": "on_top_of", "object_id": "table"},
+            {"subject_id": "cube_c", "relation": "on_top_of", "object_id": "table"},
+        ],
+    )
+
+    assert report["status"] == "pass"
+    assert report["predicted_positions"]["cube_a"] == [0.32, 0.18, 0.775]
+    assert report["predicted_positions"]["cube_b"] == [0.44, 0.18, 0.775]
+    assert report["predicted_positions"]["cube_c"] == [0.56, 0.18, 0.775]
+    assert len({
+        tuple(report["predicted_positions"][object_id][:2])
+        for object_id in ("cube_a", "cube_b", "cube_c")
+    }) == 3
+
+
 def test_relation_geometry_verifier_mounts_robot_root_on_support_surface():
     from service.isaac_assist_service.multimodal.relation_reasoning import (
         verify_relation_geometry,
@@ -192,3 +221,44 @@ def test_instantiator_uses_reasoned_robot_mount_relation():
     assert "isaac_assist:relation_verification" in result.generated_code
     assert "[Isaac Assist] relation verification:" in result.generated_code
     compile(result.generated_code, "generated_relation_scene.py", "exec")
+
+
+def test_instantiator_preserves_support_relation_xy_offsets():
+    from service.isaac_assist_service.multimodal.instantiator import instantiate
+
+    class Spec:
+        objects = [
+            {
+                "id": "table",
+                "object_class": "table_medium",
+                "name": "Table",
+                "position": [0.5, 0.0, 0.0],
+                "size": {"w": 1.2, "h": 0.8},
+            },
+            {
+                "id": "cube_a",
+                "object_class": "cube_small",
+                "name": "Cube A",
+                "position": [0.32, 0.18, 0.0],
+                "size": {"w": 0.05, "h": 0.05},
+            },
+            {
+                "id": "cube_b",
+                "object_class": "cube_small",
+                "name": "Cube B",
+                "position": [0.44, 0.18, 0.0],
+                "size": {"w": 0.05, "h": 0.05},
+            },
+        ]
+        relations = [
+            {"subject_id": "cube_a", "relation": "on_top_of", "object_id": "table"},
+            {"subject_id": "cube_b", "relation": "on_top_of", "object_id": "table"},
+        ]
+
+    result = asyncio.run(instantiate(Spec(), dry_run=True))
+
+    assert "Gf.Vec3d(0.32, 0.18, 0.775)" in result.generated_code
+    assert "Gf.Vec3d(0.44, 0.18, 0.775)" in result.generated_code
+    assert result.relation_verification["predicted_positions"]["cube_a"] == [0.32, 0.18, 0.775]
+    assert result.relation_verification["predicted_positions"]["cube_b"] == [0.44, 0.18, 0.775]
+    compile(result.generated_code, "generated_offset_scene.py", "exec")

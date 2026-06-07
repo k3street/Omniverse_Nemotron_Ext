@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from .manager import SettingsManager
-from ..scale_providers import scale_provider_notice
+from ..scale_providers import cosmos_reasoner_status, scale_provider_notice
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ async def get_settings():
         "status": "success",
         "settings": settings_manager.get_settings(),
         "scale_notice": scale_provider_notice(config),
+        "cosmos_reasoner": cosmos_reasoner_status(config),
     }
 
 @router.post("/")
@@ -92,6 +93,16 @@ async def get_scale_notice(job_kind: Optional[str] = None):
     return {
         "status": "success",
         "notice": scale_provider_notice(config, job_kind=job_kind),
+    }
+
+
+@router.get("/cosmos_reasoner")
+async def get_cosmos_reasoner():
+    """Return the configured Cosmos 3 Reasoner endpoint without probing it."""
+    from ..config import config
+    return {
+        "status": "success",
+        "reasoner": cosmos_reasoner_status(config),
     }
 
 

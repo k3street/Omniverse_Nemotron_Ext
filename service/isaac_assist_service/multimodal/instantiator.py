@@ -440,6 +440,12 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
     def _position3(value: Any) -> List[float]:
         if hasattr(value, "x") and hasattr(value, "y"):
             return [float(value.x), float(value.y), float(getattr(value, "z", 0.0))]
+        if isinstance(value, dict):
+            return [
+                float(value.get("x", 0.0)),
+                float(value.get("y", 0.0)),
+                float(value.get("z", 0.0)),
+            ]
         try:
             seq = list(value)
         except Exception:
@@ -447,6 +453,11 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         while len(seq) < 3:
             seq.append(0.0)
         return [float(seq[0]), float(seq[1]), float(seq[2])]
+
+    def _relation_xy(own_position: List[float], parent_position: List[float]) -> List[float]:
+        if abs(own_position[0]) > 1e-6 or abs(own_position[1]) > 1e-6:
+            return [own_position[0], own_position[1]]
+        return [parent_position[0], parent_position[1]]
 
     def _scale3(obj: Any, fallback: Any) -> List[float]:
         size = _obj_get(obj, "size", None)
@@ -569,7 +580,8 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         else:
             z = own_position[2]
 
-        computed[obj_id] = [parent_position[0], parent_position[1], round(z, 4)]
+        xy = _relation_xy(own_position, parent_position)
+        computed[obj_id] = [xy[0], xy[1], round(z, 4)]
         return computed[obj_id]
 
     prims: List[Dict[str, Any]] = []

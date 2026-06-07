@@ -43,7 +43,7 @@ from .cosmos3_runtime import (
     CosmosRuntimeError,
     build_cosmos3_reasoner,
 )
-from .asset_resolution import resolve_layout_assets
+from .asset_resolution import local_asset_options_payload, resolve_layout_assets
 from .instantiator import instantiate
 from .ratify import ratify
 from .render import render_layout_spec_to_file
@@ -190,6 +190,16 @@ class ClientErrorReport(BaseModel):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.get("/assets/options")
+async def get_asset_options(q: str = "", limit: int = 80) -> Dict[str, Any]:
+    """Return searchable local USD asset options for floor-plan review."""
+
+    return {
+        "status": "success",
+        **local_asset_options_payload(query=q, limit=limit),
+    }
+
 
 @router.get("/{session_id}")
 async def get_canvas(session_id: str) -> Dict[str, Any]:

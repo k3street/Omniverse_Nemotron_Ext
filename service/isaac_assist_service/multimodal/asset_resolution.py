@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, List, Optional
@@ -16,6 +16,7 @@ from typing import Any, Iterable, List, Optional
 from .object_palette import get_class
 
 _ASSET_ROOTS_ENV = "ISAAC_ASSIST_ASSET_ROOTS"
+_LEGACY_ASSET_ROOT_ENV = "ASSETS_ROOT_PATH"
 _DEFAULT_ASSET_ROOT = Path("/home/kimate/Desktop/assets")
 
 _LOCAL_ASSET_OVERRIDES = {
@@ -119,6 +120,17 @@ class AssetResolution:
     needs_review: bool = False
 
 
+@dataclass(frozen=True)
+class LocalAssetOption:
+    label: str
+    usd_ref: str
+    source: str
+    category: str = ""
+    relative_path: str = ""
+    tags: tuple[str, ...] = ()
+    score: int = 0
+
+
 def _obj_get(obj: Any, attr: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(attr, default)
@@ -133,6 +145,9 @@ def _metadata(obj: Any) -> dict:
 def _configured_asset_roots() -> tuple[Path, ...]:
     raw = os.getenv(_ASSET_ROOTS_ENV, "")
     roots = [Path(item).expanduser() for item in raw.split(os.pathsep) if item.strip()]
+    if not roots:
+        legacy = os.getenv(_LEGACY_ASSET_ROOT_ENV, "")
+        roots = [Path(item).expanduser() for item in legacy.split(os.pathsep) if item.strip()]
     if not roots:
         roots = [_DEFAULT_ASSET_ROOT]
     return tuple(root for root in roots if root.exists())
@@ -208,6 +223,127 @@ def _catalog_asset_for_class(object_class: str) -> Optional[str]:
         if best is None or candidate > best:
             best = candidate
     return best[1] if best else None
+
+
+def _asset_label_from_path(path: Path) -> str:
+    name = path.stem.replace("_", " ").replace("-", " ").strip()
+    return " ".join(part.capitalize() for part in name.split()) or path.name
+
+
+@lru_cache(maxsize=8)
+def _load_local_asset_files(root_key: str) -> tuple[dict, ...]:
+    roots = [Path(item) for item in root_key.split(os.pathsep) if item]
+    assets: list[dict] = []
+    seen: set[str] = set()
+
+    for item in _load_asset_catalog(root_key):
+        usd_path = str(item.get("usd_path") or "")
+        if not usd_path or usd_path in seen or not Path(usd_path).exists():
+            continue
+        seen.add(usd_path)
+        assets.append({
+            "name": str(item.get("name") or _asset_label_from_path(Path(usd_path))),
+            "usd_path": usd_path,
+            "relative_path": str(item.get("relative_path") or ""),
+            "category": str(item.get("category") or ""),
+            "tags": tuple(str(tag) for tag in (item.get("tags") or [])),
+            "source": "asset_catalog",
+        })
+
+    for root in roots:
+        for path in root.rglob("*"):
+            if path.suffix.lower() not in {".usd", ".usda", ".usdc"}:
+                continue
+            usd_path = str(path)
+            if usd_path in seen:
+                continue
+            seen.add(usd_path)
+            try:
+                relative_path = str(path.relative_to(root))
+            except ValueError:
+                relative_path = path.name
+            assets.append({
+                "name": _asset_label_from_path(path),
+                "usd_path": usd_path,
+                "relative_path": relative_path,
+                "category": "",
+                "tags": tuple(part.lower() for part in path.parts[-5:-1]),
+                "source": "local_file",
+            })
+    return tuple(assets)
+
+
+def _score_local_asset(item: dict, query: str) -> int:
+    query = (query or "").strip().lower()
+    if not query:
+        return 1
+    terms = [term for term in query.replace("_", " ").replace("-", " ").split() if term]
+    if not terms:
+        return 1
+
+    name = str(item.get("name") or "").lower().replace("_", " ").replace("-", " ")
+    category = str(item.get("category") or "").lower()
+    tags = " ".join(str(tag).lower().replace("_", " ").replace("-", " ") for tag in item.get("tags") or [])
+    path = str(item.get("usd_path") or "").lower().replace("_", " ").replace("-", " ")
+    haystacks = (name, category, tags, path)
+
+    score = 0
+    for term in terms:
+        if term == name:
+            score += 100
+        elif term in name:
+            score += 70
+        if term == category:
+            score += 45
+        elif category and term in category:
+            score += 30
+        if term in tags:
+            score += 25
+        if term in path:
+            score += 8
+        if not any(term in value for value in haystacks):
+            return 0
+    if str(item.get("source")) == "asset_catalog":
+        score += 5
+    path_text = str(item.get("usd_path") or "").lower()
+    if "/.thumbs/" in path_text or "/texture/" in path_text:
+        score -= 50
+    return score
+
+
+def list_local_asset_options(query: str = "", limit: int = 80) -> List[LocalAssetOption]:
+    """Return searchable local USD assets for UI review/selection."""
+
+    limit = max(1, min(int(limit), 250))
+    scored: list[LocalAssetOption] = []
+    for item in _load_local_asset_files(_catalog_key()):
+        usd_ref = str(item.get("usd_path") or "")
+        score = _score_local_asset(item, query)
+        if score <= 0:
+            continue
+        scored.append(LocalAssetOption(
+            label=str(item.get("name") or _asset_label_from_path(Path(usd_ref))),
+            usd_ref=usd_ref,
+            source=str(item.get("source") or "local_file"),
+            category=str(item.get("category") or ""),
+            relative_path=str(item.get("relative_path") or ""),
+            tags=tuple(str(tag) for tag in (item.get("tags") or ())),
+            score=score,
+        ))
+    scored.sort(key=lambda item: (-item.score, item.label.lower(), item.usd_ref))
+    return scored[:limit]
+
+
+def local_asset_options_payload(query: str = "", limit: int = 80) -> dict:
+    """Return a JSON-safe payload describing local selectable USD assets."""
+
+    options = list_local_asset_options(query=query, limit=limit)
+    return {
+        "roots": [str(root) for root in _configured_asset_roots()],
+        "query": query,
+        "count": len(options),
+        "options": [asdict(option) for option in options],
+    }
 
 
 def resolve_object_asset(obj: Any) -> Optional[AssetResolution]:

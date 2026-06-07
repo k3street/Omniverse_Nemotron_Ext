@@ -738,8 +738,8 @@ class ChatViewWindow(ui.Window):
 
         self._settings_popup = ui.Window(
             "Isaac Assist Settings",
-            width=310,
-            height=210,
+            width=390,
+            height=260,
             flags=ui.WINDOW_FLAGS_NO_RESIZE,
         )
         with self._settings_popup.frame:
@@ -749,6 +749,7 @@ class ChatViewWindow(ui.Window):
                     ui.Spacer(width=6)
                     self._settings_status_lbl = ui.Label(
                         "Loading settings...",
+                        height=58,
                         style={"color": COL_TEXT_DIM, "font_size": self._sz(10)},
                     )
                     ui.Spacer(width=6)
@@ -850,7 +851,21 @@ class ChatViewWindow(ui.Window):
                 model = model or "?"
                 auto = settings.get("AUTO_APPROVE", "?")
                 self._current_model_label = model
-                self._set_settings_status(f"Mode: {mode} | Model: {model} | Auto: {auto}")
+                notice = data.get("scale_notice") or {}
+                configured = notice.get("configured") or []
+                scale = ", ".join(configured) if configured else "local only"
+                reasoner = data.get("cosmos_reasoner") or {}
+                if reasoner.get("configured"):
+                    cosmos_provider = reasoner.get("provider") or "configured"
+                    cosmos_model = reasoner.get("model") or "model ?"
+                    cosmos = f"{cosmos_provider} / {cosmos_model}"
+                else:
+                    cosmos = "not configured"
+                self._set_settings_status(
+                    f"Mode: {mode} | Model: {model} | Auto: {auto}\n"
+                    f"Cosmos: {cosmos}\n"
+                    f"Scale: {scale}"
+                )
                 try:
                     self.btn_model.tooltip = f"Current: {model}"
                 except Exception:

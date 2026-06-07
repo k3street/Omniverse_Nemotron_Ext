@@ -46,6 +46,79 @@ def test_resolve_object_asset_preserves_explicit_override():
     assert resolved.usd_ref == "omniverse://assets/custom_fixture.usd"
 
 
+def test_list_local_asset_options_searches_catalog_and_raw_files(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import asset_resolution
+
+    catalog_asset = tmp_path / "CatalogPack/Assets/Kitchen/microwave.usd"
+    raw_asset = tmp_path / "LightwheelKitchen/Toaster003/Toaster003.usd"
+    catalog_asset.parent.mkdir(parents=True, exist_ok=True)
+    raw_asset.parent.mkdir(parents=True, exist_ok=True)
+    catalog_asset.write_text("#usda 1.0\n")
+    raw_asset.write_text("#usda 1.0\n")
+    catalog = tmp_path / "CatalogPack/asset_catalog.json"
+    catalog.write_text(
+        """{
+          "assets": [{
+            "name": "microwave",
+            "usd_path": "%s",
+            "relative_path": "Assets/Kitchen/microwave.usd",
+            "category": "appliance",
+            "tags": ["kitchen", "oven"]
+          }]
+        }""" % str(catalog_asset),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path))
+    asset_resolution._load_asset_catalog.cache_clear()
+    asset_resolution._load_local_asset_files.cache_clear()
+
+    microwave = asset_resolution.list_local_asset_options("microwave", limit=5)
+    toaster = asset_resolution.list_local_asset_options("toaster", limit=5)
+
+    assert microwave[0].usd_ref == str(catalog_asset)
+    assert microwave[0].source == "asset_catalog"
+    assert toaster[0].usd_ref == str(raw_asset)
+    assert toaster[0].source == "local_file"
+
+
+def test_local_asset_options_use_assets_root_path_fallback(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import asset_resolution
+
+    asset = tmp_path / "Kitchen/Microwave017.usd"
+    asset.parent.mkdir(parents=True)
+    asset.write_text("#usda 1.0\n")
+
+    monkeypatch.delenv("ISAAC_ASSIST_ASSET_ROOTS", raising=False)
+    monkeypatch.setenv("ASSETS_ROOT_PATH", str(tmp_path))
+    asset_resolution._load_asset_catalog.cache_clear()
+    asset_resolution._load_local_asset_files.cache_clear()
+
+    response = asset_resolution.local_asset_options_payload("microwave", limit=10)
+
+    assert response["roots"] == [str(tmp_path)]
+    assert response["options"][0]["usd_ref"] == str(asset)
+
+
+def test_asset_options_route_returns_local_payload(monkeypatch, tmp_path):
+    from service.isaac_assist_service.multimodal import asset_resolution
+    from service.isaac_assist_service.multimodal import routes
+
+    asset = tmp_path / "Kitchen/ServingBowl.usd"
+    asset.parent.mkdir(parents=True)
+    asset.write_text("#usda 1.0\n")
+
+    monkeypatch.setenv("ISAAC_ASSIST_ASSET_ROOTS", str(tmp_path))
+    asset_resolution._load_asset_catalog.cache_clear()
+    asset_resolution._load_local_asset_files.cache_clear()
+
+    response = asyncio.run(routes.get_asset_options(q="bowl", limit=10))
+
+    assert response["status"] == "success"
+    assert response["roots"] == [str(tmp_path)]
+    assert response["options"][0]["usd_ref"] == str(asset)
+
+
 def test_resolve_object_asset_prefers_local_robot_override(monkeypatch, tmp_path):
     from service.isaac_assist_service.multimodal import asset_resolution
 

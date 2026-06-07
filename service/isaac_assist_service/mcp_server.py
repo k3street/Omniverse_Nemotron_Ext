@@ -93,6 +93,8 @@ class MCPServer:
         self._openai_tools = ISAAC_SIM_TOOLS
         self._executor = execute_tool_call
         self._settings = SettingsManager()
+        from .mcp_floorplan_tools import mcp_floorplan_tool_schemas
+        self._floorplan_tools = mcp_floorplan_tool_schemas()
 
         # Apply rich descriptions for LLM tool selection accuracy (Phase 12 prep)
         try:
@@ -139,6 +141,7 @@ class MCPServer:
                 "required": ["settings"],
             },
         })
+        mcp_tools.extend(self._floorplan_tools)
         return mcp_tools
 
     # ── JSON-RPC dispatch ───────────────────────────────────────────────
@@ -236,6 +239,13 @@ class MCPServer:
                 }
             return {
                 "content": [{"type": "text", "text": json.dumps(self._settings.get_settings(), indent=2)}],
+                "isError": False,
+            }
+        from .mcp_floorplan_tools import handles_floorplan_tool, call_floorplan_tool
+        if handles_floorplan_tool(tool_name):
+            payload = await call_floorplan_tool(tool_name, arguments)
+            return {
+                "content": [{"type": "text", "text": json.dumps(payload, indent=2, default=str)}],
                 "isError": False,
             }
 

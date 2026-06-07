@@ -123,7 +123,7 @@ export class DeleteObject implements Command {
 
 // ─── SetAttr (single object fields) ──────────────────────────────────
 
-export type SetAttrKey = "class" | "name" | "notes" | "color" | "layer" | "locked";
+export type SetAttrKey = "class" | "name" | "notes" | "color" | "layer" | "locked" | "metadata";
 
 export class SetAttr implements Command {
     readonly type = "set_attr";

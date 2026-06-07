@@ -84,8 +84,50 @@ Configuration:
 ```text
 COSMOS3_MODE=local
 COSMOS3_REASONER_BASE_URL=http://dgx-spark.local:8081/v1
-COSMOS3_REASONER_MODEL=Cosmos3-Nano
+COSMOS3_REASONER_MODEL=nvidia/cosmos3-nano-reasoner
 COSMOS3_API_KEY=...
+NIM_MAX_MODEL_LEN=32768
+```
+
+Gemini Robotics-ER can be enabled as the cloud backup for this exact contract:
+
+```text
+GEMINI_API_KEY=...
+GEMINI_ROBOTICS_ER_FALLBACK=true
+GEMINI_ROBOTICS_ER_MODEL=gemini-robotics-er-1.6-preview
+```
+
+The fallback is deliberately provider-compatible with Cosmos output. It may
+infer objects and relations from text/images, but it still returns
+`CosmosSceneObservation` and still routes through the floor-plan review/build
+pipeline before Isaac Sim is mutated.
+
+When using NVIDIA Cosmos 3 Reasoner NIM, keep the NIM service on a GPU that is
+not also responsible for the interactive Isaac Sim viewport whenever possible.
+Cosmos 3 Nano Reasoner can run on a local RTX 5090, but the NIM default context
+window (`262144`) requires more KV cache than a 32 GiB workstation GPU can
+provide after the model is loaded. Set `NIM_MAX_MODEL_LEN=32768` for the first
+stable local/Spark deployment; reduce to `16384` or `8192` if Isaac Sim must
+share the same GPU. On a same-LAN DGX Spark, expose the NIM endpoint on
+`8081` and point `COSMOS3_REASONER_BASE_URL` at that host so the Isaac Sim
+workstation keeps its VRAM for rendering and live scene mutation.
+
+The repo includes a helper for starting the NIM container on a local machine or
+DGX Spark:
+
+```bash
+export NGC_API_KEY=nvapi-...
+COSMOS_NIM_CACHE=$HOME/nim-cache/cosmos3-reasoner \
+  COSMOS_NIM_PORT=8081 \
+  NIM_MAX_MODEL_LEN=32768 \
+  ./scripts/start_cosmos3_reasoner_nim.sh
+```
+
+Verify from the Isaac Assist workstation:
+
+```bash
+curl http://dgx-spark.local:8081/v1/health/ready
+curl http://dgx-spark.local:8081/v1/models
 ```
 
 ## Why Not Direct Cosmos-to-Isaac?
@@ -153,7 +195,9 @@ Ask the Reasoner to return JSON matching this shape:
    build-time USD reference / primitive fallback resolution.
 4. Done: add viewport screenshot capture from the Isaac extension and send it through
    the proposal route.
-5. Add generator-mode workflows for visual references and synthetic-data
+5. Done: add Gemini Robotics-ER as a cloud fallback for the Cosmos scene
+   observation contract.
+6. Add generator-mode workflows for visual references and synthetic-data
    augmentation after a `LayoutSpec` is approved.
 
 For larger jobs, route Cosmos and Isaac validation through the shared remote
