@@ -188,6 +188,7 @@ def test_create_ros2_scene_harness_writes_project_stack(monkeypatch, tmp_path):
     readme = (project_root / "README.md").read_text()
     assert "ROS2 OmniGraph probe: dry_run" in readme
     assert "probe_ros2_omnigraph_compatibility" in readme
+    assert "probe_ros2_omnigraph_creation" in readme
     assert "ros2 launch warehouse_franka_demo_harness warehouse_pick_place.launch.py" in "\n".join(response["next_commands"])
 
 
@@ -215,6 +216,38 @@ def test_probe_ros2_omnigraph_compatibility_is_read_only_by_default():
     assert "ROS2SubscribeJointState" in probe_code
     assert "Controller.edit" not in probe_code
     assert "CreateNode" not in probe_code
+
+
+def test_probe_ros2_omnigraph_creation_is_context_only_by_default():
+    from service.isaac_assist_service.mcp_floorplan_tools import probe_ros2_omnigraph_creation
+
+    response = asyncio.run(probe_ros2_omnigraph_creation({
+        "runtime_profile": "isaacsim-6.0",
+        "dry_run": True,
+    }))
+
+    assert response["status"] == "dry_run"
+    assert response["read_only"] is False
+    assert response["graph_authoring_tested"] is False
+    assert response["probe_mode"] == "context_only"
+    assert response["probe_path"] == "/World/IsaacAssistProbes/ROS2ContextCreationProbe"
+    assert response["cleanup"] is True
+    assert response["touches_scene_assets"] is False
+    assert response["touches_robot"] is False
+    assert response["touches_topics"] is False
+    assert response["recommendation"]["author_omnigraph"] is False
+    assert response["recommendation"]["connect_articulation_controller"] is False
+    probe_code = response["probe_code"]
+    assert "Controller.edit" in probe_code
+    assert "ROS2Context" in probe_code
+    assert "RemovePrim" in probe_code
+    assert "ROS2PublishJointState" not in probe_code
+    assert "ROS2SubscribeJointState" not in probe_code
+    assert "ArticulationController" not in probe_code
+    assert "topicName" not in probe_code
+    assert "targetPrim" not in probe_code
+    assert "joint_commands" not in probe_code
+    assert "/World/Franka" not in probe_code
 
 
 def test_set_object_asset_updates_reviewed_ref(monkeypatch, tmp_path):
@@ -276,6 +309,7 @@ def test_mcp_server_exposes_floorplan_tools(monkeypatch):
     assert "create_franka_physics_pick_scene" in names
     assert "create_ros2_scene_harness" in names
     assert "probe_ros2_omnigraph_compatibility" in names
+    assert "probe_ros2_omnigraph_creation" in names
 
 
 def test_mcp_server_dispatches_floorplan_tool(monkeypatch, tmp_path):

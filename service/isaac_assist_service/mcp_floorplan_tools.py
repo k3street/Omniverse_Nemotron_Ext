@@ -254,6 +254,41 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "probe_ros2_omnigraph_creation",
+            "description": (
+                "Disposable live-creation probe for Isaac Sim ROS2 OmniGraph support. "
+                "Default dry_run=true returns the exact context-only graph creation script. "
+                "With dry_run=false and Kit RPC alive, it creates and removes a temporary "
+                "ROS2Context-only graph under /World/IsaacAssistProbes without touching "
+                "robots, topics, articulation controllers, or scene assets."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "runtime_profile": {
+                        "type": "string",
+                        "description": "Isaac runtime profile, e.g. isaacsim-6.0 or isaacsim-5.1.",
+                    },
+                    "node_namespace": {
+                        "type": "string",
+                        "description": "Preferred ROS2 OmniGraph node namespace to try first.",
+                    },
+                    "probe_mode": {
+                        "type": "string",
+                        "description": "Only context_only is currently supported.",
+                    },
+                    "probe_path": {
+                        "type": "string",
+                        "description": "Temporary graph path. Must stay under /World/IsaacAssistProbes/.",
+                    },
+                    "cleanup": {"type": "boolean"},
+                    "dry_run": {"type": "boolean"},
+                    "timeout": {"type": "number"},
+                    "include_probe_code": {"type": "boolean"},
+                },
+            },
+        },
+        {
             "name": "search_local_assets",
             "description": "Search configured local USD asset roots for selectable Isaac scene assets.",
             "inputSchema": {
@@ -349,6 +384,8 @@ async def call_floorplan_tool(name: str, arguments: Dict[str, Any]) -> Dict[str,
         return await create_ros2_scene_harness(arguments)
     if name == "probe_ros2_omnigraph_compatibility":
         return await probe_ros2_omnigraph_compatibility(arguments)
+    if name == "probe_ros2_omnigraph_creation":
+        return await probe_ros2_omnigraph_creation(arguments)
     if name == "search_local_assets":
         return search_local_assets(arguments)
     if name == "set_object_asset":
@@ -651,6 +688,104 @@ async def probe_ros2_omnigraph_compatibility(arguments: Dict[str, Any]) -> Dict[
             response["recommendation"]["reason"] = (
                 f"Read-only probe found ROS2 node types under {matching[0]!r}. "
                 "Graph creation remains deferred until the explicit creation probe passes."
+            )
+    else:
+        response.update({
+            "status": "probe_parse_failed" if result.get("success") else "probe_failed",
+            "error": str(result.get("output") or "Kit RPC probe did not return JSON."),
+        })
+    return response
+
+
+async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Create and remove a tiny ROS2Context-only OmniGraph as a live safety probe."""
+
+    runtime_profile = get_runtime_profile(str(arguments.get("runtime_profile") or "isaacsim-6.0"))
+    runtime = runtime_scope_summary(runtime_profile)
+    dry_run = bool(arguments.get("dry_run", True))
+    timeout = float(arguments.get("timeout") or 10.0)
+    cleanup = bool(arguments.get("cleanup", True))
+    probe_mode = str(arguments.get("probe_mode") or "context_only")
+    if probe_mode != "context_only":
+        raise ValueError("probe_ros2_omnigraph_creation currently supports probe_mode='context_only'")
+
+    node_namespace = str(
+        arguments.get("node_namespace") or runtime_profile.ros2_omnigraph_namespace
+    )
+    candidate_namespaces = _ros2_candidate_namespaces(node_namespace)
+    probe_path = str(
+        arguments.get("probe_path") or "/World/IsaacAssistProbes/ROS2ContextCreationProbe"
+    )
+    if not probe_path.startswith("/World/IsaacAssistProbes/"):
+        raise ValueError("probe_path must stay under /World/IsaacAssistProbes/")
+
+    probe_code = _ros2_omnigraph_creation_probe_code(
+        candidate_namespaces=candidate_namespaces,
+        probe_path=probe_path,
+        cleanup=cleanup,
+    )
+    response: Dict[str, Any] = {
+        "status": "dry_run" if dry_run else "pending",
+        "dry_run": dry_run,
+        "runtime": runtime,
+        "candidate_namespaces": candidate_namespaces,
+        "probe_mode": probe_mode,
+        "probe_path": probe_path,
+        "cleanup": cleanup,
+        "read_only": False,
+        "graph_authoring_tested": False,
+        "touches_scene_assets": False,
+        "touches_robot": False,
+        "touches_topics": False,
+        "recommendation": {
+            "author_omnigraph": False,
+            "connect_articulation_controller": False,
+            "reason": (
+                "This context-only probe is the first live authoring gate. "
+                "Keep full ROS2 graph authoring and articulation-controller wiring "
+                "disabled until publish/subscribe node creation also passes."
+            ),
+        },
+    }
+    if bool(arguments.get("include_probe_code", False)) or dry_run:
+        response["probe_code"] = probe_code
+    if dry_run:
+        return response
+
+    try:
+        from .chat.tools import kit_tools
+    except Exception as exc:  # pragma: no cover - defensive optional import
+        response.update({
+            "status": "kit_tools_unavailable",
+            "error": f"{type(exc).__name__}: {exc}",
+        })
+        return response
+
+    if not await kit_tools.is_kit_rpc_alive():
+        response.update({
+            "status": "kit_rpc_unavailable",
+            "error": "Kit RPC /health did not respond ok on the configured port.",
+        })
+        return response
+
+    result = await kit_tools.exec_sync(probe_code, timeout=timeout)
+    response["graph_authoring_tested"] = True
+    response["kit_rpc"] = {
+        "success": bool(result.get("success")),
+        "output": result.get("output", ""),
+    }
+    readback = _extract_creation_probe_json(str(result.get("output") or ""))
+    if readback:
+        response["readback"] = readback
+        response["detected_namespace"] = readback.get("detected_namespace", "")
+        response["created"] = bool(readback.get("created"))
+        response["removed"] = bool(readback.get("removed"))
+        response["status"] = "ok" if readback.get("ok") else str(readback.get("status") or "failed")
+        if readback.get("ok"):
+            response["recommendation"]["reason"] = (
+                "Context-only ROS2 OmniGraph creation passed and cleaned up. "
+                "Next gate should create disposable publish/subscribe nodes with no "
+                "target prims before enabling the full scene graph."
             )
     else:
         response.update({
@@ -1344,8 +1479,105 @@ print("ISAAC_ASSIST_ROS2_OMNIGRAPH_PROBE=" + json.dumps(_result, sort_keys=True)
 """
 
 
+def _ros2_omnigraph_creation_probe_code(
+    *,
+    candidate_namespaces: List[str],
+    probe_path: str,
+    cleanup: bool,
+) -> str:
+    payload = {
+        "candidate_namespaces": candidate_namespaces,
+        "probe_path": probe_path,
+        "cleanup": cleanup,
+    }
+    return f"""\
+import json
+
+_probe_payload = json.loads({json.dumps(payload, sort_keys=True)!r})
+_result = {{
+    "ok": False,
+    "status": "pending",
+    "detected_namespace": "",
+    "probe_path": _probe_payload["probe_path"],
+    "created": False,
+    "removed": False,
+    "cleanup": bool(_probe_payload["cleanup"]),
+    "error": "",
+}}
+_parent_created = False
+try:
+    from pxr import Sdf
+    import omni.usd
+    import omni.graph.core as og
+
+    _stage = omni.usd.get_context().get_stage()
+    if _stage is None:
+        raise RuntimeError("No active USD stage")
+
+    _registered = set(str(_node) for _node in og.get_registered_nodes())
+    _ros2_ns = ""
+    for _namespace in _probe_payload["candidate_namespaces"]:
+        if f"{{_namespace}}.ROS2Context" in _registered:
+            _ros2_ns = _namespace
+            break
+    _result["detected_namespace"] = _ros2_ns
+    if not _ros2_ns:
+        _result["status"] = "missing_context_node"
+    else:
+        _keys = og.Controller.Keys
+        _graph_path = _probe_payload["probe_path"]
+        _path = Sdf.Path(_graph_path)
+        _parent = _path.GetParentPath()
+        if str(_parent) not in ("", "/") and not _stage.GetPrimAtPath(_parent).IsValid():
+            _stage.DefinePrim(_parent, "Scope")
+            _parent_created = True
+        if _stage.GetPrimAtPath(_path).IsValid():
+            _stage.RemovePrim(_path)
+        og.Controller.edit(
+            _graph_path,
+            {{
+                _keys.CREATE_NODES: [
+                    ("ROS2Context", f"{{_ros2_ns}}.ROS2Context"),
+                ],
+            }},
+        )
+        _graph_prim = _stage.GetPrimAtPath(_path)
+        _node_prim = _stage.GetPrimAtPath(Sdf.Path(f"{{_graph_path}}/ROS2Context"))
+        _result["created"] = bool(
+            _graph_prim and _graph_prim.IsValid() and _node_prim and _node_prim.IsValid()
+        )
+        _result["status"] = "created" if _result["created"] else "create_failed"
+        if _probe_payload["cleanup"]:
+            _stage.RemovePrim(_path)
+            if _parent_created:
+                _stage.RemovePrim(_parent)
+            _result["removed"] = not _stage.GetPrimAtPath(_path).IsValid()
+        _result["ok"] = bool(
+            _result["created"] and (
+                not _probe_payload["cleanup"] or _result["removed"]
+            )
+        )
+except Exception as _exc:
+    _result["status"] = "exception"
+    _result["error"] = f"{{type(_exc).__name__}}: {{_exc}}"
+print("ISAAC_ASSIST_ROS2_OMNIGRAPH_CREATION_PROBE=" + json.dumps(_result, sort_keys=True))
+"""
+
+
 def _extract_probe_json(output: str) -> Dict[str, Any]:
     marker = "ISAAC_ASSIST_ROS2_OMNIGRAPH_PROBE="
+    for line in reversed(output.splitlines()):
+        if marker not in line:
+            continue
+        try:
+            return json.loads(line.split(marker, 1)[1].strip())
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _extract_creation_probe_json(output: str) -> Dict[str, Any]:
+    marker = "ISAAC_ASSIST_ROS2_OMNIGRAPH_CREATION_PROBE="
     for line in reversed(output.splitlines()):
         if marker not in line:
             continue
@@ -1798,7 +2030,9 @@ when the live planner is available.
 Probe recommendation: {probe_recommendation}
 
 Run the `probe_ros2_omnigraph_compatibility` MCP tool before enabling live
-OmniGraph authoring or connecting ROS2 commands to the articulation controller.
+OmniGraph authoring. Then run `probe_ros2_omnigraph_creation` with
+`dry_run=false` to confirm this Isaac build can create and remove a disposable
+ROS2Context graph before connecting ROS2 commands to the articulation controller.
 """
 
 
