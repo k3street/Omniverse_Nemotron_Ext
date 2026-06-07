@@ -647,6 +647,22 @@ def _franka_pick_scene_spec(
                 "live_pick_controller": "setup_pick_place_controller",
                 "live_target_source": _pick_place_target_source(motion_backend),
                 "planner_backend": planner_backend,
+                "articulation_controller": {
+                    "enabled": True,
+                    "path": "/World/IsaacAssistControllers/FrankaPickPlaceController",
+                    "type": "isaacsim.core.nodes.IsaacArticulationController",
+                    "robot_path": "/World/Franka",
+                },
+                "ros2_control_graph": {
+                    "enabled": True,
+                    "path": "/World/ROS2ControlGraph",
+                    "runtime_profile": "isaacsim-6.0",
+                    "node_namespace": "isaacsim.ros2.nodes",
+                    "joint_states_topic": "/isaac_joint_states",
+                    "joint_commands_topic": "/isaac_joint_commands",
+                    "controller_type": "joint_trajectory_controller",
+                    "profile": "franka_moveit2",
+                },
             },
         },
     )

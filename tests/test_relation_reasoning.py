@@ -262,3 +262,47 @@ def test_instantiator_preserves_support_relation_xy_offsets():
     assert result.relation_verification["predicted_positions"]["cube_a"] == [0.32, 0.18, 0.775]
     assert result.relation_verification["predicted_positions"]["cube_b"] == [0.44, 0.18, 0.775]
     compile(result.generated_code, "generated_offset_scene.py", "exec")
+
+
+def test_instantiator_authors_controller_and_ros_graph_markers():
+    from service.isaac_assist_service.multimodal.instantiator import instantiate
+
+    class Spec:
+        objects = [
+            {
+                "id": "franka",
+                "object_class": "franka_panda",
+                "name": "Franka",
+                "position": [0.0, 0.0, 0.0],
+                "size": {"w": 0.4, "h": 0.4},
+            },
+        ]
+        relations = []
+        parameters = {
+            "controller": {
+                "robot_path": "/World/Franka",
+                "articulation_controller": {
+                    "path": "/World/IsaacAssistControllers/FrankaPickPlaceController",
+                    "type": "isaacsim.core.nodes.IsaacArticulationController",
+                },
+                "ros2_control_graph": {
+                    "path": "/World/ROS2ControlGraph",
+                    "node_namespace": "isaacsim.ros2.nodes",
+                    "joint_states_topic": "/isaac_joint_states",
+                    "joint_commands_topic": "/isaac_joint_commands",
+                },
+            },
+        }
+
+    result = asyncio.run(instantiate(Spec(), dry_run=True))
+
+    assert "/World/IsaacAssistControllers/FrankaPickPlaceController" in result.generated_code
+    assert "/World/ROS2ControlGraph" in result.generated_code
+    assert "isaac_assist:kind\", \"articulation_controller" in result.generated_code
+    assert "isaac_assist:kind\", \"ros2_control_omnigraph" in result.generated_code
+    assert "isaacsim.core.nodes.IsaacArticulationController" in result.generated_code
+    assert "isaacsim.ros2.nodes.ROS2Context" in result.generated_code
+    assert "isaacsim.ros2.nodes.ROS2PublishJointState" in result.generated_code
+    assert "isaacsim.ros2.nodes.ROS2SubscribeJointState" in result.generated_code
+    assert "isaacsim.ros2.bridge." not in result.generated_code
+    compile(result.generated_code, "generated_controller_scene.py", "exec")

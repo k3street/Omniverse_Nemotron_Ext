@@ -692,12 +692,127 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         p.pop("_source_name", None)
     body = generator.generate_full_script(prims)
     verification = verify_relation_geometry(spec)
+    controller_setup = _controller_setup_code(spec)
     live_verifier = _live_relation_verifier_code(verification)
     comments = "\n".join(
         part for part in (source_comments, relation_comments, diagnostic_comments)
         if part
     )
-    return header_comment + (comments + "\n" if comments else "") + body + "\n\n" + live_verifier
+    return (
+        header_comment
+        + (comments + "\n" if comments else "")
+        + body
+        + "\n\n"
+        + controller_setup
+        + "\n\n"
+        + live_verifier
+    )
+
+
+def _controller_setup_code(spec: Any) -> str:
+    """Return Kit-executable code that authors controller and ROS graph markers."""
+    parameters = getattr(spec, "parameters", None) or {}
+    if not isinstance(parameters, dict):
+        return ""
+    controller = parameters.get("controller") or {}
+    if not isinstance(controller, dict) or not controller:
+        return ""
+
+    controller_payload = json.dumps(controller, sort_keys=True)
+    graph_cfg = controller.get("ros2_control_graph") or {}
+    if not isinstance(graph_cfg, dict):
+        graph_cfg = {}
+    graph_path = str(graph_cfg.get("path") or "/World/ROS2ControlGraph")
+    ros2_node_namespace = str(graph_cfg.get("node_namespace") or "isaacsim.ros2.nodes")
+    controller_cfg = controller.get("articulation_controller") or {}
+    if not isinstance(controller_cfg, dict):
+        controller_cfg = {}
+    controller_path = str(
+        controller_cfg.get("path") or "/World/IsaacAssistControllers/FrankaPickPlaceController"
+    )
+    robot_path = str(controller.get("robot_path") or "/World/Franka")
+    joint_states_topic = str(graph_cfg.get("joint_states_topic") or "/isaac_joint_states")
+    joint_commands_topic = str(graph_cfg.get("joint_commands_topic") or "/isaac_joint_commands")
+
+    return f"""\
+# Isaac Assist controller and ROS2 OmniGraph contract.  This block makes the
+# control pipeline visible in the stage even before an external MoveIt/cuMotion
+# process is attached.
+try:
+    _controller_plan = json.loads({controller_payload!r})
+    _controller_scope = UsdGeom.Scope.Define(stage, "/World/IsaacAssistControllers").GetPrim()
+    _controller_scope.SetCustomDataByKey(
+        "isaac_assist:controller_plan",
+        json.dumps(_controller_plan, sort_keys=True),
+    )
+    _controller_prim = UsdGeom.Xform.Define(stage, {controller_path!r}).GetPrim()
+    _controller_prim.SetCustomDataByKey("isaac_assist:kind", "articulation_controller")
+    _controller_prim.SetCustomDataByKey("isaac_assist:robot_path", {robot_path!r})
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:controller_plan",
+        json.dumps(_controller_plan, sort_keys=True),
+    )
+    _robot_prim = stage.GetPrimAtPath({robot_path!r})
+    if _robot_prim and _robot_prim.IsValid():
+        if not _robot_prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+            UsdPhysics.ArticulationRootAPI.Apply(_robot_prim)
+        _robot_prim.SetCustomDataByKey(
+            "isaac_assist:articulation_controller",
+            {controller_path!r},
+        )
+    _ros_graph_prim = UsdGeom.Xform.Define(stage, {graph_path!r}).GetPrim()
+    _ros_graph_prim.SetCustomDataByKey("isaac_assist:kind", "ros2_control_omnigraph")
+    _ros_graph_prim.SetCustomDataByKey("isaac_assist:robot_path", {robot_path!r})
+    _ros_graph_prim.SetCustomDataByKey("isaac_assist:joint_states_topic", {joint_states_topic!r})
+    _ros_graph_prim.SetCustomDataByKey("isaac_assist:joint_commands_topic", {joint_commands_topic!r})
+    _ros_graph_prim.SetCustomDataByKey("isaac_assist:controller_path", {controller_path!r})
+    print("[Isaac Assist] articulation controller marker:", {controller_path!r})
+except Exception as _exc:
+    print("[Isaac Assist] controller marker warning:", _exc)
+
+try:
+    import omni.graph.core as og
+    _keys = og.Controller.Keys
+    og.Controller.edit(
+        {graph_path!r},
+        {{
+            _keys.CREATE_NODES: [
+                ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+                ("ROS2Context", {f"{ros2_node_namespace}.ROS2Context"!r}),
+                ("PublishJointState", {f"{ros2_node_namespace}.ROS2PublishJointState"!r}),
+                ("SubscribeJointState", {f"{ros2_node_namespace}.ROS2SubscribeJointState"!r}),
+                ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
+            ],
+            _keys.CONNECT: [
+                ("OnPlaybackTick.outputs:tick", "PublishJointState.inputs:execIn"),
+                ("OnPlaybackTick.outputs:tick", "SubscribeJointState.inputs:execIn"),
+                ("OnPlaybackTick.outputs:tick", "ArticulationController.inputs:execIn"),
+                ("ROS2Context.outputs:context", "PublishJointState.inputs:context"),
+                ("ROS2Context.outputs:context", "SubscribeJointState.inputs:context"),
+                ("SubscribeJointState.outputs:jointNames", "ArticulationController.inputs:jointNames"),
+                ("SubscribeJointState.outputs:positionCommand", "ArticulationController.inputs:positionCommand"),
+                ("SubscribeJointState.outputs:velocityCommand", "ArticulationController.inputs:velocityCommand"),
+                ("SubscribeJointState.outputs:effortCommand", "ArticulationController.inputs:effortCommand"),
+            ],
+            _keys.SET_VALUES: [
+                ("PublishJointState.inputs:targetPrim", {robot_path!r}),
+                ("PublishJointState.inputs:topicName", {joint_states_topic!r}),
+                ("SubscribeJointState.inputs:topicName", {joint_commands_topic!r}),
+                ("ArticulationController.inputs:targetPrim", {robot_path!r}),
+            ],
+        }},
+    )
+    _graph_prim = stage.GetPrimAtPath({graph_path!r})
+    if _graph_prim and _graph_prim.IsValid():
+        _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_status", "created")
+    print("[Isaac Assist] ROS2 control OmniGraph:", {graph_path!r})
+except Exception as _exc:
+    _graph_prim = stage.GetPrimAtPath({graph_path!r})
+    if _graph_prim and _graph_prim.IsValid():
+        _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_status", "fallback_marker")
+        _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_error", str(_exc))
+    print("[Isaac Assist] ROS2 control OmniGraph warning:", _exc)
+"""
 
 
 def _live_relation_verifier_code(verification: Dict[str, Any]) -> str:

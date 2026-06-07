@@ -56,11 +56,27 @@ def test_create_franka_physics_pick_scene_builds_controller_plan(monkeypatch, tm
     assert response["build"]["status"] == "ok"
     assert spec["parameters"]["physics"]["enabled"] is True
     assert spec["parameters"]["controller"]["live_target_source"] == "curobo"
+    articulation = spec["parameters"]["controller"]["articulation_controller"]
+    ros_graph = spec["parameters"]["controller"]["ros2_control_graph"]
+    assert articulation["path"] == "/World/IsaacAssistControllers/FrankaPickPlaceController"
+    assert articulation["type"] == "isaacsim.core.nodes.IsaacArticulationController"
+    assert ros_graph["path"] == "/World/ROS2ControlGraph"
+    assert ros_graph["runtime_profile"] == "isaacsim-6.0"
+    assert ros_graph["node_namespace"] == "isaacsim.ros2.nodes"
+    assert ros_graph["joint_states_topic"] == "/isaac_joint_states"
+    assert ros_graph["joint_commands_topic"] == "/isaac_joint_commands"
     assert any(obj["name"] == "Franka" for obj in spec["objects"])
     assert any(
         obj["metadata"].get("physics") == "dynamic_rigid_body"
         for obj in spec["objects"]
     )
+    generated_code = response["build"]["instantiation"]["generated_code"]
+    assert "/World/IsaacAssistControllers/FrankaPickPlaceController" in generated_code
+    assert "/World/ROS2ControlGraph" in generated_code
+    assert "isaacsim.core.nodes.IsaacArticulationController" in generated_code
+    assert "isaacsim.ros2.nodes.ROS2PublishJointState" in generated_code
+    assert "isaacsim.ros2.nodes.ROS2SubscribeJointState" in generated_code
+    assert "isaacsim.ros2.bridge." not in generated_code
     assert controller["live_controller_tool"] == "setup_pick_place_controller"
     assert controller["controller_code_generated"] is False
     assert controller["controller_args"]["source_paths"] == [
