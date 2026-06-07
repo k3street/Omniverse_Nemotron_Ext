@@ -181,6 +181,32 @@ def test_create_ros2_scene_harness_writes_project_stack(monkeypatch, tmp_path):
     assert "ros2 launch warehouse_franka_demo_harness warehouse_pick_place.launch.py" in "\n".join(response["next_commands"])
 
 
+def test_probe_ros2_omnigraph_compatibility_is_read_only_by_default():
+    from service.isaac_assist_service.mcp_floorplan_tools import probe_ros2_omnigraph_compatibility
+
+    response = asyncio.run(probe_ros2_omnigraph_compatibility({
+        "runtime_profile": "isaacsim-6.0",
+        "dry_run": True,
+    }))
+
+    assert response["status"] == "dry_run"
+    assert response["read_only"] is True
+    assert response["graph_authoring_tested"] is False
+    assert response["runtime"]["profile"] == "isaacsim-6.0"
+    assert response["candidate_namespaces"] == [
+        "isaacsim.ros2.nodes",
+        "isaacsim.ros2.bridge",
+    ]
+    assert response["recommendation"]["author_omnigraph"] is False
+    assert response["recommendation"]["connect_articulation_controller"] is False
+    probe_code = response["probe_code"]
+    assert "get_registered_nodes" in probe_code
+    assert "ROS2PublishJointState" in probe_code
+    assert "ROS2SubscribeJointState" in probe_code
+    assert "Controller.edit" not in probe_code
+    assert "CreateNode" not in probe_code
+
+
 def test_set_object_asset_updates_reviewed_ref(monkeypatch, tmp_path):
     _install_temp_store(monkeypatch, tmp_path)
     from service.isaac_assist_service.mcp_floorplan_tools import (
@@ -239,6 +265,7 @@ def test_mcp_server_exposes_floorplan_tools(monkeypatch):
     assert "verify_scene_relations" in names
     assert "create_franka_physics_pick_scene" in names
     assert "create_ros2_scene_harness" in names
+    assert "probe_ros2_omnigraph_compatibility" in names
 
 
 def test_mcp_server_dispatches_floorplan_tool(monkeypatch, tmp_path):

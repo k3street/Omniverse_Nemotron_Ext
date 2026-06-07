@@ -224,6 +224,27 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "probe_ros2_omnigraph_compatibility",
+            "description": (
+                "Read-only compatibility probe for Isaac Sim ROS2 OmniGraph support. "
+                "Default dry_run=true returns the expected node namespace and probe "
+                "script without touching Isaac. With dry_run=false and Kit RPC alive, "
+                "it inspects registered node types but does not create graph nodes."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "runtime_profile": {
+                        "type": "string",
+                        "description": "Isaac runtime profile, e.g. isaacsim-6.0 or isaacsim-5.1.",
+                    },
+                    "dry_run": {"type": "boolean"},
+                    "timeout": {"type": "number"},
+                    "include_probe_code": {"type": "boolean"},
+                },
+            },
+        },
+        {
             "name": "search_local_assets",
             "description": "Search configured local USD asset roots for selectable Isaac scene assets.",
             "inputSchema": {
@@ -317,6 +338,8 @@ async def call_floorplan_tool(name: str, arguments: Dict[str, Any]) -> Dict[str,
         return await create_franka_physics_pick_scene(arguments)
     if name == "create_ros2_scene_harness":
         return await create_ros2_scene_harness(arguments)
+    if name == "probe_ros2_omnigraph_compatibility":
+        return await probe_ros2_omnigraph_compatibility(arguments)
     if name == "search_local_assets":
         return search_local_assets(arguments)
     if name == "set_object_asset":
@@ -523,6 +546,88 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
             f"ros2 launch {package_name} warehouse_pick_place.launch.py",
         ],
     }
+
+
+async def probe_ros2_omnigraph_compatibility(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Probe ROS2 OmniGraph support without creating graph nodes by default."""
+
+    runtime_profile = get_runtime_profile(str(arguments.get("runtime_profile") or "isaacsim-6.0"))
+    runtime = runtime_scope_summary(runtime_profile)
+    dry_run = bool(arguments.get("dry_run", True))
+    timeout = float(arguments.get("timeout") or 10.0)
+    candidate_namespaces = _ros2_candidate_namespaces(runtime_profile.ros2_omnigraph_namespace)
+    required_suffixes = [
+        "ROS2Context",
+        "ROS2PublishJointState",
+        "ROS2SubscribeJointState",
+    ]
+    probe_code = _ros2_omnigraph_readonly_probe_code(candidate_namespaces, required_suffixes)
+
+    response: Dict[str, Any] = {
+        "status": "dry_run" if dry_run else "pending",
+        "dry_run": dry_run,
+        "runtime": runtime,
+        "candidate_namespaces": candidate_namespaces,
+        "required_node_suffixes": required_suffixes,
+        "read_only": True,
+        "graph_authoring_tested": False,
+        "recommendation": {
+            "author_omnigraph": False,
+            "connect_articulation_controller": False,
+            "reason": (
+                "Keep generated scenes in ROS2 contract-marker mode until a "
+                "separate live graph creation probe passes on this Isaac build."
+            ),
+        },
+    }
+    if bool(arguments.get("include_probe_code", False)) or dry_run:
+        response["probe_code"] = probe_code
+    if dry_run:
+        return response
+
+    try:
+        from .chat.tools import kit_tools
+    except Exception as exc:  # pragma: no cover - defensive optional import
+        response.update({
+            "status": "kit_tools_unavailable",
+            "error": f"{type(exc).__name__}: {exc}",
+        })
+        return response
+
+    if not await kit_tools.is_kit_rpc_alive():
+        response.update({
+            "status": "kit_rpc_unavailable",
+            "error": "Kit RPC /health did not respond ok on the configured port.",
+        })
+        return response
+
+    result = await kit_tools.exec_sync(probe_code, timeout=timeout)
+    response["kit_rpc"] = {
+        "success": bool(result.get("success")),
+        "output": result.get("output", ""),
+    }
+    readback = _extract_probe_json(str(result.get("output") or ""))
+    if readback:
+        response["readback"] = readback
+        matching = [
+            namespace
+            for namespace, values in (readback.get("namespaces") or {}).items()
+            if all(values.get(suffix) for suffix in required_suffixes)
+        ]
+        response["matching_namespaces"] = matching
+        response["detected_namespace"] = matching[0] if matching else ""
+        response["status"] = "ok" if matching else "missing_nodes"
+        if matching:
+            response["recommendation"]["reason"] = (
+                f"Read-only probe found ROS2 node types under {matching[0]!r}. "
+                "Graph creation remains deferred until the explicit creation probe passes."
+            )
+    else:
+        response.update({
+            "status": "probe_parse_failed" if result.get("success") else "probe_failed",
+            "error": str(result.get("output") or "Kit RPC probe did not return JSON."),
+        })
+    return response
 
 
 def search_local_assets(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -1165,6 +1270,62 @@ def _harness_precheck_issues(runtime: Dict[str, Any], ros2: Dict[str, Any]) -> L
     return issues
 
 
+def _ros2_candidate_namespaces(primary: str) -> List[str]:
+    namespaces: list[str] = []
+    for namespace in (primary, "isaacsim.ros2.nodes", "isaacsim.ros2.bridge"):
+        if namespace and namespace not in namespaces:
+            namespaces.append(namespace)
+    return namespaces
+
+
+def _ros2_omnigraph_readonly_probe_code(
+    candidate_namespaces: List[str],
+    required_suffixes: List[str],
+) -> str:
+    payload = {
+        "candidate_namespaces": candidate_namespaces,
+        "required_suffixes": required_suffixes,
+    }
+    return f"""\
+import json
+
+_probe_payload = json.loads({json.dumps(payload, sort_keys=True)!r})
+_result = {{
+    "ok": False,
+    "namespaces": {{}},
+    "registered_ros2_nodes": [],
+    "error": "",
+}}
+try:
+    import omni.graph.core as og
+    _registered = set(str(_node) for _node in og.get_registered_nodes())
+    _result["registered_ros2_nodes"] = sorted(
+        _node for _node in _registered if ".ros2." in _node
+    )
+    for _namespace in _probe_payload["candidate_namespaces"]:
+        _result["namespaces"][_namespace] = {{
+            _suffix: f"{{_namespace}}.{{_suffix}}" in _registered
+            for _suffix in _probe_payload["required_suffixes"]
+        }}
+    _result["ok"] = True
+except Exception as _exc:
+    _result["error"] = f"{{type(_exc).__name__}}: {{_exc}}"
+print("ISAAC_ASSIST_ROS2_OMNIGRAPH_PROBE=" + json.dumps(_result, sort_keys=True))
+"""
+
+
+def _extract_probe_json(output: str) -> Dict[str, Any]:
+    marker = "ISAAC_ASSIST_ROS2_OMNIGRAPH_PROBE="
+    for line in reversed(output.splitlines()):
+        if marker not in line:
+            continue
+        try:
+            return json.loads(line.split(marker, 1)[1].strip())
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
 def _write_ros2_harness_project(
     *,
     project_root: Path,
@@ -1541,6 +1702,7 @@ Generated Isaac Assist ROS2 scene harness.
 - ROS2 distro: {distro}
 - ROS2 command topic: {contract.get("controller", {}).get("ros2_control_graph", {}).get("joint_commands_topic", "/isaac_joint_commands")}
 - ROS2 state topic: {contract.get("controller", {}).get("ros2_control_graph", {}).get("joint_states_topic", "/isaac_joint_states")}
+- ROS2 OmniGraph authoring: {contract.get("controller", {}).get("ros2_control_graph", {}).get("omnigraph_policy", "defer_until_live_probe_passes")}
 
 ## Precheck
 
@@ -1558,6 +1720,9 @@ ros2 launch {package_name} warehouse_pick_place.launch.py
 The ROS2 node publishes a deterministic Franka command sequence for smoke
 testing the bridge. Replace the waypoint generator with MoveIt/cuMotion output
 when the live planner is available.
+
+Run the `probe_ros2_omnigraph_compatibility` MCP tool before enabling live
+OmniGraph authoring or connecting ROS2 commands to the articulation controller.
 """
 
 
