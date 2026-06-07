@@ -32,6 +32,22 @@ def _minimal_spec(**scenario_variants):
     )
 
 
+def test_get_canvas_returns_blank_editable_spec_for_new_session(tmp_path, monkeypatch):
+    from service.isaac_assist_service.multimodal import routes
+    from service.isaac_assist_service.multimodal.persistence import MultimodalStore
+
+    store = MultimodalStore(db_path=tmp_path / "canvas.sqlite")
+    monkeypatch.setattr(routes, "_store", store)
+
+    response = asyncio.run(routes.get_canvas("new_browser_session"))
+
+    assert response["revision"] == 0
+    assert response["spec"] is not None
+    assert response["spec"]["source"]["modality"] == "drag_drop"
+    assert response["spec"]["objects"] == []
+    assert response["spec"]["relations"] == []
+
+
 def test_build_campaign_plan_cycles_deterministically():
     from service.isaac_assist_service.multimodal.scenario_campaign import build_campaign_plan
 

@@ -59,7 +59,9 @@ def test_instantiate_dry_run_references_reviewed_palette_assets():
     result = asyncio.run(instantiate(Spec(), dry_run=True))
 
     assert result.status == "dry_run"
-    assert "AddReference('Isaac/" in result.generated_code
+    assert "source_class='franka_panda' -> prim_class='Cube'" in result.generated_code
+    assert "GetReferences().AddReference" not in result.generated_code
+    assert "isaac_assist:proxy', True" in result.generated_code
     assert "franka_panda" in result.generated_code
 
 
@@ -285,7 +287,8 @@ def test_build_route_returns_asset_resolution_summary(tmp_path):
         assert response["asset_resolutions"][0]["usd_ref"].endswith("franka.usd")
         assert response["instantiation"]["status"] == "dry_run"
         assert response["instantiation"]["dry_run"] is True
-        assert "AddReference('Isaac/" in response["instantiation"]["generated_code"]
+        assert "source_class='franka_panda' -> prim_class='Cube'" in response["instantiation"]["generated_code"]
+        assert "GetReferences().AddReference" not in response["instantiation"]["generated_code"]
     finally:
         routes._store.close()
         routes._store = old_store

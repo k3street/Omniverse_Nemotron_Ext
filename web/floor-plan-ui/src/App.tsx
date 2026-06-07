@@ -202,6 +202,13 @@ export function App() {
                                 state={buildState}
                                 result={buildResult}
                                 error={buildError}
+                                onApply={async () => {
+                                    await flushPendingPatch(api);
+                                    return api.build(sessionId, {
+                                        dry_run: false,
+                                        execute_direct: true,
+                                    });
+                                }}
                                 onClose={() => {
                                     setBuildResult(null);
                                     setBuildError(null);
@@ -277,13 +284,17 @@ function BuildPreviewPanel({
     state,
     result,
     error,
+    onApply,
     onClose,
 }: {
     state: "idle" | "previewing" | "ready" | "failed";
     result: BuildResponse | null;
     error: string | null;
+    onApply: () => Promise<BuildResponse>;
     onClose: () => void;
 }) {
+    const [applyState, setApplyState] = useState<"idle" | "applying" | "applied" | "failed">("idle");
+    const [applyMessage, setApplyMessage] = useState<string | null>(null);
     const assets = result?.asset_resolutions ?? [];
     const relations = result?.instantiation?.relation_summary ?? [];
     const relationDiagnostics = result?.instantiation?.relation_diagnostics ?? [];
@@ -291,6 +302,26 @@ function BuildPreviewPanel({
     const variants = result?.instantiation?.variant_summary;
     const code = result?.instantiation?.generated_code ?? "";
     const status = result?.instantiation?.status ?? result?.status ?? state;
+    const canApply = Boolean(result?.ratified && code && state !== "previewing" && applyState !== "applying");
+    const applyBuild = async () => {
+        if (!canApply) return;
+        setApplyState("applying");
+        setApplyMessage(null);
+        try {
+            const response = await onApply();
+            const instantiation = response.instantiation;
+            if (instantiation?.status === "ok") {
+                setApplyState("applied");
+                setApplyMessage("Applied to Isaac Sim.");
+            } else {
+                setApplyState("failed");
+                setApplyMessage(instantiation?.message || response.status || "Apply failed.");
+            }
+        } catch (e) {
+            setApplyState("failed");
+            setApplyMessage(String(e));
+        }
+    };
     return (
         <div
             style={{
@@ -324,11 +355,39 @@ function BuildPreviewPanel({
                 <span style={{ color: TEXT_SECONDARY, fontSize: 11 }}>
                     {error ? "failed" : `${status} · ${assets.length} resolved assets`}
                 </span>
+                {applyMessage && (
+                    <span
+                        style={{
+                            color: applyState === "applied" ? ACCENT : "#FF6B6B",
+                            fontSize: 11,
+                        }}
+                    >
+                        {applyMessage}
+                    </span>
+                )}
+                <button
+                    type="button"
+                    onClick={() => void applyBuild()}
+                    disabled={!canApply}
+                    title="Execute this build directly in the running Isaac Sim stage"
+                    style={{
+                        marginLeft: "auto",
+                        background: canApply ? ACCENT : "#2E3237",
+                        color: canApply ? "#000" : TEXT_SECONDARY,
+                        border: "none",
+                        borderRadius: 4,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: "4px 10px",
+                        cursor: canApply ? "pointer" : "default",
+                    }}
+                >
+                    {applyState === "applying" ? "Applying..." : "Apply to Isaac Sim"}
+                </button>
                 <button
                     type="button"
                     onClick={onClose}
                     style={{
-                        marginLeft: "auto",
                         background: "transparent",
                         color: TEXT_SECONDARY,
                         border: "1px solid #3A3F45",

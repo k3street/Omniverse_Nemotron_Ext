@@ -131,6 +131,7 @@ class LayoutSpecCodeGenerator:
         elif prim_class == "Reference":
             lines.append(f"prim = UsdGeom.Xform.Define(stage, {path_repr})")
             asset_path = (extra_attrs or {}).get("asset_path", "")
+            lines.append("prim.GetPrim().GetReferences().ClearReferences()")
             lines.append(
                 f"prim.GetPrim().GetReferences().AddReference({asset_path!r})"
             )
@@ -359,6 +360,8 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         "cube": "Cube", "sphere": "Sphere", "cylinder": "Cylinder",
         "cone": "Cone", "plane": "Plane",
         "camera": "Camera", "xform": "Xform",
+        "franka_panda": "Cube", "ur5e": "Cube", "ur10e": "Cube",
+        "ur10": "Cube", "kinova_gen3": "Cube",
         "distant_light": "DistantLight", "distantlight": "DistantLight",
         "sphere_light": "SphereLight", "spherelight": "SphereLight",
         "dome_light": "DomeLight", "domelight": "DomeLight",
@@ -370,11 +373,15 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         "bowl": "Cylinder", "plate": "Cylinder",
         "fruit": "Sphere", "apple": "Sphere", "orange": "Sphere",
         "hamburger": "Cylinder",
-        "conveyor_short": "Cube", "conveyor_long": "Cube",
+        "conveyor": "Cube", "conveyor_short": "Cube", "conveyor_long": "Cube",
         "wall": "Cube", "fence": "Cube", "obstacle_box": "Cube",
         "obstacle_cylinder": "Cylinder",
         "groundplane": "Plane",
         "camera_overhead": "Camera", "camera_side": "Camera",
+    }
+    _ROBOT_PROXY_CLASSES = {
+        "franka_panda", "ur5e", "ur10e", "ur10", "kinova_gen3",
+        "iiwa", "jaco7", "carter", "jetbot", "spot", "h1",
     }
 
     def _obj_get(obj: Any, attr: str, default: Any = None) -> Any:
@@ -410,6 +417,16 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
     def _metadata(obj: Any) -> Dict[str, Any]:
         value = _obj_get(obj, "metadata", {}) or {}
         return value if isinstance(value, dict) else {}
+
+    def _explicit_asset_ref(obj: Any) -> Any:
+        metadata = _metadata(obj)
+        return (
+            _obj_get(obj, "asset_path")
+            or _obj_get(obj, "asset_ref")
+            or metadata.get("asset_path")
+            or metadata.get("asset_ref")
+            or metadata.get("reviewed_asset_ref")
+        )
 
     def _object_id(obj: Any) -> str:
         return str(_obj_get(obj, "id", ""))
@@ -539,7 +556,9 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         normalized_class = _CLASS_NORMALIZER.get(
             str(obj_class).lower(), str(obj_class)
         )
-        if asset_resolution:
+        obj_class_key = str(obj_class).lower()
+        use_proxy = obj_class_key in _ROBOT_PROXY_CLASSES and not _explicit_asset_ref(obj)
+        if asset_resolution and not use_proxy:
             asset_ref = asset_resolution.usd_ref
             normalized_class = "Reference"
         if normalized_class not in SUPPORTED_PRIM_CLASSES:
@@ -565,6 +584,9 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
             "isaac_assist:object_class": str(obj_class),
             "isaac_assist:role_hint": str(obj_class),
         }
+        if use_proxy:
+            custom_data["isaac_assist:proxy"] = True
+            custom_data["isaac_assist:proxy_reason"] = "web_apply_render_stability"
         if asset_resolution:
             custom_data["isaac_assist:asset_source"] = asset_resolution.source
             custom_data["isaac_assist:asset_ref"] = asset_resolution.usd_ref
@@ -783,6 +805,7 @@ async def instantiate(
     spec: Any,
     template_id: Optional[str] = None,
     dry_run: bool = False,
+    execute_direct: bool = False,
 ) -> InstantiateResult:
     """Walk a LayoutSpec, emit per-object USD patches, dispatch to Kit.
 
@@ -790,6 +813,8 @@ async def instantiate(
         spec: A ratified LayoutSpec.
         template_id: Optional canonical template binding the spec.
         dry_run: If True, return the generated code without executing.
+        execute_direct: If True, bypass the queued approval path and execute
+            synchronously through Kit RPC. Intended for trusted local web flows.
 
     Returns:
         InstantiateResult with build_id (when executed), status, per-object
@@ -818,7 +843,10 @@ async def instantiate(
     # Live path
     try:
         from ..chat.tools import kit_tools
-        result = await kit_tools.queue_exec_patch(code, description=f"Phase 19: instantiate {template_id or 'spec'}")
+        if execute_direct:
+            result = await kit_tools.exec_sync(code, timeout=600)
+        else:
+            result = await kit_tools.queue_exec_patch(code, description=f"Phase 19: instantiate {template_id or 'spec'}")
         outcome = InstantiateResult.from_exec(result if isinstance(result, dict) else {"output": str(result)})
         outcome.relation_summary = relation_summary(spec)
         outcome.relation_diagnostics = relation_diagnostics(spec)

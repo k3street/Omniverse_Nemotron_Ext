@@ -48,7 +48,7 @@ from .instantiator import instantiate
 from .ratify import ratify
 from .render import render_layout_spec_to_file
 from .scenario_campaign import build_campaign_plan, materialize_campaign
-from .types import LayoutSpec
+from .types import Counts, Intent, LayoutSpec, Source, StructuralFeatures
 from .validate import validate_layout_spec
 from .relation_reasoning import normalize_spatial_relations
 
@@ -76,6 +76,25 @@ def _preview_path(session_id: str) -> Path:
     """Return the PNG preview file path for a session under ``workspace/previews/``."""
     base = DEFAULT_DB_PATH.parent / "previews"
     return base / f"{session_id}.png"
+
+
+def _blank_canvas_spec() -> LayoutSpec:
+    """Return an editable empty canvas document for new browser sessions."""
+    return LayoutSpec(
+        intent=Intent(
+            pattern_hint="pick_place",
+            counts=Counts(),
+            structural_features=StructuralFeatures(),
+            structural_tags=[],
+        ),
+        objects=[],
+        constraints=[],
+        relations=[],
+        bindings={},
+        parameters={},
+        source=Source(modality="drag_drop", confidence=1.0),
+        revision=0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -124,11 +143,14 @@ class BuildRequest(BaseModel):
         template_id: Optional canonical template to instantiate.
         force_freeform: When True, skip template lookup and generate a freeform canvas.
         dry_run: When True, return generated Kit code without mutating Isaac Sim.
+        execute_direct: When True with dry_run=False, bypass the queued approval
+            UI and execute synchronously through Kit RPC.
     """
 
     template_id: Optional[str] = None
     force_freeform: bool = False
     dry_run: bool = True
+    execute_direct: bool = False
 
 
 class CampaignPlanRequest(BaseModel):
@@ -198,9 +220,10 @@ async def get_canvas(session_id: str) -> Dict[str, Any]:
     store = get_store()
     spec = store.get_latest(session_id)
     if spec is None:
+        spec = _blank_canvas_spec()
         return {
             "session_id": session_id,
-            "spec": None,
+            "spec": spec.model_dump(mode="json"),
             "revision": 0,
         }
     return {
@@ -646,11 +669,13 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
             role: {"object_id": b.object_id, "source": b.source}
             for role, b in result.bindings.items()
         }
-        instantiation = await instantiate(
-            spec,
-            template_id=body.template_id,
-            dry_run=body.dry_run,
-        )
+        instantiate_kwargs = {
+            "template_id": body.template_id,
+            "dry_run": body.dry_run,
+        }
+        if body.execute_direct:
+            instantiate_kwargs["execute_direct"] = True
+        instantiation = await instantiate(spec, **instantiate_kwargs)
         payload["instantiation"] = {
             "status": instantiation.status,
             "message": instantiation.message,
@@ -674,6 +699,7 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
         "revision": spec.revision,
         "ratify_status": result.status,
         "template_id": body.template_id,
+        "execute_direct": body.execute_direct,
     })
     return payload
 
