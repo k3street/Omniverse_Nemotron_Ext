@@ -213,6 +213,15 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "boolean",
                         "description": "Dry-run the Isaac launch command without starting Isaac. Defaults to dry_run.",
                     },
+                    "probe_ros2_omnigraph": {
+                        "type": "boolean",
+                        "description": "Include a ROS2 OmniGraph compatibility probe result in the generated contract. Defaults to true.",
+                    },
+                    "probe_dry_run": {
+                        "type": "boolean",
+                        "description": "Keep the ROS2 OmniGraph compatibility probe offline/read-only script generation. Defaults to true.",
+                    },
+                    "probe_timeout": {"type": "number"},
                     "force_launch": {
                         "type": "boolean",
                         "description": "Launch even if ROS2/Isaac precheck reports issues.",
@@ -472,6 +481,8 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
     launch_dry_run = bool(arguments.get("launch_dry_run", dry_run))
     build_scene = bool(arguments.get("build_scene", True))
     launch_scene = bool(arguments.get("launch_scene", False))
+    probe_ros2_omnigraph = bool(arguments.get("probe_ros2_omnigraph", True))
+    probe_dry_run = bool(arguments.get("probe_dry_run", True))
 
     scene = await create_franka_physics_pick_scene({
         "session_id": session_id,
@@ -500,6 +511,23 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
             })
 
     controller = scene["spec"]["parameters"]["controller"]
+    omnigraph_probe = (
+        await probe_ros2_omnigraph_compatibility({
+            "runtime_profile": runtime_profile.key,
+            "dry_run": probe_dry_run,
+            "timeout": float(arguments.get("probe_timeout") or 10.0),
+            "include_probe_code": False,
+        })
+        if probe_ros2_omnigraph
+        else {
+            "status": "skipped",
+            "recommendation": {
+                "author_omnigraph": False,
+                "connect_articulation_controller": False,
+                "reason": "ROS2 OmniGraph compatibility probe was not requested.",
+            },
+        }
+    )
     project_root = _harness_project_root(arguments.get("workspace_root"), package_name)
     files = _write_ros2_harness_project(
         project_root=project_root,
@@ -515,6 +543,7 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
         scene=scene,
         build_response=build_response,
         launch_response=launch_response,
+        omnigraph_probe=omnigraph_probe,
     )
 
     return {
@@ -538,6 +567,7 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
         },
         "build": _compact_build_response(build_response),
         "launch": _compact_launch_response(launch_response),
+        "ros2_omnigraph_probe": _compact_probe_response(omnigraph_probe),
         "files": files,
         "next_commands": [
             f"cd {project_root}",
@@ -1341,6 +1371,7 @@ def _write_ros2_harness_project(
     scene: Dict[str, Any],
     build_response: Dict[str, Any],
     launch_response: Dict[str, Any],
+    omnigraph_probe: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     src_root = project_root / "src" / package_name
     package_dir = src_root / package_name
@@ -1364,6 +1395,7 @@ def _write_ros2_harness_project(
         scene=scene,
         build_response=build_response,
         launch_response=launch_response,
+        omnigraph_probe=omnigraph_probe,
     )
     written: list[Path] = []
 
@@ -1416,6 +1448,7 @@ def _scene_contract_payload(
     scene: Dict[str, Any],
     build_response: Dict[str, Any],
     launch_response: Dict[str, Any],
+    omnigraph_probe: Dict[str, Any],
 ) -> Dict[str, Any]:
     return {
         "schema_version": "isaac_assist.ros2_scene_harness.v1",
@@ -1438,6 +1471,7 @@ def _scene_contract_payload(
             "relation_diagnostics": scene.get("relation_diagnostics", []),
         },
         "controller": controller,
+        "ros2_omnigraph_probe": _compact_probe_response(omnigraph_probe),
         "build": _compact_build_response(build_response),
         "launch": _compact_launch_response(launch_response),
     }
@@ -1472,6 +1506,37 @@ def _compact_launch_response(launch_response: Dict[str, Any]) -> Dict[str, Any]:
         for key, value in launch_response.items()
         if key in {"status", "dry_run", "command", "usd_path", "workspace_root", "variant_id", "pid", "log_path"}
     }
+
+
+def _compact_probe_response(probe_response: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(probe_response, dict):
+        return {"status": "unknown"}
+    readback = probe_response.get("readback") if isinstance(probe_response.get("readback"), dict) else {}
+    registered_nodes = readback.get("registered_ros2_nodes") if isinstance(readback, dict) else []
+    compact: Dict[str, Any] = {
+        "status": probe_response.get("status"),
+        "dry_run": probe_response.get("dry_run"),
+        "read_only": probe_response.get("read_only", True),
+        "graph_authoring_tested": probe_response.get("graph_authoring_tested", False),
+        "candidate_namespaces": probe_response.get("candidate_namespaces", []),
+        "required_node_suffixes": probe_response.get("required_node_suffixes", []),
+        "matching_namespaces": probe_response.get("matching_namespaces", []),
+        "detected_namespace": probe_response.get("detected_namespace", ""),
+        "recommendation": probe_response.get("recommendation", {}),
+    }
+    if isinstance(readback, dict) and readback:
+        compact["readback"] = {
+            "ok": readback.get("ok"),
+            "namespaces": readback.get("namespaces", {}),
+            "registered_ros2_node_count": len(registered_nodes or []),
+            "error": readback.get("error", ""),
+        }
+    kit_rpc = probe_response.get("kit_rpc")
+    if isinstance(kit_rpc, dict):
+        compact["kit_rpc"] = {"success": bool(kit_rpc.get("success"))}
+    if probe_response.get("error"):
+        compact["error"] = probe_response.get("error")
+    return compact
 
 
 def _package_xml(package_name: str, project_name: str) -> str:
@@ -1691,6 +1756,14 @@ def _harness_readme(project_name: str, package_name: str, contract: Dict[str, An
     distro = contract.get("ros2", {}).get("ros_distro") or "jazzy"
     issues = contract.get("precheck", {}).get("issues", [])
     issue_text = "\n".join(f"- {issue}" for issue in issues) if issues else "- none"
+    graph = contract.get("controller", {}).get("ros2_control_graph", {})
+    probe = contract.get("ros2_omnigraph_probe", {})
+    probe_status = probe.get("status", "unknown")
+    probe_namespace = probe.get("detected_namespace") or "not detected"
+    probe_recommendation = probe.get("recommendation", {}).get(
+        "reason",
+        "Run the compatibility probe before enabling live graph authoring.",
+    )
     return f"""# {project_name}
 
 Generated Isaac Assist ROS2 scene harness.
@@ -1700,9 +1773,10 @@ Generated Isaac Assist ROS2 scene harness.
 - Isaac profile: {contract.get("runtime", {}).get("profile")}
 - Isaac Sim: {contract.get("runtime", {}).get("isaac_sim_version")}
 - ROS2 distro: {distro}
-- ROS2 command topic: {contract.get("controller", {}).get("ros2_control_graph", {}).get("joint_commands_topic", "/isaac_joint_commands")}
-- ROS2 state topic: {contract.get("controller", {}).get("ros2_control_graph", {}).get("joint_states_topic", "/isaac_joint_states")}
-- ROS2 OmniGraph authoring: {contract.get("controller", {}).get("ros2_control_graph", {}).get("omnigraph_policy", "defer_until_live_probe_passes")}
+- ROS2 command topic: {graph.get("joint_commands_topic", "/isaac_joint_commands")}
+- ROS2 state topic: {graph.get("joint_states_topic", "/isaac_joint_states")}
+- ROS2 OmniGraph authoring: {graph.get("omnigraph_policy", "defer_until_live_probe_passes")}
+- ROS2 OmniGraph probe: {probe_status}; detected namespace: {probe_namespace}
 
 ## Precheck
 
@@ -1720,6 +1794,8 @@ ros2 launch {package_name} warehouse_pick_place.launch.py
 The ROS2 node publishes a deterministic Franka command sequence for smoke
 testing the bridge. Replace the waypoint generator with MoveIt/cuMotion output
 when the live planner is available.
+
+Probe recommendation: {probe_recommendation}
 
 Run the `probe_ros2_omnigraph_compatibility` MCP tool before enabling live
 OmniGraph authoring or connecting ROS2 commands to the articulation controller.

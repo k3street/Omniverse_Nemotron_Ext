@@ -165,6 +165,8 @@ def test_create_ros2_scene_harness_writes_project_stack(monkeypatch, tmp_path):
     assert response["ros2"]["ros_distro"] == "jazzy"
     assert response["package_name"] == "warehouse_franka_demo_harness"
     assert response["build"]["instantiation"]["has_generated_code"] is True
+    assert response["ros2_omnigraph_probe"]["status"] == "dry_run"
+    assert response["ros2_omnigraph_probe"]["recommendation"]["author_omnigraph"] is False
     assert (package_root / "package.xml").exists()
     assert (package_root / "setup.py").exists()
     assert (package_root / "launch" / "warehouse_pick_place.launch.py").exists()
@@ -177,7 +179,15 @@ def test_create_ros2_scene_harness_writes_project_stack(monkeypatch, tmp_path):
     assert contract["controller"]["ros2_control_graph"]["fallback_node_namespace"] == "isaacsim.ros2.bridge"
     assert contract["controller"]["ros2_control_graph"]["author_omnigraph"] is False
     assert contract["controller"]["ros2_control_graph"]["connect_articulation_controller"] is False
+    assert contract["ros2_omnigraph_probe"]["status"] == "dry_run"
+    assert contract["ros2_omnigraph_probe"]["read_only"] is True
+    assert contract["ros2_omnigraph_probe"]["graph_authoring_tested"] is False
+    assert contract["ros2_omnigraph_probe"]["recommendation"]["author_omnigraph"] is False
+    assert "probe_code" not in contract["ros2_omnigraph_probe"]
     assert contract["controller"]["source_paths"] == ["/World/PickObject_1", "/World/PickObject_2"]
+    readme = (project_root / "README.md").read_text()
+    assert "ROS2 OmniGraph probe: dry_run" in readme
+    assert "probe_ros2_omnigraph_compatibility" in readme
     assert "ros2 launch warehouse_franka_demo_harness warehouse_pick_place.launch.py" in "\n".join(response["next_commands"])
 
 
