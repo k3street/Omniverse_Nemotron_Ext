@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -121,6 +122,52 @@ def test_create_franka_physics_pick_scene_records_cumotion_bridge(monkeypatch, t
     assert controller["moveit_cumotion_bridge"]["dry_run_valid"] is True
 
 
+def test_create_ros2_scene_harness_writes_project_stack(monkeypatch, tmp_path):
+    _install_temp_store(monkeypatch, tmp_path)
+    from service.isaac_assist_service import mcp_floorplan_tools
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = "ros2 help"
+        stderr = ""
+
+    monkeypatch.setenv("ROS_DISTRO", "jazzy")
+    monkeypatch.setenv("AMENT_PREFIX_PATH", "/opt/ros/jazzy")
+    monkeypatch.setenv("ROS_DOMAIN_ID", "7")
+    monkeypatch.setattr(mcp_floorplan_tools.shutil, "which", lambda name: "/opt/ros/jazzy/bin/ros2")
+    monkeypatch.setattr(mcp_floorplan_tools.subprocess, "run", lambda *args, **kwargs: FakeCompleted())
+
+    response = asyncio.run(mcp_floorplan_tools.create_ros2_scene_harness({
+        "project_name": "Warehouse Franka Demo",
+        "workspace_root": str(tmp_path / "harnesses"),
+        "dry_run": True,
+        "build_scene": True,
+        "object_count": 2,
+    }))
+
+    project_root = tmp_path / "harnesses" / "warehouse_franka_demo_harness"
+    package_root = project_root / "src" / "warehouse_franka_demo_harness"
+    contract_path = package_root / "config" / "scene_contract.json"
+
+    assert response["status"] == "ready"
+    assert response["precheck"]["ok"] is True
+    assert response["runtime"]["profile"] == "isaacsim-6.0"
+    assert response["ros2"]["ros_distro"] == "jazzy"
+    assert response["package_name"] == "warehouse_franka_demo_harness"
+    assert response["build"]["instantiation"]["has_generated_code"] is True
+    assert (package_root / "package.xml").exists()
+    assert (package_root / "setup.py").exists()
+    assert (package_root / "launch" / "warehouse_pick_place.launch.py").exists()
+    assert (package_root / "warehouse_franka_demo_harness" / "warehouse_pick_place_node.py").exists()
+    assert (package_root / "config" / "ros2_control.yaml").exists()
+    assert (project_root / "generated" / "scene_setup.py").exists()
+    contract = json.loads(contract_path.read_text())
+    assert contract["schema_version"] == "isaac_assist.ros2_scene_harness.v1"
+    assert contract["controller"]["ros2_control_graph"]["node_namespace"] == "isaacsim.ros2.nodes"
+    assert contract["controller"]["source_paths"] == ["/World/PickObject_1", "/World/PickObject_2"]
+    assert "ros2 launch warehouse_franka_demo_harness warehouse_pick_place.launch.py" in "\n".join(response["next_commands"])
+
+
 def test_set_object_asset_updates_reviewed_ref(monkeypatch, tmp_path):
     _install_temp_store(monkeypatch, tmp_path)
     from service.isaac_assist_service.mcp_floorplan_tools import (
@@ -178,6 +225,7 @@ def test_mcp_server_exposes_floorplan_tools(monkeypatch):
     assert "search_local_assets" in names
     assert "verify_scene_relations" in names
     assert "create_franka_physics_pick_scene" in names
+    assert "create_ros2_scene_harness" in names
 
 
 def test_mcp_server_dispatches_floorplan_tool(monkeypatch, tmp_path):

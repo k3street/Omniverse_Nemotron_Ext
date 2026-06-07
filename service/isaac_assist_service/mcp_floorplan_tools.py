@@ -7,8 +7,13 @@ code, launch a materialized scene variant, and verify spatial relations.
 from __future__ import annotations
 
 import base64
+import json
+import os
 import re
+import shutil
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from .multimodal.asset_resolution import list_local_asset_options, resolve_layout_assets
@@ -39,6 +44,7 @@ from .multimodal.types import (
     StructuralFeatures,
     TypedObject,
 )
+from .runtime_profiles import get_runtime_profile, runtime_scope_summary
 
 
 _CLASS_ALIASES = {
@@ -172,6 +178,44 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "create_ros2_scene_harness",
+            "description": (
+                "Create a project-local ROS2 harness for a floor-plan scene. The tool "
+                "checks the requested Isaac Sim runtime profile and ROS2 environment, "
+                "creates or reuses a scene session, builds the scene in dry-run/live mode, "
+                "optionally prepares a launch command, and writes a colcon-ready ROS2 "
+                "package with scene contract, controller config, launch file, and demo node."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_name": {"type": "string"},
+                    "session_id": {"type": "string"},
+                    "scenario": {
+                        "type": "string",
+                        "description": "Harness scenario preset. Defaults to franka_warehouse_pick_place.",
+                    },
+                    "description": {"type": "string"},
+                    "runtime_profile": {
+                        "type": "string",
+                        "description": "Isaac runtime profile, e.g. isaacsim-6.0 or isaacsim-5.1.",
+                    },
+                    "motion_backend": {"type": "string"},
+                    "object_count": {"type": "integer"},
+                    "workspace_root": {"type": "string"},
+                    "build_scene": {"type": "boolean"},
+                    "launch_scene": {"type": "boolean"},
+                    "force_launch": {
+                        "type": "boolean",
+                        "description": "Launch even if ROS2/Isaac precheck reports issues.",
+                    },
+                    "dry_run": {"type": "boolean"},
+                    "wait": {"type": "boolean"},
+                },
+                "required": ["project_name"],
+            },
+        },
+        {
             "name": "search_local_assets",
             "description": "Search configured local USD asset roots for selectable Isaac scene assets.",
             "inputSchema": {
@@ -263,6 +307,8 @@ async def call_floorplan_tool(name: str, arguments: Dict[str, Any]) -> Dict[str,
         return await create_floor_plan_from_image(arguments)
     if name == "create_franka_physics_pick_scene":
         return await create_franka_physics_pick_scene(arguments)
+    if name == "create_ros2_scene_harness":
+        return await create_ros2_scene_harness(arguments)
     if name == "search_local_assets":
         return search_local_assets(arguments)
     if name == "set_object_asset":
@@ -364,6 +410,109 @@ async def create_franka_physics_pick_scene(arguments: Dict[str, Any]) -> Dict[st
         "relation_diagnostics": relation_result.diagnostics_as_dicts(),
         "asset_resolutions": _asset_payload(saved.objects or []) if resolve_assets else [],
     })
+
+
+async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a project-local ROS2 harness for a generated floor-plan scene."""
+
+    project_name = _required_str(arguments, "project_name")
+    package_name = _ros2_package_name(project_name)
+    session_id = str(arguments.get("session_id") or package_name).strip()
+    scenario = str(arguments.get("scenario") or "franka_warehouse_pick_place").strip()
+    if scenario not in {"franka_warehouse_pick_place", "franka_pick_place"}:
+        raise ValueError(
+            "create_ros2_scene_harness currently supports "
+            "franka_warehouse_pick_place and franka_pick_place"
+        )
+
+    runtime_profile = get_runtime_profile(str(arguments.get("runtime_profile") or "isaacsim-6.0"))
+    runtime = runtime_scope_summary(runtime_profile)
+    ros2 = _ros2_environment_report()
+    precheck_issues = _harness_precheck_issues(runtime, ros2)
+
+    description = str(
+        arguments.get("description")
+        or "Warehouse Franka arm picks rigid workpieces from a table and places them in a crate."
+    )
+    motion_backend = str(arguments.get("motion_backend") or "curobo").strip().lower()
+    object_count = max(1, min(6, int(arguments.get("object_count") or 3)))
+    dry_run = bool(arguments.get("dry_run", True))
+    build_scene = bool(arguments.get("build_scene", True))
+    launch_scene = bool(arguments.get("launch_scene", False))
+
+    scene = await create_franka_physics_pick_scene({
+        "session_id": session_id,
+        "description": description,
+        "motion_backend": motion_backend,
+        "object_count": object_count,
+        "dry_run": dry_run,
+        "build": build_scene,
+        "resolve_assets": True,
+        "generate_controller_code": False,
+    })
+    build_response = scene.get("build", {"status": "skipped"})
+    launch_response: Dict[str, Any] = {"status": "skipped"}
+    if launch_scene:
+        if precheck_issues and not bool(arguments.get("force_launch", False)):
+            launch_response = {
+                "status": "blocked_by_precheck",
+                "issues": precheck_issues,
+            }
+        else:
+            launch_response = await launch_scene_in_isaac({
+                "session_id": session_id,
+                "workspace_root": arguments.get("workspace_root"),
+                "dry_run": dry_run,
+                "wait": bool(arguments.get("wait", False)),
+            })
+
+    controller = scene["spec"]["parameters"]["controller"]
+    project_root = _harness_project_root(arguments.get("workspace_root"), package_name)
+    files = _write_ros2_harness_project(
+        project_root=project_root,
+        package_name=package_name,
+        project_name=project_name,
+        session_id=session_id,
+        scenario=scenario,
+        description=description,
+        runtime=runtime,
+        ros2=ros2,
+        precheck_issues=precheck_issues,
+        controller=controller,
+        scene=scene,
+        build_response=build_response,
+        launch_response=launch_response,
+    )
+
+    return {
+        "status": "ready" if not precheck_issues else "needs_environment",
+        "project_name": project_name,
+        "package_name": package_name,
+        "project_root": str(project_root),
+        "session_id": session_id,
+        "scenario": scenario,
+        "runtime": runtime,
+        "ros2": ros2,
+        "precheck": {
+            "ok": not precheck_issues,
+            "issues": precheck_issues,
+        },
+        "scene": {
+            "created_from": scene.get("created_from"),
+            "revision": scene.get("revision"),
+            "summary": scene.get("summary"),
+            "relation_diagnostics": scene.get("relation_diagnostics", []),
+        },
+        "build": _compact_build_response(build_response),
+        "launch": _compact_launch_response(launch_response),
+        "files": files,
+        "next_commands": [
+            f"cd {project_root}",
+            "colcon build --symlink-install",
+            "source install/setup.bash",
+            f"ros2 launch {package_name} warehouse_pick_place.launch.py",
+        ],
+    }
 
 
 def search_local_assets(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -906,6 +1055,509 @@ def _franka_controller_plan(
             ),
         },
     }
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _ros2_package_name(project_name: str) -> str:
+    name = re.sub(r"[^a-zA-Z0-9_]", "_", project_name.strip().lower())
+    name = re.sub(r"_+", "_", name).strip("_")
+    if not name:
+        name = "isaac_assist_scene"
+    if not name[0].isalpha():
+        name = f"scene_{name}"
+    if not name.endswith("_harness"):
+        name = f"{name}_harness"
+    return name
+
+
+def _harness_project_root(workspace_root: Any, package_name: str) -> Path:
+    if workspace_root:
+        root = Path(str(workspace_root)).expanduser()
+        if not root.is_absolute():
+            root = _repo_root() / root
+    else:
+        root = _repo_root() / "workspace" / "ros2_harnesses"
+    return root / package_name
+
+
+def _ros2_environment_report() -> Dict[str, Any]:
+    ros_distro = os.environ.get("ROS_DISTRO") or _detect_ros_distro_from_opt()
+    ros2_bin = shutil.which("ros2")
+    if not ros2_bin and ros_distro:
+        candidate = Path("/opt/ros") / ros_distro / "bin" / "ros2"
+        if candidate.exists():
+            ros2_bin = str(candidate)
+
+    ros2_help_ok = False
+    ros2_error = ""
+    if ros2_bin:
+        try:
+            result = subprocess.run(
+                [ros2_bin, "--help"],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=3,
+            )
+            ros2_help_ok = result.returncode == 0
+            if result.returncode != 0:
+                ros2_error = (result.stderr or result.stdout or "").strip()[:500]
+        except Exception as exc:  # pragma: no cover - depends on host ROS install
+            ros2_error = f"{type(exc).__name__}: {exc}"
+
+    return {
+        "ros_distro": ros_distro,
+        "ros2_bin": ros2_bin or "",
+        "ros2_help_ok": ros2_help_ok,
+        "ros2_error": ros2_error,
+        "ament_prefix_path": os.environ.get("AMENT_PREFIX_PATH", ""),
+        "ros_domain_id": os.environ.get("ROS_DOMAIN_ID", "0"),
+        "rmw_implementation": os.environ.get("RMW_IMPLEMENTATION", ""),
+    }
+
+
+def _detect_ros_distro_from_opt() -> str:
+    opt = Path("/opt/ros")
+    if not opt.exists():
+        return ""
+    preferred = ("jazzy", "humble", "iron", "rolling")
+    existing = {path.name for path in opt.iterdir() if path.is_dir()}
+    for distro in preferred:
+        if distro in existing:
+            return distro
+    return sorted(existing)[0] if existing else ""
+
+
+def _harness_precheck_issues(runtime: Dict[str, Any], ros2: Dict[str, Any]) -> List[str]:
+    issues: list[str] = []
+    if not Path(str(runtime.get("extension_folder", ""))).is_absolute():
+        extension_folder = _repo_root() / str(runtime.get("extension_folder", ""))
+    else:
+        extension_folder = Path(str(runtime.get("extension_folder", "")))
+    if not extension_folder.exists():
+        issues.append(f"Isaac Assist extension folder not found: {extension_folder}")
+    if runtime.get("profile") == "isaacsim-6.0" and runtime.get("ros2_omnigraph_namespace") != "isaacsim.ros2.nodes":
+        issues.append("Isaac Sim 6.0 harness requires isaacsim.ros2.nodes OmniGraph namespace")
+    if not ros2.get("ros_distro"):
+        issues.append("ROS_DISTRO is not set and no /opt/ros distro was detected")
+    if not ros2.get("ros2_bin"):
+        issues.append("ros2 executable not found; source ROS2 before running the generated harness")
+    if not ros2.get("ament_prefix_path"):
+        issues.append("AMENT_PREFIX_PATH is not set; source /opt/ros/<distro>/setup.bash before launching Isaac Sim")
+    return issues
+
+
+def _write_ros2_harness_project(
+    *,
+    project_root: Path,
+    package_name: str,
+    project_name: str,
+    session_id: str,
+    scenario: str,
+    description: str,
+    runtime: Dict[str, Any],
+    ros2: Dict[str, Any],
+    precheck_issues: List[str],
+    controller: Dict[str, Any],
+    scene: Dict[str, Any],
+    build_response: Dict[str, Any],
+    launch_response: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    src_root = project_root / "src" / package_name
+    package_dir = src_root / package_name
+    config_dir = src_root / "config"
+    launch_dir = src_root / "launch"
+    resource_dir = src_root / "resource"
+    generated_dir = project_root / "generated"
+    for path in (package_dir, config_dir, launch_dir, resource_dir, generated_dir):
+        path.mkdir(parents=True, exist_ok=True)
+
+    contract = _scene_contract_payload(
+        project_name=project_name,
+        package_name=package_name,
+        session_id=session_id,
+        scenario=scenario,
+        description=description,
+        runtime=runtime,
+        ros2=ros2,
+        precheck_issues=precheck_issues,
+        controller=controller,
+        scene=scene,
+        build_response=build_response,
+        launch_response=launch_response,
+    )
+    written: list[Path] = []
+
+    def write(path: Path, text: str, executable: bool = False) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        if executable:
+            path.chmod(0o755)
+        written.append(path)
+
+    write(src_root / "package.xml", _package_xml(package_name, project_name))
+    write(src_root / "setup.py", _setup_py(package_name))
+    write(resource_dir / package_name, "")
+    write(package_dir / "__init__.py", "")
+    write(package_dir / "warehouse_pick_place_node.py", _warehouse_pick_place_node_py())
+    write(launch_dir / "warehouse_pick_place.launch.py", _warehouse_launch_py(package_name))
+    write(config_dir / "scene_contract.json", json.dumps(contract, indent=2, sort_keys=True) + "\n")
+    write(config_dir / "ros2_control.yaml", _ros2_control_yaml(controller))
+    write(project_root / "README.md", _harness_readme(project_name, package_name, contract))
+    write(project_root / "run_harness.sh", _run_harness_sh(package_name), executable=True)
+
+    generated_code = (
+        (build_response.get("instantiation") or {}).get("generated_code")
+        if isinstance(build_response, dict)
+        else None
+    )
+    if generated_code:
+        write(generated_dir / "scene_setup.py", str(generated_code))
+
+    return [
+        {
+            "path": str(path),
+            "relative_path": str(path.relative_to(project_root)),
+        }
+        for path in written
+    ]
+
+
+def _scene_contract_payload(
+    *,
+    project_name: str,
+    package_name: str,
+    session_id: str,
+    scenario: str,
+    description: str,
+    runtime: Dict[str, Any],
+    ros2: Dict[str, Any],
+    precheck_issues: List[str],
+    controller: Dict[str, Any],
+    scene: Dict[str, Any],
+    build_response: Dict[str, Any],
+    launch_response: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "schema_version": "isaac_assist.ros2_scene_harness.v1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "project_name": project_name,
+        "package_name": package_name,
+        "session_id": session_id,
+        "scenario": scenario,
+        "description": description,
+        "runtime": runtime,
+        "ros2": ros2,
+        "precheck": {
+            "ok": not precheck_issues,
+            "issues": precheck_issues,
+        },
+        "scene": {
+            "created_from": scene.get("created_from"),
+            "revision": scene.get("revision"),
+            "summary": scene.get("summary"),
+            "relation_diagnostics": scene.get("relation_diagnostics", []),
+        },
+        "controller": controller,
+        "build": _compact_build_response(build_response),
+        "launch": _compact_launch_response(launch_response),
+    }
+
+
+def _compact_build_response(build_response: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(build_response, dict):
+        return {"status": "unknown"}
+    instantiation = build_response.get("instantiation") or {}
+    return {
+        "status": build_response.get("status"),
+        "ratified": build_response.get("ratified"),
+        "revision": build_response.get("revision"),
+        "diagnostics": build_response.get("diagnostics", []),
+        "errors": build_response.get("errors", []),
+        "instantiation": {
+            "status": instantiation.get("status"),
+            "message": instantiation.get("message"),
+            "dry_run": instantiation.get("dry_run"),
+            "has_generated_code": bool(instantiation.get("generated_code")),
+            "relation_verification": instantiation.get("relation_verification"),
+            "variant_summary": instantiation.get("variant_summary"),
+        } if isinstance(instantiation, dict) else {},
+    }
+
+
+def _compact_launch_response(launch_response: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(launch_response, dict):
+        return {"status": "unknown"}
+    return {
+        key: value
+        for key, value in launch_response.items()
+        if key in {"status", "dry_run", "command", "usd_path", "workspace_root", "variant_id", "pid", "log_path"}
+    }
+
+
+def _package_xml(package_name: str, project_name: str) -> str:
+    return f"""<?xml version="1.0"?>
+<package format="3">
+  <name>{package_name}</name>
+  <version>0.1.0</version>
+  <description>ROS2 harness for {project_name} generated by Isaac Assist.</description>
+  <maintainer email="user@example.com">Isaac Assist</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+"""
+
+
+def _setup_py(package_name: str) -> str:
+    return f"""from setuptools import find_packages, setup
+
+package_name = {package_name!r}
+
+setup(
+    name=package_name,
+    version="0.1.0",
+    packages=find_packages(exclude=["test"]),
+    data_files=[
+        ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
+        ("share/" + package_name, ["package.xml"]),
+        ("share/" + package_name + "/config", ["config/scene_contract.json", "config/ros2_control.yaml"]),
+        ("share/" + package_name + "/launch", ["launch/warehouse_pick_place.launch.py"]),
+    ],
+    install_requires=["setuptools"],
+    zip_safe=True,
+    maintainer="Isaac Assist",
+    maintainer_email="user@example.com",
+    description="Project-local ROS2 harness generated by Isaac Assist.",
+    license="Apache-2.0",
+    entry_points={{
+        "console_scripts": [
+            "warehouse_pick_place_node = {package_name}.warehouse_pick_place_node:main",
+        ],
+    }},
+)
+"""
+
+
+def _warehouse_launch_py(package_name: str) -> str:
+    return f"""import os
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    pkg_share = get_package_share_directory({package_name!r})
+    contract_path = os.path.join(pkg_share, "config", "scene_contract.json")
+    return LaunchDescription([
+        Node(
+            package={package_name!r},
+            executable="warehouse_pick_place_node",
+            name="warehouse_pick_place_node",
+            output="screen",
+            parameters=[{{"contract_path": contract_path}}],
+        ),
+    ])
+"""
+
+
+def _warehouse_pick_place_node_py() -> str:
+    return '''import json
+from pathlib import Path
+
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Float32
+
+
+PANDA_JOINTS = [
+    "panda_joint1",
+    "panda_joint2",
+    "panda_joint3",
+    "panda_joint4",
+    "panda_joint5",
+    "panda_joint6",
+    "panda_joint7",
+]
+
+
+class WarehousePickPlaceNode(Node):
+    """ROS2 side of an Isaac Assist pick-place harness.
+
+    This node is intentionally small: it publishes a deterministic command
+    sequence on the topics described by scene_contract.json. Planner-backed
+    projects can replace _waypoints_from_contract with MoveIt/cuMotion output
+    while keeping the package and launch shape unchanged.
+    """
+
+    def __init__(self):
+        super().__init__("warehouse_pick_place_node")
+        self.declare_parameter("contract_path", "")
+        contract_path = self.get_parameter("contract_path").get_parameter_value().string_value
+        self.contract = self._load_contract(contract_path)
+        controller = self.contract.get("controller", {})
+        graph = controller.get("ros2_control_graph", {})
+        self.command_topic = graph.get("joint_commands_topic", "/isaac_joint_commands")
+        self.state_topic = graph.get("joint_states_topic", "/isaac_joint_states")
+        self.gripper_topic = controller.get("gripper_topic", "/isaac/robot/gripper_cmd")
+        self.command_pub = self.create_publisher(JointState, self.command_topic, 10)
+        self.gripper_pub = self.create_publisher(Float32, self.gripper_topic, 10)
+        self.state_sub = self.create_subscription(JointState, self.state_topic, self._on_joint_state, 10)
+        self.latest_state = None
+        self.step_index = 0
+        self.waypoints = self._waypoints_from_contract()
+        self.timer = self.create_timer(1.0, self._tick)
+        self.get_logger().info(
+            f"Publishing Franka harness commands to {self.command_topic}; listening on {self.state_topic}"
+        )
+
+    def _load_contract(self, contract_path):
+        if not contract_path:
+            return {}
+        path = Path(contract_path)
+        if not path.exists():
+            self.get_logger().warning(f"scene contract not found: {path}")
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _waypoints_from_contract(self):
+        return [
+            ("home_open", [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785], 0.04),
+            ("pre_pick", [0.15, -0.65, 0.05, -2.15, 0.0, 1.55, 0.70], 0.04),
+            ("grasp", [0.20, -0.50, 0.08, -2.05, 0.0, 1.45, 0.65], 0.0),
+            ("lift", [0.10, -0.85, 0.10, -2.25, 0.0, 1.65, 0.75], 0.0),
+            ("pre_drop", [-0.35, -0.60, -0.05, -2.00, 0.0, 1.45, 0.55], 0.0),
+            ("release", [-0.35, -0.60, -0.05, -2.00, 0.0, 1.45, 0.55], 0.04),
+            ("retreat", [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785], 0.04),
+        ]
+
+    def _on_joint_state(self, msg):
+        self.latest_state = msg
+
+    def _tick(self):
+        label, positions, gripper = self.waypoints[self.step_index]
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = list(PANDA_JOINTS)
+        msg.position = [float(value) for value in positions]
+        self.command_pub.publish(msg)
+        grip = Float32()
+        grip.data = float(gripper)
+        self.gripper_pub.publish(grip)
+        self.get_logger().info(f"sent {label}: gripper={gripper:.3f}")
+        self.step_index = (self.step_index + 1) % len(self.waypoints)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = WarehousePickPlaceNode()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+'''
+
+
+def _ros2_control_yaml(controller: Dict[str, Any]) -> str:
+    graph = controller.get("ros2_control_graph", {}) if isinstance(controller, dict) else {}
+    joint_states_topic = graph.get("joint_states_topic", "/isaac_joint_states")
+    joint_commands_topic = graph.get("joint_commands_topic", "/isaac_joint_commands")
+    controller_type = graph.get("controller_type", "joint_trajectory_controller")
+    return f"""controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    {controller_type}:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+{controller_type}:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100
+    action_monitor_rate: 20
+
+# The generated Isaac Assist scene publishes joint states on {joint_states_topic}
+# and subscribes to joint commands on {joint_commands_topic}.
+"""
+
+
+def _harness_readme(project_name: str, package_name: str, contract: Dict[str, Any]) -> str:
+    distro = contract.get("ros2", {}).get("ros_distro") or "jazzy"
+    issues = contract.get("precheck", {}).get("issues", [])
+    issue_text = "\n".join(f"- {issue}" for issue in issues) if issues else "- none"
+    return f"""# {project_name}
+
+Generated Isaac Assist ROS2 scene harness.
+
+## Runtime
+
+- Isaac profile: {contract.get("runtime", {}).get("profile")}
+- Isaac Sim: {contract.get("runtime", {}).get("isaac_sim_version")}
+- ROS2 distro: {distro}
+- ROS2 command topic: {contract.get("controller", {}).get("ros2_control_graph", {}).get("joint_commands_topic", "/isaac_joint_commands")}
+- ROS2 state topic: {contract.get("controller", {}).get("ros2_control_graph", {}).get("joint_states_topic", "/isaac_joint_states")}
+
+## Precheck
+
+{issue_text}
+
+## Build And Run
+
+```bash
+source /opt/ros/{distro}/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+ros2 launch {package_name} warehouse_pick_place.launch.py
+```
+
+The ROS2 node publishes a deterministic Franka command sequence for smoke
+testing the bridge. Replace the waypoint generator with MoveIt/cuMotion output
+when the live planner is available.
+"""
+
+
+def _run_harness_sh(package_name: str) -> str:
+    return f"""#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+if [[ -z "${{ROS_DISTRO:-}}" ]]; then
+    echo "ROS_DISTRO is not set. Source /opt/ros/<distro>/setup.bash first." >&2
+    exit 2
+fi
+colcon build --symlink-install
+source install/setup.bash
+ros2 launch {package_name} warehouse_pick_place.launch.py
+"""
 
 
 def _safe_name(value: str) -> str:
