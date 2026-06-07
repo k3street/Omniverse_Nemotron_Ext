@@ -204,7 +204,15 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                     "object_count": {"type": "integer"},
                     "workspace_root": {"type": "string"},
                     "build_scene": {"type": "boolean"},
+                    "build_dry_run": {
+                        "type": "boolean",
+                        "description": "Keep scene build as generated code without Kit RPC mutation. Defaults to true.",
+                    },
                     "launch_scene": {"type": "boolean"},
+                    "launch_dry_run": {
+                        "type": "boolean",
+                        "description": "Dry-run the Isaac launch command without starting Isaac. Defaults to dry_run.",
+                    },
                     "force_launch": {
                         "type": "boolean",
                         "description": "Launch even if ROS2/Isaac precheck reports issues.",
@@ -437,6 +445,8 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
     motion_backend = str(arguments.get("motion_backend") or "curobo").strip().lower()
     object_count = max(1, min(6, int(arguments.get("object_count") or 3)))
     dry_run = bool(arguments.get("dry_run", True))
+    build_dry_run = bool(arguments.get("build_dry_run", True))
+    launch_dry_run = bool(arguments.get("launch_dry_run", dry_run))
     build_scene = bool(arguments.get("build_scene", True))
     launch_scene = bool(arguments.get("launch_scene", False))
 
@@ -445,7 +455,7 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
         "description": description,
         "motion_backend": motion_backend,
         "object_count": object_count,
-        "dry_run": dry_run,
+        "dry_run": build_dry_run,
         "build": build_scene,
         "resolve_assets": True,
         "generate_controller_code": False,
@@ -462,7 +472,7 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
             launch_response = await launch_scene_in_isaac({
                 "session_id": session_id,
                 "workspace_root": arguments.get("workspace_root"),
-                "dry_run": dry_run,
+                "dry_run": launch_dry_run,
                 "wait": bool(arguments.get("wait", False)),
             })
 
@@ -807,10 +817,15 @@ def _franka_pick_scene_spec(
                     "path": "/World/ROS2ControlGraph",
                     "runtime_profile": "isaacsim-6.0",
                     "node_namespace": "isaacsim.ros2.nodes",
+                    "fallback_node_namespace": "isaacsim.ros2.bridge",
                     "joint_states_topic": "/isaac_joint_states",
                     "joint_commands_topic": "/isaac_joint_commands",
                     "controller_type": "joint_trajectory_controller",
                     "profile": "franka_moveit2",
+                    "author_omnigraph": False,
+                    "omnigraph_policy": "defer_until_live_probe_passes",
+                    "connect_articulation_controller": False,
+                    "connection_policy": "safe_bridge_until_live_probe_passes",
                 },
             },
         },

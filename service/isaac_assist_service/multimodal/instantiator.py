@@ -724,6 +724,19 @@ def _controller_setup_code(spec: Any) -> str:
         graph_cfg = {}
     graph_path = str(graph_cfg.get("path") or "/World/ROS2ControlGraph")
     ros2_node_namespace = str(graph_cfg.get("node_namespace") or "isaacsim.ros2.nodes")
+    fallback_ros2_node_namespace = str(
+        graph_cfg.get("fallback_node_namespace") or "isaacsim.ros2.bridge"
+    )
+    author_ros2_omnigraph = bool(graph_cfg.get("author_omnigraph", False))
+    omnigraph_policy = str(
+        graph_cfg.get("omnigraph_policy") or "defer_until_live_probe_passes"
+    )
+    connect_articulation_controller = bool(
+        graph_cfg.get("connect_articulation_controller", False)
+    )
+    connection_policy = str(
+        graph_cfg.get("connection_policy") or "safe_bridge_until_live_probe_passes"
+    )
     controller_cfg = controller.get("articulation_controller") or {}
     if not isinstance(controller_cfg, dict):
         controller_cfg = {}
@@ -738,6 +751,13 @@ def _controller_setup_code(spec: Any) -> str:
 # Isaac Assist controller and ROS2 OmniGraph contract.  This block makes the
 # control pipeline visible in the stage even before an external MoveIt/cuMotion
 # process is attached.
+_author_ros2_omnigraph = {author_ros2_omnigraph!r}
+_ros2_omnigraph_policy = {omnigraph_policy!r}
+_connect_articulation_controller = {connect_articulation_controller!r}
+_controller_connection_policy = {connection_policy!r}
+_controller_connection_status = (
+    "connected" if _connect_articulation_controller else "deferred_live_probe"
+)
 try:
     _controller_plan = json.loads({controller_payload!r})
     _controller_scope = UsdGeom.Scope.Define(stage, "/World/IsaacAssistControllers").GetPrim()
@@ -748,6 +768,26 @@ try:
     _controller_prim = UsdGeom.Xform.Define(stage, {controller_path!r}).GetPrim()
     _controller_prim.SetCustomDataByKey("isaac_assist:kind", "articulation_controller")
     _controller_prim.SetCustomDataByKey("isaac_assist:robot_path", {robot_path!r})
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:connect_articulation_controller",
+        _connect_articulation_controller,
+    )
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:author_ros2_omnigraph",
+        _author_ros2_omnigraph,
+    )
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:ros2_omnigraph_policy",
+        _ros2_omnigraph_policy,
+    )
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:controller_connection_policy",
+        _controller_connection_policy,
+    )
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:controller_connection_status",
+        _controller_connection_status,
+    )
     _controller_prim.SetCustomDataByKey(
         "isaac_assist:controller_plan",
         json.dumps(_controller_plan, sort_keys=True),
@@ -760,58 +800,131 @@ try:
             "isaac_assist:articulation_controller",
             {controller_path!r},
         )
-    _ros_graph_prim = UsdGeom.Xform.Define(stage, {graph_path!r}).GetPrim()
-    _ros_graph_prim.SetCustomDataByKey("isaac_assist:kind", "ros2_control_omnigraph")
-    _ros_graph_prim.SetCustomDataByKey("isaac_assist:robot_path", {robot_path!r})
-    _ros_graph_prim.SetCustomDataByKey("isaac_assist:joint_states_topic", {joint_states_topic!r})
-    _ros_graph_prim.SetCustomDataByKey("isaac_assist:joint_commands_topic", {joint_commands_topic!r})
-    _ros_graph_prim.SetCustomDataByKey("isaac_assist:controller_path", {controller_path!r})
     print("[Isaac Assist] articulation controller marker:", {controller_path!r})
 except Exception as _exc:
     print("[Isaac Assist] controller marker warning:", _exc)
 
 try:
+    if not _author_ros2_omnigraph:
+        raise RuntimeError("ROS2 OmniGraph authoring deferred until live probe passes")
     import omni.graph.core as og
     _keys = og.Controller.Keys
+    _ros2_ns = {ros2_node_namespace!r}
+    _candidate_ros2_namespaces = []
+    for _candidate_ns in (
+        {ros2_node_namespace!r},
+        {fallback_ros2_node_namespace!r},
+        "isaacsim.ros2.nodes",
+        "isaacsim.ros2.bridge",
+    ):
+        if _candidate_ns and _candidate_ns not in _candidate_ros2_namespaces:
+            _candidate_ros2_namespaces.append(_candidate_ns)
+    try:
+        _registered_nodes = set(str(_node) for _node in og.get_registered_nodes())
+        if f"{{_ros2_ns}}.ROS2Context" not in _registered_nodes:
+            for _candidate_ns in _candidate_ros2_namespaces:
+                if f"{{_candidate_ns}}.ROS2Context" in _registered_nodes:
+                    _ros2_ns = _candidate_ns
+                    break
+    except Exception as _ns_exc:
+        print("[Isaac Assist] ROS2 node namespace discovery warning:", _ns_exc)
+    _existing_graph_prim = stage.GetPrimAtPath({graph_path!r})
+    if _existing_graph_prim and _existing_graph_prim.IsValid():
+        stage.RemovePrim(Sdf.Path({graph_path!r}))
+    _create_nodes = [
+        ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+        ("ROS2Context", f"{{_ros2_ns}}.ROS2Context"),
+        ("PublishJointState", f"{{_ros2_ns}}.ROS2PublishJointState"),
+        ("SubscribeJointState", f"{{_ros2_ns}}.ROS2SubscribeJointState"),
+    ]
+    _connections = [
+        ("OnPlaybackTick.outputs:tick", "PublishJointState.inputs:execIn"),
+        ("OnPlaybackTick.outputs:tick", "SubscribeJointState.inputs:execIn"),
+        ("ROS2Context.outputs:context", "PublishJointState.inputs:context"),
+        ("ROS2Context.outputs:context", "SubscribeJointState.inputs:context"),
+    ]
+    _set_values = [
+        ("PublishJointState.inputs:targetPrim", {robot_path!r}),
+        ("PublishJointState.inputs:topicName", {joint_states_topic!r}),
+        ("SubscribeJointState.inputs:topicName", {joint_commands_topic!r}),
+    ]
+    if _connect_articulation_controller:
+        _create_nodes.append(
+            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController")
+        )
+        _connections.extend([
+            ("OnPlaybackTick.outputs:tick", "ArticulationController.inputs:execIn"),
+            ("SubscribeJointState.outputs:jointNames", "ArticulationController.inputs:jointNames"),
+            ("SubscribeJointState.outputs:positionCommand", "ArticulationController.inputs:positionCommand"),
+            ("SubscribeJointState.outputs:velocityCommand", "ArticulationController.inputs:velocityCommand"),
+            ("SubscribeJointState.outputs:effortCommand", "ArticulationController.inputs:effortCommand"),
+        ])
+        _set_values.append(("ArticulationController.inputs:targetPrim", {robot_path!r}))
     og.Controller.edit(
         {graph_path!r},
         {{
-            _keys.CREATE_NODES: [
-                ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-                ("ROS2Context", {f"{ros2_node_namespace}.ROS2Context"!r}),
-                ("PublishJointState", {f"{ros2_node_namespace}.ROS2PublishJointState"!r}),
-                ("SubscribeJointState", {f"{ros2_node_namespace}.ROS2SubscribeJointState"!r}),
-                ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
-            ],
-            _keys.CONNECT: [
-                ("OnPlaybackTick.outputs:tick", "PublishJointState.inputs:execIn"),
-                ("OnPlaybackTick.outputs:tick", "SubscribeJointState.inputs:execIn"),
-                ("OnPlaybackTick.outputs:tick", "ArticulationController.inputs:execIn"),
-                ("ROS2Context.outputs:context", "PublishJointState.inputs:context"),
-                ("ROS2Context.outputs:context", "SubscribeJointState.inputs:context"),
-                ("SubscribeJointState.outputs:jointNames", "ArticulationController.inputs:jointNames"),
-                ("SubscribeJointState.outputs:positionCommand", "ArticulationController.inputs:positionCommand"),
-                ("SubscribeJointState.outputs:velocityCommand", "ArticulationController.inputs:velocityCommand"),
-                ("SubscribeJointState.outputs:effortCommand", "ArticulationController.inputs:effortCommand"),
-            ],
-            _keys.SET_VALUES: [
-                ("PublishJointState.inputs:targetPrim", {robot_path!r}),
-                ("PublishJointState.inputs:topicName", {joint_states_topic!r}),
-                ("SubscribeJointState.inputs:topicName", {joint_commands_topic!r}),
-                ("ArticulationController.inputs:targetPrim", {robot_path!r}),
-            ],
+            _keys.CREATE_NODES: _create_nodes,
+            _keys.CONNECT: _connections,
+            _keys.SET_VALUES: _set_values,
         }},
     )
     _graph_prim = stage.GetPrimAtPath({graph_path!r})
     if _graph_prim and _graph_prim.IsValid():
         _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_status", "created")
+        _graph_prim.SetCustomDataByKey("isaac_assist:kind", "ros2_control_omnigraph")
+        _graph_prim.SetCustomDataByKey("isaac_assist:robot_path", {robot_path!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:joint_states_topic", {joint_states_topic!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:joint_commands_topic", {joint_commands_topic!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:controller_path", {controller_path!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:ros2_node_namespace", _ros2_ns)
+        _graph_prim.SetCustomDataByKey("isaac_assist:author_ros2_omnigraph", _author_ros2_omnigraph)
+        _graph_prim.SetCustomDataByKey("isaac_assist:ros2_omnigraph_policy", _ros2_omnigraph_policy)
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:connect_articulation_controller",
+            _connect_articulation_controller,
+        )
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:controller_connection_policy",
+            _controller_connection_policy,
+        )
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:controller_connection_status",
+            _controller_connection_status,
+        )
     print("[Isaac Assist] ROS2 control OmniGraph:", {graph_path!r})
 except Exception as _exc:
+    _omnigraph_status = (
+        "deferred_live_probe" if not _author_ros2_omnigraph else "fallback_marker"
+    )
     _graph_prim = stage.GetPrimAtPath({graph_path!r})
+    if not (_graph_prim and _graph_prim.IsValid()):
+        _graph_prim = UsdGeom.Xform.Define(stage, {graph_path!r}).GetPrim()
     if _graph_prim and _graph_prim.IsValid():
-        _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_status", "fallback_marker")
+        _graph_prim.SetCustomDataByKey("isaac_assist:kind", "ros2_control_omnigraph")
+        _graph_prim.SetCustomDataByKey("isaac_assist:robot_path", {robot_path!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:joint_states_topic", {joint_states_topic!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:joint_commands_topic", {joint_commands_topic!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:controller_path", {controller_path!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_status", _omnigraph_status)
         _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_error", str(_exc))
-    print("[Isaac Assist] ROS2 control OmniGraph warning:", _exc)
+        _graph_prim.SetCustomDataByKey("isaac_assist:author_ros2_omnigraph", _author_ros2_omnigraph)
+        _graph_prim.SetCustomDataByKey("isaac_assist:ros2_omnigraph_policy", _ros2_omnigraph_policy)
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:connect_articulation_controller",
+            _connect_articulation_controller,
+        )
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:controller_connection_policy",
+            _controller_connection_policy,
+        )
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:controller_connection_status",
+            _omnigraph_status,
+        )
+    if _omnigraph_status == "deferred_live_probe":
+        print("[Isaac Assist] ROS2 control contract marker:", {graph_path!r})
+    else:
+        print("[Isaac Assist] ROS2 control OmniGraph warning:", _exc)
 """
 
 

@@ -64,8 +64,13 @@ def test_create_franka_physics_pick_scene_builds_controller_plan(monkeypatch, tm
     assert ros_graph["path"] == "/World/ROS2ControlGraph"
     assert ros_graph["runtime_profile"] == "isaacsim-6.0"
     assert ros_graph["node_namespace"] == "isaacsim.ros2.nodes"
+    assert ros_graph["fallback_node_namespace"] == "isaacsim.ros2.bridge"
     assert ros_graph["joint_states_topic"] == "/isaac_joint_states"
     assert ros_graph["joint_commands_topic"] == "/isaac_joint_commands"
+    assert ros_graph["author_omnigraph"] is False
+    assert ros_graph["omnigraph_policy"] == "defer_until_live_probe_passes"
+    assert ros_graph["connect_articulation_controller"] is False
+    assert ros_graph["connection_policy"] == "safe_bridge_until_live_probe_passes"
     assert any(obj["name"] == "Franka" for obj in spec["objects"])
     assert any(
         obj["metadata"].get("physics") == "dynamic_rigid_body"
@@ -75,9 +80,14 @@ def test_create_franka_physics_pick_scene_builds_controller_plan(monkeypatch, tm
     assert "/World/IsaacAssistControllers/FrankaPickPlaceController" in generated_code
     assert "/World/ROS2ControlGraph" in generated_code
     assert "isaacsim.core.nodes.IsaacArticulationController" in generated_code
-    assert "isaacsim.ros2.nodes.ROS2PublishJointState" in generated_code
-    assert "isaacsim.ros2.nodes.ROS2SubscribeJointState" in generated_code
-    assert "isaacsim.ros2.bridge." not in generated_code
+    assert "isaacsim.ros2.nodes" in generated_code
+    assert "isaacsim.ros2.bridge" in generated_code
+    assert "ROS2PublishJointState" in generated_code
+    assert "ROS2SubscribeJointState" in generated_code
+    assert "isaac_assist:author_ros2_omnigraph" in generated_code
+    assert "defer_until_live_probe_passes" in generated_code
+    assert "isaac_assist:connect_articulation_controller" in generated_code
+    assert "deferred_live_probe" in generated_code
     assert controller["live_controller_tool"] == "setup_pick_place_controller"
     assert controller["controller_code_generated"] is False
     assert controller["controller_args"]["source_paths"] == [
@@ -164,6 +174,9 @@ def test_create_ros2_scene_harness_writes_project_stack(monkeypatch, tmp_path):
     contract = json.loads(contract_path.read_text())
     assert contract["schema_version"] == "isaac_assist.ros2_scene_harness.v1"
     assert contract["controller"]["ros2_control_graph"]["node_namespace"] == "isaacsim.ros2.nodes"
+    assert contract["controller"]["ros2_control_graph"]["fallback_node_namespace"] == "isaacsim.ros2.bridge"
+    assert contract["controller"]["ros2_control_graph"]["author_omnigraph"] is False
+    assert contract["controller"]["ros2_control_graph"]["connect_articulation_controller"] is False
     assert contract["controller"]["source_paths"] == ["/World/PickObject_1", "/World/PickObject_2"]
     assert "ros2 launch warehouse_franka_demo_harness warehouse_pick_place.launch.py" in "\n".join(response["next_commands"])
 

@@ -290,6 +290,10 @@ def test_instantiator_authors_controller_and_ros_graph_markers():
                     "node_namespace": "isaacsim.ros2.nodes",
                     "joint_states_topic": "/isaac_joint_states",
                     "joint_commands_topic": "/isaac_joint_commands",
+                    "author_omnigraph": False,
+                    "omnigraph_policy": "defer_until_live_probe_passes",
+                    "connect_articulation_controller": False,
+                    "connection_policy": "safe_bridge_until_live_probe_passes",
                 },
             },
         }
@@ -301,8 +305,13 @@ def test_instantiator_authors_controller_and_ros_graph_markers():
     assert "isaac_assist:kind\", \"articulation_controller" in result.generated_code
     assert "isaac_assist:kind\", \"ros2_control_omnigraph" in result.generated_code
     assert "isaacsim.core.nodes.IsaacArticulationController" in result.generated_code
-    assert "isaacsim.ros2.nodes.ROS2Context" in result.generated_code
-    assert "isaacsim.ros2.nodes.ROS2PublishJointState" in result.generated_code
-    assert "isaacsim.ros2.nodes.ROS2SubscribeJointState" in result.generated_code
-    assert "isaacsim.ros2.bridge." not in result.generated_code
+    assert "isaacsim.ros2.nodes" in result.generated_code
+    assert "isaacsim.ros2.bridge" in result.generated_code
+    assert "ROS2Context" in result.generated_code
+    assert "ROS2PublishJointState" in result.generated_code
+    assert "ROS2SubscribeJointState" in result.generated_code
+    assert "isaac_assist:author_ros2_omnigraph" in result.generated_code
+    assert "defer_until_live_probe_passes" in result.generated_code
+    assert "isaac_assist:connect_articulation_controller" in result.generated_code
+    assert "deferred_live_probe" in result.generated_code
     compile(result.generated_code, "generated_controller_scene.py", "exec")
