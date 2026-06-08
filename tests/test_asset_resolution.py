@@ -160,7 +160,9 @@ def test_instantiate_dry_run_references_reviewed_palette_assets(monkeypatch, tmp
     result = asyncio.run(instantiate(Spec(), dry_run=True))
 
     assert result.status == "dry_run"
-    assert "AddReference('Isaac/" in result.generated_code
+    assert "source_class='franka_panda' -> prim_class='Cube'" in result.generated_code
+    assert "GetReferences().AddReference" not in result.generated_code
+    assert "isaac_assist:proxy', True" in result.generated_code
     assert "franka_panda" in result.generated_code
 
 
@@ -424,7 +426,7 @@ def test_instantiate_dry_run_enables_physics_scene_ground_and_workpiece_body(mon
     assert "_apply_collision(prim.GetPrim(), '/World/Fruit')" in result.generated_code
     assert "_apply_rigid_body(prim.GetPrim(), 0.05)" in result.generated_code
     franka_section = result.generated_code.split(
-        "prim = UsdGeom.Xform.Define(stage, '/World/Franka')", 1
+        "prim = UsdGeom.Cube.Define(stage, '/World/Franka')", 1
     )[1].split("# Isaac Assist live relation readback", 1)[0]
     assert "_apply_rigid_body(prim.GetPrim()" not in franka_section
 
@@ -464,7 +466,7 @@ def test_build_route_returns_asset_resolution_summary(tmp_path):
         assert response["instantiation"]["status"] == "dry_run"
         assert response["instantiation"]["dry_run"] is True
         generated = response["instantiation"]["generated_code"]
-        assert "AddReference(" in generated
+        assert "isaac_assist:asset_ref" in generated
         assert "franka" in generated.lower()
         assert "UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')" in generated
         assert "UsdGeom.Cube.Define(stage, '/World/GroundPlane')" in generated

@@ -135,6 +135,56 @@ class AssistServiceClient:
         except Exception as e:
             return {"error": str(e)}
 
+    async def log_execution(self, code: str, success: bool, output: str = "", user_message: str = "") -> dict:
+        """Record an approved patch execution with the backend audit log."""
+        if not HAS_AIOHTTP:
+            return {"status": "skipped"}
+        url = f"{self.base_url}/api/v1/chat/log_execution"
+        payload = {
+            "session_id": self.session_id,
+            "code": code,
+            "success": success,
+            "output": output,
+            "user_message": user_message,
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    return {"error": f"HTTP {resp.status}"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def get_rendering_mode(self) -> dict:
+        """Return backend render stepping mode: fast or real."""
+        if not HAS_AIOHTTP:
+            return {"mode": "real", "error": "aiohttp missing"}
+        url = f"{self.base_url}/api/v1/settings/rendering_mode"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    return {"error": f"HTTP {resp.status}"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def set_rendering_mode(self, mode: str) -> dict:
+        """Set backend render stepping mode: fast or real."""
+        if not HAS_AIOHTTP:
+            return {"mode": mode, "error": "aiohttp missing"}
+        url = f"{self.base_url}/api/v1/settings/rendering_mode"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.put(url, json={"mode": mode}) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    detail = await resp.text()
+                    return {"error": f"HTTP {resp.status}: {detail}"}
+        except Exception as e:
+            return {"error": str(e)}
+
     async def observe_viewport_canvas(
         self,
         prompt: str = "Reconstruct the current Isaac Sim viewport as a robotics floor plan.",

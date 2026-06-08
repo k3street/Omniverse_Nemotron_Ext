@@ -13,9 +13,13 @@ Scene, LiveKit Vision toggle) is preserved.
 """
 import omni.ui as ui
 import asyncio
+import ast
+import contextlib
+import io
 import logging
 import os
 import json
+import math
 import time
 import webbrowser
 from typing import Optional, Dict, List, Tuple
@@ -246,7 +250,10 @@ class ChatViewWindow(ui.Window):
         self._live_rows: Dict[str, Dict] = {}
         self._live_strip_visible = False
         self._spin_task: Optional[asyncio.Task] = None
+        self._patch_poll_task: Optional[asyncio.Task] = None
         self._destroyed = False
+        self._action_fingerprints = set()
+        self._tracked_bubbles: List[Dict] = []
 
         # Undo state (Phase 6). Bubbles eligible for undo, in
         # chronological order. Latest entry = the only one with a visible
@@ -269,17 +276,22 @@ class ChatViewWindow(ui.Window):
         self._model_popup: Optional[ui.Window] = None
         self._current_model_label: str = "?"
         self._scale_lbl: Optional[ui.Label] = None
+        self._rendering_mode = "real"
+        self._render_fast_btn = None
+        self._render_real_btn = None
         # Debounce: rapid A+/A- clicks coalesce into one apply task.
         self._scale_apply_task: Optional[asyncio.Task] = None
 
         self._build_ui()
         self.service.start_stream(self._on_sse_event)
         self._spin_task = asyncio.ensure_future(self._tick_loop())
+        self._patch_poll_task = asyncio.ensure_future(self._patch_poll_loop())
         # Pre-warm the slow paths that hit on first scale change:
         # carb settings flush to disk + omni.ui style-mutation layout pass.
         # Boot already takes seconds; user won't notice another ~100ms here,
         # but they'll thank us when A+/A- responds instantly later.
         asyncio.ensure_future(self._prewarm_scale_paths())
+        asyncio.ensure_future(self._refresh_rendering_mode())
 
     async def _prewarm_scale_paths(self):
         # Yield once so widget construction finishes before we mutate.
@@ -313,6 +325,46 @@ class ChatViewWindow(ui.Window):
         lbl = ui.Label(text, style=style, **kw)
         self._track_label(lbl, font_size)
         return lbl
+
+    def _estimate_text_lines(self, text: str, chars_per_line: int = 32) -> int:
+        """Conservative line estimate for Kit labels with word_wrap enabled."""
+        lines = 0
+        for raw in (text or " ").splitlines() or [" "]:
+            expanded = raw.replace("\t", "    ")
+            lines += max(1, int(math.ceil(len(expanded) / max(8, chars_per_line))))
+        return lines
+
+    def _bubble_height(self, text: str, *, extra_height: int = 0, min_height: int = 58) -> int:
+        line_height = int(round(12 * SCALE_STEPS[-1])) + 8
+        body_lines = self._estimate_text_lines(text)
+        return max(min_height, 58 + body_lines * line_height + extra_height)
+
+    def _track_bubble_height(self, widget, text: str, extra_height: int = 0, min_height: int = 58):
+        rec = {
+            "widget": widget,
+            "text": text,
+            "extra_height": extra_height,
+            "min_height": min_height,
+        }
+        self._tracked_bubbles.append(rec)
+        return rec
+
+    def _apply_bubble_heights(self):
+        survivors = []
+        for rec in self._tracked_bubbles:
+            widget = rec.get("widget")
+            try:
+                widget.height = ui.Pixel(
+                    self._bubble_height(
+                        rec.get("text", ""),
+                        extra_height=rec.get("extra_height", 0),
+                        min_height=rec.get("min_height", 58),
+                    )
+                )
+                survivors.append(rec)
+            except Exception:
+                pass
+        self._tracked_bubbles = survivors
 
     def _load_scale_index(self) -> int:
         if not self._settings:
@@ -393,6 +445,7 @@ class ChatViewWindow(ui.Window):
             except Exception:
                 pass
         self._scaled_labels = survivors
+        self._apply_bubble_heights()
 
     async def _apply_scale_to_all_async(self):
         """Same work as _apply_scale_to_all but yields to the asyncio
@@ -415,6 +468,7 @@ class ChatViewWindow(ui.Window):
             # pass and lets other async tasks (spinner tick, SSE) breathe.
             await asyncio.sleep(0)
         self._scaled_labels = survivors
+        self._apply_bubble_heights()
 
     def _open_scale_popup(self):
         """Small floating popup with [A-] [label] [A+] [Close]."""
@@ -489,12 +543,13 @@ class ChatViewWindow(ui.Window):
     # ═══════════════════════════════════════════════════════════════════════
     # Model switcher (M button)
     # ═══════════════════════════════════════════════════════════════════════
-    # Each entry: (label_shown_to_user, llm_mode, cloud_or_local_model_name)
-    # Free / cheap options first; high-cost models last so users notice.
+    # Each entry: (label_shown_to_user, llm_mode, model_name)
+    # Keep the local DeepSeek-compatible route first for this 5.1 workflow.
     _MODEL_OPTIONS = (
-        ("Gemini 3 Flash",          "cloud",     "gemini-3-flash-preview"),
-        ("Gemini 2.5 Flash",        "cloud",     "gemini-2.5-flash"),
-        ("Gemini 2.5 Pro",          "cloud",     "gemini-2.5-pro"),
+        ("DeepSeek V4 Pro",         "openai",    "deepseek-v4-pro"),
+        ("Gemini 3 Flash",          "google",    "gemini-3-flash-preview"),
+        ("Gemini 2.5 Flash",        "google",    "gemini-2.5-flash"),
+        ("Gemini 2.5 Pro",          "google",    "gemini-2.5-pro"),
         ("Kimi K2 (Moonshot)",      "moonshot",  "kimi-k2-0905-preview"),
         ("Claude Opus 4.7",         "anthropic", "claude-opus-4-7"),
         ("Claude Sonnet 4.6",       "anthropic", "claude-sonnet-4-6"),
@@ -532,12 +587,20 @@ class ChatViewWindow(ui.Window):
                         style={"font_size": self._sz(11)},
                     )
 
+    def _model_name_key(self, mode: str) -> str:
+        mode = (mode or "").lower()
+        if mode == "local":
+            return "LOCAL_MODEL_NAME"
+        if mode in ("google", "gemini", "cloud"):
+            return "GEMINI_MODEL_NAME"
+        return "CLOUD_MODEL_NAME"
+
     def _switch_model(self, mode: str, model_name: str, label: str):
-        """POST {LLM_MODE, CLOUD_MODEL_NAME or LOCAL_MODEL_NAME} to /settings/."""
+        """POST LLM mode + the provider-specific model key to /settings/."""
         import asyncio
         import aiohttp
         async def _do_switch():
-            key = "LOCAL_MODEL_NAME" if mode == "local" else "CLOUD_MODEL_NAME"
+            key = self._model_name_key(mode)
             settings = {"LLM_MODE": mode, key: model_name}
             url = "http://localhost:8000/api/v1/settings/"
             try:
@@ -728,6 +791,7 @@ class ChatViewWindow(ui.Window):
         with self.frame:
             with ui.VStack(spacing=4):
                 self._build_header()
+                self._build_command_bar()
                 self._build_chat_area()
                 self._build_live_strip()
                 self._build_chips()
@@ -758,6 +822,22 @@ class ChatViewWindow(ui.Window):
                 clicked_fn=self._open_scale_popup,
                 style={"font_size": 11},
                 tooltip="Text size",
+            )
+            self._render_fast_btn = ui.Button(
+                "Fast",
+                width=38,
+                height=22,
+                clicked_fn=lambda: self._set_rendering_mode("fast"),
+                style=self._render_button_style("fast"),
+                tooltip="Fast verification: step simulation without per-frame rendering",
+            )
+            self._render_real_btn = ui.Button(
+                "Real",
+                width=38,
+                height=22,
+                clicked_fn=lambda: self._set_rendering_mode("real"),
+                style=self._render_button_style("real"),
+                tooltip="Real rendering: render frames for WebRTC/viewport inspection",
             )
             self.btn_new = ui.Button(
                 "New",
@@ -800,6 +880,91 @@ class ChatViewWindow(ui.Window):
                 style={"font_size": 11},
                 tooltip="Switch LLM model / provider",
             )
+
+    def _render_button_style(self, mode: str):
+        active = self._rendering_mode == mode
+        return {
+            "font_size": 10,
+            "background_color": COL_NV_GREEN if active else 0xFF2A2E33,
+            "color": 0xFF000000 if active else COL_TEXT_DIM,
+            "border_radius": 4,
+        }
+
+    def _apply_rendering_mode_ui(self):
+        try:
+            if self._render_fast_btn:
+                self._render_fast_btn.style = self._render_button_style("fast")
+            if self._render_real_btn:
+                self._render_real_btn.style = self._render_button_style("real")
+        except Exception:
+            pass
+
+    async def _refresh_rendering_mode(self):
+        response = await self.service.get_rendering_mode()
+        mode = (response.get("mode") or "").lower()
+        if mode in ("fast", "real"):
+            self._rendering_mode = mode
+            self._apply_rendering_mode_ui()
+
+    def _set_rendering_mode(self, mode: str):
+        if mode not in ("fast", "real") or mode == self._rendering_mode:
+            return
+        previous = self._rendering_mode
+        self._rendering_mode = mode
+        self._apply_rendering_mode_ui()
+
+        async def _run():
+            response = await self.service.set_rendering_mode(mode)
+            if response.get("error"):
+                self._rendering_mode = previous
+                self._apply_rendering_mode_ui()
+                self._add_assistant_bubble(
+                    f"Rendering mode switch failed: {response.get('error')}",
+                    error=True,
+                )
+                return
+            self._rendering_mode = response.get("mode", mode)
+            self._apply_rendering_mode_ui()
+            self._add_assistant_bubble(
+                f"Rendering mode: {'real rendering' if self._rendering_mode == 'real' else 'fast verification'}"
+            )
+
+        asyncio.ensure_future(_run())
+
+    def _build_command_bar(self):
+        self.command_container = ui.ScrollingFrame(
+            height=34,
+            horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_AS_NEEDED,
+            vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF,
+        )
+        with self.command_container:
+            with ui.HStack(height=28, spacing=6):
+                ui.Spacer(width=2)
+                for label, prompt, tooltip in (
+                    ("Analyze", "Analyze the current Isaac Sim stage and list concrete issues.", "Analyze the current stage"),
+                    ("Inspect", "Inspect the selected prim and summarize the important properties.", "Inspect selected prim"),
+                    ("Fix", "Fix the most important issue you can detect, but ask before destructive changes.", "Ask for a fix plan"),
+                    ("Undo", "/undo", "Revert the last stage-mutating turn"),
+                    ("Help", "/help", "Show slash commands"),
+                ):
+                    ui.Button(
+                        label,
+                        height=24,
+                        clicked_fn=lambda p=prompt: self._run_command_prompt(p),
+                        style={
+                            "font_size": 10,
+                            "background_color": 0xFF22262B,
+                            "color": COL_TEXT,
+                        },
+                        tooltip=tooltip,
+                    )
+
+    def _run_command_prompt(self, prompt: str):
+        if self._turn_active:
+            self.input_field.model.set_value(prompt)
+            return
+        self.input_field.model.set_value(prompt)
+        self._submit_message()
 
     def _build_chat_area(self):
         self.scroll = ui.ScrollingFrame(
@@ -1061,6 +1226,327 @@ class ChatViewWindow(ui.Window):
             content = msg.get("content", "")
             if content:
                 self._add_assistant_bubble(content)
+        for action in response.get("actions_to_approve") or []:
+            self._add_action_card(action)
+
+    async def _patch_poll_loop(self):
+        """Drain Kit RPC's pending patch queue into visible approval cards."""
+        while not self._destroyed:
+            try:
+                from ..context.kit_rpc import pop_pending_patch
+                while True:
+                    patch = pop_pending_patch()
+                    if not patch:
+                        break
+                    if patch.get("auto_approve"):
+                        await self._execute_patch_and_report(patch, auto=True)
+                    else:
+                        self._add_action_card(patch)
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.warning(f"[ApprovalQueue] poll failed: {e}")
+            await asyncio.sleep(0.5)
+
+    def _action_fingerprint(self, action: dict) -> str:
+        code = (action.get("code") or "").strip()
+        desc = (action.get("description") or action.get("type") or "Patch").strip()
+        return f"{desc}\n{code[:2000]}"
+
+    def _copy_to_clipboard(self, text: str, label: str = "Content"):
+        text = text or ""
+        error = None
+        for copier in self._clipboard_copiers():
+            try:
+                copier(text)
+                self._add_assistant_bubble(f"{label} copied to clipboard.")
+                return
+            except Exception as e:
+                error = e
+        self._add_assistant_bubble(
+            f"Copy failed: {error or 'clipboard API unavailable'}",
+            error=True,
+        )
+
+    @staticmethod
+    def _clipboard_copiers():
+        try:
+            import omni.kit.clipboard as clipboard
+            yield clipboard.copy
+        except Exception:
+            pass
+        try:
+            import pyperclip
+            yield pyperclip.copy
+        except Exception:
+            pass
+
+    def _add_action_card(self, action: dict):
+        code = (action.get("code") or "").strip()
+        if not code:
+            return
+        fp = self._action_fingerprint(action)
+        if fp in self._action_fingerprints:
+            return
+        self._action_fingerprints.add(fp)
+
+        description = (action.get("description") or "Review generated stage patch").strip()
+        preview_lines = code.splitlines()
+        preview = "\n".join(preview_lines[:5])
+        if len(preview_lines) > 5:
+            preview += f"\n... {len(preview_lines) - 5} more line(s)"
+        card_text = f"{description}\n{preview}"
+        card_height = self._bubble_height(card_text, extra_height=72, min_height=146)
+        body_height = max(34, self._estimate_text_lines(card_text) * (int(round(11 * SCALE_STEPS[-1])) + 7))
+        refs: Dict = {"action": action, "state": "pending"}
+
+        with self.chat_layout:
+            with ui.ZStack(height=card_height) as card:
+                ui.Rectangle(
+                    style={
+                        "background_color": 0xFF24282D,
+                        "border_radius": 6,
+                    }
+                )
+                with ui.VStack(spacing=4):
+                    ui.Spacer(height=6)
+                    with ui.HStack(height=16):
+                        ui.Spacer(width=8)
+                        refs["title_lbl"] = self._L(
+                            "Action requires approval",
+                            font_size=10,
+                            width=0,
+                            style={"color": COL_AMBER},
+                        )
+                        ui.Spacer()
+                    with ui.HStack(height=body_height):
+                        ui.Spacer(width=8)
+                        self._L(
+                            card_text,
+                            font_size=11,
+                            word_wrap=True,
+                            style={"color": COL_TEXT},
+                            tooltip=code[:1200],
+                        )
+                        ui.Spacer(width=8)
+                    with ui.HStack(height=28, spacing=6):
+                        ui.Spacer(width=8)
+                        refs["approve_btn"] = ui.Button(
+                            "Approve",
+                            width=78,
+                            height=24,
+                            clicked_fn=lambda r=refs: self._on_approve_action(r),
+                            style={
+                                "font_size": 11,
+                                "background_color": COL_NV_GREEN,
+                                "color": 0xFF000000,
+                            },
+                            tooltip="Execute this patch in Isaac Sim",
+                        )
+                        refs["reject_btn"] = ui.Button(
+                            "Reject",
+                            width=68,
+                            height=24,
+                            clicked_fn=lambda r=refs: self._on_reject_action(r),
+                            style={
+                                "font_size": 11,
+                                "background_color": 0xFF3A3E43,
+                                "color": COL_TEXT,
+                            },
+                            tooltip="Dismiss this action without running it",
+                        )
+                        refs["code_btn"] = ui.Button(
+                            "Code",
+                            width=56,
+                            height=24,
+                            clicked_fn=lambda a=action: self._show_action_code(a),
+                            style={"font_size": 11},
+                            tooltip="Render the generated Python patch in chat",
+                        )
+                        refs["copy_btn"] = ui.Button(
+                            "Copy",
+                            width=58,
+                            height=24,
+                            clicked_fn=lambda c=code: self._copy_to_clipboard(c, "Patch code"),
+                            style={"font_size": 11},
+                            tooltip="Copy the generated Python patch",
+                        )
+                        ui.Spacer()
+                    ui.Spacer(height=4)
+        refs["card"] = card
+        self._track_bubble_height(card, card_text, extra_height=72, min_height=146)
+        self._scroll_to_bottom()
+
+    def _on_reject_action(self, refs: dict):
+        refs["state"] = "rejected"
+        for key in ("approve_btn", "reject_btn"):
+            btn = refs.get(key)
+            if btn:
+                btn.enabled = False
+        if refs.get("title_lbl"):
+            refs["title_lbl"].text = "Action rejected"
+            refs["title_lbl"].style = {"color": COL_TEXT_DIM, "font_size": self._sz(10)}
+
+    def _on_approve_action(self, refs: dict):
+        if refs.get("state") != "pending":
+            return
+        refs["state"] = "running"
+        btn = refs.get("approve_btn")
+        if btn:
+            btn.text = "Running..."
+            btn.enabled = False
+        reject_btn = refs.get("reject_btn")
+        if reject_btn:
+            reject_btn.enabled = False
+        if refs.get("title_lbl"):
+            refs["title_lbl"].text = "Executing approved action..."
+        asyncio.ensure_future(self._approve_action_async(refs))
+
+    async def _approve_action_async(self, refs: dict):
+        result = await self._execute_patch_and_report(refs.get("action") or {}, auto=False)
+        ok = bool(result.get("success"))
+        refs["state"] = "done" if ok else "failed"
+        btn = refs.get("approve_btn")
+        if btn:
+            btn.text = "Done" if ok else "Failed"
+            btn.style = {
+                "font_size": 11,
+                "background_color": COL_NV_GREEN if ok else COL_RED,
+                "color": 0xFF000000 if ok else COL_TEXT,
+            }
+        if refs.get("title_lbl"):
+            refs["title_lbl"].text = "Action executed" if ok else "Action failed"
+            refs["title_lbl"].style = {
+                "color": COL_NV_GREEN if ok else COL_RED,
+                "font_size": self._sz(10),
+            }
+
+    async def _execute_patch_and_report(self, action: dict, auto: bool = False) -> dict:
+        code = (action.get("code") or "").strip()
+        desc = action.get("description") or "Approved patch"
+        output_buf = io.StringIO()
+        success = False
+        if not code:
+            return {"success": False, "output": "No code provided"}
+        try:
+            exec_code, normalized = self._prepare_approved_patch_code(code)
+            if normalized:
+                output_buf.write("[Isaac Assist] normalized duplicate-safe USD xform ops before execution.\n")
+            with contextlib.redirect_stdout(output_buf), contextlib.redirect_stderr(output_buf):
+                exec_globals = {"__builtins__": __builtins__, "__name__": "__isaac_assist_patch__"}
+                exec(exec_code, exec_globals)
+            success = True
+        except Exception as e:
+            output_buf.write(f"\nError: {e}")
+        output = output_buf.getvalue()
+        try:
+            await self.service.log_execution(code, success, output, user_message=desc)
+        except Exception as e:
+            logger.warning(f"[ApprovalQueue] log_execution failed: {e}")
+        if auto:
+            self._add_assistant_bubble(
+                f"Auto-executed action: {desc}\nStatus: {'ok' if success else 'failed'}"
+                + (f"\n{output.strip()[:500]}" if output.strip() else ""),
+                error=not success,
+            )
+        else:
+            self._add_assistant_bubble(
+                f"Approved action {'completed' if success else 'failed'}: {desc}"
+                + (f"\n{output.strip()[:500]}" if output.strip() else ""),
+                error=not success,
+            )
+        return {"success": success, "output": output}
+
+    class _UsdXformSetTransformer(ast.NodeTransformer):
+        _OP_NAMES = {
+            "AddTranslateOp": "xformOp:translate",
+            "AddScaleOp": "xformOp:scale",
+            "AddRotateXYZOp": "xformOp:rotateXYZ",
+            "AddRotateXOp": "xformOp:rotateX",
+            "AddRotateYOp": "xformOp:rotateY",
+            "AddRotateZOp": "xformOp:rotateZ",
+            "AddOrientOp": "xformOp:orient",
+            "AddTransformOp": "xformOp:transform",
+        }
+
+        def __init__(self):
+            super().__init__()
+            self.changed = False
+
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            if not isinstance(node.func, ast.Attribute) or node.func.attr != "Set":
+                return node
+            add_call = node.func.value
+            if not isinstance(add_call, ast.Call):
+                return node
+            add_func = add_call.func
+            if not isinstance(add_func, ast.Attribute):
+                return node
+            op_name = self._OP_NAMES.get(add_func.attr)
+            if not op_name:
+                return node
+            if add_call.args or add_call.keywords or len(node.args) != 1 or node.keywords:
+                return node
+            self.changed = True
+            replacement = ast.Call(
+                func=ast.Name(id="_ia_set_or_add_xform_op", ctx=ast.Load()),
+                args=[add_func.value, ast.Constant(op_name), node.args[0]],
+                keywords=[],
+            )
+            return ast.copy_location(replacement, node)
+
+    @staticmethod
+    def _approved_patch_helper_source() -> str:
+        return """
+def _ia_set_or_add_xform_op(xformable, op_name, value):
+    from pxr import UsdGeom
+    prim = xformable.GetPrim() if hasattr(xformable, "GetPrim") else xformable
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpName() == op_name:
+            op.Set(value)
+            return op
+    if op_name == "xformOp:translate":
+        op = xf.AddTranslateOp()
+    elif op_name == "xformOp:scale":
+        op = xf.AddScaleOp()
+    elif op_name == "xformOp:rotateXYZ":
+        op = xf.AddRotateXYZOp()
+    elif op_name == "xformOp:rotateX":
+        op = xf.AddRotateXOp()
+    elif op_name == "xformOp:rotateY":
+        op = xf.AddRotateYOp()
+    elif op_name == "xformOp:rotateZ":
+        op = xf.AddRotateZOp()
+    elif op_name == "xformOp:orient":
+        op = xf.AddOrientOp()
+    elif op_name == "xformOp:transform":
+        op = xf.AddTransformOp()
+    else:
+        raise ValueError(f"unsupported xform op: {op_name}")
+    op.Set(value)
+    return op
+""".strip()
+
+    def _prepare_approved_patch_code(self, code: str) -> Tuple[str, bool]:
+        try:
+            tree = ast.parse(code)
+            transformer = self._UsdXformSetTransformer()
+            tree = transformer.visit(tree)
+            if not transformer.changed:
+                return code, False
+            ast.fix_missing_locations(tree)
+            return f"{self._approved_patch_helper_source()}\n\n{ast.unparse(tree)}", True
+        except Exception as e:
+            logger.warning(f"[ApprovalQueue] xform normalization skipped: {e}")
+            return code, False
+
+    def _show_action_code(self, action: dict):
+        code = (action.get("code") or "").strip()
+        desc = action.get("description") or "Generated patch"
+        self._add_assistant_bubble(f"{desc}\n\n{code}")
+        self._scroll_to_bottom()
 
     # ═══════════════════════════════════════════════════════════════════════
     # SSE event router
@@ -1394,6 +1880,24 @@ class ChatViewWindow(ui.Window):
                     tooltip=full_paths,
                 )
                 ui.Spacer()
+        self._set_bubble_extra_height(bubble, max(bubble.get("extra_height", 0), 24))
+
+    def _set_bubble_extra_height(self, bubble: dict, extra_height: int):
+        bubble["extra_height"] = extra_height
+        rec = bubble.get("height_rec")
+        if not rec:
+            return
+        rec["extra_height"] = extra_height
+        try:
+            rec["widget"].height = ui.Pixel(
+                self._bubble_height(
+                    rec.get("text", ""),
+                    extra_height=extra_height,
+                    min_height=rec.get("min_height", 58),
+                )
+            )
+        except Exception:
+            pass
 
     def _on_connection_state(self, state):
         # Cancel any in-flight pulse before switching state, so a previous
@@ -1636,15 +2140,12 @@ class ChatViewWindow(ui.Window):
         asyncio.ensure_future(_do())
 
     def _add_user_bubble(self, text: str):
-        # Bubble auto-fits content height. Pattern: ZStack(height=0) over
-        # Rectangle + VStack(margin) → ZStack sizes to VStack's content,
-        # Rectangle fills the ZStack as background. Without height=0 the
-        # ZStack defaults to fractional fill and the bubble grows to
-        # consume the entire scroll area when there are few messages.
+        bubble_height = self._bubble_height(text)
+        body_height = max(20, self._estimate_text_lines(text) * (int(round(12 * SCALE_STEPS[-1])) + 8))
         with self.chat_layout:
-            with ui.HStack(height=0):
+            with ui.HStack(height=bubble_height) as bubble_outer:
                 ui.Spacer(width=24)  # right-bias so user msgs are visually distinct
-                with ui.ZStack(height=0):
+                with ui.ZStack(height=bubble_height):
                     ui.Rectangle(
                         style={"background_color": COL_BG_USER, "border_radius": 6}
                     )
@@ -1660,6 +2161,19 @@ class ChatViewWindow(ui.Window):
                             )
                             ui.Spacer()
                             ui.Button(
+                                "Copy",
+                                width=40,
+                                height=14,
+                                clicked_fn=lambda t=text: self._copy_to_clipboard(t, "Message"),
+                                style={
+                                    "color": COL_TEXT_SUBTLE,
+                                    "font_size": 10,
+                                    "background_color": 0x00000000,
+                                },
+                                tooltip="Copy this message",
+                            )
+                            ui.Spacer(width=4)
+                            ui.Button(
                                 "R",
                                 width=18,
                                 height=14,
@@ -1672,7 +2186,7 @@ class ChatViewWindow(ui.Window):
                                 tooltip="Re-run this prompt",
                             )
                             ui.Spacer(width=4)
-                        with ui.HStack(height=0):
+                        with ui.HStack(height=body_height):
                             ui.Spacer(width=8)
                             self._L(
                                 text,
@@ -1682,16 +2196,17 @@ class ChatViewWindow(ui.Window):
                             )
                             ui.Spacer(width=8)
                         ui.Spacer(height=4)
+        self._track_bubble_height(bubble_outer, text)
 
     def _rerun(self, text: str):
         self.input_field.model.set_value(text)
 
     def _add_assistant_bubble(self, text: str, error: bool = False) -> Optional[Dict]:
-        # Same height=0 pattern as user bubble — fits content rather than
-        # filling the available scroll area.
+        bubble_height = self._bubble_height(text)
+        body_height = max(20, self._estimate_text_lines(text) * (int(round(12 * SCALE_STEPS[-1])) + 8))
         bubble_refs: Dict = {}
         with self.chat_layout:
-            with ui.ZStack(height=0):
+            with ui.ZStack(height=bubble_height) as bubble_outer:
                 # Border rect for pulse animation (sits behind body).
                 bubble_refs["border_rect"] = ui.Rectangle(
                     style={
@@ -1699,9 +2214,9 @@ class ChatViewWindow(ui.Window):
                         "border_radius": 8,
                     }
                 )
-                with ui.HStack(height=0):
+                with ui.HStack(height=bubble_height):
                     ui.Spacer(width=2)
-                    with ui.ZStack(height=0):
+                    with ui.ZStack(height=bubble_height):
                         # Inner bg — what dims when the bubble is undone (Phase 6).
                         bubble_refs["inner_bg_rect"] = ui.Rectangle(
                             style={
@@ -1720,7 +2235,20 @@ class ChatViewWindow(ui.Window):
                                     style={"color": COL_TEXT_SUBTLE},
                                 )
                                 ui.Spacer()
-                            with ui.HStack(height=0):
+                                ui.Button(
+                                    "Copy",
+                                    width=40,
+                                    height=14,
+                                    clicked_fn=lambda t=text: self._copy_to_clipboard(t, "Message"),
+                                    style={
+                                        "color": COL_TEXT_SUBTLE,
+                                        "font_size": 10,
+                                        "background_color": 0x00000000,
+                                    },
+                                    tooltip="Copy this message",
+                                )
+                                ui.Spacer(width=4)
+                            with ui.HStack(height=body_height):
                                 ui.Spacer(width=8)
                                 body_color = COL_RED if error else COL_TEXT
                                 bubble_refs["body_lbl"] = self._L(
@@ -1735,6 +2263,7 @@ class ChatViewWindow(ui.Window):
                             bubble_refs["diff_slot"] = ui.VStack(spacing=0, height=0)
                             ui.Spacer(height=4)
                     ui.Spacer(width=24)
+        bubble_refs["height_rec"] = self._track_bubble_height(bubble_outer, text)
         return bubble_refs
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -1783,6 +2312,7 @@ class ChatViewWindow(ui.Window):
             slot.height = ui.Pixel(20 + 26 + 4)
         except Exception:
             pass
+        self._set_bubble_extra_height(bubble, max(bubble.get("extra_height", 0), 54))
 
     def _undo_tooltip(self, diff: dict) -> str:
         a = diff.get("added_paths", [])
@@ -1993,6 +2523,8 @@ class ChatViewWindow(ui.Window):
             logger.warning(f"clear_chat failed: {e}")
         self.chat_layout.clear()
         self._undoable_bubbles = []
+        self._tracked_bubbles = []
+        self._action_fingerprints.clear()
         self._chips_shown = True
         self.chips_container.visible = True
         self.chips_container.height = ui.Pixel(22)
@@ -2057,6 +2589,8 @@ class ChatViewWindow(ui.Window):
             logger.warning(f"[IsaacAssist] start_stream failed: {e}")
         self.chat_layout.clear()
         self._undoable_bubbles = []
+        self._tracked_bubbles = []
+        self._action_fingerprints.clear()
         self._collapse_live_strip()
         # Re-show the empty-state chips after a wipe — feels like a fresh start.
         self._chips_shown = True
@@ -2115,6 +2649,8 @@ class ChatViewWindow(ui.Window):
         self._destroyed = True
         if self._spin_task:
             self._spin_task.cancel()
+        if self._patch_poll_task:
+            self._patch_poll_task.cancel()
         try:
             self.service.stop_stream()
         except Exception:

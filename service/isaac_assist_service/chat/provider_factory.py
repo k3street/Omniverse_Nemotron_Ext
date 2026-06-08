@@ -29,10 +29,13 @@ def get_llm_provider():
     if mode == "openai":
         _require(config.api_key_openai, "OPENAI_API_KEY", mode)
         _require_model(config.cloud_model_name, mode)
+        base_url = config.openai_api_base
+        if not base_url.endswith("/chat/completions"):
+            base_url = base_url.rstrip("/") + "/chat/completions"
         return OpenAICompatProvider(
             api_key=config.api_key_openai,
             model=config.cloud_model_name,
-            base_url=PROVIDER_URLS["openai"],
+            base_url=base_url,
         )
 
     if mode == "grok":
