@@ -103,6 +103,24 @@ export interface TypedObject {
     layer: string;
 }
 
+export interface LocalAssetOption {
+    label: string;
+    usd_ref: string;
+    source: string;
+    category: string;
+    relative_path: string;
+    tags: string[];
+    score: number;
+}
+
+export interface LocalAssetOptionsResponse {
+    status: "success";
+    roots: string[];
+    query: string;
+    count: number;
+    options: LocalAssetOption[];
+}
+
 export interface RoleBinding {
     object_id: string;
     source: BindingSource;

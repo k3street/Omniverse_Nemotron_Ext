@@ -160,10 +160,12 @@ class LayoutSpecCodeGenerator:
         if (sx, sy, sz) != (1.0, 1.0, 1.0):
             lines.append(f"_set_xform_scale(prim, {sx!r}, {sy!r}, {sz!r})")
 
+        physics = (extra_attrs or {}).get("_isaac_assist_physics", {})
+
         # Extra attributes
         if extra_attrs:
             for attr_name, attr_value in extra_attrs.items():
-                if attr_name == "asset_path":
+                if attr_name in {"asset_path", "_isaac_assist_physics"}:
                     continue  # already handled above
                 if attr_name == "custom_data" and isinstance(attr_value, dict):
                     for key, value in attr_value.items():
@@ -174,6 +176,13 @@ class LayoutSpecCodeGenerator:
                 lines.append(
                     f"prim.GetPrim().GetAttribute({attr_name!r}).Set({attr_value!r})"
                 )
+
+        if isinstance(physics, dict):
+            if physics.get("collision"):
+                lines.append(f"_apply_collision(prim.GetPrim(), {prim_path!r})")
+            if physics.get("rigid_body"):
+                mass_kg = float(physics.get("mass_kg") or 0.05)
+                lines.append(f"_apply_rigid_body(prim.GetPrim(), {mass_kg!r})")
 
         return "\n".join(lines)
 
@@ -193,7 +202,7 @@ class LayoutSpecCodeGenerator:
             header_lines = [
                 "import omni.usd",
                 "import json",
-                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd",
+                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd, UsdPhysics",
                 "stage = omni.usd.get_context().get_stage()",
                 "UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)",
                 "UsdGeom.SetStageMetersPerUnit(stage, 1.0)",
@@ -202,7 +211,7 @@ class LayoutSpecCodeGenerator:
         else:
             header_lines = [
                 "import json",
-                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd",
+                "from pxr import UsdGeom, UsdLux, Gf, Sdf, Usd, UsdPhysics",
                 "# stage must be provided by caller",
                 "UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)",
                 "UsdGeom.SetStageMetersPerUnit(stage, 1.0)",
@@ -221,6 +230,34 @@ class LayoutSpecCodeGenerator:
             "                attr.Set(Gf.Vec3f(sx, sy, sz))",
             "            return",
             "    UsdGeom.XformCommonAPI(prim).SetScale(Gf.Vec3f(sx, sy, sz))",
+            "",
+            "def _ensure_physics_scene():",
+            "    scene = UsdPhysics.Scene.Define(stage, '/World/PhysicsScene')",
+            "    scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(0.0, 0.0, -1.0))",
+            "    scene.CreateGravityMagnitudeAttr().Set(9.81)",
+            "    return scene",
+            "",
+            "def _apply_collision(prim, label):",
+            "    try:",
+            "        UsdPhysics.CollisionAPI.Apply(prim)",
+            "    except Exception as exc:",
+            "        print(f'[Isaac Assist] collision warning for {label}: {exc}')",
+            "",
+            "def _apply_rigid_body(prim, mass_kg):",
+            "    try:",
+            "        UsdPhysics.RigidBodyAPI.Apply(prim)",
+            "        mass_api = UsdPhysics.MassAPI.Apply(prim)",
+            "        mass_api.CreateMassAttr().Set(float(mass_kg))",
+            "    except Exception as exc:",
+            "        print(f'[Isaac Assist] rigid-body warning for {prim.GetPath()}: {exc}')",
+            "",
+            "_ensure_physics_scene()",
+            "ground = UsdGeom.Cube.Define(stage, '/World/GroundPlane')",
+            "UsdGeom.XformCommonAPI(ground).SetTranslate(Gf.Vec3d(0.0, 0.0, -0.025))",
+            "_set_xform_scale(ground, 10.0, 10.0, 0.025)",
+            "ground.GetPrim().SetCustomDataByKey('isaac_assist:object_class', 'groundplane')",
+            "ground.GetPrim().SetCustomDataByKey('isaac_assist:physics_enabled', True)",
+            "_apply_collision(ground.GetPrim(), '/World/GroundPlane')",
             "",
         ])
 
@@ -384,6 +421,24 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         "iiwa", "jaco7", "carter", "jetbot", "spot", "h1",
     }
 
+    _ROBOT_CLASSES = {
+        "franka_panda", "ur5e", "ur10e", "ur10",
+        "kinova_gen3", "carter", "jetbot", "spot", "h1",
+    }
+    _STATIC_COLLIDER_CLASSES = {
+        "table_small", "table_medium", "table_large",
+        "counter", "kitchen_counter", "bin", "bin_large", "shelf",
+        "conveyor", "conveyor_short", "conveyor_long", "rotary_table",
+        "kit_tray", "fence", "wall", "obstacle_box", "obstacle_cylinder",
+        "microwave", "plate", "bowl",
+    }
+    _RIGID_WORKPIECE_CLASSES = {
+        "cube", "cube_small", "cube_medium", "cube_large",
+        "cylinder_small", "cylinder_medium", "cylinder_large",
+        "sphere", "fruit", "apple", "orange", "hamburger",
+        "screw", "nut", "bolt",
+    }
+
     def _obj_get(obj: Any, attr: str, default: Any = None) -> Any:
         if isinstance(obj, dict):
             return obj.get(attr, default)
@@ -392,6 +447,12 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
     def _position3(value: Any) -> List[float]:
         if hasattr(value, "x") and hasattr(value, "y"):
             return [float(value.x), float(value.y), float(getattr(value, "z", 0.0))]
+        if isinstance(value, dict):
+            return [
+                float(value.get("x", 0.0)),
+                float(value.get("y", 0.0)),
+                float(value.get("z", 0.0)),
+            ]
         try:
             seq = list(value)
         except Exception:
@@ -399,6 +460,11 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         while len(seq) < 3:
             seq.append(0.0)
         return [float(seq[0]), float(seq[1]), float(seq[2])]
+
+    def _relation_xy(own_position: List[float], parent_position: List[float]) -> List[float]:
+        if abs(own_position[0]) > 1e-6 or abs(own_position[1]) > 1e-6:
+            return [own_position[0], own_position[1]]
+        return [parent_position[0], parent_position[1]]
 
     def _scale3(obj: Any, fallback: Any) -> List[float]:
         size = _obj_get(obj, "size", None)
@@ -511,7 +577,9 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         parent_height = _height_m(parent)
         child_height = _height_m(obj, scale)
         relation_kind = relation["relation"]
-        if relation_kind in {"on_top_of", "supports", "stacked_above", "mounted_to"}:
+        if relation_kind == "mounted_to" and _object_class(obj).lower() in _ROBOT_CLASSES:
+            z = parent_position[2] + _support_top_m(parent)
+        elif relation_kind in {"on_top_of", "supports", "stacked_above", "mounted_to"}:
             z = parent_position[2] + _support_top_m(parent) + child_height / 2.0
         elif relation_kind in {"inside", "contains"}:
             z = (
@@ -529,7 +597,8 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         else:
             z = own_position[2]
 
-        computed[obj_id] = [parent_position[0], parent_position[1], round(z, 4)]
+        xy = _relation_xy(own_position, parent_position)
+        computed[obj_id] = [xy[0], xy[1], round(z, 4)]
         return computed[obj_id]
 
     prims: List[Dict[str, Any]] = []
@@ -600,8 +669,23 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
             "_source_class": str(obj_class),
             "_source_name": object_name,
             "_source_id": object_id,
-            "extra_attrs": {"custom_data": custom_data},
+            "extra_attrs": {
+                "custom_data": custom_data,
+                "_isaac_assist_physics": {
+                    "collision": (
+                        str(obj_class).lower() in _STATIC_COLLIDER_CLASSES
+                        or str(obj_class).lower() in _RIGID_WORKPIECE_CLASSES
+                    ),
+                    "rigid_body": str(obj_class).lower() in _RIGID_WORKPIECE_CLASSES,
+                    "mass_kg": float(_metadata(obj).get("mass_kg") or 0.05),
+                },
+            },
         }
+        if str(obj_class).lower() in _ROBOT_CLASSES:
+            prim_desc["extra_attrs"]["_isaac_assist_physics"] = {
+                "collision": False,
+                "rigid_body": False,
+            }
         if normalized_class == "Reference" and asset_ref:
             prim_desc["extra_attrs"]["asset_path"] = str(asset_ref)
         prims.append(prim_desc)
@@ -630,12 +714,240 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         p.pop("_source_name", None)
     body = generator.generate_full_script(prims)
     verification = verify_relation_geometry(spec)
+    controller_setup = _controller_setup_code(spec)
     live_verifier = _live_relation_verifier_code(verification)
     comments = "\n".join(
         part for part in (source_comments, relation_comments, diagnostic_comments)
         if part
     )
-    return header_comment + (comments + "\n" if comments else "") + body + "\n\n" + live_verifier
+    return (
+        header_comment
+        + (comments + "\n" if comments else "")
+        + body
+        + "\n\n"
+        + controller_setup
+        + "\n\n"
+        + live_verifier
+    )
+
+
+def _controller_setup_code(spec: Any) -> str:
+    """Return Kit-executable code that authors controller and ROS graph markers."""
+    parameters = getattr(spec, "parameters", None) or {}
+    if not isinstance(parameters, dict):
+        return ""
+    controller = parameters.get("controller") or {}
+    if not isinstance(controller, dict) or not controller:
+        return ""
+
+    controller_payload = json.dumps(controller, sort_keys=True)
+    graph_cfg = controller.get("ros2_control_graph") or {}
+    if not isinstance(graph_cfg, dict):
+        graph_cfg = {}
+    graph_path = str(graph_cfg.get("path") or "/World/ROS2ControlGraph")
+    ros2_node_namespace = str(graph_cfg.get("node_namespace") or "isaacsim.ros2.nodes")
+    fallback_ros2_node_namespace = str(
+        graph_cfg.get("fallback_node_namespace") or "isaacsim.ros2.bridge"
+    )
+    author_ros2_omnigraph = bool(graph_cfg.get("author_omnigraph", False))
+    omnigraph_policy = str(
+        graph_cfg.get("omnigraph_policy") or "defer_until_live_probe_passes"
+    )
+    connect_articulation_controller = bool(
+        graph_cfg.get("connect_articulation_controller", False)
+    )
+    connection_policy = str(
+        graph_cfg.get("connection_policy") or "safe_bridge_until_live_probe_passes"
+    )
+    controller_cfg = controller.get("articulation_controller") or {}
+    if not isinstance(controller_cfg, dict):
+        controller_cfg = {}
+    controller_path = str(
+        controller_cfg.get("path") or "/World/IsaacAssistControllers/FrankaPickPlaceController"
+    )
+    robot_path = str(controller.get("robot_path") or "/World/Franka")
+    joint_states_topic = str(graph_cfg.get("joint_states_topic") or "/isaac_joint_states")
+    joint_commands_topic = str(graph_cfg.get("joint_commands_topic") or "/isaac_joint_commands")
+
+    return f"""\
+# Isaac Assist controller and ROS2 OmniGraph contract.  This block makes the
+# control pipeline visible in the stage even before an external MoveIt/cuMotion
+# process is attached.
+_author_ros2_omnigraph = {author_ros2_omnigraph!r}
+_ros2_omnigraph_policy = {omnigraph_policy!r}
+_connect_articulation_controller = {connect_articulation_controller!r}
+_controller_connection_policy = {connection_policy!r}
+_controller_connection_status = (
+    "connected" if _connect_articulation_controller else "deferred_live_probe"
+)
+try:
+    _controller_plan = json.loads({controller_payload!r})
+    _controller_scope = UsdGeom.Scope.Define(stage, "/World/IsaacAssistControllers").GetPrim()
+    _controller_scope.SetCustomDataByKey(
+        "isaac_assist:controller_plan",
+        json.dumps(_controller_plan, sort_keys=True),
+    )
+    _controller_prim = UsdGeom.Xform.Define(stage, {controller_path!r}).GetPrim()
+    _controller_prim.SetCustomDataByKey("isaac_assist:kind", "articulation_controller")
+    _controller_prim.SetCustomDataByKey("isaac_assist:robot_path", {robot_path!r})
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:connect_articulation_controller",
+        _connect_articulation_controller,
+    )
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:author_ros2_omnigraph",
+        _author_ros2_omnigraph,
+    )
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:ros2_omnigraph_policy",
+        _ros2_omnigraph_policy,
+    )
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:controller_connection_policy",
+        _controller_connection_policy,
+    )
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:controller_connection_status",
+        _controller_connection_status,
+    )
+    _controller_prim.SetCustomDataByKey(
+        "isaac_assist:controller_plan",
+        json.dumps(_controller_plan, sort_keys=True),
+    )
+    _robot_prim = stage.GetPrimAtPath({robot_path!r})
+    if _robot_prim and _robot_prim.IsValid():
+        if not _robot_prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+            UsdPhysics.ArticulationRootAPI.Apply(_robot_prim)
+        _robot_prim.SetCustomDataByKey(
+            "isaac_assist:articulation_controller",
+            {controller_path!r},
+        )
+    print("[Isaac Assist] articulation controller marker:", {controller_path!r})
+except Exception as _exc:
+    print("[Isaac Assist] controller marker warning:", _exc)
+
+try:
+    if not _author_ros2_omnigraph:
+        raise RuntimeError("ROS2 OmniGraph authoring deferred until live probe passes")
+    import omni.graph.core as og
+    _keys = og.Controller.Keys
+    _ros2_ns = {ros2_node_namespace!r}
+    _candidate_ros2_namespaces = []
+    for _candidate_ns in (
+        {ros2_node_namespace!r},
+        {fallback_ros2_node_namespace!r},
+        "isaacsim.ros2.nodes",
+        "isaacsim.ros2.bridge",
+    ):
+        if _candidate_ns and _candidate_ns not in _candidate_ros2_namespaces:
+            _candidate_ros2_namespaces.append(_candidate_ns)
+    try:
+        _registered_nodes = set(str(_node) for _node in og.get_registered_nodes())
+        if f"{{_ros2_ns}}.ROS2Context" not in _registered_nodes:
+            for _candidate_ns in _candidate_ros2_namespaces:
+                if f"{{_candidate_ns}}.ROS2Context" in _registered_nodes:
+                    _ros2_ns = _candidate_ns
+                    break
+    except Exception as _ns_exc:
+        print("[Isaac Assist] ROS2 node namespace discovery warning:", _ns_exc)
+    _existing_graph_prim = stage.GetPrimAtPath({graph_path!r})
+    if _existing_graph_prim and _existing_graph_prim.IsValid():
+        stage.RemovePrim(Sdf.Path({graph_path!r}))
+    _create_nodes = [
+        ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+        ("ROS2Context", f"{{_ros2_ns}}.ROS2Context"),
+        ("PublishJointState", f"{{_ros2_ns}}.ROS2PublishJointState"),
+        ("SubscribeJointState", f"{{_ros2_ns}}.ROS2SubscribeJointState"),
+    ]
+    _connections = [
+        ("OnPlaybackTick.outputs:tick", "PublishJointState.inputs:execIn"),
+        ("OnPlaybackTick.outputs:tick", "SubscribeJointState.inputs:execIn"),
+        ("ROS2Context.outputs:context", "PublishJointState.inputs:context"),
+        ("ROS2Context.outputs:context", "SubscribeJointState.inputs:context"),
+    ]
+    _set_values = [
+        ("PublishJointState.inputs:targetPrim", {robot_path!r}),
+        ("PublishJointState.inputs:topicName", {joint_states_topic!r}),
+        ("SubscribeJointState.inputs:topicName", {joint_commands_topic!r}),
+    ]
+    if _connect_articulation_controller:
+        _create_nodes.append(
+            ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController")
+        )
+        _connections.extend([
+            ("OnPlaybackTick.outputs:tick", "ArticulationController.inputs:execIn"),
+            ("SubscribeJointState.outputs:jointNames", "ArticulationController.inputs:jointNames"),
+            ("SubscribeJointState.outputs:positionCommand", "ArticulationController.inputs:positionCommand"),
+            ("SubscribeJointState.outputs:velocityCommand", "ArticulationController.inputs:velocityCommand"),
+            ("SubscribeJointState.outputs:effortCommand", "ArticulationController.inputs:effortCommand"),
+        ])
+        _set_values.append(("ArticulationController.inputs:targetPrim", {robot_path!r}))
+    og.Controller.edit(
+        {graph_path!r},
+        {{
+            _keys.CREATE_NODES: _create_nodes,
+            _keys.CONNECT: _connections,
+            _keys.SET_VALUES: _set_values,
+        }},
+    )
+    _graph_prim = stage.GetPrimAtPath({graph_path!r})
+    if _graph_prim and _graph_prim.IsValid():
+        _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_status", "created")
+        _graph_prim.SetCustomDataByKey("isaac_assist:kind", "ros2_control_omnigraph")
+        _graph_prim.SetCustomDataByKey("isaac_assist:robot_path", {robot_path!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:joint_states_topic", {joint_states_topic!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:joint_commands_topic", {joint_commands_topic!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:controller_path", {controller_path!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:ros2_node_namespace", _ros2_ns)
+        _graph_prim.SetCustomDataByKey("isaac_assist:author_ros2_omnigraph", _author_ros2_omnigraph)
+        _graph_prim.SetCustomDataByKey("isaac_assist:ros2_omnigraph_policy", _ros2_omnigraph_policy)
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:connect_articulation_controller",
+            _connect_articulation_controller,
+        )
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:controller_connection_policy",
+            _controller_connection_policy,
+        )
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:controller_connection_status",
+            _controller_connection_status,
+        )
+    print("[Isaac Assist] ROS2 control OmniGraph:", {graph_path!r})
+except Exception as _exc:
+    _omnigraph_status = (
+        "deferred_live_probe" if not _author_ros2_omnigraph else "fallback_marker"
+    )
+    _graph_prim = stage.GetPrimAtPath({graph_path!r})
+    if not (_graph_prim and _graph_prim.IsValid()):
+        _graph_prim = UsdGeom.Xform.Define(stage, {graph_path!r}).GetPrim()
+    if _graph_prim and _graph_prim.IsValid():
+        _graph_prim.SetCustomDataByKey("isaac_assist:kind", "ros2_control_omnigraph")
+        _graph_prim.SetCustomDataByKey("isaac_assist:robot_path", {robot_path!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:joint_states_topic", {joint_states_topic!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:joint_commands_topic", {joint_commands_topic!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:controller_path", {controller_path!r})
+        _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_status", _omnigraph_status)
+        _graph_prim.SetCustomDataByKey("isaac_assist:omnigraph_error", str(_exc))
+        _graph_prim.SetCustomDataByKey("isaac_assist:author_ros2_omnigraph", _author_ros2_omnigraph)
+        _graph_prim.SetCustomDataByKey("isaac_assist:ros2_omnigraph_policy", _ros2_omnigraph_policy)
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:connect_articulation_controller",
+            _connect_articulation_controller,
+        )
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:controller_connection_policy",
+            _controller_connection_policy,
+        )
+        _graph_prim.SetCustomDataByKey(
+            "isaac_assist:controller_connection_status",
+            _omnigraph_status,
+        )
+    if _omnigraph_status == "deferred_live_probe":
+        print("[Isaac Assist] ROS2 control contract marker:", {graph_path!r})
+    else:
+        print("[Isaac Assist] ROS2 control OmniGraph warning:", _exc)
+"""
 
 
 def _live_relation_verifier_code(verification: Dict[str, Any]) -> str:

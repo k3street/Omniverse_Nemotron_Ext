@@ -44,11 +44,18 @@ class TestMCPSchemaConversion:
         names = {t["name"] for t in mcp_server._mcp_tools}
         assert "get_settings" in names
         assert "update_settings" in names
+        assert "create_floor_plan_from_text" in names
+        assert "create_floor_plan_from_image" in names
+        assert "search_local_assets" in names
+        assert "set_object_asset" in names
+        assert "build_scene_from_floor_plan" in names
+        assert "launch_scene_in_isaac" in names
+        assert "verify_scene_relations" in names
 
     def test_mcp_tool_count_matches_openai_plus_settings(self, mcp_server):
         from service.isaac_assist_service.chat.tools.tool_schemas import ISAAC_SIM_TOOLS
-        # OpenAI tools + get_settings + update_settings
-        expected = len(ISAAC_SIM_TOOLS) + 2
+        # OpenAI tools + get_settings + update_settings + 7 floor-plan MCP tools
+        expected = len(ISAAC_SIM_TOOLS) + 9
         assert len(mcp_server._mcp_tools) == expected
 
     def test_no_duplicate_mcp_tool_names(self, mcp_server):

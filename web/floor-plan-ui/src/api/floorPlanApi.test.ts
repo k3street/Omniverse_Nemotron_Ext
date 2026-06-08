@@ -349,4 +349,34 @@ describe("createCanvasApi", () => {
         );
         expect(response.launch.status).toBe("dry_run");
     });
+
+    it("fetches local asset options with query params", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                status: "success",
+                roots: ["/home/kimate/Desktop/assets"],
+                query: "bowl",
+                count: 1,
+                options: [{
+                    label: "serving_bowl",
+                    usd_ref: "/home/kimate/Desktop/assets/bowl.usd",
+                    source: "asset_catalog",
+                    category: "bowl",
+                    relative_path: "bowl.usd",
+                    tags: ["kitchen"],
+                    score: 80,
+                }],
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const api = createCanvasApi("");
+        const response = await api.assetOptions({ q: "bowl", limit: 12 });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/v1/canvas/assets/options?q=bowl&limit=12",
+        );
+        expect(response.options[0].usd_ref).toBe("/home/kimate/Desktop/assets/bowl.usd");
+    });
 });

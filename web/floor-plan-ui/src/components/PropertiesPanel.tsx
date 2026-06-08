@@ -16,6 +16,7 @@ import {
     CampaignPlanResponse,
     CircumstancePreset,
     LightingPreset,
+    LocalAssetOption,
     ScenarioVariants,
     CampaignLaunchResponse,
     SpatialRelation,
@@ -175,6 +176,7 @@ function SingleObjectEditor({ obj }: { obj: TypedObject }) {
                 options={ASSET_OPTIONS}
                 onCommit={(v) => v !== obj.class && setAttr(obj.id, "class", obj.class, v)}
             />
+            <LocalAssetSelector obj={obj} />
             <TextField
                 label="Name"
                 value={obj.name}
@@ -400,6 +402,131 @@ function AssetResolverReview({ obj }: { obj: TypedObject }) {
                 {feedback.confidence !== null && <KV k="confidence" v={`${Math.round(feedback.confidence * 100)}%`} />}
                 <KV k="class" v={feedback.selectedClass} />
             </div>
+        </div>
+    );
+}
+
+function LocalAssetSelector({ obj }: { obj: TypedObject }) {
+    const setAttr = useFloorPlanStore((s) => s.setAttr);
+    const meta = obj.metadata ?? {};
+    const currentRef = typeof meta.reviewed_asset_ref === "string" ? meta.reviewed_asset_ref : "";
+    const currentLabel = typeof meta.reviewed_asset_label === "string" ? meta.reviewed_asset_label : "";
+    const defaultQuery = currentLabel || CLASS_META[obj.class]?.label || obj.class;
+    const [query, setQuery] = useState(defaultQuery);
+    const [options, setOptions] = useState<LocalAssetOption[]>([]);
+    const [status, setStatus] = useState("Loading local assets...");
+
+    const applyMetadata = (patch: Record<string, unknown>) => {
+        const next = { ...(obj.metadata ?? {}), ...patch };
+        for (const [key, value] of Object.entries(next)) {
+            if (value === undefined || value === "") delete next[key];
+        }
+        setAttr(obj.id, "metadata", obj.metadata ?? {}, next);
+    };
+
+    const load = (assetQuery = query) => {
+        setStatus("Loading local assets...");
+        api.assetOptions({ q: assetQuery, limit: 60 })
+            .then((response) => {
+                setOptions(response.options ?? []);
+                setStatus(response.roots.length
+                    ? `${response.count} match${response.count === 1 ? "" : "es"} from ${response.roots.length} root${response.roots.length === 1 ? "" : "s"}`
+                    : "No asset roots configured");
+            })
+            .catch((error) => {
+                setOptions([]);
+                setStatus(`Asset lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+            });
+    };
+
+    useEffect(() => {
+        const nextQuery = currentLabel || CLASS_META[obj.class]?.label || obj.class;
+        setQuery(nextQuery);
+        let active = true;
+        setStatus("Loading local assets...");
+        api.assetOptions({ q: nextQuery, limit: 60 })
+            .then((response) => {
+                if (!active) return;
+                setOptions(response.options ?? []);
+                setStatus(response.roots.length
+                    ? `${response.count} match${response.count === 1 ? "" : "es"} from ${response.roots.length} root${response.roots.length === 1 ? "" : "s"}`
+                    : "No asset roots configured");
+            })
+            .catch((error) => {
+                if (!active) return;
+                setOptions([]);
+                setStatus(`Asset lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+            });
+        return () => {
+            active = false;
+        };
+    }, [obj.id, obj.class, currentLabel]);
+
+    const assetOptions = options.map((option) => ({
+        value: option.usd_ref,
+        label: `${option.label}${option.category ? ` · ${option.category}` : ""}`,
+    }));
+
+    return (
+        <div style={{ marginBottom: 10 }}>
+            <TextField
+                label="Search local USD assets"
+                value={query}
+                onCommit={(value) => {
+                    const next = value.trim();
+                    setQuery(next);
+                    load(next);
+                }}
+                placeholder="bowl, microwave, franka, table..."
+            />
+            <SelectField
+                label="Local USD asset"
+                value={currentRef}
+                options={assetOptions}
+                emptyLabel="Use class default"
+                onCommit={(value) => {
+                    const selected = options.find((option) => option.usd_ref === value);
+                    applyMetadata({
+                        reviewed_asset_ref: value || undefined,
+                        reviewed_asset_label: selected?.label,
+                        reviewed_asset_source: selected?.source,
+                    });
+                }}
+            />
+            <Row>
+                <div
+                    title={currentRef || status}
+                    style={{
+                        color: currentRef ? ACCENT : TEXT_DIM,
+                        fontSize: 10,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        flex: 1,
+                    }}
+                >
+                    {currentRef ? currentRef.split("/").slice(-2).join("/") : status}
+                </div>
+                <button
+                    type="button"
+                    onClick={() => load(query)}
+                    style={miniButtonStyle()}
+                >
+                    Refresh
+                </button>
+                <button
+                    type="button"
+                    onClick={() => applyMetadata({
+                        reviewed_asset_ref: undefined,
+                        reviewed_asset_label: undefined,
+                        reviewed_asset_source: undefined,
+                    })}
+                    disabled={!currentRef}
+                    style={miniButtonStyle(!currentRef)}
+                >
+                    Clear
+                </button>
+            </Row>
         </div>
     );
 }
@@ -1043,6 +1170,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
             {children}
         </div>
     );
+}
+
+function miniButtonStyle(disabled = false): React.CSSProperties {
+    return {
+        background: disabled ? "#24282E" : "#2B3036",
+        color: disabled ? "#555B62" : TEXT_DIM,
+        border: `1px solid ${BORDER}`,
+        borderRadius: 4,
+        fontSize: 10,
+        padding: "3px 7px",
+        cursor: disabled ? "default" : "pointer",
+    };
 }
 
 function Row({ children }: { children: React.ReactNode }) {

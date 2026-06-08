@@ -9,7 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Protocol
 
 from ..config import config
 from .cosmos3_adapter import CosmosSceneObservation
@@ -72,6 +72,26 @@ def chat_completions_url(base_url: str) -> str:
     return f"{value}/v1/chat/completions"
 
 
+def gemini_generate_content_url(
+    model: str,
+    *,
+    api_key: str = "",
+    base_url: str = "",
+) -> str:
+    """Build a Gemini generateContent endpoint URL."""
+
+    value = (
+        base_url
+        or config.gemini_robotics_er_base_url
+        or "https://generativelanguage.googleapis.com/v1beta/models"
+    ).rstrip("/")
+    if value.endswith(":generateContent"):
+        endpoint = value
+    else:
+        endpoint = f"{value}/{model}:generateContent"
+    return f"{endpoint}?key={api_key}" if api_key else endpoint
+
+
 def extract_json_object(text: str) -> Dict[str, Any]:
     """Extract the first JSON object from a model reply."""
 
@@ -98,6 +118,23 @@ def extract_json_object(text: str) -> Dict[str, Any]:
     if not isinstance(parsed, dict):
         raise CosmosRuntimeError("Cosmos response JSON was not an object")
     return parsed
+
+
+class SceneReasonerClient(Protocol):
+    """Common interface for Cosmos-compatible scene reasoners."""
+
+    def is_configured(self) -> bool:
+        ...
+
+    async def observe_scene(
+        self,
+        *,
+        prompt: str,
+        image_bytes: Optional[bytes] = None,
+        mime_type: str = "image/png",
+        input_kind: str = "photo",
+    ) -> CosmosSceneObservation:
+        ...
 
 
 class Cosmos3ReasonerClient:
@@ -178,6 +215,10 @@ class Cosmos3ReasonerClient:
         observation_json = extract_json_object(content)
         observation_json.setdefault("prompt", prompt)
         observation_json.setdefault("input_kind", input_kind)
+        metadata = observation_json.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata.setdefault("provider", "cosmos3")
+            metadata.setdefault("model", self.model)
         return CosmosSceneObservation.model_validate(observation_json)
 
     def _build_payload(
@@ -218,17 +259,209 @@ class Cosmos3ReasonerClient:
         }
 
 
-def build_cosmos3_reasoner() -> Cosmos3ReasonerClient:
+class GeminiRoboticsERReasonerClient:
+    """Gemini Robotics-ER fallback that returns CosmosSceneObservation JSON."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str = "",
+        model: str = "",
+        base_url: str = "",
+        timeout_s: float = 180.0,
+    ) -> None:
+        self.api_key = api_key or config.api_key_gemini
+        self.model = model or config.gemini_robotics_er_model
+        self.base_url = base_url or config.gemini_robotics_er_base_url
+        self.timeout_s = timeout_s
+
+    def is_configured(self) -> bool:
+        return bool(self.api_key and self.model)
+
+    async def observe_scene(
+        self,
+        *,
+        prompt: str,
+        image_bytes: Optional[bytes] = None,
+        mime_type: str = "image/png",
+        input_kind: str = "photo",
+    ) -> CosmosSceneObservation:
+        """Call Gemini Robotics-ER and parse a scene observation."""
+
+        if not self.is_configured():
+            raise CosmosRuntimeError(
+                "GEMINI_API_KEY and GEMINI_ROBOTICS_ER_MODEL must be configured"
+            )
+
+        payload = self._build_payload(
+            prompt=prompt,
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            input_kind=input_kind,
+        )
+
+        try:
+            import aiohttp  # noqa: PLC0415
+        except ModuleNotFoundError as exc:
+            raise CosmosRuntimeError(
+                "aiohttp is required for Gemini runtime calls; install requirements.txt"
+            ) from exc
+
+        timeout = aiohttp.ClientTimeout(total=self.timeout_s)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            try:
+                async with session.post(
+                    gemini_generate_content_url(
+                        self.model,
+                        api_key=self.api_key,
+                        base_url=self.base_url,
+                    ),
+                    json=payload,
+                ) as resp:
+                    body = await resp.text()
+                    if resp.status != 200:
+                        raise CosmosRuntimeError(
+                            f"Gemini Robotics-ER API error {resp.status}: {body[:500]}"
+                        )
+            except aiohttp.ClientError as exc:
+                raise CosmosRuntimeError(
+                    f"Gemini Robotics-ER connection failed: {exc}"
+                ) from exc
+
+        content = self._extract_text(body)
+        observation_json = extract_json_object(content)
+        observation_json.setdefault("prompt", prompt)
+        observation_json.setdefault("input_kind", input_kind)
+        metadata = observation_json.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata.setdefault("provider", "gemini_robotics_er")
+            metadata.setdefault("model", self.model)
+            metadata.setdefault("fallback_for", "cosmos3_reasoner")
+        return CosmosSceneObservation.model_validate(observation_json)
+
+    def _build_payload(
+        self,
+        *,
+        prompt: str,
+        image_bytes: Optional[bytes],
+        mime_type: str,
+        input_kind: str,
+    ) -> Dict[str, Any]:
+        user_text = (
+            f"{COSMOS_SCENE_PROMPT}\n\n"
+            "You are Gemini Robotics-ER acting as a cloud backup for Cosmos 3 "
+            "Reasoner. Preserve the exact JSON schema above.\n\n"
+            f"User intent: {prompt or 'Reconstruct this robotics scene.'}\n"
+            f"Input kind: {input_kind}"
+        )
+        parts: list[Dict[str, Any]] = [{"text": user_text}]
+        if image_bytes:
+            image_b64 = base64.b64encode(image_bytes).decode("ascii")
+            parts.insert(
+                0,
+                {
+                    "inline_data": {
+                        "mime_type": mime_type,
+                        "data": image_b64,
+                    }
+                },
+            )
+
+        return {
+            "contents": [{"parts": parts}],
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 4096,
+                "responseMimeType": "application/json",
+            },
+        }
+
+    @staticmethod
+    def _extract_text(body: str) -> str:
+        try:
+            data = json.loads(body)
+            parts = data["candidates"][0]["content"]["parts"]
+            text = "\n".join(part.get("text", "") for part in parts if "text" in part)
+            return text or body
+        except Exception:
+            logger.debug("Parsing Gemini response as raw JSON object")
+            return body
+
+
+class FallbackSceneReasonerClient:
+    """Try Cosmos first, then Gemini Robotics-ER if configured."""
+
+    def __init__(
+        self,
+        *,
+        primary: SceneReasonerClient,
+        fallback: Optional[SceneReasonerClient] = None,
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    def is_configured(self) -> bool:
+        return self.primary.is_configured() or bool(
+            self.fallback and self.fallback.is_configured()
+        )
+
+    async def observe_scene(
+        self,
+        *,
+        prompt: str,
+        image_bytes: Optional[bytes] = None,
+        mime_type: str = "image/png",
+        input_kind: str = "photo",
+    ) -> CosmosSceneObservation:
+        errors: list[str] = []
+
+        if self.primary.is_configured():
+            try:
+                return await self.primary.observe_scene(
+                    prompt=prompt,
+                    image_bytes=image_bytes,
+                    mime_type=mime_type,
+                    input_kind=input_kind,
+                )
+            except CosmosRuntimeError as exc:
+                errors.append(str(exc))
+                logger.warning("Cosmos 3 Reasoner failed; trying fallback: %s", exc)
+        else:
+            errors.append("Cosmos 3 Reasoner is not configured")
+
+        if self.fallback and self.fallback.is_configured():
+            return await self.fallback.observe_scene(
+                prompt=prompt,
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                input_kind=input_kind,
+            )
+
+        detail = "; ".join(errors) if errors else "No scene reasoner is configured"
+        raise CosmosRuntimeError(detail)
+
+
+def build_cosmos3_reasoner() -> SceneReasonerClient:
     """Factory used by routes/tests."""
 
-    return Cosmos3ReasonerClient()
+    primary = Cosmos3ReasonerClient()
+    fallback = (
+        GeminiRoboticsERReasonerClient()
+        if config.gemini_robotics_er_fallback
+        else None
+    )
+    return FallbackSceneReasonerClient(primary=primary, fallback=fallback)
 
 
 __all__ = [
     "COSMOS_SCENE_PROMPT",
     "Cosmos3ReasonerClient",
     "CosmosRuntimeError",
+    "FallbackSceneReasonerClient",
+    "GeminiRoboticsERReasonerClient",
+    "SceneReasonerClient",
     "build_cosmos3_reasoner",
     "chat_completions_url",
     "extract_json_object",
+    "gemini_generate_content_url",
 ]

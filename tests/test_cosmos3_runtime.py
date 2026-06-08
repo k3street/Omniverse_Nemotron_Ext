@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -10,8 +11,12 @@ from service.isaac_assist_service.multimodal.cosmos3_adapter import (
 )
 from service.isaac_assist_service.multimodal.cosmos3_runtime import (
     Cosmos3ReasonerClient,
+    CosmosRuntimeError,
+    FallbackSceneReasonerClient,
+    GeminiRoboticsERReasonerClient,
     chat_completions_url,
     extract_json_object,
+    gemini_generate_content_url,
 )
 from service.isaac_assist_service.multimodal.persistence import MultimodalStore
 from service.isaac_assist_service.multimodal import routes
@@ -26,6 +31,25 @@ def test_chat_completions_url_normalizes_base_urls():
     assert (
         chat_completions_url("http://host:8000/v1/chat/completions")
         == "http://host:8000/v1/chat/completions"
+    )
+
+
+def test_gemini_generate_content_url_normalizes_base_urls():
+    assert (
+        gemini_generate_content_url(
+            "gemini-robotics-er-1.6-preview",
+            base_url="https://generativelanguage.googleapis.com/v1beta/models",
+        )
+        == "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-robotics-er-1.6-preview:generateContent"
+    )
+    assert (
+        gemini_generate_content_url(
+            "ignored",
+            api_key="test-key",
+            base_url="https://example.com/v1beta/models/custom:generateContent",
+        )
+        == "https://example.com/v1beta/models/custom:generateContent?key=test-key"
     )
 
 
@@ -52,6 +76,130 @@ def test_reasoner_payload_embeds_image_data_url():
     assert content[0]["type"] == "text"
     assert content[1]["type"] == "image_url"
     assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_gemini_reasoner_payload_embeds_image_inline_data():
+    client = GeminiRoboticsERReasonerClient(
+        api_key="test-key",
+        model="gemini-robotics-er-1.6-preview",
+    )
+
+    payload = client._build_payload(
+        prompt="Build a pick scene",
+        image_bytes=b"fake-image",
+        mime_type="image/png",
+        input_kind="screenshot",
+    )
+
+    parts = payload["contents"][0]["parts"]
+    assert parts[0]["inline_data"]["mime_type"] == "image/png"
+    assert parts[0]["inline_data"]["data"] == base64.b64encode(b"fake-image").decode("ascii")
+    assert "Return ONLY valid JSON" in parts[1]["text"]
+    assert payload["generationConfig"]["responseMimeType"] == "application/json"
+
+
+def test_gemini_reasoner_extracts_observation_json_from_response():
+    body = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": (
+                                '{"input_kind": "screenshot", "objects": [], '
+                                '"metadata": {"source": "unit"}}'
+                            )
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    text = GeminiRoboticsERReasonerClient._extract_text(json.dumps(body))
+    parsed = extract_json_object(text)
+
+    assert parsed["input_kind"] == "screenshot"
+    assert parsed["metadata"]["source"] == "unit"
+
+
+def test_fallback_reasoner_uses_primary_when_available():
+    class FakePrimary:
+        def __init__(self):
+            self.called = False
+
+        def is_configured(self):
+            return True
+
+        async def observe_scene(self, **kwargs):
+            self.called = True
+            return CosmosSceneObservation(
+                input_kind=kwargs["input_kind"],
+                prompt=kwargs["prompt"],
+                metadata={"provider": "primary"},
+            )
+
+    class FakeFallback:
+        def __init__(self):
+            self.called = False
+
+        def is_configured(self):
+            return True
+
+        async def observe_scene(self, **kwargs):
+            self.called = True
+            return CosmosSceneObservation(metadata={"provider": "fallback"})
+
+    primary = FakePrimary()
+    fallback = FakeFallback()
+    client = FallbackSceneReasonerClient(primary=primary, fallback=fallback)
+
+    observation = asyncio.run(
+        client.observe_scene(prompt="scene", input_kind="prompt")
+    )
+
+    assert primary.called is True
+    assert fallback.called is False
+    assert observation.metadata["provider"] == "primary"
+
+
+def test_fallback_reasoner_uses_gemini_when_primary_fails():
+    class FakePrimary:
+        def is_configured(self):
+            return True
+
+        async def observe_scene(self, **kwargs):
+            raise CosmosRuntimeError("cosmos down")
+
+    class FakeFallback:
+        def __init__(self):
+            self.called_with = None
+
+        def is_configured(self):
+            return True
+
+        async def observe_scene(self, **kwargs):
+            self.called_with = kwargs
+            return CosmosSceneObservation(
+                input_kind=kwargs["input_kind"],
+                prompt=kwargs["prompt"],
+                metadata={"provider": "gemini_robotics_er"},
+            )
+
+    fallback = FakeFallback()
+    client = FallbackSceneReasonerClient(primary=FakePrimary(), fallback=fallback)
+
+    observation = asyncio.run(
+        client.observe_scene(
+            prompt="bowl on table",
+            image_bytes=b"png",
+            mime_type="image/png",
+            input_kind="screenshot",
+        )
+    )
+
+    assert observation.metadata["provider"] == "gemini_robotics_er"
+    assert fallback.called_with["image_bytes"] == b"png"
 
 
 def test_cosmos_observe_route_calls_reasoner_and_saves(monkeypatch, tmp_path):

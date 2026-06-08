@@ -18,6 +18,7 @@ import {
     CosmosViewportObserveRequest,
     CosmosViewportObserveResponse,
     LayoutSpec,
+    LocalAssetOptionsResponse,
     PatchSuccessResponse,
     PatchValidationFailureResponse,
     RenderingMode,
@@ -57,6 +58,7 @@ export interface CanvasApi {
         dry_run?: boolean;
         execute_direct?: boolean;
     }): Promise<BuildResponse>;
+    assetOptions(opts?: { q?: string; limit?: number }): Promise<LocalAssetOptionsResponse>;
     planCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;
     materializeCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;
     launchCampaign(sessionId: string, opts?: {
@@ -188,6 +190,15 @@ export function createCanvasApi(baseUrl: string = ""): CanvasApi {
                 body: JSON.stringify(opts),
             });
             if (!r.ok) throw new Error(`POST build failed: ${r.status}`);
+            return r.json();
+        },
+        async assetOptions(opts = {}) {
+            const params = new URLSearchParams();
+            if (opts.q) params.set("q", opts.q);
+            if (opts.limit) params.set("limit", String(opts.limit));
+            const suffix = params.toString() ? `?${params.toString()}` : "";
+            const r = await fetch(url(`/assets/options${suffix}`));
+            if (!r.ok) throw new Error(`GET asset options failed: ${r.status}`);
             return r.json();
         },
         async planCampaign(sessionId, opts = {}) {

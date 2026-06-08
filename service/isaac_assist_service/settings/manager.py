@@ -34,6 +34,9 @@ class SettingsManager:
         "COSMOS3_GENERATOR_BASE_URL": "cosmos3_generator_base_url",
         "COSMOS3_GENERATOR_MODEL": "cosmos3_generator_model",
         "COSMOS3_API_KEY": "cosmos3_api_key",
+        "GEMINI_ROBOTICS_ER_FALLBACK": "gemini_robotics_er_fallback",
+        "GEMINI_ROBOTICS_ER_MODEL": "gemini_robotics_er_model",
+        "GEMINI_ROBOTICS_ER_BASE_URL": "gemini_robotics_er_base_url",
         "ISAAC_ASSIST_SCALE_PROVIDER": "scale_provider",
         "DGX_SPARK_COSMOS_BASE_URL": "dgx_spark_cosmos_base_url",
         "BREV_API_KEY": "brev_api_key",
@@ -45,7 +48,7 @@ class SettingsManager:
         "ISAAC_AUTOMATOR_ISAACSIM_REF": "isaac_automator_isaacsim_ref",
         "ISAAC_AUTOMATOR_ISAACLAB_REF": "isaac_automator_isaaclab_ref",
     }
-    _BOOL_KEYS = {"CONTRIBUTE_DATA", "AUTO_APPROVE"}
+    _BOOL_KEYS = {"CONTRIBUTE_DATA", "AUTO_APPROVE", "GEMINI_ROBOTICS_ER_FALLBACK"}
     _INT_KEYS  = {"MAX_TOOL_ROUNDS"}
 
     def __init__(self):
@@ -84,6 +87,9 @@ class SettingsManager:
             "COSMOS3_REASONER_MODEL": config.cosmos3_reasoner_model,
             "COSMOS3_GENERATOR_BASE_URL": config.cosmos3_generator_base_url,
             "COSMOS3_GENERATOR_MODEL": config.cosmos3_generator_model,
+            "GEMINI_ROBOTICS_ER_FALLBACK": str(config.gemini_robotics_er_fallback).lower(),
+            "GEMINI_ROBOTICS_ER_MODEL": config.gemini_robotics_er_model,
+            "GEMINI_ROBOTICS_ER_BASE_URL": config.gemini_robotics_er_base_url,
             # Remote scale providers
             "ISAAC_ASSIST_SCALE_PROVIDER": config.scale_provider,
             "DGX_SPARK_COSMOS_BASE_URL": config.dgx_spark_cosmos_base_url,

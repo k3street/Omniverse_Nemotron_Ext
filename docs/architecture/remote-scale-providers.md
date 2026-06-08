@@ -10,7 +10,7 @@ Isaac Automator.
 | Provider | Best use |
 | --- | --- |
 | `local` | Fast iteration, Isaac Sim GUI, floor-plan UI, small local models. |
-| `dgx_spark` | Local network Cosmos/LLM/model-serving node with larger unified memory. |
+| `dgx_spark` | Same-LAN Cosmos/LLM/model-serving node with larger GPU capacity and low latency. |
 | `brev` | Temporary NVIDIA GPU capacity for Cosmos, GR00T, Isaac Lab training, SDG, or batch validation. |
 | `isaac_automator` | Cloud Isaac Workstation deployment, remote Isaac Sim/Isaac Lab runs, scene replay, regression sweeps, artifact collection. |
 
@@ -78,6 +78,77 @@ POST /api/v1/canvas/{session_id}/cosmos/propose
 
 The `cosmos/propose` route remains stable because it only accepts structured
 observations. The provider layer owns the expensive model invocation.
+
+### DGX Spark NIM Runbook
+
+Prefer DGX Spark over Brev for the first Cosmos 3 Reasoner deployment when the
+Spark is already on the same network. It avoids cloud lifecycle latency, keeps
+scene screenshots and asset names local, and frees the Isaac Sim workstation GPU
+for rendering. Brev remains useful for burst experiments, batch synthetic-data
+runs, or when Spark is unavailable.
+
+On the Spark:
+
+```bash
+git clone <repo-url> Omniverse_Nemotron_Ext
+cd Omniverse_Nemotron_Ext
+
+export NGC_API_KEY=nvapi-...
+
+COSMOS_NIM_CACHE=$HOME/nim-cache/cosmos3-reasoner \
+  COSMOS_NIM_PORT=8081 \
+  NIM_MAX_MODEL_LEN=32768 \
+  ./scripts/start_cosmos3_reasoner_nim.sh
+```
+
+The first boot downloads roughly tens of GB of model artifacts into the cache.
+Watch startup with:
+
+```bash
+docker logs -f nvidia-cosmos3-reasoner
+```
+
+A healthy startup includes:
+
+```text
+Using max model len 32768
+The server is up and ready to serve!
+Application is ready to receive API requests.
+```
+
+From the Isaac Assist workstation:
+
+```bash
+curl http://<spark-host-or-ip>:8081/v1/health/ready
+curl http://<spark-host-or-ip>:8081/v1/models
+```
+
+Then set:
+
+```text
+COSMOS3_MODE=local
+COSMOS3_REASONER_BASE_URL=http://<spark-host-or-ip>:8081/v1
+COSMOS3_REASONER_MODEL=nvidia/cosmos3-nano-reasoner
+```
+
+If the Spark firewall is enabled, allow only the workstation to reach the NIM
+port:
+
+```bash
+sudo ufw allow from <workstation-ip> to any port 8081 proto tcp
+```
+
+### Local Workstation Fallback
+
+Cosmos 3 Nano Reasoner NIM can run on a 32 GiB workstation GPU, but it is not a
+good default when Isaac Sim must run interactively on the same card. With
+`NIM_MAX_MODEL_LEN=32768`, NIM can still reserve almost all RTX 5090 VRAM. Use
+`8192` or `16384` for emergency local tests, then stop the container before
+launching Isaac Sim:
+
+```bash
+docker stop nvidia-cosmos3-reasoner
+```
 
 ## Isaac Automator Placement
 

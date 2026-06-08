@@ -240,6 +240,12 @@ def _position3(obj: Any) -> List[float]:
     return [float(seq[0]), float(seq[1]), float(seq[2])]
 
 
+def _relation_xy(own_position: List[float], parent_position: List[float]) -> List[float]:
+    if abs(own_position[0]) > 1e-6 or abs(own_position[1]) > 1e-6:
+        return [own_position[0], own_position[1]]
+    return [parent_position[0], parent_position[1]]
+
+
 def _scale3(obj: Any) -> List[float]:
     size = _obj_get(obj, "size", None)
     if hasattr(size, "w") and hasattr(size, "h"):
@@ -500,9 +506,14 @@ def predict_relation_positions(spec_or_objects: Any, relations: Optional[Iterabl
 
         parent_position = resolve(parent, stack)
         child_height = _height_m(obj)
-        if relation.relation in {"on_top_of", "stacked_above", "mounted_to"}:
+        if relation.relation == "mounted_to" and _is_robot(obj):
+            z = parent_position[2] + _support_top_m(parent)
+            xy = _relation_xy(own_position, parent_position)
+            computed[obj_id] = [xy[0], xy[1], round(z, 4)]
+        elif relation.relation in {"on_top_of", "stacked_above", "mounted_to"}:
             z = parent_position[2] + _support_top_m(parent) + child_height / 2.0
-            computed[obj_id] = [parent_position[0], parent_position[1], round(z, 4)]
+            xy = _relation_xy(own_position, parent_position)
+            computed[obj_id] = [xy[0], xy[1], round(z, 4)]
         elif relation.relation == "inside":
             parent_height = _height_m(parent)
             z = (
@@ -511,7 +522,8 @@ def predict_relation_positions(spec_or_objects: Any, relations: Optional[Iterabl
                 + _interior_floor_offset_m(parent)
                 + child_height / 2.0
             )
-            computed[obj_id] = [parent_position[0], parent_position[1], round(z, 4)]
+            xy = _relation_xy(own_position, parent_position)
+            computed[obj_id] = [xy[0], xy[1], round(z, 4)]
         elif relation.relation == "beside":
             parent_scale = _scale3(parent)
             child_scale = _scale3(obj)
@@ -572,18 +584,26 @@ def verify_relation_geometry(
         if subject is None or parent is None or child_pos is None or parent_pos is None:
             status = "fail"
             message = "relation endpoint missing from position set"
+        elif rel.relation == "mounted_to" and _is_robot(subject):
+            expected = [
+                predicted.get(rel.subject_id, child_pos)[0],
+                predicted.get(rel.subject_id, child_pos)[1],
+                parent_pos[2] + _support_top_m(parent),
+            ]
+            error_m = max(abs(child_pos[i] - expected[i]) for i in range(3))
+            message = "robot mount root position verified"
         elif rel.relation in {"on_top_of", "stacked_above", "mounted_to"}:
             expected = [
-                parent_pos[0],
-                parent_pos[1],
+                predicted.get(rel.subject_id, child_pos)[0],
+                predicted.get(rel.subject_id, child_pos)[1],
                 parent_pos[2] + _support_top_m(parent) + _height_m(subject) / 2.0,
             ]
             error_m = max(abs(child_pos[i] - expected[i]) for i in range(3))
             message = "support relation position verified"
         elif rel.relation == "inside":
             expected = [
-                parent_pos[0],
-                parent_pos[1],
+                predicted.get(rel.subject_id, child_pos)[0],
+                predicted.get(rel.subject_id, child_pos)[1],
                 parent_pos[2] - _height_m(parent) / 2.0
                 + _interior_floor_offset_m(parent)
                 + _height_m(subject) / 2.0,

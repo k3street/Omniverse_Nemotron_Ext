@@ -322,7 +322,10 @@ POST /api/v1/canvas/{session_id}/cosmos/propose
 ```
 
 `cosmos/observe` calls a configured OpenAI-compatible Cosmos 3 Reasoner
-endpoint. `cosmos/observe_viewport` first captures the active Isaac Sim viewport
+endpoint. If `GEMINI_ROBOTICS_ER_FALLBACK=true` and `GEMINI_API_KEY` is set,
+Gemini Robotics-ER can act as a cloud backup that returns the same
+`CosmosSceneObservation` contract when the Cosmos endpoint is unavailable.
+`cosmos/observe_viewport` first captures the active Isaac Sim viewport
 through Kit RPC, then calls the same observation flow. `cosmos/propose` accepts
 already-structured observations. The backend
 converts the observation into a reviewable `LayoutSpec` proposal.
@@ -422,6 +425,25 @@ remote capacity providers. See
 [Remote Scale Providers](docs/architecture/remote-scale-providers.md) for the
 planned extension/backend contract.
 
+For Cosmos 3 Reasoner NIM, prefer a same-LAN DGX Spark when one is available.
+That keeps the local Isaac Sim GPU free for rendering and live stage mutation.
+The helper below starts the NIM endpoint on Spark or another GPU host:
+
+```bash
+export NGC_API_KEY=nvapi-...
+COSMOS_NIM_CACHE=$HOME/nim-cache/cosmos3-reasoner \
+  COSMOS_NIM_PORT=8081 \
+  NIM_MAX_MODEL_LEN=32768 \
+  ./scripts/start_cosmos3_reasoner_nim.sh
+```
+
+Then point Isaac Assist at the remote endpoint:
+
+```bash
+COSMOS3_REASONER_BASE_URL=http://<spark-host-or-ip>:8081/v1
+COSMOS3_REASONER_MODEL=nvidia/cosmos3-nano-reasoner
+```
+
 #### Asset path examples
 
 ```bash
@@ -488,6 +510,40 @@ The FastAPI service exposes the following REST API modules, all prefixed under `
 | `/canvas/{session_id}/cosmos/observe_viewport` | Cosmos 3 Runtime | Active Isaac viewport screenshot → floor-plan `LayoutSpec` proposal |
 
 Full interactive documentation: **`http://localhost:8000/docs`**
+
+### External Chat MCP Floor-Plan Tools
+
+External MCP chat clients can use the floor-plan as the semantic window into
+Isaac Sim instead of trying to infer the 3D stage directly. The MCP server
+advertises these scene-creation tools:
+
+| MCP Tool | Purpose |
+|---|---|
+| `create_floor_plan_from_text` | Convert a text scene description into a reviewable `LayoutSpec`. |
+| `create_floor_plan_from_image` | Use the configured image/reasoner path to create a floor-plan proposal from an image. |
+| `create_franka_physics_pick_scene` | Create a full-physics Franka tabletop pick scene with rigid workpieces, static supports, relation metadata, and a pick-place controller plan. |
+| `create_ros2_scene_harness` | Write a project-local ROS2 package plus scene contract, controller config, launch file, and active-stage preflight targets. |
+| `preflight_isaac_stage_targets` | Read the active Isaac stage identity and confirm caller-specified target prims before graph or robot-control tools run. |
+| `search_local_assets` | Search configured USD asset roots such as `/home/kimate/Desktop/assets`. |
+| `set_object_asset` | Pin a selected USD asset to a floor-plan object via `metadata.reviewed_asset_ref`. |
+| `build_scene_from_floor_plan` | Dry-run or build the current floor-plan into Isaac/Kit generated code. |
+| `launch_scene_in_isaac` | Materialize and launch one generated scene variant. Defaults to dry-run. |
+| `verify_scene_relations` | Normalize and validate support/containment relations before claiming success. |
+
+Recommended external-client flow: create a floor-plan from text or image,
+search and pin real assets where needed, verify relations, dry-run the scene
+build, preflight the active Isaac stage and caller-specified target prims, then
+launch only after the generated code and relation diagnostics look right.
+
+For a manipulation smoke scene, use `create_franka_physics_pick_scene` with
+`motion_backend="auto"` or `"curobo"`. That path creates the physics scene and
+returns arguments for the existing `setup_pick_place_controller` live Isaac
+tool. `create_ros2_scene_harness` records the expected live-stage prim paths in
+`config/scene_contract.json` so agents can run `preflight_isaac_stage_targets`
+before any live graph or robot-control action. `motion_backend="cumotion"`
+records a MoveIt/cuMotion bridge contract and validated dry-run plan, while
+live viewport pickup still routes through the existing pick-place controller
+until the opus-runtime cuMotion execution bridge is connected.
 
 ### Recent merged capabilities
 
