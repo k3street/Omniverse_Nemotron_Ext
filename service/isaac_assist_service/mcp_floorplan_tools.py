@@ -278,7 +278,7 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                         "description": (
                             "Safety gate to run. Supported values: context_only, "
                             "context_pubsub_no_targets, context_pubsub_dummy_target, "
-                            "context_pubsub_dummy_target_tick."
+                            "context_pubsub_dummy_target_tick, articulation_dummy_target."
                         ),
                     },
                     "probe_path": {
@@ -288,7 +288,7 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                     "dummy_target_path": {
                         "type": "string",
                         "description": (
-                            "Temporary target prim path for context_pubsub_dummy_target. "
+                            "Temporary target prim path for dummy-target probe modes. "
                             "Must stay under /World/IsaacAssistProbes/."
                         ),
                     },
@@ -730,6 +730,7 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         "context_pubsub_no_targets",
         "context_pubsub_dummy_target",
         "context_pubsub_dummy_target_tick",
+        "articulation_dummy_target",
     }
     if probe_mode not in supported_modes:
         raise ValueError(
@@ -741,9 +742,12 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         arguments.get("node_namespace") or runtime_profile.ros2_omnigraph_namespace
     )
     candidate_namespaces = _ros2_candidate_namespaces(node_namespace)
-    probe_path = str(
-        arguments.get("probe_path") or "/World/IsaacAssistProbes/ROS2ContextCreationProbe"
+    default_probe_path = (
+        "/World/IsaacAssistProbes/ArticulationControllerProbe"
+        if probe_mode == "articulation_dummy_target"
+        else "/World/IsaacAssistProbes/ROS2ContextCreationProbe"
     )
+    probe_path = str(arguments.get("probe_path") or default_probe_path)
     if not probe_path.startswith("/World/IsaacAssistProbes/"):
         raise ValueError("probe_path must stay under /World/IsaacAssistProbes/")
     dummy_target_path = str(
@@ -782,13 +786,16 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         "sets_target_prim": probe_mode in {
             "context_pubsub_dummy_target",
             "context_pubsub_dummy_target_tick",
+            "articulation_dummy_target",
         },
         "uses_dummy_target": probe_mode in {
             "context_pubsub_dummy_target",
             "context_pubsub_dummy_target_tick",
+            "articulation_dummy_target",
         },
         "wires_tick": probe_mode == "context_pubsub_dummy_target_tick",
         "requires_timeline_stopped": probe_mode == "context_pubsub_dummy_target_tick",
+        "creates_articulation_controller": probe_mode == "articulation_dummy_target",
         "recommendation": {
             "author_omnigraph": False,
             "connect_articulation_controller": False,
@@ -836,7 +843,11 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         response["dummy_target_removed"] = bool(readback.get("dummy_target_removed"))
         response["timeline_playing"] = bool(readback.get("timeline_playing"))
         response["tick_wiring_created"] = bool(readback.get("tick_wiring_created"))
+        response["articulation_controller_created"] = bool(
+            readback.get("articulation_controller_created")
+        )
         response["created_node_suffixes"] = readback.get("created_node_suffixes", [])
+        response["created_node_names"] = readback.get("created_node_names", [])
         response["missing_node_suffixes"] = readback.get("missing_node_suffixes", [])
         response["missing_absolute_node_types"] = readback.get("missing_absolute_node_types", [])
         response["set_attrs_ok"] = readback.get("set_attrs_ok", [])
@@ -866,12 +877,20 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
                             "Franka or articulation-controller connection."
                         )
                     else:
-                        response["recommendation"]["reason"] = (
-                            "Disposable ROS2 publish/subscribe nodes accepted tick wiring "
-                            "while the timeline was stopped, then cleaned up. Next gate can "
-                            "test an articulation-controller node in isolation before any "
-                            "real Franka target is connected."
-                        )
+                        if probe_mode == "context_pubsub_dummy_target_tick":
+                            response["recommendation"]["reason"] = (
+                                "Disposable ROS2 publish/subscribe nodes accepted tick wiring "
+                                "while the timeline was stopped, then cleaned up. Next gate can "
+                                "test an articulation-controller node in isolation before any "
+                                "real Franka target is connected."
+                            )
+                        else:
+                            response["recommendation"]["reason"] = (
+                                "A disposable IsaacArticulationController node accepted a fake "
+                                "targetPrim and cleaned up. Next gate can connect disposable "
+                                "ROS2 joint-command outputs into a disposable controller node, "
+                                "still without a real Franka target."
+                            )
     else:
         response.update({
             "status": "probe_parse_failed" if result.get("success") else "probe_failed",
@@ -1574,14 +1593,17 @@ def _ros2_omnigraph_creation_probe_code(
     allow_when_playing: bool,
 ) -> str:
     action_node_defs: list[dict[str, str]] = []
-    node_defs = [
-        {"name": "ROS2Context", "suffix": "ROS2Context"},
-    ]
+    node_defs: list[dict[str, str]] = []
     connections: list[list[str]] = []
-    required_suffixes = ["ROS2Context"]
+    required_suffixes: list[str] = []
     required_absolute_node_types: list[str] = []
     set_pairs: list[list[str]] = []
     probe_dummy_target_path = ""
+    tick_node_names: list[str] = []
+    articulation_node_names: list[str] = []
+    if probe_mode != "articulation_dummy_target":
+        node_defs.append({"name": "ROS2Context", "suffix": "ROS2Context"})
+        required_suffixes.append("ROS2Context")
     if probe_mode in {
         "context_pubsub_no_targets",
         "context_pubsub_dummy_target",
@@ -1604,11 +1626,21 @@ def _ros2_omnigraph_creation_probe_code(
             "name": "OnPlaybackTick",
             "node_type": "omni.graph.action.OnPlaybackTick",
         })
+        tick_node_names.append("OnPlaybackTick")
         connections.extend([
             ["OnPlaybackTick.outputs:tick", "PublishJointState.inputs:execIn"],
             ["OnPlaybackTick.outputs:tick", "SubscribeJointState.inputs:execIn"],
         ])
         required_absolute_node_types.append("omni.graph.action.OnPlaybackTick")
+    if probe_mode == "articulation_dummy_target":
+        action_node_defs.append({
+            "name": "ArticulationController",
+            "node_type": "isaacsim.core.nodes.IsaacArticulationController",
+        })
+        articulation_node_names.append("ArticulationController")
+        required_absolute_node_types.append(
+            "isaacsim.core.nodes.IsaacArticulationController"
+        )
     if probe_mode in {"context_pubsub_dummy_target", "context_pubsub_dummy_target_tick"}:
         probe_dummy_target_path = dummy_target_path
         set_pairs.extend([
@@ -1616,6 +1648,9 @@ def _ros2_omnigraph_creation_probe_code(
             ["PublishJointState.inputs:topicName", "/isaac_assist_probe/joint_states"],
             ["SubscribeJointState.inputs:topicName", "/isaac_assist_probe/joint_commands"],
         ])
+    if probe_mode == "articulation_dummy_target":
+        probe_dummy_target_path = dummy_target_path
+        set_pairs.append(["ArticulationController.inputs:targetPrim", dummy_target_path])
     payload = {
         "candidate_namespaces": candidate_namespaces,
         "probe_path": probe_path,
@@ -1626,6 +1661,8 @@ def _ros2_omnigraph_creation_probe_code(
         "action_node_defs": action_node_defs,
         "node_defs": node_defs,
         "connections": connections,
+        "tick_node_names": tick_node_names,
+        "articulation_node_names": articulation_node_names,
         "required_suffixes": required_suffixes,
         "required_absolute_node_types": required_absolute_node_types,
         "set_pairs": set_pairs,
@@ -1648,6 +1685,8 @@ _result = {{
     "dummy_target_removed": False,
     "timeline_playing": False,
     "tick_wiring_created": False,
+    "articulation_controller_created": False,
+    "created_node_names": [],
     "created_node_suffixes": [],
     "missing_node_suffixes": [],
     "missing_absolute_node_types": [],
@@ -1671,31 +1710,38 @@ try:
 
     _registered = set(str(_node) for _node in og.get_registered_nodes())
     _required_suffixes = list(_probe_payload["required_suffixes"])
+    _requires_ros2_namespace = bool(_required_suffixes)
     _missing_absolute = [
         _node_type for _node_type in _probe_payload["required_absolute_node_types"]
         if _node_type not in _registered
     ]
     _result["missing_absolute_node_types"] = _missing_absolute
     _ros2_ns = ""
-    _missing = list(_required_suffixes)
-    for _namespace in _probe_payload["candidate_namespaces"]:
-        _candidate_missing = [
-            _suffix for _suffix in _required_suffixes
-            if f"{{_namespace}}.{{_suffix}}" not in _registered
-        ]
-        if not _candidate_missing:
-            _ros2_ns = _namespace
-            _missing = []
-            break
-        if len(_candidate_missing) < len(_missing):
-            _missing = _candidate_missing
+    _missing = []
+    if _requires_ros2_namespace:
+        _missing = list(_required_suffixes)
+        for _namespace in _probe_payload["candidate_namespaces"]:
+            _candidate_missing = [
+                _suffix for _suffix in _required_suffixes
+                if f"{{_namespace}}.{{_suffix}}" not in _registered
+            ]
+            if not _candidate_missing:
+                _ros2_ns = _namespace
+                _missing = []
+                break
+            if len(_candidate_missing) < len(_missing):
+                _missing = _candidate_missing
     _result["detected_namespace"] = _ros2_ns
     _result["missing_node_suffixes"] = _missing
-    if _result["timeline_playing"] and not _probe_payload["allow_when_playing"]:
+    if (
+        _probe_payload["tick_node_names"]
+        and _result["timeline_playing"]
+        and not _probe_payload["allow_when_playing"]
+    ):
         _result["status"] = "timeline_playing"
     elif _missing_absolute:
         _result["status"] = "missing_required_nodes"
-    elif not _ros2_ns:
+    elif _requires_ros2_namespace and not _ros2_ns:
         _result["status"] = "missing_required_nodes"
     else:
         _keys = og.Controller.Keys
@@ -1720,10 +1766,11 @@ try:
             (_node_def["name"], _node_def["node_type"])
             for _node_def in _probe_payload["action_node_defs"]
         ]
-        _create_nodes.extend([
-            (_node_def["name"], f"{{_ros2_ns}}.{{_node_def['suffix']}}")
-            for _node_def in _probe_payload["node_defs"]
-        ])
+        if _requires_ros2_namespace:
+            _create_nodes.extend([
+                (_node_def["name"], f"{{_ros2_ns}}.{{_node_def['suffix']}}")
+                for _node_def in _probe_payload["node_defs"]
+            ])
         _connections = [
             tuple(_connection) for _connection in _probe_payload["connections"]
         ]
@@ -1737,17 +1784,24 @@ try:
             _edit_request,
         )
         _graph_prim = _stage.GetPrimAtPath(_path)
+        _created_node_names = []
         _created_suffixes = []
         for _node_name, _node_type in _create_nodes:
             _node_prim = _stage.GetPrimAtPath(Sdf.Path(f"{{_graph_path}}/{{_node_name}}"))
             if _node_prim and _node_prim.IsValid():
+                _created_node_names.append(str(_node_name))
                 _created_suffixes.append(str(_node_type).split(".")[-1])
+        _result["created_node_names"] = _created_node_names
         _result["created_node_suffixes"] = _created_suffixes
         _result["tick_wiring_created"] = bool(
-            _probe_payload["action_node_defs"]
+            _probe_payload["tick_node_names"]
+            and all(_node_name in _created_node_names for _node_name in _probe_payload["tick_node_names"])
+        )
+        _result["articulation_controller_created"] = bool(
+            _probe_payload["articulation_node_names"]
             and all(
-                str(_node_def["node_type"]).split(".")[-1] in _created_suffixes
-                for _node_def in _probe_payload["action_node_defs"]
+                _node_name in _created_node_names
+                for _node_name in _probe_payload["articulation_node_names"]
             )
         )
         for _attr_path, _attr_value in _probe_payload["set_pairs"]:
