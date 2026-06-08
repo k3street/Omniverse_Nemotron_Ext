@@ -522,6 +522,7 @@ advertises these scene-creation tools:
 | `create_floor_plan_from_text` | Convert a text scene description into a reviewable `LayoutSpec`. |
 | `create_floor_plan_from_image` | Use the configured image/reasoner path to create a floor-plan proposal from an image. |
 | `create_franka_physics_pick_scene` | Create a full-physics Franka tabletop pick scene with rigid workpieces, static supports, relation metadata, and a pick-place controller plan. |
+| `create_ros2_scene_harness` | Write a project-local ROS2 package plus scene contract, controller config, launch file, and active-stage preflight targets. |
 | `preflight_isaac_stage_targets` | Read the active Isaac stage identity and confirm caller-specified target prims before graph or robot-control tools run. |
 | `search_local_assets` | Search configured USD asset roots such as `/home/kimate/Desktop/assets`. |
 | `set_object_asset` | Pin a selected USD asset to a floor-plan object via `metadata.reviewed_asset_ref`. |
@@ -537,10 +538,12 @@ launch only after the generated code and relation diagnostics look right.
 For a manipulation smoke scene, use `create_franka_physics_pick_scene` with
 `motion_backend="auto"` or `"curobo"`. That path creates the physics scene and
 returns arguments for the existing `setup_pick_place_controller` live Isaac
-tool. `motion_backend="cumotion"` records a MoveIt/cuMotion bridge contract and
-validated dry-run plan, while live viewport pickup still routes through the
-existing pick-place controller until the opus-runtime cuMotion execution bridge
-is connected.
+tool. `create_ros2_scene_harness` records the expected live-stage prim paths in
+`config/scene_contract.json` so agents can run `preflight_isaac_stage_targets`
+before any live graph or robot-control action. `motion_backend="cumotion"`
+records a MoveIt/cuMotion bridge contract and validated dry-run plan, while
+live viewport pickup still routes through the existing pick-place controller
+until the opus-runtime cuMotion execution bridge is connected.
 
 ### Recent merged capabilities
 

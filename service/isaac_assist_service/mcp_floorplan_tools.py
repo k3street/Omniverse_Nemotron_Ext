@@ -221,6 +221,20 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "boolean",
                         "description": "Keep the ROS2 OmniGraph compatibility probe offline/read-only script generation. Defaults to true.",
                     },
+                    "preflight_stage_targets": {
+                        "type": "boolean",
+                        "description": "Include active-stage target prim preflight in the generated contract. Defaults to true.",
+                    },
+                    "stage_preflight_dry_run": {
+                        "type": "boolean",
+                        "description": "Keep active-stage target preflight offline/read-only script generation. Defaults to dry_run.",
+                    },
+                    "target_prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Explicit target prim paths to preflight. Defaults to controller robot, source, destination, and obstacle paths.",
+                    },
+                    "stage_preflight_timeout": {"type": "number"},
                     "probe_timeout": {"type": "number"},
                     "force_launch": {
                         "type": "boolean",
@@ -580,6 +594,8 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
     launch_scene = bool(arguments.get("launch_scene", False))
     probe_ros2_omnigraph = bool(arguments.get("probe_ros2_omnigraph", True))
     probe_dry_run = bool(arguments.get("probe_dry_run", True))
+    preflight_stage_targets = bool(arguments.get("preflight_stage_targets", True))
+    stage_preflight_dry_run = bool(arguments.get("stage_preflight_dry_run", dry_run))
 
     scene = await create_franka_physics_pick_scene({
         "session_id": session_id,
@@ -608,6 +624,26 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
             })
 
     controller = scene["spec"]["parameters"]["controller"]
+    target_prim_paths = _harness_target_prim_paths(
+        controller,
+        explicit_paths=arguments.get("target_prim_paths"),
+    )
+    stage_preflight = (
+        await preflight_isaac_stage_targets({
+            "target_prim_paths": target_prim_paths,
+            "dry_run": stage_preflight_dry_run,
+            "timeout": float(arguments.get("stage_preflight_timeout") or 10.0),
+            "include_probe_code": False,
+        })
+        if preflight_stage_targets
+        else {
+            "status": "skipped",
+            "dry_run": True,
+            "read_only": True,
+            "target_prim_paths": target_prim_paths,
+            "reason": "Active-stage target preflight was not requested.",
+        }
+    )
     omnigraph_probe = (
         await probe_ros2_omnigraph_compatibility({
             "runtime_profile": runtime_profile.key,
@@ -640,6 +676,7 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
         scene=scene,
         build_response=build_response,
         launch_response=launch_response,
+        stage_preflight=stage_preflight,
         omnigraph_probe=omnigraph_probe,
     )
 
@@ -664,6 +701,7 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
         },
         "build": _compact_build_response(build_response),
         "launch": _compact_launch_response(launch_response),
+        "stage_preflight": _compact_stage_preflight_response(stage_preflight),
         "ros2_omnigraph_probe": _compact_probe_response(omnigraph_probe),
         "files": files,
         "next_commands": [
@@ -1656,6 +1694,52 @@ def _ros2_package_name(project_name: str) -> str:
     return name
 
 
+def _harness_target_prim_paths(
+    controller: Dict[str, Any],
+    *,
+    explicit_paths: Any = None,
+) -> List[str]:
+    """Derive live-stage preflight target prims from a generic controller contract."""
+
+    paths: list[str] = []
+
+    def add_path(value: Any) -> None:
+        if isinstance(value, str) and value.startswith("/") and value not in paths:
+            paths.append(value)
+
+    if explicit_paths is not None:
+        if not isinstance(explicit_paths, list):
+            raise ValueError("target_prim_paths must be a list of absolute USD prim paths")
+        for path in explicit_paths:
+            path_str = str(path).strip()
+            if not path_str.startswith("/"):
+                raise ValueError("target_prim_paths entries must be absolute USD prim paths")
+            add_path(path_str)
+        return paths
+
+    add_path(controller.get("robot_path"))
+    for source_path in controller.get("source_paths") or []:
+        add_path(source_path)
+    add_path(controller.get("destination_path"))
+    for obstacle_path in controller.get("planning_obstacles") or []:
+        add_path(obstacle_path)
+
+    articulation = controller.get("articulation_controller")
+    if isinstance(articulation, dict):
+        add_path(articulation.get("robot_path"))
+
+    controller_args = controller.get("controller_args")
+    if isinstance(controller_args, dict):
+        add_path(controller_args.get("robot_path"))
+        for source_path in controller_args.get("source_paths") or []:
+            add_path(source_path)
+        add_path(controller_args.get("destination_path"))
+        for obstacle_path in controller_args.get("planning_obstacles") or []:
+            add_path(obstacle_path)
+
+    return paths
+
+
 def _harness_project_root(workspace_root: Any, package_name: str) -> Path:
     if workspace_root:
         root = Path(str(workspace_root)).expanduser()
@@ -2256,6 +2340,7 @@ def _write_ros2_harness_project(
     scene: Dict[str, Any],
     build_response: Dict[str, Any],
     launch_response: Dict[str, Any],
+    stage_preflight: Dict[str, Any],
     omnigraph_probe: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     src_root = project_root / "src" / package_name
@@ -2280,6 +2365,7 @@ def _write_ros2_harness_project(
         scene=scene,
         build_response=build_response,
         launch_response=launch_response,
+        stage_preflight=stage_preflight,
         omnigraph_probe=omnigraph_probe,
     )
     written: list[Path] = []
@@ -2333,6 +2419,7 @@ def _scene_contract_payload(
     scene: Dict[str, Any],
     build_response: Dict[str, Any],
     launch_response: Dict[str, Any],
+    stage_preflight: Dict[str, Any],
     omnigraph_probe: Dict[str, Any],
 ) -> Dict[str, Any]:
     return {
@@ -2356,6 +2443,7 @@ def _scene_contract_payload(
             "relation_diagnostics": scene.get("relation_diagnostics", []),
         },
         "controller": controller,
+        "stage_preflight": _compact_stage_preflight_response(stage_preflight),
         "ros2_omnigraph_probe": _compact_probe_response(omnigraph_probe),
         "build": _compact_build_response(build_response),
         "launch": _compact_launch_response(launch_response),
@@ -2391,6 +2479,38 @@ def _compact_launch_response(launch_response: Dict[str, Any]) -> Dict[str, Any]:
         for key, value in launch_response.items()
         if key in {"status", "dry_run", "command", "usd_path", "workspace_root", "variant_id", "pid", "log_path"}
     }
+
+
+def _compact_stage_preflight_response(preflight_response: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(preflight_response, dict):
+        return {"status": "unknown"}
+    compact: Dict[str, Any] = {
+        "status": preflight_response.get("status"),
+        "dry_run": preflight_response.get("dry_run"),
+        "read_only": preflight_response.get("read_only", True),
+        "stage_checked": preflight_response.get("stage_checked", False),
+        "target_prim_paths": preflight_response.get("target_prim_paths", []),
+        "match_terms": preflight_response.get("match_terms", []),
+        "all_targets_present": preflight_response.get("all_targets_present"),
+        "missing_target_prim_paths": preflight_response.get("missing_target_prim_paths", []),
+        "active_stage_identifier": preflight_response.get("active_stage_identifier", ""),
+        "active_stage_real_path": preflight_response.get("active_stage_real_path", ""),
+        "timeline_playing": preflight_response.get("timeline_playing"),
+    }
+    target_prims = preflight_response.get("target_prims")
+    if isinstance(target_prims, dict):
+        compact["target_prims"] = target_prims
+    matching_prims = preflight_response.get("matching_prims")
+    if isinstance(matching_prims, list):
+        compact["matching_prims"] = matching_prims[:25]
+    kit_rpc = preflight_response.get("kit_rpc")
+    if isinstance(kit_rpc, dict):
+        compact["kit_rpc"] = {"success": bool(kit_rpc.get("success"))}
+    if preflight_response.get("error"):
+        compact["error"] = preflight_response.get("error")
+    if preflight_response.get("reason"):
+        compact["reason"] = preflight_response.get("reason")
+    return compact
 
 
 def _compact_probe_response(probe_response: Dict[str, Any]) -> Dict[str, Any]:
@@ -2642,6 +2762,10 @@ def _harness_readme(project_name: str, package_name: str, contract: Dict[str, An
     issues = contract.get("precheck", {}).get("issues", [])
     issue_text = "\n".join(f"- {issue}" for issue in issues) if issues else "- none"
     graph = contract.get("controller", {}).get("ros2_control_graph", {})
+    preflight = contract.get("stage_preflight", {})
+    preflight_status = preflight.get("status", "unknown")
+    target_paths = preflight.get("target_prim_paths") or []
+    target_text = "\n".join(f"- {path}" for path in target_paths) if target_paths else "- none recorded"
     probe = contract.get("ros2_omnigraph_probe", {})
     probe_status = probe.get("status", "unknown")
     probe_namespace = probe.get("detected_namespace") or "not detected"
@@ -2661,11 +2785,16 @@ Generated Isaac Assist ROS2 scene harness.
 - ROS2 command topic: {graph.get("joint_commands_topic", "/isaac_joint_commands")}
 - ROS2 state topic: {graph.get("joint_states_topic", "/isaac_joint_states")}
 - ROS2 OmniGraph authoring: {graph.get("omnigraph_policy", "defer_until_live_probe_passes")}
+- Active-stage target preflight: {preflight_status}
 - ROS2 OmniGraph probe: {probe_status}; detected namespace: {probe_namespace}
 
 ## Precheck
 
 {issue_text}
+
+## Expected Live Stage Targets
+
+{target_text}
 
 ## Build And Run
 
@@ -2682,10 +2811,13 @@ when the live planner is available.
 
 Probe recommendation: {probe_recommendation}
 
-Run the `probe_ros2_omnigraph_compatibility` MCP tool before enabling live
-OmniGraph authoring. Then run `probe_ros2_omnigraph_creation` with
-`dry_run=false` to confirm this Isaac build can create and remove a disposable
-ROS2Context graph before connecting ROS2 commands to the articulation controller.
+Run `preflight_isaac_stage_targets` against the active Isaac instance before
+robot-control or graph-authoring steps, using the target paths listed above.
+Then run the `probe_ros2_omnigraph_compatibility` MCP tool before enabling live
+OmniGraph authoring. Finally, run `probe_ros2_omnigraph_creation` with
+`dry_run=false` and an explicit `target_prim_path` to confirm this Isaac build
+can create and remove a disposable ROS2 command graph before connecting ROS2
+commands to the articulation controller.
 """
 
 
