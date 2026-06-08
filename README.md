@@ -522,6 +522,7 @@ advertises these scene-creation tools:
 | `create_floor_plan_from_text` | Convert a text scene description into a reviewable `LayoutSpec`. |
 | `create_floor_plan_from_image` | Use the configured image/reasoner path to create a floor-plan proposal from an image. |
 | `create_franka_physics_pick_scene` | Create a full-physics Franka tabletop pick scene with rigid workpieces, static supports, relation metadata, and a pick-place controller plan. |
+| `preflight_isaac_stage_targets` | Read the active Isaac stage identity and confirm caller-specified target prims before graph or robot-control tools run. |
 | `search_local_assets` | Search configured USD asset roots such as `/home/kimate/Desktop/assets`. |
 | `set_object_asset` | Pin a selected USD asset to a floor-plan object via `metadata.reviewed_asset_ref`. |
 | `build_scene_from_floor_plan` | Dry-run or build the current floor-plan into Isaac/Kit generated code. |
@@ -530,8 +531,8 @@ advertises these scene-creation tools:
 
 Recommended external-client flow: create a floor-plan from text or image,
 search and pin real assets where needed, verify relations, dry-run the scene
-build, then launch only after the generated code and relation diagnostics look
-right.
+build, preflight the active Isaac stage and caller-specified target prims, then
+launch only after the generated code and relation diagnostics look right.
 
 For a manipulation smoke scene, use `create_franka_physics_pick_scene` with
 `motion_backend="auto"` or `"curobo"`. That path creates the physics scene and

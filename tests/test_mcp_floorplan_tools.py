@@ -445,6 +445,54 @@ def test_probe_ros2_omnigraph_creation_subscribe_articulation_mode_is_disposable
     assert "/World/Franka" not in probe_code
 
 
+def test_preflight_isaac_stage_targets_is_generic_by_default():
+    from service.isaac_assist_service.mcp_floorplan_tools import preflight_isaac_stage_targets
+
+    response = asyncio.run(preflight_isaac_stage_targets({
+        "dry_run": True,
+    }))
+
+    assert response["status"] == "dry_run"
+    assert response["read_only"] is True
+    assert response["target_prim_paths"] == []
+    assert response["match_terms"] == []
+    assert response["stage_checked"] is False
+    probe_code = response["probe_code"]
+    assert "ISAAC_ASSIST_STAGE_PREFLIGHT" in probe_code
+    assert "stage_identifier" in probe_code
+    assert "stage_real_path" in probe_code
+    assert "target_prims" in probe_code
+    assert "matching_prims" in probe_code
+    assert "/World/Franka" not in probe_code
+
+
+def test_preflight_isaac_stage_targets_uses_explicit_target_path():
+    from service.isaac_assist_service.mcp_floorplan_tools import preflight_isaac_stage_targets
+
+    response = asyncio.run(preflight_isaac_stage_targets({
+        "target_prim_path": "/World/RobotArmA",
+        "dry_run": True,
+    }))
+
+    assert response["status"] == "dry_run"
+    assert response["target_prim_paths"] == ["/World/RobotArmA"]
+    assert response["match_terms"] == ["RobotArmA"]
+    probe_code = response["probe_code"]
+    assert "/World/RobotArmA" in probe_code
+    assert "/World/Franka" not in probe_code
+
+
+def test_probe_ros2_omnigraph_creation_real_target_requires_explicit_target():
+    from service.isaac_assist_service.mcp_floorplan_tools import probe_ros2_omnigraph_creation
+
+    with pytest.raises(ValueError, match="target_prim_path is required"):
+        asyncio.run(probe_ros2_omnigraph_creation({
+            "runtime_profile": "isaacsim-6.0",
+            "probe_mode": "subscribe_articulation_real_target_tick",
+            "dry_run": True,
+        }))
+
+
 def test_probe_ros2_omnigraph_creation_real_target_mode_requires_stage_target():
     from service.isaac_assist_service.mcp_floorplan_tools import probe_ros2_omnigraph_creation
 
@@ -549,6 +597,7 @@ def test_mcp_server_exposes_floorplan_tools(monkeypatch):
     assert "verify_scene_relations" in names
     assert "create_franka_physics_pick_scene" in names
     assert "create_ros2_scene_harness" in names
+    assert "preflight_isaac_stage_targets" in names
     assert "probe_ros2_omnigraph_compatibility" in names
     assert "probe_ros2_omnigraph_creation" in names
 

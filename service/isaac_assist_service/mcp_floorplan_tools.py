@@ -233,6 +233,37 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "preflight_isaac_stage_targets",
+            "description": (
+                "Read-only Kit RPC preflight for the active Isaac stage. Reports the "
+                "stage identifier, timeline state, requested target prim existence, and "
+                "matching prim hints before any graph or robot-control tool runs."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target_prim_path": {
+                        "type": "string",
+                        "description": "Single target prim to check, e.g. /World/MyRobot.",
+                    },
+                    "target_prim_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Target prim paths to check. Overrides target_prim_path.",
+                    },
+                    "match_terms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Case-insensitive path/type terms to list as target hints.",
+                    },
+                    "max_matches": {"type": "integer"},
+                    "dry_run": {"type": "boolean"},
+                    "timeout": {"type": "number"},
+                    "include_probe_code": {"type": "boolean"},
+                },
+            },
+        },
+        {
             "name": "probe_ros2_omnigraph_compatibility",
             "description": (
                 "Read-only compatibility probe for Isaac Sim ROS2 OmniGraph support. "
@@ -298,7 +329,7 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": (
                             "Existing real target prim path for real-target probe modes. "
-                            "Defaults to /World/Franka and must not be under probes."
+                            "Required for real-target probe modes and must not be under probes."
                         ),
                     },
                     "cleanup": {"type": "boolean"},
@@ -409,6 +440,8 @@ async def call_floorplan_tool(name: str, arguments: Dict[str, Any]) -> Dict[str,
         return await create_franka_physics_pick_scene(arguments)
     if name == "create_ros2_scene_harness":
         return await create_ros2_scene_harness(arguments)
+    if name == "preflight_isaac_stage_targets":
+        return await preflight_isaac_stage_targets(arguments)
     if name == "probe_ros2_omnigraph_compatibility":
         return await probe_ros2_omnigraph_compatibility(arguments)
     if name == "probe_ros2_omnigraph_creation":
@@ -642,6 +675,96 @@ async def create_ros2_scene_harness(arguments: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
+async def preflight_isaac_stage_targets(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Read active Isaac stage identity and target prim presence without mutation."""
+
+    raw_target_paths = arguments.get("target_prim_paths")
+    if raw_target_paths:
+        if not isinstance(raw_target_paths, list):
+            raise ValueError("target_prim_paths must be a list of absolute prim paths")
+        target_paths = [str(path).strip() for path in raw_target_paths if str(path).strip()]
+    else:
+        single_target = str(arguments.get("target_prim_path") or "").strip()
+        target_paths = [single_target] if single_target else []
+    target_paths = list(dict.fromkeys(target_paths))
+    for target_path in target_paths:
+        if not target_path.startswith("/"):
+            raise ValueError("target prim paths must be absolute USD prim paths")
+
+    raw_match_terms = arguments.get("match_terms")
+    if raw_match_terms is None:
+        match_terms = sorted({
+            target_path.rstrip("/").rsplit("/", 1)[-1]
+            for target_path in target_paths
+            if target_path.rstrip("/").rsplit("/", 1)[-1]
+        })
+    else:
+        if not isinstance(raw_match_terms, list):
+            raise ValueError("match_terms must be a list of strings")
+        match_terms = [str(term).strip() for term in raw_match_terms if str(term).strip()]
+    max_matches = max(0, min(int(arguments.get("max_matches") or 50), 200))
+    dry_run = bool(arguments.get("dry_run", False))
+    timeout = float(arguments.get("timeout") or 10.0)
+    probe_code = _isaac_stage_preflight_probe_code(
+        target_prim_paths=target_paths,
+        match_terms=match_terms,
+        max_matches=max_matches,
+    )
+    response: Dict[str, Any] = {
+        "status": "dry_run" if dry_run else "pending",
+        "dry_run": dry_run,
+        "read_only": True,
+        "target_prim_paths": target_paths,
+        "match_terms": match_terms,
+        "max_matches": max_matches,
+        "stage_checked": False,
+    }
+    if bool(arguments.get("include_probe_code", False)) or dry_run:
+        response["probe_code"] = probe_code
+    if dry_run:
+        return response
+
+    try:
+        from .chat.tools import kit_tools
+    except Exception as exc:  # pragma: no cover - defensive optional import
+        response.update({
+            "status": "kit_tools_unavailable",
+            "error": f"{type(exc).__name__}: {exc}",
+        })
+        return response
+
+    if not await kit_tools.is_kit_rpc_alive():
+        response.update({
+            "status": "kit_rpc_unavailable",
+            "error": "Kit RPC /health did not respond ok on the configured port.",
+        })
+        return response
+
+    result = await kit_tools.exec_sync(probe_code, timeout=timeout)
+    response["stage_checked"] = True
+    response["kit_rpc"] = {
+        "success": bool(result.get("success")),
+        "output": result.get("output", ""),
+    }
+    readback = _extract_stage_preflight_json(str(result.get("output") or ""))
+    if readback:
+        response["readback"] = readback
+        response["active_stage_identifier"] = readback.get("stage_identifier", "")
+        response["active_stage_real_path"] = readback.get("stage_real_path", "")
+        response["timeline_playing"] = bool(readback.get("timeline_playing"))
+        response["target_prims"] = readback.get("target_prims", {})
+        response["missing_target_prim_paths"] = readback.get("missing_target_prim_paths", [])
+        response["all_targets_present"] = bool(readback.get("all_targets_present"))
+        response["matching_prims"] = readback.get("matching_prims", [])
+        response["status"] = "ok" if readback.get("ok") else str(readback.get("status") or "failed")
+    else:
+        response.update({
+            "status": "preflight_parse_failed" if result.get("success") else "preflight_failed",
+            "error": str(result.get("output") or "Kit RPC preflight did not return JSON."),
+        })
+    return response
+
+
 async def probe_ros2_omnigraph_compatibility(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Probe ROS2 OmniGraph support without creating graph nodes by default."""
 
@@ -768,7 +891,11 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         raise ValueError("dummy_target_path must stay under /World/IsaacAssistProbes/")
     target_prim_path = ""
     if probe_mode == "subscribe_articulation_real_target_tick":
-        target_prim_path = str(arguments.get("target_prim_path") or "/World/Franka")
+        target_prim_path = str(arguments.get("target_prim_path") or "")
+        if not target_prim_path:
+            raise ValueError(
+                "target_prim_path is required for subscribe_articulation_real_target_tick"
+            )
         if not target_prim_path.startswith("/World/"):
             raise ValueError("target_prim_path must be an absolute /World prim path")
         if target_prim_path.startswith("/World/IsaacAssistProbes/"):
@@ -927,7 +1054,7 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
                             "Disposable ROS2 publish/subscribe nodes accepted probe topicName "
                             "and targetPrim values against a fake prim, then cleaned up. Next "
                             "gate can test tick wiring on a disposable graph before any real "
-                            "Franka or articulation-controller connection."
+                            "robot or articulation-controller connection."
                         )
                     else:
                         if probe_mode == "context_pubsub_dummy_target_tick":
@@ -935,21 +1062,21 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
                                 "Disposable ROS2 publish/subscribe nodes accepted tick wiring "
                                 "while the timeline was stopped, then cleaned up. Next gate can "
                                 "test an articulation-controller node in isolation before any "
-                                "real Franka target is connected."
+                                "real robot target is connected."
                             )
                         elif probe_mode == "articulation_dummy_target":
                             response["recommendation"]["reason"] = (
                                 "A disposable IsaacArticulationController node accepted a fake "
                                 "targetPrim and cleaned up. Next gate can connect disposable "
                                 "ROS2 joint-command outputs into a disposable controller node, "
-                                "still without a real Franka target."
+                                "still without a real robot target."
                             )
                         elif probe_mode == "subscribe_articulation_dummy_target_tick":
                             response["recommendation"]["reason"] = (
                                 "Disposable ROS2 joint-command outputs connected into a "
                                 "fake-target IsaacArticulationController while the timeline was "
                                 "stopped, then cleaned up. Next gate can test the same graph "
-                                "against a real loaded robot target with execution still disabled."
+                                "against an explicit loaded robot target with execution still disabled."
                             )
                         else:
                             response["recommendation"]["reason"] = (
@@ -1650,6 +1777,94 @@ print("ISAAC_ASSIST_ROS2_OMNIGRAPH_PROBE=" + json.dumps(_result, sort_keys=True)
 """
 
 
+def _isaac_stage_preflight_probe_code(
+    *,
+    target_prim_paths: List[str],
+    match_terms: List[str],
+    max_matches: int,
+) -> str:
+    payload = {
+        "target_prim_paths": target_prim_paths,
+        "match_terms": match_terms,
+        "max_matches": max_matches,
+    }
+    return f"""\
+import json
+
+_probe_payload = json.loads({json.dumps(payload, sort_keys=True)!r})
+_result = {{
+    "ok": False,
+    "status": "pending",
+    "stage_identifier": "",
+    "stage_real_path": "",
+    "timeline_playing": False,
+    "target_prims": {{}},
+    "missing_target_prim_paths": [],
+    "all_targets_present": False,
+    "matching_prims": [],
+    "error": "",
+}}
+try:
+    import omni.timeline
+    import omni.usd
+
+    _stage = omni.usd.get_context().get_stage()
+    if _stage is None:
+        _result["status"] = "stage_unavailable"
+    else:
+        _root_layer = _stage.GetRootLayer()
+        _result["stage_identifier"] = str(getattr(_root_layer, "identifier", "") or "")
+        _result["stage_real_path"] = str(getattr(_root_layer, "realPath", "") or "")
+        _timeline = omni.timeline.get_timeline_interface()
+        _result["timeline_playing"] = bool(_timeline and _timeline.is_playing())
+        for _target_path in _probe_payload["target_prim_paths"]:
+            _prim = _stage.GetPrimAtPath(_target_path)
+            _exists = bool(_prim and _prim.IsValid())
+            _info = {{
+                "path": _target_path,
+                "exists": _exists,
+                "type_name": "",
+                "applied_schemas": [],
+            }}
+            if _exists:
+                _info["type_name"] = str(_prim.GetTypeName())
+                _info["applied_schemas"] = [
+                    str(_schema) for _schema in _prim.GetAppliedSchemas()
+                ]
+            else:
+                _result["missing_target_prim_paths"].append(_target_path)
+            _result["target_prims"][_target_path] = _info
+        _terms = [
+            str(_term).strip().lower()
+            for _term in _probe_payload["match_terms"]
+            if str(_term).strip()
+        ]
+        _max_matches = int(_probe_payload["max_matches"])
+        if _terms and _max_matches > 0:
+            for _prim in _stage.Traverse():
+                _path = str(_prim.GetPath())
+                _type_name = str(_prim.GetTypeName())
+                _haystack = f"{{_path}} {{_type_name}}".lower()
+                if any(_term in _haystack for _term in _terms):
+                    _result["matching_prims"].append({{
+                        "path": _path,
+                        "type_name": _type_name,
+                        "applied_schemas": [
+                            str(_schema) for _schema in _prim.GetAppliedSchemas()
+                        ],
+                    }})
+                    if len(_result["matching_prims"]) >= _max_matches:
+                        break
+        _result["all_targets_present"] = not _result["missing_target_prim_paths"]
+        _result["ok"] = bool(_result["all_targets_present"])
+        _result["status"] = "ok" if _result["ok"] else "target_missing"
+except Exception as _exc:
+    _result["status"] = "exception"
+    _result["error"] = f"{{type(_exc).__name__}}: {{_exc}}"
+print("ISAAC_ASSIST_STAGE_PREFLIGHT=" + json.dumps(_result, sort_keys=True))
+"""
+
+
 def _ros2_omnigraph_creation_probe_code(
     *,
     candidate_namespaces: List[str],
@@ -2004,6 +2219,18 @@ def _extract_probe_json(output: str) -> Dict[str, Any]:
 
 def _extract_creation_probe_json(output: str) -> Dict[str, Any]:
     marker = "ISAAC_ASSIST_ROS2_OMNIGRAPH_CREATION_PROBE="
+    for line in reversed(output.splitlines()):
+        if marker not in line:
+            continue
+        try:
+            return json.loads(line.split(marker, 1)[1].strip())
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _extract_stage_preflight_json(output: str) -> Dict[str, Any]:
+    marker = "ISAAC_ASSIST_STAGE_PREFLIGHT="
     for line in reversed(output.splitlines()):
         if marker not in line:
             continue
