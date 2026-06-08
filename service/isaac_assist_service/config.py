@@ -77,6 +77,11 @@ class Config:
         self.auto_approve          = os.environ.get("AUTO_APPROVE", "false").lower() == "true"
         self.auto_inject_viewport  = os.environ.get("AUTO_INJECT_VIEWPORT", "false").lower() == "true"
         self.max_tool_rounds = int(os.environ.get("MAX_TOOL_ROUNDS", "10"))
+        self.rendering_mode = os.environ.get("ISAAC_ASSIST_RENDERING_MODE", "real").lower()
+        self.render_control_file = os.environ.get(
+            "ISAAC_ASSIST_RENDER_CONTROL_FILE",
+            os.path.expanduser("~/Documents/dong/isaac_ai/aed_rendering_mode.json"),
+        )
         # ── Assets ───────────────────────────────────────────────────────────
         self.assets_root_path = os.environ.get("ASSETS_ROOT_PATH", "")
         self.assets_robots_subdir = os.environ.get("ASSETS_ROBOTS_SUBDIR", "Collected_Robots")

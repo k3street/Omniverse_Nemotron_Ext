@@ -276,6 +276,9 @@ class ChatViewWindow(ui.Window):
         self._model_popup: Optional[ui.Window] = None
         self._current_model_label: str = "?"
         self._scale_lbl: Optional[ui.Label] = None
+        self._rendering_mode = "real"
+        self._render_fast_btn = None
+        self._render_real_btn = None
         # Debounce: rapid A+/A- clicks coalesce into one apply task.
         self._scale_apply_task: Optional[asyncio.Task] = None
 
@@ -288,6 +291,7 @@ class ChatViewWindow(ui.Window):
         # Boot already takes seconds; user won't notice another ~100ms here,
         # but they'll thank us when A+/A- responds instantly later.
         asyncio.ensure_future(self._prewarm_scale_paths())
+        asyncio.ensure_future(self._refresh_rendering_mode())
 
     async def _prewarm_scale_paths(self):
         # Yield once so widget construction finishes before we mutate.
@@ -819,6 +823,22 @@ class ChatViewWindow(ui.Window):
                 style={"font_size": 11},
                 tooltip="Text size",
             )
+            self._render_fast_btn = ui.Button(
+                "Fast",
+                width=38,
+                height=22,
+                clicked_fn=lambda: self._set_rendering_mode("fast"),
+                style=self._render_button_style("fast"),
+                tooltip="Fast verification: step simulation without per-frame rendering",
+            )
+            self._render_real_btn = ui.Button(
+                "Real",
+                width=38,
+                height=22,
+                clicked_fn=lambda: self._set_rendering_mode("real"),
+                style=self._render_button_style("real"),
+                tooltip="Real rendering: render frames for WebRTC/viewport inspection",
+            )
             self.btn_new = ui.Button(
                 "New",
                 width=40,
@@ -860,6 +880,56 @@ class ChatViewWindow(ui.Window):
                 style={"font_size": 11},
                 tooltip="Switch LLM model / provider",
             )
+
+    def _render_button_style(self, mode: str):
+        active = self._rendering_mode == mode
+        return {
+            "font_size": 10,
+            "background_color": COL_NV_GREEN if active else 0xFF2A2E33,
+            "color": 0xFF000000 if active else COL_TEXT_DIM,
+            "border_radius": 4,
+        }
+
+    def _apply_rendering_mode_ui(self):
+        try:
+            if self._render_fast_btn:
+                self._render_fast_btn.style = self._render_button_style("fast")
+            if self._render_real_btn:
+                self._render_real_btn.style = self._render_button_style("real")
+        except Exception:
+            pass
+
+    async def _refresh_rendering_mode(self):
+        response = await self.service.get_rendering_mode()
+        mode = (response.get("mode") or "").lower()
+        if mode in ("fast", "real"):
+            self._rendering_mode = mode
+            self._apply_rendering_mode_ui()
+
+    def _set_rendering_mode(self, mode: str):
+        if mode not in ("fast", "real") or mode == self._rendering_mode:
+            return
+        previous = self._rendering_mode
+        self._rendering_mode = mode
+        self._apply_rendering_mode_ui()
+
+        async def _run():
+            response = await self.service.set_rendering_mode(mode)
+            if response.get("error"):
+                self._rendering_mode = previous
+                self._apply_rendering_mode_ui()
+                self._add_assistant_bubble(
+                    f"Rendering mode switch failed: {response.get('error')}",
+                    error=True,
+                )
+                return
+            self._rendering_mode = response.get("mode", mode)
+            self._apply_rendering_mode_ui()
+            self._add_assistant_bubble(
+                f"Rendering mode: {'real rendering' if self._rendering_mode == 'real' else 'fast verification'}"
+            )
+
+        asyncio.ensure_future(_run())
 
     def _build_command_bar(self):
         self.command_container = ui.ScrollingFrame(
