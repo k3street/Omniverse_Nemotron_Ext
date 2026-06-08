@@ -109,6 +109,49 @@ describe("createCanvasApi", () => {
         expect(response.instantiation?.status).toBe("dry_run");
     });
 
+    it("gets the shared rendering mode", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                status: "success",
+                mode: "fast",
+                render_enabled: false,
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const api = createCanvasApi("");
+        const response = await api.getRenderingMode();
+
+        expect(fetchMock).toHaveBeenCalledWith("/api/v1/settings/rendering_mode");
+        expect(response.mode).toBe("fast");
+    });
+
+    it("sets the shared rendering mode", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                status: "success",
+                mode: "real",
+                render_enabled: true,
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const api = createCanvasApi("");
+        const response = await api.setRenderingMode("real");
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/v1/settings/rendering_mode",
+            {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mode: "real" }),
+            },
+        );
+        expect(response.render_enabled).toBe(true);
+    });
+
     it("posts viewport observation requests to the Cosmos viewport route", async () => {
         const spec = baseSpec();
         const fetchMock = vi.fn().mockResolvedValue({

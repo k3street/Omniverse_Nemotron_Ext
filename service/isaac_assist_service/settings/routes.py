@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+from pathlib import Path
 import subprocess
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
@@ -86,6 +88,31 @@ class ModeSwitchRequest(BaseModel):
     mode: str
 
 
+class RenderingModeRequest(BaseModel):
+    mode: str
+
+
+VALID_RENDERING_MODES = ("fast", "real")
+
+
+def _parse_rendering_mode(mode: str) -> str:
+    return (mode or "").strip().lower()
+
+
+def _write_render_control_file(mode: str) -> Optional[str]:
+    from ..config import config
+    configured_path = (config.render_control_file or "").strip()
+    if not configured_path:
+        return None
+    path = Path(configured_path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"mode": mode, "render_enabled": mode == "real"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return str(path)
+
+
 @router.get("/scale_notice")
 async def get_scale_notice(job_kind: Optional[str] = None):
     """Return advisory notice for configured remote scale providers."""
@@ -144,4 +171,54 @@ async def switch_llm_mode(req: ModeSwitchRequest):
         "status": "success",
         "llm_mode": mode,
         "model": model,
+    }
+
+
+@router.get("/rendering_mode")
+async def get_rendering_mode():
+    """Return fast-verification vs real-rendering mode."""
+    from ..config import config
+    mode = _parse_rendering_mode(config.rendering_mode)
+    if mode not in VALID_RENDERING_MODES:
+        mode = "real"
+    return {
+        "status": "success",
+        "mode": mode,
+        "render_enabled": mode == "real",
+        "control_file": config.render_control_file,
+    }
+
+
+@router.put("/rendering_mode")
+async def switch_rendering_mode(req: RenderingModeRequest):
+    """
+    Hot-switch render stepping mode.
+
+    fast -> runtime loop should use world.step(render=False)
+    real -> runtime loop should use world.step(render=True)
+    """
+    mode = _parse_rendering_mode(req.mode)
+    if mode not in VALID_RENDERING_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid rendering mode '{req.mode}'. Choose from: {', '.join(VALID_RENDERING_MODES)}",
+        )
+
+    success = settings_manager.update_settings({"ISAAC_ASSIST_RENDERING_MODE": mode})
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to persist rendering mode")
+
+    control_file = None
+    try:
+        control_file = _write_render_control_file(mode)
+    except Exception as e:
+        logger.warning(f"Failed to write render control file: {e}")
+
+    return {
+        "status": "success",
+        "mode": mode,
+        "render_enabled": mode == "real",
+        "control_file": control_file,
+        "kit_applied": False,
+        "kit_output": "mode is available to the runtime loop when a render control file is configured",
     }

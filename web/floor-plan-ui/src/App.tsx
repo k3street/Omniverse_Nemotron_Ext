@@ -15,7 +15,7 @@
  * Spec §11.2 + §11.3 + §13.
  */
 import { useEffect, useState } from "react";
-import { BuildResponse, CanvasGetResponse } from "./api/types";
+import { BuildResponse, CanvasGetResponse, RenderingMode } from "./api/types";
 import {
     CanvasApi,
     createCanvasApi,
@@ -54,6 +54,8 @@ export function App() {
     const [buildState, setBuildState] = useState<"idle" | "previewing" | "ready" | "failed">("idle");
     const [buildResult, setBuildResult] = useState<BuildResponse | null>(null);
     const [buildError, setBuildError] = useState<string | null>(null);
+    const [renderingMode, setRenderingMode] = useState<RenderingMode>("real");
+    const [renderingState, setRenderingState] = useState<"idle" | "saving" | "failed">("idle");
 
     const previewBuild = async () => {
         if (!spec || buildState === "previewing") return;
@@ -148,6 +150,35 @@ export function App() {
         };
     }, []);
 
+    useEffect(() => {
+        api.getRenderingMode()
+            .then((res) => {
+                if (res.mode === "fast" || res.mode === "real") {
+                    setRenderingMode(res.mode);
+                }
+            })
+            .catch((e) => {
+                console.warn("[rendering mode] GET failed:", e);
+                setRenderingState("failed");
+            });
+    }, []);
+
+    const updateRenderingMode = async (mode: RenderingMode) => {
+        if (mode === renderingMode || renderingState === "saving") return;
+        const previous = renderingMode;
+        setRenderingMode(mode);
+        setRenderingState("saving");
+        try {
+            const res = await api.setRenderingMode(mode);
+            setRenderingMode(res.mode);
+            setRenderingState("idle");
+        } catch (e) {
+            console.warn("[rendering mode] PUT failed:", e);
+            setRenderingMode(previous);
+            setRenderingState("failed");
+        }
+    };
+
     return (
         <div
             style={{
@@ -167,6 +198,9 @@ export function App() {
                 disabled={!spec || bootStatus !== "ready" || buildState === "previewing"}
                 onPreviewBuild={() => void previewBuild()}
                 state={buildState}
+                renderingMode={renderingMode}
+                renderingState={renderingState}
+                onRenderingModeChange={(mode) => void updateRenderingMode(mode)}
             />
             <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
                 <Toolbar />
@@ -223,11 +257,44 @@ function Header({
     disabled,
     onPreviewBuild,
     state,
+    renderingMode,
+    renderingState,
+    onRenderingModeChange,
 }: {
     disabled: boolean;
     onPreviewBuild: () => void;
     state: "idle" | "previewing" | "ready" | "failed";
+    renderingMode: RenderingMode;
+    renderingState: "idle" | "saving" | "failed";
+    onRenderingModeChange: (mode: RenderingMode) => void;
 }) {
+    const renderButton = (mode: RenderingMode, label: string) => {
+        const active = renderingMode === mode;
+        return (
+            <button
+                type="button"
+                onClick={() => onRenderingModeChange(mode)}
+                disabled={renderingState === "saving"}
+                title={mode === "fast" ? "Fast verification: skip per-frame rendering" : "Real rendering: render frames for viewport/WebRTC"}
+                style={{
+                    height: 22,
+                    padding: "0 10px",
+                    background: active ? ACCENT : "#24282D",
+                    color: active ? "#000" : TEXT_SECONDARY,
+                    border: "1px solid #3A3F45",
+                    borderColor: active ? ACCENT : "#3A3F45",
+                    borderRadius: 4,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: renderingState === "saving" ? "default" : "pointer",
+                    fontFamily: "inherit",
+                }}
+            >
+                {label}
+            </button>
+        );
+    };
+
     return (
         <div
             style={{
@@ -247,13 +314,28 @@ function Header({
             <span style={{ color: TEXT_SECONDARY, fontSize: 11, fontWeight: 400 }}>
                 multimodal canvas v1.0
             </span>
+            <div
+                role="radiogroup"
+                aria-label="Rendering mode"
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    marginLeft: "auto",
+                }}
+            >
+                {renderButton("fast", "Fast")}
+                {renderButton("real", "Real")}
+            </div>
+            {renderingState === "failed" && (
+                <span style={{ color: "#FF6B6B", fontSize: 11 }}>render mode failed</span>
+            )}
             <button
                 type="button"
                 onClick={onPreviewBuild}
                 disabled={disabled}
                 title="Generate reviewed Kit code without mutating Isaac Sim"
                 style={{
-                    marginLeft: "auto",
                     marginRight: 12,
                     height: 24,
                     padding: "0 12px",
