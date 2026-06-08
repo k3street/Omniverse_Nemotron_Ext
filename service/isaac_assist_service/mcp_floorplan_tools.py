@@ -278,7 +278,8 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                         "description": (
                             "Safety gate to run. Supported values: context_only, "
                             "context_pubsub_no_targets, context_pubsub_dummy_target, "
-                            "context_pubsub_dummy_target_tick, articulation_dummy_target."
+                            "context_pubsub_dummy_target_tick, articulation_dummy_target, "
+                            "subscribe_articulation_dummy_target_tick."
                         ),
                     },
                     "probe_path": {
@@ -731,6 +732,7 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         "context_pubsub_dummy_target",
         "context_pubsub_dummy_target_tick",
         "articulation_dummy_target",
+        "subscribe_articulation_dummy_target_tick",
     }
     if probe_mode not in supported_modes:
         raise ValueError(
@@ -782,20 +784,35 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         "sets_topic_names": probe_mode in {
             "context_pubsub_dummy_target",
             "context_pubsub_dummy_target_tick",
+            "subscribe_articulation_dummy_target_tick",
         },
         "sets_target_prim": probe_mode in {
             "context_pubsub_dummy_target",
             "context_pubsub_dummy_target_tick",
             "articulation_dummy_target",
+            "subscribe_articulation_dummy_target_tick",
         },
         "uses_dummy_target": probe_mode in {
             "context_pubsub_dummy_target",
             "context_pubsub_dummy_target_tick",
             "articulation_dummy_target",
+            "subscribe_articulation_dummy_target_tick",
         },
-        "wires_tick": probe_mode == "context_pubsub_dummy_target_tick",
-        "requires_timeline_stopped": probe_mode == "context_pubsub_dummy_target_tick",
-        "creates_articulation_controller": probe_mode == "articulation_dummy_target",
+        "wires_tick": probe_mode in {
+            "context_pubsub_dummy_target_tick",
+            "subscribe_articulation_dummy_target_tick",
+        },
+        "requires_timeline_stopped": probe_mode in {
+            "context_pubsub_dummy_target_tick",
+            "subscribe_articulation_dummy_target_tick",
+        },
+        "creates_articulation_controller": probe_mode in {
+            "articulation_dummy_target",
+            "subscribe_articulation_dummy_target_tick",
+        },
+        "connects_joint_command_outputs": (
+            probe_mode == "subscribe_articulation_dummy_target_tick"
+        ),
         "recommendation": {
             "author_omnigraph": False,
             "connect_articulation_controller": False,
@@ -846,6 +863,13 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         response["articulation_controller_created"] = bool(
             readback.get("articulation_controller_created")
         )
+        response["joint_command_outputs_connected"] = bool(
+            readback.get("joint_command_outputs_connected")
+        )
+        response["joint_command_connection_paths"] = readback.get(
+            "joint_command_connection_paths",
+            [],
+        )
         response["created_node_suffixes"] = readback.get("created_node_suffixes", [])
         response["created_node_names"] = readback.get("created_node_names", [])
         response["missing_node_suffixes"] = readback.get("missing_node_suffixes", [])
@@ -884,12 +908,19 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
                                 "test an articulation-controller node in isolation before any "
                                 "real Franka target is connected."
                             )
-                        else:
+                        elif probe_mode == "articulation_dummy_target":
                             response["recommendation"]["reason"] = (
                                 "A disposable IsaacArticulationController node accepted a fake "
                                 "targetPrim and cleaned up. Next gate can connect disposable "
                                 "ROS2 joint-command outputs into a disposable controller node, "
                                 "still without a real Franka target."
+                            )
+                        else:
+                            response["recommendation"]["reason"] = (
+                                "Disposable ROS2 joint-command outputs connected into a "
+                                "fake-target IsaacArticulationController while the timeline was "
+                                "stopped, then cleaned up. Next gate can test the same graph "
+                                "against a real loaded robot target with execution still disabled."
                             )
     else:
         response.update({
@@ -1595,6 +1626,7 @@ def _ros2_omnigraph_creation_probe_code(
     action_node_defs: list[dict[str, str]] = []
     node_defs: list[dict[str, str]] = []
     connections: list[list[str]] = []
+    joint_command_connections: list[list[str]] = []
     required_suffixes: list[str] = []
     required_absolute_node_types: list[str] = []
     set_pairs: list[list[str]] = []
@@ -1621,6 +1653,16 @@ def _ros2_omnigraph_creation_probe_code(
             "ROS2PublishJointState",
             "ROS2SubscribeJointState",
         ])
+    if probe_mode == "subscribe_articulation_dummy_target_tick":
+        node_defs.append({
+            "name": "SubscribeJointState",
+            "suffix": "ROS2SubscribeJointState",
+        })
+        connections.append([
+            "ROS2Context.outputs:context",
+            "SubscribeJointState.inputs:context",
+        ])
+        required_suffixes.append("ROS2SubscribeJointState")
     if probe_mode == "context_pubsub_dummy_target_tick":
         action_node_defs.append({
             "name": "OnPlaybackTick",
@@ -1632,7 +1674,18 @@ def _ros2_omnigraph_creation_probe_code(
             ["OnPlaybackTick.outputs:tick", "SubscribeJointState.inputs:execIn"],
         ])
         required_absolute_node_types.append("omni.graph.action.OnPlaybackTick")
-    if probe_mode == "articulation_dummy_target":
+    if probe_mode == "subscribe_articulation_dummy_target_tick":
+        action_node_defs.append({
+            "name": "OnPlaybackTick",
+            "node_type": "omni.graph.action.OnPlaybackTick",
+        })
+        tick_node_names.append("OnPlaybackTick")
+        connections.extend([
+            ["OnPlaybackTick.outputs:tick", "SubscribeJointState.inputs:execIn"],
+            ["OnPlaybackTick.outputs:tick", "ArticulationController.inputs:execIn"],
+        ])
+        required_absolute_node_types.append("omni.graph.action.OnPlaybackTick")
+    if probe_mode in {"articulation_dummy_target", "subscribe_articulation_dummy_target_tick"}:
         action_node_defs.append({
             "name": "ArticulationController",
             "node_type": "isaacsim.core.nodes.IsaacArticulationController",
@@ -1641,6 +1694,14 @@ def _ros2_omnigraph_creation_probe_code(
         required_absolute_node_types.append(
             "isaacsim.core.nodes.IsaacArticulationController"
         )
+    if probe_mode == "subscribe_articulation_dummy_target_tick":
+        joint_command_connections.extend([
+            ["SubscribeJointState.outputs:jointNames", "ArticulationController.inputs:jointNames"],
+            ["SubscribeJointState.outputs:positionCommand", "ArticulationController.inputs:positionCommand"],
+            ["SubscribeJointState.outputs:velocityCommand", "ArticulationController.inputs:velocityCommand"],
+            ["SubscribeJointState.outputs:effortCommand", "ArticulationController.inputs:effortCommand"],
+        ])
+        connections.extend(joint_command_connections)
     if probe_mode in {"context_pubsub_dummy_target", "context_pubsub_dummy_target_tick"}:
         probe_dummy_target_path = dummy_target_path
         set_pairs.extend([
@@ -1651,6 +1712,12 @@ def _ros2_omnigraph_creation_probe_code(
     if probe_mode == "articulation_dummy_target":
         probe_dummy_target_path = dummy_target_path
         set_pairs.append(["ArticulationController.inputs:targetPrim", dummy_target_path])
+    if probe_mode == "subscribe_articulation_dummy_target_tick":
+        probe_dummy_target_path = dummy_target_path
+        set_pairs.extend([
+            ["SubscribeJointState.inputs:topicName", "/isaac_assist_probe/joint_commands"],
+            ["ArticulationController.inputs:targetPrim", dummy_target_path],
+        ])
     payload = {
         "candidate_namespaces": candidate_namespaces,
         "probe_path": probe_path,
@@ -1661,6 +1728,7 @@ def _ros2_omnigraph_creation_probe_code(
         "action_node_defs": action_node_defs,
         "node_defs": node_defs,
         "connections": connections,
+        "joint_command_connections": joint_command_connections,
         "tick_node_names": tick_node_names,
         "articulation_node_names": articulation_node_names,
         "required_suffixes": required_suffixes,
@@ -1686,6 +1754,8 @@ _result = {{
     "timeline_playing": False,
     "tick_wiring_created": False,
     "articulation_controller_created": False,
+    "joint_command_outputs_connected": False,
+    "joint_command_connection_paths": _probe_payload["joint_command_connections"],
     "created_node_names": [],
     "created_node_suffixes": [],
     "missing_node_suffixes": [],
@@ -1833,6 +1903,9 @@ try:
             and _absolute_nodes_ok
             and _set_attrs_ok
             and _dummy_target_ok
+        )
+        _result["joint_command_outputs_connected"] = bool(
+            _result["created"] and _probe_payload["joint_command_connections"]
         )
         _result["status"] = "created" if _result["created"] else "create_failed"
         if _probe_payload["cleanup"]:
