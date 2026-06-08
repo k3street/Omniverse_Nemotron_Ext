@@ -445,6 +445,52 @@ def test_probe_ros2_omnigraph_creation_subscribe_articulation_mode_is_disposable
     assert "/World/Franka" not in probe_code
 
 
+def test_probe_ros2_omnigraph_creation_real_target_mode_requires_stage_target():
+    from service.isaac_assist_service.mcp_floorplan_tools import probe_ros2_omnigraph_creation
+
+    response = asyncio.run(probe_ros2_omnigraph_creation({
+        "runtime_profile": "isaacsim-6.0",
+        "probe_mode": "subscribe_articulation_real_target_tick",
+        "node_namespace": "isaacsim.ros2.bridge",
+        "target_prim_path": "/World/Franka",
+        "dry_run": True,
+    }))
+
+    assert response["status"] == "dry_run"
+    assert response["probe_mode"] == "subscribe_articulation_real_target_tick"
+    assert response["target_prim_path"] == "/World/Franka"
+    assert response["requires_existing_target"] is True
+    assert response["connects_joint_command_outputs"] is True
+    assert response["creates_articulation_controller"] is True
+    assert response["sets_target_prim"] is True
+    assert response["sets_topic_names"] is True
+    assert response["uses_dummy_target"] is False
+    assert response["wires_tick"] is True
+    assert response["requires_timeline_stopped"] is True
+    assert response["touches_robot"] is True
+    assert response["touches_scene_assets"] is False
+    assert response["touches_topics"] is False
+    probe_code = response["probe_code"]
+    assert "ROS2Context" in probe_code
+    assert "ROS2SubscribeJointState" in probe_code
+    assert "ROS2PublishJointState" not in probe_code
+    assert "isaacsim.core.nodes.IsaacArticulationController" in probe_code
+    assert "omni.graph.action.OnPlaybackTick" in probe_code
+    assert "target_prim_exists" in probe_code
+    assert "stage_identifier" in probe_code
+    assert "stage_real_path" in probe_code
+    assert "target_missing" in probe_code
+    assert "SubscribeJointState.outputs:jointNames" in probe_code
+    assert "ArticulationController.inputs:jointNames" in probe_code
+    assert "SubscribeJointState.outputs:positionCommand" in probe_code
+    assert "ArticulationController.inputs:positionCommand" in probe_code
+    assert "SubscribeJointState.inputs:topicName" in probe_code
+    assert "ArticulationController.inputs:targetPrim" in probe_code
+    assert "/isaac_assist_probe/joint_commands" in probe_code
+    assert "/World/Franka" in probe_code
+    assert "/World/IsaacAssistProbes/DummyJointTarget" not in probe_code
+
+
 def test_set_object_asset_updates_reviewed_ref(monkeypatch, tmp_path):
     _install_temp_store(monkeypatch, tmp_path)
     from service.isaac_assist_service.mcp_floorplan_tools import (
