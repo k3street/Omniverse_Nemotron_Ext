@@ -259,8 +259,8 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                 "Disposable live-creation probe for Isaac Sim ROS2 OmniGraph support. "
                 "Default dry_run=true returns the exact context-only graph creation script. "
                 "With dry_run=false and Kit RPC alive, it creates and removes a temporary "
-                "ROS2Context-only graph under /World/IsaacAssistProbes without touching "
-                "robots, topics, articulation controllers, or scene assets."
+                "ROS2 probe graph under /World/IsaacAssistProbes without touching "
+                "robots, articulation controllers, or scene assets."
             ),
             "inputSchema": {
                 "type": "object",
@@ -277,12 +277,19 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                         "type": "string",
                         "description": (
                             "Safety gate to run. Supported values: context_only, "
-                            "context_pubsub_no_targets."
+                            "context_pubsub_no_targets, context_pubsub_dummy_target."
                         ),
                     },
                     "probe_path": {
                         "type": "string",
                         "description": "Temporary graph path. Must stay under /World/IsaacAssistProbes/.",
+                    },
+                    "dummy_target_path": {
+                        "type": "string",
+                        "description": (
+                            "Temporary target prim path for context_pubsub_dummy_target. "
+                            "Must stay under /World/IsaacAssistProbes/."
+                        ),
                     },
                     "cleanup": {"type": "boolean"},
                     "dry_run": {"type": "boolean"},
@@ -709,7 +716,11 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
     timeout = float(arguments.get("timeout") or 10.0)
     cleanup = bool(arguments.get("cleanup", True))
     probe_mode = str(arguments.get("probe_mode") or "context_only")
-    supported_modes = {"context_only", "context_pubsub_no_targets"}
+    supported_modes = {
+        "context_only",
+        "context_pubsub_no_targets",
+        "context_pubsub_dummy_target",
+    }
     if probe_mode not in supported_modes:
         raise ValueError(
             "probe_ros2_omnigraph_creation supports probe_mode values: "
@@ -725,12 +736,18 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
     )
     if not probe_path.startswith("/World/IsaacAssistProbes/"):
         raise ValueError("probe_path must stay under /World/IsaacAssistProbes/")
+    dummy_target_path = str(
+        arguments.get("dummy_target_path") or "/World/IsaacAssistProbes/DummyJointTarget"
+    )
+    if not dummy_target_path.startswith("/World/IsaacAssistProbes/"):
+        raise ValueError("dummy_target_path must stay under /World/IsaacAssistProbes/")
 
     probe_code = _ros2_omnigraph_creation_probe_code(
         candidate_namespaces=candidate_namespaces,
         probe_path=probe_path,
         cleanup=cleanup,
         probe_mode=probe_mode,
+        dummy_target_path=dummy_target_path,
     )
     response: Dict[str, Any] = {
         "status": "dry_run" if dry_run else "pending",
@@ -739,12 +756,16 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         "candidate_namespaces": candidate_namespaces,
         "probe_mode": probe_mode,
         "probe_path": probe_path,
+        "dummy_target_path": dummy_target_path,
         "cleanup": cleanup,
         "read_only": False,
         "graph_authoring_tested": False,
         "touches_scene_assets": False,
         "touches_robot": False,
         "touches_topics": False,
+        "sets_topic_names": probe_mode == "context_pubsub_dummy_target",
+        "sets_target_prim": probe_mode == "context_pubsub_dummy_target",
+        "uses_dummy_target": probe_mode == "context_pubsub_dummy_target",
         "recommendation": {
             "author_omnigraph": False,
             "connect_articulation_controller": False,
@@ -788,8 +809,12 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         response["detected_namespace"] = readback.get("detected_namespace", "")
         response["created"] = bool(readback.get("created"))
         response["removed"] = bool(readback.get("removed"))
+        response["dummy_target_created"] = bool(readback.get("dummy_target_created"))
+        response["dummy_target_removed"] = bool(readback.get("dummy_target_removed"))
         response["created_node_suffixes"] = readback.get("created_node_suffixes", [])
         response["missing_node_suffixes"] = readback.get("missing_node_suffixes", [])
+        response["set_attrs_ok"] = readback.get("set_attrs_ok", [])
+        response["set_attrs_failed"] = readback.get("set_attrs_failed", [])
         response["status"] = "ok" if readback.get("ok") else str(readback.get("status") or "failed")
         if readback.get("ok"):
             if probe_mode == "context_only":
@@ -799,12 +824,20 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
                     "target prims before enabling the full scene graph."
                 )
             else:
-                response["recommendation"]["reason"] = (
-                    "Disposable ROS2 context plus joint-state publish/subscribe nodes "
-                    "were created, connected to context, and cleaned up without topics, "
-                    "target prims, ticks, or articulation-controller wiring. Next gate "
-                    "can test topic and targetPrim assignment on a disposable prim."
-                )
+                if probe_mode == "context_pubsub_no_targets":
+                    response["recommendation"]["reason"] = (
+                        "Disposable ROS2 context plus joint-state publish/subscribe nodes "
+                        "were created, connected to context, and cleaned up without topics, "
+                        "target prims, ticks, or articulation-controller wiring. Next gate "
+                        "can test topic and targetPrim assignment on a disposable prim."
+                    )
+                else:
+                    response["recommendation"]["reason"] = (
+                        "Disposable ROS2 publish/subscribe nodes accepted probe topicName "
+                        "and targetPrim values against a fake prim, then cleaned up. Next "
+                        "gate can test tick wiring on a disposable graph before any real "
+                        "Franka or articulation-controller connection."
+                    )
     else:
         response.update({
             "status": "probe_parse_failed" if result.get("success") else "probe_failed",
@@ -1503,13 +1536,16 @@ def _ros2_omnigraph_creation_probe_code(
     probe_path: str,
     cleanup: bool,
     probe_mode: str,
+    dummy_target_path: str,
 ) -> str:
     node_defs = [
         {"name": "ROS2Context", "suffix": "ROS2Context"},
     ]
     connections: list[list[str]] = []
     required_suffixes = ["ROS2Context"]
-    if probe_mode == "context_pubsub_no_targets":
+    set_pairs: list[list[str]] = []
+    probe_dummy_target_path = ""
+    if probe_mode in {"context_pubsub_no_targets", "context_pubsub_dummy_target"}:
         node_defs.extend([
             {"name": "PublishJointState", "suffix": "ROS2PublishJointState"},
             {"name": "SubscribeJointState", "suffix": "ROS2SubscribeJointState"},
@@ -1522,14 +1558,23 @@ def _ros2_omnigraph_creation_probe_code(
             "ROS2PublishJointState",
             "ROS2SubscribeJointState",
         ])
+    if probe_mode == "context_pubsub_dummy_target":
+        probe_dummy_target_path = dummy_target_path
+        set_pairs.extend([
+            ["PublishJointState.inputs:targetPrim", dummy_target_path],
+            ["PublishJointState.inputs:topicName", "/isaac_assist_probe/joint_states"],
+            ["SubscribeJointState.inputs:topicName", "/isaac_assist_probe/joint_commands"],
+        ])
     payload = {
         "candidate_namespaces": candidate_namespaces,
         "probe_path": probe_path,
         "cleanup": cleanup,
         "probe_mode": probe_mode,
+        "dummy_target_path": probe_dummy_target_path,
         "node_defs": node_defs,
         "connections": connections,
         "required_suffixes": required_suffixes,
+        "set_pairs": set_pairs,
     }
     return f"""\
 import json
@@ -1544,11 +1589,17 @@ _result = {{
     "removed": False,
     "cleanup": bool(_probe_payload["cleanup"]),
     "probe_mode": _probe_payload["probe_mode"],
+    "dummy_target_path": _probe_payload["dummy_target_path"],
+    "dummy_target_created": False,
+    "dummy_target_removed": False,
     "created_node_suffixes": [],
     "missing_node_suffixes": [],
+    "set_attrs_ok": [],
+    "set_attrs_failed": [],
     "error": "",
 }}
 _parent_created = False
+_target_path = None
 try:
     from pxr import Sdf
     import omni.usd
@@ -1585,6 +1636,15 @@ try:
         if str(_parent) not in ("", "/") and not _stage.GetPrimAtPath(_parent).IsValid():
             _stage.DefinePrim(_parent, "Scope")
             _parent_created = True
+        if _probe_payload["dummy_target_path"]:
+            _target_path = Sdf.Path(_probe_payload["dummy_target_path"])
+            if _stage.GetPrimAtPath(_target_path).IsValid():
+                _stage.RemovePrim(_target_path)
+            _stage.DefinePrim(_target_path, "Xform")
+            _target_prim = _stage.GetPrimAtPath(_target_path)
+            _result["dummy_target_created"] = bool(
+                _target_prim and _target_prim.IsValid()
+            )
         if _stage.GetPrimAtPath(_path).IsValid():
             _stage.RemovePrim(_path)
         _create_nodes = [
@@ -1610,13 +1670,34 @@ try:
             if _node_prim and _node_prim.IsValid():
                 _created_suffixes.append(str(_node_type).split(".")[-1])
         _result["created_node_suffixes"] = _created_suffixes
+        for _attr_path, _attr_value in _probe_payload["set_pairs"]:
+            _full_attr_path = f"{{_graph_path}}/{{_attr_path}}"
+            try:
+                og.Controller.attribute(_full_attr_path).set(_attr_value)
+                _result["set_attrs_ok"].append(_attr_path)
+            except Exception as _attr_exc:
+                _result["set_attrs_failed"].append([
+                    _attr_path,
+                    f"{{type(_attr_exc).__name__}}: {{_attr_exc}}",
+                ])
+        _set_attrs_ok = (
+            len(_result["set_attrs_ok"]) == len(_probe_payload["set_pairs"])
+        )
+        _dummy_target_ok = (
+            not _probe_payload["dummy_target_path"] or _result["dummy_target_created"]
+        )
         _result["created"] = bool(
             _graph_prim and _graph_prim.IsValid()
             and sorted(_created_suffixes) == sorted(_required_suffixes)
+            and _set_attrs_ok
+            and _dummy_target_ok
         )
         _result["status"] = "created" if _result["created"] else "create_failed"
         if _probe_payload["cleanup"]:
             _stage.RemovePrim(_path)
+            if _target_path is not None:
+                _stage.RemovePrim(_target_path)
+                _result["dummy_target_removed"] = not _stage.GetPrimAtPath(_target_path).IsValid()
             if _parent_created:
                 _stage.RemovePrim(_parent)
             _result["removed"] = not _stage.GetPrimAtPath(_path).IsValid()
