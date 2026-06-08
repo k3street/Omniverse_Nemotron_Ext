@@ -86,7 +86,7 @@ def test_campaign_plan_route_returns_current_session_plan(tmp_path, monkeypatch)
     store = MultimodalStore(db_path=tmp_path / "canvas.sqlite")
     monkeypatch.setattr(routes, "_store", store)
     spec = _minimal_spec(enabled=True, variant_count=2, seed=10)
-    asyncio.run(store.save_with_cas("route_session", spec, 0))
+    store._save_with_cas_sync("route_session", spec, 0)
 
     response = asyncio.run(
         routes.plan_canvas_campaign(
@@ -142,7 +142,7 @@ def test_campaign_materialize_route_writes_current_session_files(tmp_path, monke
     store = MultimodalStore(db_path=tmp_path / "canvas.sqlite")
     monkeypatch.setattr(routes, "_store", store)
     spec = _minimal_spec(enabled=True, variant_count=1, seed=12)
-    asyncio.run(store.save_with_cas("materialize_route", spec, 0))
+    store._save_with_cas_sync("materialize_route", spec, 0)
 
     response = asyncio.run(
         routes.materialize_canvas_campaign(
@@ -164,7 +164,7 @@ def test_campaign_launch_route_dry_run_selects_first_variant(tmp_path, monkeypat
     store = MultimodalStore(db_path=tmp_path / "canvas.sqlite")
     monkeypatch.setattr(routes, "_store", store)
     spec = _minimal_spec(enabled=True, variant_count=1, seed=22)
-    asyncio.run(store.save_with_cas("launch_route", spec, 0))
+    store._save_with_cas_sync("launch_route", spec, 0)
 
     response = asyncio.run(
         routes.launch_canvas_campaign_variant(

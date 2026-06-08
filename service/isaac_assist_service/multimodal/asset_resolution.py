@@ -111,6 +111,14 @@ _CATALOG_QUERIES = {
     "table_large": ("table",),
 }
 
+_PROXY_FIRST_CLASSES = {
+    "franka_panda",
+    "ur5e",
+    "ur10e",
+    "ur10",
+    "kinova_gen3",
+}
+
 
 @dataclass(frozen=True)
 class AssetResolution:
@@ -374,9 +382,10 @@ def resolve_object_asset(obj: Any) -> Optional[AssetResolution]:
     )
     palette_entry = get_class(object_class)
     palette_ref = palette_entry.usd_ref if palette_entry else ""
-    local_ref = "" if explicit or palette_ref else (_existing_override_for_class(object_class) or "")
-    catalog_ref = "" if explicit or palette_ref or local_ref else (_catalog_asset_for_class(object_class) or "")
-    usd_ref = _normalize_usd_ref(str(explicit or palette_ref or local_ref or catalog_ref or ""))
+    proxy_first = object_class.lower() in _PROXY_FIRST_CLASSES
+    local_ref = "" if explicit or (proxy_first and palette_ref) else (_existing_override_for_class(object_class) or "")
+    catalog_ref = "" if explicit or (proxy_first and palette_ref) or local_ref else (_catalog_asset_for_class(object_class) or "")
+    usd_ref = _normalize_usd_ref(str(explicit or local_ref or catalog_ref or palette_ref or ""))
     if not usd_ref:
         return None
 

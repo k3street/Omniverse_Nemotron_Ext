@@ -119,7 +119,7 @@ def test_asset_options_route_returns_local_payload(monkeypatch, tmp_path):
     assert response["options"][0]["usd_ref"] == str(asset)
 
 
-def test_resolve_object_asset_prefers_local_robot_override(monkeypatch, tmp_path):
+def test_resolve_object_asset_uses_palette_for_robot_proxy_by_default(monkeypatch, tmp_path):
     from service.isaac_assist_service.multimodal import asset_resolution
 
     franka = (
@@ -137,8 +137,8 @@ def test_resolve_object_asset_prefers_local_robot_override(monkeypatch, tmp_path
     )
 
     assert resolved is not None
-    assert resolved.source == "local_assets"
-    assert resolved.usd_ref == str(franka)
+    assert resolved.source == "palette"
+    assert resolved.usd_ref.endswith("/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd")
 
 
 def test_instantiate_dry_run_references_reviewed_palette_assets(monkeypatch, tmp_path):
@@ -213,7 +213,7 @@ def test_resolve_object_asset_uses_local_asset_overrides(monkeypatch, tmp_path):
 
     assert asset_resolution.resolve_object_asset(
         {"id": "robot", "object_class": "franka_panda"}
-    ).usd_ref == str(franka)
+    ).source == "palette"
     assert asset_resolution.resolve_object_asset(
         {"id": "bowl", "object_class": "bowl"}
     ).usd_ref == str(bowl)
@@ -426,35 +426,42 @@ def test_instantiate_dry_run_enables_physics_scene_ground_and_workpiece_body(mon
     assert "_apply_collision(prim.GetPrim(), '/World/Fruit')" in result.generated_code
     assert "_apply_rigid_body(prim.GetPrim(), 0.05)" in result.generated_code
     franka_section = result.generated_code.split(
-        "prim = UsdGeom.Xform.Define(stage, '/World/Franka')", 1
+        "prim = UsdGeom.Cube.Define(stage, '/World/Franka')", 1
     )[1].split("# Isaac Assist live relation readback", 1)[0]
+    assert "isaac_assist:proxy', True" in franka_section
     assert "_apply_rigid_body(prim.GetPrim()" not in franka_section
 
 
 def test_build_route_returns_asset_resolution_summary(tmp_path):
     from service.isaac_assist_service.multimodal import routes
-    from service.isaac_assist_service.multimodal.cosmos3_adapter import (
-        CosmosObjectProposal,
-        CosmosSceneObservation,
-    )
     from service.isaac_assist_service.multimodal.persistence import MultimodalStore
+    from service.isaac_assist_service.multimodal.types import LayoutSpec
 
     old_store = routes._store
     routes._store = MultimodalStore(tmp_path / "state.db")
     try:
-        proposal = routes.CosmosProposalRequest(
-            observation=CosmosSceneObservation(
-                input_kind="screenshot",
-                objects=[
-                    CosmosObjectProposal(
-                        label="franka panda",
-                        confidence=0.93,
-                    )
-                ],
-            ),
-            parent_revision=0,
-        )
-        asyncio.run(routes.propose_canvas_from_cosmos("build_assets", proposal))
+        spec = LayoutSpec.model_validate({
+            "version": "1.0",
+            "intent": {
+                "pattern_hint": "pick_place",
+                "counts": {"robots": 1, "conveyors": 0, "bins": 0, "cubes": 0, "sensors": 0, "humans": 0},
+                "structural_features": {},
+                "structural_tags": [],
+            },
+            "objects": [
+                {
+                    "id": "franka_1",
+                    "class": "franka_panda",
+                    "name": "Franka",
+                    "position": {"x": 0.0, "y": 0.0},
+                    "size": {"w": 0.4, "h": 0.4},
+                    "metadata": {"cosmos_confidence": 0.93},
+                }
+            ],
+            "relations": [],
+            "source": {"modality": "viewport", "confidence": 0.93, "metadata": {}},
+        })
+        routes.get_store()._save_with_cas_sync("build_assets", spec, 0)
 
         response = asyncio.run(
             routes.build_canvas("build_assets", routes.BuildRequest())
@@ -512,7 +519,7 @@ def test_build_route_returns_relation_summary(tmp_path):
             ],
             "source": {"modality": "drag_drop", "confidence": 1.0, "metadata": {}},
         })
-        asyncio.run(routes.get_store().save_with_cas("relations_build", spec, 0))
+        routes.get_store()._save_with_cas_sync("relations_build", spec, 0)
 
         response = asyncio.run(
             routes.build_canvas("relations_build", routes.BuildRequest())
@@ -540,12 +547,9 @@ def test_build_route_returns_relation_summary(tmp_path):
 
 def test_build_route_can_request_live_instantiation(monkeypatch, tmp_path):
     from service.isaac_assist_service.multimodal import routes
-    from service.isaac_assist_service.multimodal.cosmos3_adapter import (
-        CosmosObjectProposal,
-        CosmosSceneObservation,
-    )
     from service.isaac_assist_service.multimodal.instantiator import InstantiateResult
     from service.isaac_assist_service.multimodal.persistence import MultimodalStore
+    from service.isaac_assist_service.multimodal.types import LayoutSpec
 
     calls = {}
 
@@ -562,13 +566,27 @@ def test_build_route_can_request_live_instantiation(monkeypatch, tmp_path):
     routes._store = MultimodalStore(tmp_path / "state.db")
     monkeypatch.setattr(routes, "instantiate", fake_instantiate)
     try:
-        proposal = routes.CosmosProposalRequest(
-            observation=CosmosSceneObservation(
-                objects=[CosmosObjectProposal(label="franka panda")],
-            ),
-            parent_revision=0,
-        )
-        asyncio.run(routes.propose_canvas_from_cosmos("live_build", proposal))
+        spec = LayoutSpec.model_validate({
+            "version": "1.0",
+            "intent": {
+                "pattern_hint": "pick_place",
+                "counts": {"robots": 1, "conveyors": 0, "bins": 0, "cubes": 0, "sensors": 0, "humans": 0},
+                "structural_features": {},
+                "structural_tags": [],
+            },
+            "objects": [
+                {
+                    "id": "franka_1",
+                    "class": "franka_panda",
+                    "name": "Franka",
+                    "position": {"x": 0.0, "y": 0.0},
+                    "size": {"w": 0.4, "h": 0.4},
+                }
+            ],
+            "relations": [],
+            "source": {"modality": "viewport", "confidence": 1.0, "metadata": {}},
+        })
+        routes.get_store()._save_with_cas_sync("live_build", spec, 0)
 
         response = asyncio.run(
             routes.build_canvas(
