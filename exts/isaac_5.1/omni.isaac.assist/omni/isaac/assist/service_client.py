@@ -135,6 +135,27 @@ class AssistServiceClient:
         except Exception as e:
             return {"error": str(e)}
 
+    async def log_execution(self, code: str, success: bool, output: str = "", user_message: str = "") -> dict:
+        """Record an approved patch execution with the backend audit log."""
+        if not HAS_AIOHTTP:
+            return {"status": "skipped"}
+        url = f"{self.base_url}/api/v1/chat/log_execution"
+        payload = {
+            "session_id": self.session_id,
+            "code": code,
+            "success": success,
+            "output": output,
+            "user_message": user_message,
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    return {"error": f"HTTP {resp.status}"}
+        except Exception as e:
+            return {"error": str(e)}
+
     async def observe_viewport_canvas(
         self,
         prompt: str = "Reconstruct the current Isaac Sim viewport as a robotics floor plan.",
