@@ -13,6 +13,7 @@ Scene, LiveKit Vision toggle) is preserved.
 """
 import omni.ui as ui
 import asyncio
+import ast
 import contextlib
 import io
 import logging
@@ -321,7 +322,7 @@ class ChatViewWindow(ui.Window):
         self._track_label(lbl, font_size)
         return lbl
 
-    def _estimate_text_lines(self, text: str, chars_per_line: int = 48) -> int:
+    def _estimate_text_lines(self, text: str, chars_per_line: int = 32) -> int:
         """Conservative line estimate for Kit labels with word_wrap enabled."""
         lines = 0
         for raw in (text or " ").splitlines() or [" "]:
@@ -332,7 +333,7 @@ class ChatViewWindow(ui.Window):
     def _bubble_height(self, text: str, *, extra_height: int = 0, min_height: int = 58) -> int:
         line_height = int(round(12 * SCALE_STEPS[-1])) + 8
         body_lines = self._estimate_text_lines(text)
-        return max(min_height, 38 + body_lines * line_height + extra_height)
+        return max(min_height, 58 + body_lines * line_height + extra_height)
 
     def _track_bubble_height(self, widget, text: str, extra_height: int = 0, min_height: int = 58):
         rec = {
@@ -1173,6 +1174,34 @@ class ChatViewWindow(ui.Window):
         desc = (action.get("description") or action.get("type") or "Patch").strip()
         return f"{desc}\n{code[:2000]}"
 
+    def _copy_to_clipboard(self, text: str, label: str = "Content"):
+        text = text or ""
+        error = None
+        for copier in self._clipboard_copiers():
+            try:
+                copier(text)
+                self._add_assistant_bubble(f"{label} copied to clipboard.")
+                return
+            except Exception as e:
+                error = e
+        self._add_assistant_bubble(
+            f"Copy failed: {error or 'clipboard API unavailable'}",
+            error=True,
+        )
+
+    @staticmethod
+    def _clipboard_copiers():
+        try:
+            import omni.kit.clipboard as clipboard
+            yield clipboard.copy
+        except Exception:
+            pass
+        try:
+            import pyperclip
+            yield pyperclip.copy
+        except Exception:
+            pass
+
     def _add_action_card(self, action: dict):
         code = (action.get("code") or "").strip()
         if not code:
@@ -1188,7 +1217,7 @@ class ChatViewWindow(ui.Window):
         if len(preview_lines) > 5:
             preview += f"\n... {len(preview_lines) - 5} more line(s)"
         card_text = f"{description}\n{preview}"
-        card_height = self._bubble_height(card_text, extra_height=54, min_height=118)
+        card_height = self._bubble_height(card_text, extra_height=72, min_height=146)
         body_height = max(34, self._estimate_text_lines(card_text) * (int(round(11 * SCALE_STEPS[-1])) + 7))
         refs: Dict = {"action": action, "state": "pending"}
 
@@ -1248,17 +1277,25 @@ class ChatViewWindow(ui.Window):
                             tooltip="Dismiss this action without running it",
                         )
                         refs["code_btn"] = ui.Button(
-                            "Show code",
-                            width=86,
+                            "Code",
+                            width=56,
                             height=24,
                             clicked_fn=lambda a=action: self._show_action_code(a),
                             style={"font_size": 11},
                             tooltip="Render the generated Python patch in chat",
                         )
+                        refs["copy_btn"] = ui.Button(
+                            "Copy",
+                            width=58,
+                            height=24,
+                            clicked_fn=lambda c=code: self._copy_to_clipboard(c, "Patch code"),
+                            style={"font_size": 11},
+                            tooltip="Copy the generated Python patch",
+                        )
                         ui.Spacer()
                     ui.Spacer(height=4)
         refs["card"] = card
-        self._track_bubble_height(card, card_text, extra_height=54, min_height=118)
+        self._track_bubble_height(card, card_text, extra_height=72, min_height=146)
         self._scroll_to_bottom()
 
     def _on_reject_action(self, refs: dict):
@@ -1313,9 +1350,12 @@ class ChatViewWindow(ui.Window):
         if not code:
             return {"success": False, "output": "No code provided"}
         try:
+            exec_code, normalized = self._prepare_approved_patch_code(code)
+            if normalized:
+                output_buf.write("[Isaac Assist] normalized duplicate-safe USD xform ops before execution.\n")
             with contextlib.redirect_stdout(output_buf), contextlib.redirect_stderr(output_buf):
                 exec_globals = {"__builtins__": __builtins__, "__name__": "__isaac_assist_patch__"}
-                exec(code, exec_globals)
+                exec(exec_code, exec_globals)
             success = True
         except Exception as e:
             output_buf.write(f"\nError: {e}")
@@ -1337,6 +1377,91 @@ class ChatViewWindow(ui.Window):
                 error=not success,
             )
         return {"success": success, "output": output}
+
+    class _UsdXformSetTransformer(ast.NodeTransformer):
+        _OP_NAMES = {
+            "AddTranslateOp": "xformOp:translate",
+            "AddScaleOp": "xformOp:scale",
+            "AddRotateXYZOp": "xformOp:rotateXYZ",
+            "AddRotateXOp": "xformOp:rotateX",
+            "AddRotateYOp": "xformOp:rotateY",
+            "AddRotateZOp": "xformOp:rotateZ",
+            "AddOrientOp": "xformOp:orient",
+            "AddTransformOp": "xformOp:transform",
+        }
+
+        def __init__(self):
+            super().__init__()
+            self.changed = False
+
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            if not isinstance(node.func, ast.Attribute) or node.func.attr != "Set":
+                return node
+            add_call = node.func.value
+            if not isinstance(add_call, ast.Call):
+                return node
+            add_func = add_call.func
+            if not isinstance(add_func, ast.Attribute):
+                return node
+            op_name = self._OP_NAMES.get(add_func.attr)
+            if not op_name:
+                return node
+            if add_call.args or add_call.keywords or len(node.args) != 1 or node.keywords:
+                return node
+            self.changed = True
+            replacement = ast.Call(
+                func=ast.Name(id="_ia_set_or_add_xform_op", ctx=ast.Load()),
+                args=[add_func.value, ast.Constant(op_name), node.args[0]],
+                keywords=[],
+            )
+            return ast.copy_location(replacement, node)
+
+    @staticmethod
+    def _approved_patch_helper_source() -> str:
+        return """
+def _ia_set_or_add_xform_op(xformable, op_name, value):
+    from pxr import UsdGeom
+    prim = xformable.GetPrim() if hasattr(xformable, "GetPrim") else xformable
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpName() == op_name:
+            op.Set(value)
+            return op
+    if op_name == "xformOp:translate":
+        op = xf.AddTranslateOp()
+    elif op_name == "xformOp:scale":
+        op = xf.AddScaleOp()
+    elif op_name == "xformOp:rotateXYZ":
+        op = xf.AddRotateXYZOp()
+    elif op_name == "xformOp:rotateX":
+        op = xf.AddRotateXOp()
+    elif op_name == "xformOp:rotateY":
+        op = xf.AddRotateYOp()
+    elif op_name == "xformOp:rotateZ":
+        op = xf.AddRotateZOp()
+    elif op_name == "xformOp:orient":
+        op = xf.AddOrientOp()
+    elif op_name == "xformOp:transform":
+        op = xf.AddTransformOp()
+    else:
+        raise ValueError(f"unsupported xform op: {op_name}")
+    op.Set(value)
+    return op
+""".strip()
+
+    def _prepare_approved_patch_code(self, code: str) -> Tuple[str, bool]:
+        try:
+            tree = ast.parse(code)
+            transformer = self._UsdXformSetTransformer()
+            tree = transformer.visit(tree)
+            if not transformer.changed:
+                return code, False
+            ast.fix_missing_locations(tree)
+            return f"{self._approved_patch_helper_source()}\n\n{ast.unparse(tree)}", True
+        except Exception as e:
+            logger.warning(f"[ApprovalQueue] xform normalization skipped: {e}")
+            return code, False
 
     def _show_action_code(self, action: dict):
         code = (action.get("code") or "").strip()
@@ -1957,6 +2082,19 @@ class ChatViewWindow(ui.Window):
                             )
                             ui.Spacer()
                             ui.Button(
+                                "Copy",
+                                width=40,
+                                height=14,
+                                clicked_fn=lambda t=text: self._copy_to_clipboard(t, "Message"),
+                                style={
+                                    "color": COL_TEXT_SUBTLE,
+                                    "font_size": 10,
+                                    "background_color": 0x00000000,
+                                },
+                                tooltip="Copy this message",
+                            )
+                            ui.Spacer(width=4)
+                            ui.Button(
                                 "R",
                                 width=18,
                                 height=14,
@@ -2018,6 +2156,19 @@ class ChatViewWindow(ui.Window):
                                     style={"color": COL_TEXT_SUBTLE},
                                 )
                                 ui.Spacer()
+                                ui.Button(
+                                    "Copy",
+                                    width=40,
+                                    height=14,
+                                    clicked_fn=lambda t=text: self._copy_to_clipboard(t, "Message"),
+                                    style={
+                                        "color": COL_TEXT_SUBTLE,
+                                        "font_size": 10,
+                                        "background_color": 0x00000000,
+                                    },
+                                    tooltip="Copy this message",
+                                )
+                                ui.Spacer(width=4)
                             with ui.HStack(height=body_height):
                                 ui.Spacer(width=8)
                                 body_color = COL_RED if error else COL_TEXT
