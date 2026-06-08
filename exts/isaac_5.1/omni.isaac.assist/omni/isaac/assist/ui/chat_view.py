@@ -539,12 +539,13 @@ class ChatViewWindow(ui.Window):
     # ═══════════════════════════════════════════════════════════════════════
     # Model switcher (M button)
     # ═══════════════════════════════════════════════════════════════════════
-    # Each entry: (label_shown_to_user, llm_mode, cloud_or_local_model_name)
-    # Free / cheap options first; high-cost models last so users notice.
+    # Each entry: (label_shown_to_user, llm_mode, model_name)
+    # Keep the local DeepSeek-compatible route first for this 5.1 workflow.
     _MODEL_OPTIONS = (
-        ("Gemini 3 Flash",          "cloud",     "gemini-3-flash-preview"),
-        ("Gemini 2.5 Flash",        "cloud",     "gemini-2.5-flash"),
-        ("Gemini 2.5 Pro",          "cloud",     "gemini-2.5-pro"),
+        ("DeepSeek V4 Pro",         "openai",    "deepseek-v4-pro"),
+        ("Gemini 3 Flash",          "google",    "gemini-3-flash-preview"),
+        ("Gemini 2.5 Flash",        "google",    "gemini-2.5-flash"),
+        ("Gemini 2.5 Pro",          "google",    "gemini-2.5-pro"),
         ("Kimi K2 (Moonshot)",      "moonshot",  "kimi-k2-0905-preview"),
         ("Claude Opus 4.7",         "anthropic", "claude-opus-4-7"),
         ("Claude Sonnet 4.6",       "anthropic", "claude-sonnet-4-6"),
@@ -582,12 +583,20 @@ class ChatViewWindow(ui.Window):
                         style={"font_size": self._sz(11)},
                     )
 
+    def _model_name_key(self, mode: str) -> str:
+        mode = (mode or "").lower()
+        if mode == "local":
+            return "LOCAL_MODEL_NAME"
+        if mode in ("google", "gemini", "cloud"):
+            return "GEMINI_MODEL_NAME"
+        return "CLOUD_MODEL_NAME"
+
     def _switch_model(self, mode: str, model_name: str, label: str):
-        """POST {LLM_MODE, CLOUD_MODEL_NAME or LOCAL_MODEL_NAME} to /settings/."""
+        """POST LLM mode + the provider-specific model key to /settings/."""
         import asyncio
         import aiohttp
         async def _do_switch():
-            key = "LOCAL_MODEL_NAME" if mode == "local" else "CLOUD_MODEL_NAME"
+            key = self._model_name_key(mode)
             settings = {"LLM_MODE": mode, key: model_name}
             url = "http://localhost:8000/api/v1/settings/"
             try:
