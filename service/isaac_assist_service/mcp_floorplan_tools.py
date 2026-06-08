@@ -275,7 +275,10 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                     },
                     "probe_mode": {
                         "type": "string",
-                        "description": "Only context_only is currently supported.",
+                        "description": (
+                            "Safety gate to run. Supported values: context_only, "
+                            "context_pubsub_no_targets."
+                        ),
                     },
                     "probe_path": {
                         "type": "string",
@@ -706,8 +709,12 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
     timeout = float(arguments.get("timeout") or 10.0)
     cleanup = bool(arguments.get("cleanup", True))
     probe_mode = str(arguments.get("probe_mode") or "context_only")
-    if probe_mode != "context_only":
-        raise ValueError("probe_ros2_omnigraph_creation currently supports probe_mode='context_only'")
+    supported_modes = {"context_only", "context_pubsub_no_targets"}
+    if probe_mode not in supported_modes:
+        raise ValueError(
+            "probe_ros2_omnigraph_creation supports probe_mode values: "
+            + ", ".join(sorted(supported_modes))
+        )
 
     node_namespace = str(
         arguments.get("node_namespace") or runtime_profile.ros2_omnigraph_namespace
@@ -723,6 +730,7 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         candidate_namespaces=candidate_namespaces,
         probe_path=probe_path,
         cleanup=cleanup,
+        probe_mode=probe_mode,
     )
     response: Dict[str, Any] = {
         "status": "dry_run" if dry_run else "pending",
@@ -780,13 +788,23 @@ async def probe_ros2_omnigraph_creation(arguments: Dict[str, Any]) -> Dict[str, 
         response["detected_namespace"] = readback.get("detected_namespace", "")
         response["created"] = bool(readback.get("created"))
         response["removed"] = bool(readback.get("removed"))
+        response["created_node_suffixes"] = readback.get("created_node_suffixes", [])
+        response["missing_node_suffixes"] = readback.get("missing_node_suffixes", [])
         response["status"] = "ok" if readback.get("ok") else str(readback.get("status") or "failed")
         if readback.get("ok"):
-            response["recommendation"]["reason"] = (
-                "Context-only ROS2 OmniGraph creation passed and cleaned up. "
-                "Next gate should create disposable publish/subscribe nodes with no "
-                "target prims before enabling the full scene graph."
-            )
+            if probe_mode == "context_only":
+                response["recommendation"]["reason"] = (
+                    "Context-only ROS2 OmniGraph creation passed and cleaned up. "
+                    "Next gate should create disposable publish/subscribe nodes with no "
+                    "target prims before enabling the full scene graph."
+                )
+            else:
+                response["recommendation"]["reason"] = (
+                    "Disposable ROS2 context plus joint-state publish/subscribe nodes "
+                    "were created, connected to context, and cleaned up without topics, "
+                    "target prims, ticks, or articulation-controller wiring. Next gate "
+                    "can test topic and targetPrim assignment on a disposable prim."
+                )
     else:
         response.update({
             "status": "probe_parse_failed" if result.get("success") else "probe_failed",
@@ -1484,11 +1502,34 @@ def _ros2_omnigraph_creation_probe_code(
     candidate_namespaces: List[str],
     probe_path: str,
     cleanup: bool,
+    probe_mode: str,
 ) -> str:
+    node_defs = [
+        {"name": "ROS2Context", "suffix": "ROS2Context"},
+    ]
+    connections: list[list[str]] = []
+    required_suffixes = ["ROS2Context"]
+    if probe_mode == "context_pubsub_no_targets":
+        node_defs.extend([
+            {"name": "PublishJointState", "suffix": "ROS2PublishJointState"},
+            {"name": "SubscribeJointState", "suffix": "ROS2SubscribeJointState"},
+        ])
+        connections.extend([
+            ["ROS2Context.outputs:context", "PublishJointState.inputs:context"],
+            ["ROS2Context.outputs:context", "SubscribeJointState.inputs:context"],
+        ])
+        required_suffixes.extend([
+            "ROS2PublishJointState",
+            "ROS2SubscribeJointState",
+        ])
     payload = {
         "candidate_namespaces": candidate_namespaces,
         "probe_path": probe_path,
         "cleanup": cleanup,
+        "probe_mode": probe_mode,
+        "node_defs": node_defs,
+        "connections": connections,
+        "required_suffixes": required_suffixes,
     }
     return f"""\
 import json
@@ -1502,6 +1543,9 @@ _result = {{
     "created": False,
     "removed": False,
     "cleanup": bool(_probe_payload["cleanup"]),
+    "probe_mode": _probe_payload["probe_mode"],
+    "created_node_suffixes": [],
+    "missing_node_suffixes": [],
     "error": "",
 }}
 _parent_created = False
@@ -1515,14 +1559,24 @@ try:
         raise RuntimeError("No active USD stage")
 
     _registered = set(str(_node) for _node in og.get_registered_nodes())
+    _required_suffixes = list(_probe_payload["required_suffixes"])
     _ros2_ns = ""
+    _missing = list(_required_suffixes)
     for _namespace in _probe_payload["candidate_namespaces"]:
-        if f"{{_namespace}}.ROS2Context" in _registered:
+        _candidate_missing = [
+            _suffix for _suffix in _required_suffixes
+            if f"{{_namespace}}.{{_suffix}}" not in _registered
+        ]
+        if not _candidate_missing:
             _ros2_ns = _namespace
+            _missing = []
             break
+        if len(_candidate_missing) < len(_missing):
+            _missing = _candidate_missing
     _result["detected_namespace"] = _ros2_ns
+    _result["missing_node_suffixes"] = _missing
     if not _ros2_ns:
-        _result["status"] = "missing_context_node"
+        _result["status"] = "missing_required_nodes"
     else:
         _keys = og.Controller.Keys
         _graph_path = _probe_payload["probe_path"]
@@ -1533,18 +1587,32 @@ try:
             _parent_created = True
         if _stage.GetPrimAtPath(_path).IsValid():
             _stage.RemovePrim(_path)
+        _create_nodes = [
+            (_node_def["name"], f"{{_ros2_ns}}.{{_node_def['suffix']}}")
+            for _node_def in _probe_payload["node_defs"]
+        ]
+        _connections = [
+            tuple(_connection) for _connection in _probe_payload["connections"]
+        ]
+        _edit_request = {{
+            _keys.CREATE_NODES: _create_nodes,
+        }}
+        if _connections:
+            _edit_request[_keys.CONNECT] = _connections
         og.Controller.edit(
             _graph_path,
-            {{
-                _keys.CREATE_NODES: [
-                    ("ROS2Context", f"{{_ros2_ns}}.ROS2Context"),
-                ],
-            }},
+            _edit_request,
         )
         _graph_prim = _stage.GetPrimAtPath(_path)
-        _node_prim = _stage.GetPrimAtPath(Sdf.Path(f"{{_graph_path}}/ROS2Context"))
+        _created_suffixes = []
+        for _node_name, _node_type in _create_nodes:
+            _node_prim = _stage.GetPrimAtPath(Sdf.Path(f"{{_graph_path}}/{{_node_name}}"))
+            if _node_prim and _node_prim.IsValid():
+                _created_suffixes.append(str(_node_type).split(".")[-1])
+        _result["created_node_suffixes"] = _created_suffixes
         _result["created"] = bool(
-            _graph_prim and _graph_prim.IsValid() and _node_prim and _node_prim.IsValid()
+            _graph_prim and _graph_prim.IsValid()
+            and sorted(_created_suffixes) == sorted(_required_suffixes)
         )
         _result["status"] = "created" if _result["created"] else "create_failed"
         if _probe_payload["cleanup"]:
