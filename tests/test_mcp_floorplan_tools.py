@@ -321,6 +321,44 @@ def test_probe_ros2_omnigraph_creation_dummy_target_mode_assigns_probe_attrs():
     assert "/World/Franka" not in probe_code
 
 
+def test_probe_ros2_omnigraph_creation_tick_mode_requires_stopped_timeline():
+    from service.isaac_assist_service.mcp_floorplan_tools import probe_ros2_omnigraph_creation
+
+    response = asyncio.run(probe_ros2_omnigraph_creation({
+        "runtime_profile": "isaacsim-6.0",
+        "probe_mode": "context_pubsub_dummy_target_tick",
+        "node_namespace": "isaacsim.ros2.bridge",
+        "dry_run": True,
+    }))
+
+    assert response["status"] == "dry_run"
+    assert response["probe_mode"] == "context_pubsub_dummy_target_tick"
+    assert response["allow_when_playing"] is False
+    assert response["requires_timeline_stopped"] is True
+    assert response["wires_tick"] is True
+    assert response["sets_topic_names"] is True
+    assert response["sets_target_prim"] is True
+    assert response["touches_robot"] is False
+    assert response["touches_scene_assets"] is False
+    assert response["touches_topics"] is False
+    assert response["recommendation"]["connect_articulation_controller"] is False
+    probe_code = response["probe_code"]
+    assert "omni.timeline" in probe_code
+    assert "timeline_playing" in probe_code
+    assert "allow_when_playing" in probe_code
+    assert "OnPlaybackTick" in probe_code
+    assert "omni.graph.action.OnPlaybackTick" in probe_code
+    assert "OnPlaybackTick.outputs:tick" in probe_code
+    assert "PublishJointState.inputs:execIn" in probe_code
+    assert "SubscribeJointState.inputs:execIn" in probe_code
+    assert "PublishJointState.inputs:targetPrim" in probe_code
+    assert "PublishJointState.inputs:topicName" in probe_code
+    assert "SubscribeJointState.inputs:topicName" in probe_code
+    assert "/World/IsaacAssistProbes/DummyJointTarget" in probe_code
+    assert "ArticulationController" not in probe_code
+    assert "/World/Franka" not in probe_code
+
+
 def test_set_object_asset_updates_reviewed_ref(monkeypatch, tmp_path):
     _install_temp_store(monkeypatch, tmp_path)
     from service.isaac_assist_service.mcp_floorplan_tools import (
