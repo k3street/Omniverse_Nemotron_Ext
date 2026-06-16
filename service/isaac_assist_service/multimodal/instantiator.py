@@ -131,6 +131,7 @@ class LayoutSpecCodeGenerator:
         elif prim_class == "Reference":
             lines.append(f"prim = UsdGeom.Xform.Define(stage, {path_repr})")
             asset_path = (extra_attrs or {}).get("asset_path", "")
+            lines.append("prim.GetPrim().GetReferences().ClearReferences()")
             lines.append(
                 f"prim.GetPrim().GetReferences().AddReference({asset_path!r})"
             )
@@ -407,7 +408,7 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         "bowl": "Cylinder", "plate": "Cylinder",
         "fruit": "Sphere", "apple": "Sphere", "orange": "Sphere",
         "hamburger": "Cylinder",
-        "conveyor_short": "Cube", "conveyor_long": "Cube",
+        "conveyor": "Cube", "conveyor_short": "Cube", "conveyor_long": "Cube",
         "wall": "Cube", "fence": "Cube", "obstacle_box": "Cube",
         "obstacle_cylinder": "Cylinder",
         "groundplane": "Plane",
@@ -1095,6 +1096,7 @@ async def instantiate(
     spec: Any,
     template_id: Optional[str] = None,
     dry_run: bool = False,
+    execute_direct: bool = False,
 ) -> InstantiateResult:
     """Walk a LayoutSpec, emit per-object USD patches, dispatch to Kit.
 
@@ -1102,6 +1104,10 @@ async def instantiate(
         spec: A ratified LayoutSpec.
         template_id: Optional canonical template binding the spec.
         dry_run: If True, return the generated code without executing.
+        execute_direct: If True, bypass the queued approval UI and execute
+            synchronously through Kit RPC. Intended for trusted local web
+            flows. The generated code is still run through the patch
+            validator first and rejected if it has blocking issues.
 
     Returns:
         InstantiateResult with build_id (when executed), status, per-object
@@ -1130,7 +1136,45 @@ async def instantiate(
     # Live path
     try:
         from ..chat.tools import kit_tools
-        result = await kit_tools.queue_exec_patch(code, description=f"Phase 19: instantiate {template_id or 'spec'}")
+        if execute_direct:
+            # Direct apply bypasses the extension's approval UI, so enforce the
+            # same pre-flight patch validation the chat tool path runs before it
+            # ever reaches the live stage.
+            from ..chat.tools.patch_validator import (
+                validate_patch,
+                has_blocking_issues,
+                format_issues_for_llm,
+            )
+            issues = validate_patch(code)
+            if has_blocking_issues(issues):
+                msg = format_issues_for_llm(issues)
+                logger.warning(f"[Phase19 instantiate] direct apply blocked: {msg}")
+                return InstantiateResult(
+                    status="error",
+                    message=f"Patch validation blocked direct apply:\n{msg}",
+                    generated_code=code,
+                    relation_summary=relation_summary(spec),
+                    relation_diagnostics=relation_diagnostics(spec),
+                    relation_verification=relation_verification(spec),
+                    variant_summary=variant_summary(spec),
+                )
+            if not await kit_tools.is_kit_rpc_alive():
+                return InstantiateResult(
+                    status="error",
+                    message=(
+                        "Isaac Assist Kit RPC is not reachable on port 8001. "
+                        "Start Isaac Sim with the omni.isaac.assist extension enabled "
+                        "before applying this build."
+                    ),
+                    generated_code=code,
+                    relation_summary=relation_summary(spec),
+                    relation_diagnostics=relation_diagnostics(spec),
+                    relation_verification=relation_verification(spec),
+                    variant_summary=variant_summary(spec),
+                )
+            result = await kit_tools.exec_sync(code, timeout=600)
+        else:
+            result = await kit_tools.queue_exec_patch(code, description=f"Phase 19: instantiate {template_id or 'spec'}")
         outcome = InstantiateResult.from_exec(result if isinstance(result, dict) else {"output": str(result)})
         outcome.relation_summary = relation_summary(spec)
         outcome.relation_diagnostics = relation_diagnostics(spec)

@@ -160,7 +160,10 @@ def test_instantiate_dry_run_references_reviewed_palette_assets(monkeypatch, tmp
     result = asyncio.run(instantiate(Spec(), dry_run=True))
 
     assert result.status == "dry_run"
-    assert "AddReference('Isaac/" in result.generated_code
+    # Palette robots load their real USD via a Reference, with the relative
+    # "Isaac/..." ref normalized to a Kit-resolvable assets-base URL.
+    assert "GetReferences().AddReference(" in result.generated_code
+    assert "Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd" in result.generated_code
     assert "franka_panda" in result.generated_code
 
 

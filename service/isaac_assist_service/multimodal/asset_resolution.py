@@ -19,6 +19,16 @@ _ASSET_ROOTS_ENV = "ISAAC_ASSIST_ASSET_ROOTS"
 _LEGACY_ASSET_ROOT_ENV = "ASSETS_ROOT_PATH"
 _DEFAULT_ASSET_ROOT = Path("/home/kimate/Desktop/assets")
 
+# Base used to turn palette-relative "Isaac/..." references into a
+# Kit-resolvable URL. This must be a full Isaac *assets root* (equivalent to
+# omni.isaac.core's get_assets_root_path()), i.e. ending in ".../Assets/Isaac/<ver>",
+# NOT a bare Nucleus server root. The default targets the production S3 bucket;
+# override with ISAAC_ASSIST_ASSET_BASE for a local Nucleus mount.
+_ASSET_BASE_ENV = "ISAAC_ASSIST_ASSET_BASE"
+_DEFAULT_ISAAC_ASSET_BASE = (
+    "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1"
+)
+
 _LOCAL_ASSET_OVERRIDES = {
     "franka_panda": [
         "Lightwheel_OpenSource/Locomotion/Grass/E/InteractiveAsset/omron_franka.usd",
@@ -225,6 +235,22 @@ def _catalog_asset_for_class(object_class: str) -> Optional[str]:
     return best[1] if best else None
 
 
+def _normalize_usd_ref(usd_ref: str) -> str:
+    """Return a Kit-resolvable USD reference for palette-relative Isaac paths.
+
+    Palette refs are stored relative to the Isaac assets root (e.g.
+    "Isaac/Robots/.../franka.usd"). A bare relative ref does not resolve on a
+    fresh stage, so prepend the configured assets base. Absolute refs
+    (omniverse://, http(s)://, file://, leading slash) are passed through.
+    """
+    if not usd_ref or "://" in usd_ref or usd_ref.startswith("/"):
+        return usd_ref
+    if usd_ref.startswith("Isaac/"):
+        base = os.getenv(_ASSET_BASE_ENV, _DEFAULT_ISAAC_ASSET_BASE).rstrip("/")
+        return f"{base}/{usd_ref}"
+    return usd_ref
+
+
 def _asset_label_from_path(path: Path) -> str:
     name = path.stem.replace("_", " ").replace("-", " ").strip()
     return " ".join(part.capitalize() for part in name.split()) or path.name
@@ -365,7 +391,7 @@ def resolve_object_asset(obj: Any) -> Optional[AssetResolution]:
     palette_ref = palette_entry.usd_ref if palette_entry else ""
     local_ref = "" if explicit else (_existing_override_for_class(object_class) or "")
     catalog_ref = "" if explicit or local_ref else (_catalog_asset_for_class(object_class) or "")
-    usd_ref = str(explicit or local_ref or catalog_ref or palette_ref or "")
+    usd_ref = _normalize_usd_ref(str(explicit or local_ref or catalog_ref or palette_ref or ""))
     if not usd_ref:
         return None
 

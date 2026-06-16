@@ -308,6 +308,17 @@ export interface BuildResponse {
     };
 }
 
+export type RenderingMode = "fast" | "real";
+
+export interface RenderingModeResponse {
+    status?: string;
+    mode: RenderingMode;
+    render_enabled: boolean;
+    control_file?: string | null;
+    kit_applied?: boolean;
+    kit_output?: string;
+}
+
 export interface CampaignVariantPlan {
     variant_id: string;
     index: number;

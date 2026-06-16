@@ -53,6 +53,38 @@ async def test_instantiate_dry_run_returns_generated_code():
 
 
 @pytest.mark.asyncio
+async def test_instantiate_robot_palette_class_loads_reviewed_reference():
+    """Palette robots load their real USD via a Reference (relative ref normalized)."""
+    from service.isaac_assist_service.multimodal.instantiator import instantiate
+    spec = _StubSpec(objects=[
+        _StubObject("franka_panda", [0.0, 0.0, 0.0]),
+    ])
+    result = await instantiate(spec, dry_run=True)
+    assert result.status == "dry_run"
+    # Robots load a real USD via a Reference, not a placeholder Cube/Xform.
+    assert "source_class='franka_panda' -> prim_class='Reference'" in result.generated_code
+    assert "GetReferences().AddReference(" in result.generated_code
+    assert "franka" in result.generated_code.lower()
+
+
+@pytest.mark.asyncio
+async def test_instantiate_robot_explicit_asset_override_still_references_asset():
+    """Explicit reviewed assets remain available for users who want full USDs."""
+    from service.isaac_assist_service.multimodal.instantiator import instantiate
+    spec = _StubSpec(objects=[
+        {
+            "object_class": "franka_panda",
+            "position": [0.0, 0.0, 0.0],
+            "asset_path": "omniverse://localhost/Robots/franka.usd",
+        },
+    ])
+    result = await instantiate(spec, dry_run=True)
+    assert result.status == "dry_run"
+    assert "source_class='franka_panda' -> prim_class='Reference'" in result.generated_code
+    assert "GetReferences().AddReference('omniverse://localhost/Robots/franka.usd')" in result.generated_code
+
+
+@pytest.mark.asyncio
 async def test_instantiate_handles_dict_objects_too():
     """Phase 19 scaffold accepts both dataclass-like and dict objects."""
     from service.isaac_assist_service.multimodal.instantiator import instantiate
@@ -62,6 +94,19 @@ async def test_instantiate_handles_dict_objects_too():
     result = await instantiate(spec, dry_run=True)
     assert result.status == "dry_run"
     assert "table" in result.generated_code
+
+
+@pytest.mark.asyncio
+async def test_instantiate_plain_conveyor_generates_visible_primitive():
+    """Plain conveyor objects should not fall back to invisible Xforms."""
+    from service.isaac_assist_service.multimodal.instantiator import instantiate
+    spec = _StubSpec(objects=[
+        {"object_class": "conveyor", "name": "Conveyor_1", "position": [0, 0, 0]},
+    ])
+    result = await instantiate(spec, dry_run=True)
+    assert result.status == "dry_run"
+    assert "source_class='conveyor' -> prim_class='Cube'" in result.generated_code
+    assert "UsdGeom.Cube.Define(stage, '/World/Conveyor_1')" in result.generated_code
 
 
 def test_instantiate_result_from_exec_success():
@@ -128,6 +173,7 @@ class TestLayoutSpecCodeGeneratorPrimClasses:
             "Reference", "/World/Robot",
             extra_attrs={"asset_path": "omniverse://localhost/assets/robot.usd"},
         )
+        assert "GetReferences().ClearReferences()" in code
         assert "GetReferences().AddReference(" in code
         assert "robot.usd" in code
 

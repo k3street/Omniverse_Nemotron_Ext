@@ -124,11 +124,15 @@ class BuildRequest(BaseModel):
         template_id: Optional canonical template to instantiate.
         force_freeform: When True, skip template lookup and generate a freeform canvas.
         dry_run: When True, return generated Kit code without mutating Isaac Sim.
+        execute_direct: When True with dry_run=False, bypass the queued approval
+            UI and execute synchronously through Kit RPC (still subject to
+            patch validation before dispatch).
     """
 
     template_id: Optional[str] = None
     force_freeform: bool = False
     dry_run: bool = True
+    execute_direct: bool = False
 
 
 class CampaignPlanRequest(BaseModel):
@@ -656,11 +660,13 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
             role: {"object_id": b.object_id, "source": b.source}
             for role, b in result.bindings.items()
         }
-        instantiation = await instantiate(
-            spec,
-            template_id=body.template_id,
-            dry_run=body.dry_run,
-        )
+        instantiate_kwargs = {
+            "template_id": body.template_id,
+            "dry_run": body.dry_run,
+        }
+        if body.execute_direct:
+            instantiate_kwargs["execute_direct"] = True
+        instantiation = await instantiate(spec, **instantiate_kwargs)
         payload["instantiation"] = {
             "status": instantiation.status,
             "message": instantiation.message,
@@ -684,6 +690,7 @@ async def build_canvas(session_id: str, body: BuildRequest) -> Dict[str, Any]:
         "revision": spec.revision,
         "ratify_status": result.status,
         "template_id": body.template_id,
+        "execute_direct": body.execute_direct,
     })
     return payload
 

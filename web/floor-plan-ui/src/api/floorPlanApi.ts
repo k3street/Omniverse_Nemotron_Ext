@@ -21,6 +21,8 @@ import {
     LocalAssetOptionsResponse,
     PatchSuccessResponse,
     PatchValidationFailureResponse,
+    RenderingMode,
+    RenderingModeResponse,
     TypedObject,
     ScenarioVariants,
 } from "./types";
@@ -50,7 +52,12 @@ export interface CanvasApi {
     patch(sessionId: string, spec: LayoutSpec, parentRevision: number): Promise<PatchSuccessResponse>;
     commit(sessionId: string): Promise<{ committed: true; revision: number }>;
     previewRender(sessionId: string): Promise<{ rendered: true; path: string; revision: number }>;
-    build(sessionId: string, opts?: { template_id?: string; force_freeform?: boolean; dry_run?: boolean }): Promise<BuildResponse>;
+    build(sessionId: string, opts?: {
+        template_id?: string;
+        force_freeform?: boolean;
+        dry_run?: boolean;
+        execute_direct?: boolean;
+    }): Promise<BuildResponse>;
     assetOptions(opts?: { q?: string; limit?: number }): Promise<LocalAssetOptionsResponse>;
     planCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;
     materializeCampaign(sessionId: string, opts?: { workspace_root?: string }): Promise<CampaignPlanResponse>;
@@ -67,6 +74,8 @@ export interface CanvasApi {
         sessionId: string,
         req: CosmosViewportObserveRequest,
     ): Promise<CosmosViewportObserveResponse>;
+    getRenderingMode(): Promise<RenderingModeResponse>;
+    setRenderingMode(mode: RenderingMode): Promise<RenderingModeResponse>;
     delete(sessionId: string): Promise<{ deleted: true; removed_revisions: number }>;
     reportClientError(sessionId: string, message: string, stack?: string): Promise<void>;
 }
@@ -133,6 +142,7 @@ function normalizePatchResponse<T extends { spec: LayoutSpec }>(body: T): T {
 
 export function createCanvasApi(baseUrl: string = ""): CanvasApi {
     const url = (path: string) => `${baseUrl}/api/v1/canvas${path}`;
+    const settingsUrl = (path: string) => `${baseUrl}/api/v1/settings${path}`;
     return {
         async get(sessionId) {
             const r = await fetch(url(`/${encodeURIComponent(sessionId)}`));
@@ -241,6 +251,20 @@ export function createCanvasApi(baseUrl: string = ""): CanvasApi {
                 throw new Error(`POST cosmos/observe_viewport failed: ${r.status} ${err}`);
             }
             return normalizePatchResponse((await r.json()) as CosmosViewportObserveResponse);
+        },
+        async getRenderingMode() {
+            const r = await fetch(settingsUrl("/rendering_mode"));
+            if (!r.ok) throw new Error(`GET rendering_mode failed: ${r.status}`);
+            return r.json();
+        },
+        async setRenderingMode(mode) {
+            const r = await fetch(settingsUrl("/rendering_mode"), {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mode }),
+            });
+            if (!r.ok) throw new Error(`PUT rendering_mode failed: ${r.status}`);
+            return r.json();
         },
         async delete(sessionId) {
             const r = await fetch(url(`/${encodeURIComponent(sessionId)}`), {
