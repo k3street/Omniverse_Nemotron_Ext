@@ -75,6 +75,22 @@ _WORKFLOW_TEMPLATES = _state_module._WORKFLOW_TEMPLATES  # noqa: F811
 
 _eureka_runs: Dict[str, Dict] = {}
 
+_FIXED_BASE_COMPAT_MESSAGE = (
+    "Compatibility blocked: PhysxArticulationAPI.CreateFixedBaseAttr(...) is "
+    "not available in Isaac Sim 6.0 or 5.x Python bindings. Use anchor_robot "
+    "when possible, or author the raw USD bool attribute instead: "
+    "attr = prim.GetAttribute('physxArticulation:fixedBase'); "
+    "if not attr.IsValid(): attr = prim.CreateAttribute("
+    "'physxArticulation:fixedBase', Sdf.ValueTypeNames.Bool); attr.Set(True)."
+)
+
+
+def _runtime_compatibility_error(tool_name: str, code: str) -> Optional[str]:
+    if tool_name == "run_usd_script" and re.search(r"\.CreateFixedBaseAttr\s*\(", code):
+        return _FIXED_BASE_COMPAT_MESSAGE
+    return None
+
+
 # _PHYSICS_MATERIALS_PATH + _physics_materials migrated to handlers/physics.py (Phase 8 wave 6).
 _physics_materials: Optional[Dict] = None
 
@@ -320,6 +336,16 @@ async def execute_tool_call(
         if tool_name == "run_usd_script":
             code = arguments.get("code", "")
             desc = arguments.get("description", "Run custom script")
+            compat_err = _runtime_compatibility_error(tool_name, code)
+            if compat_err is not None:
+                logger.warning(f"[ToolExecutor] Patch blocked for {tool_name}: {compat_err}")
+                return {
+                    "type": "error",
+                    "error": compat_err,
+                    "code": code,
+                    "validation_blocked": True,
+                    "compatibility_blocked": True,
+                }
             # Pre-flight validation
             issues = validate_patch(code)
             if has_blocking_issues(issues):

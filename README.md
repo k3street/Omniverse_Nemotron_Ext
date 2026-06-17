@@ -33,7 +33,7 @@
 
 | Requirement | Version |
 |---|---|
-| NVIDIA Isaac Sim | 5.1 or 6.0 |
+| NVIDIA Isaac Sim | 6.0 from source on DGX Spark; 5.1 still supported as a fallback |
 | Python (system host) | 3.10+ |
 | Docker + Docker Compose | Latest |
 | Ollama *(local LLM mode)* | Latest |
@@ -188,19 +188,30 @@ The `launch_isaac.sh` script configures the correct ROS2 environment and registe
 ./launch_canvas_scene.sh /path/to/scene.usd
 ```
 
-To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` in your `.env` file or export it before launching:
+To point at a custom Isaac Sim installation, set `ISAAC_SIM_PATH` or `ISAACSIM_PATH` in your `.env` file or export it before launching:
 
 ```bash
-export ISAAC_SIM_PATH=/path/to/your/isaac-sim
+export ISAACSIM_PATH=~/Documents/Github/isaacsim/_build/linux-aarch64/release
 ./launch_isaac.sh
 ```
 
-The script auto-detects architecture (`x86_64` or `aarch64`) and sets default paths accordingly:
+The script auto-detects architecture (`x86_64` or `aarch64`) and sets default paths accordingly. For DGX Spark/aarch64, the preferred path is the Isaac Sim 6.0 source-build release directory:
 
 | Architecture | Default Path |
 |---|---|
-| x86_64 | `~/isaac-sim/isaac-sim-standalone-5.1.0-linux-x86_64` |
-| aarch64 (Jetson / DGX Spark) | `~/Documents/Github/isaacsim/_build/linux-aarch64/release` |
+| x86_64 | `~/IsaacSim/_build/linux-x86_64/release`, `~/Documents/Github/isaacsim/_build/linux-x86_64/release`, then standalone 6.0/5.1 fallbacks |
+| aarch64 (DGX Spark) | `~/IsaacSim/_build/linux-aarch64/release`, then `~/Documents/Github/isaacsim/_build/linux-aarch64/release` |
+
+To rebuild Isaac Sim 6.0 from source on DGX Spark:
+
+```bash
+cd ~/Documents/Github/isaacsim
+git fetch origin
+git merge --ff-only origin/main
+git lfs pull
+./build.sh -r -u
+export ISAACSIM_PATH=$PWD/_build/linux-aarch64/release
+```
 
 ### 5.2 Manual extension loading (Isaac Sim Extension Manager)
 

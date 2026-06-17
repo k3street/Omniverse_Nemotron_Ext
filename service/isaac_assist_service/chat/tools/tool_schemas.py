@@ -145,6 +145,10 @@ ISAAC_SIM_TOOLS = [
                 "validators and become responsible for authoring RigidBodyAPI, "
                 "CollisionAPI, MassAPI, ConveyorBeltAPI etc. correctly — easy to "
                 "miss, common cause of 'cube falls through ground at Play'. "
+                "Never call PhysxArticulationAPI.CreateFixedBaseAttr(...); "
+                "Isaac Sim 6.0/5.x does not expose that convenience method. "
+                "Use anchor_robot or author the raw USD bool attribute "
+                "physxArticulation:fixedBase instead. "
                 "If you find yourself writing the same run_usd_script pattern "
                 "twice, that's a signal a dedicated tool is missing — surface "
                 "it to the user instead of silently expanding the script."
@@ -3771,7 +3775,7 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "setup_pick_place_controller",
-                "description": "Composite stateful pick-and-place controller with a full matrix of motion architectures via target_source. Pick based on hardware + scenario: 'auto' (let the system probe the env and pick — recommended default when hardware is unknown); 'native' (Franka + CPU, reactive RmpFlow, 1/4 baseline delivery on conveyor-pick-place); 'spline' (CPU-only, deterministic pre-planned Cartesian waypoints with scipy.CubicSpline — beats native 3x at 3/4 delivery; best CPU choice); 'curobo' (GPU-accelerated global optimization with collision awareness — shortest cycle, requires NVIDIA GPU >= Volta + cuRobo lib + Warp 1.9+); 'sensor_gated' (industrial PLC-mimic, pre-taught or coord-IK poses, belt pause gated on photoelectric sensor); 'fixed_poses' (timer-driven pose replay, no sensing); 'cube_tracking' (omniscient — NOT sim2real); 'ros2_cmd' (external ROS2/MoveIt drives state machine); 'diffik' (Isaac Lab stateless Jacobian, teleop use case); 'osc' (experimental task-space impedance). Before calling, invoke list_available_controllers to see which modes are runnable on the current env. Installs physics-step callback — start the simulation to begin.",
+                "description": "Composite stateful pick-and-place controller with a full matrix of motion architectures via target_source. Pick based on hardware + scenario: 'auto' (let the system probe the env and pick — recommended default when hardware is unknown); 'native' (Franka + CPU, reactive RmpFlow, 1/4 baseline delivery on conveyor-pick-place); 'spline' (CPU-only, deterministic pre-planned Cartesian waypoints with scipy.CubicSpline — beats native 3x at 3/4 delivery; best CPU choice); 'curobo' (legacy standalone cuRobo MotionPlanner path; requires the external curobo Python package, not just Isaac Sim 6.0's bundled isaacsim.robot_motion.cumotion); 'sensor_gated' (industrial PLC-mimic, pre-taught or coord-IK poses, belt pause gated on photoelectric sensor); 'fixed_poses' (timer-driven pose replay, no sensing); 'cube_tracking' (omniscient — NOT sim2real); 'ros2_cmd' (external ROS2/MoveIt drives state machine); 'diffik' (Isaac Lab stateless Jacobian, teleop use case); 'osc' (experimental task-space impedance). Isaac Sim 6.0 source builds commonly provide cuMotion as isaacsim.robot_motion.cumotion + cumotion, which is a different API from this legacy target_source='curobo' generator. Before calling, invoke list_available_controllers to see which modes are runnable on the current env. Installs physics-step callback — start the simulation to begin.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -3781,7 +3785,7 @@ ISAAC_SIM_TOOLS = [
                             "description": (
                                 "Motion controller architecture. Decision guide: "
                                 "(1) 'auto' — probe env and pick best; safe default when the user's hardware is unknown. "
-                                "(2) 'curobo' — fastest cycle time and only option with true collision-aware planning; requires NVIDIA GPU (Volta 7.0+, 4GB VRAM) AND cuRobo package. Production quality. "
+                                "(2) 'curobo' — legacy standalone cuRobo MotionPlanner path; fastest cycle time when available, but it requires NVIDIA GPU (Volta 7.0+, 4GB VRAM) AND the external curobo Python package. Isaac Sim 6.0's bundled isaacsim.robot_motion.cumotion/cumotion package is not imported as curobo and needs the cuMotion API path. "
                                 "(3) 'spline' — best CPU-only option. Deterministic 6-waypoint Cartesian trajectory, warm-start IK chaining, scipy.CubicSpline interpolation. Verified 3/4 delivery on conveyor scenario (beats native 3x). Use for CPU-only machines, sim2real demos, reproducible cycles. "
                                 "(4) 'native' — canonical Franka PickPlaceController (only Franka supported). Reactive, RmpFlow-based, 1/4 delivery baseline. Use when the user explicitly wants the stock Isaac Sim controller. "
                                 "(5) 'sensor_gated' — industrial PLC-mimic with pre-taught or coord-IK PICK/DROP/HOME. Use for PLC/teach-pendant sim2real workflows (non-Franka arms, CPU). "
@@ -3842,7 +3846,7 @@ ISAAC_SIM_TOOLS = [
             "type": "function",
             "function": {
                 "name": "list_available_controllers",
-                "description": "Probe the current Kit runtime and report which pick-place controller modes (target_source values) are available, plus hardware capabilities (GPU arch + VRAM, scipy version, cuRobo presence, Isaac Lab presence). Use this BEFORE setup_pick_place_controller to pick a target_source that actually works on the user's machine. Returns a list of recommended controllers in priority order ('curobo' first if available, else 'spline'/'native'), and for each controller: hardware_req, cycle_class, motion_quality (1-5), collision_aware, use_case_fit tags, and reason_if_not available.",
+                "description": "Probe the current Kit runtime and report which pick-place controller modes (target_source values) are available, plus hardware capabilities (GPU arch + VRAM, scipy version, legacy cuRobo package presence, Isaac Sim 6.0 cuMotion presence, Isaac Lab presence). Use this BEFORE setup_pick_place_controller to pick a target_source that actually works on the user's machine. If cuRobo is missing but isaacsim.robot_motion.cumotion is present, do not claim standalone cuRobo is installed; use a supported fallback such as spline/native or a dedicated cuMotion implementation. Returns a list of recommended controllers in priority order ('curobo' first if available, else 'spline'/'native'), and for each controller: hardware_req, cycle_class, motion_quality (1-5), collision_aware, use_case_fit tags, and reason_if_not available.",
                 "parameters": {"type": "object", "properties": {}, "required": []},
             },
         },

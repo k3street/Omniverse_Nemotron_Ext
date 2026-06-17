@@ -1021,7 +1021,6 @@ class ChatOrchestrator:
                 scored = retrieve_templates_with_scores(
                     user_message,
                     top_k=_template_top_k,
-                    profile=runtime_profile,
                 )
             top_sim = scored[0]["similarity"] if scored else 0.0
             second_sim = scored[1]["similarity"] if len(scored) > 1 else 0.0

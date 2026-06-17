@@ -13,7 +13,7 @@
 #   ./launch_isaac.sh --lab script.py [args]  # Run script through Isaac Lab
 #
 # Environment overrides:
-#   ISAAC_SIM_PATH or ISAAC_SIM_ROOT — explicit Isaac Sim installation dir
+#   ISAAC_SIM_PATH, ISAACSIM_PATH, or ISAAC_SIM_ROOT — explicit Isaac Sim dir
 #   ISAAC_LAB_ROOT or ISAACLAB_PATH  — explicit Isaac Lab repo dir
 #   ISAAC_VERSION                    — "5.1" or "6.0"
 #   ISAAC_ASSIST_EXT_FOLDER          — explicit extension search folder
@@ -71,6 +71,7 @@ esac
 # ── Known install candidates, newest first ───────────────────────────────────
 declare -a SIM_CANDIDATES_X86_64=(
     "6.0:$HOME/IsaacSim/_build/linux-x86_64/release"
+    "6.0:$HOME/Documents/Github/isaacsim/_build/linux-x86_64/release"
     "6.0:$HOME/isaac-sim/isaac-sim-standalone-6.0.0-linux-x86_64"
     "6.0:$HOME/.local/share/ov/pkg/isaac-sim-6.0.0"
     "5.1:$HOME/isaac-sim/isaac-sim-standalone-5.1.0-linux-x86_64"
@@ -78,12 +79,12 @@ declare -a SIM_CANDIDATES_X86_64=(
 )
 declare -a SIM_CANDIDATES_AARCH64=(
     "6.0:$HOME/IsaacSim/_build/linux-aarch64/release"
-    "5.1:$HOME/Documents/Github/isaacsim/_build/linux-aarch64/release"
+    "6.0:$HOME/Documents/Github/isaacsim/_build/linux-aarch64/release"
     "5.1:$HOME/.local/share/ov/pkg/isaac-sim-5.1.0"
 )
 
 resolve_sim_path() {
-    local explicit="${ISAAC_SIM_ROOT:-${ISAAC_SIM_PATH:-}}"
+    local explicit="${ISAAC_SIM_ROOT:-${ISAAC_SIM_PATH:-${ISAACSIM_PATH:-}}}"
     if [[ -n "$explicit" && -d "$explicit" ]]; then
         echo "$explicit"
         return
@@ -148,19 +149,26 @@ fi
 
 # ── Resolve Isaac Sim path ────────────────────────────────────────────────────
 ISAAC_SIM_PATH="$(resolve_sim_path)"
+export ISAAC_SIM_PATH
+export ISAACSIM_PATH="$ISAAC_SIM_PATH"
 
 if [[ -z "$ISAAC_SIM_PATH" || ! -f "$ISAAC_SIM_PATH/isaac-sim.sh" ]]; then
     echo "❌ Isaac Sim not found."
     if [[ -n "$REQUESTED_VERSION" ]]; then
         echo "   Requested version: $REQUESTED_VERSION"
     fi
-    echo "   Set ISAAC_SIM_PATH or ISAAC_SIM_ROOT, or install to one of the known 5.1/6.0 paths."
+    echo "   Set ISAAC_SIM_PATH, ISAACSIM_PATH, or ISAAC_SIM_ROOT, or install to one of the known 5.1/6.0 paths."
     exit 1
 fi
 
 VERSION_LABEL="unknown"
 [[ "$ISAAC_SIM_PATH" == *"5.1"* ]] && VERSION_LABEL="5.1"
 [[ "$ISAAC_SIM_PATH" == *"6.0"* || "$ISAAC_SIM_PATH" == *"/IsaacSim/"* ]] && VERSION_LABEL="6.0"
+if [[ -f "$ISAAC_SIM_PATH/VERSION" ]]; then
+    VERSION_TEXT="$(tr -d '[:space:]' < "$ISAAC_SIM_PATH/VERSION")"
+    [[ "$VERSION_TEXT" == 5.1* ]] && VERSION_LABEL="5.1"
+    [[ "$VERSION_TEXT" == 6.0* ]] && VERSION_LABEL="6.0"
+fi
 if [[ -n "$REQUESTED_VERSION" ]]; then
     VERSION_LABEL="$REQUESTED_VERSION"
 fi
