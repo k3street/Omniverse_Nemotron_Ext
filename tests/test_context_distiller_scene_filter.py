@@ -84,3 +84,36 @@ def test_trailing_punctuation_stripped_from_extracted_path():
     )
     out = filter_scene_context(ctx, "Look at /World/X, please.", KN(session_id="test"), max_lines=10)
     assert "/World/X" in out
+
+
+def test_pick_place_prompt_includes_registered_controller_tools():
+    from service.isaac_assist_service.chat.context_distiller import (
+        ConversationKnowledge,
+        select_rules,
+        select_tools,
+    )
+
+    message = (
+        "Install the actual registered controller by calling "
+        "setup_pick_place_controller with target_source='spline', then "
+        "start the timeline and report delivered_count/4 for the bin."
+    )
+    tools = select_tools(
+        "patch_request",
+        message,
+        ConversationKnowledge(session_id="test"),
+    )
+
+    names = {tool["function"]["name"] for tool in tools}
+    assert "setup_pick_place_controller" in names
+    assert "list_available_controllers" in names
+    assert "sim_control" in names
+
+    rules = select_rules(
+        "patch_request",
+        message,
+        ConversationKnowledge(session_id="test"),
+        has_selection=False,
+    )
+    assert "Pick-place controller discipline" in rules
+    assert "Do NOT fake pick-and-place" in rules

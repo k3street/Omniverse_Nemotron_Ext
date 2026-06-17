@@ -77,7 +77,14 @@ def _find_franka_configs():
     roots = ["/home/anton/.local/share/ov/data/exts",
              "/home/anton/.local/share/ov/pkg",
              "/opt/isaac-sim",
-             os.environ.get("ISAAC_PATH", "")]
+             os.environ.get("ISAAC_PATH", ""),
+             os.environ.get("ISAAC_SIM_PATH", ""),
+             os.environ.get("ISAACSIM_PATH", ""),
+             "/home/kimate/Documents/Github/isaacsim/source/deprecated/isaacsim.robot_motion.motion_generation"]
+    for _env_root in (os.environ.get("ISAAC_SIM_PATH", ""), os.environ.get("ISAACSIM_PATH", "")):
+        if "_build" in _env_root:
+            _repo_root = _env_root.split("/_build", 1)[0]
+            roots.append(os.path.join(_repo_root, "source/deprecated/isaacsim.robot_motion.motion_generation"))
     for root in roots:
         if not root or not os.path.isdir(root):
             continue
@@ -568,7 +575,14 @@ def _find_franka_configs():
     roots = ["/home/anton/.local/share/ov/data/exts",
              "/home/anton/.local/share/ov/pkg",
              "/opt/isaac-sim",
-             os.environ.get("ISAAC_PATH", "")]
+             os.environ.get("ISAAC_PATH", ""),
+             os.environ.get("ISAAC_SIM_PATH", ""),
+             os.environ.get("ISAACSIM_PATH", ""),
+             "/home/kimate/Documents/Github/isaacsim/source/deprecated/isaacsim.robot_motion.motion_generation"]
+    for _env_root in (os.environ.get("ISAAC_SIM_PATH", ""), os.environ.get("ISAACSIM_PATH", "")):
+        if "_build" in _env_root:
+            _repo_root = _env_root.split("/_build", 1)[0]
+            roots.append(os.path.join(_repo_root, "source/deprecated/isaacsim.robot_motion.motion_generation"))
     for root in roots:
         if not root or not os.path.isdir(root):
             continue
@@ -1869,7 +1883,14 @@ def _find_franka_configs():
     roots = ["/home/anton/.local/share/ov/data/exts",
              "/home/anton/.local/share/ov/pkg",
              "/opt/isaac-sim",
-             os.environ.get("ISAAC_PATH", "")]
+             os.environ.get("ISAAC_PATH", ""),
+             os.environ.get("ISAAC_SIM_PATH", ""),
+             os.environ.get("ISAACSIM_PATH", ""),
+             "/home/kimate/Documents/Github/isaacsim/source/deprecated/isaacsim.robot_motion.motion_generation"]
+    for _env_root in (os.environ.get("ISAAC_SIM_PATH", ""), os.environ.get("ISAACSIM_PATH", "")):
+        if "_build" in _env_root:
+            _repo_root = _env_root.split("/_build", 1)[0]
+            roots.append(os.path.join(_repo_root, "source/deprecated/isaacsim.robot_motion.motion_generation"))
     for root in roots:
         if not root or not os.path.isdir(root):
             continue
@@ -3317,10 +3338,18 @@ except Exception as _fe:
 # ── IK solver (Lula) ─────────────────────────────────────────────────
 from isaacsim.robot_motion.motion_generation.lula.kinematics import LulaKinematicsSolver
 _mpc_root = None
-for _root_try in [
+_root_tries = [
     "/mnt/shared_data/isaac-sim/exts/isaacsim.robot_motion.motion_generation",
     "/opt/isaac-sim/exts/isaacsim.robot_motion.motion_generation",
-]:
+    os.environ.get("ISAAC_SIM_PATH", ""),
+    os.environ.get("ISAACSIM_PATH", ""),
+    "/home/kimate/Documents/Github/isaacsim/source/deprecated/isaacsim.robot_motion.motion_generation",
+]
+for _env_root in (os.environ.get("ISAAC_SIM_PATH", ""), os.environ.get("ISAACSIM_PATH", "")):
+    if "_build" in _env_root:
+        _repo_root = _env_root.split("/_build", 1)[0]
+        _root_tries.append(os.path.join(_repo_root, "source/deprecated/isaacsim.robot_motion.motion_generation"))
+for _root_try in _root_tries:
     _cand = os.path.join(_root_try, "motion_policy_configs/franka/rmpflow")
     if os.path.isdir(_cand):
         _mpc_root = _cand

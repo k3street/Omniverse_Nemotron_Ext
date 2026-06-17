@@ -84,11 +84,48 @@ _FIXED_BASE_COMPAT_MESSAGE = (
     "'physxArticulation:fixedBase', Sdf.ValueTypeNames.Bool); attr.Set(True)."
 )
 
+_FAKE_PICK_PLACE_MESSAGE = (
+    "Validation blocked: this run_usd_script appears to fake pick-and-place by "
+    "directly moving/teleporting cube prims. For executable pick-and-place, call "
+    "setup_pick_place_controller with a real target_source such as 'spline', then "
+    "start the timeline with sim_control. run_usd_script may still be used for "
+    "inspection and verification, but not for cube transfer."
+)
+
 
 def _runtime_compatibility_error(tool_name: str, code: str) -> Optional[str]:
     if tool_name == "run_usd_script" and re.search(r"\.CreateFixedBaseAttr\s*\(", code):
         return _FIXED_BASE_COMPAT_MESSAGE
+    if tool_name == "run_usd_script" and _looks_like_fake_pick_place_script(code):
+        return _FAKE_PICK_PLACE_MESSAGE
     return None
+
+
+def _looks_like_fake_pick_place_script(code: str) -> bool:
+    """Detect common run_usd_script attempts to simulate pick-place by moving cubes."""
+    lowered = code.lower()
+    pick_place_terms = (
+        "pick-and-place" in lowered
+        or "pick and place" in lowered
+        or "pre-grasp" in lowered
+        or "close gripper" in lowered
+        or "open gripper" in lowered
+        or "delivered_count" in lowered
+        or "teleport cube" in lowered
+        or "move franka" in lowered
+    )
+    cube_terms = re.search(r"/World/Cube_\d+", code) is not None
+    direct_xform_mutation = re.search(
+        r"\.(?:ClearXformOpOrder|AddTranslateOp|SetTranslate|SetMatrix|SetPosition)\s*\(",
+        code,
+    ) is not None
+    conveyor_bin_context = (
+        "/World/Conveyor" in code
+        or "/World/Bin" in code
+        or "surfacevelocity" in lowered
+        or "belt" in lowered
+    )
+    return bool(pick_place_terms and cube_terms and direct_xform_mutation and conveyor_bin_context)
 
 
 # _PHYSICS_MATERIALS_PATH + _physics_materials migrated to handlers/physics.py (Phase 8 wave 6).

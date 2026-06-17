@@ -57,7 +57,11 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
     "sensor": ["add_sensor_to_prim", "lookup_product_spec"],
     "sim_control": ["sim_control"],
     "clone": ["clone_prim"],
-    "motion_planning": ["move_to_pose", "plan_trajectory"],
+    "motion_planning": [
+        "move_to_pose", "plan_trajectory",
+        "list_available_controllers", "setup_pick_place_controller",
+        "setup_pick_place_ros2_bridge", "verify_pickplace_pipeline",
+    ],
     "scene_query": [
         "scene_summary", "list_all_prims", "measure_distance",
         "get_debug_info",
@@ -162,6 +166,22 @@ _ALWAYS_TOOLS = {
     "resolve_coordinate_reference", "resolve_relational_property",
 }
 
+_PICK_PLACE_TOOLS = {
+    "list_available_controllers",
+    "setup_pick_place_controller",
+    "setup_pick_place_ros2_bridge",
+    "verify_pickplace_pipeline",
+    "sim_control",
+}
+
+_PICK_PLACE_PATTERN = re.compile(
+    r"pick.?and.?place|pick.?place|setup_pick_place_controller|"
+    r"pick.?place.?controller|controller\s+with\s+target_source|"
+    r"\btarget_source\b|pre.?grasp|gripper|deliver(?:y|ed)?_count|"
+    r"conveyor.*bin|bin.*conveyor",
+    re.I,
+)
+
 # Build a fast name→schema lookup
 _TOOL_BY_NAME: Dict[str, Dict] = {
     t["function"]["name"]: t for t in ISAAC_SIM_TOOLS
@@ -235,6 +255,15 @@ Robot rules:
 - STATIONARY robots (Franka arm): use anchor_robot with fixedBase=True. NEVER move ArticulationRootAPI off root prim.
 - WHEELED/MOBILE robots (Nova Carter, Jetbot): do NOT set fixedBase=True. Delete rootJoint, add rigid body + colliders.
   Use DifferentialController for wheeled robots."""
+
+RULE_PICK_PLACE = """\
+Pick-place controller discipline:
+- For executable pick-and-place, prefer registered controller tools over raw USD scripts.
+- Before installing a controller, call list_available_controllers when available.
+- If standalone cuRobo is missing but Isaac Sim 6.0 cuMotion/cumotion is present, do not import curobo or isaacsim.robot_motion.curobo. Use setup_pick_place_controller with target_source="spline" unless a verified cuMotion-specific controller tool is available.
+- Do NOT fake pick-and-place by moving cubes with run_usd_script, ClearXformOpOrder, AddTranslateOp, SetTranslate, SetMatrix, or hard-coded bin coordinates.
+- run_usd_script is allowed for read-only verification, scene reset/repair, and bbox checks, but not for cube transfer or delivered_count fabrication.
+- After setup_pick_place_controller succeeds, use sim_control(action="play"), let the physics callback run, then verify delivered_count using the actual destination bin bounding box."""
 
 RULE_NOVA_CARTER = """\
 Nova Carter specifics:
@@ -315,6 +344,12 @@ _KEYWORD_RULES: List[tuple] = [
      [RULE_OMNIGRAPH]),
     (re.compile(r"robot|franka|ur10|panda|anchor|articulation|fixed.?base", re.I),
      [RULE_ROBOT]),
+    (re.compile(
+        r"pick.?and.?place|pick.?place|setup_pick_place_controller|"
+        r"target_source|curobo|cumotion|delivered_count|pre.?grasp|"
+        r"conveyor.*bin|bin.*conveyor",
+        re.I,
+    ), [RULE_PICK_PLACE]),
     (re.compile(r"carter|nova.?carter|wheeled|differential|caster", re.I),
      [RULE_NOVA_CARTER, RULE_ROBOT]),
     (re.compile(r"clone|grid|batch|replicate", re.I),
@@ -515,6 +550,8 @@ def select_tools(
     # top-20 tools whose descriptions best match the user message. This is
     # REPLACE mode — retrieval is the primary filter, not an addition.
     tool_names: Set[str] = set(_ALWAYS_TOOLS)
+    if _PICK_PLACE_PATTERN.search(message):
+        tool_names.update(_PICK_PLACE_TOOLS)
     try:
         from .tools.tool_retriever import retrieve_tools
         semantic = retrieve_tools(message, top_k=20)

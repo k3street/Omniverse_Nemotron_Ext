@@ -119,6 +119,30 @@ class TestErrorRetrieval:
         results = knowledge_base.get_error_learnings("5.1", "zzzzunrelated")
         assert len(results) == 0
 
+    def test_pick_place_repair_memory_matches_controller_prompt(self, knowledge_base):
+        knowledge_base.add_entry(
+            "6.0.0",
+            (
+                "Isaac Sim 6.0 pick-place repair memory: pick-place "
+                "setup_pick_place_controller target_source spline curobo "
+                "cumotion conveyor bin gripper delivered_count run_usd_script"
+            ),
+            (
+                "Call list_available_controllers, then "
+                "setup_pick_place_controller(target_source='spline'), then "
+                "sim_control(action='play'). Do not teleport cubes."
+            ),
+            source="auto_error_learning",
+        )
+
+        results = knowledge_base.get_error_learnings(
+            "6.0.0",
+            "pick-place setup_pick_place_controller target_source spline delivered_count",
+        )
+
+        assert len(results) == 1
+        assert "setup_pick_place_controller" in results[0]["response"]
+
 
 class TestSuccessRetrieval:
 
