@@ -25,6 +25,8 @@ from __future__ import annotations
 import base64
 import logging
 from pathlib import Path
+import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -41,6 +43,7 @@ from .cosmos3_adapter import (
 )
 from .cosmos3_runtime import (
     CosmosRuntimeError,
+    build_cosmos3_generator,
     build_cosmos3_reasoner,
 )
 from .asset_resolution import local_asset_options_payload, resolve_layout_assets
@@ -56,6 +59,20 @@ logger = logging.getLogger(__name__)
 
 # Routes mounted at /api/v1/canvas via include_router prefix in main.py.
 router = APIRouter(tags=["canvas"])
+
+
+COSMOS_GENERATION_MODES = {
+    "text_to_image",
+    "text_to_video",
+    "image_to_video",
+    "video_to_video",
+    "text_to_video_with_sound",
+    "image_to_video_with_sound",
+    "video_to_video_with_sound",
+    "policy",
+    "inverse_dynamics",
+    "forward_dynamics",
+}
 
 
 # Singleton store; lazily instantiated. Same store as multimodal_handlers
@@ -76,6 +93,51 @@ def _preview_path(session_id: str) -> Path:
     """Return the PNG preview file path for a session under ``workspace/previews/``."""
     base = DEFAULT_DB_PATH.parent / "previews"
     return base / f"{session_id}.png"
+
+
+def _cosmos_generation_dir() -> Path:
+    """Return the durable artifact directory for Cosmos 3 generated outputs."""
+
+    return DEFAULT_DB_PATH.parent / "cosmos3_generations"
+
+
+def _decode_base64_payload(value: Optional[str], *, field_name: str) -> Optional[bytes]:
+    if not value:
+        return None
+    raw = value.strip()
+    if "," in raw and raw.startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    try:
+        return base64.b64decode(raw, validate=True)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field_name} is not valid base64: {exc}",
+        )
+
+
+def _safe_artifact_stem(session_id: str, mode: str) -> str:
+    safe_session = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_id).strip("._") or "session"
+    safe_mode = re.sub(r"[^A-Za-z0-9_.-]+", "_", mode).strip("._") or "cosmos"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ%f")
+    return f"{safe_session}_{safe_mode}_{stamp}"
+
+
+def _redact_media_fields(value: Any) -> Any:
+    """Remove embedded base64 media from response metadata before returning it."""
+
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, item in value.items():
+            lower = key.lower()
+            if lower in {"b64_json", "image_base64", "video_base64", "media_base64"}:
+                redacted[key] = "<omitted>"
+            else:
+                redacted[key] = _redact_media_fields(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_media_fields(item) for item in value]
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +237,40 @@ class CosmosViewportObserveRequest(BaseModel):
     prompt: str = Field(default="Reconstruct the current Isaac Sim viewport as a robotics floor plan.")
     max_dim: int = Field(default=1280, ge=64, le=4096)
     parent_revision: int = Field(default=0, ge=0)
+
+
+class CosmosGenerateRequest(BaseModel):
+    """Call Cosmos 3 Generator and persist generated media/action artifacts."""
+
+    mode: str = Field(
+        default="text_to_video",
+        description=(
+            "text_to_image, text_to_video, image_to_video, video_to_video, "
+            "text_to_video_with_sound, image_to_video_with_sound, "
+            "video_to_video_with_sound, policy, inverse_dynamics, or forward_dynamics"
+        ),
+    )
+    prompt: str = Field(default="A robot arm performs a careful pick-and-place motion.")
+    negative_prompt: str = Field(default="blurry, distorted, low quality")
+    image_base64: Optional[str] = Field(default=None)
+    image_mime_type: str = Field(default="image/png")
+    video_base64: Optional[str] = Field(default=None)
+    video_mime_type: str = Field(default="video/mp4")
+    size: str = Field(default="320x192")
+    num_frames: int = Field(default=24, ge=1, le=300)
+    fps: int = Field(default=12, ge=1, le=60)
+    num_inference_steps: int = Field(default=35, ge=1, le=200)
+    guidance_scale: float = Field(default=6.0, ge=0.0, le=30.0)
+    flow_shift: float = Field(default=10.0, ge=0.0, le=50.0)
+    seed: int = Field(default=0, ge=0)
+    guardrails: bool = Field(default=True)
+    extra_params: Dict[str, Any] = Field(default_factory=dict)
+    domain_name: Optional[str] = Field(default=None)
+    raw_action_dim: Optional[int] = Field(default=None, ge=1, le=256)
+    action_chunk_size: Optional[int] = Field(default=None, ge=1, le=512)
+    action_path: Optional[str] = Field(default=None)
+    action_values: Optional[Any] = Field(default=None)
+    include_media_base64: bool = Field(default=False)
 
 
 class ClientErrorReport(BaseModel):
@@ -416,6 +512,127 @@ async def observe_canvas_from_viewport(
         "height": capture.get("height"),
         "max_dim": body.max_dim,
     }
+    return response
+
+
+@router.post("/{session_id}/cosmos/generate")
+async def generate_with_cosmos(
+    session_id: str,
+    body: CosmosGenerateRequest,
+) -> Dict[str, Any]:
+    """Call Cosmos 3 Generator and write media/action output under workspace."""
+
+    mode = body.mode.strip().lower().replace("-", "_")
+    image_bytes = _decode_base64_payload(body.image_base64, field_name="image_base64")
+    video_bytes = _decode_base64_payload(body.video_base64, field_name="video_base64")
+
+    if mode not in COSMOS_GENERATION_MODES:
+        supported = ", ".join(sorted(COSMOS_GENERATION_MODES))
+        raise HTTPException(
+            status_code=422,
+            detail=f"unsupported Cosmos generation mode {mode!r}; choose one of: {supported}",
+        )
+
+    image_modes = {"image_to_video", "image_to_video_with_sound", "forward_dynamics"}
+    video_modes = {"video_to_video", "video_to_video_with_sound", "inverse_dynamics"}
+    if mode in image_modes and not image_bytes:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{mode} requires image_base64 as input_reference",
+        )
+    if mode in video_modes and not video_bytes:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{mode} requires video_base64 as input_reference",
+        )
+    if mode == "policy" and not (image_bytes or video_bytes):
+        raise HTTPException(
+            status_code=422,
+            detail="policy requires image_base64 or video_base64 as input_reference",
+        )
+    if mode == "forward_dynamics" and not (body.action_path or body.action_values is not None):
+        raise HTTPException(
+            status_code=422,
+            detail="forward_dynamics requires action_path or action_values",
+        )
+
+    generator = build_cosmos3_generator()
+    try:
+        result = await generator.generate(
+            mode=mode,
+            prompt=body.prompt,
+            negative_prompt=body.negative_prompt,
+            image_bytes=image_bytes,
+            image_mime_type=body.image_mime_type,
+            video_bytes=video_bytes,
+            video_mime_type=body.video_mime_type,
+            size=body.size,
+            num_frames=body.num_frames,
+            fps=body.fps,
+            num_inference_steps=body.num_inference_steps,
+            guidance_scale=body.guidance_scale,
+            flow_shift=body.flow_shift,
+            seed=body.seed,
+            guardrails=body.guardrails,
+            extra_params=body.extra_params,
+            domain_name=body.domain_name,
+            raw_action_dim=body.raw_action_dim,
+            action_chunk_size=body.action_chunk_size,
+            action_path=body.action_path,
+            action_values=body.action_values,
+        )
+    except CosmosRuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+
+    out_dir = _cosmos_generation_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    extension = result.extension if result.extension.startswith(".") else f".{result.extension}"
+    if not result.media_bytes and result.action is not None:
+        extension = ".json"
+    out_path = out_dir / f"{_safe_artifact_stem(session_id, mode)}{extension}"
+
+    safe_metadata = _redact_media_fields(result.metadata)
+    if result.media_bytes:
+        out_path.write_bytes(result.media_bytes)
+    else:
+        out_path.write_text(
+            json.dumps(
+                {
+                    "mode": result.mode,
+                    "content_type": result.content_type,
+                    "action": result.action,
+                    "metadata": safe_metadata,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    store = get_store()
+    store.append_event(session_id, "cosmos_generation", {
+        "mode": result.mode,
+        "content_type": result.content_type,
+        "output_path": str(out_path),
+        "has_media": bool(result.media_bytes),
+        "has_action": result.action is not None,
+    })
+
+    response: Dict[str, Any] = {
+        "status": "success",
+        "session_id": session_id,
+        "mode": result.mode,
+        "content_type": result.content_type,
+        "output_path": str(out_path),
+        "bytes": len(result.media_bytes),
+        "action": result.action,
+        "metadata": safe_metadata,
+    }
+    if body.include_media_base64 and result.media_bytes:
+        response["media_base64"] = base64.b64encode(result.media_bytes).decode("ascii")
     return response
 
 

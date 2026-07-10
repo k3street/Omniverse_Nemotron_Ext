@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from service.isaac_assist_service.scale_providers import (
+    cosmos_generator_status,
     cosmos_reasoner_status,
     isaac_automator_configured,
     scale_provider_notice,
@@ -20,6 +21,8 @@ def _cfg(**overrides):
         "cosmos3_mode": "disabled",
         "cosmos3_reasoner_base_url": "",
         "cosmos3_reasoner_model": "nvidia/cosmos3-nano-reasoner",
+        "cosmos3_generator_base_url": "",
+        "cosmos3_generator_model": "nvidia/Cosmos3-Nano",
         "gemini_robotics_er_fallback": False,
         "gemini_robotics_er_model": "gemini-robotics-er-1.6-preview",
         "api_key_gemini": "",
@@ -123,6 +126,21 @@ def test_cosmos_reasoner_status_reports_gemini_fallback():
     assert "fallback is configured" in status["message"]
 
 
+def test_cosmos_generator_status_reports_vllm_omni_endpoint():
+    config = _cfg(
+        cosmos3_mode="remote",
+        cosmos3_generator_base_url="http://192.168.1.42:8000/v1",
+    )
+
+    status = cosmos_generator_status(config)
+
+    assert status["configured"] is True
+    assert status["provider"] == "cosmos3_generator"
+    assert status["images_url"] == "http://192.168.1.42:8000/v1/images/generations"
+    assert status["videos_sync_url"] == "http://192.168.1.42:8000/v1/videos/sync"
+    assert status["is_loopback"] is False
+
+
 def test_cosmos_reasoner_route_returns_static_status():
     from service.isaac_assist_service.settings import routes
 
@@ -132,3 +150,14 @@ def test_cosmos_reasoner_route_returns_static_status():
     assert "reasoner" in response
     assert "configured" in response["reasoner"]
     assert response["reasoner"]["requires_user_approval"] is True
+
+
+def test_cosmos_generator_route_returns_static_status():
+    from service.isaac_assist_service.settings import routes
+
+    response = asyncio.run(routes.get_cosmos_generator())
+
+    assert response["status"] == "success"
+    assert "generator" in response
+    assert "configured" in response["generator"]
+    assert response["generator"]["requires_user_approval"] is True

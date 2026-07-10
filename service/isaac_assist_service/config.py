@@ -43,7 +43,7 @@ class Config:
         self.cosmos3_reasoner_base_url = os.environ.get("COSMOS3_REASONER_BASE_URL", "")
         self.cosmos3_reasoner_model = os.environ.get("COSMOS3_REASONER_MODEL", "Cosmos3-Nano")
         self.cosmos3_generator_base_url = os.environ.get("COSMOS3_GENERATOR_BASE_URL", "")
-        self.cosmos3_generator_model = os.environ.get("COSMOS3_GENERATOR_MODEL", "Cosmos3-Super-Text2Image")
+        self.cosmos3_generator_model = os.environ.get("COSMOS3_GENERATOR_MODEL", "nvidia/Cosmos3-Nano")
         self.cosmos3_api_key = (
             os.environ.get("COSMOS3_API_KEY")
             or os.environ.get("NGC_API_KEY")

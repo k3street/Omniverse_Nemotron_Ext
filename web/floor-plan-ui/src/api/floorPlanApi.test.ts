@@ -225,6 +225,45 @@ describe("createCanvasApi", () => {
         expect(response.viewport_capture?.height).toBe(720);
     });
 
+    it("posts Cosmos generation requests", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                status: "success",
+                session_id: "session one",
+                mode: "text_to_video",
+                content_type: "video/mp4",
+                output_path: "workspace/multimodal/cosmos3_generations/out.mp4",
+                bytes: 12,
+                metadata: {},
+            }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const api = createCanvasApi("");
+        const response = await api.cosmosGenerate("session one", {
+            mode: "text_to_video",
+            prompt: "a gripper lifts a red cube",
+            num_frames: 24,
+            fps: 12,
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/v1/canvas/session%20one/cosmos/generate",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    mode: "text_to_video",
+                    prompt: "a gripper lifts a red cube",
+                    num_frames: 24,
+                    fps: 12,
+                }),
+            },
+        );
+        expect(response.output_path).toContain("out.mp4");
+    });
+
     it("posts campaign planning requests", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,

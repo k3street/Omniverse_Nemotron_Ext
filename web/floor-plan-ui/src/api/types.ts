@@ -396,6 +396,53 @@ export interface CosmosViewportObserveResponse extends CosmosObserveResponse {
     };
 }
 
+export interface CosmosGenerateRequest {
+    mode:
+        | "text_to_image"
+        | "text_to_video"
+        | "image_to_video"
+        | "video_to_video"
+        | "text_to_video_with_sound"
+        | "image_to_video_with_sound"
+        | "video_to_video_with_sound"
+        | "policy"
+        | "inverse_dynamics"
+        | "forward_dynamics";
+    prompt: string;
+    negative_prompt?: string;
+    image_base64?: string;
+    image_mime_type?: string;
+    video_base64?: string;
+    video_mime_type?: string;
+    size?: string;
+    num_frames?: number;
+    fps?: number;
+    num_inference_steps?: number;
+    guidance_scale?: number;
+    flow_shift?: number;
+    seed?: number;
+    guardrails?: boolean;
+    extra_params?: Record<string, unknown>;
+    domain_name?: string;
+    raw_action_dim?: number;
+    action_chunk_size?: number;
+    action_path?: string;
+    action_values?: unknown;
+    include_media_base64?: boolean;
+}
+
+export interface CosmosGenerateResponse {
+    status: "success";
+    session_id: string;
+    mode: string;
+    content_type: string;
+    output_path: string;
+    bytes: number;
+    action?: unknown;
+    metadata: Record<string, unknown>;
+    media_base64?: string;
+}
+
 export interface ConflictDetail {
     conflict: true;
     expected_revision: number;

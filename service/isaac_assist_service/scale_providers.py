@@ -69,6 +69,14 @@ def _is_loopback_url(url: str) -> bool:
     return host in {"localhost", "127.0.0.1", "::1"}
 
 
+def _v1_endpoint(base_url: str, suffix: str) -> str:
+    value = base_url.rstrip("/")
+    suffix = suffix.lstrip("/")
+    if value.endswith("/v1"):
+        return f"{value}/{suffix}"
+    return f"{value}/v1/{suffix}"
+
+
 def cosmos_reasoner_status(config: Any) -> Dict[str, Any]:
     """Describe the configured Cosmos 3 reasoner endpoint.
 
@@ -119,10 +127,51 @@ def cosmos_reasoner_status(config: Any) -> Dict[str, Any]:
         "base_url": base_url,
         "model": model,
         "is_loopback": _is_loopback_url(base_url) if base_url else False,
-        "health_url": f"{base_url}/v1/health/live" if base_url else "",
-        "models_url": f"{base_url}/v1/models" if base_url else "",
+        "health_url": _v1_endpoint(base_url, "health/live") if base_url else "",
+        "models_url": _v1_endpoint(base_url, "models") if base_url else "",
         "fallback_provider": "gemini_robotics_er",
         "fallback_configured": gemini_fallback_configured,
+        "requires_user_approval": True,
+        "message": message,
+    }
+
+
+def cosmos_generator_status(config: Any) -> Dict[str, Any]:
+    """Describe the configured Cosmos 3 generator endpoint without probing it."""
+
+    dgx_url = _clean_base_url(str(getattr(config, "dgx_spark_cosmos_base_url", "") or ""))
+    generator_url = _clean_base_url(str(getattr(config, "cosmos3_generator_base_url", "") or ""))
+    model = str(getattr(config, "cosmos3_generator_model", "") or "nvidia/Cosmos3-Nano")
+    mode = str(getattr(config, "cosmos3_mode", "") or "disabled")
+
+    provider = ""
+    base_url = ""
+    if generator_url:
+        provider = "cosmos3_generator"
+        base_url = generator_url
+    elif dgx_url:
+        provider = "dgx_spark"
+        base_url = dgx_url
+
+    configured = bool(base_url and model)
+    if configured:
+        locality = "local workstation" if _is_loopback_url(base_url) else "remote endpoint"
+        message = f"Cosmos 3 Generator is configured via {provider} on a {locality}."
+    elif mode and mode != "disabled":
+        message = "Cosmos 3 mode is enabled, but no generator endpoint is configured."
+    else:
+        message = "Cosmos 3 Generator is not configured."
+
+    return {
+        "configured": configured,
+        "provider": provider,
+        "mode": mode,
+        "base_url": base_url,
+        "model": model,
+        "is_loopback": _is_loopback_url(base_url) if base_url else False,
+        "images_url": _v1_endpoint(base_url, "images/generations") if base_url else "",
+        "videos_sync_url": _v1_endpoint(base_url, "videos/sync") if base_url else "",
+        "models_url": _v1_endpoint(base_url, "models") if base_url else "",
         "requires_user_approval": True,
         "message": message,
     }
@@ -179,6 +228,7 @@ def scale_provider_notice(
 __all__ = [
     "HEAVY_JOB_KINDS",
     "brev_configured",
+    "cosmos_generator_status",
     "cosmos_reasoner_status",
     "dgx_spark_configured",
     "isaac_automator_configured",

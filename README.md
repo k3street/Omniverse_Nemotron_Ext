@@ -330,6 +330,7 @@ prompt into structured scene observations, then submit them to:
 POST /api/v1/canvas/{session_id}/cosmos/observe
 POST /api/v1/canvas/{session_id}/cosmos/observe_viewport
 POST /api/v1/canvas/{session_id}/cosmos/propose
+POST /api/v1/canvas/{session_id}/cosmos/generate
 ```
 
 `cosmos/observe` calls a configured OpenAI-compatible Cosmos 3 Reasoner
@@ -345,6 +346,16 @@ build goes through `POST /api/v1/canvas/{session_id}/build`. Builds default to
 `dry_run=true`, returning resolved assets and generated Kit code for review;
 set `dry_run=false` only when ready to queue the patch into live Isaac Sim. See
 [Cosmos 3 to Floor-Plan Flow](docs/architecture/cosmos3-floor-plan-flow.md).
+
+`cosmos/generate` calls a configured Cosmos 3 Generator endpoint and writes
+durable artifacts under `workspace/multimodal/cosmos3_generations/`. It covers
+the Cosmos 3 Omni modes that are useful for Isaac Assist review and robot data:
+`text_to_image`, `text_to_video`, `image_to_video`, `video_to_video`,
+`*_with_sound`, `policy`, `inverse_dynamics`, and `forward_dynamics`. The
+default generation settings are intentionally light for DGX Spark/Nano smoke
+tests: `320x192`, `24` frames, `12` fps, and `35` denoising steps. Increase to
+480p/720p and longer frame counts once endpoint latency and VRAM headroom look
+good.
 
 Floor-plan builds can also carry semantic spatial relations such as
 `on_top_of`, `inside`, `contains`, and `supports`. The instantiator normalizes
@@ -453,6 +464,32 @@ Then point Isaac Assist at the remote endpoint:
 ```bash
 COSMOS3_REASONER_BASE_URL=http://<spark-host-or-ip>:8081/v1
 COSMOS3_REASONER_MODEL=nvidia/cosmos3-nano-reasoner
+```
+
+For Cosmos 3 Generator video/image/action output, run vLLM-Omni on the host
+with the Nano weights and point Isaac Assist at that endpoint:
+
+```bash
+COSMOS_GENERATOR_PORT=8082 \
+COSMOS_GENERATOR_MODEL=nvidia/Cosmos3-Nano \
+  ./scripts/start_cosmos3_generator_vllm_omni.sh
+
+COSMOS3_GENERATOR_BASE_URL=http://<spark-host-or-ip>:8082/v1
+COSMOS3_GENERATOR_MODEL=nvidia/Cosmos3-Nano
+```
+
+Smoke-test text-to-video through Isaac Assist:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/canvas/demo/cosmos/generate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "text_to_video",
+    "prompt": "a gripper grabs a red cube and slowly lifts it",
+    "size": "320x192",
+    "num_frames": 24,
+    "fps": 12
+  }'
 ```
 
 #### Asset path examples

@@ -8,7 +8,11 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from .manager import SettingsManager
-from ..scale_providers import cosmos_reasoner_status, scale_provider_notice
+from ..scale_providers import (
+    cosmos_generator_status,
+    cosmos_reasoner_status,
+    scale_provider_notice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,7 @@ async def get_settings():
         "settings": settings_manager.get_settings(),
         "scale_notice": scale_provider_notice(config),
         "cosmos_reasoner": cosmos_reasoner_status(config),
+        "cosmos_generator": cosmos_generator_status(config),
     }
 
 @router.post("/")
@@ -145,6 +150,16 @@ async def get_cosmos_reasoner():
     return {
         "status": "success",
         "reasoner": cosmos_reasoner_status(config),
+    }
+
+
+@router.get("/cosmos_generator")
+async def get_cosmos_generator():
+    """Return the configured Cosmos 3 Generator endpoint without probing it."""
+    from ..config import config
+    return {
+        "status": "success",
+        "generator": cosmos_generator_status(config),
     }
 
 

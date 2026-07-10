@@ -10,6 +10,8 @@ from service.isaac_assist_service.multimodal.cosmos3_adapter import (
     CosmosSceneObservation,
 )
 from service.isaac_assist_service.multimodal.cosmos3_runtime import (
+    CosmosGenerationResult,
+    Cosmos3GeneratorClient,
     Cosmos3ReasonerClient,
     CosmosRuntimeError,
     FallbackSceneReasonerClient,
@@ -17,12 +19,34 @@ from service.isaac_assist_service.multimodal.cosmos3_runtime import (
     chat_completions_url,
     extract_json_object,
     gemini_generate_content_url,
+    image_generations_url,
+    videos_sync_url,
 )
-from service.isaac_assist_service.multimodal.persistence import MultimodalStore
 from service.isaac_assist_service.multimodal import routes
 
 
 pytestmark = pytest.mark.l0
+
+
+class FakeCanvasStore:
+    def __init__(self):
+        self.saved = {}
+        self.events = []
+
+    async def save_with_cas(self, session_id, spec, parent_revision):
+        saved = spec.model_copy(update={"revision": parent_revision + 1})
+        self.saved[session_id] = saved
+        return saved
+
+    def append_event(self, session_id, event_type, payload):
+        self.events.append({
+            "session_id": session_id,
+            "event_type": event_type,
+            "payload": payload,
+        })
+
+    def close(self):
+        pass
 
 
 def test_chat_completions_url_normalizes_base_urls():
@@ -31,6 +55,21 @@ def test_chat_completions_url_normalizes_base_urls():
     assert (
         chat_completions_url("http://host:8000/v1/chat/completions")
         == "http://host:8000/v1/chat/completions"
+    )
+
+
+def test_cosmos_generator_urls_normalize_base_urls():
+    assert image_generations_url("http://host:8000") == "http://host:8000/v1/images/generations"
+    assert image_generations_url("http://host:8000/v1") == "http://host:8000/v1/images/generations"
+    assert (
+        image_generations_url("http://host:8000/v1/images/generations")
+        == "http://host:8000/v1/images/generations"
+    )
+    assert videos_sync_url("http://host:8000") == "http://host:8000/v1/videos/sync"
+    assert videos_sync_url("http://host:8000/v1") == "http://host:8000/v1/videos/sync"
+    assert (
+        videos_sync_url("http://host:8000/v1/videos/sync")
+        == "http://host:8000/v1/videos/sync"
     )
 
 
@@ -76,6 +115,26 @@ def test_reasoner_payload_embeds_image_data_url():
     assert content[0]["type"] == "text"
     assert content[1]["type"] == "image_url"
     assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_generator_json_response_extracts_media_and_actions():
+    media = base64.b64encode(b"mp4").decode("ascii")
+    client = Cosmos3GeneratorClient(base_url="http://cosmos", model="nvidia/Cosmos3-Nano")
+
+    result = client._parse_generation_json(
+        mode="policy",
+        body=json.dumps(
+            {
+                "data": [{"video_base64": media}],
+                "predicted_actions": [[0.1, 0.2]],
+            }
+        ).encode("utf-8"),
+    )
+
+    assert result.media_bytes == b"mp4"
+    assert result.content_type == "video/mp4"
+    assert result.action == [[0.1, 0.2]]
+    assert result.extension == ".mp4"
 
 
 def test_gemini_reasoner_payload_embeds_image_inline_data():
@@ -218,7 +277,7 @@ def test_cosmos_observe_route_calls_reasoner_and_saves(monkeypatch, tmp_path):
             )
 
     old_store = routes._store
-    routes._store = MultimodalStore(tmp_path / "state.db")
+    routes._store = FakeCanvasStore()
     monkeypatch.setattr(routes, "build_cosmos3_reasoner", lambda: FakeReasoner())
     try:
         req = routes.CosmosObserveRequest(
@@ -234,7 +293,6 @@ def test_cosmos_observe_route_calls_reasoner_and_saves(monkeypatch, tmp_path):
         assert response["observation"]["input_kind"] == "screenshot"
         assert response["spec"]["objects"][0]["object_class"] == "franka_panda"
     finally:
-        routes._store.close()
         routes._store = old_store
 
 
@@ -275,7 +333,7 @@ def test_cosmos_observe_viewport_captures_and_saves(monkeypatch, tmp_path):
     from service.isaac_assist_service.chat.tools import kit_tools
 
     old_store = routes._store
-    routes._store = MultimodalStore(tmp_path / "state.db")
+    routes._store = FakeCanvasStore()
     monkeypatch.setattr(routes, "build_cosmos3_reasoner", lambda: FakeReasoner())
     monkeypatch.setattr(kit_tools, "get_viewport_image", fake_capture)
     try:
@@ -294,7 +352,6 @@ def test_cosmos_observe_viewport_captures_and_saves(monkeypatch, tmp_path):
         }
         assert response["spec"]["objects"][0]["object_class"] == "bin"
     finally:
-        routes._store.close()
         routes._store = old_store
 
 
@@ -318,3 +375,57 @@ def test_cosmos_observe_viewport_reports_missing_capture(monkeypatch):
         assert "Kit is not running" in str(exc.detail)
     else:
         raise AssertionError("Expected HTTPException for missing viewport capture")
+
+
+def test_cosmos_generate_route_saves_video_artifact(monkeypatch, tmp_path):
+    class FakeGenerator:
+        async def generate(self, **kwargs):
+            assert kwargs["mode"] == "text_to_video"
+            assert kwargs["prompt"] == "gripper lifts a red cube"
+            assert kwargs["num_frames"] == 24
+            return CosmosGenerationResult(
+                mode=kwargs["mode"],
+                content_type="video/mp4",
+                media_bytes=b"mp4-bytes",
+                metadata={"provider": "cosmos3_generator", "video_base64": "huge"},
+                extension=".mp4",
+            )
+
+    old_store = routes._store
+    routes._store = FakeCanvasStore()
+    monkeypatch.setattr(routes, "build_cosmos3_generator", lambda: FakeGenerator())
+    monkeypatch.setattr(routes, "_cosmos_generation_dir", lambda: tmp_path / "gens")
+    try:
+        req = routes.CosmosGenerateRequest(
+            mode="text_to_video",
+            prompt="gripper lifts a red cube",
+            num_frames=24,
+        )
+
+        response = asyncio.run(routes.generate_with_cosmos("gen_smoke", req))
+
+        out_path = response["output_path"]
+        assert response["status"] == "success"
+        assert response["content_type"] == "video/mp4"
+        assert response["bytes"] == len(b"mp4-bytes")
+        assert response["metadata"]["video_base64"] == "<omitted>"
+        assert out_path.endswith(".mp4")
+        with open(out_path, "rb") as f:
+            assert f.read() == b"mp4-bytes"
+    finally:
+        routes._store = old_store
+
+
+def test_cosmos_generate_route_rejects_missing_image_for_policy():
+    req = routes.CosmosGenerateRequest(
+        mode="policy",
+        prompt="put the pot left of the purple item",
+    )
+
+    try:
+        asyncio.run(routes.generate_with_cosmos("policy_missing_image", req))
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert "requires image_base64 or video_base64" in str(exc.detail)
+    else:
+        raise AssertionError("Expected HTTPException for missing policy image")

@@ -71,6 +71,7 @@ The first runtime route is:
 ```text
 POST /api/v1/canvas/{session_id}/cosmos/observe
 POST /api/v1/canvas/{session_id}/cosmos/observe_viewport
+POST /api/v1/canvas/{session_id}/cosmos/generate
 ```
 
 It accepts `prompt`, optional `image_base64`, `mime_type`, and `input_kind`,
@@ -79,12 +80,38 @@ calls the configured OpenAI-compatible Cosmos 3 Reasoner endpoint, parses a
 `cosmos/observe_viewport` first captures the active Isaac Sim viewport through
 Kit RPC `/capture`, then runs the same observation/proposal flow.
 
+`cosmos/generate` is the Generator route. It calls a vLLM-Omni-style Cosmos 3
+Omni endpoint and persists the output under
+`workspace/multimodal/cosmos3_generations/` without mutating Isaac Sim. It is
+for visual references, future-state rollout clips, synthetic-data seed clips,
+and action-policy experiments. Supported `mode` values:
+
+- `text_to_image`
+- `text_to_video`
+- `image_to_video`
+- `video_to_video`
+- `text_to_video_with_sound`
+- `image_to_video_with_sound`
+- `video_to_video_with_sound`
+- `policy`
+- `inverse_dynamics`
+- `forward_dynamics`
+
+The action modes pass Cosmos embodiment controls through `extra_params`:
+`action_mode`, `domain_name`, `raw_action_dim`, `action_chunk_size`, and
+`action_path` when provided. `policy` accepts either `image_base64` or
+`video_base64` as observation context. Treat the returned actions as proposed
+policy chunks for review/evaluation; do not stream them directly to hardware
+without the existing controller, safety, and sim-validation layers.
+
 Configuration:
 
 ```text
 COSMOS3_MODE=local
 COSMOS3_REASONER_BASE_URL=http://dgx-spark.local:8081/v1
 COSMOS3_REASONER_MODEL=nvidia/cosmos3-nano-reasoner
+COSMOS3_GENERATOR_BASE_URL=http://dgx-spark.local:8082/v1
+COSMOS3_GENERATOR_MODEL=nvidia/Cosmos3-Nano
 COSMOS3_API_KEY=...
 NIM_MAX_MODEL_LEN=32768
 ```
@@ -128,6 +155,28 @@ Verify from the Isaac Assist workstation:
 ```bash
 curl http://dgx-spark.local:8081/v1/health/ready
 curl http://dgx-spark.local:8081/v1/models
+```
+
+Start a Cosmos 3 Generator server for image/video/action output with:
+
+```bash
+COSMOS_GENERATOR_PORT=8082 \
+COSMOS_GENERATOR_MODEL=nvidia/Cosmos3-Nano \
+  ./scripts/start_cosmos3_generator_vllm_omni.sh
+```
+
+Smoke-test the backend route:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/canvas/demo/cosmos/generate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "text_to_video",
+    "prompt": "a gripper grabs a red cube and slowly lifts it",
+    "size": "320x192",
+    "num_frames": 24,
+    "fps": 12
+  }'
 ```
 
 ## Why Not Direct Cosmos-to-Isaac?
@@ -197,8 +246,10 @@ Ask the Reasoner to return JSON matching this shape:
    the proposal route.
 5. Done: add Gemini Robotics-ER as a cloud fallback for the Cosmos scene
    observation contract.
-6. Add generator-mode workflows for visual references and synthetic-data
-   augmentation after a `LayoutSpec` is approved.
+6. Done: add generator-mode backend workflows for visual references,
+   synthetic-data clips, sound-enabled video, and action rollout artifacts.
+7. Add floor-plan UI controls for reviewing and comparing generated clips
+   alongside approved `LayoutSpec` scenarios.
 
 For larger jobs, route Cosmos and Isaac validation through the shared remote
 capacity contract in [Remote Scale Providers](remote-scale-providers.md). That

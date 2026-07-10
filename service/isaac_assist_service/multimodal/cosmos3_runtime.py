@@ -7,6 +7,7 @@ This module owns the upstream model invocation: image/prompt in,
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass, field
 import json
 import logging
 from typing import Any, Dict, Optional, Protocol
@@ -72,6 +73,28 @@ def chat_completions_url(base_url: str) -> str:
     return f"{value}/v1/chat/completions"
 
 
+def image_generations_url(base_url: str) -> str:
+    """Normalize a base URL to an OpenAI-compatible image generation URL."""
+
+    value = base_url.rstrip("/")
+    if value.endswith("/images/generations"):
+        return value
+    if value.endswith("/v1"):
+        return f"{value}/images/generations"
+    return f"{value}/v1/images/generations"
+
+
+def videos_sync_url(base_url: str) -> str:
+    """Normalize a base URL to a vLLM-Omni synchronous video URL."""
+
+    value = base_url.rstrip("/")
+    if value.endswith("/videos/sync"):
+        return value
+    if value.endswith("/v1"):
+        return f"{value}/videos/sync"
+    return f"{value}/v1/videos/sync"
+
+
 def gemini_generate_content_url(
     model: str,
     *,
@@ -135,6 +158,449 @@ class SceneReasonerClient(Protocol):
         input_kind: str = "photo",
     ) -> CosmosSceneObservation:
         ...
+
+
+@dataclass
+class CosmosGenerationResult:
+    """Media/action payload returned by a Cosmos 3 Generator endpoint."""
+
+    mode: str
+    content_type: str
+    media_bytes: bytes = b""
+    action: Optional[Any] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    extension: str = ".bin"
+
+
+class CosmosGeneratorClient(Protocol):
+    """Common interface for Cosmos-compatible generator endpoints."""
+
+    def is_configured(self) -> bool:
+        ...
+
+    async def generate(
+        self,
+        *,
+        mode: str,
+        prompt: str,
+        negative_prompt: str = "",
+        image_bytes: Optional[bytes] = None,
+        image_mime_type: str = "image/png",
+        video_bytes: Optional[bytes] = None,
+        video_mime_type: str = "video/mp4",
+        size: str = "320x192",
+        num_frames: int = 24,
+        fps: int = 12,
+        num_inference_steps: int = 35,
+        guidance_scale: float = 6.0,
+        flow_shift: float = 10.0,
+        seed: int = 0,
+        guardrails: bool = True,
+        extra_params: Optional[Dict[str, Any]] = None,
+        domain_name: Optional[str] = None,
+        raw_action_dim: Optional[int] = None,
+        action_chunk_size: Optional[int] = None,
+        action_path: Optional[str] = None,
+        action_values: Optional[Any] = None,
+    ) -> CosmosGenerationResult:
+        ...
+
+
+def _decode_base64_media(value: str) -> bytes:
+    raw = value.strip()
+    if "," in raw and raw.startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    return base64.b64decode(raw, validate=False)
+
+
+def _media_extension(content_type: str, *, fallback: str = ".bin") -> str:
+    kind = content_type.split(";", 1)[0].strip().lower()
+    return {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "video/mp4": ".mp4",
+        "audio/aac": ".aac",
+        "application/json": ".json",
+    }.get(kind, fallback)
+
+
+class Cosmos3GeneratorClient:
+    """vLLM-Omni/OpenAI-compatible client for Cosmos 3 Generator endpoints."""
+
+    IMAGE_MODES = {"text_to_image"}
+    SOUND_MODES = {"text_to_video_with_sound", "image_to_video_with_sound", "video_to_video_with_sound"}
+    ACTION_MODES = {"policy", "inverse_dynamics", "forward_dynamics"}
+    REFERENCE_IMAGE_MODES = {"image_to_video", "image_to_video_with_sound", "forward_dynamics"}
+    REFERENCE_VIDEO_MODES = {"video_to_video", "video_to_video_with_sound", "inverse_dynamics"}
+    SUPPORTED_MODES = (
+        IMAGE_MODES
+        | {
+            "text_to_video",
+            "image_to_video",
+            "video_to_video",
+            "text_to_video_with_sound",
+            "image_to_video_with_sound",
+            "video_to_video_with_sound",
+        }
+        | ACTION_MODES
+    )
+
+    def __init__(
+        self,
+        *,
+        base_url: str = "",
+        model: str = "",
+        api_key: str = "",
+        timeout_s: float = 900.0,
+    ) -> None:
+        self.base_url = base_url or config.cosmos3_generator_base_url
+        self.model = model or config.cosmos3_generator_model
+        self.api_key = api_key or config.cosmos3_api_key
+        self.timeout_s = timeout_s
+
+    def is_configured(self) -> bool:
+        return bool(self.base_url and self.model)
+
+    async def generate(
+        self,
+        *,
+        mode: str,
+        prompt: str,
+        negative_prompt: str = "",
+        image_bytes: Optional[bytes] = None,
+        image_mime_type: str = "image/png",
+        video_bytes: Optional[bytes] = None,
+        video_mime_type: str = "video/mp4",
+        size: str = "320x192",
+        num_frames: int = 24,
+        fps: int = 12,
+        num_inference_steps: int = 35,
+        guidance_scale: float = 6.0,
+        flow_shift: float = 10.0,
+        seed: int = 0,
+        guardrails: bool = True,
+        extra_params: Optional[Dict[str, Any]] = None,
+        domain_name: Optional[str] = None,
+        raw_action_dim: Optional[int] = None,
+        action_chunk_size: Optional[int] = None,
+        action_path: Optional[str] = None,
+        action_values: Optional[Any] = None,
+    ) -> CosmosGenerationResult:
+        """Generate image/video/action artifacts through a configured endpoint."""
+
+        mode = mode.strip().lower().replace("-", "_")
+        if not self.is_configured():
+            raise CosmosRuntimeError(
+                "COSMOS3_GENERATOR_BASE_URL and COSMOS3_GENERATOR_MODEL must be configured"
+            )
+        if mode not in self.SUPPORTED_MODES:
+            supported = ", ".join(sorted(self.SUPPORTED_MODES))
+            raise CosmosRuntimeError(
+                f"unsupported Cosmos generation mode {mode!r}; choose one of: {supported}"
+            )
+        if mode in self.IMAGE_MODES:
+            return await self._generate_image(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                size=size,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                seed=seed,
+                guardrails=guardrails,
+                extra_params=extra_params or {},
+            )
+        return await self._generate_video(
+            mode=mode,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            image_bytes=image_bytes,
+            image_mime_type=image_mime_type,
+            video_bytes=video_bytes,
+            video_mime_type=video_mime_type,
+            size=size,
+            num_frames=num_frames,
+            fps=fps,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            flow_shift=flow_shift,
+            seed=seed,
+            guardrails=guardrails,
+            extra_params=extra_params or {},
+            domain_name=domain_name,
+            raw_action_dim=raw_action_dim,
+            action_chunk_size=action_chunk_size,
+            action_path=action_path,
+            action_values=action_values,
+        )
+
+    def _headers(self) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    async def _generate_image(
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        size: str,
+        num_inference_steps: int,
+        guidance_scale: float,
+        seed: int,
+        guardrails: bool,
+        extra_params: Dict[str, Any],
+    ) -> CosmosGenerationResult:
+        try:
+            import aiohttp  # noqa: PLC0415
+        except ModuleNotFoundError as exc:
+            raise CosmosRuntimeError(
+                "aiohttp is required for Cosmos generator calls; install requirements.txt"
+            ) from exc
+
+        extra_args = {
+            "guardrails": guardrails,
+            "use_resolution_template": False,
+            **extra_params,
+        }
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "size": size,
+            "n": 1,
+            "response_format": "b64_json",
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+            "seed": seed,
+            "extra_args": extra_args,
+        }
+
+        timeout = aiohttp.ClientTimeout(total=self.timeout_s)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            try:
+                async with session.post(
+                    image_generations_url(self.base_url),
+                    json=payload,
+                    headers={"Content-Type": "application/json", **self._headers()},
+                ) as resp:
+                    body = await resp.read()
+                    if resp.status != 200:
+                        raise CosmosRuntimeError(
+                            f"Cosmos Generator image API error {resp.status}: "
+                            f"{body[:500].decode('utf-8', errors='replace')}"
+                        )
+                    content_type = resp.headers.get("Content-Type", "application/json")
+            except aiohttp.ClientError as exc:
+                raise CosmosRuntimeError(f"Cosmos Generator connection failed: {exc}") from exc
+
+        if content_type.startswith("image/"):
+            return CosmosGenerationResult(
+                mode="text_to_image",
+                content_type=content_type,
+                media_bytes=body,
+                metadata={"provider": "cosmos3_generator", "model": self.model},
+                extension=_media_extension(content_type, fallback=".png"),
+            )
+
+        try:
+            data = json.loads(body.decode("utf-8"))
+            first = data.get("data", [{}])[0]
+            b64_value = first.get("b64_json") or first.get("image_base64") or first.get("media_base64")
+            if not b64_value:
+                raise KeyError("missing b64_json/image_base64/media_base64")
+            media = _decode_base64_media(str(b64_value))
+        except Exception as exc:
+            raise CosmosRuntimeError(f"Cosmos image response parse failed: {exc}") from exc
+
+        return CosmosGenerationResult(
+            mode="text_to_image",
+            content_type="image/png",
+            media_bytes=media,
+            metadata={
+                "provider": "cosmos3_generator",
+                "model": self.model,
+                "created": data.get("created"),
+                "usage": data.get("usage"),
+            },
+            extension=".png",
+        )
+
+    async def _generate_video(
+        self,
+        *,
+        mode: str,
+        prompt: str,
+        negative_prompt: str,
+        image_bytes: Optional[bytes],
+        image_mime_type: str,
+        video_bytes: Optional[bytes],
+        video_mime_type: str,
+        size: str,
+        num_frames: int,
+        fps: int,
+        num_inference_steps: int,
+        guidance_scale: float,
+        flow_shift: float,
+        seed: int,
+        guardrails: bool,
+        extra_params: Dict[str, Any],
+        domain_name: Optional[str],
+        raw_action_dim: Optional[int],
+        action_chunk_size: Optional[int],
+        action_path: Optional[str],
+        action_values: Optional[Any],
+    ) -> CosmosGenerationResult:
+        try:
+            import aiohttp  # noqa: PLC0415
+        except ModuleNotFoundError as exc:
+            raise CosmosRuntimeError(
+                "aiohttp is required for Cosmos generator calls; install requirements.txt"
+            ) from exc
+
+        form = aiohttp.FormData()
+        fields: Dict[str, Any] = {
+            "model": self.model,
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "size": size,
+            "num_frames": num_frames,
+            "fps": fps,
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+            "flow_shift": flow_shift,
+            "seed": seed,
+        }
+        if mode in self.SOUND_MODES:
+            fields["generate_sound"] = "true"
+
+        request_extra = {
+            "guardrails": guardrails,
+            "use_resolution_template": False,
+            "use_duration_template": False,
+            **extra_params,
+        }
+        action_mode = mode if mode in self.ACTION_MODES else None
+        if action_mode:
+            request_extra["action_mode"] = action_mode
+            if domain_name:
+                request_extra["domain_name"] = domain_name
+            if raw_action_dim is not None:
+                request_extra["raw_action_dim"] = raw_action_dim
+            if action_chunk_size is not None:
+                request_extra["action_chunk_size"] = action_chunk_size
+            if action_path:
+                request_extra["action_path"] = action_path
+            if action_values is not None:
+                request_extra["action_values"] = action_values
+
+        fields["extra_params"] = json.dumps(request_extra)
+        for key, value in fields.items():
+            form.add_field(key, str(value))
+
+        if (mode in self.REFERENCE_IMAGE_MODES or mode == "policy") and image_bytes:
+            form.add_field(
+                "input_reference",
+                image_bytes,
+                filename="input_reference.png",
+                content_type=image_mime_type,
+            )
+        elif (mode in self.REFERENCE_VIDEO_MODES or mode == "policy") and video_bytes:
+            form.add_field(
+                "input_reference",
+                video_bytes,
+                filename="input_reference.mp4",
+                content_type=video_mime_type,
+            )
+
+        timeout = aiohttp.ClientTimeout(total=self.timeout_s)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            try:
+                async with session.post(
+                    videos_sync_url(self.base_url),
+                    data=form,
+                    headers=self._headers(),
+                ) as resp:
+                    body = await resp.read()
+                    if resp.status != 200:
+                        raise CosmosRuntimeError(
+                            f"Cosmos Generator video API error {resp.status}: "
+                            f"{body[:500].decode('utf-8', errors='replace')}"
+                        )
+                    content_type = resp.headers.get("Content-Type", "video/mp4")
+            except aiohttp.ClientError as exc:
+                raise CosmosRuntimeError(f"Cosmos Generator connection failed: {exc}") from exc
+
+        if content_type.startswith("application/json"):
+            return self._parse_generation_json(mode=mode, body=body)
+
+        return CosmosGenerationResult(
+            mode=mode,
+            content_type=content_type,
+            media_bytes=body,
+            metadata={"provider": "cosmos3_generator", "model": self.model},
+            extension=_media_extension(content_type, fallback=".mp4"),
+        )
+
+    def _parse_generation_json(self, *, mode: str, body: bytes) -> CosmosGenerationResult:
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except Exception as exc:
+            raise CosmosRuntimeError(f"Cosmos generation JSON parse failed: {exc}") from exc
+
+        candidates = []
+        if isinstance(data.get("data"), list):
+            candidates.extend(item for item in data["data"] if isinstance(item, dict))
+        if isinstance(data, dict):
+            candidates.append(data)
+
+        media_bytes = b""
+        content_type = "application/json"
+        for item in candidates:
+            for key, media_type in (
+                ("video_base64", "video/mp4"),
+                ("media_base64", "video/mp4"),
+                ("b64_json", "image/png"),
+                ("image_base64", "image/png"),
+            ):
+                value = item.get(key)
+                if value:
+                    media_bytes = _decode_base64_media(str(value))
+                    content_type = media_type
+                    break
+            if media_bytes:
+                break
+
+        action = (
+            data.get("action")
+            or data.get("actions")
+            or data.get("action_values")
+            or data.get("predicted_actions")
+        )
+        if action is None and candidates:
+            for item in candidates:
+                action = (
+                    item.get("action")
+                    or item.get("actions")
+                    or item.get("action_values")
+                    or item.get("predicted_actions")
+                )
+                if action is not None:
+                    break
+
+        extension = _media_extension(content_type)
+        if not media_bytes and action is not None:
+            extension = ".json"
+        return CosmosGenerationResult(
+            mode=mode,
+            content_type=content_type,
+            media_bytes=media_bytes,
+            action=action,
+            metadata={"provider": "cosmos3_generator", "model": self.model, "response": data},
+            extension=extension,
+        )
 
 
 class Cosmos3ReasonerClient:
@@ -453,15 +919,27 @@ def build_cosmos3_reasoner() -> SceneReasonerClient:
     return FallbackSceneReasonerClient(primary=primary, fallback=fallback)
 
 
+def build_cosmos3_generator() -> CosmosGeneratorClient:
+    """Factory used by routes/tests."""
+
+    return Cosmos3GeneratorClient()
+
+
 __all__ = [
     "COSMOS_SCENE_PROMPT",
+    "Cosmos3GeneratorClient",
     "Cosmos3ReasonerClient",
+    "CosmosGenerationResult",
+    "CosmosGeneratorClient",
     "CosmosRuntimeError",
     "FallbackSceneReasonerClient",
     "GeminiRoboticsERReasonerClient",
     "SceneReasonerClient",
+    "build_cosmos3_generator",
     "build_cosmos3_reasoner",
     "chat_completions_url",
     "extract_json_object",
     "gemini_generate_content_url",
+    "image_generations_url",
+    "videos_sync_url",
 ]

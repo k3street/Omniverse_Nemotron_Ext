@@ -13,6 +13,8 @@ import {
     CampaignLaunchResponse,
     CampaignPlanResponse,
     ConflictDetail,
+    CosmosGenerateRequest,
+    CosmosGenerateResponse,
     CosmosObserveRequest,
     CosmosObserveResponse,
     CosmosViewportObserveRequest,
@@ -74,6 +76,7 @@ export interface CanvasApi {
         sessionId: string,
         req: CosmosViewportObserveRequest,
     ): Promise<CosmosViewportObserveResponse>;
+    cosmosGenerate(sessionId: string, req: CosmosGenerateRequest): Promise<CosmosGenerateResponse>;
     getRenderingMode(): Promise<RenderingModeResponse>;
     setRenderingMode(mode: RenderingMode): Promise<RenderingModeResponse>;
     delete(sessionId: string): Promise<{ deleted: true; removed_revisions: number }>;
@@ -251,6 +254,18 @@ export function createCanvasApi(baseUrl: string = ""): CanvasApi {
                 throw new Error(`POST cosmos/observe_viewport failed: ${r.status} ${err}`);
             }
             return normalizePatchResponse((await r.json()) as CosmosViewportObserveResponse);
+        },
+        async cosmosGenerate(sessionId, req) {
+            const r = await fetch(url(`/${encodeURIComponent(sessionId)}/cosmos/generate`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(req),
+            });
+            if (!r.ok) {
+                const err = await r.text();
+                throw new Error(`POST cosmos/generate failed: ${r.status} ${err}`);
+            }
+            return r.json();
         },
         async getRenderingMode() {
             const r = await fetch(settingsUrl("/rendering_mode"));

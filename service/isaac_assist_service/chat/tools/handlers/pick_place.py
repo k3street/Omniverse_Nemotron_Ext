@@ -2692,6 +2692,33 @@ def _world_pos(path):
     t = UsdGeom.Xformable(p).ComputeLocalToWorldTransform(0).ExtractTranslation()
     return np.array([float(t[0]), float(t[1]), float(t[2])])
 
+def _prim_center(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): return None
+    try:
+        bb = UsdGeom.Imageable(p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
+        mn, mx = bb.GetMin(), bb.GetMax()
+        return np.array([(mn[0] + mx[0]) / 2.0,
+                         (mn[1] + mx[1]) / 2.0,
+                         (mn[2] + mx[2]) / 2.0], dtype=np.float64)
+    except Exception:
+        return _world_pos(path)
+
+def _surface_z_range():
+    tops = []
+    for _path in (BELT_PATH, "/World/Conveyor/Belt", "/World/Conveyor", "/World/Table"):
+        _p = stage.GetPrimAtPath(_path) if _path else None
+        if not _p or not _p.IsValid():
+            continue
+        try:
+            _bb = UsdGeom.Imageable(_p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
+            tops.append(float(_bb.GetMax()[2]))
+        except Exception:
+            continue
+    if not tops:
+        return None
+    return (min(tops) - 0.12, max(tops) + 0.25)
+
 def _bin_drop_pos():
     if DROP_TARGET is not None:
         return np.array(DROP_TARGET, dtype=np.float32)
@@ -3206,7 +3233,7 @@ def _gen_pick_place_spline(robot_path: str, sensor_path: str, belt_path: str,
 # Pre-planned 6-waypoint Cartesian trajectory, joint-space CubicSpline
 # with warm-start IK chaining. CPU-only, deterministic, no RmpFlow.
 import omni.usd, omni.timeline, omni.physx, omni.kit.app, numpy as np, builtins, json, time, os
-from pxr import UsdGeom, Sdf, Gf, UsdPhysics
+from pxr import UsdGeom, Sdf, Gf, UsdPhysics, PhysxSchema
 from isaacsim.core.api import World
 from isaacsim.core.simulation_manager import SimulationManager
 from isaacsim.robot.manipulators.examples.franka import Franka
@@ -3223,6 +3250,7 @@ EE_OFFSET = np.array({_json.dumps(list(ee_offset))}, dtype=np.float32)
 EE_INIT_H_OVERRIDE = {end_effector_initial_height!r}
 WAYPOINT_DT = {_json.dumps(spline_waypoint_dt) if spline_waypoint_dt else 'None'}
 GRIP_STYLE = {grip_style_norm!r}
+ROBOT_FAMILY = "franka"
 MUTEX_PATH = {mutex_path!r}  # Multi-robot coordination — when set, robot must claim mutex before pickup
 # SORT-01 enabler: same color_routing dispatch as cuRobo target_source.
 # When non-empty, _bin_drop_pos selects destination per cube based on
@@ -3382,6 +3410,33 @@ def _world_pos(path):
     t = UsdGeom.Xformable(p).ComputeLocalToWorldTransform(0).ExtractTranslation()
     return np.array([float(t[0]), float(t[1]), float(t[2])])
 
+def _prim_center(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid(): return None
+    try:
+        bb = UsdGeom.Imageable(p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
+        mn, mx = bb.GetMin(), bb.GetMax()
+        return np.array([(mn[0] + mx[0]) / 2.0,
+                         (mn[1] + mx[1]) / 2.0,
+                         (mn[2] + mx[2]) / 2.0], dtype=np.float64)
+    except Exception:
+        return _world_pos(path)
+
+def _surface_z_range():
+    tops = []
+    for _path in (BELT_PATH, "/World/Conveyor/Belt", "/World/Conveyor", "/World/Table"):
+        _p = stage.GetPrimAtPath(_path) if _path else None
+        if not _p or not _p.IsValid():
+            continue
+        try:
+            _bb = UsdGeom.Imageable(_p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
+            tops.append(float(_bb.GetMax()[2]))
+        except Exception:
+            continue
+    if not tops:
+        return None
+    return (min(tops) - 0.12, max(tops) + 0.25)
+
 def _cube_semantic_class(prim_path):
     \"\"\"Return cube's Semantics_color/colour/class data (lowercase) or None.
     Used by color_routing dispatch.\"\"\"
@@ -3435,17 +3490,25 @@ def _bin_drop_pos(cube_path=None):
 def _compute_h1():
     if EE_INIT_H_OVERRIDE is not None:
         return float(EE_INIT_H_OVERRIDE)
+    _z_range = _surface_z_range()
     _zs = []
     for _sp in SOURCE_PATHS:
-        _wp = _world_pos(_sp)
+        _wp = _prim_center(_sp)
         if _wp is not None:
-            _zs.append(float(_wp[2]))
+            _z = float(_wp[2])
+            if _z_range is None or (_z_range[0] <= _z <= _z_range[1]):
+                _zs.append(_z)
     _dp = _bin_drop_pos()
     if _dp is not None:
         _zs.append(float(_dp[2]))
+    if not _zs and _z_range is not None:
+        _zs.append(float(_z_range[1] - 0.10))
     if not _zs:
         return 0.3
-    return max(_zs) + 0.20  # 20cm clearance
+    _h = max(_zs) + 0.20  # 20cm clearance
+    if _z_range is not None:
+        _h = min(_h, float(_z_range[1]) + 0.20)
+    return _h
 
 EE_INITIAL_HEIGHT = _compute_h1()
 
@@ -3562,19 +3625,263 @@ def _make_trajectory(plan):
         return _sample
 
 # ── Belt pause/resume ────────────────────────────────────────────────
-_belt_prim = stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
+def _resolve_belt_prim():
+    _candidates = []
+    for _path in (BELT_PATH, "/World/Conveyor/Belt", "/World/Conveyor"):
+        if _path and _path not in _candidates:
+            _candidates.append(_path)
+    for _path in _candidates:
+        _prim = stage.GetPrimAtPath(_path)
+        if _prim and _prim.IsValid():
+            _sv = _prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity")
+            if _sv and _sv.IsValid():
+                return _prim
+    for _prim in stage.Traverse():
+        try:
+            _sv = _prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity")
+            if _sv and _sv.IsValid():
+                return _prim
+        except Exception:
+            continue
+    return stage.GetPrimAtPath(BELT_PATH) if BELT_PATH else None
+
+_belt_prim = _resolve_belt_prim()
+if _belt_prim and _belt_prim.IsValid():
+    try:
+        PhysxSchema.PhysxSurfaceVelocityAPI.Apply(_belt_prim)
+    except Exception:
+        pass
 _belt_sv = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocity") if (_belt_prim and _belt_prim.IsValid()) else None
+_belt_en = _belt_prim.GetAttribute("physxSurfaceVelocity:surfaceVelocityEnabled") if (_belt_prim and _belt_prim.IsValid()) else None
 _captured = tuple(_belt_sv.Get()) if (_belt_sv and _belt_sv.IsDefined() and _belt_sv.Get()) else None
 if _captured is None or sum(abs(v) for v in _captured) < 1e-6:
     _nominal_belt = (0.2, 0.0, 0.0)
 else:
     _nominal_belt = _captured
+
+_belt_pause_request = [None]  # None=no-op, True=pause, False=resume
+def _set_belt_paused(paused):
+    if _belt_en and _belt_en.IsDefined():
+        _belt_en.Set(not paused)
+    if _belt_sv:
+        _belt_sv.Set((0, 0, 0) if paused else _nominal_belt)
+
+def _apply_belt_pause_outside_callback():
+    _req = _belt_pause_request[0]
+    if _req is None:
+        return
+    _set_belt_paused(bool(_req))
+    _belt_pause_request[0] = None
+
 def _pause_belt():
-    if _belt_sv: _belt_sv.Set((0, 0, 0))
+    _set_belt_paused(True)
+    _belt_pause_request[0] = True
 def _resume_belt():
-    if _belt_sv: _belt_sv.Set(_nominal_belt)
+    _set_belt_paused(False)
+    _belt_pause_request[0] = False
+try:
+    _BELT_PRESTEP_SUB_ATTR = "_belt_prestep_spline_pp"
+    _old_belt_sub = getattr(builtins, _BELT_PRESTEP_SUB_ATTR, None)
+    if _old_belt_sub is not None:
+        try: _old_belt_sub.unsubscribe()
+        except Exception: pass
+    _physx_iface_for_belt = omni.physx.get_physx_interface()
+    try:
+        _belt_prestep_sub = _physx_iface_for_belt.subscribe_physics_on_step_events(
+            lambda _dt: _apply_belt_pause_outside_callback(), True, 0,
+        )
+    except TypeError:
+        _belt_prestep_sub = _physx_iface_for_belt.subscribe_physics_on_step_events(
+            lambda _dt: _apply_belt_pause_outside_callback(),
+        )
+    setattr(builtins, _BELT_PRESTEP_SUB_ATTR, _belt_prestep_sub)
+except Exception as _bpe:
+    print(f"(spline pp: pre-step belt-pause subscription failed: {{_bpe}})")
 if _belt_sv and sum(abs(v) for v in (_belt_sv.Get() or (0,0,0))) < 1e-6:
     _resume_belt()
+
+# ── Source feed stabilization ────────────────────────────────────────
+# Isaac Sim 6.0/Newton can leave small dynamic source cubes falling
+# through a kinematic surface-velocity belt. Keep only unclaimed,
+# undelivered sources on the conveyor lane so wait_sensor can claim a
+# real pick target; the selected cube is released back to dynamic motion
+# at grasp time.
+def _source_body_api(path):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return None, None
+    if not p.HasAPI(UsdPhysics.RigidBodyAPI):
+        rb = UsdPhysics.RigidBodyAPI.Apply(p)
+    else:
+        rb = UsdPhysics.RigidBodyAPI(p)
+    return p, rb
+
+def _set_source_kinematic(path, enabled):
+    p, rb = _source_body_api(path)
+    if p is None or rb is None:
+        return False
+    a = p.GetAttribute("physics:kinematicEnabled")
+    if not a or not a.IsDefined():
+        a = rb.CreateKinematicEnabledAttr()
+    a.Set(bool(enabled))
+    return True
+
+def _zero_source_velocity(path):
+    p, rb = _source_body_api(path)
+    if p is None or rb is None:
+        return
+    for _name, _maker in (
+        ("physics:velocity", rb.CreateVelocityAttr),
+        ("physics:angularVelocity", rb.CreateAngularVelocityAttr),
+    ):
+        _a = p.GetAttribute(_name)
+        if not _a or not _a.IsDefined():
+            _a = _maker()
+        _a.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+
+def _set_world_translate(path, pos):
+    p = stage.GetPrimAtPath(path)
+    if not p or not p.IsValid():
+        return False
+    _a = p.GetAttribute("xformOp:translate")
+    if _a and _a.IsValid():
+        _a.Set(Gf.Vec3d(float(pos[0]), float(pos[1]), float(pos[2])))
+    else:
+        UsdGeom.Xformable(p).AddTranslateOp().Set(Gf.Vec3d(float(pos[0]), float(pos[1]), float(pos[2])))
+    return True
+
+def _prim_bounds(path):
+    p = stage.GetPrimAtPath(path) if path else None
+    if not p or not p.IsValid():
+        return None
+    try:
+        _bb = UsdGeom.Imageable(p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
+        return (
+            np.array([float(_bb.GetMin()[0]), float(_bb.GetMin()[1]), float(_bb.GetMin()[2])], dtype=np.float64),
+            np.array([float(_bb.GetMax()[0]), float(_bb.GetMax()[1]), float(_bb.GetMax()[2])], dtype=np.float64),
+        )
+    except Exception:
+        return None
+
+def _prim_size(path):
+    _b = _prim_bounds(path)
+    if _b is None:
+        return np.array([0.08, 0.08, 0.08], dtype=np.float64)
+    _sz = np.maximum(_b[1] - _b[0], 0.001)
+    if not np.all(np.isfinite(_sz)):
+        return np.array([0.08, 0.08, 0.08], dtype=np.float64)
+    return _sz
+
+_SOURCE_FEED = {{}}
+_SOURCE_FEED_WRAP_PAD = 0.12
+
+def _belt_bounds():
+    for _path in (BELT_PATH, "/World/Conveyor/Belt", "/World/Conveyor", "/World/Table"):
+        _b = _prim_bounds(_path)
+        if _b is not None:
+            return _b
+    return None
+
+def _init_source_feed():
+    _SOURCE_FEED.clear()
+    _bounds = _belt_bounds()
+    if _bounds is None:
+        return
+    _mn, _mx = _bounds
+    _count = max(1, len(SOURCE_PATHS))
+    # Keep the source feed inside the Franka's practical pick window. The
+    # conveyor may be much longer than the reachable region; spanning the full
+    # belt causes later cubes to be claimed at unreachable X positions.
+    _reach_min_x = max(float(_mn[0] + _SOURCE_FEED_WRAP_PAD), float(_usd_pos[0]) - 0.20)
+    _reach_max_x = min(float(_mx[0] - _SOURCE_FEED_WRAP_PAD), float(_usd_pos[0]) + 0.20)
+    if _reach_max_x <= _reach_min_x + 0.05:
+        _reach_min_x = float(_mn[0] + _SOURCE_FEED_WRAP_PAD)
+        _reach_max_x = float(_mx[0] - _SOURCE_FEED_WRAP_PAD)
+    _usable = max(0.05, _reach_max_x - _reach_min_x)
+    _spacing = min(0.20, _usable / max(1, _count - 1))
+    _center_y = float((_mn[1] + _mx[1]) * 0.5)
+    _half_y = max(0.05, float((_mx[1] - _mn[1]) * 0.5))
+    for _idx, _sp in enumerate(SOURCE_PATHS):
+        _size = _prim_size(_sp)
+        _cp = _prim_center(_sp)
+        _surface = globals().get("_SURFACE_Z_RANGE", _surface_z_range())
+        _valid_surface = bool(
+            _cp is not None and np.all(np.isfinite(_cp)) and
+            _surface is not None and
+            _surface[0] <= float(_cp[2]) <= _surface[1]
+        )
+        if _valid_surface:
+            _slot_x = min(max(float(_cp[0]), _reach_min_x), _reach_max_x)
+            _slot_y = float(_cp[1])
+            if abs(_slot_y - _center_y) > _half_y + 0.15:
+                _slot_y = _center_y
+        else:
+            _slot_x = float(_reach_min_x + _idx * _spacing)
+            _slot_y = _center_y
+        _slot_z = float(_mx[2] + max(0.035, float(_size[2]) * 0.5))
+        _SOURCE_FEED[_sp] = {{
+            "slot": np.array([_slot_x, _slot_y, _slot_z], dtype=np.float64),
+            "size": _size,
+            "min_x": _reach_min_x,
+            "max_x": _reach_max_x,
+            "lane_y": _slot_y,
+            "lane_z": _slot_z,
+        }}
+
+def _belt_velocity_vec():
+    if _belt_sv and _belt_sv.IsDefined():
+        _v = _belt_sv.Get()
+        if _v:
+            return np.array([float(_v[0]), float(_v[1]), float(_v[2])], dtype=np.float64)
+    return np.array(_nominal_belt, dtype=np.float64)
+
+def _belt_is_paused():
+    if _belt_en and _belt_en.IsDefined() and _belt_en.Get() is False:
+        return True
+    _v = _belt_velocity_vec()
+    return bool(np.sum(np.abs(_v)) < 1e-6)
+
+def _stabilize_source_feed(dt):
+    if not _SOURCE_FEED:
+        return
+    _state = globals().get("S", {{}})
+    _surface = globals().get("_SURFACE_Z_RANGE", _surface_z_range())
+    _paused = _belt_is_paused()
+    _vel = _belt_velocity_vec()
+    _step = max(0.0, min(float(dt or 0.0), 0.10))
+    for _sp, _feed in list(_SOURCE_FEED.items()):
+        if _sp in _state.get("delivered", set()):
+            continue
+        if _sp == _state.get("picked_path"):
+            continue
+        try:
+            if _is_in_bin(_sp):
+                continue
+        except Exception:
+            pass
+        _cp = _prim_center(_sp)
+        _target = np.array(_feed["slot"], dtype=np.float64)
+        _needs_reset = True
+        if _cp is not None and np.all(np.isfinite(_cp)):
+            _on_surface = (_surface is None or
+                           (_surface[0] <= float(_cp[2]) <= _surface[1]))
+            _in_lane = abs(float(_cp[1]) - float(_feed["lane_y"])) <= 0.20
+            _in_x = float(_feed["min_x"]) - 0.25 <= float(_cp[0]) <= float(_feed["max_x"]) + 0.25
+            _needs_reset = not (_on_surface and _in_lane and _in_x)
+            if not _needs_reset:
+                _target = np.array([float(_cp[0]), float(_feed["lane_y"]), float(_feed["lane_z"])], dtype=np.float64)
+        if not _paused and not _needs_reset:
+            _target[0] += float(_vel[0]) * _step
+            if _target[0] > float(_feed["max_x"]):
+                _target[0] = float(_feed["min_x"])
+            elif _target[0] < float(_feed["min_x"]):
+                _target[0] = float(_feed["max_x"])
+        _set_source_kinematic(_sp, True)
+        _set_world_translate(_sp, _target)
+        _zero_source_velocity(_sp)
+
+_init_source_feed()
+_stabilize_source_feed(0.0)
 
 # ── Gripper actions ──────────────────────────────────────────────────
 def _grip_open():
@@ -3595,6 +3902,11 @@ def _attach_cube(cube_path):
     ee = stage.GetPrimAtPath(ROBOT_PATH + "/panda_hand")
     cube = stage.GetPrimAtPath(cube_path)
     if not (ee and ee.IsValid() and cube and cube.IsValid()): return None
+    try:
+        _set_source_kinematic(cube_path, False)
+        _zero_source_velocity(cube_path)
+    except Exception:
+        pass
     jp = f"{{cube_path}}_spline_grasp"
     fj = UsdPhysics.FixedJoint.Define(stage, jp)
     fj.CreateBody0Rel().SetTargets([Sdf.Path(str(ee.GetPath()))])
@@ -3604,6 +3916,16 @@ def _detach_cube(jp):
     if jp and stage.GetPrimAtPath(jp).IsValid():
         stage.RemovePrim(jp)
 
+def _settle_released_cube(cube_path, drop_pos):
+    if not cube_path or drop_pos is None:
+        return
+    try:
+        _set_world_translate(cube_path, np.asarray(drop_pos, dtype=np.float64))
+        _set_source_kinematic(cube_path, True)
+        _zero_source_velocity(cube_path)
+    except Exception as _se:
+        print(f"(release settle soft-fail: {{_se}})")
+
 # ── Sensor + proximity latch ──────────────────────────────────────────
 _sensor = stage.GetPrimAtPath(SENSOR_PATH) if SENSOR_PATH else None
 def _sensor_world_pos():
@@ -3612,29 +3934,55 @@ def _sensor_world_pos():
     return np.array([float(t[0]), float(t[1]), float(t[2])])
 _SENSOR_RADIUS = 0.08
 _sensor_pos = _sensor_world_pos()
+_LAST_CUBE_REJECT = [""]
+
+_SURFACE_Z_RANGE = _surface_z_range()
+_PICK_REACH_M = 0.88
+
 # Reach-based cube selection — beats pure sensor-proximity gating because
 # cubes can whoosh past the sensor during a 10s pick cycle and never
 # trigger again once we resume belt. Instead: pick ANY undelivered cube
-# still on belt within robot workspace. Priority = closest to sensor
-# (so we pick sequentially in approach order when multiple ready).
+# still within robot workspace. Hard-reject cubes that are not on the
+# conveyor/table surface; otherwise one flying/fallen body poisons the
+# approach-height calculation and Franka never moves because waypoint 0
+# becomes unreachable.
 def _cube_to_pick():
     base_xy = np.array([float(_usd_pos[0]), float(_usd_pos[1])])
     sensor_xy = (_sensor_pos[:2] if _sensor_pos is not None else base_xy)
     candidates = []
+    rejects = []
     for _sp in SOURCE_PATHS:
-        if _sp in S["delivered"] or _is_in_bin(_sp): continue
-        _cp = _world_pos(_sp)
-        if _cp is None: continue
-        # On-belt check: cube z should be within ±5cm of belt top (~0.875)
-        if _cp[2] < 0.83 or _cp[2] > 0.95: continue
-        # Reach check: within 70cm of robot base in XY
+        if _sp in S["delivered"]:
+            continue
+        if _is_in_bin(_sp):
+            try:
+                S["delivered"].add(_sp)
+                _a_cubes.Set(len(S["delivered"]))
+            except Exception:
+                pass
+            continue
+        _cp = _prim_center(_sp)
+        if _cp is None or not np.all(np.isfinite(_cp)):
+            rejects.append(f"{{_sp}}:no_pose")
+            continue
+        if _cp[2] < -0.05 or _cp[2] > 2.50:
+            rejects.append(f"{{_sp}}:z={{_cp[2]:.2f}}")
+            continue
+        if _SURFACE_Z_RANGE is not None and not (_SURFACE_Z_RANGE[0] <= float(_cp[2]) <= _SURFACE_Z_RANGE[1]):
+            rejects.append(f"{{_sp}}:off_surface_z={{_cp[2]:.2f}}")
+            continue
         _d_base = float(np.linalg.norm(_cp[:2] - base_xy))
-        if _d_base > 0.70: continue
+        if _d_base > _PICK_REACH_M:
+            rejects.append(f"{{_sp}}:reach={{_d_base:.2f}}")
+            continue
         _d_sensor = float(np.linalg.norm(_cp[:2] - sensor_xy))
-        candidates.append((_d_sensor, _sp))
-    if not candidates: return None
-    candidates.sort(key=lambda t: t[0])
-    return candidates[0][1]
+        candidates.append((_d_sensor, _d_base, _sp))
+    if not candidates:
+        _LAST_CUBE_REJECT[0] = ";".join(rejects[:4]) if rejects else "no_source_candidates"
+        return None
+    candidates.sort(key=lambda t: (t[0], t[1]))
+    _LAST_CUBE_REJECT[0] = ""
+    return candidates[0][2]
 
 {_PP_OBSERVABILITY_SNIPPET}
 _a_mode.Set("spline")
@@ -3651,7 +3999,7 @@ def _record_err(e):
     try:
         _a_err.Set(S["errors"])
         _a_last_err.Set(f"{{type(e).__name__}}: {{str(e)[:150]}}")
-        print(f"(curobo pp ERR ticks={{S['ticks']}}: {{type(e).__name__}}: {{str(e)[:200]}})", flush=True)
+        print(f"(spline pp ERR ticks={{S['ticks']}}: {{type(e).__name__}}: {{str(e)[:200]}})", flush=True)
     except Exception: pass
 
 # Diagnostic — log mode transitions + claim details, write last ~10 to USD attr
@@ -3663,7 +4011,7 @@ def _log_event(info=""):
         # Write tail (last 8 events) to USD attr — readable from outside
         tail = _MODE_LOG[-8:]
         log_str = " || ".join([f"t{{m[0]}}:{{m[1]}}={{m[2]}}" for m in tail])
-        _attr = stage.GetPrimAtPath(ROBOT_PATH).CreateAttribute("curobo_mode_log", Sdf.ValueTypeNames.String)
+        _attr = stage.GetPrimAtPath(ROBOT_PATH).CreateAttribute("spline_mode_log", Sdf.ValueTypeNames.String)
         _attr.Set(log_str[:800])
     except Exception: pass
 
@@ -3672,16 +4020,18 @@ def _bin_bounds():
     p = stage.GetPrimAtPath(DEST_PATH)
     if not p or not p.IsValid(): return None
     bb = UsdGeom.Imageable(p).ComputeWorldBound(0, UsdGeom.Tokens.default_).ComputeAlignedRange()
-    return (np.array([bb.GetMin()[0], bb.GetMin()[1]]),
-            np.array([bb.GetMax()[0], bb.GetMax()[1]]))
+    return (np.array([bb.GetMin()[0], bb.GetMin()[1], bb.GetMin()[2]], dtype=np.float64),
+            np.array([bb.GetMax()[0], bb.GetMax()[1], bb.GetMax()[2]], dtype=np.float64))
 
 def _is_in_bin(cube_path):
     bounds = _bin_bounds()
     if bounds is None: return False
-    cp = _world_pos(cube_path)
+    cp = _prim_center(cube_path)
     if cp is None: return False
     mn, mx = bounds
-    return (mn[0] <= cp[0] <= mx[0]) and (mn[1] <= cp[1] <= mx[1])
+    return bool((mn[0] <= cp[0] <= mx[0]) and
+                (mn[1] <= cp[1] <= mx[1]) and
+                (mn[2] - 0.05 <= cp[2] <= mx[2] + 0.25))
 
 def _apply_joint_target(q7):
     # Map 7-DoF arm config to full dof_names order; leave gripper joints
@@ -3715,6 +4065,11 @@ def _on_step(dt):
             _a_phase.Set(S["mode"])
         except Exception:
             return
+        try:
+            _stabilize_source_feed(dt)
+        except Exception as _sfe:
+            if S["ticks"] % 120 == 1:
+                _log_event(f"source_feed_soft_fail:{{type(_sfe).__name__}}")
 
         if S["mode"] == "wait_sensor":
             # Multi-robot mutex: only claim cube if mutex is free or already
@@ -3744,10 +4099,16 @@ def _on_step(dt):
                 _pause_belt()
                 S["mode"] = "planning"
                 _log_event(f"claim:{{picked}}")
+            elif S["ticks"] % 120 == 0:
+                _log_event(f"wait_no_cube:{{_LAST_CUBE_REJECT[0]}}")
+                if len(S["delivered"]) < len(SOURCE_PATHS):
+                    _resume_belt()
             return
 
         if S["mode"] == "planning":
-            cube_pos = _world_pos(S["picked_path"])
+            cube_pos = _prim_center(S["picked_path"])
+            if cube_pos is None:
+                cube_pos = _world_pos(S["picked_path"])
             # Pass cube_path so COLOR_ROUTING can dispatch per cube
             drop_pos = _bin_drop_pos(S["picked_path"])
             if cube_pos is None or drop_pos is None:
@@ -3814,6 +4175,7 @@ def _on_step(dt):
                         _detach_cube(S["grasp_joint"])
                         S["grasp_joint"] = None
                     _grip_open()
+                    _settle_released_cube(S.get("picked_path"), plan.get("drop_pos"))
                     S["grip_opened_done"] = True
                 # else: keep grip_opened_done False, retry next tick once EE arrives
 
@@ -3826,7 +4188,7 @@ def _on_step(dt):
                 try:
                     _final_cubp = _world_pos(S["picked_path"]) if S["picked_path"] else None
                     _drop = plan.get("drop_pos") if plan else None
-                    if _final_cubp and _drop:
+                    if _final_cubp is not None and _drop is not None:
                         _xy_err = ((_final_cubp[0]-_drop[0])**2 + (_final_cubp[1]-_drop[1])**2)**0.5
                         _z_err = abs(_final_cubp[2]-_drop[2])
                         _log_event(f"cycle_end xy_err={{_xy_err:.3f}} z_err={{_z_err:.3f}}")
@@ -3841,17 +4203,14 @@ def _on_step(dt):
                     try: _detach_cube(S["grasp_joint"])
                     except Exception: pass
                     S["grasp_joint"] = None
-                if _UR10_FJ_PATH[0]:
-                    try:
-                        if stage.GetPrimAtPath(_UR10_FJ_PATH[0]).IsValid():
-                            stage.RemovePrim(_UR10_FJ_PATH[0])
-                    except Exception: pass
-                    _UR10_FJ_PATH[0] = None
                 S["cubes"] += 1
                 _a_cycles.Set(S["cubes"])
                 if S["picked_path"]:
-                    S["delivered"].add(S["picked_path"])
-                    _a_cubes.Set(len(S["delivered"]))
+                    if _is_in_bin(S["picked_path"]):
+                        S["delivered"].add(S["picked_path"])
+                        _a_cubes.Set(len(S["delivered"]))
+                    else:
+                        _log_event(f"cycle_not_delivered:{{S['picked_path']}}")
                 S["picked_path"] = None; _a_picked.Set("")
                 S["plan"] = None; S["traj_fn"] = None; S["start_t"] = None
                 # Release mutex so other robots can claim
@@ -3864,12 +4223,10 @@ def _on_step(dt):
                                 _attr.Set("")
                     except Exception: pass
                 S["mode"] = "wait_sensor"
-                # Keep belt PAUSED between cycles — cube positions stay
-                # frozen so later cycles don't miss cubes that drift past
-                # sensor during transit. Belt only resumes when all cubes
-                # delivered (triggers next round) or on explicit reset.
-                if len(S["delivered"]) >= len(SOURCE_PATHS):
-                    _resume_belt()
+                # Resume between cycles so the conveyor can feed the next cube.
+                # If no cube is reachable yet, wait_sensor keeps the belt moving
+                # and reports the rejection reason in spline_mode_log.
+                _resume_belt()
             return
 
     except Exception as e:
