@@ -159,6 +159,8 @@ class KitRPCServer:
         app.router.add_get("/selection", self._handle_selection)
         app.router.add_post("/sim_control", self._handle_sim_control)
         app.router.add_post("/set_viewport_camera", self._handle_set_viewport_camera)
+        app.router.add_get("/physics_watchdog", self._handle_physics_watchdog_get)
+        app.router.add_post("/physics_watchdog", self._handle_physics_watchdog_post)
         app.router.add_get("/list_prims", self._handle_list_prims)
         app.router.add_post("/check_placement", self._handle_check_placement)
 
@@ -354,6 +356,52 @@ class KitRPCServer:
             )
             await _PATCH_QUEUE.put({"code": code, "description": f"Set viewport camera to {camera_path}", "auto_approve": True})
             return web.json_response({"ok": True, "camera_path": camera_path})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_physics_watchdog_get(self, request) -> "web.Response":
+        """Return the fail-fast rigid-body transform watchdog state."""
+        from aiohttp import web
+        try:
+            from .physics_watchdog import get_physics_watchdog
+            return web.json_response(get_physics_watchdog().state())
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_physics_watchdog_post(self, request) -> "web.Response":
+        """
+        Configure or control the transform watchdog.
+        Body: {"action": "configure"|"enable"|"disable"|"reset", ...}
+        """
+        from aiohttp import web
+        try:
+            from .physics_watchdog import get_physics_watchdog
+
+            body = await request.json()
+            action = body.get("action", "configure").lower()
+            watchdog = get_physics_watchdog()
+            if action == "configure":
+                state = watchdog.configure(
+                    root_path=body.get("root_path", ""),
+                    max_translation=float(body.get("max_translation", 100.0)),
+                    max_frame_displacement=float(
+                        body.get("max_frame_displacement", 0.1)
+                    ),
+                    enabled=bool(body.get("enabled", True)),
+                )
+            elif action == "enable":
+                state = watchdog.enable()
+            elif action == "disable":
+                state = watchdog.disable()
+            elif action == "reset":
+                state = watchdog.reset()
+            else:
+                return web.json_response(
+                    {"error": f"Unknown watchdog action: {action}"}, status=400
+                )
+            return web.json_response(state)
+        except (TypeError, ValueError, RuntimeError) as e:
+            return web.json_response({"error": str(e)}, status=400)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 

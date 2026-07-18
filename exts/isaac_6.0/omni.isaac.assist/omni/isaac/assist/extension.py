@@ -5,13 +5,14 @@ import carb
 _window = None
 _rpc_server = None
 _ros2_bridge = None
+_physics_watchdog = None
 
 class IsaacAssistExtension(omni.ext.IExt):
     """
     Omniverse Extension entry point for Isaac Assist on Isaac Sim 6.0.
     """
     def on_startup(self, ext_id):
-        global _window, _rpc_server, _ros2_bridge
+        global _window, _rpc_server, _ros2_bridge, _physics_watchdog
         carb.log_warn("[IsaacAssist] on_startup")
         self._menu = None
 
@@ -30,6 +31,15 @@ class IsaacAssistExtension(omni.ext.IExt):
         except Exception as e:
             carb.log_warn(f"[IsaacAssist] Kit RPC skipped: {e}")
             self._rpc_server = None
+
+        try:
+            from .context.physics_watchdog import get_physics_watchdog
+            _physics_watchdog = get_physics_watchdog()
+            _physics_watchdog.start()
+            self._physics_watchdog = _physics_watchdog
+        except Exception as e:
+            carb.log_warn(f"[IsaacAssist] Physics watchdog skipped: {e}")
+            self._physics_watchdog = None
 
         try:
             from .telemetry import init_telemetry
@@ -77,7 +87,7 @@ class IsaacAssistExtension(omni.ext.IExt):
             self._window.visible = True
 
     def on_shutdown(self):
-        global _window, _rpc_server, _ros2_bridge
+        global _window, _rpc_server, _ros2_bridge, _physics_watchdog
         carb.log_warn("[IsaacAssist] on_shutdown")
 
         if getattr(self, "_rpc_server", None) is not None:
@@ -89,6 +99,14 @@ class IsaacAssistExtension(omni.ext.IExt):
                 pass
             self._rpc_server = None
             _rpc_server = None
+
+        if getattr(self, "_physics_watchdog", None) is not None:
+            try:
+                self._physics_watchdog.stop()
+            except Exception:
+                pass
+            self._physics_watchdog = None
+            _physics_watchdog = None
 
         try:
             from .context.console_log import detach_log_listener
