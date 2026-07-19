@@ -5,6 +5,7 @@ import carb
 _window = None
 _rpc_server = None
 _ros2_bridge = None
+_ros2_articulation_auto_attach = None
 _physics_watchdog = None
 
 class IsaacAssistExtension(omni.ext.IExt):
@@ -12,7 +13,7 @@ class IsaacAssistExtension(omni.ext.IExt):
     Omniverse Extension entry point for Isaac Assist on Isaac Sim 6.0.
     """
     def on_startup(self, ext_id):
-        global _window, _rpc_server, _ros2_bridge, _physics_watchdog
+        global _window, _rpc_server, _ros2_bridge, _ros2_articulation_auto_attach, _physics_watchdog
         carb.log_warn("[IsaacAssist] on_startup")
         self._menu = None
 
@@ -58,6 +59,16 @@ class IsaacAssistExtension(omni.ext.IExt):
             self._ros2_bridge = None
 
         try:
+            from .context.ros2_articulation import get_ros2_articulation_auto_attach
+            _ros2_articulation_auto_attach = get_ros2_articulation_auto_attach()
+            attach_state = _ros2_articulation_auto_attach.start()
+            carb.log_warn(f"[IsaacAssist] ROS2 articulation auto-attach: {attach_state}")
+            self._ros2_articulation_auto_attach = _ros2_articulation_auto_attach
+        except Exception as e:
+            carb.log_warn(f"[IsaacAssist] ROS2 articulation auto-attach skipped: {e}")
+            self._ros2_articulation_auto_attach = None
+
+        try:
             from .ui import ChatViewWindow
             _window = ChatViewWindow("Isaac Assist AI", width=440, height=660)
             _window.visible = True
@@ -87,7 +98,7 @@ class IsaacAssistExtension(omni.ext.IExt):
             self._window.visible = True
 
     def on_shutdown(self):
-        global _window, _rpc_server, _ros2_bridge, _physics_watchdog
+        global _window, _rpc_server, _ros2_bridge, _ros2_articulation_auto_attach, _physics_watchdog
         carb.log_warn("[IsaacAssist] on_shutdown")
 
         if getattr(self, "_rpc_server", None) is not None:
@@ -121,6 +132,14 @@ class IsaacAssistExtension(omni.ext.IExt):
                 pass
             self._ros2_bridge = None
             _ros2_bridge = None
+
+        if getattr(self, "_ros2_articulation_auto_attach", None) is not None:
+            try:
+                self._ros2_articulation_auto_attach.stop()
+            except Exception:
+                pass
+            self._ros2_articulation_auto_attach = None
+            _ros2_articulation_auto_attach = None
 
         if self._menu is not None:
             try:

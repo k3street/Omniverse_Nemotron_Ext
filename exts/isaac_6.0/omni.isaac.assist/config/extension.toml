@@ -14,6 +14,11 @@ icon = "" # Add an icon later
 "omni.kit.uiapp" = {}
 "omni.ui" = {}
 "omni.kit.viewport.utility" = {} # Required for LiveKit WebRTC viewport grabbing
+"omni.graph.core" = {}
+"isaacsim.core.nodes" = {}
+"isaacsim.sensors.physics.nodes" = {}
+"isaacsim.ros2.bridge" = {}
+"isaacsim.ros2.nodes" = {}
 
 [[python.module]]
 name = "omni.isaac.assist"
