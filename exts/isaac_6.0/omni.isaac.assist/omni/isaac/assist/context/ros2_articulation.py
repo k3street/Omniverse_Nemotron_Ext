@@ -85,6 +85,19 @@ def _command_safety(stage, logical_root: str, articulation_root: str) -> dict[st
 
     blockers = []
     root_prim = stage.GetPrimAtPath(articulation_root)
+    logical_prim = stage.GetPrimAtPath(logical_root)
+    collision_filter_contract = logical_prim.GetAttribute(
+        "homehero:collisionFilterContract"
+    ).Get()
+    simulation_actuator_contract = logical_prim.GetAttribute(
+        "homehero:simulationActuatorContract"
+    ).Get()
+    simulation_actuator_hardware_authority = logical_prim.GetAttribute(
+        "homehero:simulationActuatorHardwareAuthority"
+    ).Get()
+    simulation_operator_gate_requested = os.environ.get(
+        "HOMEHERO_SIM_OPERATOR_GATE_CONFIRMED", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
     self_collision_values = []
     newton_self_collision = root_prim.GetAttribute("newton:selfCollisionEnabled")
     if newton_self_collision.IsValid() and newton_self_collision.HasAuthoredValueOpinion():
@@ -157,7 +170,14 @@ def _command_safety(stage, logical_root: str, articulation_root: str) -> dict[st
         blockers.append("no rigid bodies found below robot root")
     if collisionless:
         blockers.append(f"rigid bodies without enabled collision shapes: {collisionless[:5]}")
-    if placeholder_limits:
+    simulation_operator_gate = (
+        simulation_operator_gate_requested
+        and qualified is True
+        and bool(collision_filter_contract)
+        and bool(simulation_actuator_contract)
+        and simulation_actuator_hardware_authority is False
+    )
+    if placeholder_limits and not simulation_operator_gate:
         blockers.append(f"placeholder 360-degree arm limits: {sorted(placeholder_limits)}")
     if initial_pose_mismatches:
         blockers.append(f"outboard startup pose is not authored: {sorted(initial_pose_mismatches)}")
@@ -169,6 +189,14 @@ def _command_safety(stage, logical_root: str, articulation_root: str) -> dict[st
         "initial_pose_profile": initial_pose_profile,
         "safety_qualified": qualified is True,
         "safety_qualified_profile": qualified_profile,
+        "collision_filter_contract": collision_filter_contract,
+        "simulation_actuator_contract": simulation_actuator_contract,
+        "simulation_actuator_hardware_authority": simulation_actuator_hardware_authority,
+        "simulation_operator_gate_requested": simulation_operator_gate_requested,
+        "simulation_operator_gate_confirmed": simulation_operator_gate,
+        "placeholder_limits_advisory": sorted(placeholder_limits),
+        "scope": "isaac_sim_session_only",
+        "physical_motor_bringup_bypassed": False,
     }
 
 
@@ -340,6 +368,14 @@ class Ros2ArticulationAutoAttach:
     def start(self) -> dict[str, Any]:
         import omni.usd
 
+        if os.environ.get(
+            "HOMEHERO_DISABLE_ROS2_ARTICULATION_AUTO_ATTACH", ""
+        ).strip().lower() in {"1", "true", "yes", "on"}:
+            self.stop()
+            return {
+                "configured": False,
+                "reason": "disabled by HOMEHERO_DISABLE_ROS2_ARTICULATION_AUTO_ATTACH",
+            }
         if self._subscription is None:
             self._subscription = (
                 omni.usd.get_context()
