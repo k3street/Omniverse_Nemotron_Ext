@@ -144,6 +144,8 @@ class KitRPCServer:
         app.router.add_post("/sim_control", self._handle_sim_control)
         app.router.add_post("/set_viewport_camera", self._handle_set_viewport_camera)
         app.router.add_get("/list_prims", self._handle_list_prims)
+        app.router.add_post("/get_pose", self._handle_get_pose)
+        app.router.add_post("/draw_axes", self._handle_draw_axes)
         # Kit Supervisor soft-reset endpoint (spec 2026-05-11 v2 §5)
         app.router.add_post("/admin/reset_world", self._handle_reset_world)
 
@@ -253,6 +255,43 @@ class KitRPCServer:
                 )
 
             return web.json_response(result_holder["result"])
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_get_pose(self, request) -> "web.Response":
+        """Convention-labeled pose of a prim (see isaac_6.0 twin)."""
+        from aiohttp import web
+        try:
+            body = await request.json()
+            from .spatial_tools import get_prim_pose
+            pose = get_prim_pose(
+                body.get("prim_path", ""), body.get("in_frame", "world"))
+            return web.json_response(pose)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_draw_axes(self, request) -> "web.Response":
+        """Axes gizmo via the main-thread sync-exec tick."""
+        from aiohttp import web
+        try:
+            body = await request.json()
+            quat = [float(v) for v in body.get("quaternion", [1, 0, 0, 0])]
+            if body.get("convention", "wxyz") == "xyzw":
+                quat = [quat[3], quat[0], quat[1], quat[2]]
+            norm = sum(v * v for v in quat) ** 0.5
+            quat = [v / norm for v in quat]
+            from .spatial_tools import build_draw_axes_code
+            code = build_draw_axes_code(
+                [float(v) for v in body["position"]], quat,
+                float(body.get("scale", 0.1)))
+            result_holder = {"result": None, "event": threading.Event()}
+            _SYNC_EXEC_QUEUE.put((code, result_holder))
+            loop = asyncio.get_event_loop()
+            completed = await loop.run_in_executor(
+                None, lambda: result_holder["event"].wait(timeout=10))
+            if not completed or result_holder["result"] is None:
+                return web.json_response({"error": "draw timed out"}, status=504)
+            return web.json_response({"drawn": True, "label": body.get("label", "")})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
