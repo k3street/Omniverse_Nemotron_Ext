@@ -186,6 +186,30 @@ def tool_get_pose(args):
     return _service("/get_pose", {
         "prim_path": args["prim_path"],
         "in_frame": args.get("in_frame", "world"),
+        "prefer": args.get("prefer", "fabric"),
+    })
+
+
+def tool_grasp_gap(args):
+    return _service("/grasp_gap", {
+        "object": args["object"],
+        "hand_frame": args["hand_frame"],
+        "digit_tips": args.get("digit_tips", []),
+        "object_half_extents": args.get("object_half_extents"),
+        "prefer": args.get("prefer", "fabric"),
+    })
+
+
+def tool_get_contacts(args):
+    return _service("/contacts", {
+        "filter": args.get("filter", ""),
+    }, timeout=25.0)
+
+
+def tool_set_camera_pose(args):
+    return _service("/set_camera_pose", {
+        "eye": args["eye"],
+        "target": args["target"],
     })
 
 
@@ -255,13 +279,46 @@ TOOLS = {
          "required": ["a", "b"]}),
     "get_pose": (
         tool_get_pose,
-        "LIVE SIM: pose of a USD prim from the running Isaac session, "
-        "with explicitly labeled quaternion conventions.",
+        "LIVE SIM: pose of a prim with labeled quaternion conventions. "
+        "Reads the live Fabric transform (what physics wrote this frame) "
+        "with USD-stage fallback; 'source' in the reply states which.",
         {"type": "object", "properties": {
             "prim_path": {"type": "string"},
             "in_frame": {"type": "string",
-                         "description": "world (default) or a prim path"}},
+                         "description": "world (default) or a prim path"},
+            "prefer": {"type": "string", "enum": ["fabric", "usd"]}},
          "required": ["prim_path"]}),
+    "grasp_gap": (
+        tool_grasp_gap,
+        "LIVE SIM: pre-grasp geometry report — object pose in the hand "
+        "frame, each digit tip's vector/distance to the object, aperture "
+        "centroid offset, and per-axis box clearances when half extents "
+        "are given. Measures what screenshot-guessing cannot.",
+        {"type": "object", "properties": {
+            "object": {"type": "string"},
+            "hand_frame": {"type": "string"},
+            "digit_tips": {"type": "array", "items": {"type": "string"}},
+            "object_half_extents": {"type": "array",
+                                    "items": {"type": "number"}},
+            "prefer": {"type": "string", "enum": ["fabric", "usd"]}},
+         "required": ["object", "hand_frame", "digit_tips"]}),
+    "get_contacts": (
+        tool_get_contacts,
+        "LIVE SIM: PhysX contact report aggregated per body pair "
+        "(points, total impulse, min separation). Only pairs carrying "
+        "the contact-report API appear (Isaac Lab contact sensors apply "
+        "it to tracked bodies).",
+        {"type": "object", "properties": {
+            "filter": {"type": "string",
+                       "description": "substring filter on body paths"}}}),
+    "set_camera_pose": (
+        tool_set_camera_pose,
+        "LIVE SIM: place the viewport camera at eye looking at target — "
+        "makes captures deterministic across sessions.",
+        {"type": "object", "properties": {
+            "eye": {"type": "array", "items": {"type": "number"}},
+            "target": {"type": "array", "items": {"type": "number"}}},
+         "required": ["eye", "target"]}),
     "list_prims": (
         tool_list_prims,
         "LIVE SIM: list prim paths, filterable by subtree and USD type.",

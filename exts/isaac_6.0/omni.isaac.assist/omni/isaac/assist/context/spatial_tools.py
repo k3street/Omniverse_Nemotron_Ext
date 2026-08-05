@@ -57,33 +57,178 @@ def _world_transform(stage, prim_path):
     return xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
 
 
-def get_prim_pose(prim_path: str, in_frame: str = "world") -> dict:
-    """Pose of prim_path, optionally expressed in another prim's frame.
+# ── Fabric-aware live poses ──────────────────────────────────────────────
+# Isaac Lab (and any omni.physx fabric pipeline) steps physics through
+# Fabric and never writes back to the USD stage, so USD reads return the
+# authoring-time transform all run.  usdrt reads the Fabric world
+# transform PhysX actually produced this frame.
 
-    Returns explicitly labeled quaternion conventions.  Gf matrices are
-    row-vector convention (world = local * M); the relative transform of
-    a in frame b is therefore M_a * M_b.GetInverse().
-    """
+
+def _fabric_world_pose(prim_path: str):
+    """(position, quat_wxyz) from Fabric, or None if unavailable."""
+    try:
+        import omni.usd
+        import usdrt
+
+        stage_id = omni.usd.get_context().get_stage_id()
+        rt_stage = usdrt.Usd.Stage.Attach(stage_id)
+        prim = rt_stage.GetPrimAtPath(usdrt.Sdf.Path(prim_path))
+        if not prim or not prim.IsValid():
+            return None
+        xformable = usdrt.Rt.Xformable(prim)
+        if not xformable.HasWorldXform():
+            return None
+        position = xformable.GetWorldPositionAttr().Get()
+        orientation = xformable.GetWorldOrientationAttr().Get()
+        imaginary = orientation.GetImaginary()
+        return (
+            [float(position[0]), float(position[1]), float(position[2])],
+            [float(orientation.GetReal()), float(imaginary[0]),
+             float(imaginary[1]), float(imaginary[2])],
+        )
+    except Exception:
+        return None
+
+
+def _usd_world_pose(prim_path: str):
+    """(position, quat_wxyz) from the USD stage (authoring-time state)."""
     import omni.usd
 
     stage = omni.usd.get_context().get_stage()
     if stage is None:
         raise RuntimeError("no stage open")
     matrix = _world_transform(stage, prim_path)
-    frame_label = "world"
-    if in_frame and in_frame not in ("world", "/"):
-        reference = _world_transform(stage, in_frame)
-        matrix = matrix * reference.GetInverse()
-        frame_label = in_frame
     translation = matrix.ExtractTranslation()
     quat = matrix.ExtractRotationQuat()
     imaginary = quat.GetImaginary()
-    pose = _labeled_pose(
-        (translation[0], translation[1], translation[2]),
-        (quat.GetReal(), imaginary[0], imaginary[1], imaginary[2]))
+    return (
+        [float(translation[0]), float(translation[1]), float(translation[2])],
+        [float(quat.GetReal()), float(imaginary[0]), float(imaginary[1]),
+         float(imaginary[2])],
+    )
+
+
+def _world_pose_any(prim_path: str, prefer: str = "fabric"):
+    """(position, quat_wxyz, source) preferring live Fabric state."""
+    if prefer != "usd":
+        fabric = _fabric_world_pose(prim_path)
+        if fabric is not None:
+            return fabric[0], fabric[1], "fabric"
+    position, quat = _usd_world_pose(prim_path)
+    return position, quat, "usd_stage"
+
+
+def _quat_mul(a, b):
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return [aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw]
+
+
+def _quat_conj(q):
+    return [q[0], -q[1], -q[2], -q[3]]
+
+
+def _quat_rotate(q, v):
+    return _quat_mul(_quat_mul(q, [0.0, v[0], v[1], v[2]]),
+                     _quat_conj(q))[1:]
+
+
+def _relative_pose(target_pos, target_quat, ref_pos, ref_quat):
+    """Pose of target expressed in the reference prim's frame."""
+    inverse = _quat_conj(ref_quat)
+    delta = [target_pos[i] - ref_pos[i] for i in range(3)]
+    return _quat_rotate(inverse, delta), _quat_mul(inverse, target_quat)
+
+
+def get_prim_pose(prim_path: str, in_frame: str = "world",
+                  prefer: str = "fabric") -> dict:
+    """Pose of prim_path, optionally expressed in another prim's frame.
+
+    Prefers the live Fabric world transform (what physics produced this
+    frame) and falls back to the USD stage; the response's ``source``
+    field states which one answered, so a stale authoring-time pose can
+    never masquerade as live state again.
+    """
+    position, quat, source = _world_pose_any(prim_path, prefer)
+    frame_label = "world"
+    frame_source = None
+    if in_frame and in_frame not in ("world", "/"):
+        ref_pos, ref_quat, frame_source = _world_pose_any(in_frame, prefer)
+        position, quat = _relative_pose(position, quat, ref_pos, ref_quat)
+        frame_label = in_frame
+    pose = _labeled_pose(position, quat)
     pose["prim_path"] = prim_path
     pose["in_frame"] = frame_label
+    pose["source"] = source
+    if frame_source is not None:
+        pose["frame_source"] = frame_source
     return pose
+
+
+def grasp_gap(object_path: str, hand_frame_path: str,
+              digit_tip_paths: list, object_half_extents=None,
+              prefer: str = "fabric") -> dict:
+    """Live pre-grasp geometry report: everything an agent needs to aim.
+
+    Returns the object's pose in the hand frame, each digit tip's vector
+    to the object center (world and hand frame), the aperture center
+    (tip centroid) offset to the object, and — when half extents are
+    given — each tip's per-axis clearance to the object's box surface in
+    the OBJECT frame (negative = inside the face band on that axis).
+    """
+    obj_pos, obj_quat, obj_src = _world_pose_any(object_path, prefer)
+    hand_pos, hand_quat, hand_src = _world_pose_any(hand_frame_path, prefer)
+    rel_pos, rel_quat = _relative_pose(obj_pos, obj_quat, hand_pos, hand_quat)
+    object_in_hand = _labeled_pose(rel_pos, rel_quat)
+
+    hand_inverse = _quat_conj(hand_quat)
+    object_inverse = _quat_conj(obj_quat)
+    tips = []
+    centroid = [0.0, 0.0, 0.0]
+    for path in digit_tip_paths:
+        tip_pos, _tip_quat, tip_src = _world_pose_any(path, prefer)
+        for axis in range(3):
+            centroid[axis] += tip_pos[axis] / len(digit_tip_paths)
+        to_object_world = [obj_pos[i] - tip_pos[i] for i in range(3)]
+        record = {
+            "prim_path": path,
+            "source": tip_src,
+            "tip_world": [round(v, 6) for v in tip_pos],
+            "to_object_center_world": [round(v, 6) for v in to_object_world],
+            "to_object_center_hand_frame": [
+                round(v, 6) for v in _quat_rotate(hand_inverse, to_object_world)],
+            "distance_to_object_center_m": round(
+                math.sqrt(sum(v * v for v in to_object_world)), 6),
+        }
+        if object_half_extents is not None:
+            tip_in_object = _quat_rotate(
+                object_inverse, [tip_pos[i] - obj_pos[i] for i in range(3)])
+            record["tip_in_object_frame"] = [
+                round(v, 6) for v in tip_in_object]
+            record["box_axis_clearance_m"] = [
+                round(abs(tip_in_object[i]) - float(object_half_extents[i]), 6)
+                for i in range(3)]
+        tips.append(record)
+
+    aperture_to_object_world = [obj_pos[i] - centroid[i] for i in range(3)]
+    return {
+        "object_path": object_path,
+        "hand_frame_path": hand_frame_path,
+        "sources": {"object": obj_src, "hand": hand_src},
+        "object_in_hand_frame": object_in_hand,
+        "aperture_center_world": [round(v, 6) for v in centroid],
+        "aperture_to_object_world": [
+            round(v, 6) for v in aperture_to_object_world],
+        "aperture_to_object_hand_frame": [
+            round(v, 6)
+            for v in _quat_rotate(hand_inverse, aperture_to_object_world)],
+        "aperture_to_object_distance_m": round(
+            math.sqrt(sum(v * v for v in aperture_to_object_world)), 6),
+        "digit_tips": tips,
+    }
 
 
 def build_draw_axes_code(position, quat_wxyz, scale: float = 0.1) -> str:

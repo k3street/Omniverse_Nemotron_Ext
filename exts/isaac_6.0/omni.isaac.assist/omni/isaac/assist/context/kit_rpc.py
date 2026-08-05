@@ -165,6 +165,9 @@ class KitRPCServer:
         app.router.add_post("/check_placement", self._handle_check_placement)
         app.router.add_post("/get_pose", self._handle_get_pose)
         app.router.add_post("/draw_axes", self._handle_draw_axes)
+        app.router.add_post("/grasp_gap", self._handle_grasp_gap)
+        app.router.add_post("/contacts", self._handle_contacts)
+        app.router.add_post("/set_camera_pose", self._handle_set_camera_pose)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -301,17 +304,148 @@ class KitRPCServer:
 
     async def _handle_get_pose(self, request) -> "web.Response":
         """Convention-labeled pose of a prim, optionally in another prim's
-        frame.  Body: {"prim_path": "...", "in_frame": "world"|prim path}.
-        Read-only USD access — safe off the main thread (stage_reader
-        pattern)."""
+        frame.  Body: {"prim_path": "...", "in_frame": "world"|prim path,
+        "prefer": "fabric"|"usd"}.  Prefers the live Fabric transform
+        (what physics wrote this frame) with USD-stage fallback; the
+        response's "source" states which answered."""
         from aiohttp import web
         try:
             body = await request.json()
             from .spatial_tools import get_prim_pose
             pose = get_prim_pose(
                 body.get("prim_path", ""),
-                body.get("in_frame", "world"))
+                body.get("in_frame", "world"),
+                body.get("prefer", "fabric"))
             return web.json_response(pose)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_grasp_gap(self, request) -> "web.Response":
+        """Live pre-grasp geometry: object pose in the hand frame, digit
+        tip vectors/distances to the object, aperture-center offset, and
+        optional per-axis box-surface clearances.  Body: {"object": path,
+        "hand_frame": path, "digit_tips": [paths...],
+        "object_half_extents": [x,y,z] (optional),
+        "prefer": "fabric"|"usd"}.  Read-only — safe off the main
+        thread."""
+        from aiohttp import web
+        try:
+            body = await request.json()
+            from .spatial_tools import grasp_gap
+            report = grasp_gap(
+                body.get("object", ""),
+                body.get("hand_frame", ""),
+                list(body.get("digit_tips", [])),
+                body.get("object_half_extents"),
+                body.get("prefer", "fabric"))
+            return web.json_response(report)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_contacts(self, request) -> "web.Response":
+        """Live PhysX contact report, aggregated per body pair.  Body:
+        {"filter": "substring" (optional), "timeout": s}.  Only pairs
+        whose bodies carry the PhysX contact-report API appear (Isaac Lab
+        contact sensors apply it to their tracked bodies).  Runs on the
+        main-thread sync-exec tick."""
+        from aiohttp import web
+        try:
+            body = await request.json()
+            needle = str(body.get("filter", ""))
+            code = (
+                "import json\n"
+                "from omni.physx import get_physx_simulation_interface\n"
+                "from pxr import PhysicsSchemaTools\n"
+                f"needle = {json.dumps(needle)}\n"
+                "headers, data = (get_physx_simulation_interface()\n"
+                "                 .get_contact_report())\n"
+                "pairs = {}\n"
+                "for header in headers:\n"
+                "    actor0 = str(PhysicsSchemaTools.intToSdfPath("
+                "header.actor0))\n"
+                "    actor1 = str(PhysicsSchemaTools.intToSdfPath("
+                "header.actor1))\n"
+                "    if needle and needle not in actor0 and needle not in "
+                "actor1:\n"
+                "        continue\n"
+                "    key = (actor0, actor1)\n"
+                "    entry = pairs.setdefault(key, {\n"
+                "        'actor0': actor0, 'actor1': actor1,\n"
+                "        'contact_points': 0, 'total_impulse': 0.0,\n"
+                "        'min_separation': None})\n"
+                "    start = header.contact_data_offset\n"
+                "    count = header.num_contact_data\n"
+                "    for index in range(start, start + count):\n"
+                "        contact = data[index]\n"
+                "        entry['contact_points'] += 1\n"
+                "        impulse = (contact.impulse.x ** 2 +\n"
+                "                   contact.impulse.y ** 2 +\n"
+                "                   contact.impulse.z ** 2) ** 0.5\n"
+                "        entry['total_impulse'] += impulse\n"
+                "        separation = float(contact.separation)\n"
+                "        if (entry['min_separation'] is None or\n"
+                "                separation < entry['min_separation']):\n"
+                "            entry['min_separation'] = separation\n"
+                "print(json.dumps({'pairs': list(pairs.values()),\n"
+                "                  'pair_count': len(pairs)}))\n"
+            )
+            result_holder = {"result": None, "event": threading.Event()}
+            _SYNC_EXEC_QUEUE.put((code, result_holder))
+            loop = asyncio.get_event_loop()
+            completed = await loop.run_in_executor(
+                None,
+                lambda: result_holder["event"].wait(
+                    timeout=float(body.get("timeout", 10))))
+            if not completed or result_holder["result"] is None:
+                return web.json_response(
+                    {"error": "contact query timed out"}, status=504)
+            output = result_holder["result"].get("output", "").strip()
+            try:
+                return web.json_response(json.loads(output.splitlines()[-1]))
+            except (json.JSONDecodeError, ValueError, IndexError):
+                return web.json_response(
+                    {"error": "unparseable contact report",
+                     "raw_output": output[-1200:]}, status=500)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_set_camera_pose(self, request) -> "web.Response":
+        """Deterministically place the viewport camera.  Body:
+        {"eye": [x,y,z], "target": [x,y,z]}.  Makes captures
+        reproducible across sessions (the default viewport state is
+        not).  Runs on the main-thread sync-exec tick."""
+        from aiohttp import web
+        try:
+            body = await request.json()
+            eye = [float(v) for v in body["eye"]]
+            target = [float(v) for v in body["target"]]
+            code = (
+                "from pxr import Gf\n"
+                "from omni.kit.viewport.utility import get_active_viewport\n"
+                "from omni.kit.viewport.utility.camera_state import "
+                "ViewportCameraState\n"
+                "viewport = get_active_viewport()\n"
+                "state = ViewportCameraState(viewport.camera_path, viewport)\n"
+                f"state.set_position_world(Gf.Vec3d({eye[0]!r}, {eye[1]!r}, "
+                f"{eye[2]!r}), True)\n"
+                f"state.set_target_world(Gf.Vec3d({target[0]!r}, "
+                f"{target[1]!r}, {target[2]!r}), True)\n"
+                "print('camera set')\n"
+            )
+            result_holder = {"result": None, "event": threading.Event()}
+            _SYNC_EXEC_QUEUE.put((code, result_holder))
+            loop = asyncio.get_event_loop()
+            completed = await loop.run_in_executor(
+                None, lambda: result_holder["event"].wait(timeout=10))
+            if not completed or result_holder["result"] is None:
+                return web.json_response(
+                    {"error": "camera set timed out"}, status=504)
+            if not result_holder["result"].get("success"):
+                return web.json_response(
+                    {"error": result_holder["result"].get("output", "")[-800:]},
+                    status=500)
+            return web.json_response({"ok": True, "eye": eye,
+                                      "target": target})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
