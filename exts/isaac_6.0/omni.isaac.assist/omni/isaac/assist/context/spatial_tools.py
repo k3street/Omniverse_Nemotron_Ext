@@ -64,8 +64,39 @@ def _world_transform(stage, prim_path):
 # transform PhysX actually produced this frame.
 
 
+def _quat_from_row_matrix(m):
+    """quat wxyz from a Gf row-vector-convention 4x4 (rows = basis images).
+
+    A row-convention rotation is the transpose of the standard column
+    convention, so the standard extraction is run on the transpose.
+    """
+    r = [[m[c][row] for c in range(3)] for row in range(3)]
+    trace = r[0][0] + r[1][1] + r[2][2]
+    if trace > 0.0:
+        s = math.sqrt(trace + 1.0) * 2.0
+        return [0.25 * s, (r[2][1] - r[1][2]) / s,
+                (r[0][2] - r[2][0]) / s, (r[1][0] - r[0][1]) / s]
+    if r[0][0] > r[1][1] and r[0][0] > r[2][2]:
+        s = math.sqrt(1.0 + r[0][0] - r[1][1] - r[2][2]) * 2.0
+        return [(r[2][1] - r[1][2]) / s, 0.25 * s,
+                (r[0][1] + r[1][0]) / s, (r[0][2] + r[2][0]) / s]
+    if r[1][1] > r[2][2]:
+        s = math.sqrt(1.0 + r[1][1] - r[0][0] - r[2][2]) * 2.0
+        return [(r[0][2] - r[2][0]) / s, (r[0][1] + r[1][0]) / s,
+                0.25 * s, (r[1][2] + r[2][1]) / s]
+    s = math.sqrt(1.0 + r[2][2] - r[0][0] - r[1][1]) * 2.0
+    return [(r[1][0] - r[0][1]) / s, (r[0][2] + r[2][0]) / s,
+            (r[1][2] + r[2][1]) / s, 0.25 * s]
+
+
 def _fabric_world_pose(prim_path: str):
-    """(position, quat_wxyz) from Fabric, or None if unavailable."""
+    """(position, quat_wxyz) from Fabric, or None if unavailable.
+
+    Live-validated 2026-08-05: physics writes `omni:fabric:worldMatrix`
+    (row-vector convention, translation in row 3); the Rt.Xformable
+    world attrs are NOT populated in the Isaac Lab pipeline
+    (HasWorldXform() is False) and remain only as a fallback.
+    """
     try:
         import omni.usd
         import usdrt
@@ -75,6 +106,17 @@ def _fabric_world_pose(prim_path: str):
         prim = rt_stage.GetPrimAtPath(usdrt.Sdf.Path(prim_path))
         if not prim or not prim.IsValid():
             return None
+        attr = prim.GetAttribute("omni:fabric:worldMatrix")
+        value = attr.Get() if attr and attr.IsValid() else None
+        if value is not None:
+            matrix = [[float(value[row][col]) for col in range(4)]
+                      for row in range(4)]
+            scale = [math.sqrt(sum(matrix[row][col] ** 2
+                                   for col in range(3)))
+                     for row in range(3)]
+            rotation = [[matrix[row][col] / (scale[row] or 1.0)
+                         for col in range(4)] for row in range(3)]
+            return matrix[3][:3], _quat_from_row_matrix(rotation)
         xformable = usdrt.Rt.Xformable(prim)
         if not xformable.HasWorldXform():
             return None

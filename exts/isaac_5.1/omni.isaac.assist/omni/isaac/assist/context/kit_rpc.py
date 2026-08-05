@@ -432,18 +432,24 @@ class KitRPCServer:
                 f"{target[1]!r}, {target[2]!r}), True)\n"
                 "print('camera set')\n"
             )
-            result_holder = {"result": None, "event": threading.Event()}
-            _SYNC_EXEC_QUEUE.put((code, result_holder))
             loop = asyncio.get_event_loop()
-            completed = await loop.run_in_executor(
-                None, lambda: result_holder["event"].wait(timeout=10))
-            if not completed or result_holder["result"] is None:
+            # Scene load can starve the exec tick for tens of seconds
+            # (observed live 2026-08-05) — wait long, retry once.
+            result = None
+            for _attempt in range(2):
+                result_holder = {"result": None, "event": threading.Event()}
+                _SYNC_EXEC_QUEUE.put((code, result_holder))
+                completed = await loop.run_in_executor(
+                    None, lambda: result_holder["event"].wait(timeout=45))
+                if completed and result_holder["result"] is not None:
+                    result = result_holder["result"]
+                    break
+            if result is None:
                 return web.json_response(
                     {"error": "camera set timed out"}, status=504)
-            if not result_holder["result"].get("success"):
+            if not result.get("success"):
                 return web.json_response(
-                    {"error": result_holder["result"].get("output", "")[-800:]},
-                    status=500)
+                    {"error": result.get("output", "")[-800:]}, status=500)
             return web.json_response({"ok": True, "eye": eye,
                                       "target": target})
         except Exception as e:
@@ -588,29 +594,42 @@ class KitRPCServer:
 
     async def _handle_list_prims(self, request) -> "web.Response":
         """
-        List prims, optionally filtered by type.
+        List prims by direct stage traversal — unlimited depth (the old
+        tree walk capped at depth 6 and hid deep robot links).
         Query params: ?filter_type=Mesh&under_path=/World
+                      &contains=index_L2&limit=200
         """
         from aiohttp import web
         try:
-            from .stage_reader import get_stage_tree
-            tree = get_stage_tree()
+            import omni.usd
+            stage = omni.usd.get_context().get_stage()
+            if stage is None:
+                return web.json_response({"error": "no stage open"},
+                                         status=500)
             filter_type = request.rel_url.query.get("filter_type")
             under_path = request.rel_url.query.get("under_path", "/")
+            contains = request.rel_url.query.get("contains", "")
+            limit = int(request.rel_url.query.get("limit", "500"))
 
-            # Flatten tree to list of paths with types
             prims = []
-            def _flatten(nodes, depth=0):
-                for n in nodes:
-                    path = n.get("path", "")
-                    ptype = n.get("type", "")
-                    if path.startswith(under_path):
-                        if not filter_type or ptype == filter_type:
-                            prims.append({"path": path, "type": ptype})
-                    _flatten(n.get("children", []), depth + 1)
-
-            _flatten(tree.get("tree", []))
-            return web.json_response({"prims": prims, "count": len(prims)})
+            truncated = False
+            for prim in stage.Traverse():
+                path = str(prim.GetPath())
+                if not path.startswith(under_path):
+                    continue
+                if contains and contains not in path:
+                    continue
+                prim_type = prim.GetTypeName()
+                if filter_type and prim_type != filter_type:
+                    continue
+                prims.append({"path": path, "type": str(prim_type)})
+                if len(prims) >= limit:
+                    truncated = True
+                    break
+            payload = {"prims": prims, "count": len(prims)}
+            if truncated:
+                payload["truncated_to"] = limit
+            return web.json_response(payload)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
