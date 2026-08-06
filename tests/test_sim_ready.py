@@ -375,6 +375,40 @@ class TestSimReadyRegistry:
             for mat in a.get("materials", {}).values():
                 assert mat in db["materials"], f"unknown material {mat!r}"
 
+    def test_every_asset_has_human_review(self):
+        _, registry = self._load()
+        for a in registry["assets"]:
+            assert "review" in a, f"{a['asset_id']} missing human review block"
+            assert a["review"]["reviewer"]
+        for a in registry["assets"]:
+            if a["category"].endswith("_verified"):
+                assert a["review"]["approved"] is True
+
+    def test_ingest_report_codegen(self, monkeypatch):
+        captured = {}
+
+        async def fake_queue(code, description="", timeout=600):
+            captured["code"] = code
+            return {}
+
+        from service.isaac_assist_service.chat.tools import kit_tools
+        from service.isaac_assist_service.chat.tools.handlers.physics import (
+            _handle_ingest_asset_report,
+        )
+        monkeypatch.setattr(kit_tools, "queue_exec_patch", fake_queue)
+        asyncio.run(_handle_ingest_asset_report(
+            {"file_path": "/tmp/x.usd", "class_hint": "chair"}))
+        code = captured["code"]
+        compile(code, "<ingest>", "exec")
+        assert "_class_hint = 'chair'" in code
+        # every sim2real dimension is checked
+        for marker in ("suggested_scale_correction", "joint_limits",
+                       "no physics material bound", "baked asset",
+                       "requires_human_review", "authored total mass"):
+            assert marker in code, f"missing check: {marker}"
+        # priors embedded at codegen time
+        assert "'mug'" in code and "'pan'" in code
+
     def test_audit_surfaces_certification_stamp(self, monkeypatch):
         captured = {}
 

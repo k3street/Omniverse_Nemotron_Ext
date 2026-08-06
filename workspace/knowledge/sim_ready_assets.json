@@ -1,58 +1,110 @@
 {
-  "version": 1,
-  "assets": [
-    {
-      "asset_id": "overbed_table",
-      "file": "/home/kimate/Desktop/overbed_table_simready.usda",
-      "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Adjustable_Bedside_Table.usdz",
-      "category": "articulated_verified",
-      "scale_correction": 0.00265,
-      "materials": {
-        "Base_BedTable_0": "steel_mild",
-        "Base_Extender": "steel_mild",
-        "Upper": "plastic_abs"
-      },
-      "masses_kg": {
-        "Base_BedTable_0": 10.0,
-        "Base_Extender": 2.0,
-        "Upper": 5.0
-      },
-      "audit": {"ready": true, "simulable": true},
-      "verification": {
-        "date": "2026-08-06",
-        "method": "live_physx_drive_test",
-        "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-        "articulation": {
-          "joint": "/World/OverbedTable/Joints/lift",
-          "commanded_m": -0.25,
-          "measured_m": -0.2514,
-          "position_error_m": 0.0014,
-          "max_position_error_m": 0.005,
-          "gravity_sag_measured_m": 0.0016,
-          "gravity_sag_predicted_m": 0.0025,
-          "base_drift_m": 0.0,
-          "max_base_drift_m": 0.01
-        }
-      }
-    },
-    {
-      "asset_id": "office_chair",
-      "file": "/home/kimate/Desktop/office_chair_simready.usda",
-      "source_file": "/home/kimate/Desktop/office_chair.usdz",
-      "category": "rigid_only_baked",
-      "materials": {"OfficeChair": "plastic_abs"},
-      "masses_kg": {"OfficeChair": 12.0},
-      "audit": {"ready": false, "simulable": true},
-      "verification": {
-        "date": "2026-08-06",
-        "method": "live_physx_drop_test",
-        "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-        "drop": {
-          "drop_measured_m": 0.273,
-          "drop_predicted_m": 0.27,
-          "rests_after_s": 2.0
-        }
-      }
+ "version": 1,
+ "assets": [
+  {
+   "asset_id": "overbed_table",
+   "file": "/home/kimate/Desktop/overbed_table_simready.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Adjustable_Bedside_Table.usdz",
+   "category": "articulated_verified",
+   "scale_correction": 0.00265,
+   "materials": {
+    "Base_BedTable_0": "steel_mild",
+    "Base_Extender": "steel_mild",
+    "Upper": "plastic_abs"
+   },
+   "masses_kg": {
+    "Base_BedTable_0": 10.0,
+    "Base_Extender": 2.0,
+    "Upper": 5.0
+   },
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "kimate",
+    "date": "2026-08-06",
+    "notes": "User ran the live lift test in Isaac Sim and confirmed it worked."
+   },
+   "verification": {
+    "date": "2026-08-06",
+    "method": "live_physx_drive_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "articulation": {
+     "joint": "/World/OverbedTable/Joints/lift",
+     "commanded_m": -0.25,
+     "measured_m": -0.2514,
+     "position_error_m": 0.0014,
+     "max_position_error_m": 0.005,
+     "gravity_sag_measured_m": 0.0016,
+     "gravity_sag_predicted_m": 0.0025,
+     "base_drift_m": 0.0,
+     "max_base_drift_m": 0.01
     }
-  ]
+   }
+  },
+  {
+   "asset_id": "office_chair",
+   "file": "/home/kimate/Desktop/office_chair_simready.usda",
+   "source_file": "/home/kimate/Desktop/office_chair.usdz",
+   "category": "rigid_only_baked",
+   "materials": {
+    "OfficeChair": "plastic_abs"
+   },
+   "masses_kg": {
+    "OfficeChair": 12.0
+   },
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "kimate",
+    "date": "2026-08-06",
+    "notes": "Human confirmed the baked-asset callout: single fused mesh, articulations unattainable from this file; category rigid_only_baked is correct."
+   },
+   "verification": {
+    "date": "2026-08-06",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.273,
+     "drop_predicted_m": 0.27,
+     "rests_after_s": 2.0
+    }
+   }
+  },
+  {
+   "asset_id": "steel_frying_pan",
+   "file": "/home/kimate/Desktop/assets/SketchFab_Assets/Steel_frying_pan.usdz",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Steel_frying_pan.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": false
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "Kimate",
+    "date": "2026-08-06"
+   }
+  },
+  {
+   "asset_id": "adjustable_bedside_table",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/adjustable_bedside_table_simready.usda",
+   "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/adjustable_bedside_table_simready.usda",
+   "category": "articulated_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": false
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "Kimate",
+    "date": "2026-08-06"
+   }
+  }
+ ]
 }

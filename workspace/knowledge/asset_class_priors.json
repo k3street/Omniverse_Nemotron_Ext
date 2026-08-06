@@ -1,0 +1,28 @@
+{
+  "_doc": "Real-world plausibility priors for asset ingest verification. Matched by case-insensitive keyword against prim/file names. max_dim_m is the plausible range for the asset's largest bounding-box dimension in meters; mass_kg the plausible total mass; articulable=true means the object class normally has moving parts (absence of joints on a single fused mesh is a fidelity callout).",
+  "classes": {
+    "chair": {"keywords": ["chair", "stool", "armchair"], "max_dim_m": [0.7, 1.6], "mass_kg": [3, 25], "articulable": true, "typical_materials": ["plastic_abs", "steel_mild", "foam_polyurethane"]},
+    "table": {"keywords": ["table", "desk"], "max_dim_m": [0.5, 2.5], "mass_kg": [4, 80], "articulable": false, "typical_materials": ["wood_oak", "steel_mild", "plastic_abs"]},
+    "overbed_table": {"keywords": ["bedside", "overbed"], "max_dim_m": [0.6, 1.3], "mass_kg": [8, 25], "articulable": true, "typical_materials": ["steel_mild", "plastic_abs"]},
+    "cabinet": {"keywords": ["cabinet", "cupboard", "wardrobe", "dresser"], "max_dim_m": [0.6, 2.4], "mass_kg": [10, 120], "articulable": true, "typical_materials": ["wood_oak", "steel_mild"]},
+    "door": {"keywords": ["door"], "max_dim_m": [1.8, 2.4], "mass_kg": [15, 60], "articulable": true, "typical_materials": ["wood_oak", "steel_mild"]},
+    "appliance_large": {"keywords": ["fridge", "refrigerator", "oven", "stove", "washer", "dishwasher"], "max_dim_m": [0.6, 2.0], "mass_kg": [25, 150], "articulable": true, "typical_materials": ["steel_stainless", "plastic_abs"]},
+    "appliance_small": {"keywords": ["blender", "microwave", "toaster", "kettle", "mixer"], "max_dim_m": [0.2, 0.7], "mass_kg": [1, 20], "articulable": true, "typical_materials": ["plastic_abs", "steel_stainless"]},
+    "mug": {"keywords": ["mug", "cup"], "max_dim_m": [0.07, 0.2], "mass_kg": [0.2, 0.7], "articulable": false, "typical_materials": ["ceramic", "steel_stainless"]},
+    "glass": {"keywords": ["glass", "goblet", "beaker", "vial"], "max_dim_m": [0.05, 0.3], "mass_kg": [0.03, 0.6], "articulable": false, "typical_materials": ["glass"]},
+    "bottle": {"keywords": ["bottle", "can", "flask"], "max_dim_m": [0.1, 0.4], "mass_kg": [0.02, 2.0], "articulable": false, "typical_materials": ["glass", "aluminum", "plastic_abs"]},
+    "pan": {"keywords": ["pan", "pot", "skillet", "wok"], "max_dim_m": [0.2, 0.75], "mass_kg": [0.4, 4.0], "articulable": false, "typical_materials": ["steel_mild", "steel_stainless", "aluminum"]},
+    "cutlery": {"keywords": ["fork", "spoon", "knife", "cutlery"], "max_dim_m": [0.1, 0.45], "mass_kg": [0.02, 0.4], "articulable": false, "typical_materials": ["steel_stainless", "wood_oak", "plastic_abs"]},
+    "plate": {"keywords": ["plate", "tray", "dish", "bowl"], "max_dim_m": [0.1, 0.6], "mass_kg": [0.1, 2.0], "articulable": false, "typical_materials": ["ceramic", "plastic_abs", "steel_stainless"]},
+    "hand_tool": {"keywords": ["drill", "hammer", "screwdriver", "pliers", "scissors", "wrench", "soldering"], "max_dim_m": [0.1, 0.5], "mass_kg": [0.05, 3.0], "articulable": true, "typical_materials": ["steel_mild", "plastic_abs", "rubber_natural"]},
+    "electronics_handheld": {"keywords": ["phone", "remote", "mouse", "keyboard", "headphone", "headset", "airpods", "walkman", "ipad", "tablet", "toothbrush", "pen"], "max_dim_m": [0.05, 0.6], "mass_kg": [0.02, 2.5], "articulable": false, "typical_materials": ["plastic_abs", "aluminum"]},
+    "medical_furniture": {"keywords": ["stretcher", "biobed", "hospital bed", "gurney"], "max_dim_m": [1.6, 2.6], "mass_kg": [20, 150], "articulable": true, "typical_materials": ["steel_stainless", "plastic_abs"]},
+    "box": {"keywords": ["box", "crate", "bin", "toolbox", "case"], "max_dim_m": [0.1, 1.2], "mass_kg": [0.1, 20], "articulable": true, "typical_materials": ["cardboard", "plastic_abs", "steel_mild"]},
+    "shoe": {"keywords": ["shoe", "sneaker", "boot"], "max_dim_m": [0.2, 0.4], "mass_kg": [0.2, 1.5], "articulable": false, "typical_materials": ["rubber_natural", "foam_polyurethane"]},
+    "vehicle": {"keywords": ["car", "truck", "aston", "wheelchair", "коляска"], "max_dim_m": [0.9, 6.0], "mass_kg": [8, 2500], "articulable": true, "typical_materials": ["steel_mild", "aluminum", "rubber_natural"]},
+    "glasses_wearable": {"keywords": ["glasses", "spectacles", "goggles"], "max_dim_m": [0.12, 0.2], "mass_kg": [0.02, 0.08], "articulable": true, "typical_materials": ["plastic_abs", "titanium"]},
+    "book": {"keywords": ["book", "notebook", "magazine"], "max_dim_m": [0.1, 0.55], "mass_kg": [0.1, 3.0], "articulable": true, "typical_materials": ["cardboard"]},
+    "blinds": {"keywords": ["blind", "blinds", "curtain", "shade"], "max_dim_m": [0.4, 2.6], "mass_kg": [0.5, 8.0], "articulable": true, "typical_materials": ["plastic_abs", "aluminum"]},
+    "food_item": {"keywords": ["apple", "banana", "orange", "tomato", "potato", "lettuce", "bread", "egg", "fruit"], "max_dim_m": [0.04, 0.35], "mass_kg": [0.03, 2.0], "articulable": false, "typical_materials": []}
+  }
+}

@@ -242,6 +242,21 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "ingest_asset_report",
+            "description": "Sim2real ingest verification of an asset FILE (not the open stage): checks real-world scale against class priors (chair 0.7-1.6 m, mug 7-20 cm, ...) with a suggested correction factor when implausible, articulation state (joints present and body refs resolve / articulable class baked into one mesh / multi-part but unjointed), joint limits (unlimited moving joints, inverted limits, prismatic travel exceeding asset size, >720 deg revolute ranges), physics presence, material bindings, and authored mass vs class range. Reports callouts by severity and an ingest_ok verdict; every report requires human review before the asset can be certified in the sim-ready registry. Run on every asset at ingest.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path to the USD/USDZ asset file to verify"},
+                    "class_hint": {"type": "string", "description": "Optional asset class key from asset_class_priors.json (e.g. 'chair', 'pan', 'appliance_small') when name-based matching would be ambiguous"},
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "articulate_asset",
             "description": "Turn a jointed non-robot asset (cabinet with drawers, door, appliance, simple mechanism) into a USD physics articulation from a declarative joint list — without going through URDF. Applies RigidBodyAPI to the named links (stripping nested rigid bodies), optional collision on link geometry, creates UsdPhysics Revolute/Prismatic/Fixed joints under <root>/Joints anchored at each child link's origin, adds angular/linear drives, applies ArticulationRootAPI, and optionally fixes the base link to the world. For robots from URDF use import_robot instead; for a single joint use create_articulated_joint.",
             "parameters": {

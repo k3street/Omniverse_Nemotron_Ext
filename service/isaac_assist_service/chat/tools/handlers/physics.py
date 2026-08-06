@@ -2854,6 +2854,230 @@ else:
 
 
 # ---------------------------------------------------------------------------
+# Asset ingest verification (2026-08-06)
+#
+# Sim2real gate: every ingested asset is checked for real-world scale,
+# articulation state, materials, and mass against class priors
+# (workspace/knowledge/asset_class_priors.json). The machine produces
+# evidence and callouts; a HUMAN reviews and approves each asset before it
+# can be certified in the registry (schema requires review.approved).
+
+_ASSET_PRIORS_PATH = _WORKSPACE / "knowledge" / "asset_class_priors.json"
+
+
+@functools.lru_cache(maxsize=1)
+def _load_asset_priors() -> Dict:
+    """Load asset class priors from the JSON data file (cached)."""
+    if _ASSET_PRIORS_PATH.exists():
+        return json.loads(_ASSET_PRIORS_PATH.read_text())
+    return {"classes": {}}
+
+
+@with_telemetry
+async def _handle_ingest_asset_report(args: Dict) -> Dict:
+    """Automated sim2real ingest verification of an asset file."""
+    from .. import kit_tools
+    file_path = args["file_path"]
+    class_hint = (args.get("class_hint") or "").strip().lower()
+    priors = _load_asset_priors().get("classes", {})
+    header = f"""\
+import json
+from pxr import Usd, UsdGeom, UsdPhysics
+
+_file = {file_path!r}
+_class_hint = {class_hint!r}
+_priors = {priors!r}
+"""
+    body = """\
+result = {'file': _file, 'callouts': [], 'requires_human_review': True}
+
+def _callout(severity, check, message):
+    result['callouts'].append({'severity': severity, 'check': check, 'message': message})
+
+stage = Usd.Stage.Open(_file)
+if stage is None:
+    result['ingest_ok'] = False
+    _callout('error', 'file', 'could not open USD file')
+    print(json.dumps(result, default=str))
+else:
+    mpu = UsdGeom.GetStageMetersPerUnit(stage)
+    root = stage.GetDefaultPrim() or stage.GetPseudoRoot()
+    result['meters_per_unit'] = mpu
+    result['up_axis'] = str(UsdGeom.GetStageUpAxis(stage))
+
+    # ---- gather structure ----
+    _names = [_file.rsplit('/', 1)[-1].lower()]
+    meshes, joints, rigid, collision, mat_bound, mass_prims = [], [], [], 0, 0, []
+    for _p in stage.Traverse():
+        _names.append(_p.GetName().lower())
+        if _p.IsA(UsdGeom.Mesh):
+            meshes.append(str(_p.GetPath()))
+        if _p.IsA(UsdPhysics.Joint):
+            joints.append({'path': str(_p.GetPath()), 'type': str(_p.GetTypeName())})
+        if _p.HasAPI(UsdPhysics.RigidBodyAPI):
+            rigid.append(str(_p.GetPath()))
+        if _p.HasAPI(UsdPhysics.CollisionAPI):
+            collision += 1
+        _rel = _p.GetRelationship('physics:materialBinding')
+        if _rel and _rel.GetTargets():
+            mat_bound += 1
+        if _p.HasAPI(UsdPhysics.MassAPI):
+            _ma = UsdPhysics.MassAPI(_p).GetMassAttr()
+            if _ma and _ma.HasAuthoredValue():
+                mass_prims.append({'path': str(_p.GetPath()), 'mass_kg': float(_ma.Get())})
+    result['structure'] = {'meshes': len(meshes), 'joints': joints,
+                           'rigid_bodies': len(rigid), 'collision_prims': collision,
+                           'material_bindings': mat_bound, 'authored_masses': mass_prims}
+
+    # ---- class match ----
+    # token match, not substring: 'pen' must not match a prim named 'open'
+    import re as _re
+    _blob = ' '.join(_names)
+    _tokens = set(_re.split(r'[^a-z0-9]+', _blob))
+    def _kw_hit(_kw):
+        return (_kw in _blob) if (' ' in _kw) else (_kw in _tokens)
+    _cls, _prior = None, None
+    if _class_hint and _class_hint in _priors:
+        _cls, _prior = _class_hint, _priors[_class_hint]
+    else:
+        # longest matching keyword wins: 'bedside' (overbed_table) must beat
+        # the generic 'table'
+        _best_kw = ''
+        for _k, _v in _priors.items():
+            for _kw in _v['keywords']:
+                if _kw_hit(_kw) and len(_kw) > len(_best_kw):
+                    _best_kw, _cls, _prior = _kw, _k, _v
+    result['matched_class'] = _cls
+
+    # ---- scale check ----
+    _bbox = UsdGeom.BBoxCache(Usd.TimeCode.Default(),
+                              [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]
+                              ).ComputeWorldBound(root).ComputeAlignedRange()
+    if _bbox.IsEmpty():
+        _callout('error', 'scale', 'empty bounding box — no imageable geometry')
+        _max_dim = 0.0
+    else:
+        _sz = _bbox.GetSize()
+        _max_dim = max(_sz[0], _sz[1], _sz[2]) * mpu
+        result['max_dim_m'] = round(_max_dim, 4)
+        if _prior:
+            _lo, _hi = _prior['max_dim_m']
+            if _max_dim < _lo or _max_dim > _hi:
+                _target = (_lo + _hi) / 2.0
+                result['suggested_scale_correction'] = round(_target / _max_dim, 6)
+                _callout('error', 'scale',
+                         'implausible size for class ' + repr(_cls) + ': max dimension '
+                         + format(_max_dim, '.3f') + ' m, expected ' + format(_lo, 'g')
+                         + '-' + format(_hi, 'g') + ' m. Suggested uniform scale: '
+                         + format(_target / _max_dim, '.6f'))
+        else:
+            _callout('info', 'scale', 'no class prior matched — scale unverified ('
+                     + format(_max_dim, '.3f') + ' m max dimension); provide class_hint '
+                     'or human judgment')
+
+    # ---- articulation check ----
+    _articulable = bool(_prior and _prior.get('articulable'))
+    if joints:
+        _dangling = 0
+        for _j in stage.Traverse():
+            if _j.IsA(UsdPhysics.Joint):
+                _jp = UsdPhysics.Joint(_j)
+                for _r in (_jp.GetBody0Rel(), _jp.GetBody1Rel()):
+                    for _t in (_r.GetTargets() if _r else []):
+                        if not stage.GetPrimAtPath(_t).IsValid():
+                            _dangling += 1
+        if _dangling:
+            _callout('error', 'articulation', str(_dangling) + ' joint body reference(s) '
+                     'do not resolve — articulation is broken')
+        else:
+            result['articulation'] = 'present (' + str(len(joints)) + ' joints) — needs live drive-test verification'
+        # joint limits: real mechanisms have finite, plausible travel
+        _limit_report = []
+        for _j in stage.Traverse():
+            _rj = UsdPhysics.RevoluteJoint(_j) if _j.IsA(UsdPhysics.RevoluteJoint) else None
+            _pj = UsdPhysics.PrismaticJoint(_j) if _j.IsA(UsdPhysics.PrismaticJoint) else None
+            _mj = _rj or _pj
+            if not _mj:
+                continue
+            _lo_a, _hi_a = _mj.GetLowerLimitAttr(), _mj.GetUpperLimitAttr()
+            _lo = _lo_a.Get() if _lo_a and _lo_a.HasAuthoredValue() else None
+            _hi = _hi_a.Get() if _hi_a and _hi_a.HasAuthoredValue() else None
+            _jpath = str(_j.GetPath())
+            _limit_report.append({'joint': _jpath,
+                                  'type': 'revolute' if _rj else 'prismatic',
+                                  'lower': _lo, 'upper': _hi})
+            if _lo is None and _hi is None:
+                _callout('warning', 'joint_limits', 'joint ' + _jpath + ' has no authored '
+                         'limits — it moves without bounds; real mechanisms have finite '
+                         'travel. Author limits or justify (continuous joints only)')
+                continue
+            if _lo is not None and _hi is not None:
+                if float(_lo) > float(_hi):
+                    _callout('error', 'joint_limits', 'joint ' + _jpath + ' has lower limit '
+                             '> upper limit — physically invalid')
+                    continue
+                _range = float(_hi) - float(_lo)
+                if _pj and _max_dim > 0 and _range * mpu > _max_dim:
+                    _callout('error', 'joint_limits', 'prismatic joint ' + _jpath
+                             + ' travel ' + format(_range * mpu, '.3f') + ' m exceeds the '
+                             'asset size (' + format(_max_dim, '.3f') + ' m) — implausible')
+                if _rj and _range > 720.0:
+                    _callout('warning', 'joint_limits', 'revolute joint ' + _jpath
+                             + ' range ' + format(_range, '.1f') + ' deg exceeds 720 deg — '
+                             'verify this is intended (crank/reel), not an authoring error')
+            else:
+                _callout('warning', 'joint_limits', 'joint ' + _jpath + ' has only one '
+                         'limit authored — verify the open side is intended')
+        if _limit_report:
+            result['joint_limits'] = _limit_report
+    elif _articulable and len(meshes) <= 1:
+        _callout('error', 'articulation', 'baked asset: class ' + repr(_cls) + ' typically '
+                 'has moving parts but the file is a single fused mesh — articulations '
+                 'cannot be correct within the limits of this file')
+    elif _articulable:
+        _callout('warning', 'articulation', 'class ' + repr(_cls) + ' typically has moving '
+                 'parts and the file has ' + str(len(meshes)) + ' separate meshes but no '
+                 'joints — run articulate_asset, then verify live')
+    else:
+        result['articulation'] = 'none — acceptable for this class'
+
+    # ---- physics / materials / mass ----
+    if not rigid and not collision:
+        _callout('warning', 'physics', 'no physics authored (no rigid bodies, no collision) '
+                 '— raw asset; run make_sim_ready' + ('/articulate_asset' if joints or _articulable else ''))
+    if rigid and mat_bound == 0:
+        _callout('warning', 'materials', 'physics present but no physics material bound — '
+                 'friction/restitution fall back to PhysX defaults, not real-world values')
+    if _prior:
+        result['suggested_materials'] = _prior.get('typical_materials', [])
+        _mlo, _mhi = _prior['mass_kg']
+        _total = sum(_m['mass_kg'] for _m in mass_prims)
+        if mass_prims and (_total < _mlo or _total > _mhi):
+            _callout('error', 'mass', 'authored total mass ' + format(_total, '.3f')
+                     + ' kg implausible for class ' + repr(_cls) + ' (expected '
+                     + format(_mlo, 'g') + '-' + format(_mhi, 'g') + ' kg)')
+        elif not mass_prims and rigid:
+            _callout('warning', 'mass', 'rigid bodies without authored mass — PhysX will '
+                     'derive from geometry x density; verify against class range '
+                     + format(_mlo, 'g') + '-' + format(_mhi, 'g') + ' kg')
+
+    # ---- certification already present? ----
+    for _p in stage.Traverse():
+        _cd = _p.GetCustomDataByKey('simReady')
+        if _cd:
+            result.setdefault('certifications', {})[str(_p.GetPath())] = dict(_cd)
+
+    _errors = [c for c in result['callouts'] if c['severity'] == 'error']
+    result['ingest_ok'] = not _errors
+    result['verdict'] = ('PASS pending human review' if not _errors else
+                         'CALLOUTS — physically incorrect for sim2real until resolved')
+    print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(
+        header + body, f"ingest_asset_report {file_path}")
+
+
+# ---------------------------------------------------------------------------
 # Asset articulation (2026-08-06)
 #
 # Declarative joint config (shape borrowed from robot_discovery_hub's DH-7
@@ -3190,6 +3414,7 @@ def register(
     data["get_mass"] = _handle_get_mass
     data["get_physics_errors"] = _handle_get_physics_errors
     data["get_physics_scene_config"] = _handle_get_physics_scene_config
+    data["ingest_asset_report"] = _handle_ingest_asset_report
     data["lookup_material"] = _handle_lookup_material
     data["sim_ready_audit"] = _handle_sim_ready_audit
     data["suggest_physics_settings"] = _handle_suggest_physics_settings

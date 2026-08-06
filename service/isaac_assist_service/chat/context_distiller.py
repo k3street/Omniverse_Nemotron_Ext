@@ -39,6 +39,7 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
     "physics": [
         "apply_api_schema", "set_physics_params", "create_deformable_mesh",
         "make_sim_ready", "sim_ready_audit", "articulate_asset",
+        "ingest_asset_report",
     ],
     "material": ["create_material", "assign_material"],
     "robot": [
@@ -76,7 +77,7 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
     "scene_builder": [
         "generate_scene_blueprint", "build_scene_from_blueprint",
         "catalog_search", "nucleus_browse", "download_asset",
-        "make_sim_ready", "sim_ready_audit",
+        "make_sim_ready", "sim_ready_audit", "ingest_asset_report",
     ],
     "rl_training": ["create_isaaclab_env", "launch_training"],
     "sdg": ["configure_sdg"],

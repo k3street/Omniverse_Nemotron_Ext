@@ -15,7 +15,7 @@
   "$defs": {
     "asset": {
       "type": "object",
-      "required": ["asset_id", "file", "source_file", "category", "audit"],
+      "required": ["asset_id", "file", "source_file", "category", "audit", "review"],
       "properties": {
         "asset_id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
         "file": {"type": "string", "description": "Sim-ready USD produced by the pipeline"},
@@ -49,14 +49,20 @@
             "simulable": {"type": "boolean"}
           }
         },
-        "verification": {"$ref": "#/$defs/verification"}
+        "verification": {"$ref": "#/$defs/verification"},
+        "review": {"$ref": "#/$defs/review"}
       },
       "allOf": [
         {
           "if": {"properties": {"category": {"const": "articulated_verified"}}},
           "then": {"required": ["verification"],
                    "properties": {"verification": {"required": ["articulation"]},
-                                  "audit": {"properties": {"ready": {"const": true}}}}}
+                                  "audit": {"properties": {"ready": {"const": true}}},
+                                  "review": {"properties": {"approved": {"const": true}}}}}
+        },
+        {
+          "if": {"properties": {"category": {"const": "rigid_verified"}}},
+          "then": {"properties": {"review": {"properties": {"approved": {"const": true}}}}}
         },
         {
           "if": {"properties": {"category": {"const": "rigid_only_baked"}}},
@@ -64,6 +70,17 @@
                                                            "simulable": {"const": true}}}}}
         }
       ]
+    },
+    "review": {
+      "type": "object",
+      "required": ["approved", "reviewer", "date"],
+      "description": "Human sign-off. The machine produces evidence (ingest report + live verification); a human verifies each asset. Verified categories require approved=true.",
+      "properties": {
+        "approved": {"type": "boolean"},
+        "reviewer": {"type": "string"},
+        "date": {"type": "string", "format": "date"},
+        "notes": {"type": "string"}
+      }
     },
     "verification": {
       "type": "object",

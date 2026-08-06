@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-06T14:30:38+00:00
-Tool count: 438
+Generated: 2026-08-06T16:08:49+00:00
+Tool count: 439
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -127,6 +127,14 @@ class SimReadyAuditArgs(BaseModel):
 
     prim_path: Optional[str] = Field(None, description="USD path of the asset root to audit. Default: '/World' (audits everything under it)")
     expect_dynamic: Optional[bool] = Field(None, description="If true, missing RigidBodyAPI/mass on the root counts as an issue. Default: false")
+
+
+class IngestAssetReportArgs(BaseModel):
+    """Sim2real ingest verification of an asset FILE (not the open stage): checks real-world scale against class priors (chair 0.7-1.6 m, mug 7-20 cm, ...) with a suggested correction factor when implausible"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    file_path: str = Field(..., description="Absolute path to the USD/USDZ asset file to verify")
+    class_hint: Optional[str] = Field(None, description="Optional asset class key from asset_class_priors.json (e.g. 'chair', 'pan', 'appliance_small') when name-based matching would be ambiguous")
 
 
 class ArticulateAssetArgs(BaseModel):
@@ -3991,6 +3999,7 @@ MODEL_REGISTRY = {
     "create_deformable_mesh": CreateDeformableMeshArgs,
     "make_sim_ready": MakeSimReadyArgs,
     "sim_ready_audit": SimReadyAuditArgs,
+    "ingest_asset_report": IngestAssetReportArgs,
     "articulate_asset": ArticulateAssetArgs,
     "anchor_robot": AnchorRobotArgs,
     "create_omnigraph": CreateOmnigraphArgs,
