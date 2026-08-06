@@ -105,6 +105,22 @@
     "reviewer": "Kimate",
     "date": "2026-08-06"
    }
+  },
+  {
+   "asset_id": "airpods",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_simready.usda",
+   "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_simready.usda",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": false
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "kimate",
+    "date": "2026-08-06",
+    "notes": "kimate"
+   }
   }
  ]
 }
