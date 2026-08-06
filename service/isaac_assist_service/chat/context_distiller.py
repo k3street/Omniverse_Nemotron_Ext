@@ -38,11 +38,12 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
     ],
     "physics": [
         "apply_api_schema", "set_physics_params", "create_deformable_mesh",
+        "make_sim_ready", "sim_ready_audit", "articulate_asset",
     ],
     "material": ["create_material", "assign_material"],
     "robot": [
         "import_robot", "anchor_robot", "set_joint_targets",
-        "get_articulation_state",
+        "get_articulation_state", "articulate_asset",
     ],
     "omnigraph_ros2": [
         "create_omnigraph", "ros2_connect", "ros2_list_topics",
@@ -75,6 +76,7 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
     "scene_builder": [
         "generate_scene_blueprint", "build_scene_from_blueprint",
         "catalog_search", "nucleus_browse", "download_asset",
+        "make_sim_ready", "sim_ready_audit",
     ],
     "rl_training": ["create_isaaclab_env", "launch_training"],
     "sdg": ["configure_sdg"],
@@ -89,7 +91,7 @@ _KEYWORD_CATEGORIES: List[tuple] = [
      {"robot", "usd_core"}),
     (re.compile(r"ros2?|omnigraph|graph|publish|subscribe|topic|/cmd_vel|/joint|twist|odom", re.I),
      {"omnigraph_ros2", "scripting"}),
-    (re.compile(r"physics|rigid.?body|collision|collider|gravity|deform|cloth|soft|mass", re.I),
+    (re.compile(r"physics|rigid.?body|collision|collider|gravity|deform|cloth|soft|mass|sim.?ready|physicaliz|simulat.?ready", re.I),
      {"physics", "usd_core"}),
     (re.compile(r"material|color|red|blue|green|glass|metal|opaque|transparent|pbr", re.I),
      {"material", "usd_core"}),

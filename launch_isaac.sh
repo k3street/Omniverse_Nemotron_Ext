@@ -177,15 +177,34 @@ fi
 export ROS_DISTRO=jazzy
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
+# 6.0 source builds ship the ROS2 libs in isaacsim.ros2.core; 5.1 in
+# isaacsim.ros2.bridge. A wrong path here makes the ROS2 bridge fail on
+# startup, which reloads the ROS2 extension stack and takes
+# omni.isaac.assist (a dependent) down with it — killing the Kit RPC server.
 BRIDGE_BASE="${ISAAC_SIM_PATH}/exts/isaacsim.ros2.bridge/jazzy"
-if [[ -d "$BRIDGE_BASE/lib" ]]; then
+ROS2_CORE_BASE="${ISAAC_SIM_PATH}/exts/isaacsim.ros2.core/jazzy"
+if [[ -d "$ROS2_CORE_BASE/lib" ]]; then
+    export LD_LIBRARY_PATH="${ROS2_CORE_BASE}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+elif [[ -d "$BRIDGE_BASE/lib" ]]; then
     export LD_LIBRARY_PATH="${BRIDGE_BASE}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 fi
-TORCH_LIB="${ISAAC_SIM_PATH}/kit/python/lib/python3.11/site-packages/torch/lib"
-if [[ -d "$TORCH_LIB" ]]; then
-    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}${TORCH_LIB}"
+for TORCH_LIB in "${ISAAC_SIM_PATH}"/kit/python/lib/python3.*/site-packages/torch/lib; do
+    if [[ -d "$TORCH_LIB" ]]; then
+        export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}${TORCH_LIB}"
+        break
+    fi
+done
+# Kit's bundled torch needs libnvshmem_host.so.3, which some builds don't
+# ship in their own python — without it torch import crashes Kit at startup.
+if ! [[ -e "${TORCH_LIB:-/nonexistent}/../nvidia/nvshmem/lib/libnvshmem_host.so.3" ]]; then
+    NVSHMEM_DIR=$(ls -d "$HOME"/.cache/packman/chk/kit-kernel/*/python/lib/python3.*/site-packages/nvidia/nvshmem/lib 2>/dev/null | head -1)
+    if [[ -n "$NVSHMEM_DIR" ]]; then
+        export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}${NVSHMEM_DIR}"
+    fi
 fi
-if [[ -d "$BRIDGE_BASE/rclpy" ]]; then
+if [[ -d "$ROS2_CORE_BASE/rclpy" ]]; then
+    export PYTHONPATH="${ROS2_CORE_BASE}/rclpy${PYTHONPATH:+:${PYTHONPATH}}"
+elif [[ -d "$BRIDGE_BASE/rclpy" ]]; then
     export PYTHONPATH="${BRIDGE_BASE}/rclpy${PYTHONPATH:+:${PYTHONPATH}}"
 fi
 

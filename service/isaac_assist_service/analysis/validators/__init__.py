@@ -10,6 +10,7 @@ from .sensor_completeness import SensorCompletenessValidator
 from .ros_bridge_readiness import ROSBridgeReadinessValidator
 from .performance_warnings import PerformanceWarningsValidator
 from .isaaclab_sanity import IsaacLabSanityValidator
+from .sim_readiness import SimReadinessRule
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ register_validator("sensor_completeness", SensorCompletenessValidator)
 register_validator("ros_bridge_readiness", ROSBridgeReadinessValidator)
 register_validator("performance_warnings", PerformanceWarningsValidator)
 register_validator("isaaclab_sanity", IsaacLabSanityValidator)
+register_validator("sim_readiness", SimReadinessRule)
 
 
 __all__ = [
@@ -66,6 +68,7 @@ __all__ = [
     "ROSBridgeReadinessValidator",
     "PerformanceWarningsValidator",
     "IsaacLabSanityValidator",
+    "SimReadinessRule",
     "register_validator",
     "get_registered_validators",
     "create_all_validators",

@@ -189,6 +189,85 @@ ISAAC_SIM_TOOLS = [
         },
     },
 
+    # ─── Sim-ready asset augmentation ────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "make_sim_ready",
+            "description": "Make an imported asset sim-ready in one call: recursively applies CollisionAPI + MeshCollisionAPI (with the chosen approximation) to every mesh in the subtree, then per profile adds RigidBodyAPI on the root, MassAPI with mass estimated from bounding-box volume × material density (or an explicit mass), and binds a physics material from the material database. Enforces the no-nested-rigid-bodies rule by removing RigidBodyAPI from descendants. Profiles: 'manipulable' (graspable object: collision + rigid body + mass), 'tool' (same as manipulable), 'furniture' (static collider: collision only), 'static' (fixture: collision only), 'decoration' (no physics, audit only). Use on a freshly referenced/imported asset instead of chaining apply_api_schema + apply_physics_material + simplify_collision manually.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path of the asset root prim (e.g. the Xform a reference was added under)"},
+                    "profile": {
+                        "type": "string",
+                        "enum": ["manipulable", "tool", "furniture", "static", "decoration"],
+                        "description": "Physics profile. 'manipulable'/'tool' = dynamic rigid body with mass; 'furniture'/'static' = static collider; 'decoration' = no physics. Default: 'manipulable'",
+                    },
+                    "material": {"type": "string", "description": "Physics material name from the database (e.g. 'steel', 'rubber', 'wood_oak', 'plastic_abs'). Binds friction/restitution and provides density for mass estimation."},
+                    "approximation": {
+                        "type": "string",
+                        "enum": ["convexHull", "convexDecomposition", "boundingCube", "boundingSphere", "meshSimplification", "sdf", "none"],
+                        "description": "Collision approximation applied to every mesh. 'none' skips MeshCollisionAPI (triangle-mesh collision, static only). Default: 'convexHull'",
+                    },
+                    "mass_kg": {"type": "number", "description": "Explicit mass in kg for the root rigid body. Overrides density-based estimation."},
+                    "density_kg_m3": {"type": "number", "description": "Density override in kg/m³ for mass estimation. Defaults to the material's database density, else 1000."},
+                    "fill_ratio": {"type": "number", "description": "Fraction of the bounding-box volume assumed solid when estimating mass (0-1). Default: 0.5"},
+                    "kinematic": {"type": "boolean", "description": "Make the rigid body kinematic (animated, not physics-driven). Default: false"},
+                    "skip_name_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Case-insensitive substrings; meshes whose name contains one are skipped for collision (e.g. ['screw', 'bolt', 'label'] for CAD assemblies).",
+                    },
+                },
+                "required": ["prim_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sim_ready_audit",
+            "description": "Audit an asset subtree (or the whole stage) for simulation readiness without modifying anything. Reports: meshes missing CollisionAPI, nested rigid bodies (RigidBodyAPI under another RigidBodyAPI), rigid bodies with no collision geometry, missing/zero MassAPI mass, missing physics material binding, triangle-mesh collision on dynamic bodies, joints whose body0/body1 targets do not resolve, and whether a PhysicsScene exists. Fidelity gates readiness: baked single-fused-mesh assets whose object class typically has moving parts (chair, cabinet, fridge...), and articulation candidates (prims named wheel/hinge/drawer/lid...) with no joints authored, are fidelity ERRORS — 'ready' is false because the asset's articulations cannot be correct within the limits of the source file. A separate 'simulable' flag reports whether it still runs as whole-body rigid dynamics. Run after make_sim_ready or an asset import.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path of the asset root to audit. Default: '/World' (audits everything under it)"},
+                    "expect_dynamic": {"type": "boolean", "description": "If true, missing RigidBodyAPI/mass on the root counts as an issue. Default: false"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "articulate_asset",
+            "description": "Turn a jointed non-robot asset (cabinet with drawers, door, appliance, simple mechanism) into a USD physics articulation from a declarative joint list — without going through URDF. Applies RigidBodyAPI to the named links (stripping nested rigid bodies), optional collision on link geometry, creates UsdPhysics Revolute/Prismatic/Fixed joints under <root>/Joints anchored at each child link's origin, adds angular/linear drives, applies ArticulationRootAPI, and optionally fixes the base link to the world. For robots from URDF use import_robot instead; for a single joint use create_articulated_joint.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prim_path": {"type": "string", "description": "USD path of the asset root prim"},
+                    "joints": {
+                        "type": "array",
+                        "description": "Joint configs. Each: {name, joint_type: 'revolute'|'prismatic'|'fixed', parent_prim, child_prim (paths, absolute or relative to prim_path), axis: 'X'|'Y'|'Z' or [x,y,z], lower_limit, upper_limit (degrees for revolute, stage units for prismatic), anchor: optional [x,y,z] world-space pivot (defaults to the child link origin), drive: bool (default true for moving joints), stiffness, damping, max_force}",
+                        "items": {"type": "object"},
+                    },
+                    "fixed_base": {"type": "boolean", "description": "Fix the base link to the world with a FixedJoint (cabinets, doors: true; free-standing mechanisms: false). Default: true"},
+                    "articulation_root": {"type": "string", "description": "Prim to carry ArticulationRootAPI. Default: prim_path"},
+                    "add_collisions": {"type": "boolean", "description": "Apply CollisionAPI (+ approximation on meshes) to link geometry. Default: true"},
+                    "approximation": {
+                        "type": "string",
+                        "enum": ["convexHull", "convexDecomposition", "boundingCube", "boundingSphere", "meshSimplification", "sdf", "none"],
+                        "description": "Collision approximation for link meshes. Default: 'convexHull'",
+                    },
+                    "link_mass_kg": {"type": "number", "description": "Mass applied to every link via MassAPI. Omit to let PhysX derive mass from geometry."},
+                },
+                "required": ["prim_path", "joints"],
+            },
+        },
+    },
+
     # ─── Robot anchoring ─────────────────────────────────────────────────────
     {
         "type": "function",

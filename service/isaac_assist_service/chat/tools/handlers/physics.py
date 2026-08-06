@@ -2459,6 +2459,696 @@ async def _handle_suggest_physics_settings(args: Dict) -> Dict:
 
 
 # ---------------------------------------------------------------------------
+# Sim-ready asset augmentation (2026-08-05)
+#
+# One-call composite that turns a referenced/imported asset subtree into a
+# simulatable rigid object: recursive collision + approximation, root-only
+# RigidBodyAPI (no-nested-rigid-bodies rule), density-derived MassAPI mass,
+# physics-material binding. Profiles mirror the scene-physics category rules
+# from robot_discovery_hub's scene_physics_validator (DH-5).
+
+_SIM_READY_PROFILES = ("manipulable", "tool", "furniture", "static", "decoration")
+
+_SIM_READY_DYNAMIC = ("manipulable", "tool")
+
+_SIM_READY_APPROX = (
+    "none", "convexHull", "convexDecomposition", "meshSimplification",
+    "boundingSphere", "boundingCube", "sdf",
+)
+
+# Mass estimate clamp — bbox × density over-estimates hollow objects and
+# under-estimates degenerate bboxes; keep results in a sane rigid-body range.
+_SIM_READY_MASS_MIN_KG = 0.001
+_SIM_READY_MASS_MAX_KG = 1000.0
+
+
+def _gen_make_sim_ready(args: Dict) -> str:
+    """Generate code that makes an asset subtree sim-ready in one pass."""
+    prim_path = args["prim_path"]
+    profile = args.get("profile") or "manipulable"
+    approximation = args.get("approximation") or "convexHull"
+    material_name = args.get("material")
+    mass_kg = args.get("mass_kg")
+    kinematic = bool(args.get("kinematic", False))
+    skip_patterns = [str(s).lower() for s in (args.get("skip_name_patterns") or [])]
+
+    if profile not in _SIM_READY_PROFILES:
+        return (
+            "raise ValueError('make_sim_ready: unknown profile ' + "
+            f"{profile!r} + '. Valid: ' + {list(_SIM_READY_PROFILES)!r})"
+        )
+    if approximation not in _SIM_READY_APPROX:
+        return (
+            "raise ValueError('make_sim_ready: unknown approximation ' + "
+            f"{approximation!r} + '. Valid: ' + {list(_SIM_READY_APPROX)!r})"
+        )
+
+    mat = None
+    mat_key = None
+    if material_name:
+        db = _load_physics_materials()
+        mat_key = _normalize_material_name(material_name)
+        mat = db["materials"].get(mat_key)
+        if mat is None:
+            available = sorted(db["materials"].keys())
+            return (
+                f"raise ValueError(\"make_sim_ready: unknown material "
+                f"'{material_name}' (normalized: '{mat_key}'). "
+                f"Available: {', '.join(available)}\")"
+            )
+
+    density = args.get("density_kg_m3")
+    if density is None:
+        density = mat["density_kg_m3"] if mat else 1000.0
+    density = float(density)
+
+    try:
+        fill_ratio = float(args.get("fill_ratio", 0.5))
+    except (TypeError, ValueError):
+        fill_ratio = 0.5
+    fill_ratio = max(0.0, min(fill_ratio, 1.0))
+
+    header = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdGeom, UsdPhysics, Sdf
+
+stage = omni.usd.get_context().get_stage()
+_root_path = {prim_path!r}
+_profile = {profile!r}
+_approx = {approximation!r}
+_skip = {skip_patterns!r}
+_kinematic = {kinematic!r}
+_explicit_mass = {mass_kg!r}
+_density = {density!r}
+_fill_ratio = {fill_ratio!r}
+_mat_name = {mat_key!r}
+_mat_sf = {mat["static_friction"] if mat else None!r}
+_mat_df = {mat["dynamic_friction"] if mat else None!r}
+_mat_rest = {mat["restitution"] if mat else None!r}
+_mat_density = {mat["density_kg_m3"] if mat else None!r}
+_mass_min = {_SIM_READY_MASS_MIN_KG!r}
+_mass_max = {_SIM_READY_MASS_MAX_KG!r}
+"""
+    body = """\
+root = stage.GetPrimAtPath(_root_path)
+if not root or not root.IsValid():
+    raise RuntimeError('make_sim_ready: prim not found: ' + repr(_root_path))
+
+result = {'prim_path': _root_path, 'profile': _profile, 'warnings': []}
+
+if _profile == 'decoration':
+    result['note'] = 'decoration profile — no physics applied'
+    result['root_applied_schemas'] = [str(s) for s in root.GetAppliedSchemas()]
+    print(json.dumps(result, default=str))
+else:
+    # 1. Collision on every geometry prim in the subtree.
+    _geoms = []
+    _skipped = []
+    for _p in Usd.PrimRange(root):
+        if not _p.IsA(UsdGeom.Gprim):
+            continue
+        _name = _p.GetName().lower()
+        if any(_s in _name for _s in _skip):
+            _skipped.append(str(_p.GetPath()))
+            continue
+        _geoms.append(_p)
+    if _skipped:
+        result['skipped_meshes'] = _skipped
+
+    for _g in _geoms:
+        if not _g.HasAPI(UsdPhysics.CollisionAPI):
+            UsdPhysics.CollisionAPI.Apply(_g)
+        if _g.IsA(UsdGeom.Mesh) and _approx != 'none':
+            _mc = UsdPhysics.MeshCollisionAPI.Apply(_g)
+            if _mc.GetApproximationAttr().Set(_approx) is False:
+                raise RuntimeError(
+                    'make_sim_ready: approximation ' + repr(_approx)
+                    + ' refused on ' + str(_g.GetPath())
+                )
+    result['collision_prims'] = len(_geoms)
+    if not _geoms:
+        result['warnings'].append(
+            'no geometry prims found under ' + repr(_root_path)
+            + ' — nothing to collide (is the reference loaded?)'
+        )
+    # Call out baked sources: real-world physics needs real parts. A single
+    # fused mesh for an object class that has moving parts caps fidelity at
+    # whole-body rigid dynamics, and the user must know that.
+    _mesh_n = sum(1 for _g in _geoms if _g.IsA(UsdGeom.Mesh))
+    if _mesh_n <= 1:
+        _class_kw = ('chair', 'cabinet', 'drawer', 'door', 'fridge',
+                     'refrigerator', 'oven', 'microwave', 'washer',
+                     'dishwasher', 'laptop', 'gripper', 'valve', 'cart',
+                     'stroller', 'bicycle', 'bike')
+        _rname = root.GetName().lower()
+        if any(_kw in _rname for _kw in _class_kw):
+            result['sim_ready'] = False
+            result['warnings'].append(
+                "NOT sim ready — baked asset: '" + root.GetName() + "' is a "
+                'single fused mesh but this object class typically has moving '
+                'parts. Its articulations cannot be correct within the limits '
+                'of this file; it simulates as whole-body rigid dynamics only. '
+                'Source a multi-part version for real articulation'
+            )
+        else:
+            result['fidelity'] = 'single-mesh rigid object — no articulation potential'
+
+    _dynamic = _profile in ('manipulable', 'tool')
+    if _dynamic:
+        # 2. RigidBodyAPI on the root only — PhysX rejects nested rigid
+        # bodies, so strip any the asset shipped with.
+        _removed = []
+        for _p in Usd.PrimRange(root):
+            if _p != root and _p.HasAPI(UsdPhysics.RigidBodyAPI):
+                _p.RemoveAPI(UsdPhysics.RigidBodyAPI)
+                _removed.append(str(_p.GetPath()))
+        if _removed:
+            result['removed_nested_rigid_bodies'] = _removed
+        _anc = root.GetParent()
+        while _anc and not _anc.IsPseudoRoot():
+            if _anc.HasAPI(UsdPhysics.RigidBodyAPI):
+                result['warnings'].append(
+                    'ancestor ' + str(_anc.GetPath())
+                    + ' already has RigidBodyAPI — nested rigid bodies are '
+                    'invalid; remove one of the two'
+                )
+                break
+            _anc = _anc.GetParent()
+
+        if not root.HasAPI(UsdPhysics.RigidBodyAPI):
+            UsdPhysics.RigidBodyAPI.Apply(root)
+        _rb = UsdPhysics.RigidBodyAPI(root)
+        _rb.CreateKinematicEnabledAttr().Set(bool(_kinematic))
+
+        # 3. Mass — explicit, or bbox volume × density × fill ratio.
+        _mass_api = UsdPhysics.MassAPI.Apply(root)
+        if _explicit_mass is not None:
+            _mass = float(_explicit_mass)
+            result['mass_source'] = 'explicit'
+        else:
+            _bbox = UsdGeom.BBoxCache(
+                Usd.TimeCode.Default(),
+                [UsdGeom.Tokens.default_, UsdGeom.Tokens.render],
+            ).ComputeWorldBound(root)
+            _size = _bbox.ComputeAlignedRange().GetSize()
+            _mpu = UsdGeom.GetStageMetersPerUnit(stage)
+            _vol_m3 = abs(_size[0] * _size[1] * _size[2]) * (_mpu ** 3)
+            _mass = max(_mass_min, min(_vol_m3 * _density * _fill_ratio, _mass_max))
+            result['mass_source'] = (
+                'bbox_volume(' + format(_vol_m3, '.6g') + ' m3) x density('
+                + format(_density, 'g') + ' kg/m3) x fill_ratio('
+                + format(_fill_ratio, 'g') + ')'
+            )
+        _mass_api.CreateMassAttr().Set(_mass)
+        result['mass_kg'] = _mass
+
+        # 4. A physics scene must exist for anything to simulate.
+        if not any(_p.IsA(UsdPhysics.Scene) for _p in stage.Traverse()):
+            UsdPhysics.Scene.Define(stage, Sdf.Path('/PhysicsScene'))
+            result['created_physics_scene'] = '/PhysicsScene'
+
+    # 5. Physics material bind on the root (same convention as
+    # apply_physics_material: material prim under /World/PhysicsMaterials).
+    if _mat_name is not None:
+        _mat_path = '/World/PhysicsMaterials/' + _mat_name
+        _mat_prim = stage.DefinePrim(_mat_path)
+        _mat_api = UsdPhysics.MaterialAPI.Apply(_mat_prim)
+        _mat_api.CreateStaticFrictionAttr().Set(_mat_sf)
+        _mat_api.CreateDynamicFrictionAttr().Set(_mat_df)
+        _mat_api.CreateRestitutionAttr().Set(_mat_rest)
+        _mat_api.CreateDensityAttr().Set(_mat_density)
+        _rel = root.CreateRelationship('physics:materialBinding', custom=False)
+        _rel.SetTargets([Sdf.Path(_mat_path)])
+        result['physics_material'] = _mat_path
+
+    # 6. Verify the writes took before reporting success.
+    result['root_applied_schemas'] = [str(s) for s in root.GetAppliedSchemas()]
+    if _dynamic and not root.HasAPI(UsdPhysics.RigidBodyAPI):
+        raise RuntimeError('make_sim_ready: RigidBodyAPI failed to apply on ' + repr(_root_path))
+    print(json.dumps(result, default=str))
+"""
+    return header + body
+
+
+@with_telemetry
+async def _handle_sim_ready_audit(args: Dict) -> Dict:
+    """Read-only sim-readiness audit of an asset subtree."""
+    from .. import kit_tools
+    prim_path = args.get("prim_path") or "/World"
+    expect_dynamic = bool(args.get("expect_dynamic", False))
+    header = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdGeom, UsdPhysics
+
+stage = omni.usd.get_context().get_stage()
+_root_path = {prim_path!r}
+_expect_dynamic = {expect_dynamic!r}
+"""
+    body = """\
+root = stage.GetPrimAtPath(_root_path)
+result = {'prim_path': _root_path, 'issues': [], 'stats': {}}
+
+def _issue(severity, message, path=None, category='physics'):
+    result['issues'].append({'severity': severity, 'message': message,
+                             'prim': path, 'category': category})
+
+if not root or not root.IsValid():
+    result['error'] = 'prim not found'
+    print(json.dumps(result, default=str))
+else:
+    _geoms = []
+    _rigid = []
+    _joints = []
+    for _p in Usd.PrimRange(root):
+        if _p.IsA(UsdGeom.Gprim):
+            _geoms.append(_p)
+        if _p.HasAPI(UsdPhysics.RigidBodyAPI):
+            _rigid.append(_p)
+        if _p.IsA(UsdPhysics.Joint):
+            _joints.append(_p)
+
+    _no_col = [str(_m.GetPath()) for _m in _geoms if not _m.HasAPI(UsdPhysics.CollisionAPI)]
+    result['stats']['geometry_prims'] = len(_geoms)
+    result['stats']['with_collision'] = len(_geoms) - len(_no_col)
+    for _path in _no_col:
+        _issue('warning', 'geometry prim has no CollisionAPI', _path)
+
+    result['stats']['rigid_bodies'] = [str(_p.GetPath()) for _p in _rigid]
+    for _p in _rigid:
+        _anc = _p.GetParent()
+        while _anc and not _anc.IsPseudoRoot():
+            if _anc.HasAPI(UsdPhysics.RigidBodyAPI):
+                _issue('error', 'nested rigid body — RigidBodyAPI also on ancestor ' + str(_anc.GetPath()), str(_p.GetPath()))
+                break
+            _anc = _anc.GetParent()
+
+    for _p in _rigid:
+        if not any(_c.HasAPI(UsdPhysics.CollisionAPI) for _c in Usd.PrimRange(_p)):
+            _issue('error', 'rigid body has no collision geometry in its subtree (will fall through the floor)', str(_p.GetPath()))
+            continue
+        _kin_attr = UsdPhysics.RigidBodyAPI(_p).GetKinematicEnabledAttr()
+        _is_kin = bool(_kin_attr.Get()) if _kin_attr else False
+        if _is_kin:
+            continue
+        if not _p.HasAPI(UsdPhysics.MassAPI):
+            _issue('info', 'no MassAPI — PhysX will derive mass from collision geometry and density', str(_p.GetPath()))
+        else:
+            _m_attr = UsdPhysics.MassAPI(_p).GetMassAttr()
+            _mval = _m_attr.Get() if _m_attr else None
+            if _m_attr and _m_attr.HasAuthoredValue() and _mval is not None and float(_mval) <= 0.0:
+                _issue('warning', 'MassAPI mass is authored as 0', str(_p.GetPath()))
+        for _c in Usd.PrimRange(_p):
+            if _c.IsA(UsdGeom.Mesh) and _c.HasAPI(UsdPhysics.CollisionAPI):
+                _approx = None
+                if _c.HasAPI(UsdPhysics.MeshCollisionAPI):
+                    _a = UsdPhysics.MeshCollisionAPI(_c).GetApproximationAttr()
+                    _approx = _a.Get() if _a else None
+                if _approx in (None, 'none'):
+                    _issue('warning', 'dynamic body uses triangle-mesh collision (no approximation) — set convexHull or convexDecomposition', str(_c.GetPath()))
+
+    _rel = root.GetRelationship('physics:materialBinding')
+    result['stats']['physics_material_bound'] = bool(_rel and _rel.GetTargets())
+
+    # Fidelity gate — an asset whose articulations cannot be correct within
+    # the limits of the source file is NOT sim ready. These are errors
+    # (category 'fidelity'): they flip 'ready' to false. 'simulable' below
+    # still records that the object runs as whole-body rigid dynamics.
+    _part_kw = ('wheel', 'caster', 'door', 'drawer', 'hinge', 'lid', 'handle',
+                'knob', 'lever', 'slider', 'axle', 'swivel', 'piston', 'gear',
+                'latch', 'wing')
+    _class_kw = ('chair', 'cabinet', 'drawer', 'door', 'fridge', 'refrigerator',
+                 'oven', 'microwave', 'washer', 'dishwasher', 'laptop',
+                 'gripper', 'valve', 'cart', 'stroller', 'bicycle', 'bike')
+    _candidates = sorted({str(_p.GetPath()) for _p in Usd.PrimRange(root)
+                          if any(_kw in _p.GetName().lower() for _kw in _part_kw)})
+    if _candidates and not _joints:
+        _issue('error',
+               'articulation candidates present but no joints authored ('
+               + ', '.join(_candidates[:8]) + ') — run articulate_asset to give them real motion',
+               _root_path, category='fidelity')
+    # Bodies that are joint targets are articulation links — a drawer link
+    # being one mesh is correct, so the baked check must skip them.
+    _link_targets = set()
+    for _j in _joints:
+        _jp = UsdPhysics.Joint(_j)
+        for _body_rel in (_jp.GetBody0Rel(), _jp.GetBody1Rel()):
+            for _t in (_body_rel.GetTargets() if _body_rel else []):
+                _link_targets.add(str(_t))
+    for _p in _rigid:
+        _sub_meshes = [_c for _c in Usd.PrimRange(_p) if _c.IsA(UsdGeom.Mesh)]
+        _pname = _p.GetName().lower()
+        if (len(_sub_meshes) <= 1 and str(_p.GetPath()) not in _link_targets
+                and any(_kw in _pname for _kw in _class_kw)):
+            _issue('error',
+                   "baked asset: '" + _p.GetName() + "' is a single fused mesh but "
+                   'this object class typically has moving parts. Joints cannot be '
+                   'authored without mesh segmentation — its articulations cannot be '
+                   'correct within the limits of this file. Source a multi-part '
+                   'version for real articulation', str(_p.GetPath()),
+                   category='fidelity')
+        _rel_b = _p.GetRelationship('physics:materialBinding')
+        if not (_rel_b and _rel_b.GetTargets()):
+            _issue('info', 'no physics material bound — contact friction/restitution '
+                   'fall back to PhysX defaults, not real-world values', str(_p.GetPath()))
+
+    result['stats']['joints'] = len(_joints)
+    for _j in _joints:
+        _jp = UsdPhysics.Joint(_j)
+        for _body_rel in (_jp.GetBody0Rel(), _jp.GetBody1Rel()):
+            for _t in (_body_rel.GetTargets() if _body_rel else []):
+                if not stage.GetPrimAtPath(_t).IsValid():
+                    _issue('error', 'joint references missing prim ' + str(_t), str(_j.GetPath()))
+
+    _has_scene = any(_p.IsA(UsdPhysics.Scene) for _p in stage.Traverse())
+    result['stats']['physics_scene'] = _has_scene
+    if not _has_scene:
+        _issue('warning', 'no PhysicsScene prim in stage')
+
+    if _expect_dynamic and not root.HasAPI(UsdPhysics.RigidBodyAPI):
+        _issue('error', 'expected dynamic asset but root has no RigidBodyAPI', _root_path)
+
+    result['ready'] = not any(_i['severity'] == 'error' for _i in result['issues'])
+    result['simulable'] = not any(
+        _i['severity'] == 'error' and _i.get('category') == 'physics'
+        for _i in result['issues'])
+    if not result['ready'] and result['simulable']:
+        result['verdict'] = ('NOT sim ready — articulation fidelity is capped by '
+                             'the source file; the object still simulates as '
+                             'whole-body rigid dynamics')
+    print(json.dumps(result, default=str))
+"""
+    return await kit_tools.queue_exec_patch(header + body, f"sim_ready_audit {prim_path}")
+
+
+# ---------------------------------------------------------------------------
+# Asset articulation (2026-08-06)
+#
+# Declarative joint config (shape borrowed from robot_discovery_hub's DH-7
+# scene_articulation_setup YAML) executed with this repo's proven UsdPhysics
+# joint pattern (see robot.py create_articulated_joint). The discovery hub's
+# joint_creator.py was reviewed and NOT ported: it never applies
+# UsdPhysics.ArticulationRootAPI, always uses an "angular" drive (wrong for
+# prismatic), and double-rotates joint frames. Only its rules survive here:
+# rigid bodies on links only (never nested), drives on every moving joint,
+# explicit articulation root, optional fixed base.
+
+_ARTICULATE_JOINT_TYPES = ("revolute", "prismatic", "fixed")
+
+_ARTICULATE_DRIVE_DEFAULTS = {"stiffness": 1.0e4, "damping": 1.0e3, "max_force": 1.0e6}
+
+_JOINT_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _articulate_axis_token(axis: Any) -> Optional[str]:
+    """Normalize an axis spec ('X'/'y'/[0,1,0]) to a USD axis token."""
+    if isinstance(axis, str):
+        token = axis.strip().upper()
+        return token if token in ("X", "Y", "Z") else None
+    if isinstance(axis, (list, tuple)) and len(axis) == 3:
+        try:
+            mags = [abs(float(v)) for v in axis]
+        except (TypeError, ValueError):
+            return None
+        if max(mags) == 0:
+            return None
+        return "XYZ"[mags.index(max(mags))]
+    return None
+
+
+def _gen_articulate_asset(args: Dict) -> str:
+    """Generate code that turns a jointed asset into a USD physics articulation."""
+    prim_path = str(args["prim_path"]).rstrip("/")
+    joints_cfg = args.get("joints") or []
+    fixed_base = bool(args.get("fixed_base", True))
+    add_collisions = bool(args.get("add_collisions", True))
+    approximation = args.get("approximation") or "convexHull"
+    link_mass = args.get("link_mass_kg")
+    articulation_root = str(args.get("articulation_root") or prim_path).rstrip("/")
+
+    def _err(msg: str) -> str:
+        return f"raise ValueError({('articulate_asset: ' + msg)!r})"
+
+    if not isinstance(joints_cfg, list) or not joints_cfg:
+        return _err("'joints' must be a non-empty array of joint configs")
+    if approximation not in _SIM_READY_APPROX:
+        return _err(
+            f"unknown approximation '{approximation}'. Valid: {list(_SIM_READY_APPROX)}"
+        )
+
+    def _resolve(p: Any) -> str:
+        p = str(p).strip()
+        return p if p.startswith("/") else f"{prim_path}/{p}"
+
+    # Validate + normalize the joint configs (rules ported from DH-7
+    # validate_articulation_config) before any code is generated.
+    normalized = []
+    seen_names = set()
+    for i, j in enumerate(joints_cfg):
+        if not isinstance(j, dict):
+            return _err(f"joints[{i}] is not an object")
+        name = str(j.get("name") or f"joint_{i}")
+        if not _JOINT_NAME_RE.match(name):
+            return _err(f"joints[{i}] name {name!r} is not a valid USD prim name")
+        if name in seen_names:
+            return _err(f"duplicate joint name {name!r}")
+        seen_names.add(name)
+        jtype = str(j.get("joint_type") or "revolute")
+        if jtype not in _ARTICULATE_JOINT_TYPES:
+            return _err(
+                f"joints[{i}] joint_type {jtype!r} invalid. Valid: {list(_ARTICULATE_JOINT_TYPES)}"
+            )
+        if not j.get("parent_prim") or not j.get("child_prim"):
+            return _err(f"joints[{i}] ({name}) needs parent_prim and child_prim")
+        parent = _resolve(j["parent_prim"])
+        child = _resolve(j["child_prim"])
+        if parent == child:
+            return _err(f"joints[{i}] ({name}) parent_prim == child_prim")
+        axis = _articulate_axis_token(j.get("axis", "Z"))
+        if jtype != "fixed" and axis is None:
+            return _err(f"joints[{i}] ({name}) axis must be 'X'/'Y'/'Z' or a 3-vector")
+        lower = j.get("lower_limit")
+        upper = j.get("upper_limit")
+        if lower is not None and upper is not None and float(lower) > float(upper):
+            return _err(f"joints[{i}] ({name}) lower_limit > upper_limit")
+        anchor = j.get("anchor")
+        if anchor is not None and (
+            not isinstance(anchor, (list, tuple)) or len(anchor) != 3
+        ):
+            return _err(f"joints[{i}] ({name}) anchor must be a [x, y, z] world position")
+        drive = j.get("drive")
+        if drive is None:
+            drive = jtype != "fixed"
+        normalized.append({
+            "name": name,
+            "type": jtype,
+            "parent": parent,
+            "child": child,
+            "axis": axis,
+            "lower": None if lower is None else float(lower),
+            "upper": None if upper is None else float(upper),
+            "anchor": None if anchor is None else [float(v) for v in anchor],
+            "drive": bool(drive) and jtype != "fixed",
+            "stiffness": float(j.get("stiffness", _ARTICULATE_DRIVE_DEFAULTS["stiffness"])),
+            "damping": float(j.get("damping", _ARTICULATE_DRIVE_DEFAULTS["damping"])),
+            "max_force": float(j.get("max_force", _ARTICULATE_DRIVE_DEFAULTS["max_force"])),
+        })
+
+    # The joint graph must be a tree — PhysX articulations reject loops.
+    # (Rule from cad_creator's URDF planner: skip/exclude one joint of any
+    # closed loop rather than authoring it.)
+    child_seen: Dict[str, str] = {}
+    for j in normalized:
+        prev = child_seen.get(j["child"])
+        if prev is not None:
+            return _err(
+                f"link {j['child']!r} is the child of two joints ({prev!r} and "
+                f"{j['name']!r}) — articulations must be trees; drop or 'fixed'-"
+                "merge one of them"
+            )
+        child_seen[j["child"]] = j["name"]
+    parent_of = {j["child"]: j["parent"] for j in normalized}
+    for start in parent_of:
+        node, hops = start, 0
+        while node in parent_of and hops <= len(parent_of):
+            node = parent_of[node]
+            hops += 1
+            if node == start:
+                return _err(
+                    f"kinematic loop through link {start!r} — articulations "
+                    "must be trees; remove one joint of the cycle"
+                )
+
+    static_warnings = []
+    for j in normalized:
+        if j["type"] != "fixed" and j["lower"] is None and j["upper"] is None:
+            static_warnings.append(
+                f"joint '{j['name']}' has no limits — it will move freely"
+            )
+
+    # Links must not nest — PhysX rejects a rigid body under a rigid body.
+    links = []
+    for j in normalized:
+        for p in (j["parent"], j["child"]):
+            if p not in links:
+                links.append(p)
+    for a in links:
+        for b in links:
+            if a != b and b.startswith(a + "/"):
+                return _err(
+                    f"link {b!r} is a descendant of link {a!r} — links must be "
+                    "sibling subtrees (nested rigid bodies are invalid)"
+                )
+
+    # Base link: appears as a parent but never as a child; fallback to the
+    # first joint's parent when the graph is a loop.
+    children = {j["child"] for j in normalized}
+    base_candidates = [p for p in links if p not in children]
+    base_link = base_candidates[0] if base_candidates else normalized[0]["parent"]
+    if len(base_candidates) > 1:
+        static_warnings.append(
+            f"multiple base candidates {base_candidates!r} — using {base_link!r}; "
+            "connect the others with fixed joints if they belong to the same body"
+        )
+
+    header = f"""\
+import omni.usd
+import json
+from pxr import Usd, UsdGeom, UsdPhysics, Sdf, Gf
+
+stage = omni.usd.get_context().get_stage()
+_root_path = {prim_path!r}
+_art_root = {articulation_root!r}
+_joints = {normalized!r}
+_links = {links!r}
+_base_link = {base_link!r}
+_fixed_base = {fixed_base!r}
+_add_collisions = {add_collisions!r}
+_approx = {approximation!r}
+_link_mass = {link_mass!r}
+_static_warnings = {static_warnings!r}
+"""
+    body = """\
+root = stage.GetPrimAtPath(_root_path)
+if not root or not root.IsValid():
+    raise RuntimeError('articulate_asset: prim not found: ' + repr(_root_path))
+_missing = [_l for _l in _links if not stage.GetPrimAtPath(_l).IsValid()]
+if _missing:
+    raise RuntimeError('articulate_asset: link prims not found: ' + repr(_missing))
+
+result = {'prim_path': _root_path, 'links': _links, 'base_link': _base_link,
+          'joints': [], 'warnings': list(_static_warnings)}
+
+# 1. Rigid bodies on links only. Strip any RigidBodyAPI inside link
+# subtrees and on the asset/articulation root (unless it is itself a link)
+# — nested rigid bodies break PhysX articulations.
+for _lp in _links:
+    _link = stage.GetPrimAtPath(_lp)
+    if not _link.HasAPI(UsdPhysics.RigidBodyAPI):
+        UsdPhysics.RigidBodyAPI.Apply(_link)
+    for _p in Usd.PrimRange(_link):
+        if _p != _link and _p.HasAPI(UsdPhysics.RigidBodyAPI):
+            _p.RemoveAPI(UsdPhysics.RigidBodyAPI)
+            result['warnings'].append('removed nested RigidBodyAPI on ' + str(_p.GetPath()))
+    if _link_mass is not None:
+        UsdPhysics.MassAPI.Apply(_link).CreateMassAttr().Set(float(_link_mass))
+for _rp in {_root_path, _art_root}:
+    _r = stage.GetPrimAtPath(_rp)
+    if _r and _r.IsValid() and _rp not in _links and _r.HasAPI(UsdPhysics.RigidBodyAPI):
+        _r.RemoveAPI(UsdPhysics.RigidBodyAPI)
+        result['warnings'].append('removed RigidBodyAPI on root ' + _rp + ' (links carry the bodies)')
+
+# 2. Collision on link geometry.
+if _add_collisions:
+    _col_count = 0
+    for _lp in _links:
+        for _p in Usd.PrimRange(stage.GetPrimAtPath(_lp)):
+            if not _p.IsA(UsdGeom.Gprim):
+                continue
+            if not _p.HasAPI(UsdPhysics.CollisionAPI):
+                UsdPhysics.CollisionAPI.Apply(_p)
+            if _p.IsA(UsdGeom.Mesh) and _approx != 'none':
+                UsdPhysics.MeshCollisionAPI.Apply(_p).GetApproximationAttr().Set(_approx)
+            _col_count += 1
+    result['collision_prims'] = _col_count
+    if _col_count == 0:
+        result['warnings'].append('links contain no geometry prims — no collision applied')
+
+# 3. Joints under <root>/Joints, anchored at the child link origin (or an
+# explicit world-space anchor), expressed in each body's local frame.
+_xf = UsdGeom.XformCache(Usd.TimeCode.Default())
+_scope = _root_path + '/Joints'
+if not stage.GetPrimAtPath(_scope).IsValid():
+    UsdGeom.Scope.Define(stage, Sdf.Path(_scope))
+for _j in _joints:
+    _jpath = _scope + '/' + _j['name']
+    if _j['type'] == 'revolute':
+        _joint = UsdPhysics.RevoluteJoint.Define(stage, Sdf.Path(_jpath))
+    elif _j['type'] == 'prismatic':
+        _joint = UsdPhysics.PrismaticJoint.Define(stage, Sdf.Path(_jpath))
+    else:
+        _joint = UsdPhysics.FixedJoint.Define(stage, Sdf.Path(_jpath))
+    _joint.CreateBody0Rel().SetTargets([Sdf.Path(_j['parent'])])
+    _joint.CreateBody1Rel().SetTargets([Sdf.Path(_j['child'])])
+
+    _parent_w = _xf.GetLocalToWorldTransform(stage.GetPrimAtPath(_j['parent']))
+    _child_w = _xf.GetLocalToWorldTransform(stage.GetPrimAtPath(_j['child']))
+    if _j['anchor'] is not None:
+        _anchor = Gf.Vec3d(*_j['anchor'])
+    else:
+        _anchor = _child_w.Transform(Gf.Vec3d(0, 0, 0))
+    _lp0 = _parent_w.GetInverse().Transform(_anchor)
+    _lp1 = _child_w.GetInverse().Transform(_anchor)
+    _joint.CreateLocalPos0Attr().Set(Gf.Vec3f(_lp0))
+    _joint.CreateLocalPos1Attr().Set(Gf.Vec3f(_lp1))
+
+    if _j['type'] != 'fixed':
+        _joint.CreateAxisAttr().Set(_j['axis'])
+        if _j['lower'] is not None:
+            _joint.CreateLowerLimitAttr().Set(_j['lower'])
+        if _j['upper'] is not None:
+            _joint.CreateUpperLimitAttr().Set(_j['upper'])
+        if _j['drive']:
+            _token = 'angular' if _j['type'] == 'revolute' else 'linear'
+            _drive = UsdPhysics.DriveAPI.Apply(_joint.GetPrim(), _token)
+            _drive.CreateTypeAttr().Set('force')
+            _drive.CreateStiffnessAttr().Set(_j['stiffness'])
+            _drive.CreateDampingAttr().Set(_j['damping'])
+            _drive.CreateMaxForceAttr().Set(_j['max_force'])
+    result['joints'].append({'path': _jpath, 'type': _j['type'],
+                             'axis': _j['axis'], 'drive': _j['drive']})
+
+# 4. Articulation root + optional fixed base (FixedJoint from world).
+_art_prim = stage.GetPrimAtPath(_art_root)
+if not _art_prim or not _art_prim.IsValid():
+    raise RuntimeError('articulate_asset: articulation_root not found: ' + repr(_art_root))
+if not _art_prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+    UsdPhysics.ArticulationRootAPI.Apply(_art_prim)
+result['articulation_root'] = _art_root
+if _fixed_base:
+    _fb_path = _scope + '/FixedBase'
+    _fb = UsdPhysics.FixedJoint.Define(stage, Sdf.Path(_fb_path))
+    _fb.CreateBody1Rel().SetTargets([Sdf.Path(_base_link)])
+    result['fixed_base_joint'] = _fb_path
+
+# 5. A physics scene must exist for anything to simulate.
+if not any(_p.IsA(UsdPhysics.Scene) for _p in stage.Traverse()):
+    UsdPhysics.Scene.Define(stage, Sdf.Path('/PhysicsScene'))
+    result['created_physics_scene'] = '/PhysicsScene'
+
+# 6. Verify before reporting success.
+if not _art_prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+    raise RuntimeError('articulate_asset: ArticulationRootAPI failed to apply')
+for _j in result['joints']:
+    if not stage.GetPrimAtPath(_j['path']).IsValid():
+        raise RuntimeError('articulate_asset: joint prim missing after create: ' + _j['path'])
+print(json.dumps(result, default=str))
+"""
+    return header + body
+
+
+# ---------------------------------------------------------------------------
 # Registration
 
 
@@ -2471,7 +3161,7 @@ def register(
     Called by `handlers/_dispatch.py:register_handlers()` which is the
     sole dispatch entry point from `tool_executor.py`.
     """
-    # Data handlers (19)
+    # Data handlers (20)
     data["get_angular_velocity"] = _handle_get_angular_velocity
     data["get_articulation_mass"] = _handle_get_articulation_mass
     data["get_articulation_state"] = _handle_get_articulation_state
@@ -2490,10 +3180,13 @@ def register(
     data["get_physics_errors"] = _handle_get_physics_errors
     data["get_physics_scene_config"] = _handle_get_physics_scene_config
     data["lookup_material"] = _handle_lookup_material
+    data["sim_ready_audit"] = _handle_sim_ready_audit
     data["suggest_physics_settings"] = _handle_suggest_physics_settings
 
-    # Code-gen handlers (16)
+    # Code-gen handlers (18)
     codegen["apply_force"] = _gen_apply_force
+    codegen["make_sim_ready"] = _gen_make_sim_ready
+    codegen["articulate_asset"] = _gen_articulate_asset
     codegen["apply_physics_material"] = _gen_apply_physics_material
     codegen["compute_convex_hull"] = _gen_compute_convex_hull
     codegen["configure_self_collision"] = _gen_configure_self_collision

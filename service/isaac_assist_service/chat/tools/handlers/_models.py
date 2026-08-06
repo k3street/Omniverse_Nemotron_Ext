@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-05-14T08:32:36+00:00
-Tool count: 435
+Generated: 2026-08-06T14:30:38+00:00
+Tool count: 438
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -106,6 +106,42 @@ class CreateDeformableMeshArgs(BaseModel):
     self_collision: Optional[bool] = Field(None, description="Enable self-collision detection")
 
 
+class MakeSimReadyArgs(BaseModel):
+    """Make an imported asset sim-ready in one call: recursively applies CollisionAPI + MeshCollisionAPI (with the chosen approximation) to every mesh in the subtree, then per profile adds RigidBodyAPI on th"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    prim_path: str = Field(..., description="USD path of the asset root prim (e.g. the Xform a reference was added under)")
+    profile: Optional[str] = Field(None, description="Physics profile. 'manipulable'/'tool' = dynamic rigid body with mass; 'furniture'/'static' = static collider; 'decoration' = no physics. Default: 'manipulable'")
+    material: Optional[str] = Field(None, description="Physics material name from the database (e.g. 'steel', 'rubber', 'wood_oak', 'plastic_abs'). Binds friction/restitution and provides density for mass estimation.")
+    approximation: Optional[str] = Field(None, description="Collision approximation applied to every mesh. 'none' skips MeshCollisionAPI (triangle-mesh collision, static only). Default: 'convexHull'")
+    mass_kg: Optional[float] = Field(None, description="Explicit mass in kg for the root rigid body. Overrides density-based estimation.")
+    density_kg_m3: Optional[float] = Field(None, description="Density override in kg/m³ for mass estimation. Defaults to the material's database density, else 1000.")
+    fill_ratio: Optional[float] = Field(None, description="Fraction of the bounding-box volume assumed solid when estimating mass (0-1). Default: 0.5")
+    kinematic: Optional[bool] = Field(None, description="Make the rigid body kinematic (animated, not physics-driven). Default: false")
+    skip_name_patterns: Optional[List[str]] = Field(None, description="Case-insensitive substrings; meshes whose name contains one are skipped for collision (e.g. ['screw', 'bolt', 'label'] for CAD assemblies).")
+
+
+class SimReadyAuditArgs(BaseModel):
+    """Audit an asset subtree (or the whole stage) for simulation readiness without modifying anything. Reports: meshes missing CollisionAPI, nested rigid bodies (RigidBodyAPI under another RigidBodyAPI), ri"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    prim_path: Optional[str] = Field(None, description="USD path of the asset root to audit. Default: '/World' (audits everything under it)")
+    expect_dynamic: Optional[bool] = Field(None, description="If true, missing RigidBodyAPI/mass on the root counts as an issue. Default: false")
+
+
+class ArticulateAssetArgs(BaseModel):
+    """Turn a jointed non-robot asset (cabinet with drawers, door, appliance, simple mechanism) into a USD physics articulation from a declarative joint list — without going through URDF. Applies RigidBodyAP"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    prim_path: str = Field(..., description="USD path of the asset root prim")
+    joints: List[Dict[str, Any]] = Field(..., description="Joint configs. Each: {name, joint_type: 'revolute'|'prismatic'|'fixed', parent_prim, child_prim (paths, absolute or relative to prim_path), axis: 'X'|'Y'|'Z' or [x,y,z], lower_limit, upper_limit (degr")
+    fixed_base: Optional[bool] = Field(None, description="Fix the base link to the world with a FixedJoint (cabinets, doors: true; free-standing mechanisms: false). Default: true")
+    articulation_root: Optional[str] = Field(None, description="Prim to carry ArticulationRootAPI. Default: prim_path")
+    add_collisions: Optional[bool] = Field(None, description="Apply CollisionAPI (+ approximation on meshes) to link geometry. Default: true")
+    approximation: Optional[str] = Field(None, description="Collision approximation for link meshes. Default: 'convexHull'")
+    link_mass_kg: Optional[float] = Field(None, description="Mass applied to every link via MassAPI. Omit to let PhysX derive mass from geometry.")
+
+
 class AnchorRobotArgs(BaseModel):
     """Anchor a STATIONARY robot (e.g., Franka arm) to the world or a surface. Sets PhysxArticulationAPI.fixedBase=True and deletes the rootJoint. Do NOT use for wheeled/mobile robots (Nova Carter, Jetbot) —"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
@@ -148,11 +184,11 @@ class LookupProductSpecArgs(BaseModel):
 
 
 class CreateMaterialArgs(BaseModel):
-    """Create a new MDL material (OmniPBR, OmniGlass, OmniSurface) with specified appearance properties."""
+    """Create a new material with specified appearance properties. OmniPBR-style colors are emitted through the USD Preview Surface safe path in Isaac Sim 6; do not create an OmniPBR prim type directly."""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     material_path: str = Field(..., description="USD path for the material")
-    shader_type: str
+    shader_type: str = Field(..., description="Requested material style; OmniPBR is generated as USD Preview Surface for Isaac Sim 6 safety.")
     diffuse_color: Optional[List[float]] = Field(None, description="RGB color [r, g, b] 0-1")
     metallic: Optional[float] = Field(None, description="Metallic factor 0-1")
     roughness: Optional[float] = Field(None, description="Roughness factor 0-1")
@@ -351,8 +387,8 @@ class SimulateTraversalCheckArgs(BaseModel):
     """FUNCTION GATE for pick-place / assembly-line scenes — counterpart to verify_pickplace_pipeline's FORM gate. Plays the timeline for duration_s of sim time, captures the cube's position twice (for veloc"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    cube_path: str = Field(..., description="Prim path of the cube to track (e.g. /World/Cube_1).")
     target_path: str = Field(..., description="Prim path of the destination whose world bbox is the target (e.g. /World/Bin).")
+    cube_path: Optional[str] = Field(None, description="Prim path of the cube to track (e.g. /World/Cube_1).")
     duration_s: Optional[float] = Field(None, description="Sim duration in seconds. Default 60. Use 30 for smoke tests.")
     xy_tolerance: Optional[float] = Field(None, description="Extra xy slack on target bbox in meters. Default 0.0 (strict).")
     floor_tolerance: Optional[float] = Field(None, description="Allowed z drop below target floor in meters (for end-of-run bounce). Default 0.10.")
@@ -1351,7 +1387,7 @@ class IterateRewardArgs(BaseModel):
     prev_reward_code: str = Field(..., description="Previous iteration's reward function code")
     metrics: Dict[str, Any] = Field(..., description="Training metrics: { fitness: float, components: { name: { mean: [float], converged: bool } }, task_success_rate: float }")
     user_feedback: Optional[str] = Field(None, description="Optional user feedback — e.g. 'it keeps dropping the handle'")
-    run_id: Optional[str] = Field(None, description="Optional Eureka run identifier — threads iteration state through EUREKA.runs[run_id] so eureka_status / eureka_history reflect the iter_count increment. Without it the handler still runs the mutation but the run-state bookkeeping does not advance.")
+    run_id: Optional[str] = Field(None, description="Optional Eureka run identifier returned by generate_reward. When supplied, EUREKA.runs[run_id] is updated and the response echoes back run_status / current_iteration / best_fitness.")
 
 
 class EurekaStatusArgs(BaseModel):
@@ -1688,7 +1724,7 @@ class SetupPickPlaceControllerArgs(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     robot_path: str = Field(..., description="USD path to articulation root")
-    target_source: str = Field(..., description="Motion controller architecture. Decision guide: (1) 'auto' — probe env and pick best; safe default when the user's hardware is unknown. (2) 'curobo' — fastest cycle time and only option with true coll")
+    target_source: str = Field(..., description="Motion controller architecture. Decision guide: (1) 'auto' — probe env and pick best; safe default when the user's hardware is unknown. (2) 'curobo' — legacy standalone cuRobo MotionPlanner path; fast")
     source_paths: Optional[List[str]] = Field(None, description="native/cube_tracking mode: objects to pick (in priority order)")
     destination_path: Optional[str] = Field(None, description="native/cube_tracking mode: bin prim — controller drops at its top-center + 0.05m clearance unless drop_target overrides")
     sensor_path: Optional[str] = Field(None, description="native/sensor_gated mode: USD path to a proximity sensor (from add_proximity_sensor). In native mode, if omitted the controller free-runs (picks first available cube continuously).")
@@ -1719,14 +1755,14 @@ class SetupPickPlaceControllerArgs(BaseModel):
     curobo_world_yml: Optional[str] = Field(None, description="curobo mode: path to cuRobo world_config YAML (cuboid/mesh obstacles). If omitted, the live USD stage is used to auto-build a Cuboid scene for collision checking.")
     planning_obstacles: Optional[List[str]] = Field(None, description="curobo mode: list of USD paths to include as collision obstacles during planning. Each prim's world-bound is converted to a Cuboid. Use to avoid the conveyor/table/walls during transit.")
     color_routing: Optional[Dict[str, Any]] = Field(None, description="curobo mode (SORT-01 enabler): dict mapping semantic class_name → destination prim path. When present, the controller looks up each picked cube's Semantics_color (or Semantics_class) class_name and ro")
-    drop_targets: Optional[Any] = Field(None, description="curobo mode (stack-placement enabler): dict mapping cube_path → world drop position [x,y,z], OR list of [x,y,z] parallel to source_paths. When set, each cube is dropped at its specified position inste")
-    gripper_rotation: Optional[Any] = Field(None, description="curobo mode (Tier B brick-pattern enabler): dict mapping cube_path → yaw_deg (degrees), OR list of yaw_deg parallel to source_paths, OR scalar yaw_deg for all cubes. Rotates gripper around world Z-axi")
+    drop_targets: Optional[Dict[str, Any]] = Field(None, description="curobo mode (stack-placement enabler): dict mapping cube_path → world drop position [x,y,z], OR list of [x,y,z] parallel to source_paths. When set, each cube is dropped at its specified position inste")
+    gripper_rotation: Optional[Dict[str, Any]] = Field(None, description="curobo mode (Tier B brick-pattern enabler): dict mapping cube_path → yaw_deg (degrees), OR list of yaw_deg parallel to source_paths, OR scalar yaw_deg for all cubes. Rotates gripper around world Z-axi")
     robot_family: Optional[str] = Field(None, description="curobo mode: which robot family the controller targets. 'franka' (default) — 7-DOF Franka Panda + ParallelGripper, panda_hand tool frame, franka.yml cuRobo config. 'ur10'/'ur10e' — 6-DOF Universal Rob")
     diffik_method: Optional[str] = Field(None, description="diffik mode: Jacobian inversion method. 'dls' (damped least-squares, default, λ=0.05) handles singularities gracefully; 'pinv' is Moore-Penrose pseudoinverse; 'svd' is truncated SVD. Use 'dls' unless ")
 
 
 class ListAvailableControllersArgs(BaseModel):
-    """Probe the current Kit runtime and report which pick-place controller modes (target_source values) are available, plus hardware capabilities (GPU arch + VRAM, scipy version, cuRobo presence, Isaac Lab"""
+    """Probe the current Kit runtime and report which pick-place controller modes (target_source values) are available, plus hardware capabilities (GPU arch + VRAM, scipy version, legacy cuRobo package prese"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     pass
@@ -2914,7 +2950,6 @@ class SetSemanticLabelArgs(BaseModel):
     prim_path: str = Field(..., description="USD path to the prim to label")
     class_name: str = Field(..., description="Semantic class name, e.g. 'cube', 'robot', 'table'")
     semantic_type: Optional[str] = Field(None, description="Semantic type token. Default: 'class'")
-    label: Optional[str] = Field(None, description="Optional per-instance label string for finer-grained metadata alongside the broader class_name (e.g. class_name='pack_item' + label='consumable_tube'). The class is what Replicator emits; label is bookkeeping metadata.")
 
 
 class GetJointLimitsArgs(BaseModel):
@@ -3824,7 +3859,7 @@ class CommitLayoutSpecArgs(BaseModel):
 
 
 class ApplyLayoutSpecToSceneArgs(BaseModel):
-    """Apply (ratify) the current LayoutSpec for a session against a canonical template; returns ratify status (ok / needs_choice / rejected) with bindings, diagnostics, and ambiguous-role candidates. When f"""
+    """Apply (ratify) the current LayoutSpec for a session against a canonical template; returns ratify status (ok / needs_choice / rejected) with bindings, diagnostics, ambiguous-role candidates, asset reso"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     session_id: str = Field(..., description="Multimodal session ID.")
@@ -3954,6 +3989,9 @@ MODEL_REGISTRY = {
     "clone_prim": ClonePrimArgs,
     "run_usd_script": RunUsdScriptArgs,
     "create_deformable_mesh": CreateDeformableMeshArgs,
+    "make_sim_ready": MakeSimReadyArgs,
+    "sim_ready_audit": SimReadyAuditArgs,
+    "articulate_asset": ArticulateAssetArgs,
     "anchor_robot": AnchorRobotArgs,
     "create_omnigraph": CreateOmnigraphArgs,
     "add_sensor_to_prim": AddSensorToPrimArgs,
