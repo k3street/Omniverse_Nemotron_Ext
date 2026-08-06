@@ -23,6 +23,7 @@
     "glasses_wearable": {"keywords": ["glasses", "spectacles", "goggles"], "max_dim_m": [0.12, 0.2], "mass_kg": [0.02, 0.08], "articulable": true, "typical_materials": ["plastic_abs", "titanium"]},
     "book": {"keywords": ["book", "notebook", "magazine"], "max_dim_m": [0.1, 0.55], "mass_kg": [0.1, 3.0], "articulable": true, "typical_materials": ["cardboard"]},
     "blinds": {"keywords": ["blind", "blinds", "curtain", "shade"], "max_dim_m": [0.4, 2.6], "mass_kg": [0.5, 8.0], "articulable": true, "typical_materials": ["plastic_abs", "aluminum"]},
-    "food_item": {"keywords": ["apple", "banana", "orange", "tomato", "potato", "lettuce", "bread", "egg", "fruit"], "max_dim_m": [0.04, 0.35], "mass_kg": [0.03, 2.0], "articulable": false, "typical_materials": []}
+    "food_item": {"keywords": ["apple", "banana", "orange", "tomato", "potato", "lettuce", "bread", "egg", "fruit"], "max_dim_m": [0.04, 0.35], "mass_kg": [0.03, 2.0], "articulable": false, "typical_materials": []},
+    "chess_piece": {"keywords": ["chess", "rook", "pawn", "chess piece"], "max_dim_m": [0.04, 0.12], "mass_kg": [0.01, 0.16], "articulable": false, "typical_materials": ["wood_oak", "plastic_abs"]}
   }
 }

@@ -2930,23 +2930,28 @@ else:
                            'material_bindings': mat_bound, 'authored_masses': mass_prims}
 
     # ---- class match ----
-    # token match, not substring: 'pen' must not match a prim named 'open'
+    # token match, not substring ('pen' must not match a prim named 'open'),
+    # and the FILE name outranks prim names (an Aston Martin's window
+    # material prim 'glass' must not classify the car as glassware)
     import re as _re
     _blob = ' '.join(_names)
-    _tokens = set(_re.split(r'[^a-z0-9]+', _blob))
-    def _kw_hit(_kw):
-        return (_kw in _blob) if (' ' in _kw) else (_kw in _tokens)
+    _file_tokens = set(_re.split(r'[^a-z0-9]+', _names[0]))
+    _all_tokens = set(_re.split(r'[^a-z0-9]+', _blob))
     _cls, _prior = None, None
     if _class_hint and _class_hint in _priors:
         _cls, _prior = _class_hint, _priors[_class_hint]
     else:
-        # longest matching keyword wins: 'bedside' (overbed_table) must beat
-        # the generic 'table'
-        _best_kw = ''
-        for _k, _v in _priors.items():
-            for _kw in _v['keywords']:
-                if _kw_hit(_kw) and len(_kw) > len(_best_kw):
-                    _best_kw, _cls, _prior = _kw, _k, _v
+        # longest matching keyword wins per pass: 'bedside' (overbed_table)
+        # must beat the generic 'table'
+        for _tokset, _text in ((_file_tokens, _names[0]), (_all_tokens, _blob)):
+            _best_kw = ''
+            for _k, _v in _priors.items():
+                for _kw in _v['keywords']:
+                    _hit = (_kw in _text) if (' ' in _kw) else (_kw in _tokset)
+                    if _hit and len(_kw) > len(_best_kw):
+                        _best_kw, _cls, _prior = _kw, _k, _v
+            if _cls:
+                break
     result['matched_class'] = _cls
 
     # ---- scale check ----
@@ -2974,6 +2979,18 @@ else:
             _callout('info', 'scale', 'no class prior matched — scale unverified ('
                      + format(_max_dim, '.3f') + ' m max dimension); provide class_hint '
                      'or human judgment')
+
+    # ---- orientation check ----
+    # Isaac convention is Z-up. A Y-up file is auto-rotated when a corrective
+    # derivative is built; visually tipped geometry (correct metadata, wrong
+    # authored pose) is NOT machine-detectable — reviewer must eyeball it.
+    if str(UsdGeom.GetStageUpAxis(stage)).upper() != 'Z':
+        _callout('warning', 'orientation', 'file is ' + str(UsdGeom.GetStageUpAxis(stage))
+                 + '-up (Isaac is Z-up) — the corrective scale/sim-ready actions '
+                 'rotate it automatically; verify visually in Isaac that the object '
+                 'stands upright afterwards')
+    else:
+        result['orientation'] = 'Z-up (Isaac convention) — visual uprightness still needs human eyes'
 
     # ---- articulation check ----
     _articulable = bool(_prior and _prior.get('articulable'))

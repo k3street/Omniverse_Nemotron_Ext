@@ -75,15 +75,63 @@ def needs_articulation(report: dict) -> bool:
 
 
 _USD_EXTS = {".usd", ".usda", ".usdc", ".usdz"}
+FIXED_DIR = REPO / "workspace" / "assets_fixed"
 
 
 def _asset_id_for(file_path: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", Path(file_path).stem.lower()).strip("_")
 
 
+def _camel(s: str) -> str:
+    name = "".join(w.capitalize() for w in s.split("_")) or "Asset"
+    # USD prim names cannot start with a digit (e.g. asset '2011_aston_...')
+    return name if name[0].isalpha() else f"Asset_{name}"
+
+
+def build_wrapper(entry: dict, size_factor: float | None) -> str:
+    """(Re)create the sim-ready derivative: a meters/Z-up wrapper stage
+    referencing the original source, with unit conversion, up-axis
+    correction, and optional real-world size correction applied."""
+    from pxr import Gf, Usd, UsdGeom
+
+    src = entry.get("original_file") or entry["file"]
+    report = entry["report"]
+    mpu = float(report.get("meters_per_unit", 1.0))
+    factor = mpu * (size_factor if size_factor else 1.0)
+    FIXED_DIR.mkdir(parents=True, exist_ok=True)
+    out = FIXED_DIR / f"{entry['asset_id']}_simready.usda"
+    if out.exists():
+        out.unlink()
+    stage = Usd.Stage.CreateNew(str(out))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    world = UsdGeom.Xform.Define(stage, "/World")
+    stage.SetDefaultPrim(world.GetPrim())
+    asset = stage.DefinePrim(f"/World/{_camel(entry['asset_id'])}", "Xform")
+    src_stage = Usd.Stage.Open(src)
+    default = src_stage.GetDefaultPrim()
+    if default:
+        asset.GetReferences().AddReference(src, str(default.GetPath()))
+    else:
+        asset.GetReferences().AddReference(src)
+    xf = UsdGeom.XformCommonAPI(asset)
+    if str(report.get("up_axis", "Z")).upper() == "Y":
+        xf.SetRotate(Gf.Vec3f(90, 0, 0))
+    xf.SetScale(Gf.Vec3f(factor, factor, factor))
+    stage.GetRootLayer().Save()
+    return str(out)
+
+
 def queue_file(file_path: str, class_hint: str | None = None,
-               asset_id: str | None = None) -> dict:
-    """Run the ingest report on one file and write its review-queue entry."""
+               asset_id: str | None = None, auto_fix_scale: bool = True) -> dict:
+    """Run the ingest report on one file and write its review-queue entry.
+
+    Deterministic mechanical fixes are applied at ingest, not held for
+    review: a scale error with a suggested correction factor automatically
+    produces a corrected meters/Z-up derivative, which is re-checked. The
+    applied fix is recorded on the entry; the ORIGINAL file is preserved
+    and approval still requires a human.
+    """
     file_path = str(Path(file_path).resolve())
     report = run_report(file_path, class_hint)
     asset_id = asset_id or _asset_id_for(file_path)
@@ -97,6 +145,15 @@ def queue_file(file_path: str, class_hint: str | None = None,
         "status": "pending_review",
         "report": report,
     }
+    factor = report.get("suggested_scale_correction")
+    if auto_fix_scale and factor:
+        entry["original_file"] = file_path
+        entry["file"] = build_wrapper(entry, float(factor))
+        entry["applied_fixes"] = [
+            f"auto scale x{factor} (source units x{report.get('meters_per_unit')}, "
+            f"up-axis {report.get('up_axis')} -> Z)"]
+        entry["report"] = run_report(entry["file"], class_hint)
+        entry["proposed_category"] = propose_category(entry["report"])
     QUEUE_DIR.mkdir(parents=True, exist_ok=True)
     (QUEUE_DIR / f"{asset_id}.json").write_text(json.dumps(entry, indent=1))
     return entry

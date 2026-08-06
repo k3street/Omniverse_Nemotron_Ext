@@ -32,7 +32,6 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 QUEUE_DIR = REPO / "workspace" / "review_queue"
-FIXED_DIR = REPO / "workspace" / "assets_fixed"
 REGISTRY = REPO / "workspace" / "knowledge" / "sim_ready_assets.json"
 SCHEMA = REPO / "workspace" / "knowledge" / "sim_ready_asset_registry.schema.json"
 KIT_RPC = f"http://127.0.0.1:{os.environ.get('KIT_RPC_PORT', '8001')}"
@@ -41,6 +40,8 @@ PORT = int(os.environ.get("REVIEW_HUB_PORT", "8777"))
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ingest_asset import (  # noqa: E402
+    FIXED_DIR,
+    build_wrapper,
     needs_articulation,
     propose_category,
     run_report,
@@ -135,44 +136,6 @@ def _camel(s: str) -> str:
     return "".join(w.capitalize() for w in s.split("_")) or "Asset"
 
 
-def _source_of(entry: dict) -> str:
-    return entry.get("original_file") or entry["file"]
-
-
-def _build_wrapper(entry: dict, size_factor: float | None) -> str:
-    """(Re)create the sim-ready derivative: a meters/Z-up wrapper stage
-    referencing the original source, with unit conversion and optional
-    real-world size correction applied."""
-    from pxr import Gf, Usd, UsdGeom
-
-    src = _source_of(entry)
-    report = entry["report"]
-    mpu = float(report.get("meters_per_unit", 1.0))
-    factor = mpu * (size_factor if size_factor else 1.0)
-    FIXED_DIR.mkdir(parents=True, exist_ok=True)
-    out = FIXED_DIR / f"{entry['asset_id']}_simready.usda"
-    if out.exists():
-        out.unlink()
-    stage = Usd.Stage.CreateNew(str(out))
-    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
-    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
-    world = UsdGeom.Xform.Define(stage, "/World")
-    stage.SetDefaultPrim(world.GetPrim())
-    asset = stage.DefinePrim(f"/World/{_camel(entry['asset_id'])}", "Xform")
-    src_stage = Usd.Stage.Open(src)
-    default = src_stage.GetDefaultPrim()
-    if default:
-        asset.GetReferences().AddReference(src, str(default.GetPath()))
-    else:
-        asset.GetReferences().AddReference(src)
-    xf = UsdGeom.XformCommonAPI(asset)
-    if str(report.get("up_axis", "Z")).upper() == "Y":
-        xf.SetRotate(Gf.Vec3f(90, 0, 0))
-    xf.SetScale(Gf.Vec3f(factor, factor, factor))
-    stage.GetRootLayer().Save()
-    return str(out)
-
-
 def _re_ingest(entry: dict) -> None:
     """Re-run the automated checks on the entry's current file."""
     report = run_report(entry["file"], entry.get("class_hint"))
@@ -188,7 +151,7 @@ def fix_scale(entry: dict) -> str:
     src_mpu = entry["report"].get("meters_per_unit")
     if "original_file" not in entry:
         entry["original_file"] = entry["file"]
-    entry["file"] = _build_wrapper(entry, float(factor))
+    entry["file"] = build_wrapper(entry, float(factor))
     entry["applied_fixes"] = entry.get("applied_fixes", []) + [
         f"scale x{factor} (source units x{src_mpu})"]
     _re_ingest(entry)
@@ -221,7 +184,7 @@ def make_rigid_sim_ready(entry: dict) -> str:
     if "original_file" not in entry or not entry["file"].startswith(str(FIXED_DIR)):
         if "original_file" not in entry:
             entry["original_file"] = entry["file"]
-        entry["file"] = _build_wrapper(entry, None)
+        entry["file"] = build_wrapper(entry, None)
     stage = Usd.Stage.Open(entry["file"])
     omni = types.ModuleType("omni")
     omni_usd = types.ModuleType("omni.usd")
