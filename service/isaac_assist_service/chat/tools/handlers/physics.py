@@ -2771,6 +2771,17 @@ else:
     _rel = root.GetRelationship('physics:materialBinding')
     result['stats']['physics_material_bound'] = bool(_rel and _rel.GetTargets())
 
+    # Surface sim-ready certifications stamped on assets (customData
+    # 'simReady', written when an asset is registered in
+    # workspace/knowledge/sim_ready_assets.json with verification evidence).
+    _certs = {}
+    for _p in Usd.PrimRange(root):
+        _cd = _p.GetCustomDataByKey('simReady')
+        if _cd:
+            _certs[str(_p.GetPath())] = dict(_cd)
+    if _certs:
+        result['certifications'] = _certs
+
     # Fidelity gate — an asset whose articulations cannot be correct within
     # the limits of the source file is NOT sim ready. These are errors
     # (category 'fidelity'): they flip 'ready' to false. 'simulable' below

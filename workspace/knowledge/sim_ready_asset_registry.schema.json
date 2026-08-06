@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "isaac-assist:sim_ready_asset_registry",
+  "title": "Sim-Ready Asset Registry",
+  "description": "Registry of assets processed by the sim-ready pipeline. Category is a verified claim, not a label: 'articulated_verified' requires live-simulation articulation evidence within tolerance; 'rigid_only_baked' records that the source file's limits prevent correct articulation (per policy: such assets are NOT sim ready).",
+  "type": "object",
+  "required": ["version", "assets"],
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "assets": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/asset"}
+    }
+  },
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "required": ["asset_id", "file", "source_file", "category", "audit"],
+      "properties": {
+        "asset_id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "file": {"type": "string", "description": "Sim-ready USD produced by the pipeline"},
+        "source_file": {"type": "string", "description": "Raw asset the sim-ready USD references"},
+        "category": {
+          "type": "string",
+          "enum": [
+            "articulated_verified",
+            "articulated_unverified",
+            "rigid_verified",
+            "rigid_unverified",
+            "rigid_only_baked"
+          ],
+          "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class — sim-ready is unattainable from this file."
+        },
+        "scale_correction": {"type": "number", "exclusiveMinimum": 0},
+        "materials": {
+          "type": "object",
+          "additionalProperties": {"type": "string"},
+          "description": "link/prim path suffix -> physics material key from physics_materials.json"
+        },
+        "masses_kg": {
+          "type": "object",
+          "additionalProperties": {"type": "number", "exclusiveMinimum": 0}
+        },
+        "audit": {
+          "type": "object",
+          "required": ["ready", "simulable"],
+          "properties": {
+            "ready": {"type": "boolean"},
+            "simulable": {"type": "boolean"}
+          }
+        },
+        "verification": {"$ref": "#/$defs/verification"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"category": {"const": "articulated_verified"}}},
+          "then": {"required": ["verification"],
+                   "properties": {"verification": {"required": ["articulation"]},
+                                  "audit": {"properties": {"ready": {"const": true}}}}}
+        },
+        {
+          "if": {"properties": {"category": {"const": "rigid_only_baked"}}},
+          "then": {"properties": {"audit": {"properties": {"ready": {"const": false},
+                                                           "simulable": {"const": true}}}}}
+        }
+      ]
+    },
+    "verification": {
+      "type": "object",
+      "required": ["date", "method", "simulator"],
+      "properties": {
+        "date": {"type": "string", "format": "date"},
+        "method": {"type": "string", "enum": ["live_physx_drive_test", "live_physx_drop_test"]},
+        "simulator": {"type": "string"},
+        "articulation": {
+          "type": "object",
+          "required": ["joint", "commanded_m", "measured_m", "position_error_m",
+                       "max_position_error_m", "base_drift_m", "max_base_drift_m"],
+          "description": "Articulation accuracy criteria: |measured - commanded| <= max_position_error_m AND base_drift_m <= max_base_drift_m AND (when present) gravity sag consistent with drive stiffness.",
+          "properties": {
+            "joint": {"type": "string"},
+            "commanded_m": {"type": "number"},
+            "measured_m": {"type": "number"},
+            "position_error_m": {"type": "number", "minimum": 0},
+            "max_position_error_m": {"type": "number", "exclusiveMinimum": 0, "default": 0.005},
+            "gravity_sag_measured_m": {"type": "number"},
+            "gravity_sag_predicted_m": {"type": "number", "description": "load_N / drive_stiffness — measured sag must be same order"},
+            "base_drift_m": {"type": "number", "minimum": 0},
+            "max_base_drift_m": {"type": "number", "exclusiveMinimum": 0, "default": 0.01}
+          }
+        },
+        "drop": {
+          "type": "object",
+          "required": ["drop_measured_m", "drop_predicted_m"],
+          "properties": {
+            "drop_measured_m": {"type": "number"},
+            "drop_predicted_m": {"type": "number"},
+            "rests_after_s": {"type": "number"}
+          }
+        }
+      }
+    }
+  }
+}

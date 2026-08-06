@@ -326,6 +326,70 @@ class TestGeneratedCodeOnRealStage:
 
 
 # ---------------------------------------------------------------------------
+# sim-ready asset registry (workspace/knowledge)
+
+
+class TestSimReadyRegistry:
+    _KNOWLEDGE = None
+
+    @property
+    def knowledge(self):
+        from pathlib import Path
+        return Path(__file__).resolve().parents[1] / "workspace" / "knowledge"
+
+    def _load(self):
+        import json
+        schema = json.loads((self.knowledge / "sim_ready_asset_registry.schema.json").read_text())
+        registry = json.loads((self.knowledge / "sim_ready_assets.json").read_text())
+        return schema, registry
+
+    def test_registry_validates_against_schema(self):
+        jsonschema = pytest.importorskip("jsonschema")
+        schema, registry = self._load()
+        jsonschema.validate(registry, schema)
+
+    def test_articulated_verified_meets_accuracy_criteria(self):
+        _, registry = self._load()
+        arts = [a for a in registry["assets"] if a["category"] == "articulated_verified"]
+        assert arts, "registry should contain at least one articulated_verified asset"
+        for a in arts:
+            v = a["verification"]["articulation"]
+            assert v["position_error_m"] <= v["max_position_error_m"]
+            assert v["base_drift_m"] <= v["max_base_drift_m"]
+            assert abs(v["measured_m"] - v["commanded_m"]) == pytest.approx(
+                v["position_error_m"], abs=1e-9)
+            assert a["audit"]["ready"] is True
+
+    def test_baked_assets_are_not_marked_ready(self):
+        _, registry = self._load()
+        for a in registry["assets"]:
+            if a["category"] == "rigid_only_baked":
+                assert a["audit"]["ready"] is False
+                assert a["audit"]["simulable"] is True
+
+    def test_materials_exist_in_material_database(self):
+        import json
+        _, registry = self._load()
+        db = json.loads((self.knowledge / "physics_materials.json").read_text())
+        for a in registry["assets"]:
+            for mat in a.get("materials", {}).values():
+                assert mat in db["materials"], f"unknown material {mat!r}"
+
+    def test_audit_surfaces_certification_stamp(self, monkeypatch):
+        captured = {}
+
+        async def fake_queue(code, description="", timeout=600):
+            captured["code"] = code
+            return {}
+
+        from service.isaac_assist_service.chat.tools import kit_tools
+        monkeypatch.setattr(kit_tools, "queue_exec_patch", fake_queue)
+        asyncio.run(_handle_sim_ready_audit({}))
+        assert "simReady" in captured["code"]
+        assert "certifications" in captured["code"]
+
+
+# ---------------------------------------------------------------------------
 # sim_readiness stage validator
 
 
