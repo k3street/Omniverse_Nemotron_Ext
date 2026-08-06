@@ -2935,8 +2935,10 @@ else:
     # material prim 'glass' must not classify the car as glassware)
     import re as _re
     _blob = ' '.join(_names)
-    _file_tokens = set(_re.split(r'[^a-z0-9]+', _names[0]))
-    _all_tokens = set(_re.split(r'[^a-z0-9]+', _blob))
+    # \W+ keeps unicode word tokens — 'коляска' (vehicle prior) must match
+    # Cyrillic-named assets
+    _file_tokens = set(_re.split(r'[\W_]+', _names[0]))
+    _all_tokens = set(_re.split(r'[\W_]+', _blob))
     _cls, _prior = None, None
     if _class_hint and _class_hint in _priors:
         _cls, _prior = _class_hint, _priors[_class_hint]

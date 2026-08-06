@@ -79,7 +79,13 @@ FIXED_DIR = REPO / "workspace" / "assets_fixed"
 
 
 def _asset_id_for(file_path: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", Path(file_path).stem.lower()).strip("_")
+    # keep unicode word chars (Cyrillic filenames etc.); ascii-only ids
+    # would collapse to "" for e.g. Кресло-коляска_*.usdz
+    slug = re.sub(r"[\W]+", "_", Path(file_path).stem.lower(), flags=re.UNICODE).strip("_")
+    if not slug:
+        import hashlib
+        slug = "asset_" + hashlib.md5(Path(file_path).name.encode()).hexdigest()[:8]
+    return slug
 
 
 def _camel(s: str) -> str:
@@ -122,6 +128,39 @@ def build_wrapper(entry: dict, size_factor: float | None) -> str:
     return str(out)
 
 
+def _find_usdrecord() -> str | None:
+    import shutil
+    found = shutil.which("usdrecord")
+    if found:
+        return found
+    try:
+        import pxr
+        cand = Path(pxr.__file__).resolve().parents[3] / "bin" / "usdrecord"
+        return str(cand) if cand.exists() else None
+    except ImportError:
+        return None
+
+
+def render_thumbnail(file_path: str, asset_id: str) -> str | None:
+    """Render a review thumbnail with usdrecord (Storm). The reviewer must
+    see WHAT the object is — the filename may have nothing to do with it."""
+    import subprocess
+    usdrecord = _find_usdrecord()
+    if not usdrecord:
+        return None
+    thumbs = QUEUE_DIR / "thumbs"
+    thumbs.mkdir(parents=True, exist_ok=True)
+    out = thumbs / f"{asset_id}.png"
+    try:
+        subprocess.run(
+            [usdrecord, "--renderer", "Storm", "--imageWidth", "512",
+             file_path, str(out)],
+            capture_output=True, timeout=180, check=False)
+    except Exception:
+        return None
+    return str(out) if out.exists() else None
+
+
 def queue_file(file_path: str, class_hint: str | None = None,
                asset_id: str | None = None, auto_fix_scale: bool = True) -> dict:
     """Run the ingest report on one file and write its review-queue entry.
@@ -154,6 +193,10 @@ def queue_file(file_path: str, class_hint: str | None = None,
             f"up-axis {report.get('up_axis')} -> Z)"]
         entry["report"] = run_report(entry["file"], class_hint)
         entry["proposed_category"] = propose_category(entry["report"])
+    # the class from name matching is only a guess until a human (or VLM)
+    # looks at the object itself
+    entry["class_source"] = "hint" if class_hint else "filename_guess"
+    entry["thumbnail"] = render_thumbnail(entry["file"], asset_id)
     QUEUE_DIR.mkdir(parents=True, exist_ok=True)
     (QUEUE_DIR / f"{asset_id}.json").write_text(json.dumps(entry, indent=1))
     return entry

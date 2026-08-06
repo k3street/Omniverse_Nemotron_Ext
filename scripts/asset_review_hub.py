@@ -303,11 +303,19 @@ def render_entry(e: dict) -> str:
     callouts = (f"<table>{rows}</table>" if rows
                 else '<p class="meta">no callouts — all automated checks passed</p>')
     joints = r.get("structure", {}).get("joints", [])
-    meta = (f'class <code>{html.escape(str(r.get("matched_class")))}</code> · '
+    cls_note = (" (filename guess — confirm against the image)"
+                if e.get("class_source", "filename_guess") == "filename_guess" else "")
+    meta = (f'class <code>{html.escape(str(r.get("matched_class")))}</code>{cls_note} · '
             f'max dim <code>{r.get("max_dim_m", "?")} m</code> · '
             f'{r.get("structure", {}).get("meshes", "?")} meshes · '
             f'{len(joints)} joints · proposed '
             f'<code>{html.escape(e.get("proposed_category", "?"))}</code>')
+    thumb = ""
+    if e.get("thumbnail") and Path(e["thumbnail"]).exists():
+        thumb = (f'<img src="/thumb/{html.escape(Path(e["thumbnail"]).name)}" '
+                 'style="float:right;max-height:150px;max-width:210px;'
+                 'border-radius:8px;background:#0b0c0e;margin-left:14px" '
+                 'alt="render — verify this matches the class">')
     cert = ""
     if r.get("certifications"):
         c0 = list(r["certifications"].values())[0]
@@ -364,9 +372,17 @@ def render_entry(e: dict) -> str:
  {approve_btn}
  <button class="reject" name="do" value="reject">Reject</button>
 </form>"""
-    return (f'<div class="card"><h2>{aid}{badge}</h2>'
+    reclass = "" if status in ("approved", "rejected") else f"""
+<form class="actions" method="post" action="/action" style="margin-top:6px">
+ <input type="hidden" name="asset_id" value="{aid}">
+ <span class="meta" style="align-self:center">image shows something else?</span>
+ <input name="class_hint" placeholder="true class (e.g. wheelchair, pan)" style="width:210px">
+ <button name="do" value="reclass">Reclassify &amp; re-check</button>
+</form>"""
+    return (f'<div class="card">{thumb}<h2>{aid}{badge}</h2>'
             f'<div class="path">{html.escape(e.get("file", ""))}</div>'
-            f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{review_note}{actions}</div>')
+            f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{review_note}{actions}{reclass}'
+            f'<div style="clear:both"></div></div>')
 
 
 def render_index(msg: str = "") -> bytes:
@@ -438,6 +454,19 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/health"):
             self._send(b"ok")
             return
+        if self.path.startswith("/thumb/"):
+            name = Path(urllib.parse.unquote(self.path[len("/thumb/"):])).name
+            f = QUEUE_DIR / "thumbs" / name
+            if f.exists() and f.suffix == ".png":
+                data = f.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self._send(b"not found", 404)
+            return
         self._send(render_index())
 
     def do_POST(self):
@@ -480,6 +509,23 @@ class Handler(BaseHTTPRequestHandler):
                 msg = f"re-checked {asset_id}: {entry['report'].get('verdict')}"
             except Exception as ex:
                 msg = f"re-check failed: {ex}"
+        elif action == "reclass":
+            hint = get("class_hint")
+            if not hint:
+                msg = "provide the true class (a key from asset_class_priors.json)"
+            else:
+                try:
+                    entry["class_hint"] = hint
+                    entry["class_source"] = "human_visual"
+                    _re_ingest(entry)
+                    if entry["report"].get("suggested_scale_correction"):
+                        msg = f"reclassified as {hint}; " + fix_scale(entry)
+                    else:
+                        msg = (f"reclassified as {hint}: "
+                               f"{entry['report'].get('verdict')}")
+                    save_queue_entry(entry)
+                except Exception as ex:
+                    msg = f"reclassify failed: {ex}"
         elif action == "approve":
             errors = [c for c in entry.get("report", {}).get("callouts", [])
                       if c["severity"] == "error"]

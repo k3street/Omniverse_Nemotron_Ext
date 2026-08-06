@@ -121,6 +121,38 @@
     "date": "2026-08-06",
     "notes": "kimate"
    }
+  },
+  {
+   "asset_id": "airpods_2_case",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_2_case_simready.usda",
+   "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_2_case_simready.usda",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": false
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "kimate",
+    "date": "2026-08-06",
+    "notes": "kimate"
+   }
+  },
+  {
+   "asset_id": "004_chess_rook",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/004_chess_rook_simready.usda",
+   "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/004_chess_rook_simready.usda",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": false
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "kimate",
+    "date": "2026-08-06",
+    "notes": "kimate"
+   }
   }
  ]
 }
