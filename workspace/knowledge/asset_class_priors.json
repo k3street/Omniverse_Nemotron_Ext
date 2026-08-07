@@ -562,6 +562,174 @@
     "aluminum",
     "glass"
    ]
+  },
+  "pillow": {
+   "keywords": [
+    "pillow",
+    "cushion"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.8
+   ],
+   "mass_kg": [
+    0.3,
+    1.5
+   ],
+   "articulable": false,
+   "deformable": "sponge",
+   "typical_materials": []
+  },
+  "towel": {
+   "keywords": [
+    "towel",
+    "washcloth",
+    "rag"
+   ],
+   "max_dim_m": [
+    0.25,
+    1.5
+   ],
+   "mass_kg": [
+    0.1,
+    0.8
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": []
+  },
+  "blanket": {
+   "keywords": [
+    "blanket",
+    "duvet",
+    "quilt",
+    "throw"
+   ],
+   "max_dim_m": [
+    0.8,
+    2.5
+   ],
+   "mass_kg": [
+    0.8,
+    3.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": []
+  },
+  "curtain": {
+   "keywords": [
+    "curtain",
+    "drape",
+    "drapes"
+   ],
+   "max_dim_m": [
+    1.0,
+    3.0
+   ],
+   "mass_kg": [
+    0.5,
+    2.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": []
+  },
+  "clothing_garment": {
+   "keywords": [
+    "shirt",
+    "tshirt",
+    "hoodie",
+    "jacket",
+    "pants",
+    "dress",
+    "garment",
+    "clothing"
+   ],
+   "max_dim_m": [
+    0.3,
+    1.2
+   ],
+   "mass_kg": [
+    0.15,
+    1.5
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": []
+  },
+  "face_mask": {
+   "keywords": [
+    "mask",
+    "respirator"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.25
+   ],
+   "mass_kg": [
+    0.005,
+    0.05
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": []
+  },
+  "bandage": {
+   "keywords": [
+    "bandage",
+    "bandagem",
+    "gauze",
+    "wrap"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.3
+   ],
+   "mass_kg": [
+    0.005,
+    0.1
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": []
+  },
+  "sponge": {
+   "keywords": [
+    "sponge",
+    "foam"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.25
+   ],
+   "mass_kg": [
+    0.005,
+    0.1
+   ],
+   "articulable": false,
+   "deformable": "sponge",
+   "typical_materials": []
+  },
+  "rope_cable": {
+   "keywords": [
+    "rope",
+    "cable",
+    "cord",
+    "hose",
+    "leash"
+   ],
+   "max_dim_m": [
+    0.3,
+    5.0
+   ],
+   "mass_kg": [
+    0.05,
+    2.0
+   ],
+   "articulable": false,
+   "deformable": "rope",
+   "typical_materials": []
   }
  }
 }

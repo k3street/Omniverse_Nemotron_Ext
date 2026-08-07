@@ -126,14 +126,25 @@ Requires ANTHROPIC_API_KEY (present in .env). Remaining: auto-VLM at
 ingest behind an env flag; use the moving-parts report in the
 articulation draft tier (#3).
 
-## 6. Deformables path — ◐ preset unlock SHIPPED 2026-08-07
-`create_deformable_mesh` now accepts generic types (cloth/sponge/rubber/
-gel/rope) or any exact preset key — all 15 presets reachable (silk, denim,
-canvas, memory foam, leather, paper, plastic film, silicone, ...); unknown
-types fail loud instead of silently defaulting to an empty preset.
-Remaining: route make_sim_ready/ingest to the deformable path when the
-class/material says cloth/soft (currently everything gets rigid
-treatment); deformable-aware audit checks.
+## 6. Deformables path — ✅ routing SHIPPED 2026-08-07
+`create_deformable_mesh` accepts generic types (cloth/sponge/rubber/gel/
+rope) or any exact preset key — all 15 presets reachable; unknown types
+fail loud. Routing (same-day): 9 soft prior classes (pillow, towel,
+blanket, curtain, clothing_garment, face_mask, bandage, sponge,
+rope_cable) carry a `deformable` type; ingest SKIPS rigid authoring for
+them (a rigid shell on cloth is a physics lie) and proposes the new
+`deformable_unverified` category. PhysX deformable APIs are Kit-only, so
+authoring happens LIVE: `build_scene_from_blueprint` resolves a registry
+asset's `deformable` field and applies the preset (`_soften`: per-mesh
+PhysxDeformableBody/SurfaceAPI + preset params + density) at placement.
+Schema: deformable_unverified/verified categories require the
+`deformable` field; machine sign-off remains rigid-only — deformables
+always need a human. Validated: disposable_medical_masks → face_mask/
+cloth, bandagem → bandage/cloth, both deformable_unverified with zero
+rigid bodies; blueprint codegen emits PhysxDeformableSurfaceAPI with
+cloth_cotton params. Remaining: live drape/settle verification to reach
+deformable_verified; deformable-aware audit checks (current audit only
+speaks rigid/articulated).
 
 ## 7. Mass/inertia fidelity
 Per-part masses, inertia tensor + COM validation (SPD check — cad_creator

@@ -425,6 +425,31 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         "        _from_library += 1",
         "        _physics_used = True",
         "    _placed += 1",
+        "    return prim",
+        "",
+        "def _soften(prim, api_name, density, params):",
+        "    # registry deformables: the library asset carries NO rigid",
+        "    # physics by design — the soft-body preset applies here, live,",
+        "    # where PhysxSchema exists",
+        "    global _physics_used",
+        "    if prim is None:",
+        "        return",
+        "    from pxr import PhysxSchema",
+        "    _n = 0",
+        "    for _m in Usd.PrimRange(prim):",
+        "        if not _m.IsA(UsdGeom.Mesh):",
+        "            continue",
+        "        _api = getattr(PhysxSchema, api_name).Apply(_m.GetPrim())",
+        "        for _k, _v in params.items():",
+        "            _attr = ''.join(w.capitalize() for w in _k.split('_'))",
+        "            _create = getattr(_api, 'Create' + _attr + 'Attr', None)",
+        "            if _create:",
+        "                _create(_v)",
+        "        _mass = UsdPhysics.MassAPI.Apply(_m.GetPrim())",
+        "        _mass.CreateDensityAttr().Set(float(density))",
+        "        _n += 1",
+        "    _physics_used = True",
+        "    print(f'  deformable ({api_name}) on {_n} meshes under {prim.GetPath()}')",
         "",
     ]
 
@@ -443,21 +468,37 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         # its verified, physics-authored library file — no re-physicalizing
         sr_id = obj.get("sim_ready_asset")
         from_library = False
+        deformable = None
         entry = registry.get(sr_id) if sr_id else None
         if entry and entry.get("file"):
             asset_path = entry["file"]
             profile = None
             from_library = True
+            deformable = entry.get("deformable")
 
         lines.append(f"# --- {name}"
                      + (f" [sim-ready library: {sr_id}]" if from_library else "")
                      + " ---")
-        lines.append(
+        call = (
             f"_place({name!r}, {asset_path!r}, {prim_path!r}, "
             f"{prim_type!r}, {pos!r}, {rot!r}, {scale!r}, "
             f"physics_profile={profile!r}, mass_kg={mass!r}, "
             f"from_library={from_library!r})"
         )
+        if deformable:
+            from .physics import _load_deformable_presets
+            presets = _load_deformable_presets().get("presets", {})
+            alias = {"cloth": "cloth_cotton", "sponge": "sponge_soft",
+                     "rubber": "rubber_soft", "gel": "gel_soft",
+                     "rope": "rope_nylon"}
+            preset = presets.get(alias.get(deformable, deformable), {})
+            api = preset.get("api", "PhysxDeformableBodyAPI")
+            lines.append(
+                f"_soften({call}, {api!r}, "
+                f"{preset.get('density_kg_m3', 1000)!r}, "
+                f"{preset.get('params', {})!r})")
+        else:
+            lines.append(call)
 
     n = len(objects)
     lines.append("")

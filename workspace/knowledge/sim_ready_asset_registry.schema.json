@@ -51,9 +51,11 @@
       "articulated_unverified",
       "rigid_verified",
       "rigid_unverified",
-      "rigid_only_baked"
+      "rigid_only_baked",
+      "deformable_unverified",
+      "deformable_verified"
      ],
-     "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class \u2014 sim-ready is unattainable from this file."
+     "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class \u2014 sim-ready is unattainable from this file. deformable_unverified: soft-body class routed past rigid authoring (deformable APIs are PhysX-only; create_deformable_mesh applies the preset live at scene build/verification). deformable_verified: live soft-body evidence (drape/settle) within tolerance."
     },
     "scale_correction": {
      "type": "number",
@@ -93,6 +95,10 @@
     },
     "review": {
      "$ref": "#/$defs/review"
+    },
+    "deformable": {
+     "type": "string",
+     "description": "Deformable type/preset (cloth/sponge/rubber/gel/rope or an exact deformable_presets.json key) for create_deformable_mesh at scene build."
     }
    },
    "allOf": [
@@ -206,6 +212,46 @@
         ]
        }
       }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "category": {
+        "const": "deformable_verified"
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "deformable"
+      ],
+      "properties": {
+       "review": {
+        "properties": {
+         "approved": {
+          "const": true
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "category": {
+        "enum": [
+         "deformable_unverified",
+         "deformable_verified"
+        ]
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "deformable"
+      ]
      }
     }
    ]

@@ -56,7 +56,8 @@ DEFAULT_SCAN_DIR = os.environ.get(
     "ASSET_SCAN_DIR", str(Path.home() / "Desktop" / "assets" / "SketchFab_Assets"))
 _watch_status = {"last": "watcher not running", "queued_total": 0}
 
-CATEGORIES = ["articulated_verified", "articulated_unverified",
+CATEGORIES = ["deformable_verified", "deformable_unverified",
+              "articulated_verified", "articulated_unverified",
               "rigid_verified", "rigid_unverified", "rigid_only_baked"]
 
 SEV_COLOR = {"error": "#e5484d", "warning": "#f5a524", "info": "#3e97ff"}
@@ -496,6 +497,8 @@ def do_approve(entry: dict, category: str, reviewer: str, notes: str,
         "file": entry["file"],
         "source_file": entry.get("original_file") or entry["file"],
         "category": category,
+        **({"deformable": entry.get("deformable", "cloth")}
+           if category.startswith("deformable") else {}),
         "audit": {"ready": category.endswith("_verified"),
                   "simulable": bool(report.get("structure", {}).get("rigid_bodies"))},
         "review": {"approved": True, "reviewer": reviewer,

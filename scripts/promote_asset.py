@@ -135,6 +135,12 @@ def ensure_physics(entry: dict, category: str) -> list[str]:
         if total_mass:
             notes.append(f"per-link masses: {round(total_mass, 2)} kg split by volume")
         stage.GetRootLayer().Save()
+    elif category.startswith("deformable"):
+        # soft body: no rigid authoring — PhysX deformable APIs are
+        # Kit-only; the registry's `deformable` type drives
+        # create_deformable_mesh live at scene build / verification
+        notes.append(f"deformable ({entry.get('deformable', 'cloth')}): "
+                     "no rigid physics authored; preset applies live")
     elif not rigid:
         args = {"prim_path": f"/World/{_camel(entry['asset_id'])}",
                 "profile": "manipulable"}

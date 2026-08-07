@@ -58,6 +58,9 @@ def propose_category(report: dict) -> str:
     'rigid' — the object is not rigid just because nobody authored its joints.
     """
     callouts = report.get("callouts", [])
+    if _deformable_type(report):
+        # soft-body class: rigid categories would be a physics lie
+        return "deformable_unverified"
     if any(c["check"] == "articulation" and "baked" in c["message"] for c in callouts):
         return "rigid_only_baked"
     if report.get("structure", {}).get("joints"):
@@ -66,6 +69,19 @@ def propose_category(report: dict) -> str:
            for c in callouts):
         return "articulated_unverified"
     return "rigid_unverified"
+
+
+def _deformable_type(report: dict) -> str | None:
+    """Deformable preset/type for the report's class, or None (rigid)."""
+    cls = report.get("matched_class")
+    if not cls:
+        return None
+    priors_path = REPO / "workspace" / "knowledge" / "asset_class_priors.json"
+    try:
+        prior = json.loads(priors_path.read_text())["classes"].get(cls, {})
+    except (OSError, json.JSONDecodeError):
+        return None
+    return prior.get("deformable")
 
 
 def needs_articulation(report: dict) -> bool:
@@ -286,6 +302,14 @@ def apply_rigid_physics(entry: dict) -> str | None:
     report = entry.get("report", {})
     if needs_articulation(report):
         return None
+    dtype = _deformable_type(report)
+    if dtype:
+        # a rigid shell on a soft body is a physics lie — deformable APIs
+        # are PhysX-only (unavailable headless), so authoring happens live
+        # via create_deformable_mesh at scene build / verification
+        entry["deformable"] = dtype
+        return (f"deformable class ({dtype}): rigid physics skipped; "
+                f"soft-body authored live via create_deformable_mesh")
     if report.get("structure", {}).get("rigid_bodies"):
         return None
     from pxr import Usd

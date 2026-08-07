@@ -215,21 +215,6 @@
    }
   },
   {
-   "asset_id": "apple_tv_remote",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/apple_tv_remote/apple_tv_remote.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Apple_TV_remote.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": false
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "Kimate",
-    "date": "2026-08-07"
-   }
-  },
-  {
    "asset_id": "beer_bottle",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/beer_bottle/beer_bottle.usda",
    "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Beer_Bottle.usdz",
@@ -1794,6 +1779,36 @@
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
     }
+   }
+  },
+  {
+   "asset_id": "apple_tv_remote",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/apple_tv_remote/apple_tv_remote.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Apple_TV_remote.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "Kimate",
+    "date": "2026-08-07"
+   }
+  },
+  {
+   "asset_id": "002_master_chef_can",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/002_master_chef_can/002_master_chef_can.usda",
+   "source_file": "/home/kimate/Desktop/assets/YCB_Objects/002_master_chef_can.usd",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "Kimate",
+    "date": "2026-08-07"
    }
   }
  ]

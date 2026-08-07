@@ -201,3 +201,74 @@ class TestJudgeSchema:
         enum = schema["properties"]["asset_class"]["anyOf"][0]["enum"]
         assert set(enum) == set(PRIORS)
         assert schema["additionalProperties"] is False
+
+
+class TestDeformablePath:
+    def test_soft_classes_have_valid_types(self):
+        valid = {"cloth", "sponge", "rubber", "gel", "rope"}
+        soft = {k: v for k, v in PRIORS.items() if v.get("deformable")}
+        assert len(soft) >= 9
+        for k, v in soft.items():
+            assert v["deformable"] in valid, k
+            assert not v["articulable"], k
+
+    def test_propose_category_routes_deformable(self):
+        from ingest_asset import propose_category
+        assert propose_category(
+            {"matched_class": "towel", "callouts": [],
+             "structure": {}}) == "deformable_unverified"
+        assert propose_category(
+            {"matched_class": "mug", "callouts": [],
+             "structure": {}}) == "rigid_unverified"
+
+    def test_schema_deformable_requires_type(self):
+        import jsonschema
+        base = {"asset_id": "t", "file": "f.usda", "source_file": "s.usdz",
+                "category": "deformable_unverified",
+                "audit": {"ready": False, "simulable": True},
+                "review": {"approved": False, "reviewer": "x",
+                           "date": "2026-08-07"}}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"version": 1, "assets": [base]}, SCHEMA)
+        jsonschema.validate(
+            {"version": 1, "assets": [{**base, "deformable": "cloth"}]},
+            SCHEMA)
+
+    def test_machine_cannot_sign_deformable(self):
+        import jsonschema
+        asset = {"asset_id": "t", "file": "f.usda", "source_file": "s.usdz",
+                 "category": "deformable_unverified", "deformable": "cloth",
+                 "audit": {"ready": False, "simulable": True},
+                 "review": {"approved": True, "reviewer": "visual-qa-v1",
+                            "reviewer_type": "machine", "date": "2026-08-07",
+                            "models": ["a", "b"]}}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"version": 1, "assets": [asset]}, SCHEMA)
+
+    def test_blueprint_softens_registry_deformables(self):
+        from unittest.mock import patch
+
+        from service.isaac_assist_service.chat.tools.handlers import (
+            scene_blueprints as sb,
+        )
+        reg = {"assets": [{"asset_id": "towel_x", "file": "/tmp/t.usda",
+                           "deformable": "cloth"}]}
+        with patch.object(sb, "_load_sim_ready_registry", return_value=reg):
+            code = sb._gen_build_scene_from_blueprint({"blueprint": {
+                "objects": [{"name": "towel", "sim_ready_asset": "towel_x"}]}})
+        compile(code, "<bp>", "exec")
+        assert "_soften(_place(" in code
+        assert "PhysxDeformableSurfaceAPI" in code  # cloth preset
+
+    def test_rigid_library_assets_not_softened(self):
+        from unittest.mock import patch
+
+        from service.isaac_assist_service.chat.tools.handlers import (
+            scene_blueprints as sb,
+        )
+        reg = {"assets": [{"asset_id": "mug_x", "file": "/tmp/m.usda"}]}
+        with patch.object(sb, "_load_sim_ready_registry", return_value=reg):
+            code = sb._gen_build_scene_from_blueprint({"blueprint": {
+                "objects": [{"name": "mug", "sim_ready_asset": "mug_x"}]}})
+        compile(code, "<bp>", "exec")
+        assert "_soften(_place(" not in code
