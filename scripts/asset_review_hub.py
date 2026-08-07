@@ -458,6 +458,7 @@ def render_entry(e: dict) -> str:
         if arti_needed:
             corrective += ('<button name="do" value="draft_arti">Draft articulation '
                            'spec</button>')
+        corrective += '<button name="do" value="vlm">Classify visually (VLM)</button>'
         corrective += '<button name="do" value="recheck">Re-run checks</button>'
         gate = ""
         approve_btn = '<button class="primary" name="do" value="approve">Approve &rarr; registry</button>'
@@ -640,6 +641,12 @@ class Handler(BaseHTTPRequestHandler):
                 msg = f"re-checked {asset_id}: {entry['report'].get('verdict')}"
             except Exception as ex:
                 msg = f"re-check failed: {ex}"
+        elif action == "vlm":
+            try:
+                from vlm_classify import classify_entry
+                msg = classify_entry(asset_id)
+            except Exception as ex:
+                msg = f"VLM classification failed: {ex}"
         elif action == "segment":
             try:
                 from segment_mesh import segment_entry

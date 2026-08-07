@@ -97,18 +97,36 @@ def _camel(s: str) -> str:
 def build_wrapper(entry: dict, size_factor: float | None) -> str:
     """(Re)create the sim-ready derivative: a meters/Z-up wrapper stage
     referencing the original source, with unit conversion, up-axis
-    correction, and optional real-world size correction applied."""
+    correction, and optional real-world size correction applied.
+
+    Scale bookkeeping: the wrapper's cumulative scale is tracked on the
+    entry (`wrapper_scale`). A size_factor measured against the CURRENT
+    state (source or an earlier derivative) multiplies onto it — never
+    trust a derivative report's meters_per_unit (it is 1.0 by
+    construction and mis-multiplies the correction)."""
     from pxr import Gf, Usd, UsdGeom
 
     src = entry.get("original_file") or entry["file"]
-    report = entry["report"]
-    mpu = float(report.get("meters_per_unit", 1.0))
-    factor = mpu * (size_factor if size_factor else 1.0)
+    src_probe = Usd.Stage.Open(src)
+    src_mpu = float(UsdGeom.GetStageMetersPerUnit(src_probe))
+    src_up = str(UsdGeom.GetStageUpAxis(src_probe)).upper()
+    del src_probe
+    base = float(entry.get("wrapper_scale", src_mpu))
+    factor = base * (size_factor if size_factor else 1.0)
+    from pxr import Sdf
+
     FIXED_DIR.mkdir(parents=True, exist_ok=True)
     out = FIXED_DIR / f"{entry['asset_id']}_simready.usda"
-    if out.exists():
-        out.unlink()
-    stage = Usd.Stage.CreateNew(str(out))
+    # the layer may still be registered from an earlier build in this
+    # process — clear and reuse it (CreateNew collides with a live layer)
+    existing = Sdf.Layer.Find(str(out))
+    if existing:
+        existing.Clear()
+        stage = Usd.Stage.Open(existing)
+    else:
+        if out.exists():
+            out.unlink()
+        stage = Usd.Stage.CreateNew(str(out))
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
     world = UsdGeom.Xform.Define(stage, "/World")
@@ -121,10 +139,11 @@ def build_wrapper(entry: dict, size_factor: float | None) -> str:
     else:
         asset.GetReferences().AddReference(src)
     xf = UsdGeom.XformCommonAPI(asset)
-    if str(report.get("up_axis", "Z")).upper() == "Y":
+    if src_up == "Y":
         xf.SetRotate(Gf.Vec3f(90, 0, 0))
     xf.SetScale(Gf.Vec3f(factor, factor, factor))
     stage.GetRootLayer().Save()
+    entry["wrapper_scale"] = factor
     return str(out)
 
 

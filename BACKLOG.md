@@ -67,9 +67,20 @@ follow-on (now part of #3): cross-mesh LINK GROUPING — cluster the split
 parts into articulation links by side/proximity (left wheel = tire + rim +
 spokes) so the draft-spec proposes wheel joints directly.
 
-## 5. VLM visual classification
-`class_source` seam exists (`filename_guess`/`hint`/`human_visual`); wire
-thumbnail → VLM → class so the visual step stops being manual.
+## 5. VLM visual classification — ✅ SHIPPED 2026-08-07
+`scripts/vlm_classify.py <asset_id>` + hub "Classify visually (VLM)"
+button: thumbnail → Claude vision (structured output, constrained to the
+prior class keys) → class_hint with `class_source: "vlm"`, checks re-run
+under the corrected prior, auto-rescale + physics re-applied when the
+class changes the plausible size. Also reports moving parts visible in the
+render (feeds future joint suggestion). Validated: a chess rook renamed
+`random_object_42.usdz` (filename matching: nothing, 3.0 m passed
+unverified) was identified from pixels alone, reclassified chess_piece,
+auto-rescaled to 0.08 m with wood_oak + 85 g. The wheelchair classified
+"Manual wheelchair, high confidence" with every moving part enumerated.
+Requires ANTHROPIC_API_KEY (present in .env). Remaining: auto-VLM at
+ingest behind an env flag; use the moving-parts report in the
+articulation draft tier (#3).
 
 ## 6. Deformables path
 Cloth/soft assets currently get rigid treatment. Widen
