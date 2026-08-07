@@ -246,20 +246,22 @@ def verify_articulated(info: dict) -> dict:
                            "(limited, or continuous revolute)")
     base_link = testable[0].get("parent") or (info["rigid"][0] if info["rigid"] else None)
     # continuous joints (wheels): spinning against ground friction either
-    # PROPELS the asset (free base) or stalls the wheels (pinned base) —
-    # both contaminate joint measurement. Pin the base and keep the wheels
-    # off any ground so the joints respond freely. Limited-joint assets
-    # instead stand on a ground with a free base (gravity-realistic).
+    # PROPELS the asset (free base) or stalls the wheels — hold the base
+    # and keep wheels off any ground. NEVER pin via kinematicEnabled: a
+    # kinematic link INVALIDATES the whole PhysX articulation ("did not
+    # match any articulations" — no joints, no drives, bodies drift free).
+    # A FixedJoint from the world to the base link is the legal construct.
     has_continuous = any(j["lower"] is None and j["upper"] is None for j in testable)
     if not has_continuous:
         add_ground(info["zmin"] if info["zmin"] is not None else 0.0)
     if has_continuous and base_link:
         exec_sync(f"""
 import omni.usd
-from pxr import UsdPhysics
+from pxr import UsdPhysics, Sdf
 stage = omni.usd.get_context().get_stage()
-UsdPhysics.RigidBodyAPI(stage.GetPrimAtPath({base_link!r})).CreateKinematicEnabledAttr().Set(True)
-print('base pinned for spin test')
+fj = UsdPhysics.FixedJoint.Define(stage, Sdf.Path('/World/SpinTestAnchor'))
+fj.CreateBody1Rel().SetTargets([Sdf.Path({base_link!r})])
+print('base anchored to world for spin test')
 """)
     # multi-body links (wheel + spokes + rim as fixed-joined bodies) have
     # convex hulls that interpenetrate — articulation self-collision must be
@@ -328,12 +330,10 @@ print('reset')
     base_after = fabric_pose(base_link) if base_link else None
     stop()
     if has_continuous and base_link:
-        exec_sync(f"""
+        exec_sync("""
 import omni.usd
-from pxr import UsdPhysics
-stage = omni.usd.get_context().get_stage()
-UsdPhysics.RigidBodyAPI(stage.GetPrimAtPath({base_link!r})).CreateKinematicEnabledAttr().Set(False)
-print('base unpinned')
+omni.usd.get_context().get_stage().RemovePrim('/World/SpinTestAnchor')
+print('spin anchor removed')
 """)
     base_drift = (math.dist(base_before[0], base_after[0])
                   if base_before and base_after else None)

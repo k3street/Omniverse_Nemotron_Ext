@@ -38,20 +38,19 @@ with naive fallback. Validated on the segmented wheelchair: both drive
 wheels found with 20/12 grouped members plus both casters; reviewer edits
 4 noise candidates to fixed and applies — 110 bodies, 109 joints, 4
 spinning wheels.
-Remaining: VLM tier for non-wheel mechanisms (lids, doors, drawers —
-geometry alone cannot name them), limit inference, and ONE OPEN PHYSICS
-INVESTIGATION — continuous-wheel drive convergence: verify_asset_live now
-has the spin-test harness (--file standalone mode, base pinned kinematic,
-no ground, articulation self-collision off, wheel joints anchored at the
-hub centroid — each step validated and each ruled out as the cause), but
-the wheelchair's wheel crawls continuously under a position drive with
-the target interpreted as neither degrees (90 -> endless spin) nor
-radians (pi/2 -> passes 90 deg and keeps going, ~4 deg/s). Next probe:
-read the joint state through omni.physx directly instead of Fabric
-relative rotation, and check drive semantics (position vs velocity,
-stiffness units) for reduced-coordinate articulations in Isaac 6.0.
-Limited-joint verification (prismatic/revolute with limits) is solid —
-that path verified 7/8 registry assets.
+Wheel-drive investigation RESOLVED 2026-08-07: the drives were always
+correct (targets in degrees). The failing harness had pinned the base via
+kinematicEnabled — a kinematic link INVALIDATES the whole PhysX
+articulation ("did not match any articulations" in the console; no
+joints, no drives, bodies drift free), which explained every anomalous
+measurement. The legal construct is a FixedJoint from the world to the
+base link; with that anchor the wheelchair verifies 4/4 wheels — drive
+wheels 89.989 deg for a 90 deg command (0.011 deg error), casters 0.163
+deg error, zero base drift. Diagnosis instrument for next time:
+PhysxSchema.JointStateAPI (PhysX writes joint pos/vel into USD attrs) and
+the omni.physx.tensors "did not match any articulations" console error.
+Remaining in #3: VLM-fed joint suggestion for non-wheel mechanisms, limit
+inference.
 
 ## 4. Mesh segmentation for baked assets — ✅ SHIPPED 2026-08-07
 `scripts/segment_mesh.py <asset_id>` + hub "Segment baked mesh" button:
