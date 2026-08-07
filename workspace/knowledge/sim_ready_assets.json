@@ -1669,6 +1669,132 @@
      "rests_after_s": 5.0
     }
    }
+  },
+  {
+   "asset_id": "dropper_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/dropper_bottle/dropper_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Dropper_Bottle.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.0917,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "006_mustard_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/006_mustard_bottle/006_mustard_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/YCB_Objects/006_mustard_bottle.usd",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1019,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "024_bowl",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/024_bowl/024_bowl.usda",
+   "source_file": "/home/kimate/Desktop/assets/YCB_Objects/024_bowl.usd",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1535,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0,
+     "note": "reoriented while settling (tipped); rests on ground"
+    }
+   }
+  },
+  {
+   "asset_id": "025_mug",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/025_mug/025_mug.usda",
+   "source_file": "/home/kimate/Desktop/assets/YCB_Objects/025_mug.usd",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1109,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
   }
  ]
 }
