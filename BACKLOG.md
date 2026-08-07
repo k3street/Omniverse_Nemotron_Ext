@@ -81,10 +81,14 @@ Requires ANTHROPIC_API_KEY (present in .env). Remaining: auto-VLM at
 ingest behind an env flag; use the moving-parts report in the
 articulation draft tier (#3).
 
-## 6. Deformables path
-Cloth/soft assets currently get rigid treatment. Widen
-`create_deformable_mesh` enum (10 of 15 presets unreachable); route
-make_sim_ready by material class.
+## 6. Deformables path — ◐ preset unlock SHIPPED 2026-08-07
+`create_deformable_mesh` now accepts generic types (cloth/sponge/rubber/
+gel/rope) or any exact preset key — all 15 presets reachable (silk, denim,
+canvas, memory foam, leather, paper, plastic film, silicone, ...); unknown
+types fail loud instead of silently defaulting to an empty preset.
+Remaining: route make_sim_ready/ingest to the deformable path when the
+class/material says cloth/soft (currently everything gets rigid
+treatment); deformable-aware audit checks.
 
 ## 7. Mass/inertia fidelity
 Per-part masses, inertia tensor + COM validation (SPD check — cad_creator

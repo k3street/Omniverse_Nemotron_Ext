@@ -326,6 +326,43 @@ class TestGeneratedCodeOnRealStage:
 
 
 # ---------------------------------------------------------------------------
+# deformable preset unlock (BACKLOG #6)
+
+
+class TestDeformableUnlock:
+    def test_every_preset_key_resolves(self):
+        import json
+        from pathlib import Path
+        from service.isaac_assist_service.chat.tools.handlers.physics import (
+            _gen_deformable,
+        )
+        presets = json.loads(
+            (Path(__file__).resolve().parents[1] / "workspace" / "knowledge"
+             / "deformable_presets.json").read_text())["presets"]
+        assert len(presets) >= 15
+        for key in presets:
+            code = _gen_deformable({"prim_path": "/World/M", "soft_body_type": key})
+            compile(code, "<gen>", "exec")
+            assert not code.startswith("raise "), f"{key} should resolve"
+
+    def test_generic_aliases_resolve(self):
+        from service.isaac_assist_service.chat.tools.handlers.physics import (
+            _gen_deformable,
+        )
+        for alias in ("cloth", "sponge", "rubber", "gel", "rope"):
+            code = _gen_deformable({"prim_path": "/World/M", "soft_body_type": alias})
+            assert not code.startswith("raise "), f"{alias} should resolve"
+
+    def test_unknown_type_fails_loud(self):
+        from service.isaac_assist_service.chat.tools.handlers.physics import (
+            _gen_deformable,
+        )
+        code = _gen_deformable({"prim_path": "/World/M", "soft_body_type": "jelly"})
+        assert code.startswith("raise ValueError")
+        assert "cloth_silk" in code  # lists valid presets
+
+
+# ---------------------------------------------------------------------------
 # mesh segmentation core (pure python, no pxr needed)
 
 

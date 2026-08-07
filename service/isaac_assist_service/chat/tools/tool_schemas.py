@@ -169,15 +169,19 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "create_deformable_mesh",
-            "description": "Convert an existing mesh prim into a deformable soft body (cloth, sponge, rubber, gel, rope). Applies PhysX deformable APIs with physics presets.",
+            "description": "Convert an existing mesh prim into a deformable soft body. Applies PhysX deformable APIs with measured physics presets. Accepts generic types (cloth, sponge, rubber, gel, rope) or any exact preset key for finer material control (cloth_silk, cloth_denim, cloth_canvas, sponge_memory_foam, rubber_hard, silicone_soft, leather, paper, plastic_film, ...).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "prim_path": {"type": "string", "description": "Path to the existing Mesh prim"},
                     "soft_body_type": {
                         "type": "string",
-                        "enum": ["cloth", "sponge", "rubber", "gel", "rope"],
-                        "description": "Type of soft body behavior",
+                        "enum": ["cloth", "sponge", "rubber", "gel", "rope",
+                                 "cloth_canvas", "cloth_cotton", "cloth_denim", "cloth_silk",
+                                 "gel_soft", "leather", "paper", "plastic_film",
+                                 "rope_nylon", "rubber_hard", "rubber_soft", "silicone_soft",
+                                 "sponge_foam", "sponge_memory_foam", "sponge_soft"],
+                        "description": "Generic soft body type, or an exact preset key for a specific material",
                     },
                     "youngs_modulus": {"type": "number", "description": "Override stiffness (Pa). Higher = stiffer."},
                     "poissons_ratio": {"type": "number", "description": "Override compressibility (0-0.49). Higher = less compressible."},

@@ -11,7 +11,7 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-06T16:08:49+00:00
+Generated: 2026-08-07T15:50:11+00:00
 Tool count: 439
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
@@ -95,11 +95,11 @@ class RunUsdScriptArgs(BaseModel):
 
 
 class CreateDeformableMeshArgs(BaseModel):
-    """Convert an existing mesh prim into a deformable soft body (cloth, sponge, rubber, gel, rope). Applies PhysX deformable APIs with physics presets."""
+    """Convert an existing mesh prim into a deformable soft body. Applies PhysX deformable APIs with measured physics presets. Accepts generic types (cloth, sponge, rubber, gel, rope) or any exact preset key"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     prim_path: str = Field(..., description="Path to the existing Mesh prim")
-    soft_body_type: str = Field(..., description="Type of soft body behavior")
+    soft_body_type: str = Field(..., description="Generic soft body type, or an exact preset key for a specific material")
     youngs_modulus: Optional[float] = Field(None, description="Override stiffness (Pa). Higher = stiffer.")
     poissons_ratio: Optional[float] = Field(None, description="Override compressibility (0-0.49). Higher = less compressible.")
     damping: Optional[float] = Field(None, description="Override damping factor")

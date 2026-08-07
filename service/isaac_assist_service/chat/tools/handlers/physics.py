@@ -648,7 +648,10 @@ def _gen_deformable(args: Dict) -> str:
 
     presets = _load_deformable_presets().get("presets", {})
 
-    # Map user-friendly names to preset keys
+    # Generic aliases map to a default preset; every exact preset key from
+    # deformable_presets.json is also accepted (previously 10 of 15 presets
+    # were unreachable and unknown types silently fell through to an empty
+    # preset — now they fail loud).
     preset_map = {
         "cloth": "cloth_cotton",
         "sponge": "sponge_soft",
@@ -656,9 +659,16 @@ def _gen_deformable(args: Dict) -> str:
         "gel": "gel_soft",
         "rope": "rope_nylon",
     }
-    preset_key = preset_map.get(sbt, f"{sbt}_soft")
-    preset = presets.get(preset_key, {})
-    params = preset.get("params", {})
+    preset_key = preset_map.get(sbt, sbt)
+    preset = presets.get(preset_key)
+    if preset is None:
+        valid = sorted(set(preset_map) | set(presets))
+        return (
+            "raise ValueError("
+            f"\"create_deformable_mesh: unknown soft_body_type '{sbt}'. "
+            f"Valid: {', '.join(valid)}\")"
+        )
+    params = dict(preset.get("params", {}))
 
     # Allow user overrides
     if args.get("youngs_modulus"):
