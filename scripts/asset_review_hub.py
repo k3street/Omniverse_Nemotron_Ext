@@ -435,6 +435,10 @@ def render_entry(e: dict) -> str:
         if no_physics and not arti_needed:
             corrective += ('<button name="do" value="make_rigid">Make sim-ready '
                            '(collision + material + mass)</button>')
+        baked = any("baked asset" in c["message"] for c in r.get("callouts", []))
+        if baked:
+            corrective += ('<button name="do" value="segment">Segment baked mesh '
+                           '(split fused parts)</button>')
         if arti_needed:
             corrective += ('<button name="do" value="draft_arti">Draft articulation '
                            'spec</button>')
@@ -620,6 +624,12 @@ class Handler(BaseHTTPRequestHandler):
                 msg = f"re-checked {asset_id}: {entry['report'].get('verdict')}"
             except Exception as ex:
                 msg = f"re-check failed: {ex}"
+        elif action == "segment":
+            try:
+                from segment_mesh import segment_entry
+                msg = segment_entry(asset_id)
+            except Exception as ex:
+                msg = f"segmentation failed: {ex}"
         elif action == "draft_arti":
             try:
                 msg = draft_articulation(entry)

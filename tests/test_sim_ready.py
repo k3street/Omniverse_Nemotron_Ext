@@ -326,6 +326,73 @@ class TestGeneratedCodeOnRealStage:
 
 
 # ---------------------------------------------------------------------------
+# mesh segmentation core (pure python, no pxr needed)
+
+
+class TestMeshSegmentation:
+    @property
+    def seg(self):
+        from pathlib import Path
+        p = str(Path(__file__).resolve().parents[1] / "scripts")
+        if p not in sys.path:
+            sys.path.insert(0, p)
+        import segment_mesh
+        return segment_mesh
+
+    def test_two_islands_split(self):
+        # two triangles sharing no vertices -> two components
+        counts = [3, 3]
+        indices = [0, 1, 2, 3, 4, 5]
+        comps = self.seg.mesh_components(counts, indices)
+        assert sorted(len(c) for c in comps) == [1, 1]
+
+    def test_shared_vertex_joins(self):
+        counts = [3, 3]
+        indices = [0, 1, 2, 2, 3, 4]  # share vertex 2 -> one component
+        comps = self.seg.mesh_components(counts, indices)
+        assert len(comps) == 1
+
+    def test_duplicate_position_weld(self):
+        # same positions, different indices: without points -> 2 islands;
+        # with points -> welded into 1 (the scan-fragmentation fix)
+        counts = [3, 3]
+        indices = [0, 1, 2, 3, 4, 5]
+        pts = [(0, 0, 0), (1, 0, 0), (0, 1, 0),
+               (1, 0, 0), (0, 1, 0), (1, 1, 0)]  # tri2 reuses tri1 edge positions
+        assert len(self.seg.mesh_components(counts, indices)) == 2
+        assert len(self.seg.mesh_components(counts, indices, pts)) == 1
+
+    def test_small_islands_merge_into_nearest(self):
+        # one big chain component (300 faces) + one tiny far triangle well
+        # below the 1% face threshold -> island absorbed into the big part
+        n_big = 300
+        counts = [3] * (n_big + 1)
+        indices = []
+        pts = []
+        for i in range(n_big):  # chain of triangles sharing vertices
+            base = i * 2
+            indices += [base, base + 1, base + 2]
+        for i in range(2 * n_big + 2):
+            pts.append((i * 0.01, 0, 0))
+        island_base = 2 * n_big + 2
+        indices += [island_base, island_base + 1, island_base + 2]
+        pts += [(100, 0, 0), (100.1, 0, 0), (100, 0.1, 0)]
+        comps = self.seg.mesh_components(counts, indices)
+        assert len(comps) == 2
+        merged = self.seg.merge_small(comps, pts, indices, counts, len(counts))
+        assert len(merged) == 1  # tiny island absorbed
+
+    def test_part_count_capped(self):
+        n = self.seg.MAX_PARTS + 20
+        counts = [3] * n
+        indices = list(range(3 * n))
+        pts = [(i, 0, 0) for i in range(3 * n)]
+        comps = self.seg.mesh_components(counts, indices)
+        merged = self.seg.merge_small(comps, pts, indices, counts, n)
+        assert len(merged) <= self.seg.MAX_PARTS
+
+
+# ---------------------------------------------------------------------------
 # sim-ready asset registry (workspace/knowledge)
 
 

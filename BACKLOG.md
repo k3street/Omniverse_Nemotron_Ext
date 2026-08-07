@@ -34,10 +34,19 @@ next: AI/VLM joint suggestion (discovery hub `suggest_joints_ai` prior
 art), axis/limit inference from geometry, per-link masses in
 articulate_asset.
 
-## 4. Mesh segmentation for baked assets
-Connected-component split (office chair, wheelchair wheels are clean
-disjoint islands inside fused meshes). Unlocks articulation for the
-largest class of scan assets.
+## 4. Mesh segmentation for baked assets — ✅ SHIPPED 2026-08-07
+`scripts/segment_mesh.py <asset_id>` + hub "Segment baked mesh" button:
+connected-component split with exact-position vertex welding (scan exports
+duplicate vertices per strip — the wheelchair tire was 8193 false islands
+until welded, 5 after), small islands merged into the nearest part by
+centroid, part count capped at 32, primvars/normals/material bindings and
+local transforms carried, original mesh deactivated in the derivative.
+Validated: wheelchair — every fused left/right pair split cleanly (wheels,
+casters, handrims, axle); office chair — 26 parts from one fused mesh;
+segmented assets render correctly with materials intact. Remaining
+follow-on (now part of #3): cross-mesh LINK GROUPING — cluster the split
+parts into articulation links by side/proximity (left wheel = tire + rim +
+spokes) so the draft-spec proposes wheel joints directly.
 
 ## 5. VLM visual classification
 `class_source` seam exists (`filename_guess`/`hint`/`human_visual`); wire
