@@ -39,9 +39,19 @@ wheels found with 20/12 grouped members plus both casters; reviewer edits
 4 noise candidates to fixed and applies — 110 bodies, 109 joints, 4
 spinning wheels.
 Remaining: VLM tier for non-wheel mechanisms (lids, doors, drawers —
-geometry alone cannot name them), limit inference, drives on proposed
-wheel joints, live spin verification for continuous joints
-(verify_asset_live currently requires limited joints).
+geometry alone cannot name them), limit inference, and ONE OPEN PHYSICS
+INVESTIGATION — continuous-wheel drive convergence: verify_asset_live now
+has the spin-test harness (--file standalone mode, base pinned kinematic,
+no ground, articulation self-collision off, wheel joints anchored at the
+hub centroid — each step validated and each ruled out as the cause), but
+the wheelchair's wheel crawls continuously under a position drive with
+the target interpreted as neither degrees (90 -> endless spin) nor
+radians (pi/2 -> passes 90 deg and keeps going, ~4 deg/s). Next probe:
+read the joint state through omni.physx directly instead of Fabric
+relative rotation, and check drive semantics (position vs velocity,
+stiffness units) for reduced-coordinate articulations in Isaac 6.0.
+Limited-joint verification (prismatic/revolute with limits) is solid —
+that path verified 7/8 registry assets.
 
 ## 4. Mesh segmentation for baked assets — ✅ SHIPPED 2026-08-07
 `scripts/segment_mesh.py <asset_id>` + hub "Segment baked mesh" button:

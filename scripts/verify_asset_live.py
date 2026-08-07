@@ -233,14 +233,46 @@ def verify_rigid(info: dict) -> dict:
 
 
 def verify_articulated(info: dict) -> dict:
+    # limited joints get a mid-range target; continuous revolute joints
+    # (wheels) get a 90-degree spin test. Unlimited prismatic is never
+    # commanded (no safe target exists).
     testable = [j for j in info["joints"]
-                if j["has_drive"] and j["lower"] is not None and j["upper"] is not None]
+                if j["has_drive"] and (
+                    (j["lower"] is not None and j["upper"] is not None)
+                    or (j["type"] == "revolute"
+                        and j["lower"] is None and j["upper"] is None))]
     if not testable:
-        raise RuntimeError("no driven, limited joints to verify")
-    # the asset must stand on something — a floating-base articulation in
-    # free fall contaminates every displacement measurement
-    add_ground(info["zmin"] if info["zmin"] is not None else 0.0)
+        raise RuntimeError("no driven verifiable joints "
+                           "(limited, or continuous revolute)")
     base_link = testable[0].get("parent") or (info["rigid"][0] if info["rigid"] else None)
+    # continuous joints (wheels): spinning against ground friction either
+    # PROPELS the asset (free base) or stalls the wheels (pinned base) —
+    # both contaminate joint measurement. Pin the base and keep the wheels
+    # off any ground so the joints respond freely. Limited-joint assets
+    # instead stand on a ground with a free base (gravity-realistic).
+    has_continuous = any(j["lower"] is None and j["upper"] is None for j in testable)
+    if not has_continuous:
+        add_ground(info["zmin"] if info["zmin"] is not None else 0.0)
+    if has_continuous and base_link:
+        exec_sync(f"""
+import omni.usd
+from pxr import UsdPhysics
+stage = omni.usd.get_context().get_stage()
+UsdPhysics.RigidBodyAPI(stage.GetPrimAtPath({base_link!r})).CreateKinematicEnabledAttr().Set(True)
+print('base pinned for spin test')
+""")
+    # multi-body links (wheel + spokes + rim as fixed-joined bodies) have
+    # convex hulls that interpenetrate — articulation self-collision must be
+    # off for joint measurement (and is standard for articulations)
+    if info.get("articulation_root"):
+        exec_sync(f"""
+import omni.usd
+from pxr import PhysxSchema
+stage = omni.usd.get_context().get_stage()
+api = PhysxSchema.PhysxArticulationAPI.Apply(stage.GetPrimAtPath({info['articulation_root']!r}))
+api.CreateEnabledSelfCollisionsAttr().Set(False)
+print('self-collision off')
+""")
     play()
     time.sleep(3)
     base_before = fabric_pose(base_link) if base_link else None
@@ -249,8 +281,10 @@ def verify_articulated(info: dict) -> dict:
         child, parent = j["child"], j["parent"]
         before_c = fabric_pose(child)
         before_p = fabric_pose(parent) if parent else None
-        span = j["upper"] - j["lower"]
-        target = j["lower"] + span * 0.5
+        if j["lower"] is not None and j["upper"] is not None:
+            target = j["lower"] + (j["upper"] - j["lower"]) * 0.5
+        else:
+            target = 90.0  # continuous revolute: quarter-turn spin test
         token = "angular" if j["type"] == "revolute" else "linear"
         exec_sync(f"""
 import omni.usd
@@ -293,6 +327,14 @@ print('reset')
         time.sleep(2)
     base_after = fabric_pose(base_link) if base_link else None
     stop()
+    if has_continuous and base_link:
+        exec_sync(f"""
+import omni.usd
+from pxr import UsdPhysics
+stage = omni.usd.get_context().get_stage()
+UsdPhysics.RigidBodyAPI(stage.GetPrimAtPath({base_link!r})).CreateKinematicEnabledAttr().Set(False)
+print('base unpinned')
+""")
     base_drift = (math.dist(base_before[0], base_after[0])
                   if base_before and base_after else None)
     worst = max(results, key=lambda r: r["error"] / (ANG_TOL_DEG if r["unit"] == "deg" else POS_TOL_M))
@@ -358,6 +400,20 @@ def main() -> int:
         return 1
     reg = json.loads(REGISTRY.read_text())
     args = sys.argv[1:]
+    if args and args[0] == "--file":
+        # standalone: measure a file without touching the registry (e.g. a
+        # queue derivative before human approval)
+        file_path = args[1]
+        articulated = len(args) > 2 and args[2] == "--articulated"
+        open_stage(file_path)
+        info = stage_info()
+        try:
+            result = (verify_articulated(info) if articulated or info["joints"]
+                      else verify_rigid(info))
+        finally:
+            cleanup()
+        print(("PASS" if result["passed"] else "FAIL"), json.dumps(result["evidence"]))
+        return 0 if result["passed"] else 1
     if args == ["--all-unverified"]:
         ids = [a["asset_id"] for a in reg["assets"]
                if a["category"].endswith("_unverified")]

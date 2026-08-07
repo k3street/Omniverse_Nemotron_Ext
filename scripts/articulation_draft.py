@@ -210,10 +210,15 @@ def propose(stage, asset_root: str, prim_path_for_spec: str) -> dict:
     for w in wheels:
         wp = w["part"]["path"]
         name = f"wheel_{w['side']}_{len([j for j in joints if j['name'].startswith('wheel_' + w['side'])])}"
+        # anchor at the wheel's centroid (its hub) — segmented parts keep the
+        # FUSED mesh's origin, so anchoring at the child origin would hinge
+        # the wheel off-axis at the asset center
         joints.append({"name": name, "joint_type": "revolute",
                        "parent_prim": base["path"], "child_prim": wp,
                        "axis": axis_name, "lower_limit": None, "upper_limit": None,
-                       "_note": "continuous wheel spin — limits intentionally open"})
+                       "anchor": [round(c, 6) for c in w["part"]["centroid"]],
+                       "_note": "continuous wheel spin — limits intentionally open; "
+                                "anchor = wheel hub"})
         for i, m in enumerate(members.get(wp, [])):
             joints.append({"name": f"{name}_mount{i:02d}", "joint_type": "fixed",
                            "parent_prim": wp, "child_prim": m})
