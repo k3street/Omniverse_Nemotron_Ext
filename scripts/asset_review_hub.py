@@ -508,12 +508,18 @@ def render_index(msg: str = "") -> bytes:
 
 def do_approve(entry: dict, category: str, reviewer: str, notes: str) -> str:
     report = entry.get("report", {})
+    # approved must mean finished: articulated categories need their joints
+    # authored before a human can sign them off
+    if category.startswith("articulated") and not report.get(
+            "structure", {}).get("joints"):
+        return ("NOT approved — articulated category but no joints authored. "
+                "Use 'Draft articulation spec' → Apply first.")
     reg = load_registry()
     reg["assets"] = [a for a in reg["assets"] if a["asset_id"] != entry["asset_id"]]
     new = {
         "asset_id": entry["asset_id"],
         "file": entry["file"],
-        "source_file": entry["file"],
+        "source_file": entry.get("original_file") or entry["file"],
         "category": category,
         "audit": {"ready": category.endswith("_verified"),
                   "simulable": bool(report.get("structure", {}).get("rigid_bodies"))},
@@ -527,11 +533,21 @@ def do_approve(entry: dict, category: str, reviewer: str, notes: str) -> str:
     err = write_registry(reg)
     if err:
         return f"NOT approved — {err}"
-    stamp = stamp_usd(entry["file"], category, reviewer)
-    entry["status"] = "approved"
-    entry["review"] = new["review"]
-    save_queue_entry(entry)
-    return f"approved {entry['asset_id']} as {category}; {stamp}"
+    # promotion IS part of approval: physics ensured, landed in the library,
+    # stamped, registry pointed at the library copy
+    try:
+        from promote_asset import promote
+        promote_msg = promote(entry["asset_id"])
+    except Exception as ex:
+        reg = load_registry()
+        reg["assets"] = [a for a in reg["assets"] if a["asset_id"] != entry["asset_id"]]
+        write_registry(reg)
+        return f"NOT approved — promotion failed: {ex}"
+    fresh = next((e for e in load_queue() if e["asset_id"] == entry["asset_id"]), entry)
+    fresh["status"] = "approved"
+    fresh["review"] = new["review"]
+    save_queue_entry(fresh)
+    return f"approved {entry['asset_id']} as {category}; {promote_msg}"
 
 
 class Handler(BaseHTTPRequestHandler):

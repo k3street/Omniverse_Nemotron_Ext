@@ -81,7 +81,7 @@ FIXED_DIR = REPO / "workspace" / "assets_fixed"
 def _asset_id_for(file_path: str) -> str:
     # keep unicode word chars (Cyrillic filenames etc.); ascii-only ids
     # would collapse to "" for e.g. Кресло-коляска_*.usdz
-    slug = re.sub(r"[\W]+", "_", Path(file_path).stem.lower(), flags=re.UNICODE).strip("_")
+    slug = re.sub(r"[\W_]+", "_", Path(file_path).stem.lower(), flags=re.UNICODE).strip("_")
     if not slug:
         import hashlib
         slug = "asset_" + hashlib.md5(Path(file_path).name.encode()).hexdigest()[:8]
@@ -161,6 +161,61 @@ def render_thumbnail(file_path: str, asset_id: str) -> str | None:
     return str(out) if out.exists() else None
 
 
+def apply_rigid_physics(entry: dict) -> str | None:
+    """Author rigid physics on the entry's derivative (deterministic:
+    collision + class material + class-plausible mass). Returns a note, or
+    None when not applicable. Never applied to articulable assets — their
+    joints must be authored first."""
+    import contextlib
+    import io
+    import types
+
+    report = entry.get("report", {})
+    if needs_articulation(report):
+        return None
+    if report.get("structure", {}).get("rigid_bodies"):
+        return None
+    from pxr import Usd
+
+    from service.isaac_assist_service.chat.tools.handlers.physics import (
+        _gen_make_sim_ready,
+        _load_asset_priors,
+    )
+
+    if "original_file" not in entry or not str(entry["file"]).endswith(".usda"):
+        entry.setdefault("original_file", entry["file"])
+        entry["file"] = build_wrapper(entry, None)
+    stage = Usd.Stage.Open(entry["file"])
+    omni = types.ModuleType("omni")
+    omni_usd = types.ModuleType("omni.usd")
+    ctx = type("Ctx", (), {"get_stage": lambda self: stage})()
+    omni_usd.get_context = lambda: ctx
+    omni.usd = omni_usd
+    sys.modules["omni"] = omni
+    sys.modules["omni.usd"] = omni_usd
+
+    cls = report.get("matched_class")
+    prior = _load_asset_priors().get("classes", {}).get(cls or "", {})
+    mats = prior.get("typical_materials") or []
+    mass_range = prior.get("mass_kg")
+    profile = ("furniture" if cls in ("table", "cabinet", "door",
+                                      "appliance_large", "medical_furniture")
+               else "manipulable")
+    args = {"prim_path": f"/World/{_camel(entry['asset_id'])}", "profile": profile}
+    if mats:
+        args["material"] = mats[0]
+    if mass_range and profile == "manipulable":
+        args["mass_kg"] = round((mass_range[0] + mass_range[1]) / 2.0, 3)
+    code = _gen_make_sim_ready(args)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        exec(compile(code, "<auto-physics>", "exec"), {"__builtins__": __builtins__})
+    stage.GetRootLayer().Save()
+    del stage
+    return (f"auto physics: {profile}, {mats[0] if mats else 'no material (no class)'}"
+            + (f", {args['mass_kg']} kg" if args.get("mass_kg") else " (bbox mass)"))
+
+
 def queue_file(file_path: str, class_hint: str | None = None,
                asset_id: str | None = None, auto_fix_scale: bool = True) -> dict:
     """Run the ingest report on one file and write its review-queue entry.
@@ -193,6 +248,15 @@ def queue_file(file_path: str, class_hint: str | None = None,
             f"up-axis {report.get('up_axis')} -> Z)"]
         entry["report"] = run_report(entry["file"], class_hint)
         entry["proposed_category"] = propose_category(entry["report"])
+    # deterministic physics for non-articulable rigids happens at ingest
+    # too — no button, no waiting (articulable assets get physics at
+    # promote, after their joints are authored)
+    if auto_fix_scale:
+        note = apply_rigid_physics(entry)
+        if note:
+            entry.setdefault("applied_fixes", []).append(note)
+            entry["report"] = run_report(entry["file"], class_hint)
+            entry["proposed_category"] = propose_category(entry["report"])
     # the class from name matching is only a guess until a human (or VLM)
     # looks at the object itself
     entry["class_source"] = "hint" if class_hint else "filename_guess"

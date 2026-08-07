@@ -2,19 +2,20 @@
 
 Ordered by leverage. Top item first.
 
-## 1. Finish line: finalize/promote step (TOP)
-"Approved" must mean "finished and sim-usable". Today 5 of 7 registered
-assets contain zero physics, and one registry entry points at the raw
-`.usdz` instead of its physics derivative.
-- Promote step (hub action + CLI): make_sim_ready if physics absent →
-  re-audit → stamp customData → registry `file` points at the derivative →
-  copy/land in ONE canonical library dir (`workspace/assets_fixed/` today;
-  decide final library location).
-- Approval gate: rigid categories require physics authored; block or
-  auto-promote otherwise.
-- Cleanups: steel_frying_pan registry pointer (raw usdz → derivative),
-  11-byte corrupt aston wrapper, black__decker/black_decker id-collision
-  dedupe.
+## 1. Finish line: finalize/promote step — ✅ SHIPPED 2026-08-07
+"Approved" means "finished and sim-usable".
+- `scripts/promote_asset.py` (CLI + called by hub Approve): ensures physics
+  (rigid: make_sim_ready with class material/mass at INGEST already;
+  articulated: joints required, materials + volume-split per-link masses at
+  promote) → re-audit → stamp → lands in the canonical, self-contained
+  library `workspace/asset_library/<asset_id>/` (source copied in,
+  references rewritten relative — the folder is portable) → registry
+  `file` points at the library copy.
+- Approve refuses articulated categories without joints; promotion is part
+  of approval and rolls back the registry entry on failure.
+- Cleanups done: frying-pan pointer, corrupt aston wrapper, drill dupe
+  (slug now collapses underscore runs). All 8 registered assets verified:
+  physics present, materials correct, relative refs.
 
 ## 2. Automated live verification (verify_asset_live)
 Per-joint drive sweep + rigid drop test in a live/headless Isaac session →

@@ -3,7 +3,7 @@
  "assets": [
   {
    "asset_id": "overbed_table",
-   "file": "/home/kimate/Desktop/overbed_table_simready.usda",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/overbed_table/overbed_table.usda",
    "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Adjustable_Bedside_Table.usdz",
    "category": "articulated_verified",
    "scale_correction": 0.00265,
@@ -46,7 +46,7 @@
   },
   {
    "asset_id": "office_chair",
-   "file": "/home/kimate/Desktop/office_chair_simready.usda",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/office_chair/office_chair.usda",
    "source_file": "/home/kimate/Desktop/office_chair.usdz",
    "category": "rigid_only_baked",
    "materials": {
@@ -78,7 +78,7 @@
   },
   {
    "asset_id": "steel_frying_pan",
-   "file": "/home/kimate/Desktop/assets/SketchFab_Assets/Steel_frying_pan.usdz",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/steel_frying_pan/steel_frying_pan.usda",
    "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Steel_frying_pan.usdz",
    "category": "rigid_unverified",
    "audit": {
@@ -93,7 +93,7 @@
   },
   {
    "asset_id": "adjustable_bedside_table",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/adjustable_bedside_table_simready.usda",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/adjustable_bedside_table/adjustable_bedside_table.usda",
    "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/adjustable_bedside_table_simready.usda",
    "category": "articulated_unverified",
    "audit": {
@@ -108,7 +108,7 @@
   },
   {
    "asset_id": "airpods",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_simready.usda",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/airpods/airpods.usda",
    "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_simready.usda",
    "category": "rigid_unverified",
    "audit": {
@@ -124,7 +124,7 @@
   },
   {
    "asset_id": "airpods_2_case",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_2_case_simready.usda",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/airpods_2_case/airpods_2_case.usda",
    "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_2_case_simready.usda",
    "category": "rigid_unverified",
    "audit": {
@@ -140,7 +140,7 @@
   },
   {
    "asset_id": "004_chess_rook",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/004_chess_rook_simready.usda",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/004_chess_rook/004_chess_rook.usda",
    "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/004_chess_rook_simready.usda",
    "category": "rigid_unverified",
    "audit": {
@@ -152,6 +152,21 @@
     "reviewer": "kimate",
     "date": "2026-08-06",
     "notes": "kimate"
+   }
+  },
+  {
+   "asset_id": "airpods_max_clone",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/airpods_max_clone/airpods_max_clone.usda",
+   "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_max_clone_simready.usda",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "Kimate",
+    "date": "2026-08-07"
    }
   }
  ]
