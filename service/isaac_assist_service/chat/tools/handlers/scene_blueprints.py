@@ -334,6 +334,20 @@ def _load_sensor_specs() -> List[Dict]:
 # Phase 6 wave 11 — scene blueprints + scene templates
 
 
+def _load_sim_ready_registry() -> Dict:
+    """Sim-ready asset registry: verified, physics-authored library assets."""
+    import json as _json
+    from pathlib import Path as _Path
+    reg_path = (_Path(__file__).resolve().parents[5] / "workspace" / "knowledge"
+                / "sim_ready_assets.json")
+    if reg_path.exists():
+        try:
+            return _json.loads(reg_path.read_text())
+        except (_json.JSONDecodeError, OSError):
+            pass
+    return {"assets": []}
+
+
 def _gen_build_scene_from_blueprint(args: Dict) -> str:
     """Generate code to build a scene from a structured blueprint."""
     from ._shared import _SAFE_XFORM_SNIPPET
@@ -344,21 +358,47 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
     if not objects:
         return "print('Empty blueprint — nothing to build')\n"
 
+    registry = {a["asset_id"]: a for a in _load_sim_ready_registry().get("assets", [])}
+
     # Build the per-object placement as a helper function so we can use
     # early-return semantics (`return` instead of the old unwrapped code
     # that would need `continue` without a loop to skip bad objects).
     lines = [
         "import os",
         "import omni.usd",
-        "from pxr import UsdGeom, Gf, Sdf",
+        "from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf",
         _SAFE_XFORM_SNIPPET,
         "stage = omni.usd.get_context().get_stage()",
         "_placed = 0",
         "_missing_assets = []",
         "_ref_not_authored = []",
+        "_from_library = 0",
+        "_physics_used = False",
         "",
-        "def _place(name, asset_path, prim_path, prim_type, pos, rot, scale):",
-        "    global _placed",
+        "def _physicalize(prim, profile, mass):",
+        "    # sim2real: placed objects carry physics per profile (DH-5",
+        "    # categories). Library assets arrive already authored (profile",
+        "    # 'none' here).",
+        "    global _physics_used",
+        "    if not profile or profile in ('none', 'decoration'):",
+        "        return",
+        "    for _p in Usd.PrimRange(prim):",
+        "        if not _p.IsA(UsdGeom.Gprim):",
+        "            continue",
+        "        if not _p.HasAPI(UsdPhysics.CollisionAPI):",
+        "            UsdPhysics.CollisionAPI.Apply(_p)",
+        "        if _p.IsA(UsdGeom.Mesh):",
+        "            UsdPhysics.MeshCollisionAPI.Apply(_p).GetApproximationAttr().Set('convexHull')",
+        "    if profile in ('manipulable', 'tool'):",
+        "        if not prim.HasAPI(UsdPhysics.RigidBodyAPI):",
+        "            UsdPhysics.RigidBodyAPI.Apply(prim)",
+        "        if mass:",
+        "            UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(float(mass))",
+        "    _physics_used = True",
+        "",
+        "def _place(name, asset_path, prim_path, prim_type, pos, rot, scale,",
+        "           physics_profile=None, mass_kg=None, from_library=False):",
+        "    global _placed, _from_library, _physics_used",
         "    if asset_path:",
         "        if not any(asset_path.startswith(p) for p in ('omniverse://','http://','https://','file://','anon:')):",
         "            if not os.path.exists(asset_path):",
@@ -380,6 +420,10 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         "        _safe_set_rotate_xyz(prim, (rot[0], rot[1], rot[2]))",
         "    if scale != [1, 1, 1]:",
         "        _safe_set_scale(prim, (scale[0], scale[1], scale[2]))",
+        "    _physicalize(prim, physics_profile, mass_kg)",
+        "    if from_library:",
+        "        _from_library += 1",
+        "        _physics_used = True",
         "    _placed += 1",
         "",
     ]
@@ -392,17 +436,39 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         rot = obj.get("rotation", [0, 0, 0])
         scale = obj.get("scale", [1, 1, 1])
         prim_type = obj.get("prim_type")
+        profile = obj.get("physics")
+        mass = obj.get("mass_kg")
 
-        lines.append(f"# --- {name} ---")
+        # sim-ready library resolution: a matching registry asset supplies
+        # its verified, physics-authored library file — no re-physicalizing
+        sr_id = obj.get("sim_ready_asset")
+        from_library = False
+        entry = registry.get(sr_id) if sr_id else None
+        if entry and entry.get("file"):
+            asset_path = entry["file"]
+            profile = None
+            from_library = True
+
+        lines.append(f"# --- {name}"
+                     + (f" [sim-ready library: {sr_id}]" if from_library else "")
+                     + " ---")
         lines.append(
             f"_place({name!r}, {asset_path!r}, {prim_path!r}, "
-            f"{prim_type!r}, {pos!r}, {rot!r}, {scale!r})"
+            f"{prim_type!r}, {pos!r}, {rot!r}, {scale!r}, "
+            f"physics_profile={profile!r}, mass_kg={mass!r}, "
+            f"from_library={from_library!r})"
         )
 
     n = len(objects)
     lines.append("")
     lines.append(
+        "if _physics_used and not any(p.IsA(UsdPhysics.Scene) for p in stage.Traverse()):",
+    )
+    lines.append("    UsdPhysics.Scene.Define(stage, Sdf.Path('/PhysicsScene'))")
+    lines.append("    print('build_scene_from_blueprint: created /PhysicsScene')")
+    lines.append(
         f"print(f'build_scene_from_blueprint: placed={{_placed}}/{n} requested, "
+        f"from_library={{_from_library}}, "
         f"missing_assets={{len(_missing_assets)}}, ref_not_authored={{len(_ref_not_authored)}}')"
     )
     lines.append(
@@ -1517,6 +1583,33 @@ exec(open("{out_dir}/scene_setup.py").read())
 # Registration
 
 
+@with_telemetry
+async def _handle_list_sim_ready_assets(args: Dict) -> Dict:
+    """Browse the sim-ready asset library (verified, physics-authored)."""
+    reg = _load_sim_ready_registry()
+    category = (args.get("category") or "").strip()
+    out = []
+    for a in reg.get("assets", []):
+        if category and a.get("category") != category:
+            continue
+        v = a.get("verification", {})
+        out.append({
+            "asset_id": a.get("asset_id"),
+            "category": a.get("category"),
+            "file": a.get("file"),
+            "source_file": a.get("source_file"),
+            "materials": a.get("materials"),
+            "verified": v.get("date"),
+            "verification_method": v.get("method"),
+            "reviewer": a.get("review", {}).get("reviewer"),
+        })
+    return {"type": "data", "count": len(out), "assets": out,
+            "usage": ("reference an asset in build_scene_from_blueprint via "
+                      "its asset_id in the object's 'sim_ready_asset' field — "
+                      "the verified library file (physics included) is used "
+                      "automatically")}
+
+
 def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
@@ -1531,6 +1624,7 @@ def register(
     data["download_asset"] = _handle_download_asset
     data["export_scene_package"] = _handle_export_scene_package
     data["filter_templates_by_hardware"] = _handle_filter_templates_by_hardware
+    data["list_sim_ready_assets"] = _handle_list_sim_ready_assets
     data["generate_scene_blueprint"] = _handle_generate_scene_blueprint
     data["list_local_files"] = _handle_list_local_files
     data["list_scene_templates"] = _handle_list_scene_templates

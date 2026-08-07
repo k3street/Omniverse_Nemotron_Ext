@@ -94,10 +94,18 @@ treatment); deformable-aware audit checks.
 Per-part masses, inertia tensor + COM validation (SPD check — cad_creator
 `inertia_is_spd` prior art), density-from-volume per link.
 
-## 8. Scene-level physics
-`build_scene_from_blueprint` authors zero physics; consume the sim-ready
-registry in scene building; per-object physics profiles in blueprints and
-the floor-plan instantiator.
+## 8. Scene-level physics — ✅ SHIPPED 2026-08-07
+`build_scene_from_blueprint`: per-object `sim_ready_asset` field resolves
+to the verified library file (physics + joints arrive through the
+reference, no re-authoring); per-object `physics` profile
+(manipulable/tool/furniture/static/decoration) + `mass_kg` authors
+collision/RB/mass on placement; PhysicsScene ensured whenever physics is
+used. New `list_sim_ready_assets` data tool lets the LLM browse the
+library (with category filter + verification evidence) before building.
+Validated headless: 4-object hospital-corner scene — library table
+composed with 3 rigid bodies + 2 verified joints, cup manipulable at
+0.3 kg, cabinet static collider, decoration untouched. Remaining: same
+profile plumbing in the floor-plan instantiator (multimodal path).
 
 ## 9. Format breadth
 MJCF/URDF/glTF ingest (MolmoSpaces raw is MJCF); conversion step before

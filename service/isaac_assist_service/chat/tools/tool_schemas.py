@@ -246,6 +246,20 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "list_sim_ready_assets",
+            "description": "Browse the sim-ready asset library: verified, physics-authored assets promoted through the ingest/review pipeline (workspace/asset_library). Returns asset_id, category (articulated_verified, rigid_verified, ...), library file path, materials, and verification evidence. Use before building scenes — reference an asset in build_scene_from_blueprint via its asset_id in the object's 'sim_ready_asset' field to place the verified physics-complete version.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "Optional filter, e.g. 'articulated_verified' or 'rigid_verified'"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ingest_asset_report",
             "description": "Sim2real ingest verification of an asset FILE (not the open stage): checks real-world scale against class priors (chair 0.7-1.6 m, mug 7-20 cm, ...) with a suggested correction factor when implausible, articulation state (joints present and body refs resolve / articulable class baked into one mesh / multi-part but unjointed), joint limits (unlimited moving joints, inverted limits, prismatic travel exceeding asset size, >720 deg revolute ranges), physics presence, material bindings, and authored mass vs class range. Reports callouts by severity and an ingest_ok verdict; every report requires human review before the asset can be certified in the sim-ready registry. Run on every asset at ingest.",
             "parameters": {
@@ -1761,13 +1775,13 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "build_scene_from_blueprint",
-            "description": "Execute a scene blueprint — creates all prims, places assets, applies physics. The blueprint should come from generate_scene_blueprint. Each object becomes a code patch for individual approval.",
+            "description": "Execute a scene blueprint — creates all prims, places assets, applies physics. The blueprint should come from generate_scene_blueprint. Per object: 'sim_ready_asset' (an asset_id from list_sim_ready_assets) references the verified library file with physics already authored; otherwise an optional 'physics' profile ('manipulable'|'tool'|'furniture'|'static'|'decoration') plus 'mass_kg' authors collision (+ rigid body and mass for dynamic profiles) on placement. A PhysicsScene is ensured whenever physics is used.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "blueprint": {
                         "type": "object",
-                        "description": "Scene blueprint from generate_scene_blueprint with objects, positions, and asset paths.",
+                        "description": "Scene blueprint with objects, positions, and asset paths. Object fields: name, asset_path or prim_type, prim_path, position, rotation, scale, sim_ready_asset (library asset_id), physics (profile), mass_kg.",
                     },
                     "dry_run": {"type": "boolean", "description": "If true, generate code patches but don't execute. Default: false"},
                 },

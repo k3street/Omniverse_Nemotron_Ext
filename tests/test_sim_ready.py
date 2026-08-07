@@ -326,6 +326,53 @@ class TestGeneratedCodeOnRealStage:
 
 
 # ---------------------------------------------------------------------------
+# scene building consumes the sim-ready library (BACKLOG #8)
+
+
+class TestScenePhysics:
+    def _gen(self, objects):
+        from service.isaac_assist_service.chat.tools.handlers.scene_blueprints import (
+            _gen_build_scene_from_blueprint,
+        )
+        return _gen_build_scene_from_blueprint({"blueprint": {"objects": objects}})
+
+    def test_physics_profile_emitted(self):
+        code = self._gen([{"name": "cup", "prim_type": "Cylinder",
+                           "physics": "manipulable", "mass_kg": 0.3}])
+        compile(code, "<gen>", "exec")
+        assert "physics_profile='manipulable'" in code
+        assert "mass_kg=0.3" in code
+        assert "_physicalize" in code
+        assert "UsdPhysics.Scene.Define" in code  # scene ensured when used
+
+    def test_sim_ready_asset_resolves_to_library(self):
+        code = self._gen([{"name": "t", "sim_ready_asset": "overbed_table"}])
+        assert "asset_library/overbed_table" in code
+        assert "from_library=True" in code
+        # library assets are not re-physicalized
+        assert "physics_profile=None" in code
+
+    def test_unknown_sim_ready_asset_falls_through(self):
+        code = self._gen([{"name": "t", "sim_ready_asset": "no_such_asset",
+                           "asset_path": "/tmp/x.usd"}])
+        assert "from_library=False" in code
+        assert "/tmp/x.usd" in code
+
+    def test_list_sim_ready_assets(self):
+        from service.isaac_assist_service.chat.tools.handlers.scene_blueprints import (
+            _handle_list_sim_ready_assets,
+        )
+        out = asyncio.run(_handle_list_sim_ready_assets({}))
+        assert out["type"] == "data" and out["count"] >= 2
+        ids = {a["asset_id"] for a in out["assets"]}
+        assert "overbed_table" in ids
+        filtered = asyncio.run(_handle_list_sim_ready_assets(
+            {"category": "articulated_verified"}))
+        assert all(a["category"] == "articulated_verified" for a in filtered["assets"])
+        assert filtered["count"] >= 1
+
+
+# ---------------------------------------------------------------------------
 # deformable preset unlock (BACKLOG #6)
 
 

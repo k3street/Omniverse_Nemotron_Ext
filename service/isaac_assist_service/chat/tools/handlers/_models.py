@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-07T15:50:11+00:00
-Tool count: 439
+Generated: 2026-08-07T15:54:45+00:00
+Tool count: 440
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -127,6 +127,13 @@ class SimReadyAuditArgs(BaseModel):
 
     prim_path: Optional[str] = Field(None, description="USD path of the asset root to audit. Default: '/World' (audits everything under it)")
     expect_dynamic: Optional[bool] = Field(None, description="If true, missing RigidBodyAPI/mass on the root counts as an issue. Default: false")
+
+
+class ListSimReadyAssetsArgs(BaseModel):
+    """Browse the sim-ready asset library: verified, physics-authored assets promoted through the ingest/review pipeline (workspace/asset_library). Returns asset_id, category (articulated_verified, rigid_ver"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    category: Optional[str] = Field(None, description="Optional filter, e.g. 'articulated_verified' or 'rigid_verified'")
 
 
 class IngestAssetReportArgs(BaseModel):
@@ -794,10 +801,10 @@ class GenerateSceneBlueprintArgs(BaseModel):
 
 
 class BuildSceneFromBlueprintArgs(BaseModel):
-    """Execute a scene blueprint — creates all prims, places assets, applies physics. The blueprint should come from generate_scene_blueprint. Each object becomes a code patch for individual approval."""
+    """Execute a scene blueprint — creates all prims, places assets, applies physics. The blueprint should come from generate_scene_blueprint. Per object: 'sim_ready_asset' (an asset_id from list_sim_ready_a"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    blueprint: Dict[str, Any] = Field(..., description="Scene blueprint from generate_scene_blueprint with objects, positions, and asset paths.")
+    blueprint: Dict[str, Any] = Field(..., description="Scene blueprint with objects, positions, and asset paths. Object fields: name, asset_path or prim_type, prim_path, position, rotation, scale, sim_ready_asset (library asset_id), physics (profile), mas")
     dry_run: Optional[bool] = Field(None, description="If true, generate code patches but don't execute. Default: false")
 
 
@@ -3999,6 +4006,7 @@ MODEL_REGISTRY = {
     "create_deformable_mesh": CreateDeformableMeshArgs,
     "make_sim_ready": MakeSimReadyArgs,
     "sim_ready_audit": SimReadyAuditArgs,
+    "list_sim_ready_assets": ListSimReadyAssetsArgs,
     "ingest_asset_report": IngestAssetReportArgs,
     "articulate_asset": ArticulateAssetArgs,
     "anchor_robot": AnchorRobotArgs,

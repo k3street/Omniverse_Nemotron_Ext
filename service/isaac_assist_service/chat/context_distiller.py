@@ -78,6 +78,7 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
         "generate_scene_blueprint", "build_scene_from_blueprint",
         "catalog_search", "nucleus_browse", "download_asset",
         "make_sim_ready", "sim_ready_audit", "ingest_asset_report",
+        "list_sim_ready_assets",
     ],
     "rl_training": ["create_isaaclab_env", "launch_training"],
     "sdg": ["configure_sdg"],
