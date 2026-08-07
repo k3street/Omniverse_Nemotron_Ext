@@ -233,9 +233,9 @@
    "asset_id": "beer_bottle",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/beer_bottle/beer_bottle.usda",
    "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Beer_Bottle.usdz",
-   "category": "rigid_unverified",
+   "category": "rigid_verified",
    "audit": {
-    "ready": false,
+    "ready": true,
     "simulable": true
    },
    "review": {
@@ -248,12 +248,963 @@
      "gemma4",
      "nvidia/Cosmos-Reason2-2B"
     ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1004,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
    }
   },
   {
    "asset_id": "chess_piece_king",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_piece_king/chess_piece_king.usda",
    "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Chess_Piece_King.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "beer_can",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/beer_can/beer_can.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Beer_can.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "bose_qc35_wireless_headphone_high_poly",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/bose_qc35_wireless_headphone_high_poly/bose_qc35_wireless_headphone_high_poly.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/BOSE_QC35_wireless_headphone_high_poly.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.055,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "bottle_of_champagne",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/bottle_of_champagne/bottle_of_champagne.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Bottle_of_Champagne.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1007,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "bottles_medical",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/bottles_medical/bottles_medical.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Bottles_Medical.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1007,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "bottles_medical_1",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/bottles_medical_1/bottles_medical_1.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Bottles_Medical(1).usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1007,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "champagne_glass",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/champagne_glass/champagne_glass.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Champagne_glass.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1002,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "chess_piece_queen",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_piece_queen/chess_piece_queen.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Chess_Piece_Queen.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "computer_mouse",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/computer_mouse/computer_mouse.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Computer_mouse.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "david_clark_pilot_headset",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/david_clark_pilot_headset/david_clark_pilot_headset.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/David_Clark_Pilot_Headset.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1219,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "decorated_plate",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/decorated_plate/decorated_plate.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Decorated_plate.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1002,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "fork",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/fork/fork.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Fork.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.2306,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0,
+     "note": "reoriented while settling (tipped); rests on ground"
+    }
+   }
+  },
+  {
+   "asset_id": "frying_pan",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/frying_pan/frying_pan.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Frying_pan.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.101,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "gaming_headphone",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/gaming_headphone/gaming_headphone.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Gaming_Headphone.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.2174,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0,
+     "note": "reoriented while settling (tipped); rests on ground"
+    }
+   }
+  },
+  {
+   "asset_id": "gaming_mouse_free_low_poly",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/gaming_mouse_free_low_poly/gaming_mouse_free_low_poly.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Gaming_Mouse_-_Free_low_poly.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "keyboard_1",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/keyboard_1/keyboard_1.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Keyboard(1).usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.0999,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "kitchen_knife",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/kitchen_knife/kitchen_knife.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Knife.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.072,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "pepper_and_salt",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/pepper_and_salt/pepper_and_salt.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Pepper_and_salt.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1011,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "plate",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/plate/plate.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Plate.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1001,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "plate_1",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/plate_1/plate_1.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Plate(1).usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "red_bull_energy_drink_can",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/red_bull_energy_drink_can/red_bull_energy_drink_can.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/RED_BULL_ENERGY_DRINK_CAN.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1001,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "red_wine_glass",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/red_wine_glass/red_wine_glass.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Red_Wine_Glass.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "samsung_tv_remote_control",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/samsung_tv_remote_control/samsung_tv_remote_control.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Samsung_TV_Remote_Control.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "scanned_adidas_sports_shoe",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/scanned_adidas_sports_shoe/scanned_adidas_sports_shoe.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Scanned_Adidas_Sports_Shoe.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1002,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "shaker_bottom",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/shaker_bottom/shaker_bottom.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Shaker_Bottom.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1008,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "simple_cola_can",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/simple_cola_can/simple_cola_can.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Simple_Cola_Can.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "simple_pill_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/simple_pill_bottle/simple_pill_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Simple_Pill_Bottle.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5",
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1922,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0,
+     "note": "reoriented while settling (tipped); rests on ground"
+    }
+   }
+  },
+  {
+   "asset_id": "soda_can",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/soda_can/soda_can.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Soda_Can.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "soda_can_1",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/soda_can_1/soda_can_1.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Soda_Can(1).usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1021,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "sonic_care_electric_tooth_brush",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/sonic_care_electric_tooth_brush/sonic_care_electric_tooth_brush.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Sonic_Care_Electric_Tooth_Brush.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1002,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "sony_walkman_tps_l2_1979",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/sony_walkman_tps_l2_1979/sony_walkman_tps_l2_1979.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/SONY_Walkman_TPS-L2_1979.usdz",
    "category": "rigid_unverified",
    "audit": {
     "ready": false,
@@ -269,6 +1220,454 @@
      "gemma4",
      "nvidia/Cosmos-Reason2-2B"
     ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1001,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "spoon",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/spoon/spoon.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Spoon.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1014,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "stanley_mug",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/stanley_mug/stanley_mug.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Stanley_Mug.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "steelseries_arctis_wireless_pro",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/steelseries_arctis_wireless_pro/steelseries_arctis_wireless_pro.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/SteelSeries_Arctis_Wireless_Pro.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.0995,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "tablespoon_dessert_spoon_teaspoon",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/tablespoon_dessert_spoon_teaspoon/tablespoon_dessert_spoon_teaspoon.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Tablespoon__dessert_spoon__teaspoon.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1004,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "utility_knife",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/utility_knife/utility_knife.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Utility_Knife.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1069,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "wine_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wine_bottle/wine_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Wine_Bottle.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1059,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "wine_glass",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wine_glass/wine_glass.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Wine_Glass.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.0991,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "wooden_spoon",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wooden_spoon/wooden_spoon.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Wooden_spoon.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1018,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "zwiesel_schott_champagne_glass",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/zwiesel_schott_champagne_glass/zwiesel_schott_champagne_glass.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Zwiesel_Schott_Champagne_Glass.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "faber_castell_ballpoint_pen",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/faber_castell_ballpoint_pen/faber_castell_ballpoint_pen.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Faber_Castell_Ballpoint_Pen.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1015,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "metal_fork_high_res",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/metal_fork_high_res/metal_fork_high_res.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Metal_Fork_-_High_Res.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1005,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "simple_pen_2",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/simple_pen_2/simple_pen_2.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Simple_Pen_2.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.2519,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0,
+     "note": "reoriented while settling (tipped); rests on ground"
+    }
+   }
+  },
+  {
+   "asset_id": "basic_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/basic_bottle/basic_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Basic_bottle.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
+   }
+  },
+  {
+   "asset_id": "kidney_tray",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/kidney_tray/kidney_tray.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kidney_Tray.usdz",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
    }
   }
  ]

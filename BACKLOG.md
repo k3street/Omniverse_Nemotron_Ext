@@ -23,13 +23,29 @@ via structured outputs on all three judges. Validated: beer_bottle +
 chess_piece_king machine-approved end-to-end on local judges alone
 (both promoted to the library); az_vaccine_vial correctly fail-closed
 to human review (gray render is honestly ambiguous vial-vs-bottle).
+Full-queue sweep 2026-08-07: 135 verdicts — 44 machine-approved, 91
+fail-closed to human, 0 errors. Live drop-tests auto-dispatched at
+approval flipped the fleet to 45 rigid_verified with measured evidence
+(registry: 8 → 56 assets in one day, 46 machine-signed, 10
+audit-sampled). Density remediation: the machine revoked 3 of its own
+approvals (4198–10090 kg/m³ implied) and re-approved them under
+size-aware mass. Product spec lookup (`scripts/product_lookup.py`,
+Claude + web search, cached in workspace/knowledge/product_specs.json)
+turns named products' class RANGES into published SPECS — Vision Pro
+authored at Apple's 0.625 kg. Scan is package-aware across the ENTIRE
+assets folder (top-most-USD rule suppresses package components,
+.thumb.usd filtered; 7910 files → 3027 assets) and the hub watcher +
+judges grind it continuously under VISUAL_QA_AUTO=1.
+Shipped since: ✅ auto live-verify at machine approval; ✅ judge
+supervision (launch_judges.sh, hub-invoked).
 Remaining:
-- [ ] Live-verify machine-approved rigids (drop test) to reach
-      rigid_verified without a human; keep sign-off split honest.
 - [ ] Stretch: feed drop/settle video from live verification to Cosmos
       (video-native) for "does it fall like a real chair" judgment.
-- [ ] Judge health telemetry + vLLM/Ollama supervision (systemd unit or
-      hub-side launch) so the ensemble survives reboots.
+- [ ] Split over-broad priors (electronics_handheld passed an oversized
+      1.26 kg mouse); lean on spec lookup for branded items.
+- [ ] Triage policy for NVIDIA stock content (Collected_Environments/
+      Robots/Sensors/People ~1550 assets) — much is already sim-ready;
+      wholesale re-wrapping may be waste. Decide with the human.
 
 ## 1. Finish line: finalize/promote step — ✅ SHIPPED 2026-08-07
 "Approved" means "finished and sim-usable".

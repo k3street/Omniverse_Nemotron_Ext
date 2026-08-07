@@ -442,15 +442,45 @@ def scan_dir(directory: str, limit: int = 0, max_size_mb: float = 200.0) -> dict
 
     Returns {'queued': [...], 'skipped': [(file, reason)], 'errors': [...]}.
     """
+    import os as _os
     root = Path(directory).expanduser().resolve()
     out = {"queued": [], "skipped": [], "errors": []}
+    exclude = [t.strip() for t in _os.environ.get(
+        "ASSET_SCAN_EXCLUDE", "").split(",") if t.strip()]
     candidates = sorted(
         p for p in root.rglob("*")
         if p.suffix.lower() in _USD_EXTS and p.is_file()
+        and ".thumb." not in p.name.lower()  # Omniverse preview stages
     )
+    # Package awareness: only the TOP-MOST USD in a subtree is an asset.
+    # Collected_/Lightwheel/SimReady packages keep their stage at the
+    # package root with a payload of component USDs (materials, props,
+    # parts) below — wrapping those individually would flood the queue
+    # with non-assets. A USD whose ancestor directory (inside the scan
+    # root) directly contains another USD is a component of that package.
+    dirs_with_usd = {p.parent for p in candidates}
+
+    def _component_of(p: Path) -> Path | None:
+        anc = p.parent.parent
+        while root in anc.parents or anc == root:
+            if anc == root:  # loose files at the root never suppress subdirs
+                return None
+            if anc in dirs_with_usd:
+                return anc
+            anc = anc.parent
+        return None
     for p in candidates:
         if limit and len(out["queued"]) >= limit:
             out["skipped"].append((str(p), f"scan limit {limit} reached"))
+            continue
+        rel = str(p.relative_to(root))
+        if any(t in rel for t in exclude):
+            out["skipped"].append((str(p), "ASSET_SCAN_EXCLUDE match"))
+            continue
+        pkg = _component_of(p)
+        if pkg is not None:
+            out["skipped"].append(
+                (str(p), f"component of package {pkg.name}"))
             continue
         size_mb = p.stat().st_size / 1e6
         if size_mb > max_size_mb:
