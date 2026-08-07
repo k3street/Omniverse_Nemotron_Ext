@@ -180,6 +180,100 @@ def render_thumbnail(file_path: str, asset_id: str) -> str | None:
     return str(out) if out.exists() else None
 
 
+def render_views(file_path: str, asset_id: str, n_views: int = 4,
+                 width: int = 512) -> list[str]:
+    """Orbit renders for visual QA — one usdrecord run with a time-sampled
+    camera circling the asset. Integrity judgment needs more than a front
+    view: a missing back face, hollow interior, or untextured patch hides
+    from a single frame."""
+    import math
+    import subprocess
+
+    usdrecord = _find_usdrecord()
+    if not usdrecord:
+        return []
+    from pxr import Gf, Sdf, Usd, UsdGeom
+
+    src = Usd.Stage.Open(file_path)
+    if not src:
+        return []
+    bbox = UsdGeom.BBoxCache(
+        Usd.TimeCode.Default(),
+        [UsdGeom.Tokens.default_, UsdGeom.Tokens.render],
+    ).ComputeWorldBound(src.GetPseudoRoot())
+    rng = bbox.ComputeAlignedRange()
+    if rng.IsEmpty():
+        return []
+    center = Gf.Vec3d(rng.GetMidpoint())
+    # 3.2x the largest dimension keeps the whole object in frame at the
+    # default 50mm-equivalent lens (~24 deg FOV)
+    dist = (3.2 * max(rng.GetSize())) or 1.0
+    z_up = str(UsdGeom.GetStageUpAxis(src)).upper() == "Z"
+    default = src.GetDefaultPrim()
+    default_path = str(default.GetPath()) if default else None
+    del src
+
+    thumbs = QUEUE_DIR / "thumbs"
+    thumbs.mkdir(parents=True, exist_ok=True)
+    for stale in thumbs.glob(f"{asset_id}__view.*.png"):
+        stale.unlink()
+    orbit = thumbs / f"{asset_id}__orbit.usda"
+    layer = Sdf.Layer.Find(str(orbit))
+    if layer:
+        layer.Clear()
+        stage = Usd.Stage.Open(layer)
+    else:
+        if orbit.exists():
+            orbit.unlink()
+        stage = Usd.Stage.CreateNew(str(orbit))
+    UsdGeom.SetStageUpAxis(
+        stage, UsdGeom.Tokens.z if z_up else UsdGeom.Tokens.y)
+    stage.SetStartTimeCode(1)
+    stage.SetEndTimeCode(n_views)
+    asset = stage.DefinePrim("/Asset", "Xform")
+    if default_path:
+        asset.GetReferences().AddReference(file_path, default_path)
+    else:
+        asset.GetReferences().AddReference(file_path)
+    cam = UsdGeom.Camera.Define(stage, "/OrbitCam")
+    cam.GetClippingRangeAttr().Set(Gf.Vec2f(dist * 0.01, dist * 10.0))
+    up = Gf.Vec3d(0, 0, 1) if z_up else Gf.Vec3d(0, 1, 0)
+    xf = cam.AddTransformOp()
+    elev = math.radians(20.0)
+    for i in range(n_views):
+        az = 2.0 * math.pi * i / n_views
+        if z_up:
+            off = Gf.Vec3d(math.sin(az) * math.cos(elev),
+                           -math.cos(az) * math.cos(elev),
+                           math.sin(elev))
+        else:
+            off = Gf.Vec3d(math.sin(az) * math.cos(elev),
+                           math.sin(elev),
+                           math.cos(az) * math.cos(elev))
+        view = Gf.Matrix4d()
+        view.SetLookAt(center + dist * off, center, up)
+        xf.Set(view.GetInverse(), Usd.TimeCode(i + 1))
+    stage.GetRootLayer().Save()
+    del stage
+    try:
+        subprocess.run(
+            [usdrecord, "--renderer", "Storm", "--imageWidth", str(width),
+             "--camera", "/OrbitCam", "--frames", f"1:{n_views}",
+             str(orbit), str(thumbs / f"{asset_id}__view.#.png")],
+            capture_output=True, timeout=300, check=False)
+    except Exception:
+        return []
+    return sorted(str(p) for p in thumbs.glob(f"{asset_id}__view.*.png"))
+
+
+def refresh_renders(entry: dict) -> None:
+    """(Re)render the hero thumbnail and orbit views from the entry's
+    CURRENT file. Must run after every corrective action — a judge (human
+    or model) approving from a pre-fix render approves the wrong asset."""
+    entry["thumbnail"] = render_thumbnail(entry["file"], entry["asset_id"])
+    entry["views"] = render_views(entry["file"], entry["asset_id"])
+
+
 def apply_rigid_physics(entry: dict) -> str | None:
     """Author rigid physics on the entry's derivative (deterministic:
     collision + class material + class-plausible mass). Returns a note, or
@@ -279,7 +373,7 @@ def queue_file(file_path: str, class_hint: str | None = None,
     # the class from name matching is only a guess until a human (or VLM)
     # looks at the object itself
     entry["class_source"] = "hint" if class_hint else "filename_guess"
-    entry["thumbnail"] = render_thumbnail(entry["file"], asset_id)
+    refresh_renders(entry)
     QUEUE_DIR.mkdir(parents=True, exist_ok=True)
     (QUEUE_DIR / f"{asset_id}.json").write_text(json.dumps(entry, indent=1))
     return entry

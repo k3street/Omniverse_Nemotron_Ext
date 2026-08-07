@@ -447,6 +447,20 @@ def render_index(msg: str = "") -> bytes:
              else 'auto-watch off (set ASSET_WATCH_DIRS to enable)')
     body += (f'<p class="meta">{len(pending)} pending review · '
              f'{len(reg.get("assets", []))} in registry · {watch}</p>')
+    machine = [a for a in reg.get("assets", [])
+               if a.get("review", {}).get("reviewer_type") == "machine"]
+    if machine:
+        rows = "".join(
+            f'<li>{html.escape(a["asset_id"])} — {html.escape(a["category"])}'
+            f' (judges: {html.escape(", ".join(a["review"].get("models", [])))})'
+            + (' <b>AUDIT: human spot-check requested</b>'
+               if a["review"].get("audit_sampled") else "")
+            + "</li>" for a in machine)
+        body += ('<div class="card"><h2>Machine approvals — audit lane</h2>'
+                 f'<ul class="meta">{rows}</ul>'
+                 '<p class="meta">The pipeline signed these itself (rigid '
+                 'only, unanimous visual QA). Sampled items want a human '
+                 'look; use the entry card to reject a wrong one.</p></div>')
     body += f"""
 <form class="actions" method="post" action="/scan" style="margin:10px 0 4px">
  <input name="dir" value="{html.escape(DEFAULT_SCAN_DIR)}" style="flex:1;min-width:340px">
@@ -463,7 +477,11 @@ def render_index(msg: str = "") -> bytes:
 # ---------------------------------------------------------------------------
 # actions
 
-def do_approve(entry: dict, category: str, reviewer: str, notes: str) -> str:
+def do_approve(entry: dict, category: str, reviewer: str, notes: str,
+               review_extra: dict | None = None) -> str:
+    """Sign + promote. review_extra carries machine-reviewer metadata
+    (reviewer_type/models/audit_sampled) — schema enforces that machine
+    reviews can only land on rigid categories."""
     report = entry.get("report", {})
     # approved must mean finished: articulated categories need their joints
     # authored before a human can sign them off
@@ -482,7 +500,8 @@ def do_approve(entry: dict, category: str, reviewer: str, notes: str) -> str:
                   "simulable": bool(report.get("structure", {}).get("rigid_bodies"))},
         "review": {"approved": True, "reviewer": reviewer,
                    "date": date.today().isoformat(),
-                   **({"notes": notes} if notes else {})},
+                   **({"notes": notes} if notes else {}),
+                   **(review_extra or {})},
     }
     if category == "rigid_only_baked":
         new["audit"] = {"ready": False, "simulable": True}
@@ -636,6 +655,16 @@ def _watch_loop():
         for d in WATCH_DIRS:
             try:
                 res = scan_dir(d.strip(), limit=int(os.environ.get("ASSET_WATCH_LIMIT", "20")))
+                if os.environ.get("VISUAL_QA_AUTO") == "1" and res["queued"]:
+                    # fire-and-forget: judges verdict + machine sign-off for
+                    # what passes; everything else stays in this queue
+                    ids = [q["asset_id"] for q in res["queued"]]
+                    subprocess.Popen(
+                        [sys.executable,
+                         str(Path(__file__).resolve().parent / "visual_qa.py"),
+                         *ids, "--approve"],
+                        stdout=open(QUEUE_DIR / "visual_qa_auto.log", "a"),
+                        stderr=subprocess.STDOUT)
                 _watch_status["queued_total"] += len(res["queued"])
                 _watch_status["last"] = (
                     f"last pass {datetime.now().strftime('%H:%M:%S')}: "

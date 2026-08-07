@@ -63,7 +63,8 @@ class TestMakeSimReadyCodegen:
             {"prim_path": "/World/X", "skip_name_patterns": ["Screw", "BOLT"]}
         )
         compile(code, "<gen>", "exec")
-        assert "_skip = ['screw', 'bolt']" in code
+        # user patterns lowercased, decal-like meshes always skipped
+        assert "_skip = ['screw', 'bolt', 'label', 'decal', 'sticker']" in code
 
     def test_static_profile_compiles(self):
         code = _gen_make_sim_ready(

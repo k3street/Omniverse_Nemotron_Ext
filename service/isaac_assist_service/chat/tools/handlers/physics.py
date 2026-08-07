@@ -2501,6 +2501,11 @@ def _gen_make_sim_ready(args: Dict) -> str:
     mass_kg = args.get("mass_kg")
     kinematic = bool(args.get("kinematic", False))
     skip_patterns = [str(s).lower() for s in (args.get("skip_name_patterns") or [])]
+    # Decal-like meshes (labels, stickers) never get colliders: their hull
+    # overlaps the body they are glued to and adds nothing physical.
+    for _decal in ("label", "decal", "sticker"):
+        if _decal not in skip_patterns:
+            skip_patterns.append(_decal)
 
     if profile not in _SIM_READY_PROFILES:
         return (

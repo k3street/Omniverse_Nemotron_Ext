@@ -10,6 +10,13 @@
 # Tunables: ASSET_WATCH_INTERVAL_S (default 120), ASSET_WATCH_LIMIT (20/pass),
 #           ASSET_SCAN_DIR (default folder in the hub's scan box)
 #
+# Autonomous visual approval: VISUAL_QA_AUTO=1 sends each newly watched-in
+# asset through scripts/visual_qa.py — local judges (Cosmos-Reason2 via vLLM
+# on :8021, Gemma via Ollama) + Claude tiebreak; unanimous rigid passes are
+# machine-signed and promoted, everything else stays here for the human.
+# Tunables: VISUAL_QA_AUDIT_EVERY (default 5 — every Nth machine approval is
+# flagged for human spot-check), VISUAL_QA_COSMOS_URL, VISUAL_QA_GEMMA_MODEL.
+#
 # Sets up an OpenUSD pxr python so ingest checks and USD certification
 # stamping work headlessly. Override with USD_INSTALL=/path/to/openusd.
 set -euo pipefail

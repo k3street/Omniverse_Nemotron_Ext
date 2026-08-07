@@ -1,138 +1,404 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "isaac-assist:sim_ready_asset_registry",
-  "title": "Sim-Ready Asset Registry",
-  "description": "Registry of assets processed by the sim-ready pipeline. Category is a verified claim, not a label: 'articulated_verified' requires live-simulation articulation evidence within tolerance; 'rigid_only_baked' records that the source file's limits prevent correct articulation (per policy: such assets are NOT sim ready).",
-  "type": "object",
-  "required": ["version", "assets"],
-  "properties": {
-    "version": {"type": "integer", "minimum": 1},
-    "assets": {
-      "type": "array",
-      "items": {"$ref": "#/$defs/asset"}
-    }
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "isaac-assist:sim_ready_asset_registry",
+ "title": "Sim-Ready Asset Registry",
+ "description": "Registry of assets processed by the sim-ready pipeline. Category is a verified claim, not a label: 'articulated_verified' requires live-simulation articulation evidence within tolerance; 'rigid_only_baked' records that the source file's limits prevent correct articulation (per policy: such assets are NOT sim ready).",
+ "type": "object",
+ "required": [
+  "version",
+  "assets"
+ ],
+ "properties": {
+  "version": {
+   "type": "integer",
+   "minimum": 1
   },
-  "$defs": {
-    "asset": {
-      "type": "object",
-      "required": ["asset_id", "file", "source_file", "category", "audit", "review"],
-      "properties": {
-        "asset_id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
-        "file": {"type": "string", "description": "Sim-ready USD produced by the pipeline"},
-        "source_file": {"type": "string", "description": "Raw asset the sim-ready USD references"},
-        "category": {
-          "type": "string",
-          "enum": [
-            "articulated_verified",
-            "articulated_unverified",
-            "rigid_verified",
-            "rigid_unverified",
-            "rigid_only_baked"
-          ],
-          "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class — sim-ready is unattainable from this file."
-        },
-        "scale_correction": {"type": "number", "exclusiveMinimum": 0},
-        "materials": {
-          "type": "object",
-          "additionalProperties": {"type": "string"},
-          "description": "link/prim path suffix -> physics material key from physics_materials.json"
-        },
-        "masses_kg": {
-          "type": "object",
-          "additionalProperties": {"type": "number", "exclusiveMinimum": 0}
-        },
-        "audit": {
-          "type": "object",
-          "required": ["ready", "simulable"],
-          "properties": {
-            "ready": {"type": "boolean"},
-            "simulable": {"type": "boolean"}
-          }
-        },
-        "verification": {"$ref": "#/$defs/verification"},
-        "review": {"$ref": "#/$defs/review"}
-      },
-      "allOf": [
-        {
-          "if": {"properties": {"category": {"const": "articulated_verified"}}},
-          "then": {"required": ["verification"],
-                   "properties": {"verification": {"required": ["articulation"]},
-                                  "audit": {"properties": {"ready": {"const": true}}},
-                                  "review": {"properties": {"approved": {"const": true}}}}}
-        },
-        {
-          "if": {"properties": {"category": {"const": "rigid_verified"}}},
-          "then": {"properties": {"review": {"properties": {"approved": {"const": true}}}}}
-        },
-        {
-          "if": {"properties": {"category": {"const": "rigid_only_baked"}}},
-          "then": {"properties": {"audit": {"properties": {"ready": {"const": false},
-                                                           "simulable": {"const": true}}}}}
-        }
-      ]
+  "assets": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/asset"
+   }
+  }
+ },
+ "$defs": {
+  "asset": {
+   "type": "object",
+   "required": [
+    "asset_id",
+    "file",
+    "source_file",
+    "category",
+    "audit",
+    "review"
+   ],
+   "properties": {
+    "asset_id": {
+     "type": "string",
+     "pattern": "^[a-z0-9_]+$"
     },
-    "review": {
-      "type": "object",
-      "required": ["approved", "reviewer", "date"],
-      "description": "Human sign-off. The machine produces evidence (ingest report + live verification); a human verifies each asset. Verified categories require approved=true.",
-      "properties": {
-        "approved": {"type": "boolean"},
-        "reviewer": {"type": "string"},
-        "date": {"type": "string", "format": "date"},
-        "notes": {"type": "string"}
+    "file": {
+     "type": "string",
+     "description": "Sim-ready USD produced by the pipeline"
+    },
+    "source_file": {
+     "type": "string",
+     "description": "Raw asset the sim-ready USD references"
+    },
+    "category": {
+     "type": "string",
+     "enum": [
+      "articulated_verified",
+      "articulated_unverified",
+      "rigid_verified",
+      "rigid_unverified",
+      "rigid_only_baked"
+     ],
+     "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class \u2014 sim-ready is unattainable from this file."
+    },
+    "scale_correction": {
+     "type": "number",
+     "exclusiveMinimum": 0
+    },
+    "materials": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "string"
+     },
+     "description": "link/prim path suffix -> physics material key from physics_materials.json"
+    },
+    "masses_kg": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "number",
+      "exclusiveMinimum": 0
+     }
+    },
+    "audit": {
+     "type": "object",
+     "required": [
+      "ready",
+      "simulable"
+     ],
+     "properties": {
+      "ready": {
+       "type": "boolean"
+      },
+      "simulable": {
+       "type": "boolean"
       }
+     }
     },
     "verification": {
-      "type": "object",
-      "required": ["date", "method", "simulator"],
-      "properties": {
-        "date": {"type": "string", "format": "date"},
-        "method": {"type": "string", "enum": ["live_physx_drive_test", "live_physx_drop_test"]},
-        "simulator": {"type": "string"},
-        "articulation": {
-          "type": "object",
-          "required": ["joint", "commanded_m", "measured_m", "position_error_m",
-                       "max_position_error_m", "base_drift_m", "max_base_drift_m"],
-          "description": "Articulation accuracy criteria: |measured - commanded| <= max_position_error_m AND base_drift_m <= max_base_drift_m AND (when present) gravity sag consistent with drive stiffness. Top-level numbers are the worst-case joint; per-joint detail in 'joints'.",
-          "properties": {
-            "joint": {"type": "string"},
-            "unit": {"type": "string", "enum": ["m", "deg"], "default": "m"},
-            "commanded_m": {"type": "number"},
-            "measured_m": {"type": "number"},
-            "position_error_m": {"type": "number", "minimum": 0},
-            "max_position_error_m": {"type": "number", "exclusiveMinimum": 0, "default": 0.005},
-            "gravity_sag_measured_m": {"type": "number"},
-            "gravity_sag_predicted_m": {"type": "number", "description": "load_N / drive_stiffness — measured sag must be same order"},
-            "base_drift_m": {"type": "number", "minimum": 0},
-            "max_base_drift_m": {"type": "number", "exclusiveMinimum": 0, "default": 0.01},
-            "joints": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "required": ["joint", "type", "commanded", "measured", "error", "unit", "pass"],
-                "properties": {
-                  "joint": {"type": "string"},
-                  "type": {"type": "string", "enum": ["prismatic", "revolute"]},
-                  "commanded": {"type": "number"},
-                  "measured": {"type": "number"},
-                  "error": {"type": "number", "minimum": 0},
-                  "unit": {"type": "string", "enum": ["m", "deg"]},
-                  "pass": {"type": "boolean"}
-                }
-              }
-            }
-          }
-        },
-        "drop": {
-          "type": "object",
-          "required": ["drop_measured_m", "drop_predicted_m"],
-          "properties": {
-            "drop_measured_m": {"type": "number"},
-            "drop_predicted_m": {"type": "number"},
-            "rests_after_s": {"type": "number"}
-          }
-        }
-      }
+     "$ref": "#/$defs/verification"
+    },
+    "review": {
+     "$ref": "#/$defs/review"
     }
+   },
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "category": {
+        "const": "articulated_verified"
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "verification"
+      ],
+      "properties": {
+       "verification": {
+        "required": [
+         "articulation"
+        ]
+       },
+       "audit": {
+        "properties": {
+         "ready": {
+          "const": true
+         }
+        }
+       },
+       "review": {
+        "properties": {
+         "approved": {
+          "const": true
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "category": {
+        "const": "rigid_verified"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "review": {
+        "properties": {
+         "approved": {
+          "const": true
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "category": {
+        "const": "rigid_only_baked"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "audit": {
+        "properties": {
+         "ready": {
+          "const": false
+         },
+         "simulable": {
+          "const": true
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "required": [
+       "review"
+      ],
+      "properties": {
+       "review": {
+        "required": [
+         "reviewer_type"
+        ],
+        "properties": {
+         "reviewer_type": {
+          "const": "machine"
+         }
+        }
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "category": {
+        "enum": [
+         "rigid_verified",
+         "rigid_unverified"
+        ]
+       },
+       "review": {
+        "required": [
+         "models"
+        ]
+       }
+      }
+     }
+    }
+   ]
+  },
+  "review": {
+   "type": "object",
+   "required": [
+    "approved",
+    "reviewer",
+    "date"
+   ],
+   "description": "Sign-off. Humans may approve any category. Machines (reviewer_type=machine) may approve RIGID assets only, and only on unanimous multi-model visual QA (the models list is the evidence trail); articulated assets and any judge disagreement always route to a human. audit_sampled marks machine approvals pulled into the hub for human spot-check. Verified categories require approved=true.",
+   "properties": {
+    "approved": {
+     "type": "boolean"
+    },
+    "reviewer": {
+     "type": "string"
+    },
+    "date": {
+     "type": "string",
+     "format": "date"
+    },
+    "notes": {
+     "type": "string"
+    },
+    "reviewer_type": {
+     "type": "string",
+     "enum": [
+      "human",
+      "machine"
+     ],
+     "description": "Absent means human (pre-machine-signoff entries)."
+    },
+    "models": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "minItems": 2,
+     "description": "Vision judges behind a machine approval."
+    },
+    "audit_sampled": {
+     "type": "boolean",
+     "description": "This machine approval was sampled for human audit."
+    }
+   }
+  },
+  "verification": {
+   "type": "object",
+   "required": [
+    "date",
+    "method",
+    "simulator"
+   ],
+   "properties": {
+    "date": {
+     "type": "string",
+     "format": "date"
+    },
+    "method": {
+     "type": "string",
+     "enum": [
+      "live_physx_drive_test",
+      "live_physx_drop_test"
+     ]
+    },
+    "simulator": {
+     "type": "string"
+    },
+    "articulation": {
+     "type": "object",
+     "required": [
+      "joint",
+      "commanded_m",
+      "measured_m",
+      "position_error_m",
+      "max_position_error_m",
+      "base_drift_m",
+      "max_base_drift_m"
+     ],
+     "description": "Articulation accuracy criteria: |measured - commanded| <= max_position_error_m AND base_drift_m <= max_base_drift_m AND (when present) gravity sag consistent with drive stiffness. Top-level numbers are the worst-case joint; per-joint detail in 'joints'.",
+     "properties": {
+      "joint": {
+       "type": "string"
+      },
+      "unit": {
+       "type": "string",
+       "enum": [
+        "m",
+        "deg"
+       ],
+       "default": "m"
+      },
+      "commanded_m": {
+       "type": "number"
+      },
+      "measured_m": {
+       "type": "number"
+      },
+      "position_error_m": {
+       "type": "number",
+       "minimum": 0
+      },
+      "max_position_error_m": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "default": 0.005
+      },
+      "gravity_sag_measured_m": {
+       "type": "number"
+      },
+      "gravity_sag_predicted_m": {
+       "type": "number",
+       "description": "load_N / drive_stiffness \u2014 measured sag must be same order"
+      },
+      "base_drift_m": {
+       "type": "number",
+       "minimum": 0
+      },
+      "max_base_drift_m": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "default": 0.01
+      },
+      "joints": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "required": [
+         "joint",
+         "type",
+         "commanded",
+         "measured",
+         "error",
+         "unit",
+         "pass"
+        ],
+        "properties": {
+         "joint": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string",
+          "enum": [
+           "prismatic",
+           "revolute"
+          ]
+         },
+         "commanded": {
+          "type": "number"
+         },
+         "measured": {
+          "type": "number"
+         },
+         "error": {
+          "type": "number",
+          "minimum": 0
+         },
+         "unit": {
+          "type": "string",
+          "enum": [
+           "m",
+           "deg"
+          ]
+         },
+         "pass": {
+          "type": "boolean"
+         }
+        }
+       }
+      }
+     }
+    },
+    "drop": {
+     "type": "object",
+     "required": [
+      "drop_measured_m",
+      "drop_predicted_m"
+     ],
+     "properties": {
+      "drop_measured_m": {
+       "type": "number"
+      },
+      "drop_predicted_m": {
+       "type": "number"
+      },
+      "rests_after_s": {
+       "type": "number"
+      }
+     }
+    }
+   }
   }
+ }
 }

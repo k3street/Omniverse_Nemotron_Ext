@@ -107,7 +107,8 @@ def classify_entry(asset_id: str) -> str:
         # the rebuild discards prior wrapper edits, so re-apply physics too
         factor = entry["report"].get("suggested_scale_correction")
         if factor:
-            from ingest_asset import apply_rigid_physics, build_wrapper
+            from ingest_asset import (apply_rigid_physics, build_wrapper,
+                                      refresh_renders)
             entry.setdefault("original_file", entry["file"])
             entry["file"] = build_wrapper(entry, float(factor))
             entry.setdefault("applied_fixes", []).append(
@@ -118,6 +119,9 @@ def classify_entry(asset_id: str) -> str:
                 entry["applied_fixes"].append(note)
                 entry["report"] = run_report(entry["file"], new_class)
             entry["proposed_category"] = propose_category(entry["report"])
+            # renders must follow the file they judge — a stale image is
+            # evidence about the wrong asset
+            refresh_renders(entry)
     qf.write_text(json.dumps(entry, indent=1))
     change = (f"{old_class} -> {new_class}" if new_class and new_class != old_class
               else f"confirmed {old_class}" if new_class else "no class fits")

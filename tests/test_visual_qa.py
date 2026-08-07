@@ -1,0 +1,184 @@
+"""Autonomous visual approval (BACKLOG #0): rubric, schema governance,
+decal-collision skip, and the vial prior that motivated them."""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.l0
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "scripts"))
+
+SCHEMA = json.loads(
+    (REPO / "workspace" / "knowledge" /
+     "sim_ready_asset_registry.schema.json").read_text())
+PRIORS = json.loads(
+    (REPO / "workspace" / "knowledge" /
+     "asset_class_priors.json").read_text())["classes"]
+
+
+def _entry(category="rigid_unverified", mass=0.029, callouts=None,
+           cls="vial"):
+    return {
+        "asset_id": "t", "proposed_category": category,
+        "report": {
+            "matched_class": cls,
+            "callouts": callouts or [],
+            "structure": {"rigid_bodies": 1, "collision_prims": 2,
+                          "material_bindings": 1,
+                          "authored_masses": [{"path": "/World/T",
+                                               "mass_kg": mass}]},
+        },
+    }
+
+
+def _judge(judge="gemma", cls="vial", name="vial", ok=True, conf=0.9):
+    return {"judge": judge, "model": judge, "asset_class": cls,
+            "object_name": name, "confidence": conf, "integrity_ok": ok,
+            "integrity_notes": ""}
+
+
+class TestRubric:
+    def test_clean_rigid_passes_every_check(self):
+        from visual_qa import rubric
+        checks = rubric(_entry(), [_judge("gemma"), _judge("cosmos")])
+        assert all(c["ok"] for c in checks), [
+            c for c in checks if not c["ok"]]
+
+    def test_sibling_class_with_right_name_counts_as_agreement(self):
+        from visual_qa import rubric
+        judges = [_judge("gemma"),
+                  _judge("cosmos", cls="medical_furniture", name="vial")]
+        checks = {c["check"]: c for c in rubric(_entry(), judges)}
+        assert checks["identity_agreement"]["ok"]
+
+    def test_wrong_class_and_name_fails_identity(self):
+        from visual_qa import rubric
+        judges = [_judge("gemma"),
+                  _judge("cosmos", cls="table", name="dining table")]
+        checks = {c["check"]: c for c in rubric(_entry(), judges)}
+        assert not checks["identity_agreement"]["ok"]
+
+    def test_integrity_veto(self):
+        from visual_qa import rubric
+        judges = [_judge("gemma"), _judge("cosmos", ok=False)]
+        checks = {c["check"]: c for c in rubric(_entry(), judges)}
+        assert not checks["integrity"]["ok"]
+
+    def test_single_judge_is_not_enough(self):
+        from visual_qa import rubric
+        judges = [_judge("gemma"), {"judge": "cosmos", "error": "down"}]
+        checks = {c["check"]: c for c in rubric(_entry(), judges)}
+        assert not checks["judges_healthy"]["ok"]
+        assert not checks["identity_agreement"]["ok"]
+
+    def test_rigid_only_baked_is_out_of_machine_scope(self):
+        from visual_qa import rubric
+        checks = {c["check"]: c for c in rubric(
+            _entry(category="rigid_only_baked"),
+            [_judge("gemma"), _judge("cosmos")])}
+        assert not checks["rigid_scope"]["ok"]
+
+    def test_articulated_is_out_of_machine_scope(self):
+        from visual_qa import rubric
+        checks = {c["check"]: c for c in rubric(
+            _entry(category="articulated_unverified"),
+            [_judge("gemma"), _judge("cosmos")])}
+        assert not checks["rigid_scope"]["ok"]
+
+    def test_mass_outside_class_prior_fails_physics(self):
+        from visual_qa import rubric
+        checks = {c["check"]: c for c in rubric(
+            _entry(mass=1.158),  # the HomeHero vial complaint
+            [_judge("gemma"), _judge("cosmos")])}
+        assert not checks["physics_ready"]["ok"]
+
+    def test_error_callout_blocks(self):
+        from visual_qa import rubric
+        checks = {c["check"]: c for c in rubric(
+            _entry(callouts=[{"severity": "error", "check": "fidelity",
+                              "message": "x"}]),
+            [_judge("gemma"), _judge("cosmos")])}
+        assert not checks["no_error_callouts"]["ok"]
+
+
+class TestSchemaGovernance:
+    BASE = {
+        "asset_id": "t", "file": "f.usda", "source_file": "s.usdz",
+        "category": "rigid_unverified",
+        "audit": {"ready": False, "simulable": True},
+    }
+
+    def _validate(self, review, category="rigid_unverified"):
+        import jsonschema
+        asset = {**self.BASE, "category": category, "review": review}
+        jsonschema.validate({"version": 1, "assets": [asset]}, SCHEMA)
+
+    def test_machine_review_on_rigid_validates(self):
+        self._validate({"approved": True, "reviewer": "visual-qa-v1",
+                        "reviewer_type": "machine", "date": "2026-08-07",
+                        "models": ["gemma4", "nvidia/Cosmos-Reason2-2B"]})
+
+    def test_machine_review_on_articulated_rejected(self):
+        import jsonschema
+        with pytest.raises(jsonschema.ValidationError):
+            self._validate(
+                {"approved": True, "reviewer": "visual-qa-v1",
+                 "reviewer_type": "machine", "date": "2026-08-07",
+                 "models": ["a", "b"]},
+                category="articulated_unverified")
+
+    def test_machine_review_requires_models(self):
+        import jsonschema
+        with pytest.raises(jsonschema.ValidationError):
+            self._validate({"approved": True, "reviewer": "visual-qa-v1",
+                            "reviewer_type": "machine",
+                            "date": "2026-08-07"})
+
+    def test_human_review_unchanged(self):
+        self._validate({"approved": True, "reviewer": "kimate",
+                        "date": "2026-08-07"})
+
+
+class TestDecalSkip:
+    def test_make_sim_ready_skips_label_decal_sticker(self):
+        from service.isaac_assist_service.chat.tools.handlers.physics import (
+            _gen_make_sim_ready,
+        )
+        code = _gen_make_sim_ready({"prim_path": "/World/X"})
+        for token in ("label", "decal", "sticker"):
+            assert token in code
+
+    def test_user_patterns_still_merge(self):
+        from service.isaac_assist_service.chat.tools.handlers.physics import (
+            _gen_make_sim_ready,
+        )
+        code = _gen_make_sim_ready({"prim_path": "/World/X",
+                                    "skip_name_patterns": ["glasslid"]})
+        assert "glasslid" in code and "label" in code
+
+
+class TestVialPrior:
+    def test_vial_class_exists_with_plausible_range(self):
+        vial = PRIORS["vial"]
+        assert vial["mass_kg"][1] <= 0.06
+        assert vial["max_dim_m"][1] <= 0.1
+        assert not vial["articulable"]
+
+    def test_vial_keyword_moved_out_of_glass(self):
+        assert "vial" not in PRIORS["glass"]["keywords"]
+        assert "vial" in PRIORS["vial"]["keywords"]
+
+
+class TestJudgeSchema:
+    def test_class_enum_constrains_to_priors(self):
+        from visual_qa import _judge_schema
+        schema = _judge_schema()
+        enum = schema["properties"]["asset_class"]["anyOf"][0]["enum"]
+        assert set(enum) == set(PRIORS)
+        assert schema["additionalProperties"] is False

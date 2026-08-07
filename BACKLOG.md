@@ -2,6 +2,35 @@
 
 Ordered by leverage. Top item first.
 
+## 0. Autonomous visual approval (machine sign-off) — ✅ core SHIPPED 2026-08-07
+The system visually approves its own downloaded USDZ files; the hub is
+the exception surface. `scripts/visual_qa.py`: orbit renders → LOCAL
+judge ensemble (Cosmos-Reason2-2B via vLLM :8021, gemma4 via Ollama) +
+Claude tiebreak (fires on judge-vs-judge OR judges-vs-entry-class
+disagreement) → named rubric checks with evidence (judges_healthy,
+identity_agreement with sibling-class keyword credit, integrity,
+scale_in_prior, physics_ready incl. mass-in-class-prior, no_error_
+callouts, rigid_scope) → unanimous pass = machine sign-off via the same
+do_approve+promote path humans use. Schema enforces governance: machine
+reviews (reviewer_type=machine, models required) validate ONLY on rigid
+categories; every Nth (VISUAL_QA_AUDIT_EVERY=5) approval is
+audit_sampled for human spot-check in the hub's audit lane. Hub watcher
+auto-QAs new assets when VISUAL_QA_AUTO=1. Multi-view orbit renders
+(`render_views`, one usdrecord run, time-sampled camera) at ingest and
+re-rendered after every corrective action; judges get measured bbox
+dims (renders carry no absolute scale). asset_class is enum-CONSTRAINED
+via structured outputs on all three judges. Validated: beer_bottle +
+chess_piece_king machine-approved end-to-end on local judges alone
+(both promoted to the library); az_vaccine_vial correctly fail-closed
+to human review (gray render is honestly ambiguous vial-vs-bottle).
+Remaining:
+- [ ] Live-verify machine-approved rigids (drop test) to reach
+      rigid_verified without a human; keep sign-off split honest.
+- [ ] Stretch: feed drop/settle video from live verification to Cosmos
+      (video-native) for "does it fall like a real chair" judgment.
+- [ ] Judge health telemetry + vLLM/Ollama supervision (systemd unit or
+      hub-side launch) so the ensemble survives reboots.
+
 ## 1. Finish line: finalize/promote step — ✅ SHIPPED 2026-08-07
 "Approved" means "finished and sim-usable".
 - `scripts/promote_asset.py` (CLI + called by hub Approve): ensures physics
