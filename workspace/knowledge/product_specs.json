@@ -1,0 +1,18 @@
+{
+ "_doc": "Web-sourced product specs used as per-asset priors at ingest. Cached for determinism; delete a key to force a fresh lookup.",
+ "specs": {
+  "apple vision pro": {
+   "product_name": "Apple Vision Pro (Apple mixed-reality headset, M2 model, released Feb 2, 2024)",
+   "max_dim_m": 0.25,
+   "dims_m": [
+    0.16,
+    0.25,
+    0.09
+   ],
+   "mass_kg": 0.625,
+   "source": "Weight: Apple official tech specs, https://support.apple.com/en-us/117810 (21.2-22.9 oz / 600-650 g; separate external battery 353 g). Dimensions: Apple does not publish them; approximate third-party figures ~16 cm W x 25 cm D (incl. head band) x 9 cm H, e.g. https://bitnamic.net/en/blog/apple-vision-pro-specs-price-release; iFixit teardown (https://www.ifixit.com/News/90405/vision-pro-teardown) corroborates scale.",
+   "notes": "Real, specific product. Mass 0.625 kg is the midpoint of Apple's published 0.600-0.650 kg range (varies with Light Seal and head band: Solo Knit vs Dual Loop); the tethered external battery pack (0.353 kg) is NOT integral and is excluded, as is the USB-C power adapter. Apple publishes no official W/D/H, so dims_m are unofficial approximations for the worn assembly: ~0.16 m wide (visor/front glass), ~0.25 m front-to-back including the head band loop, ~0.09 m tall including the Light Seal; the visor housing alone is roughly 0.04 m deep, ~0.09 m with the Light Seal attached. For a sim ingest pipeline, treat max_dim_m ~0.25 m (or ~0.16-0.20 m if the asset is the visor only, without the band) and verify the mesh's bounding box against these values with +/-15% tolerance before setting scale; set rigid-body mass to 0.60-0.65 kg.",
+   "looked_up": "2026-08-07"
+  }
+ }
+}

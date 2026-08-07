@@ -535,6 +535,33 @@
     "glass",
     "aluminum"
    ]
+  },
+  "headset_xr": {
+   "keywords": [
+    "headset",
+    "vr",
+    "xr",
+    "visor",
+    "vision",
+    "quest",
+    "hololens",
+    "goggles_vr",
+    "oculus"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.3
+   ],
+   "mass_kg": [
+    0.3,
+    0.8
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs",
+    "aluminum",
+    "glass"
+   ]
   }
  }
 }

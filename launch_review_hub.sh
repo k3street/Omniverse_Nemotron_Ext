@@ -46,5 +46,11 @@ for u in "${USD_CANDIDATES[@]}"; do
 done
 
 export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:${PYTHONPATH}}"
+
+# autonomous approval needs its local judges up
+if [[ "${VISUAL_QA_AUTO:-}" == "1" ]]; then
+    "$SCRIPT_DIR/launch_judges.sh" || echo "⚠️  judge stack incomplete — QA will fail closed to human review"
+fi
+
 echo "🧪 Asset Review Hub on http://127.0.0.1:${REVIEW_HUB_PORT:-8777}"
 exec python3 "$SCRIPT_DIR/scripts/asset_review_hub.py"

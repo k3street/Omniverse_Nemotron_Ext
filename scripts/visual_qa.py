@@ -264,6 +264,17 @@ def rubric(entry: dict, judges: list[dict]) -> list[dict]:
         total = sum(m.get("mass_kg", 0) for m in masses)
         mass_ok = mass_range[0] <= total <= mass_range[1]
         mass_note += f"; class prior {mass_range} kg"
+        # broad class ranges pass implausible masses (a 1.26 kg mouse is
+        # inside 'electronics'): implied density must stay physical —
+        # looser than any real material band because bboxes overestimate
+        # volume, but tight enough to catch midpoint-vs-size absurdities
+        dims = report.get("dimensions_m") or _measure_dims(entry.get("file"))
+        if mass_ok and dims and all(dims):
+            vol = dims[0] * dims[1] * dims[2]
+            rho = total / vol if vol > 0 else 0
+            if not (15.0 <= rho <= 3000.0):
+                mass_ok = False
+            mass_note += f"; implied density {rho:.0f} kg/m3 (sane: 15-3000)"
     checks.append({
         "check": "physics_ready",
         "ok": bool(structure.get("rigid_bodies"))
@@ -371,6 +382,24 @@ def auto_approve_entry(asset_id: str) -> str:
         f"checks: {', '.join(c['check'] for c in vq.get('checks', []))}",
         review_extra={"reviewer_type": "machine", "models": models,
                       **({"audit_sampled": True} if sampled else {})})
+    if msg.startswith("approved"):
+        # close the loop: a live Isaac session upgrades the approval to
+        # rigid_verified with measured drop evidence — still no human in
+        # the rigid path. Skipped silently when Kit RPC is down.
+        kit = ("http://127.0.0.1:"
+               + os.environ.get("KIT_RPC_PORT", "8001") + "/health")
+        try:
+            urllib.request.urlopen(kit, timeout=2)
+            import subprocess
+            subprocess.Popen(
+                [sys.executable,
+                 str(Path(__file__).resolve().parent / "verify_asset_live.py"),
+                 asset_id],
+                stdout=open(QUEUE_DIR / "visual_qa_auto.log", "a"),
+                stderr=subprocess.STDOUT)
+            msg += "; live drop-test dispatched"
+        except Exception:
+            msg += "; live verify pending (no Isaac session)"
     return f"{asset_id}: {msg}" + (" [AUDIT SAMPLED]" if sampled else "")
 
 

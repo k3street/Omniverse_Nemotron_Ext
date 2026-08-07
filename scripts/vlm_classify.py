@@ -104,15 +104,21 @@ def classify_entry(asset_id: str) -> str:
         entry["report"] = run_report(entry["file"], new_class)
         entry["proposed_category"] = propose_category(entry["report"])
         # class change may change the plausible size — re-apply auto-scale;
-        # the rebuild discards prior wrapper edits, so re-apply physics too
+        # the rebuild discards prior wrapper edits, so re-apply physics too.
+        # Even WITHOUT a size change, physics authored under the old class
+        # carries the old material/mass — rebuild so the derivative matches
+        # the corrected class. Never touch joint-authored derivatives.
         factor = entry["report"].get("suggested_scale_correction")
-        if factor:
+        has_joints = bool(entry["report"].get("structure", {}).get("joints"))
+        if factor or (new_class != old_class and not has_joints):
             from ingest_asset import (apply_rigid_physics, build_wrapper,
                                       refresh_renders)
             entry.setdefault("original_file", entry["file"])
-            entry["file"] = build_wrapper(entry, float(factor))
+            entry["file"] = build_wrapper(
+                entry, float(factor) if factor else None)
             entry.setdefault("applied_fixes", []).append(
-                f"auto scale x{factor} (after VLM reclass to {new_class})")
+                (f"auto scale x{factor} " if factor else "physics rebuild ")
+                + f"(after VLM reclass to {new_class})")
             entry["report"] = run_report(entry["file"], new_class)
             note = apply_rigid_physics(entry)
             if note:
@@ -125,6 +131,16 @@ def classify_entry(asset_id: str) -> str:
     qf.write_text(json.dumps(entry, indent=1))
     change = (f"{old_class} -> {new_class}" if new_class and new_class != old_class
               else f"confirmed {old_class}" if new_class else "no class fits")
+    # a NAMED product can trade the class-prior range for a published spec
+    # (dims + mass with source) — the VLM's identification is the query
+    import os
+    if os.environ.get("PRODUCT_LOOKUP") == "1" and result.get(
+            "confidence") in ("high", "medium"):
+        try:
+            from product_lookup import enrich_entry
+            change += "; " + enrich_entry(asset_id)
+        except Exception as e:
+            change += f"; spec lookup failed: {str(e)[:80]}"
     return (f"{asset_id}: VLM sees '{result['object_name']}' "
             f"({result['confidence']} confidence) — {change}"
             + (f"; moving parts: {', '.join(result['visible_moving_parts'])}"

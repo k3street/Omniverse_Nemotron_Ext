@@ -318,7 +318,33 @@ def apply_rigid_physics(entry: dict) -> str | None:
     if mats:
         args["material"] = mats[0]
     if mass_range and profile == "manipulable":
-        args["mass_kg"] = round((mass_range[0] + mass_range[1]) / 2.0, 3)
+        # bbox volume x material density x hollow-fill, CLAMPED into the
+        # class range — a bare class midpoint ignores size (it gave a
+        # computer mouse 1.26 kg and a crayon box 10 kg)
+        est = None
+        try:
+            from pxr import UsdGeom
+            rng = UsdGeom.BBoxCache(
+                Usd.TimeCode.Default(),
+                [UsdGeom.Tokens.default_, UsdGeom.Tokens.render],
+            ).ComputeWorldBound(stage.GetPseudoRoot()).ComputeAlignedRange()
+            if not rng.IsEmpty():
+                s = rng.GetSize()
+                mpu = UsdGeom.GetStageMetersPerUnit(stage)
+                vol = abs(s[0] * s[1] * s[2]) * mpu ** 3
+                from service.isaac_assist_service.chat.tools.handlers.physics import (  # noqa: E501
+                    _load_physics_materials,
+                )
+                db = _load_physics_materials()["materials"]
+                density = (db.get(mats[0], {}).get("density_kg_m3", 1000.0)
+                           if mats else 1000.0)
+                est = vol * density * 0.3
+        except Exception:
+            est = None
+        if est is None:
+            est = (mass_range[0] + mass_range[1]) / 2.0
+        args["mass_kg"] = round(
+            min(max(est, mass_range[0]), mass_range[1]), 4)
     code = _gen_make_sim_ready(args)
     out = io.StringIO()
     with contextlib.redirect_stdout(out):

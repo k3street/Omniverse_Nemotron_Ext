@@ -98,6 +98,25 @@ class TestRubric:
             [_judge("gemma"), _judge("cosmos")])}
         assert not checks["physics_ready"]["ok"]
 
+    def test_implied_density_guard(self):
+        # in-range mass can still be absurd for the measured size (class
+        # midpoints gave a 1.26 kg mouse) — implied density catches it
+        from visual_qa import rubric
+        e = _entry(mass=0.05)  # top of vial range
+        e["report"]["dimensions_m"] = [0.01, 0.01, 0.02]  # tiny: 25000 kg/m3
+        checks = {c["check"]: c for c in rubric(
+            e, [_judge("gemma"), _judge("cosmos")])}
+        assert not checks["physics_ready"]["ok"]
+        assert "implied density" in checks["physics_ready"]["evidence"]
+
+    def test_plausible_density_passes(self):
+        from visual_qa import rubric
+        e = _entry(mass=0.029)
+        e["report"]["dimensions_m"] = [0.033, 0.033, 0.057]  # ~470 kg/m3
+        checks = {c["check"]: c for c in rubric(
+            e, [_judge("gemma"), _judge("cosmos")])}
+        assert checks["physics_ready"]["ok"]
+
     def test_error_callout_blocks(self):
         from visual_qa import rubric
         checks = {c["check"]: c for c in rubric(
