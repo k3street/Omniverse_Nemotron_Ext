@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Asset Review Hub — local web page for human sim2real review.
+"""Asset Review Hub — the human review-and-judgment surface.
 
-Machine evidence in, human judgment out: lists every asset queued by
-scripts/ingest_asset.py with its ingest-report callouts, and gives the
-reviewer three actions per asset:
+Mechanical fixes (scale, orientation, rigid physics) happen automatically
+at ingest; live verification and promotion run from their CLIs. What
+remains here is exactly what needs a human:
 
-  * Open in Isaac Sim — reuses a running session via Kit RPC
-    (POST /exec_sync open_stage), or spawns launch_isaac.sh if none is up.
-  * Approve — writes the signed review block into
-    workspace/knowledge/sim_ready_assets.json (schema-validated when
-    jsonschema is available) and stamps customData['simReady'] into the
-    USD (when pxr is importable).
-  * Reject — records the rejection with notes; the asset stays out of the
-    registry.
+  * SEE the asset — thumbnail card + callouts; Open in Isaac Sim for deep
+    inspection (live Kit RPC session, or cold launch).
+  * JUDGE it — VLM classify / manual reclassify when the image disagrees
+    with the class; Segment baked mesh; draft-edit-apply articulation
+    (joint types, axes, limits are judgment calls).
+  * SIGN it — Approve (promotes into the library, schema-enforced named
+    review) or Reject. Approval is blocked while error callouts stand.
 
-Stdlib only. Start with launch_review_hub.sh (sets OpenUSD env), default
-port 8777.
+Start with launch_review_hub.sh (OpenUSD env + .env for the VLM key),
+default port 8777. Queue intake: the scan box, the ASSET_WATCH_DIRS
+watcher, or scripts/ingest_asset.py.
 """
 from __future__ import annotations
 
@@ -264,64 +264,6 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     return f"articulation applied ({len(spec.get('joints', []))} joints) — re-checked: {verdict}"
 
 
-def make_rigid_sim_ready(entry: dict) -> str:
-    """make_sim_ready on the derivative: collision + rigid body + class
-    material + class-plausible mass. Only for assets that should NOT
-    articulate — articulable assets need articulate_asset first."""
-    if needs_articulation(entry["report"]):
-        return ("this asset should articulate — authoring a single rigid body "
-                "would be physically wrong. Run articulate_asset (chat/CLI), "
-                "then re-ingest")
-    import contextlib
-    import io
-    import types
-
-    from pxr import Usd
-
-    from service.isaac_assist_service.chat.tools.handlers.physics import (
-        _gen_make_sim_ready,
-        _load_asset_priors,
-    )
-
-    if "original_file" not in entry or not entry["file"].startswith(str(FIXED_DIR)):
-        if "original_file" not in entry:
-            entry["original_file"] = entry["file"]
-        entry["file"] = build_wrapper(entry, None)
-    stage = Usd.Stage.Open(entry["file"])
-    omni = types.ModuleType("omni")
-    omni_usd = types.ModuleType("omni.usd")
-    ctx = type("Ctx", (), {"get_stage": lambda self: stage})()
-    omni_usd.get_context = lambda: ctx
-    omni.usd = omni_usd
-    sys.modules["omni"] = omni
-    sys.modules["omni.usd"] = omni_usd
-
-    cls = entry["report"].get("matched_class")
-    prior = _load_asset_priors().get("classes", {}).get(cls or "", {})
-    mats = prior.get("typical_materials") or []
-    mass_range = prior.get("mass_kg")
-    profile = ("furniture" if cls in ("table", "cabinet", "door",
-                                      "appliance_large", "medical_furniture")
-               else "manipulable")
-    args = {"prim_path": f"/World/{_camel(entry['asset_id'])}", "profile": profile}
-    if mats:
-        args["material"] = mats[0]
-    if mass_range and profile == "manipulable":
-        args["mass_kg"] = round((mass_range[0] + mass_range[1]) / 2.0, 3)
-    code = _gen_make_sim_ready(args)
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        exec(compile(code, "<fix>", "exec"), {"__builtins__": __builtins__})
-    stage.GetRootLayer().Save()
-    entry["applied_fixes"] = entry.get("applied_fixes", []) + [
-        f"make_sim_ready profile={profile} material={mats[0] if mats else None} "
-        f"mass={args.get('mass_kg')}"]
-    _re_ingest(entry)
-    return (f"make_sim_ready applied ({profile}, {mats[0] if mats else 'no material'}"
-            + (f", {args['mass_kg']} kg" if args.get("mass_kg") else "")
-            + f") -> {entry['file']} — re-checked")
-
-
 # ---------------------------------------------------------------------------
 # isaac launch
 
@@ -440,17 +382,11 @@ def render_entry(e: dict) -> str:
                  + " · ".join(html.escape(f) for f in e["applied_fixes"]) + "</p>")
     actions = ""
     if status not in ("approved", "rejected"):
-        # corrective actions the machine can take, per callout
+        # judgment actions only — mechanical fixes run automatically at
+        # ingest (scale, orientation, rigid physics) or at approve (promote)
         corrective = ""
-        if r.get("suggested_scale_correction"):
-            corrective += (f'<button name="do" value="fix_scale">Apply scale fix '
-                           f'(&times;{r["suggested_scale_correction"]})</button>')
         arti_needed = any(c["check"] == "articulation" and "articulate_asset" in c["message"]
                           for c in r.get("callouts", []))
-        no_physics = any(c["check"] == "physics" for c in r.get("callouts", []))
-        if no_physics and not arti_needed:
-            corrective += ('<button name="do" value="make_rigid">Make sim-ready '
-                           '(collision + material + mass)</button>')
         baked = any("baked asset" in c["message"] for c in r.get("callouts", []))
         if baked:
             corrective += ('<button name="do" value="segment">Segment baked mesh '
@@ -625,16 +561,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         if action == "launch":
             msg = open_in_isaac(entry["file"])
-        elif action == "fix_scale":
-            try:
-                msg = fix_scale(entry)
-            except Exception as ex:
-                msg = f"scale fix failed: {ex}"
-        elif action == "make_rigid":
-            try:
-                msg = make_rigid_sim_ready(entry)
-            except Exception as ex:
-                msg = f"make_sim_ready failed: {ex}"
         elif action == "recheck":
             try:
                 _re_ingest(entry)
