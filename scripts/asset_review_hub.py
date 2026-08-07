@@ -173,10 +173,24 @@ def draft_articulation(entry: dict) -> str:
         entry["file"] = build_wrapper(entry, None)
         entry["report"] = run_report(entry["file"], entry.get("class_hint"))
     stage = Usd.Stage.Open(entry["file"])
+    asset_root = f"/World/{_camel(entry['asset_id'])}"
+    # tier 1: geometry-driven proposal (symmetry, wheel detection, link
+    # grouping) — falls back to the naive parent-of-mesh listing
+    try:
+        from articulation_draft import propose
+        spec = propose(stage, asset_root, asset_root)
+        entry["articulation_draft"] = json.dumps(spec, indent=1)
+        save_queue_entry(entry)
+        a = spec.get("_analysis", {})
+        return (f"draft proposed from geometry: {a.get('parts')} parts, "
+                f"symmetry axis {a.get('symmetry_axis')}, "
+                f"{a.get('wheels_detected')} wheels detected, base "
+                f"{str(a.get('base_link', '')).rsplit('/', 1)[-1]}, "
+                f"{len(spec['joints'])} joints — review, edit, then Apply")
+    except Exception as ex:
+        geo_err = str(ex)[:120]
     cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(),
                               [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
-    # candidate links: distinct ancestors that group meshes (the parent
-    # Xform of each mesh), largest one proposed as the base link
     links = {}
     for p in stage.Traverse():
         if p.IsA(UsdGeom.Mesh):
@@ -187,11 +201,11 @@ def draft_articulation(entry: dict) -> str:
                 links[str(parent.GetPath())] = s[0] * s[1] * s[2]
     if len(links) < 2:
         return ("only one mesh-bearing part found — this asset is baked; "
-                "articulation needs mesh segmentation")
+                "use Segment baked mesh first")
     ordered = sorted(links, key=links.get, reverse=True)
     base, children = ordered[0], ordered[1:]
     spec = {
-        "prim_path": f"/World/{_camel(entry['asset_id'])}",
+        "prim_path": asset_root,
         "fixed_base": False,
         "joints": [
             {"name": f"joint_{i}", "joint_type": "revolute|prismatic|fixed",
@@ -207,8 +221,9 @@ def draft_articulation(entry: dict) -> str:
     }
     entry["articulation_draft"] = json.dumps(spec, indent=1)
     save_queue_entry(entry)
-    return (f"draft spec proposed: base link {base.rsplit('/', 1)[-1]}, "
-            f"{len(children)} candidate moving parts — edit the spec, then Apply")
+    return (f"draft spec proposed (naive fallback; geometry tier: {geo_err}): "
+            f"base {base.rsplit('/', 1)[-1]}, {len(children)} candidates — "
+            "edit the spec, then Apply")
 
 
 def apply_articulation(entry: dict, spec_text: str) -> str:
@@ -225,6 +240,7 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
 
     spec = json.loads(spec_text)
     spec.pop("_instructions", None)
+    spec.pop("_analysis", None)
     if any("|" in str(j.get("joint_type", "")) for j in spec.get("joints", [])):
         return "spec still has placeholder joint_type values — edit before applying"
     stage = Usd.Stage.Open(entry["file"])

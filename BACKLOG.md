@@ -28,11 +28,20 @@ library stamp updates. Validated: 7/8 registry assets verified with
 measured evidence (bedside lift: commanded 0.15 m, measured 0.15 m,
 error 0.0000). Remaining: hub button per asset; headless-Isaac CI mode.
 
-## 3. Articulation authoring at scale
-Draft-spec proposal from part structure (hub editor shipped 2026-08-06);
-next: AI/VLM joint suggestion (discovery hub `suggest_joints_ai` prior
-art), axis/limit inference from geometry, per-link masses in
-articulate_asset.
+## 3. Articulation authoring at scale — ◐ geometric tier SHIPPED 2026-08-07
+`scripts/articulation_draft.py`: symmetry-axis detection (wheel-pair-first,
+bbox-center midpoint — centroid means skew off the symmetry plane),
+disc/mirror-pair wheel detection with a ground-contact prior (side guards
+float, wheels touch the floor), containment collapse of co-axial rings,
+and link grouping by same-side bbox containment. Hub draft flow uses it
+with naive fallback. Validated on the segmented wheelchair: both drive
+wheels found with 20/12 grouped members plus both casters; reviewer edits
+4 noise candidates to fixed and applies — 110 bodies, 109 joints, 4
+spinning wheels.
+Remaining: VLM tier for non-wheel mechanisms (lids, doors, drawers —
+geometry alone cannot name them), limit inference, drives on proposed
+wheel joints, live spin verification for continuous joints
+(verify_asset_live currently requires limited joints).
 
 ## 4. Mesh segmentation for baked assets — ✅ SHIPPED 2026-08-07
 `scripts/segment_mesh.py <asset_id>` + hub "Segment baked mesh" button:
