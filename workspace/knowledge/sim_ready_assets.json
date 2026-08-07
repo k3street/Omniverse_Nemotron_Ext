@@ -80,93 +80,170 @@
    "asset_id": "steel_frying_pan",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/steel_frying_pan/steel_frying_pan.usda",
    "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Steel_frying_pan.usdz",
-   "category": "rigid_unverified",
+   "category": "rigid_verified",
    "audit": {
-    "ready": false,
-    "simulable": false
+    "ready": true,
+    "simulable": true
    },
    "review": {
     "approved": true,
     "reviewer": "Kimate",
     "date": "2026-08-06"
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
    }
   },
   {
    "asset_id": "adjustable_bedside_table",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/adjustable_bedside_table/adjustable_bedside_table.usda",
    "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/adjustable_bedside_table_simready.usda",
-   "category": "articulated_unverified",
+   "category": "articulated_verified",
    "audit": {
-    "ready": false,
-    "simulable": false
+    "ready": true,
+    "simulable": true
    },
    "review": {
     "approved": true,
     "reviewer": "Kimate",
     "date": "2026-08-06"
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drive_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "articulation": {
+     "joint": "/World/AdjustableBedsideTable/Joints/lift",
+     "unit": "m",
+     "commanded_m": 0.15,
+     "measured_m": 0.15,
+     "position_error_m": 0.0,
+     "max_position_error_m": 0.005,
+     "base_drift_m": 0.0001,
+     "max_base_drift_m": 0.01,
+     "joints": [
+      {
+       "joint": "/World/AdjustableBedsideTable/Joints/lift",
+       "type": "prismatic",
+       "commanded": 0.15,
+       "measured": 0.15,
+       "error": 0.0,
+       "unit": "m",
+       "pass": true
+      }
+     ]
+    }
    }
   },
   {
    "asset_id": "airpods",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/airpods/airpods.usda",
    "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_simready.usda",
-   "category": "rigid_unverified",
+   "category": "rigid_verified",
    "audit": {
-    "ready": false,
-    "simulable": false
+    "ready": true,
+    "simulable": true
    },
    "review": {
     "approved": true,
     "reviewer": "kimate",
     "date": "2026-08-06",
     "notes": "kimate"
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.111,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
    }
   },
   {
    "asset_id": "airpods_2_case",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/airpods_2_case/airpods_2_case.usda",
    "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_2_case_simready.usda",
-   "category": "rigid_unverified",
+   "category": "rigid_verified",
    "audit": {
-    "ready": false,
-    "simulable": false
+    "ready": true,
+    "simulable": true
    },
    "review": {
     "approved": true,
     "reviewer": "kimate",
     "date": "2026-08-06",
     "notes": "kimate"
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.2379,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0,
+     "note": "reoriented while settling (tipped); rests on ground"
+    }
    }
   },
   {
    "asset_id": "004_chess_rook",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/004_chess_rook/004_chess_rook.usda",
    "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/004_chess_rook_simready.usda",
-   "category": "rigid_unverified",
+   "category": "rigid_verified",
    "audit": {
-    "ready": false,
-    "simulable": false
+    "ready": true,
+    "simulable": true
    },
    "review": {
     "approved": true,
     "reviewer": "kimate",
     "date": "2026-08-06",
     "notes": "kimate"
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
    }
   },
   {
    "asset_id": "airpods_max_clone",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/airpods_max_clone/airpods_max_clone.usda",
    "source_file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/assets_fixed/airpods_max_clone_simready.usda",
-   "category": "rigid_unverified",
+   "category": "rigid_verified",
    "audit": {
-    "ready": false,
+    "ready": true,
     "simulable": true
    },
    "review": {
     "approved": true,
     "reviewer": "Kimate",
     "date": "2026-08-07"
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1004,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    }
    }
   }
  ]

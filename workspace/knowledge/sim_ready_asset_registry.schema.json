@@ -93,9 +93,10 @@
           "type": "object",
           "required": ["joint", "commanded_m", "measured_m", "position_error_m",
                        "max_position_error_m", "base_drift_m", "max_base_drift_m"],
-          "description": "Articulation accuracy criteria: |measured - commanded| <= max_position_error_m AND base_drift_m <= max_base_drift_m AND (when present) gravity sag consistent with drive stiffness.",
+          "description": "Articulation accuracy criteria: |measured - commanded| <= max_position_error_m AND base_drift_m <= max_base_drift_m AND (when present) gravity sag consistent with drive stiffness. Top-level numbers are the worst-case joint; per-joint detail in 'joints'.",
           "properties": {
             "joint": {"type": "string"},
+            "unit": {"type": "string", "enum": ["m", "deg"], "default": "m"},
             "commanded_m": {"type": "number"},
             "measured_m": {"type": "number"},
             "position_error_m": {"type": "number", "minimum": 0},
@@ -103,7 +104,23 @@
             "gravity_sag_measured_m": {"type": "number"},
             "gravity_sag_predicted_m": {"type": "number", "description": "load_N / drive_stiffness — measured sag must be same order"},
             "base_drift_m": {"type": "number", "minimum": 0},
-            "max_base_drift_m": {"type": "number", "exclusiveMinimum": 0, "default": 0.01}
+            "max_base_drift_m": {"type": "number", "exclusiveMinimum": 0, "default": 0.01},
+            "joints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["joint", "type", "commanded", "measured", "error", "unit", "pass"],
+                "properties": {
+                  "joint": {"type": "string"},
+                  "type": {"type": "string", "enum": ["prismatic", "revolute"]},
+                  "commanded": {"type": "number"},
+                  "measured": {"type": "number"},
+                  "error": {"type": "number", "minimum": 0},
+                  "unit": {"type": "string", "enum": ["m", "deg"]},
+                  "pass": {"type": "boolean"}
+                }
+              }
+            }
           }
         },
         "drop": {

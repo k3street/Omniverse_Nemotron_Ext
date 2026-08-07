@@ -17,12 +17,16 @@ Ordered by leverage. Top item first.
   (slug now collapses underscore runs). All 8 registered assets verified:
   physics present, materials correct, relative refs.
 
-## 2. Automated live verification (verify_asset_live)
-Per-joint drive sweep + rigid drop test in a live/headless Isaac session →
-measured evidence written to the registry → auto-flip `*_unverified` →
-`*_verified` when within schema tolerances. Hub button per asset. The
-overbed-table/office-chair evidence was gathered with one-off scripts;
-this makes verified categories scale.
+## 2. Automated live verification — ✅ SHIPPED 2026-08-07
+`scripts/verify_asset_live.py [<id> ... | --all-unverified]` against a live
+Isaac session: rigid drop test (rest-on-ground criterion tolerating
+settle-tipping) and per-joint drive tests for articulated assets
+(prismatic in meters, revolute in degrees, measured base drift, ground
+under floating bases). Evidence written to the registry; categories
+auto-flip `*_unverified` → `*_verified` inside schema tolerances and the
+library stamp updates. Validated: 7/8 registry assets verified with
+measured evidence (bedside lift: commanded 0.15 m, measured 0.15 m,
+error 0.0000). Remaining: hub button per asset; headless-Isaac CI mode.
 
 ## 3. Articulation authoring at scale
 Draft-spec proposal from part structure (hub editor shipped 2026-08-06);
