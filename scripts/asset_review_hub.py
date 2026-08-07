@@ -162,6 +162,92 @@ def fix_scale(entry: dict) -> str:
                 for c in entry["report"]["callouts"]) else "scale still flagged"))
 
 
+def draft_articulation(entry: dict) -> str:
+    """Propose a joint-spec draft from the asset's part structure. The
+    reviewer edits it (types, axes, limits are judgment) and applies."""
+    from pxr import Usd, UsdGeom
+
+    if "original_file" not in entry or not entry["file"].startswith(str(FIXED_DIR)):
+        if "original_file" not in entry:
+            entry["original_file"] = entry["file"]
+        entry["file"] = build_wrapper(entry, None)
+        entry["report"] = run_report(entry["file"], entry.get("class_hint"))
+    stage = Usd.Stage.Open(entry["file"])
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(),
+                              [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    # candidate links: distinct ancestors that group meshes (the parent
+    # Xform of each mesh), largest one proposed as the base link
+    links = {}
+    for p in stage.Traverse():
+        if p.IsA(UsdGeom.Mesh):
+            parent = p.GetParent()
+            r = cache.ComputeWorldBound(parent).ComputeAlignedRange()
+            if not r.IsEmpty():
+                s = r.GetSize()
+                links[str(parent.GetPath())] = s[0] * s[1] * s[2]
+    if len(links) < 2:
+        return ("only one mesh-bearing part found — this asset is baked; "
+                "articulation needs mesh segmentation")
+    ordered = sorted(links, key=links.get, reverse=True)
+    base, children = ordered[0], ordered[1:]
+    spec = {
+        "prim_path": f"/World/{_camel(entry['asset_id'])}",
+        "fixed_base": False,
+        "joints": [
+            {"name": f"joint_{i}", "joint_type": "revolute|prismatic|fixed",
+             "parent_prim": base, "child_prim": c, "axis": "Z",
+             "lower_limit": None, "upper_limit": None}
+            for i, c in enumerate(children[:12])
+        ],
+        "_instructions": ("EDIT before applying: set each joint_type, axis "
+                          "(X/Y/Z), and limits (deg for revolute, m for "
+                          "prismatic); delete joints for parts that are "
+                          "fixed to the base (or set joint_type 'fixed'); "
+                          "remove this key when done"),
+    }
+    entry["articulation_draft"] = json.dumps(spec, indent=1)
+    save_queue_entry(entry)
+    return (f"draft spec proposed: base link {base.rsplit('/', 1)[-1]}, "
+            f"{len(children)} candidate moving parts — edit the spec, then Apply")
+
+
+def apply_articulation(entry: dict, spec_text: str) -> str:
+    """Run articulate_asset with the reviewer-edited spec on the derivative."""
+    import contextlib
+    import io
+    import types
+
+    from pxr import Usd
+
+    from service.isaac_assist_service.chat.tools.handlers.physics import (
+        _gen_articulate_asset,
+    )
+
+    spec = json.loads(spec_text)
+    spec.pop("_instructions", None)
+    if any("|" in str(j.get("joint_type", "")) for j in spec.get("joints", [])):
+        return "spec still has placeholder joint_type values — edit before applying"
+    stage = Usd.Stage.Open(entry["file"])
+    omni = types.ModuleType("omni")
+    omni_usd = types.ModuleType("omni.usd")
+    ctx = type("Ctx", (), {"get_stage": lambda self: stage})()
+    omni_usd.get_context = lambda: ctx
+    omni.usd = omni_usd
+    sys.modules["omni"] = omni
+    sys.modules["omni.usd"] = omni_usd
+    code = _gen_articulate_asset(spec)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        exec(compile(code, "<articulate>", "exec"), {"__builtins__": __builtins__})
+    stage.GetRootLayer().Save()
+    entry["articulation_draft"] = spec_text
+    entry["applied_fixes"] = entry.get("applied_fixes", []) + [
+        f"articulate_asset: {len(spec.get('joints', []))} joints"]
+    _re_ingest(entry)
+    verdict = entry["report"].get("verdict", "")
+    return f"articulation applied ({len(spec.get('joints', []))} joints) — re-checked: {verdict}"
+
+
 def make_rigid_sim_ready(entry: dict) -> str:
     """make_sim_ready on the derivative: collision + rigid body + class
     material + class-plausible mass. Only for assets that should NOT
@@ -350,9 +436,8 @@ def render_entry(e: dict) -> str:
             corrective += ('<button name="do" value="make_rigid">Make sim-ready '
                            '(collision + material + mass)</button>')
         if arti_needed:
-            corrective += ('<span class="meta" style="align-self:center">joints must be '
-                           'authored: <code>articulate_asset</code> via chat/CLI, '
-                           'then</span>')
+            corrective += ('<button name="do" value="draft_arti">Draft articulation '
+                           'spec</button>')
         corrective += '<button name="do" value="recheck">Re-run checks</button>'
         gate = ""
         approve_btn = '<button class="primary" name="do" value="approve">Approve &rarr; registry</button>'
@@ -372,6 +457,15 @@ def render_entry(e: dict) -> str:
  {approve_btn}
  <button class="reject" name="do" value="reject">Reject</button>
 </form>"""
+    arti_editor = ""
+    if status not in ("approved", "rejected") and e.get("articulation_draft"):
+        arti_editor = f"""
+<form method="post" action="/action" style="margin-top:8px">
+ <input type="hidden" name="asset_id" value="{aid}">
+ <p class="meta">articulation spec — edit joint types/axes/limits, then apply:</p>
+ <textarea name="spec" rows="12" style="width:100%;font:12px monospace;background:#0b0c0e;color:#d7dbe0;border:1px solid #33373d;border-radius:7px;padding:8px">{html.escape(e["articulation_draft"])}</textarea>
+ <div class="actions"><button class="primary" name="do" value="apply_arti">Apply articulation</button></div>
+</form>"""
     reclass = "" if status in ("approved", "rejected") else f"""
 <form class="actions" method="post" action="/action" style="margin-top:6px">
  <input type="hidden" name="asset_id" value="{aid}">
@@ -381,7 +475,8 @@ def render_entry(e: dict) -> str:
 </form>"""
     return (f'<div class="card">{thumb}<h2>{aid}{badge}</h2>'
             f'<div class="path">{html.escape(e.get("file", ""))}</div>'
-            f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{review_note}{actions}{reclass}'
+            f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{review_note}{actions}'
+            f'{arti_editor}{reclass}'
             f'<div style="clear:both"></div></div>')
 
 
@@ -509,6 +604,16 @@ class Handler(BaseHTTPRequestHandler):
                 msg = f"re-checked {asset_id}: {entry['report'].get('verdict')}"
             except Exception as ex:
                 msg = f"re-check failed: {ex}"
+        elif action == "draft_arti":
+            try:
+                msg = draft_articulation(entry)
+            except Exception as ex:
+                msg = f"draft failed: {ex}"
+        elif action == "apply_arti":
+            try:
+                msg = apply_articulation(entry, get("spec"))
+            except Exception as ex:
+                msg = f"articulation failed: {ex}"
         elif action == "reclass":
             hint = get("class_hint")
             if not hint:
