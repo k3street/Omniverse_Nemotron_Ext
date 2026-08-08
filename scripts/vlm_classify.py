@@ -31,25 +31,94 @@ from ingest_asset import QUEUE_DIR, propose_category, run_report  # noqa: E402
 
 PRIORS_PATH = REPO / "workspace" / "knowledge" / "asset_class_priors.json"
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "object_name": {"type": "string",
-                        "description": "What the object actually is, in a few words"},
-        "asset_class": {"type": ["string", "null"],
-                        "description": "Best matching class key from the provided list, or null if none fits"},
-        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-        "articulable": {"type": "boolean",
-                        "description": "Does the real-world object have moving parts?"},
-        "visible_moving_parts": {"type": "array", "items": {"type": "string"},
-                                 "description": "Moving parts visible in the render (wheels, lids, drawers...)"},
-        "notes": {"type": "string",
-                  "description": "Anything a sim2real reviewer should know (orientation, damage, scale cues)"},
-    },
-    "required": ["object_name", "asset_class", "confidence", "articulable",
-                 "visible_moving_parts", "notes"],
-    "additionalProperties": False,
-}
+MATERIALS_PATH = REPO / "workspace" / "knowledge" / "physics_materials.json"
+
+
+def _schema() -> dict:
+    materials = sorted(json.loads(
+        MATERIALS_PATH.read_text())["materials"].keys())
+    return {
+        "type": "object",
+        "properties": {
+            "object_name": {"type": "string",
+                            "description": "What the object actually is, in a few words"},
+            "asset_class": {"anyOf": [{"type": "string"}, {"type": "null"}],
+                            "description": "Best matching class key from the provided list, or null if none fits"},
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            "articulable": {"type": "boolean",
+                            "description": "Does the real-world object have moving parts?"},
+            "visible_moving_parts": {"type": "array", "items": {"type": "string"},
+                                     "description": "Moving parts visible in the render (wheels, lids, drawers...)"},
+            "notes": {"type": "string",
+                      "description": "Anything a sim2real reviewer should know (orientation, damage, scale cues)"},
+            # unknown-class path: the taxonomy grows itself. These fields
+            # let an unrecognized object REGISTER its own prior class
+            # (marked provisional until a human confirms it).
+            "proposed_class_key": {"anyOf": [{"type": "string"},
+                                             {"type": "null"}],
+                                   "description": "If no class fits: a new snake_case class key for this KIND of object (e.g. 'watering_can')"},
+            "est_max_dim_m": {"anyOf": [{"type": "array",
+                                         "items": {"type": "number"}},
+                                        {"type": "null"}],
+                              "description": "Plausible [min,max] largest dimension of the real object, meters"},
+            "est_mass_kg": {"anyOf": [{"type": "array",
+                                       "items": {"type": "number"}},
+                                      {"type": "null"}],
+                            "description": "Plausible [min,max] mass of the real object, kg"},
+            "primary_material": {"anyOf": [{"type": "string",
+                                            "enum": materials},
+                                           {"type": "null"}],
+                                 "description": "Dominant physical material"},
+            "deformable_type": {"anyOf": [{"type": "string",
+                                           "enum": ["cloth", "sponge",
+                                                    "rubber", "gel", "rope"]},
+                                          {"type": "null"}],
+                                "description": "Soft-body type if the real object is deformable, else null"},
+        },
+        "required": ["object_name", "asset_class", "confidence", "articulable",
+                     "visible_moving_parts", "notes", "proposed_class_key",
+                     "est_max_dim_m", "est_mass_kg", "primary_material",
+                     "deformable_type"],
+        "additionalProperties": False,
+    }
+
+
+def register_provisional_class(result: dict, asset_id: str) -> str | None:
+    """Create a prior class from the VLM's estimates. Marked source='vlm'
+    (provisional): visual QA fails closed on provisional classes, so the
+    FIRST asset of a new kind always crosses a human — approving it
+    confirms the class, and later assets machine-approve normally."""
+    import re as _re
+    from datetime import date as _date
+
+    key = result.get("proposed_class_key")
+    dims = result.get("est_max_dim_m")
+    mass = result.get("est_mass_kg")
+    if (not key or not dims or not mass
+            or len(dims) != 2 or len(mass) != 2):
+        return None
+    key = _re.sub(r"[\W]+", "_", key.strip().lower()).strip("_")
+    data = json.loads(PRIORS_PATH.read_text())
+    if key in data["classes"]:
+        return key  # raced/already registered — just use it
+    tokens = [t for t in _re.split(r"[\W_]+",
+                                   (key + " " + result["object_name"]).lower())
+              if len(t) > 2]
+    data["classes"][key] = {
+        "keywords": sorted(set(tokens)),
+        "max_dim_m": [float(dims[0]), float(dims[1])],
+        "mass_kg": [float(mass[0]), float(mass[1])],
+        "articulable": bool(result.get("articulable")),
+        **({"deformable": result["deformable_type"]}
+           if result.get("deformable_type") else {}),
+        "typical_materials": ([result["primary_material"]]
+                              if result.get("primary_material") else []),
+        "source": "vlm",
+        "proposed_by": asset_id,
+        "proposed_on": _date.today().isoformat(),
+    }
+    PRIORS_PATH.write_text(json.dumps(data, indent=1))
+    return key
 
 
 def classify_thumbnail(png_path: str) -> dict:
@@ -77,10 +146,13 @@ def classify_thumbnail(png_path: str) -> dict:
                     "This is a render of a 3D asset being ingested into a robotics "
                     "simulation pipeline. Identify what the object is, whether the "
                     "real-world object has moving parts, and which class from this "
-                    "list fits best (null if none):\n\n" + class_list)},
+                    "list fits best (null if none). If NO class fits, propose a new "
+                    "snake_case class key for this KIND of object plus plausible "
+                    "real-world max-dimension and mass ranges, its dominant "
+                    "material, and whether it is deformable:\n\n" + class_list)},
             ],
         }],
-        output_config={"format": {"type": "json_schema", "schema": SCHEMA}},
+        output_config={"format": {"type": "json_schema", "schema": _schema()}},
     )
     if response.stop_reason == "refusal":
         raise RuntimeError("model declined the classification request")
@@ -98,6 +170,11 @@ def classify_entry(asset_id: str) -> str:
     entry["vlm"] = result
     old_class = entry.get("report", {}).get("matched_class")
     new_class = result.get("asset_class")
+    if (not new_class and result.get("confidence") in ("high", "medium")):
+        new_class = register_provisional_class(result, asset_id)
+        if new_class:
+            result["asset_class"] = new_class
+            result["registered_provisional_class"] = True
     if new_class:
         entry["class_hint"] = new_class
         entry["class_source"] = "vlm"

@@ -186,7 +186,6 @@
   "bottle": {
    "keywords": [
     "bottle",
-    "can",
     "flask"
    ],
    "max_dim_m": [
@@ -298,25 +297,17 @@
   "electronics_handheld": {
    "keywords": [
     "phone",
-    "remote",
-    "mouse",
-    "keyboard",
-    "headphone",
-    "headset",
     "airpods",
-    "walkman",
     "ipad",
-    "tablet",
-    "toothbrush",
-    "pen"
+    "tablet"
    ],
    "max_dim_m": [
     0.05,
-    0.6
+    0.4
    ],
    "mass_kg": [
-    0.02,
-    2.5
+    0.05,
+    0.8
    ],
    "articulable": false,
    "typical_materials": [
@@ -372,20 +363,20 @@
    "keywords": [
     "shoe",
     "sneaker",
-    "boot"
+    "boot",
+    "sandal"
    ],
    "max_dim_m": [
-    0.2,
-    0.4
+    0.22,
+    0.35
    ],
    "mass_kg": [
     0.2,
-    1.5
+    0.7
    ],
    "articulable": false,
    "typical_materials": [
-    "rubber_natural",
-    "foam_polyurethane"
+    "rubber_soft"
    ]
   },
   "vehicle": {
@@ -538,7 +529,6 @@
   },
   "headset_xr": {
    "keywords": [
-    "headset",
     "vr",
     "xr",
     "visor",
@@ -730,6 +720,170 @@
    "articulable": false,
    "deformable": "rope",
    "typical_materials": []
+  },
+  "can": {
+   "keywords": [
+    "can",
+    "cola",
+    "soda"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.18
+   ],
+   "mass_kg": [
+    0.012,
+    0.5
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "aluminum"
+   ]
+  },
+  "computer_mouse": {
+   "keywords": [
+    "mouse"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.14
+   ],
+   "mass_kg": [
+    0.06,
+    0.16
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
+  },
+  "headphones": {
+   "keywords": [
+    "headphone",
+    "headphones",
+    "earmuff"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.28
+   ],
+   "mass_kg": [
+    0.15,
+    0.45
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
+  },
+  "headset_comms": {
+   "keywords": [
+    "headset"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.28
+   ],
+   "mass_kg": [
+    0.25,
+    0.6
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
+  },
+  "remote_control": {
+   "keywords": [
+    "remote"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.25
+   ],
+   "mass_kg": [
+    0.05,
+    0.25
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
+  },
+  "keyboard": {
+   "keywords": [
+    "keyboard"
+   ],
+   "max_dim_m": [
+    0.28,
+    0.5
+   ],
+   "mass_kg": [
+    0.4,
+    1.2
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
+  },
+  "toothbrush": {
+   "keywords": [
+    "toothbrush",
+    "brush"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.26
+   ],
+   "mass_kg": [
+    0.02,
+    0.25
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
+  },
+  "pen": {
+   "keywords": [
+    "pen",
+    "pencil",
+    "stylus",
+    "marker"
+   ],
+   "max_dim_m": [
+    0.11,
+    0.16
+   ],
+   "mass_kg": [
+    0.005,
+    0.05
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
+  },
+  "portable_audio": {
+   "keywords": [
+    "walkman",
+    "radio",
+    "speaker"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.3
+   ],
+   "mass_kg": [
+    0.15,
+    1.5
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs",
+    "aluminum"
+   ]
   }
  }
 }

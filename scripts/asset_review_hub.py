@@ -492,12 +492,19 @@ def do_approve(entry: dict, category: str, reviewer: str, notes: str,
                 "Use 'Draft articulation spec' → Apply first.")
     reg = load_registry()
     reg["assets"] = [a for a in reg["assets"] if a["asset_id"] != entry["asset_id"]]
+    # passing Newton drape evidence upgrades a human-approved deformable
+    # to deformable_verified — same pattern as the rigid drop-test flip
+    drape = entry.get("drape_test") or {}
+    if (category == "deformable_unverified"
+            and drape.get("drapes_like_cloth")):
+        category = "deformable_verified"
     new = {
         "asset_id": entry["asset_id"],
         "file": entry["file"],
         "source_file": entry.get("original_file") or entry["file"],
         "category": category,
-        **({"deformable": entry.get("deformable", "cloth")}
+        **({"deformable": entry.get("deformable", "cloth"),
+            **({"verification": {"newton": drape}} if drape else {})}
            if category.startswith("deformable") else {}),
         "audit": {"ready": category.endswith("_verified"),
                   "simulable": bool(report.get("structure", {}).get("rigid_bodies"))},
@@ -526,6 +533,24 @@ def do_approve(entry: dict, category: str, reviewer: str, notes: str,
     fresh["status"] = "approved"
     fresh["review"] = new["review"]
     save_queue_entry(fresh)
+    # a HUMAN approving an asset under a provisional (VLM-created) prior
+    # class confirms the class — later assets of this kind can
+    # machine-approve; the taxonomy grows with one human touch per kind
+    if (review_extra or {}).get("reviewer_type") != "machine":
+        cls = fresh.get("report", {}).get("matched_class")
+        try:
+            import json as _json
+            priors_path = REPO / "workspace" / "knowledge" / "asset_class_priors.json"
+            data = _json.loads(priors_path.read_text())
+            prior = data["classes"].get(cls or "", {})
+            if prior.get("source") == "vlm":
+                prior.pop("source", None)
+                prior["confirmed_by"] = reviewer
+                prior["confirmed_on"] = date.today().isoformat()
+                priors_path.write_text(_json.dumps(data, indent=1))
+                promote_msg += f"; confirmed new class '{cls}'"
+        except (OSError, ValueError):
+            pass
     return f"approved {entry['asset_id']} as {category}; {promote_msg}"
 
 

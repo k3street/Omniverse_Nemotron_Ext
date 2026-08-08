@@ -60,11 +60,15 @@ def _judge_schema() -> dict:
                             "description": "Best matching class key, or null"},
             "confidence": {"type": "number",
                            "description": "0..1 (1 = certain)"},
+            "matches_expected": {"type": "boolean",
+                                 "description": "Is this the same KIND of "
+                                 "object the entry claims (see prompt)? "
+                                 "Judge the object, not the class key."},
             "integrity_ok": {"type": "boolean"},
             "integrity_notes": {"type": "string"},
         },
         "required": ["object_name", "asset_class", "confidence",
-                     "integrity_ok", "integrity_notes"],
+                     "matches_expected", "integrity_ok", "integrity_notes"],
         "additionalProperties": False,
     }
 
@@ -77,17 +81,24 @@ def _class_list() -> str:
         for k, v in classes.items())
 
 
-def _prompt(dims_m: list[float] | None = None) -> str:
+def _prompt(dims_m: list[float] | None = None,
+            expected: str | None = None) -> str:
     # renders carry no absolute scale — the measured size is evidence the
     # judges must have (a 6 cm 'bottle' shape is a vial)
     dims = ""
     if dims_m:
         dims = ("The asset's measured bounding box is "
                 f"{dims_m[0]:.3f} x {dims_m[1]:.3f} x {dims_m[2]:.3f} m. ")
+    claim = ""
+    if expected:
+        claim = (f"The pipeline believes this object is: {expected}. "
+                 "Set matches_expected to whether you see the same KIND "
+                 "of object (a vial vs a small bottle is the same kind; "
+                 "a chair vs a bottle is not). ")
     return (
         "These are orbit views of one 3D asset rendered for physics-"
         "simulation QA (untextured gray is a renderer limitation, not a "
-        "defect). " + dims +
+        "defect). " + dims + claim +
         "Identify the object, pick the best matching class key "
         "from this list (null if none fits), and judge mesh integrity: "
         "missing faces, holes, exploded or floating parts, implausible "
@@ -221,9 +232,11 @@ def rubric(entry: dict, judges: list[dict]) -> list[dict]:
         "keywords", [])]
 
     def _identity_vote(j: dict) -> bool:
-        # class-key match, or the judge NAMED the object with one of the
-        # entry class's keywords (a sibling class key with the right name
-        # is agreement, not disagreement)
+        # semantic same-object answer first — the class key is a lookup
+        # index, not the identity; enum-equality made vial-vs-bottle a
+        # failure even when every judge named the object correctly
+        if j.get("matches_expected") is True:
+            return True
         if j.get("asset_class") == entry_class:
             return True
         tokens = re.split(r"[\W_]+", str(j.get("object_name", "")).lower())
@@ -292,6 +305,18 @@ def rubric(entry: dict, judges: list[dict]) -> list[dict]:
         "ok": not errors,
         "evidence": str(errors) if errors else "no error-severity callouts"})
 
+    prior_full = json.loads(PRIORS_PATH.read_text())["classes"].get(
+        entry_class or "", {})
+    checks.append({
+        "check": "prior_confirmed",
+        "ok": prior_full.get("source") != "vlm",
+        "evidence": (f"class '{entry_class}' is a PROVISIONAL VLM-created "
+                     "prior — a machine-invented prior cannot validate a "
+                     "machine approval; the first asset of a new kind "
+                     "crosses a human, whose approval confirms the class"
+                     if prior_full.get("source") == "vlm"
+                     else f"class '{entry_class}' is human-curated/confirmed")})
+
     category = entry.get("proposed_category", "")
     checks.append({
         "check": "rigid_scope",
@@ -336,7 +361,11 @@ def qa_entry(asset_id: str) -> str:
     report = entry.get("report", {})
     entry_class = report.get("matched_class") or entry.get("class_hint")
     dims = report.get("dimensions_m") or _measure_dims(entry.get("file"))
-    judges = _run_judges(views, _prompt(dims), entry_class)
+    expected = entry_class
+    vlm_name = (entry.get("vlm") or {}).get("object_name")
+    if vlm_name:
+        expected = f"{vlm_name} (class '{entry_class}')"
+    judges = _run_judges(views, _prompt(dims, expected), entry_class)
     checks = rubric(entry, judges)
     failed = [c["check"] for c in checks if not c["ok"]]
     verdict = "auto_approve_eligible" if not failed else "human_review"

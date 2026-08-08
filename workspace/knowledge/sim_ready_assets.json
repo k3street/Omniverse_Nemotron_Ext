@@ -2442,6 +2442,197 @@
      }
     }
    }
+  },
+  {
+   "asset_id": "simple_pill_bottle_2",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/simple_pill_bottle_2/simple_pill_bottle_2.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Simple_Pill_Bottle (2).usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   }
+  },
+  {
+   "asset_id": "prescription_pill_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/prescription_pill_bottle/prescription_pill_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Prescription_Pill_Bottle.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   }
+  },
+  {
+   "asset_id": "multivitamins_bottle_realistic_3d_model",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/multivitamins_bottle_realistic_3d_model/multivitamins_bottle_realistic_3d_model.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Multivitamins_Bottle__Realistic_3D_Model.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   }
+  },
+  {
+   "asset_id": "sanitizer_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/sanitizer_bottle/sanitizer_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Sanitizer_Bottle.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "hand_sanitizer",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/hand_sanitizer/hand_sanitizer.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Hand-sanitizer.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-08",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   }
+  },
+  {
+   "asset_id": "kohler_undermount_double_bowl_kitchen_sink",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/kohler_undermount_double_bowl_kitchen_sink/kohler_undermount_double_bowl_kitchen_sink.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/KOHLER_Undermount_Double-Bowl_Kitchen_Sink.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-08",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   }
+  },
+  {
+   "asset_id": "spray_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/spray_bottle/spray_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Spray_Bottle.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-08",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   }
+  },
+  {
+   "asset_id": "spray_bottle_mdi",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/spray_bottle_mdi/spray_bottle_mdi.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Spray_Bottle_mdi.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-08",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   }
+  },
+  {
+   "asset_id": "spray_bottle_1",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/spray_bottle_1/spray_bottle_1.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Spray_Bottle(1).usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-08",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ],
+    "audit_sampled": true
+   }
   }
  ]
 }

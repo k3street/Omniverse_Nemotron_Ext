@@ -304,3 +304,74 @@ class TestDeformablePath:
                 "objects": [{"name": "mug", "sim_ready_asset": "mug_x"}]}})
         compile(code, "<bp>", "exec")
         assert "_soften(_place(" not in code
+
+
+class TestUnknownClassification:
+    def test_semantic_match_beats_wrong_class_key(self):
+        # the vial case: judges name the object right but pick a sibling
+        # key — matches_expected is the identity, keys are lookup indexes
+        from visual_qa import rubric
+        judges = [
+            {**_judge("gemma", cls="bottle", name="bottle"),
+             "matches_expected": True},
+            {**_judge("cosmos", cls="medical_furniture", name="container"),
+             "matches_expected": True},
+        ]
+        checks = {c["check"]: c for c in rubric(_entry(), judges)}
+        assert checks["identity_agreement"]["ok"]
+
+    def test_semantic_mismatch_fails(self):
+        from visual_qa import rubric
+        judges = [
+            {**_judge("gemma", cls="table", name="dining table"),
+             "matches_expected": False},
+            {**_judge("cosmos", cls="table", name="table"),
+             "matches_expected": False},
+        ]
+        checks = {c["check"]: c for c in rubric(_entry(), judges)}
+        assert not checks["identity_agreement"]["ok"]
+
+    def test_provisional_class_fails_closed(self, tmp_path, monkeypatch):
+        import visual_qa
+        priors = {"classes": {
+            "watering_can": {"keywords": ["watering"], "max_dim_m": [0.2, 0.5],
+                             "mass_kg": [0.2, 1.5], "articulable": False,
+                             "typical_materials": ["plastic_abs"],
+                             "source": "vlm"}}}
+        pp = tmp_path / "priors.json"
+        pp.write_text(json.dumps(priors))
+        monkeypatch.setattr(visual_qa, "PRIORS_PATH", pp)
+        judges = [{**_judge("gemma", cls="watering_can", name="watering can"),
+                   "matches_expected": True},
+                  {**_judge("cosmos", cls="watering_can", name="watering can"),
+                   "matches_expected": True}]
+        checks = {c["check"]: c for c in visual_qa.rubric(
+            _entry(cls="watering_can"), judges)}
+        assert not checks["prior_confirmed"]["ok"]
+        assert "PROVISIONAL" in checks["prior_confirmed"]["evidence"]
+
+    def test_confirmed_class_passes_gate(self):
+        from visual_qa import rubric
+        checks = {c["check"]: c for c in rubric(
+            _entry(), [_judge("gemma"), _judge("cosmos")])}
+        assert checks["prior_confirmed"]["ok"]
+
+    def test_register_provisional_class(self, tmp_path, monkeypatch):
+        import vlm_classify
+        pp = tmp_path / "priors.json"
+        pp.write_text(json.dumps({"classes": {}}))
+        monkeypatch.setattr(vlm_classify, "PRIORS_PATH", pp)
+        result = {"proposed_class_key": "Watering-Can",
+                  "object_name": "green watering can",
+                  "est_max_dim_m": [0.25, 0.45], "est_mass_kg": [0.2, 1.2],
+                  "articulable": False, "primary_material": "plastic_abs",
+                  "deformable_type": None}
+        key = vlm_classify.register_provisional_class(result, "asset_x")
+        assert key == "watering_can"
+        cls = json.loads(pp.read_text())["classes"]["watering_can"]
+        assert cls["source"] == "vlm"
+        assert cls["proposed_by"] == "asset_x"
+        assert "watering" in cls["keywords"]
+        assert cls["typical_materials"] == ["plastic_abs"]
+        # second registration reuses, never duplicates
+        assert vlm_classify.register_provisional_class(result, "y") == "watering_can"
