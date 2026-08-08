@@ -260,6 +260,38 @@ class TestDeformablePath:
         assert "_soften(_place(" in code
         assert "PhysxDeformableSurfaceAPI" in code  # cloth preset
 
+    def test_newton_world_mesh_welds_and_dedups(self):
+        # scan meshes: duplicated vertices + double-sided faces must weld
+        # to a clean manifold or the cloth solver diverges
+        pytest.importorskip("pxr")
+        import tempfile
+
+        from pxr import Usd, UsdGeom
+        with tempfile.TemporaryDirectory() as td:
+            f = str(Path(td) / "quad.usda")
+            stage = Usd.Stage.CreateNew(f)
+            UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+            mesh = UsdGeom.Mesh.Define(stage, "/quad")
+            # two triangles sharing an edge, authored with DUPLICATED
+            # vertices and a reversed-winding copy of the first face
+            mesh.GetPointsAttr().Set(
+                [(0, 0, 0), (1, 0, 0), (0, 1, 0),
+                 (0, 0, 0), (1, 0, 0), (0, 1, 0),  # duplicates
+                 (1, 1, 0)])
+            mesh.GetFaceVertexCountsAttr().Set([3, 3, 3])
+            mesh.GetFaceVertexIndicesAttr().Set(
+                [0, 1, 2, 5, 4, 3, 4, 6, 5])  # face2 = face1 reversed
+            stage.GetRootLayer().Save()
+            sys.path.insert(0, str(REPO / "scripts"))
+            from verify_asset_newton import _world_mesh
+            pts, tris = _world_mesh(f)
+            assert len(pts) == 4          # welded
+            assert len(tris) // 3 == 2    # reversed duplicate dropped
+
+    def test_newton_script_syntax(self):
+        import ast
+        ast.parse((REPO / "scripts" / "verify_asset_newton.py").read_text())
+
     def test_rigid_library_assets_not_softened(self):
         from unittest.mock import patch
 

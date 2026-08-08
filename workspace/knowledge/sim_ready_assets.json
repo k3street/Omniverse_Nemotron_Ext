@@ -98,6 +98,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -125,6 +137,18 @@
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0,
      "note": "reoriented while settling (tipped); rests on ground"
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.2382,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -151,6 +175,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0007,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -212,6 +248,20 @@
     "approved": true,
     "reviewer": "Kimate",
     "date": "2026-08-07"
+   },
+   "verification": {
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0001,
+      "rests_after_s": 4.0
+     }
+    }
    }
   },
   {
@@ -242,6 +292,17 @@
      "drop_measured_m": 0.1004,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.0998,
+      "drop_predicted_m": 0.1,
+      "rest_speed": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -273,6 +334,17 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "rest_speed": 0.0014,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -304,6 +376,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -335,6 +419,18 @@
      "drop_measured_m": 0.055,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.0565,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -367,6 +463,18 @@
      "drop_measured_m": 0.1007,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -398,6 +506,18 @@
      "drop_measured_m": 0.1007,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -429,6 +549,18 @@
      "drop_measured_m": 0.1007,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -460,6 +592,18 @@
      "drop_measured_m": 0.1002,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -491,6 +635,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -523,6 +679,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -554,6 +722,18 @@
      "drop_measured_m": 0.1219,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1128,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -585,6 +765,18 @@
      "drop_measured_m": 0.1002,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1001,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0007,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -617,6 +809,18 @@
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0,
      "note": "reoriented while settling (tipped); rests on ground"
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.2342,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0002,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -649,6 +853,18 @@
      "drop_measured_m": 0.101,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0005,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -681,6 +897,18 @@
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0,
      "note": "reoriented while settling (tipped); rests on ground"
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.0822,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0009,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -712,6 +940,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -743,6 +983,18 @@
      "drop_measured_m": 0.0999,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0001,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -775,6 +1027,18 @@
      "drop_measured_m": 0.072,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.0929,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0017,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -806,6 +1070,18 @@
      "drop_measured_m": 0.1011,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1293,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -837,6 +1113,18 @@
      "drop_measured_m": 0.1001,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -869,6 +1157,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -900,6 +1200,18 @@
      "drop_measured_m": 0.1001,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1559,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -931,6 +1243,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0004,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -962,6 +1286,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -993,6 +1329,18 @@
      "drop_measured_m": 0.1002,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1025,6 +1373,18 @@
      "drop_measured_m": 0.1008,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1056,6 +1416,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1089,6 +1461,18 @@
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0,
      "note": "reoriented while settling (tipped); rests on ground"
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.0655,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0003,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1120,6 +1504,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1152,6 +1548,18 @@
      "drop_measured_m": 0.1021,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1001,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1183,6 +1591,18 @@
      "drop_measured_m": 0.1002,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.2428,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0011,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1276,6 +1696,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0002,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1339,6 +1771,18 @@
      "drop_measured_m": 0.1004,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.0981,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0043,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1432,6 +1876,18 @@
      "drop_measured_m": 0.0991,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0001,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1464,6 +1920,18 @@
      "drop_measured_m": 0.1018,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1017,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0003,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1495,6 +1963,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1526,6 +2006,18 @@
      "drop_measured_m": 0.1015,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1014,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1589,6 +2081,18 @@
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0,
      "note": "reoriented while settling (tipped); rests on ground"
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.2492,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1621,6 +2125,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0001,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1652,6 +2168,18 @@
      "drop_measured_m": 0.1,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1683,6 +2211,18 @@
      "drop_measured_m": 0.0917,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1002,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1714,6 +2254,17 @@
      "drop_measured_m": 0.1019,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.0729,
+      "drop_predicted_m": 0.1,
+      "rest_speed": 0.0003,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1746,6 +2297,18 @@
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0,
      "note": "reoriented while settling (tipped); rests on ground"
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1534,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0008,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1778,6 +2341,17 @@
      "drop_measured_m": 0.1109,
      "drop_predicted_m": 0.1,
      "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.0639,
+      "drop_predicted_m": 0.1,
+      "rest_speed": 0.0019,
+      "rests_after_s": 4.0
+     }
     }
    }
   },
@@ -1794,6 +2368,20 @@
     "approved": true,
     "reviewer": "Kimate",
     "date": "2026-08-07"
+   },
+   "verification": {
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1003,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
+    }
    }
   },
   {
@@ -1809,6 +2397,50 @@
     "approved": true,
     "reviewer": "Kimate",
     "date": "2026-08-07"
+   }
+  },
+  {
+   "asset_id": "planter_round_02_inst_base",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/planter_round_02_inst_base/planter_round_02_inst_base.usda",
+   "source_file": "/home/kimate/Desktop/assets/Collected_Environments/planter_round_02_inst_base.usd",
+   "category": "rigid_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-07",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5",
+     "gemma4",
+     "nvidia/Cosmos-Reason2-2B"
+    ]
+   },
+   "verification": {
+    "date": "2026-08-07",
+    "method": "live_physx_drop_test",
+    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
+    "drop": {
+     "drop_measured_m": 0.1,
+     "drop_predicted_m": 0.1,
+     "rests_after_s": 5.0
+    },
+    "newton": {
+     "date": "2026-08-07",
+     "method": "headless_newton_drop_test",
+     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
+     "drop": {
+      "drop_measured_m": 0.1,
+      "drop_predicted_m": 0.1,
+      "settled_last_second": true,
+      "final_vz": 0.0,
+      "rests_after_s": 4.0
+     }
+    }
    }
   }
  ]

@@ -302,11 +302,6 @@
   },
   "verification": {
    "type": "object",
-   "required": [
-    "date",
-    "method",
-    "simulator"
-   ],
    "properties": {
     "date": {
      "type": "string",
@@ -443,8 +438,51 @@
        "type": "number"
       }
      }
+    },
+    "newton": {
+     "type": "object",
+     "required": [
+      "date",
+      "method",
+      "engine"
+     ],
+     "description": "Cross-engine check: the same USD re-verified headlessly in NVIDIA Newton (Warp). Agreement between engines is stronger sim2real evidence than either alone.",
+     "properties": {
+      "date": {
+       "type": "string",
+       "format": "date"
+      },
+      "method": {
+       "type": "string",
+       "enum": [
+        "headless_newton_drop_test",
+        "headless_newton_drape_test"
+       ]
+      },
+      "engine": {
+       "type": "string"
+      },
+      "drop": {
+       "type": "object"
+      }
+     }
     }
-   }
+   },
+   "anyOf": [
+    {
+     "required": [
+      "date",
+      "method",
+      "simulator"
+     ]
+    },
+    {
+     "required": [
+      "newton"
+     ]
+    }
+   ],
+   "description": "Live-simulation evidence: the primary PhysX record (date/method/simulator) and/or a cross-engine Newton record. At least one engine's evidence is required."
   }
  }
 }

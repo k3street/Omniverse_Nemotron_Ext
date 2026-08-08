@@ -38,6 +38,18 @@ assets folder (top-most-USD rule suppresses package components,
 judges grind it continuously under VISUAL_QA_AUTO=1.
 Shipped since: ✅ auto live-verify at machine approval; ✅ judge
 supervision (launch_judges.sh, hub-invoked).
+Newton cross-engine verification SHIPPED 2026-08-07:
+`scripts/verify_asset_newton.py` (runs in the Newton venv, fully
+headless — no Isaac, no Kit, GPU or CPU). `rigid`: re-drops registry
+assets in Newton XPBD; 46/46 verified rigids AGREE with PhysX
+(evidence in verification.newton; settle-criterion tolerates tipping
+AND rolling — a rolling beer can IS at rest). `drape`: cloth drop for
+deformables in Newton VBD (welded + dedup double-sided faces + largest
+component + unit-normalized scale); clean towel grid PASSES flat on
+ground, ball-like 'bandage' honestly FAILS (not cloth), degenerate
+scan topology reported as needs-mesh-repair instead of garbage
+numbers. Also = the headless CI mode #2 wanted: rigid verification now
+needs no live Isaac session.
 Remaining:
 - [ ] Stretch: feed drop/settle video from live verification to Cosmos
       (video-native) for "does it fall like a real chair" judgment.
