@@ -50,7 +50,26 @@ ground, ball-like 'bandage' honestly FAILS (not cloth), degenerate
 scan topology reported as needs-mesh-repair instead of garbage
 numbers. Also = the headless CI mode #2 wanted: rigid verification now
 needs no live Isaac session.
+Laundry-folding mission (2026-08-08 — user: "laundry folding is a big
+reason for the robot"; cloth is CORE, not peripheral):
+`scripts/make_garment.py` generates clean parametric garments (towel,
+hand_towel, washcloth, napkin, tshirt silhouette; quad grids, adaptive
+resolution — cells under ~3.5% of the long side leave the solver's
+stable regime) and ingests them as deformable_unverified cloth.
+`verify_asset_newton.py fold`: fold-PERSISTENCE test — mesh folded in
+half geometrically at spawn, dropped, settled; real cloth STAYS folded
+(~0.5 length, flat 2-layer stack), springy shells pop open. Validated
+5/5 garments: drape PASS + fold PASS (0.49-0.50). Learned: bending
+stiffness must be fabric-realistic (edge_ke ~0.05; the 10.0 default is
+spring steel — pops folds open, detonates crease energy); moving pinned
+particles at runtime is NOT a supported VBD pattern (springs are ignored
+by VBD, XPBD explodes at these stiffnesses) — actuated grasp/fold
+belongs to the robot-policy workstream, asset verification uses the
+zero-actuation persistence formulation.
 Remaining:
+- [ ] Actuated fold benchmark (grasp-drag-release) when a supported
+      moving-attachment path exists (Style3D solver / robot gripper
+      contact like example_cloth_franka).
 - [ ] Stretch: feed drop/settle video from live verification to Cosmos
       (video-native) for "does it fall like a real chair" judgment.
 - [ ] Split over-broad priors (electronics_handheld passed an oversized

@@ -323,11 +323,110 @@ def drape(asset_id: str) -> str:
             f"{planar:.3f} m), on_ground={on_ground}, {len(pq)} particles")
 
 
+
+
+def fold(asset_id: str) -> str:
+    """Fold-persistence test: the mesh is folded in half GEOMETRICALLY at
+    spawn (one half reflected over the midline, one layer's thickness
+    apart), dropped a few cm, and settled. Real cloth STAYS folded — a
+    springy shell or rigid sheet springs open or balloons. This is the
+    material property a laundry-folding robot depends on, measured with
+    zero actuation (moving pinned particles is not a supported VBD
+    pattern in this Newton build; actuated grasping is a separate
+    workstream on the robot side)."""
+    import math
+
+    import newton
+    import numpy as np
+    import warp as wp
+
+    wp.set_device("cpu")
+
+    qf = QUEUE_DIR / f"{asset_id}.json"
+    entry = json.loads(qf.read_text())
+    if not entry.get("deformable"):
+        return f"{asset_id}: not a deformable entry"
+    points, tris = _world_mesh(entry["file"])
+    if points is None:
+        return f"{asset_id}: no mesh found"
+
+    points = points - points.mean(axis=0)
+    extents = points.max(axis=0) - points.min(axis=0)
+    planar_m = float(max(extents[0], extents[1]))
+    points = points / max(planar_m, 1e-6)
+    ext = points.max(axis=0) - points.min(axis=0)
+    if ext[0] > ext[1]:  # fold along the LONG axis -> put it on Y
+        points = points[:, [1, 0, 2]].copy()
+    y_min, y_max = points[:, 1].min(), points[:, 1].max()
+    y_len0 = float(y_max - y_min)
+    mid = 0.5 * (y_min + y_max)
+    layer_gap = 0.03
+    folded_half = points[:, 1] > mid
+    points[folded_half, 1] = 2.0 * mid - points[folded_half, 1]
+    points[folded_half, 2] += layer_gap
+
+    builder = newton.ModelBuilder()
+    builder.default_particle_radius = 0.01
+    builder.add_cloth_mesh(
+        pos=wp.vec3(0.0, 0.0, 0.05), rot=wp.quat_identity(), scale=1.0,
+        vertices=[wp.vec3(*p) for p in points], indices=tris,
+        vel=wp.vec3(0.0, 0.0, 0.0), density=0.2,
+        # fabric-realistic bending: the cotton preset's bend stiffness is
+        # ~0.02 — stiff bending pops the fold open (spring-steel, not
+        # cloth) and detonates the creased line's stored energy
+        tri_ke=5.0e1, tri_ka=5.0e1, tri_kd=1.0e-1,
+        edge_ke=5.0e-2, edge_kd=1.0e-2,
+    )
+    builder.color(include_bending=True)
+    builder.add_ground_plane()
+    model = builder.finalize()
+    model.soft_contact_ke = 1.0e2
+    model.soft_contact_kd = 1.0e0
+    model.soft_contact_mu = 0.7
+    solver = newton.solvers.SolverVBD(model, 10,
+                                      particle_enable_self_contact=False)
+    pipeline = newton.CollisionPipelineUnified.from_model(model)
+
+    state0, state1 = model.state(), model.state()
+    control = model.control()
+    substeps = 20
+    dt = FRAME_DT / substeps
+    for _ in range(int(3.0 / FRAME_DT)):
+        for _ in range(substeps):
+            state0.clear_forces()
+            contacts = pipeline.collide(model, state0)
+            solver.step(state0, state1, control, contacts, dt)
+            state0, state1 = state1, state0
+    pq = state0.particle_q.numpy()
+    if not math.isfinite(float(pq.sum())):
+        return f"ERROR {asset_id}: fold solve diverged"
+    y_len = float(pq[:, 1].max() - pq[:, 1].min())
+    z_ext = float(pq[:, 2].max() - pq[:, 2].min())
+    ratio = y_len / y_len0 if y_len0 > 1e-6 else 1.0
+    # stays folded: about half length (cloth may slump slightly wider),
+    # flat two-layer stack, resting on ground
+    on_ground = float(pq[:, 2].min()) < 0.05
+    folded = 0.4 <= ratio <= 0.75 and z_ext < 0.12 and on_ground
+    entry["fold_test"] = {
+        "date": date.today().isoformat(),
+        "method": "headless_newton_fold_persistence_test",
+        "engine": "Newton (warp) SolverVBD, headless cpu",
+        "fold_axis_len_ratio": round(ratio, 3),
+        "final_z_extent_norm": round(z_ext, 4),
+        "rests_on_ground": on_ground,
+        "stays_folded": folded,
+    }
+    qf.write_text(json.dumps(entry, indent=1))
+    return (f"{'PASS' if folded else 'FAIL'} {asset_id}: settled at "
+            f"{ratio:.2f} of unfolded length (want ~0.5), z-extent "
+            f"{z_ext:.3f} -> {'stays folded' if folded else 'did not stay folded'}")
+
+
 def main() -> int:
-    if len(sys.argv) < 3 or sys.argv[1] not in ("rigid", "drape"):
+    if len(sys.argv) < 3 or sys.argv[1] not in ("rigid", "drape", "fold"):
         print(__doc__)
         return 1
-    fn = rigid_drop if sys.argv[1] == "rigid" else drape
+    fn = {"rigid": rigid_drop, "drape": drape, "fold": fold}[sys.argv[1]]
     failures = 0
     for asset_id in sys.argv[2:]:
         try:
