@@ -422,11 +422,144 @@ def fold(asset_id: str) -> str:
             f"{z_ext:.3f} -> {'stays folded' if folded else 'did not stay folded'}")
 
 
+def squish(asset_id: str) -> str:
+    """Volumetric material test (foam/sponge/rubber/silicone/gel): a soft
+    FEM block with the asset's dimensions and its PRESET's actual material
+    parameters (Young's modulus / Poisson -> Lame) is dropped and settled.
+    Foam stays compressed with a dead landing; rubber lands lively and
+    keeps its height; gel damps out. Evidence: restitution proxy,
+    compression ratio, settle stability."""
+    import math
+
+    import newton
+    import numpy as np
+    import warp as wp
+
+    wp.set_device("cpu")
+
+    qf = QUEUE_DIR / f"{asset_id}.json"
+    entry = json.loads(qf.read_text())
+    dtype = entry.get("deformable")
+    if not dtype:
+        return f"{asset_id}: not a deformable entry"
+    presets = json.loads((REPO / "workspace" / "knowledge" /
+                          "deformable_presets.json").read_text())["presets"]
+    alias = {"sponge": "sponge_soft", "rubber": "rubber_soft",
+             "gel": "gel_soft"}
+    preset_key = alias.get(dtype, dtype)
+    preset = presets.get(preset_key)
+    if not preset or "Body" not in preset.get("api", ""):
+        return (f"{asset_id}: '{dtype}' is not a volumetric preset "
+                f"(use drape/fold for shells)")
+    params = preset.get("params", {})
+    E = float(params.get("youngs_modulus", 1e4))
+    nu = min(0.48, float(params.get("poissons_ratio", 0.3)))
+    density = float(preset.get("density_kg_m3", 500))
+    k_mu = E / (2.0 * (1.0 + nu))
+    k_lambda = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+    k_damp = float(params.get("damping", 0.05)) * 10.0
+
+    dims = _measure_dims_local(entry.get("file")) or [0.1, 0.1, 0.1]
+    dims = [max(0.02, min(d, 0.5)) for d in dims]
+    cells = [max(2, min(6, round(d / 0.03))) for d in dims]
+    drop_h = 0.15
+
+    builder = newton.ModelBuilder()
+    builder.default_particle_radius = 0.005  # cm-scale grids float/explode at the 0.1 default
+    builder.add_soft_grid(
+        pos=wp.vec3(-dims[0] / 2, -dims[1] / 2, drop_h),
+        rot=wp.quat_identity(), vel=wp.vec3(0.0, 0.0, 0.0),
+        dim_x=cells[0], dim_y=cells[1], dim_z=cells[2],
+        cell_x=dims[0] / cells[0], cell_y=dims[1] / cells[1],
+        cell_z=dims[2] / cells[2],
+        density=density, k_mu=k_mu, k_lambda=k_lambda, k_damp=k_damp,
+        # surface skin triangles must be soft — default membrane
+        # stiffness on tiny cell masses explodes (per the diffsim example)
+        tri_ke=1e-4, tri_ka=1e-4, tri_kd=1e-4, tri_drag=0.0, tri_lift=0.0,
+    )
+    builder.add_ground_plane()
+    model = builder.finalize()
+    model.soft_contact_ke = 1.0e3
+    model.soft_contact_kd = 1.0e1
+    model.soft_contact_mu = 0.6
+    # XPBD: explicit SemiImplicit is knife-edged on tiny cell masses
+    # (undamped it bounces forever, damped it overshoots the stability
+    # limit); XPBD's constraint projection handles tets robustly
+    solver = newton.solvers.SolverXPBD(model, iterations=10)
+
+    state0, state1 = model.state(), model.state()
+    control = model.control()
+    substeps = 20
+    dt = FRAME_DT / substeps
+    h0 = dims[2]
+    com_z, heights = [], []
+    for _ in range(int(2.5 / FRAME_DT)):
+        for _ in range(substeps):
+            state0.clear_forces()
+            contacts = model.collide(state0, soft_contact_margin=0.001)
+            solver.step(state0, state1, control, contacts, dt)
+            state0, state1 = state1, state0
+        pq = state0.particle_q.numpy()
+        com_z.append(float(pq[:, 2].mean()))
+        heights.append(float(pq[:, 2].max() - max(0.0, pq[:, 2].min())))
+    pq = state0.particle_q.numpy()
+    if not math.isfinite(float(pq.sum())):
+        return f"ERROR {asset_id}: squish solve diverged"
+    # restitution proxy: highest COM rebound after the first minimum
+    first_min = int(np.argmin(com_z[: len(com_z) // 2]))
+    rebound = max(com_z[first_min:]) - com_z[first_min]
+    restitution = max(0.0, min(1.0, rebound / max(drop_h, 1e-6)))
+    height_ratio = heights[-1] / h0 if h0 > 1e-6 else 1.0
+    last = com_z[-30:]
+    settled = max(last) - min(last) < 0.005
+    on_ground = float(pq[:, 2].min()) < 0.02
+    plausible = (settled and on_ground
+                 and 0.25 <= height_ratio <= 1.15
+                 and restitution <= 0.9)
+    entry["squish_test"] = {
+        "date": date.today().isoformat(),
+        "method": "headless_newton_squish_test",
+        "engine": "Newton (warp) SolverSemiImplicit FEM, headless cpu",
+        "preset": preset_key,
+        "youngs_modulus": E, "poissons_ratio": nu,
+        "restitution_proxy": round(restitution, 3),
+        "height_ratio": round(height_ratio, 3),
+        "settled": settled,
+        "behaves_like_soft_body": plausible,
+    }
+    qf.write_text(json.dumps(entry, indent=1))
+    return (f"{'PASS' if plausible else 'FAIL'} {asset_id} [{preset_key}]: "
+            f"restitution {restitution:.2f}, height ratio {height_ratio:.2f}, "
+            f"settled={settled}")
+
+
+def _measure_dims_local(file_path):
+    """Bbox dims in meters via pxr (None when unavailable)."""
+    if not file_path or not Path(file_path).exists():
+        return None
+    try:
+        from pxr import Usd, UsdGeom
+        st = Usd.Stage.Open(file_path)
+        rng = UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [UsdGeom.Tokens.default_, UsdGeom.Tokens.render],
+        ).ComputeWorldBound(st.GetPseudoRoot()).ComputeAlignedRange()
+        if rng.IsEmpty():
+            return None
+        mpu = UsdGeom.GetStageMetersPerUnit(st)
+        s = rng.GetSize()
+        return [s[0] * mpu, s[1] * mpu, s[2] * mpu]
+    except Exception:
+        return None
+
+
 def main() -> int:
-    if len(sys.argv) < 3 or sys.argv[1] not in ("rigid", "drape", "fold"):
+    if len(sys.argv) < 3 or sys.argv[1] not in ("rigid", "drape", "fold",
+                                                 "squish"):
         print(__doc__)
         return 1
-    fn = {"rigid": rigid_drop, "drape": drape, "fold": fold}[sys.argv[1]]
+    fn = {"rigid": rigid_drop, "drape": drape, "fold": fold,
+          "squish": squish}[sys.argv[1]]
     failures = 0
     for asset_id in sys.argv[2:]:
         try:

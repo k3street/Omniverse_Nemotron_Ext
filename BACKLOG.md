@@ -66,7 +66,23 @@ particles at runtime is NOT a supported VBD pattern (springs are ignored
 by VBD, XPBD explodes at these stiffnesses) — actuated grasp/fold
 belongs to the robot-policy workstream, asset verification uses the
 zero-actuation persistence formulation.
-Remaining:
+Material-behavior families (2026-08-08 — user: "many material types,
+paper, cloth, jells, liquids, foam, rubber"): presets cover 4 cloth
+weights + leather/paper/plastic_film (shells) and 5 volumetric
+(sponge x3, rubber x2, silicone, gel) + rope. Verification per family:
+shells = drape + fold-persistence (SHIPPED); volumetric = NEW `squish`
+test (SolverXPBD FEM soft-grid proxy at the asset's dims with the
+preset's Young's/Poisson -> Lame params; foam brick PASSES with dead
+landing + compression; explicit SemiImplicit was knife-edged — skin
+tri_ke must be ~1e-4 per the diffsim example). Remaining:
+- [ ] Squish material DISCRIMINATION: XPBD tet stiffness saturates
+      (rubber E=1e5 compresses like foam E=5e3) — calibrate the
+      k_mu/k_lambda -> XPBD compliance mapping so presets separate.
+- [ ] Liquids + granular: nothing exists (no preset, no authoring, no
+      verification). Newton ships MPM examples (granular, multi-material)
+      = headless path; PhysX particle fluids = scene-time path. Classes
+      needed: liquid containers should model contents (fill-level mass).
+- [ ] Rope/cable settle test (1D deformable; the chain asset is waiting).
 - [ ] Actuated fold benchmark (grasp-drag-release) when a supported
       moving-attachment path exists (Style3D solver / robot gripper
       contact like example_cloth_franka).

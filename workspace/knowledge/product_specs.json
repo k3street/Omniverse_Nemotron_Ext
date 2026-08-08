@@ -13,6 +13,110 @@
    "source": "Weight: Apple official tech specs, https://support.apple.com/en-us/117810 (21.2-22.9 oz / 600-650 g; separate external battery 353 g). Dimensions: Apple does not publish them; approximate third-party figures ~16 cm W x 25 cm D (incl. head band) x 9 cm H, e.g. https://bitnamic.net/en/blog/apple-vision-pro-specs-price-release; iFixit teardown (https://www.ifixit.com/News/90405/vision-pro-teardown) corroborates scale.",
    "notes": "Real, specific product. Mass 0.625 kg is the midpoint of Apple's published 0.600-0.650 kg range (varies with Light Seal and head band: Solo Knit vs Dual Loop); the tethered external battery pack (0.353 kg) is NOT integral and is excluded, as is the USB-C power adapter. Apple publishes no official W/D/H, so dims_m are unofficial approximations for the worn assembly: ~0.16 m wide (visor/front glass), ~0.25 m front-to-back including the head band loop, ~0.09 m tall including the Light Seal; the visor housing alone is roughly 0.04 m deep, ~0.09 m with the Light Seal attached. For a sim ingest pipeline, treat max_dim_m ~0.25 m (or ~0.16-0.20 m if the asset is the visor only, without the band) and verify the mesh's bounding box against these values with +/-15% tolerance before setting scale; set rigid-body mass to 0.60-0.65 kg.",
    "looked_up": "2026-08-07"
+  },
+  "bose quietcomfort 35 ii headphones": {
+   "product_name": "Bose QuietComfort 35 II (QC35 II) wireless noise-cancelling over-ear headphones",
+   "max_dim_m": 0.18,
+   "dims_m": [
+    0.17,
+    0.081,
+    0.18
+   ],
+   "mass_kg": 0.235,
+   "source": "Bose official product page specs (bose.com, QuietComfort 35 Wireless Headphones II): Headphones 7.1\" H x 6.7\" W x 3.2\" D, 8.3 oz (235 g); corroborated by retailer spec listings",
+   "notes": "Real product (released Sept 2017). Bose publishes headphone dimensions as 7.1 in H x 6.7 in W x 3.2 in D = 18.0 x 17.0 x 8.1 cm, so dims_m are given as W x D x H = 0.170 x 0.081 x 0.180 m; max dimension 0.18 m (height, as worn/upright). Mass 235 g is the headphone alone with its integral built-in rechargeable lithium-ion battery, excluding the detachable 47\" audio cable, USB cable, and carrying case. Note some retailer Q&A pages quote ~310 g or ~700 g figures, which refer to the original QC35 listing/shipping or packaged weight, not the bare QC35 II headphone. Folded/collapsed envelope is smaller than the listed figures; for collision geometry a ~0.18 x 0.17 x 0.08 m bounding box is appropriate.",
+   "looked_up": "2026-08-08"
+  },
+  "bose qc35 wireless headphone high poly": {
+   "product_name": "Bose QuietComfort 35 II (QC35 II) wireless noise-cancelling over-ear headphones",
+   "max_dim_m": 0.18,
+   "dims_m": [
+    0.17,
+    0.081,
+    0.18
+   ],
+   "mass_kg": 0.235,
+   "source": "Bose official product page specs (bose.com, QuietComfort 35 Wireless Headphones II): Headphones 7.1\" H x 6.7\" W x 3.2\" D, 8.3 oz (235 g); corroborated by retailer spec listings",
+   "notes": "Real product (released Sept 2017). Bose publishes headphone dimensions as 7.1 in H x 6.7 in W x 3.2 in D = 18.0 x 17.0 x 8.1 cm, so dims_m are given as W x D x H = 0.170 x 0.081 x 0.180 m; max dimension 0.18 m (height, as worn/upright). Mass 235 g is the headphone alone with its integral built-in rechargeable lithium-ion battery, excluding the detachable 47\" audio cable, USB cable, and carrying case. Note some retailer Q&A pages quote ~310 g or ~700 g figures, which refer to the original QC35 listing/shipping or packaged weight, not the bare QC35 II headphone. Folded/collapsed envelope is smaller than the listed figures; for collision geometry a ~0.18 x 0.17 x 0.08 m bounding box is appropriate.",
+   "looked_up": "2026-08-08"
+  },
+  "david clark h10 13 4 aviation headset": {
+   "product_name": "David Clark H10-13.4 aviation headset (passive, dual GA plugs)",
+   "max_dim_m": null,
+   "dims_m": null,
+   "mass_kg": 0.468,
+   "source": "Sporty's Pilot Shop product spec (https://www.sportys.com/david-clark-h10-13-4-headset.html) and MyPilotStore (https://www.mypilotstore.com/mypilotstore/sep/640): 'Weight without cord assembly: 16.5 oz.'; David Clark Company product page: https://www.davidclarkcompany.com/aviation/fixed-wing-passive.php",
+   "notes": "Real, currently produced product (FAA TSO C57 Cat. B / C58a, 23 dB NRR passive GA headset). Mass: 16.5 oz = 0.468 kg, quoted 'without cord assembly', which matches the requested exclusion of the detachable/coiled cord; some retailers list 16 oz and one (Aircraft Spruce) erroneously states 13.4 oz by confusing the model number with weight. No manufacturer-published linear dimensions exist for the headset itself - David Clark publishes only weight, NRR and electrical specs - so dims_m and max_dim_m are left null rather than guessed. The only dimensional figures found online are retail packaging (approx. 9.49 x 8.86 x 4.88 in box, 1.79 lb shipped), which are explicitly out of scope. For the simulation ingest pipeline, geometric scale should be taken from a measured reference or CAD scan, not from published specs.",
+   "looked_up": "2026-08-08"
+  },
+  "david clark pilot headset": {
+   "product_name": "David Clark H10-13.4 aviation headset (passive, dual GA plugs)",
+   "max_dim_m": null,
+   "dims_m": null,
+   "mass_kg": 0.468,
+   "source": "Sporty's Pilot Shop product spec (https://www.sportys.com/david-clark-h10-13-4-headset.html) and MyPilotStore (https://www.mypilotstore.com/mypilotstore/sep/640): 'Weight without cord assembly: 16.5 oz.'; David Clark Company product page: https://www.davidclarkcompany.com/aviation/fixed-wing-passive.php",
+   "notes": "Real, currently produced product (FAA TSO C57 Cat. B / C58a, 23 dB NRR passive GA headset). Mass: 16.5 oz = 0.468 kg, quoted 'without cord assembly', which matches the requested exclusion of the detachable/coiled cord; some retailers list 16 oz and one (Aircraft Spruce) erroneously states 13.4 oz by confusing the model number with weight. No manufacturer-published linear dimensions exist for the headset itself - David Clark publishes only weight, NRR and electrical specs - so dims_m and max_dim_m are left null rather than guessed. The only dimensional figures found online are retail packaging (approx. 9.49 x 8.86 x 4.88 in box, 1.79 lb shipped), which are explicitly out of scope. For the simulation ingest pipeline, geometric scale should be taken from a measured reference or CAD scan, not from published specs.",
+   "looked_up": "2026-08-08"
+  },
+  "red bull energy drink can 250ml": {
+   "product_name": "Red Bull Energy Drink, 250 ml (8.4 fl oz) slim aluminium can",
+   "max_dim_m": 0.134,
+   "dims_m": [
+    0.053,
+    0.053,
+    0.134
+   ],
+   "mass_kg": 0.265,
+   "source": "Standard 250 ml 'sleek/slim' beverage-can geometry (~53 mm outer diameter x ~134 mm height) as reported by can-spec and retail-listing sources, e.g. https://www.accio.com/plp/red-bull-250ml-can-dimensions ; product/size confirmation from Red Bull: https://www.redbull.com/gb-en/energydrink/questions/what-sizes-does-red-bull-come-in",
+   "notes": "Identifiable real product (Red Bull Energy Drink 250 ml can). Red Bull itself does not publish exact can geometry, so dimensions come from the industry-standard 250 ml sleek two-piece aluminium can format used for this SKU: ~53 mm body diameter (neck/lid ~52 mm, 202-style end) and ~134 mm overall height; add ~1-2 mm variance depending on measurement of the tab/rim. Mass ~265 g for a sealed, filled can (250 g liquid, density ~1.04 g/ml for the sugared formula plus ~13-15 g aluminium body+lid); the empty rinsed can is only ~13-15 g (0.014 kg) - use that value if the asset is modelled as an empty/crushed can. For simulation: rigid cylinder, aluminium shell, filled can center of mass roughly 0.055-0.06 m above the base; a filled can behaves close to a uniform-density cylinder, an empty one is a thin shell with very low inertia.",
+   "looked_up": "2026-08-08"
+  },
+  "red bull energy drink can": {
+   "product_name": "Red Bull Energy Drink, 250 ml (8.4 fl oz) slim aluminium can",
+   "max_dim_m": 0.134,
+   "dims_m": [
+    0.053,
+    0.053,
+    0.134
+   ],
+   "mass_kg": 0.265,
+   "source": "Standard 250 ml 'sleek/slim' beverage-can geometry (~53 mm outer diameter x ~134 mm height) as reported by can-spec and retail-listing sources, e.g. https://www.accio.com/plp/red-bull-250ml-can-dimensions ; product/size confirmation from Red Bull: https://www.redbull.com/gb-en/energydrink/questions/what-sizes-does-red-bull-come-in",
+   "notes": "Identifiable real product (Red Bull Energy Drink 250 ml can). Red Bull itself does not publish exact can geometry, so dimensions come from the industry-standard 250 ml sleek two-piece aluminium can format used for this SKU: ~53 mm body diameter (neck/lid ~52 mm, 202-style end) and ~134 mm overall height; add ~1-2 mm variance depending on measurement of the tab/rim. Mass ~265 g for a sealed, filled can (250 g liquid, density ~1.04 g/ml for the sugared formula plus ~13-15 g aluminium body+lid); the empty rinsed can is only ~13-15 g (0.014 kg) - use that value if the asset is modelled as an empty/crushed can. For simulation: rigid cylinder, aluminium shell, filled can center of mass roughly 0.055-0.06 m above the base; a filled can behaves close to a uniform-density cylinder, an empty one is a thin shell with very low inertia.",
+   "looked_up": "2026-08-08"
+  },
+  "samsung tv remote control": null,
+  "philips sonicare electric toothbrush": null,
+  "sonic care electric tooth brush": null,
+  "sony walkman tps l2 1979": {
+   "product_name": "Sony Walkman TPS-L2 (1979)",
+   "max_dim_m": 0.1335,
+   "dims_m": [
+    0.088,
+    0.029,
+    0.1335
+   ],
+   "mass_kg": 0.39,
+   "source": "https://www.hifiengine.com/manual_library/sony/tps-l2.shtml (Sony TPS-L2 spec sheet: 88 x 133.5 x 29 mm, 390 g); corroborated by https://walkman.land/sony/tps-l2 and V&A Collections (https://collections.vam.ac.uk/item/O58358/) which cites 391 g total; MoMA object record lists ~13 x 8.9 x 2.9 cm",
+   "notes": "First-generation Sony Walkman (TPS-L2, launched July 1979, sold as Stowaway/Soundabout/Freestyle in some markets). Published spec is 88 mm (W) x 29 mm (D) x 133.5 mm (H), including protrusions; dims_m ordered as W x D x H. Mass 390 g as published; sources differ on whether this includes the two AA cells (V&A cites 391 g total, walkman.land states 390 g without batteries) - body-only mass is roughly 340-390 g. Figures exclude the MDR-3L2 headphones, carrying case, batteries, and any external DC-in cable.",
+   "looked_up": "2026-08-08"
+  },
+  "steelseries arctis pro wireless headset": {
+   "product_name": "SteelSeries Arctis Pro Wireless (gaming headset, 2018)",
+   "max_dim_m": 0.2,
+   "dims_m": null,
+   "mass_kg": 0.375,
+   "source": "SteelSeries product page (steelseries.com/gaming-headsets/arctis-pro-wireless) and third-party spec/review roundups (e.g. RTINGS, productindetail.com) \u2014 SteelSeries publishes audio/battery specs but no official W x D x H envelope; measured headset mass is reported around 366-376 g (~13 oz)",
+   "notes": "Real, identifiable product: SteelSeries Arctis Pro Wireless over-ear gaming headset with 2.4 GHz OLED base station and two swappable batteries. Mass ~0.375 kg is the headset alone with one battery installed (the battery is required for operation, so it is treated as integral); it excludes the base station, charging/USB and 3.5 mm cables, and the spare battery. SteelSeries does not publish a dimensional envelope for the headset, so dims_m is left null; max_dim_m 0.20 m is an approximate headband-height figure typical of this Arctis over-ear chassis (roughly 0.20 m tall x 0.18 m wide x 0.09 m deep with earcups folded flat) and should be refined by measuring the actual mesh before use in a physics sim. Note that if the ingest asset is intended to include the OLED base station, that is a separate body (~0.13 x 0.10 x 0.05 m, ~0.3 kg) not covered by these figures.",
+   "looked_up": "2026-08-08"
+  },
+  "steelseries arctis wireless pro": {
+   "product_name": "SteelSeries Arctis Pro Wireless (gaming headset, 2018)",
+   "max_dim_m": 0.2,
+   "dims_m": null,
+   "mass_kg": 0.375,
+   "source": "SteelSeries product page (steelseries.com/gaming-headsets/arctis-pro-wireless) and third-party spec/review roundups (e.g. RTINGS, productindetail.com) \u2014 SteelSeries publishes audio/battery specs but no official W x D x H envelope; measured headset mass is reported around 366-376 g (~13 oz)",
+   "notes": "Real, identifiable product: SteelSeries Arctis Pro Wireless over-ear gaming headset with 2.4 GHz OLED base station and two swappable batteries. Mass ~0.375 kg is the headset alone with one battery installed (the battery is required for operation, so it is treated as integral); it excludes the base station, charging/USB and 3.5 mm cables, and the spare battery. SteelSeries does not publish a dimensional envelope for the headset, so dims_m is left null; max_dim_m 0.20 m is an approximate headband-height figure typical of this Arctis over-ear chassis (roughly 0.20 m tall x 0.18 m wide x 0.09 m deep with earcups folded flat) and should be refined by measuring the actual mesh before use in a physics sim. Note that if the ingest asset is intended to include the OLED base station, that is a separate body (~0.13 x 0.10 x 0.05 m, ~0.3 kg) not covered by these figures.",
+   "looked_up": "2026-08-08"
   }
  }
 }
