@@ -451,8 +451,25 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         "    skel = stage.GetPrimAtPath(prim_path + '/Biped/biped_demo_meters/Root')",
         "    clip = prim_path + '/Biped/CharacterAnimation/Animation/' + clip_key + '_skelanim'",
         "    if not stage.GetPrimAtPath(clip):",
-        "        print(f'character {name}: unknown clip {clip_key}')",
-        "        return",
+        "        # not among Biped_Setup's in-stage clips — reference the",
+        "        # clip FILE from the animation library (push_button,",
+        "        # type_keyboard, walk_loop_in_place, or any future mocap)",
+        "        import os as _os",
+        "        _clip_file = _os.path.join(_CHARACTER_ANIM_DIR, clip_key + '.skelanim.usd')",
+        "        if not _os.path.exists(_clip_file):",
+        "            print(f'character {name}: unknown clip {clip_key} (no in-stage prim, no file in ' + _CHARACTER_ANIM_DIR + ')')",
+        "            return",
+        "        _cp = stage.DefinePrim(prim_path + '/ClipRef')  # typeless:",
+        "        _cp.GetReferences().AddReference(_clip_file)",
+        "        # ...inherits SkelAnimation from the file's default prim",
+        "        clip = prim_path + '/ClipRef'",
+        "        if _cp.GetTypeName() != 'SkelAnimation':",
+        "            _kids = [c for c in _cp.GetChildren()",
+        "                     if c.GetTypeName() == 'SkelAnimation']",
+        "            if not _kids:",
+        "                print(f'character {name}: {clip_key} has no SkelAnimation')",
+        "                return",
+        "            clip = str(_kids[0].GetPath())",
         "    with Usd.EditContext(stage, stage.GetSessionLayer()):",
         "        UsdSkel.BindingAPI.Apply(skel).CreateAnimationSourceRel(",
         "            ).SetTargets([Sdf.Path(clip)])",
@@ -537,12 +554,18 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         char_asset = os.environ.get(
             "CHARACTER_ASSET_PATH",
             "/home/kimate/Desktop/assets/Collected_People/Biped_Setup.usd")
+        anim_dir = os.environ.get(
+            "CHARACTER_ANIM_DIR",
+            "/home/kimate/Desktop/assets/Collected_People")
         lines.insert(4, f"_CHARACTER_ASSET = {char_asset!r}")
+        lines.insert(5, f"_CHARACTER_ANIM_DIR = {anim_dir!r}")
         clip_alias = {
             "walk": "stand_walk_1", "walk_2": "stand_walk_2",
             "walk_3": "stand_walk_3", "walk_4": "stand_walk_4",
             "sit": "Sit", "idle": "stand_idle_loop",
             "wave": "stand_idle_wave_loop", "look_around": "LookAround",
+            "walk_in_place": "stand_walk_loop_in_place",
+            "push_button": "push_button", "type_keyboard": "type_keyboard",
         }
         for i, ch in enumerate(characters):
             name = ch.get("name", f"person_{i}")
