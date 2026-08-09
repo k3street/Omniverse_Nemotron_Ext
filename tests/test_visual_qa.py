@@ -417,3 +417,40 @@ class TestRiggedCharacters:
             [_judge("gemma", cls="human_character", name="person"),
              _judge("cosmos", cls="human_character", name="person")])}
         assert not checks["rigid_scope"]["ok"]
+
+
+class TestCharacterBlueprint:
+    def _gen(self, blueprint):
+        from service.isaac_assist_service.chat.tools.handlers import (
+            scene_blueprints as sb,
+        )
+        code = sb._gen_build_scene_from_blueprint({"blueprint": blueprint})
+        compile(code, "<bp>", "exec")
+        return code
+
+    def test_characters_spawn_with_clip_aliases(self):
+        code = self._gen({"characters": [
+            {"name": "w", "position": [0, 0, 0], "clip": "walk"},
+            {"name": "s", "position": [1, 0, 0.4], "clip": "sit"},
+            {"name": "g", "position": [2, 0, 0], "clip": "wave"}]})
+        assert "'stand_walk_1'" in code
+        assert "'Sit'" in code
+        assert "'stand_idle_wave_loop'" in code
+        assert "_tl.play()" in code
+        assert "GetSessionLayer" in code  # the binding that actually wins
+
+    def test_characters_only_blueprint_is_not_empty(self):
+        code = self._gen({"characters": [{"name": "p", "position": [0, 0, 0]}]})
+        assert "Empty blueprint" not in code
+        assert "_spawn_character('p'" in code
+
+    def test_no_characters_no_timeline(self):
+        code = self._gen({"objects": [
+            {"name": "cup", "prim_type": "Cylinder", "physics": "manipulable"}]})
+        assert "_tl.play()" not in code
+        assert "# --- character" not in code  # helper def exists, no calls
+
+    def test_unknown_clip_passes_through_for_runtime_guard(self):
+        code = self._gen({"characters": [
+            {"name": "x", "position": [0, 0, 0], "clip": "backflip"}]})
+        assert "'backflip'" in code  # runtime prints 'unknown clip'

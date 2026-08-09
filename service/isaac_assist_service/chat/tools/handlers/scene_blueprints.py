@@ -350,12 +350,14 @@ def _load_sim_ready_registry() -> Dict:
 
 def _gen_build_scene_from_blueprint(args: Dict) -> str:
     """Generate code to build a scene from a structured blueprint."""
+    import os
+
     from ._shared import _SAFE_XFORM_SNIPPET
     blueprint = args.get("blueprint", {})
     objects = blueprint.get("objects", [])
     dry_run = args.get("dry_run", False)
 
-    if not objects:
+    if not objects and not blueprint.get("characters"):
         return "print('Empty blueprint — nothing to build')\n"
 
     registry = {a["asset_id"]: a for a in _load_sim_ready_registry().get("assets", [])}
@@ -366,7 +368,7 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
     lines = [
         "import os",
         "import omni.usd",
-        "from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf",
+        "from pxr import Usd, UsdGeom, UsdPhysics, UsdSkel, Gf, Sdf",
         _SAFE_XFORM_SNIPPET,
         "stage = omni.usd.get_context().get_stage()",
         "_placed = 0",
@@ -426,6 +428,36 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         "        _physics_used = True",
         "    _placed += 1",
         "    return prim",
+        "",
+        "def _spawn_character(name, prim_path, pos, heading_deg, clip_key):",
+        "    # animated human: Biped mannequin + clip bound DIRECTLY to its",
+        "    # skeleton. The asset's AnimationGraph owns the skeleton via a",
+        "    # SESSION-layer animationSource, so the clip must be bound in",
+        "    # the session layer and the graph API detached. Outer prim",
+        "    # carries placement+heading; inner prim carries the Y-up fix.",
+        "    global _placed",
+        "    outer = stage.DefinePrim(prim_path, 'Xform')",
+        "    ox = UsdGeom.XformCommonAPI(outer)",
+        "    ox.SetTranslate((pos[0], pos[1], pos[2]))",
+        "    ox.SetRotate((0.0, 0.0, heading_deg))",
+        "    inner = stage.DefinePrim(prim_path + '/Biped', 'Xform')",
+        "    inner.GetReferences().AddReference(_CHARACTER_ASSET)",
+        "    UsdGeom.XformCommonAPI(inner).SetRotate((90.0, 0.0, 0.0))",
+        "    sr = stage.GetPrimAtPath(prim_path + '/Biped/biped_demo_meters')",
+        "    if not sr or not sr.IsValid():",
+        "        print(f'character {name}: Biped asset failed to reference')",
+        "        return",
+        "    sr.RemoveAppliedSchema('AnimationGraphAPI')",
+        "    skel = stage.GetPrimAtPath(prim_path + '/Biped/biped_demo_meters/Root')",
+        "    clip = prim_path + '/Biped/CharacterAnimation/Animation/' + clip_key + '_skelanim'",
+        "    if not stage.GetPrimAtPath(clip):",
+        "        print(f'character {name}: unknown clip {clip_key}')",
+        "        return",
+        "    with Usd.EditContext(stage, stage.GetSessionLayer()):",
+        "        UsdSkel.BindingAPI.Apply(skel).CreateAnimationSourceRel(",
+        "            ).SetTargets([Sdf.Path(clip)])",
+        "    _placed += 1",
+        "    print(f'  character {name}: {clip_key} at {pos}')",
         "",
         "def _soften(prim, api_name, density, params):",
         "    # registry deformables: the library asset carries NO rigid",
@@ -500,7 +532,42 @@ def _gen_build_scene_from_blueprint(args: Dict) -> str:
         else:
             lines.append(call)
 
-    n = len(objects)
+    characters = blueprint.get("characters", [])
+    if characters:
+        char_asset = os.environ.get(
+            "CHARACTER_ASSET_PATH",
+            "/home/kimate/Desktop/assets/Collected_People/Biped_Setup.usd")
+        lines.insert(4, f"_CHARACTER_ASSET = {char_asset!r}")
+        clip_alias = {
+            "walk": "stand_walk_1", "walk_2": "stand_walk_2",
+            "walk_3": "stand_walk_3", "walk_4": "stand_walk_4",
+            "sit": "Sit", "idle": "stand_idle_loop",
+            "wave": "stand_idle_wave_loop", "look_around": "LookAround",
+        }
+        for i, ch in enumerate(characters):
+            name = ch.get("name", f"person_{i}")
+            pos = ch.get("position", [0, 0, 0])
+            heading = float(ch.get("heading_deg", 0.0))
+            clip = ch.get("clip", "walk")
+            clip_key = clip_alias.get(clip, clip)
+            prim_path = ch.get("prim_path", f"/World/Characters/{name}")
+            lines.append(f"# --- character {name} ({clip}) ---")
+            lines.append(
+                f"_spawn_character({name!r}, {prim_path!r}, {pos!r}, "
+                f"{heading!r}, {clip_key!r})")
+        lines.append("")
+        lines.append("# characters animate on the timeline")
+        lines.append("stage.SetStartTimeCode(0)")
+        lines.append("stage.SetEndTimeCode(776)")
+        lines.append("stage.SetTimeCodesPerSecond(30)")
+        lines.append("import omni.timeline")
+        lines.append("_tl = omni.timeline.get_timeline_interface()")
+        lines.append("_tl.set_start_time(0.0)")
+        lines.append("_tl.set_end_time(776.0 / 30.0)")
+        lines.append("_tl.set_looping(True)")
+        lines.append("_tl.play()")
+
+    n = len(objects) + len(characters)
     lines.append("")
     lines.append(
         "if _physics_used and not any(p.IsA(UsdPhysics.Scene) for p in stage.Traverse()):",

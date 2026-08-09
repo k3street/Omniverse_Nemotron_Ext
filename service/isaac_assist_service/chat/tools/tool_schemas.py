@@ -1775,13 +1775,13 @@ ISAAC_SIM_TOOLS = [
         "type": "function",
         "function": {
             "name": "build_scene_from_blueprint",
-            "description": "Execute a scene blueprint — creates all prims, places assets, applies physics. The blueprint should come from generate_scene_blueprint. Per object: 'sim_ready_asset' (an asset_id from list_sim_ready_assets) references the verified library file with physics already authored; otherwise an optional 'physics' profile ('manipulable'|'tool'|'furniture'|'static'|'decoration') plus 'mass_kg' authors collision (+ rigid body and mass for dynamic profiles) on placement. A PhysicsScene is ensured whenever physics is used.",
+            "description": "Execute a scene blueprint — creates all prims, places assets, applies physics, and spawns ANIMATED HUMAN CHARACTERS. The blueprint should come from generate_scene_blueprint. Per object: 'sim_ready_asset' (an asset_id from list_sim_ready_assets) references the verified library file with physics already authored; otherwise an optional 'physics' profile ('manipulable'|'tool'|'furniture'|'static'|'decoration') plus 'mass_kg' authors collision (+ rigid body and mass for dynamic profiles) on placement. A PhysicsScene is ensured whenever physics is used. Blueprint may also carry 'characters': a list of {name, position [x,y,z], heading_deg, clip} — clip is one of 'walk'|'walk_2'|'walk_3'|'walk_4'|'sit'|'idle'|'wave'|'look_around'. Characters are animated Biped humans playing real motion clips on a looping timeline (walk clips carry root motion — they cross the floor). For 'humans sitting on furniture', place a 'sit' character at the seat position facing outward.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "blueprint": {
                         "type": "object",
-                        "description": "Scene blueprint with objects, positions, and asset paths. Object fields: name, asset_path or prim_type, prim_path, position, rotation, scale, sim_ready_asset (library asset_id), physics (profile), mass_kg.",
+                        "description": "Scene blueprint with objects, positions, and asset paths. Object fields: name, asset_path or prim_type, prim_path, position, rotation, scale, sim_ready_asset (library asset_id), physics (profile), mass_kg. Optional 'characters' list: {name, position, heading_deg, clip: walk|sit|idle|wave|look_around} spawns animated humans.",
                     },
                     "dry_run": {"type": "boolean", "description": "If true, generate code patches but don't execute. Default: false"},
                 },

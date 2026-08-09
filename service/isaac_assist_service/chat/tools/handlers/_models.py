@@ -11,7 +11,7 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-07T15:54:45+00:00
+Generated: 2026-08-09T23:15:55+00:00
 Tool count: 440
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
@@ -801,7 +801,7 @@ class GenerateSceneBlueprintArgs(BaseModel):
 
 
 class BuildSceneFromBlueprintArgs(BaseModel):
-    """Execute a scene blueprint — creates all prims, places assets, applies physics. The blueprint should come from generate_scene_blueprint. Per object: 'sim_ready_asset' (an asset_id from list_sim_ready_a"""
+    """Execute a scene blueprint — creates all prims, places assets, applies physics, and spawns ANIMATED HUMAN CHARACTERS. The blueprint should come from generate_scene_blueprint. Per object: 'sim_ready_ass"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     blueprint: Dict[str, Any] = Field(..., description="Scene blueprint with objects, positions, and asset paths. Object fields: name, asset_path or prim_type, prim_path, position, rotation, scale, sim_ready_asset (library asset_id), physics (profile), mas")
