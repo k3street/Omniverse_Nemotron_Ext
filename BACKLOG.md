@@ -106,6 +106,35 @@ normalized, animation semantics (static pose clip = valid, motion
 applies at scene time via omni.anim.people; multi-sample clips must
 actually move joints). Validated: 6/6 Collected_People rigs PASS (78
 joints, 14-17 skinned meshes each).
+Human-like character MOTION (researched 2026-08-09, primary sources =
+the installed extensions): Isaac Sim 6.0 does this via
+**isaacsim.replicator.agent (IRA) v1.6.8** — installed in our build with
+its full stack: omni.anim.graph (locomotion blending), omni.anim.
+navigation (navmesh path planning), omni.anim.retarget, omni.anim.
+behavior (behavior trees). omni.anim.people is DEPRECATED in favor of
+IRA. Our Collected_People folder is the complete kit: characters +
+Biped_Setup.usd (shared rig/anim graph) + Animations/ clip library
+(4 walk cycles + mirrors, idle, wave, Sit, LookAround, push_button).
+How it works: YAML config (environment.base_stage_asset_path; character
+groups with num/asset_path/routines — wander/patrol with speed_range +
+weighted idle animations; sensor groups; Replicator writers for
+RGB/bbox/segmentation GT) → api.load_config_file + setup_simulation +
+start_data_generation_async (headless-scriptable) → characters spawn on
+a baked NAVMESH, behavior trees (MoveTo + RandomNavMeshPoint) plan
+paths, the anim graph blends walk/idle clips = human-like motion.
+App kit: isaacsim.exp.action_and_event_data_generation.base.kit (IRA
+preloaded). Integration plan for scene testing:
+- [ ] Launch path: add IRA app/kit option to launch_isaac.sh (or enable
+      isaacsim.replicator.agent.core in the standard app).
+- [ ] `make_people_config.py`: generate IRA YAML from a scene blueprint
+      + our verified character_rigged assets (asset_path can point at
+      Collected_People); bake navmesh over the blueprint scene.
+- [ ] Verification: extend verify_character with a LIVE motion check via
+      Kit RPC — command a wander routine, sample skeleton root over
+      time, assert navmesh-constrained displacement + gait (no sliding:
+      root speed within walk clip's speed_range).
+- [ ] VLM judge on motion clips (Cosmos is video-native): 'does this
+      person walk like a person' — same judge stack as visual QA.
 Environment-effects ladder (each is a different sim maturity):
 - [ ] Lights: detection SHIPPED (report.lights); next: blueprint light
       placement (UsdLux Sphere/Rect/Dome + intensity/color) for
