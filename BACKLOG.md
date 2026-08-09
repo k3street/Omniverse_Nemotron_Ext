@@ -94,6 +94,33 @@ tri_ke must be ~1e-4 per the diffsim example). Remaining:
       Robots/Sensors/People ~1550 assets) — much is already sim-ready;
       wholesale re-wrapping may be waste. Decide with the human.
 
+## 0.5 Characters + environment effects (2026-08-09)
+Rigged humans SHIPPED: ingest detects UsdSkel (scan_scene_features:
+skeletons/joints/animations/skinned meshes + UsdLux light count) →
+`character_rigged` category (schema requires the skeleton record;
+machines cannot sign characters — humans review humans). Characters are
+KINEMATIC animated colliders, never dynamic rigid bodies; rigid-physics
+authoring skips them. `scripts/verify_character.py`: headless rig check
+— topology (bind/rest transforms match joints), skinning weights
+normalized, animation semantics (static pose clip = valid, motion
+applies at scene time via omni.anim.people; multi-sample clips must
+actually move joints). Validated: 6/6 Collected_People rigs PASS (78
+joints, 14-17 skinned meshes each).
+Environment-effects ladder (each is a different sim maturity):
+- [ ] Lights: detection SHIPPED (report.lights); next: blueprint light
+      placement (UsdLux Sphere/Rect/Dome + intensity/color) for
+      perception-domain randomization.
+- [ ] Sound: UsdMedia.SpatialAudio exists in USD — detect + place as
+      metadata; no acoustic physics in PhysX/Newton (ray-traced audio is
+      an Omniverse renderer feature).
+- [ ] Wind: cloth-relevant (laundry line!). Newton soft grids expose
+      tri_drag/tri_lift aero terms; a lateral-wind drape deflection test
+      is feasible headless. PhysX scene wind at scene level.
+- [ ] Heat: no thermal solver anywhere in the stack — represent as
+      SEMANTIC thermal zones (customData temperature tags on hot
+      surfaces, e.g. stove burners) that policies must avoid; define the
+      convention in the registry schema when first needed.
+
 ## 1. Finish line: finalize/promote step — ✅ SHIPPED 2026-08-07
 "Approved" means "finished and sim-usable".
 - `scripts/promote_asset.py` (CLI + called by hub Approve): ensures physics

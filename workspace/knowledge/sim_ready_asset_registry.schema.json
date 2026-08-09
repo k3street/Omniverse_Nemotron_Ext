@@ -53,9 +53,10 @@
       "rigid_unverified",
       "rigid_only_baked",
       "deformable_unverified",
-      "deformable_verified"
+      "deformable_verified",
+      "character_rigged"
      ],
-     "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class \u2014 sim-ready is unattainable from this file. deformable_unverified: soft-body class routed past rigid authoring (deformable APIs are PhysX-only; create_deformable_mesh applies the preset live at scene build/verification). deformable_verified: live soft-body evidence (drape/settle) within tolerance."
+     "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class \u2014 sim-ready is unattainable from this file. deformable_unverified: soft-body class routed past rigid authoring (deformable APIs are PhysX-only; create_deformable_mesh applies the preset live at scene build/verification). deformable_verified: live soft-body evidence (drape/settle) within tolerance. character_rigged: UsdSkel rigged character \u2014 kinematic animated collider for navigation/interaction sims, never a dynamic rigid body; requires the skeleton record."
     },
     "scale_correction": {
      "type": "number",
@@ -99,6 +100,29 @@
     "deformable": {
      "type": "string",
      "description": "Deformable type/preset (cloth/sponge/rubber/gel/rope or an exact deformable_presets.json key) for create_deformable_mesh at scene build."
+    },
+    "skeleton": {
+     "type": "object",
+     "required": [
+      "joints",
+      "animations"
+     ],
+     "properties": {
+      "joints": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "animations": {
+       "type": "integer"
+      },
+      "skinned_meshes": {
+       "type": "integer"
+      },
+      "verified": {
+       "type": "boolean",
+       "description": "Headless rig check passed: bind/rest transforms consistent, weights normalized, animation moves joints"
+      }
+     }
     }
    },
    "allOf": [
@@ -251,6 +275,20 @@
      "then": {
       "required": [
        "deformable"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "category": {
+        "const": "character_rigged"
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "skeleton"
       ]
      }
     }

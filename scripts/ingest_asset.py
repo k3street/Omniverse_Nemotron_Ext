@@ -58,6 +58,10 @@ def propose_category(report: dict) -> str:
     'rigid' — the object is not rigid just because nobody authored its joints.
     """
     callouts = report.get("callouts", [])
+    if report.get("skeleton"):
+        # UsdSkel rig: a character is a kinematic animated collider,
+        # never a dynamic rigid body
+        return "character_rigged"
     if _deformable_type(report):
         # soft-body class: rigid categories would be a physics lie
         return "deformable_unverified"
@@ -69,6 +73,37 @@ def propose_category(report: dict) -> str:
            for c in callouts):
         return "articulated_unverified"
     return "rigid_unverified"
+
+
+def scan_scene_features(file_path: str) -> dict:
+    """Non-geometry features the report codegen doesn't know about:
+    UsdSkel rigs (characters) and UsdLux lights. Cheap single traversal."""
+    out = {}
+    try:
+        from pxr import Usd, UsdLux, UsdSkel
+        stage = Usd.Stage.Open(file_path)
+        skels = anims = skinned = lights = 0
+        joints = 0
+        for prim in stage.Traverse():
+            if prim.IsA(UsdSkel.Skeleton):
+                skels += 1
+                j = UsdSkel.Skeleton(prim).GetJointsAttr().Get()
+                joints = max(joints, len(j or []))
+            elif prim.IsA(UsdSkel.Animation):
+                anims += 1
+            elif prim.HasAPI(UsdSkel.BindingAPI) and prim.GetTypeName() == "Mesh":
+                skinned += 1
+            elif prim.HasAPI(UsdLux.LightAPI):
+                lights += 1
+        if skels:
+            out["skeleton"] = {"skeletons": skels, "joints": joints,
+                               "animations": anims,
+                               "skinned_meshes": skinned}
+        if lights:
+            out["lights"] = lights
+    except Exception:
+        pass
+    return out
 
 
 def _deformable_type(report: dict) -> str | None:
@@ -300,6 +335,9 @@ def apply_rigid_physics(entry: dict) -> str | None:
     import types
 
     report = entry.get("report", {})
+    if report.get("skeleton"):
+        return ("rigged character (UsdSkel): kinematic animated collider — "
+                "no dynamic rigid body authored")
     if needs_articulation(report):
         return None
     dtype = _deformable_type(report)
@@ -390,7 +428,9 @@ def queue_file(file_path: str, class_hint: str | None = None,
     and approval still requires a human.
     """
     file_path = str(Path(file_path).resolve())
+    features = scan_scene_features(file_path)
     report = run_report(file_path, class_hint)
+    report.update(features)
     asset_id = asset_id or _asset_id_for(file_path)
     entry = {
         "asset_id": asset_id,
@@ -410,6 +450,7 @@ def queue_file(file_path: str, class_hint: str | None = None,
             f"auto scale x{factor} (source units x{report.get('meters_per_unit')}, "
             f"up-axis {report.get('up_axis')} -> Z)"]
         entry["report"] = run_report(entry["file"], class_hint)
+        entry["report"].update(features)
         entry["proposed_category"] = propose_category(entry["report"])
     # deterministic physics for non-articulable rigids happens at ingest
     # too — no button, no waiting (articulable assets get physics at
@@ -419,6 +460,7 @@ def queue_file(file_path: str, class_hint: str | None = None,
         if note:
             entry.setdefault("applied_fixes", []).append(note)
             entry["report"] = run_report(entry["file"], class_hint)
+            entry["report"].update(features)
             entry["proposed_category"] = propose_category(entry["report"])
     # the class from name matching is only a guess until a human (or VLM)
     # looks at the object itself

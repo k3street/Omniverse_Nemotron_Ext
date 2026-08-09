@@ -375,3 +375,45 @@ class TestUnknownClassification:
         assert cls["typical_materials"] == ["plastic_abs"]
         # second registration reuses, never duplicates
         assert vlm_classify.register_provisional_class(result, "y") == "watering_can"
+
+
+class TestRiggedCharacters:
+    def test_skeleton_routes_to_character_category(self):
+        from ingest_asset import propose_category
+        assert propose_category(
+            {"matched_class": "human_character", "callouts": [],
+             "structure": {},
+             "skeleton": {"skeletons": 1, "joints": 78, "animations": 1},
+             }) == "character_rigged"
+
+    def test_schema_character_requires_skeleton(self):
+        import jsonschema
+        base = {"asset_id": "p", "file": "f.usd", "source_file": "s.usd",
+                "category": "character_rigged",
+                "audit": {"ready": False, "simulable": True},
+                "review": {"approved": False, "reviewer": "x",
+                           "date": "2026-08-09"}}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"version": 1, "assets": [base]}, SCHEMA)
+        jsonschema.validate({"version": 1, "assets": [
+            {**base, "skeleton": {"joints": 78, "animations": 1}}]}, SCHEMA)
+
+    def test_machine_cannot_sign_characters(self):
+        import jsonschema
+        asset = {"asset_id": "p", "file": "f.usd", "source_file": "s.usd",
+                 "category": "character_rigged",
+                 "skeleton": {"joints": 78, "animations": 1},
+                 "audit": {"ready": False, "simulable": True},
+                 "review": {"approved": True, "reviewer": "visual-qa-v1",
+                            "reviewer_type": "machine", "date": "2026-08-09",
+                            "models": ["a", "b"]}}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"version": 1, "assets": [asset]}, SCHEMA)
+
+    def test_characters_out_of_machine_scope_in_rubric(self):
+        from visual_qa import rubric
+        checks = {c["check"]: c for c in rubric(
+            _entry(category="character_rigged", cls="human_character"),
+            [_judge("gemma", cls="human_character", name="person"),
+             _judge("cosmos", cls="human_character", name="person")])}
+        assert not checks["rigid_scope"]["ok"]

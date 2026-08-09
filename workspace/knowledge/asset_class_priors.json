@@ -884,6 +884,29 @@
     "plastic_abs",
     "aluminum"
    ]
+  },
+  "human_character": {
+   "keywords": [
+    "person",
+    "human",
+    "character",
+    "man",
+    "woman",
+    "worker",
+    "nurse",
+    "doctor",
+    "patient"
+   ],
+   "max_dim_m": [
+    1.2,
+    2.1
+   ],
+   "mass_kg": [
+    40,
+    120
+   ],
+   "articulable": true,
+   "typical_materials": []
   }
  }
 }
