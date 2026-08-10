@@ -46,7 +46,13 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
     seg = length_m / links
-    link_mass = RUBBER_DENSITY * math.pi * radius_m ** 2 * seg
+    # physical linear-density mass (~2.5 g for 4 mm cord segments) is
+    # SOLVER-HOSTILE: the iterative solver cannot converge 24 joint
+    # constraints between gram-scale links carrying a 100 g tool — the
+    # chain crumples and climbs. 15 g links are stable; recorded in
+    # customLayerData so consumers know the fudge.
+    physical_mass = RUBBER_DENSITY * math.pi * radius_m ** 2 * seg
+    link_mass = max(physical_mass, 0.015)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     layer = Sdf.Layer.Find(str(out_path))
@@ -96,6 +102,12 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
         UsdPhysics.RigidBodyAPI.Apply(link.GetPrim())
         UsdPhysics.MassAPI.Apply(link.GetPrim()).CreateMassAttr().Set(
             round(link_mass, 6))
+        link.GetPrim().CreateAttribute(
+            "physxRigidBody:solverPositionIterationCount",
+            Sdf.ValueTypeNames.Int).Set(64)
+        link.GetPrim().CreateAttribute(
+            "physxRigidBody:solverVelocityIterationCount",
+            Sdf.ValueTypeNames.Int).Set(8)
         rel = link.GetPrim().CreateRelationship(
             "physics:materialBinding", custom=False)
         rel.SetTargets([Sdf.Path("/Cable/PhysicsMaterials/rubber")])
@@ -107,31 +119,35 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
                 "physxArticulation:enabledSelfCollisions",
                 Sdf.ValueTypeNames.Bool).Set(False)
         else:
-            j = UsdPhysics.SphericalJoint.Define(
-                stage, f"/Cable/joints/j_{i:02d}")
+            # D6 joint: omni.physx IGNORES SphericalJoint cone limits
+            # inside articulations (15 deg authored -> 90 deg+ observed
+            # folds). A generic Joint with per-axis LimitAPIs and
+            # rotational stiffness/damping DRIVES is bending stiffness
+            # the solver actually enforces.
+            j = UsdPhysics.Joint.Define(stage, f"/Cable/joints/j_{i:02d}")
             j.CreateBody0Rel().SetTargets([Sdf.Path(prev)])
             j.CreateBody1Rel().SetTargets([Sdf.Path(lp)])
-            # anchor at the shared end of the two capsules, in each
-            # body's local frame
             p0 = pos(i - 1)
             p1 = pos(i)
             mid = (p0 + p1) / 2.0
             j.CreateLocalPos0Attr().Set(Gf.Vec3f(*(mid - p0)))
             j.CreateLocalPos1Attr().Set(Gf.Vec3f(*(mid - p1)))
-            j.CreateAxisAttr().Set("X")
-            # cable bend: a real jacket can't fold 40 deg every 4 cm —
-            # generous cones let the chain ACCORDION into a zigzag ball
-            # (measured: 1.0 m cord compacted to 0.25 m span). 15 deg per
-            # joint is still ~360 deg of total flex over the chain.
-            j.CreateConeAngle0LimitAttr().Set(15.0)
-            j.CreateConeAngle1LimitAttr().Set(15.0)
-            # rubber jackets damp fast — undamped the assembly is a
-            # perpetual pendulum and solver noise slowly ADDS energy
-            # scaled to link gravity torque (~5e-4 N*m for gram links);
-            # 0.02 made the cord rigid under its own weight
-            j.GetPrim().CreateAttribute(
-                "physxJoint:jointFriction",
-                Sdf.ValueTypeNames.Float).Set(round(link_mass * 9.81 * seg * 0.15, 6))
+            prim = j.GetPrim()
+            for dof in ("transX", "transY", "transZ"):
+                lim = UsdPhysics.LimitAPI.Apply(prim, dof)
+                lim.CreateLowAttr().Set(1.0)    # low > high = locked
+                lim.CreateHighAttr().Set(-1.0)
+            for dof, ang in (("rotX", 20.0), ("rotY", 25.0), ("rotZ", 25.0)):
+                lim = UsdPhysics.LimitAPI.Apply(prim, dof)
+                lim.CreateLowAttr().Set(-ang)
+                lim.CreateHighAttr().Set(ang)
+                drv = UsdPhysics.DriveAPI.Apply(prim, dof)
+                drv.CreateTypeAttr().Set("force")
+                drv.CreateTargetPositionAttr().Set(0.0)  # wants straight
+                # bend stiffness: gentle spring toward straight (angular
+                # drives are in DEGREES in omni.physx)
+                drv.CreateStiffnessAttr().Set(0.0005)
+                drv.CreateDampingAttr().Set(0.0002)
         prev = lp
 
     # attachment points for composing with tools/plugs
@@ -142,7 +158,9 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
 
     stage.GetRootLayer().customLayerData = {
         "cable": {"length_m": length_m, "radius_m": radius_m,
-                  "links": links, "link_mass_kg": round(link_mass, 6)}}
+                  "links": links, "link_mass_kg": round(link_mass, 6),
+                  "physical_mass_kg": round(physical_mass, 6),
+                  "note": "link mass floored at 15 g for solver stability"}}
     stage.GetRootLayer().Save()
     return out_path
 
@@ -269,7 +287,14 @@ def compose(iron: str, plug: str, out_path: Path,
         "physxArticulation:enabledSelfCollisions",
         Sdf.ValueTypeNames.Bool).Set(False)
 
-    UsdPhysics.Scene.Define(stage, Sdf.Path("/PhysicsScene"))
+    scene = UsdPhysics.Scene.Define(stage, Sdf.Path("/PhysicsScene"))
+    # the convergence package that makes the cord DRAPE instead of
+    # crumple (validated live): 240 Hz physics + 64 position iterations
+    scene.GetPrim().CreateAttribute(
+        "physxScene:timeStepsPerSecond", Sdf.ValueTypeNames.UInt).Set(240)
+    root_prim.CreateAttribute(
+        "physxArticulation:solverPositionIterationCount",
+        Sdf.ValueTypeNames.Int).Set(64)
     stage.GetRootLayer().Save()
     return out_path
 

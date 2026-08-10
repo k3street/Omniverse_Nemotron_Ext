@@ -468,17 +468,23 @@ class TestCableGenerator:
         bodies = [p for p in st.Traverse()
                   if p.HasAPI(UsdPhysics.RigidBodyAPI)]
         joints = [p for p in st.Traverse()
-                  if p.IsA(UsdPhysics.SphericalJoint)]
+                  if p.IsA(UsdPhysics.Joint) and "joints/" in str(p.GetPath())]
         roots = [p for p in st.Traverse()
                  if p.HasAPI(UsdPhysics.ArticulationRootAPI)]
         assert len(bodies) == 10
         assert len(joints) == 9
         assert len(roots) == 1  # standalone cable: floating base at link_00
-        # spherical joints must carry coincident-frame local positions and
-        # scaled friction — the unset-frame default slams origins together
-        j = UsdPhysics.SphericalJoint(joints[0])
+        # D6 joints (SphericalJoint cone limits are IGNORED by omni.physx
+        # inside articulations): coincident frames, locked translation,
+        # limited+driven rotation
+        j = UsdPhysics.Joint(joints[0])
         assert j.GetLocalPos0Attr().Get() is not None
-        assert joints[0].GetAttribute("physxJoint:jointFriction").Get() > 0
+        tx = UsdPhysics.LimitAPI(joints[0], "transX")
+        assert tx.GetLowAttr().Get() > tx.GetHighAttr().Get()  # locked
+        ry = UsdPhysics.LimitAPI(joints[0], "rotY")
+        assert ry.GetHighAttr().Get() == 25.0
+        drv = UsdPhysics.DriveAPI(joints[0], "rotY")
+        assert drv.GetStiffnessAttr().Get() > 0
         # attachment prims for composing
         assert st.GetPrimAtPath("/Cable/link_00/AttachA")
         assert st.GetPrimAtPath("/Cable/link_09/AttachB")
@@ -495,5 +501,8 @@ class TestCableGenerator:
         st = Usd.Stage.Open(str(f))
         m = UsdPhysics.MassAPI(
             st.GetPrimAtPath("/Cable/link_00")).GetMassAttr().Get()
-        expect = RUBBER_DENSITY * math.pi * 0.004 ** 2 * (1.0 / 20)
-        assert abs(m - expect) < 1e-6
+        physical = RUBBER_DENSITY * math.pi * 0.004 ** 2 * (1.0 / 20)
+        # solver-stability floor: gram links crumple under load
+        assert abs(m - max(physical, 0.015)) < 1e-6
+        meta = st.GetRootLayer().customLayerData["cable"]
+        assert abs(meta["physical_mass_kg"] - physical) < 1e-6

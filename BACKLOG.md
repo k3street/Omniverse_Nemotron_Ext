@@ -169,13 +169,22 @@ CRUMPLES instead of draping — omni.physx does NOT enforce
 UsdPhysics.SphericalJoint cone limits inside articulations (observed
 90-deg+ folds at 15-deg authored cones), and free ball joints + gram
 links crumple under solver noise with slow energy climb.
+RESOLVED 2026-08-10: the cord now DRAPES — straight vertical hang,
+plug->iron 1.045 m of a 1.0 m cord, gentle swing, iron dangling
+tip-down. The cure was CONVERGENCE, not limits: gram-scale links
+carrying a 100 g tool through 24 constraints cannot converge at 60 Hz
+default iterations (limits were being swamped, not ignored... though
+SphericalJoint cone limits ARE also unenforced in articulations). The
+baked-in recipe: D6 joints (locked translation, +/-20-25 deg rotation
+limits, stiffness/damping drives toward straight), link mass FLOORED at
+15 g (physical 2.5 g recorded in customLayerData), 64 position
+iterations per link + articulation, physxScene 240 Hz. Scan cleanup:
+Soldering_Iron(1)'s baked cord is a separable mesh named 'wire' —
+deactivate + rescale to true body.
 Remaining:
-- [ ] Cable bending done right: D6 joints with per-axis rotation limits
-      + rotational stiffness/damping DRIVES (physxJoint drives) =
-      authored bending stiffness the solver respects; verify in Newton
-      headless (ModelBuilder.add_joint_cable exists there).
-- [ ] plug-socket insertion affordance; cable in scene blueprints;
-      Newton cross-check for cable assemblies.
+- [ ] Mass-floor honesty: reduce toward physical 2.5 g links via TGS
+      solver tuning or Newton (cross-check with add_joint_cable).
+- [ ] plug-socket insertion affordance; cable in scene blueprints.
 Environment-effects ladder (each is a different sim maturity):
 - [ ] Lights: detection SHIPPED (report.lights); next: blueprint light
       placement (UsdLux Sphere/Rect/Dome + intensity/color) for
