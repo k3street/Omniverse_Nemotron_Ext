@@ -454,3 +454,46 @@ class TestCharacterBlueprint:
         code = self._gen({"characters": [
             {"name": "x", "position": [0, 0, 0], "clip": "backflip"}]})
         assert "'backflip'" in code  # runtime prints 'unknown clip'
+
+
+class TestCableGenerator:
+    def test_cable_structure(self, tmp_path):
+        pytest.importorskip("pxr")
+        from pxr import Usd, UsdPhysics
+
+        from make_cable import build_cable
+        f = build_cable(tmp_path / "c.usda", length_m=0.5, radius_m=0.005,
+                        links=10)
+        st = Usd.Stage.Open(str(f))
+        bodies = [p for p in st.Traverse()
+                  if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+        joints = [p for p in st.Traverse()
+                  if p.IsA(UsdPhysics.SphericalJoint)]
+        roots = [p for p in st.Traverse()
+                 if p.HasAPI(UsdPhysics.ArticulationRootAPI)]
+        assert len(bodies) == 10
+        assert len(joints) == 9
+        assert len(roots) == 1  # standalone cable: floating base at link_00
+        # spherical joints must carry coincident-frame local positions and
+        # scaled friction — the unset-frame default slams origins together
+        j = UsdPhysics.SphericalJoint(joints[0])
+        assert j.GetLocalPos0Attr().Get() is not None
+        assert joints[0].GetAttribute("physxJoint:jointFriction").Get() > 0
+        # attachment prims for composing
+        assert st.GetPrimAtPath("/Cable/link_00/AttachA")
+        assert st.GetPrimAtPath("/Cable/link_09/AttachB")
+
+    def test_link_mass_is_linear_density(self, tmp_path):
+        pytest.importorskip("pxr")
+        import math
+
+        from pxr import Usd, UsdPhysics
+
+        from make_cable import RUBBER_DENSITY, build_cable
+        f = build_cable(tmp_path / "c2.usda", length_m=1.0, radius_m=0.004,
+                        links=20)
+        st = Usd.Stage.Open(str(f))
+        m = UsdPhysics.MassAPI(
+            st.GetPrimAtPath("/Cable/link_00")).GetMassAttr().Get()
+        expect = RUBBER_DENSITY * math.pi * 0.004 ** 2 * (1.0 / 20)
+        assert abs(m - expect) < 1e-6

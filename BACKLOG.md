@@ -147,6 +147,24 @@ that as valid by design). Excluded from the hub watcher
 (ASSET_SCAN_EXCLUDE=Metropolis_People) to avoid flooding the human
 queue; batch verify_character when registering. These are the crowd
 population for IRA scene testing.
+Physically accurate cords SHIPPED 2026-08-10 (user downloaded plugs/
+cords/electronics incl. 4 soldering irons): `scripts/make_cable.py` —
+capsule-chain articulated cables (spherical joints, coincident local
+frames, gravity-torque-scaled joint friction, rubber material, linear-
+density link masses) + `compose` (iron + cord + plug as ONE articulation
+rooted at the plug, physics on clean UNSCALED proxy boxes, scan meshes
+as physics-free visuals). Live-validated: iron DANGLES from its cord
+(slack cord crumples into a realistic bundle, iron hangs tip-down,
+stable). Hard-won PhysX facts: an external maximal FixedJoint against a
+floating-base articulation explodes past ~4 links — the fixed-base
+convention is ArticulationRootAPI ON the world FixedJoint prim; every
+joint needs coincident frames at spawn (default zero frames slam
+origins together); joint frames through scaled scan wrappers are
+treacherous (proxy bodies); friction above link gravity torque makes
+the cord rigid. Electronics priors added (soldering_iron, power_plug,
+power_strip, charger; 'soldering' removed from hand_tool). Remaining:
+plug-socket insertion affordance; cable in scene blueprints; Newton
+cross-check for cable assemblies.
 Environment-effects ladder (each is a different sim maturity):
 - [ ] Lights: detection SHIPPED (report.lights); next: blueprint light
       placement (UsdLux Sphere/Rect/Dome + intensity/color) for

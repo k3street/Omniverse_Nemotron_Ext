@@ -276,8 +276,7 @@
     "screwdriver",
     "pliers",
     "scissors",
-    "wrench",
-    "soldering"
+    "wrench"
    ],
    "max_dim_m": [
     0.1,
@@ -907,6 +906,82 @@
    ],
    "articulable": true,
    "typical_materials": []
+  },
+  "soldering_iron": {
+   "keywords": [
+    "soldering",
+    "solder"
+   ],
+   "max_dim_m": [
+    0.18,
+    0.35
+   ],
+   "mass_kg": [
+    0.04,
+    0.15
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs",
+    "steel_stainless"
+   ]
+  },
+  "power_plug": {
+   "keywords": [
+    "plug",
+    "socket",
+    "outlet"
+   ],
+   "max_dim_m": [
+    0.025,
+    0.09
+   ],
+   "mass_kg": [
+    0.015,
+    0.09
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
+  },
+  "power_strip": {
+   "keywords": [
+    "extension",
+    "strip",
+    "surge"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.55
+   ],
+   "mass_kg": [
+    0.2,
+    0.7
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
+  },
+  "charger": {
+   "keywords": [
+    "charger",
+    "adapter",
+    "psu"
+   ],
+   "max_dim_m": [
+    0.04,
+    0.12
+   ],
+   "mass_kg": [
+    0.03,
+    0.25
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ]
   }
  }
 }
