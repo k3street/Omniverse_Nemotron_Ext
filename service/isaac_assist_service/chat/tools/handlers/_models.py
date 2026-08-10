@@ -11,7 +11,7 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-09T23:15:55+00:00
+Generated: 2026-08-10T00:28:59+00:00
 Tool count: 440
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.

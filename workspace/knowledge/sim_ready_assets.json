@@ -2082,6 +2082,28 @@
      "nvidia/Cosmos-Reason2-2B"
     ]
    }
+  },
+  {
+   "asset_id": "hiwisci_fi_radio_extreme",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/hiwisci_fi_radio_extreme/hiwisci_fi_radio_extreme.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/HiWiSci-Fi_Radio_Extreme.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "visual-qa-v1",
+    "date": "2026-08-09",
+    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5",
+     "gemma4"
+    ],
+    "audit_sampled": true
+   }
   }
  ]
 }
