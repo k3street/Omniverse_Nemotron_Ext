@@ -88,7 +88,10 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
         cap = UsdGeom.Capsule.Define(stage, lp + "/geom")
         cap.GetAxisAttr().Set("X")
         cap.GetRadiusAttr().Set(radius_m)
-        cap.GetHeightAttr().Set(max(seg - 2 * radius_m, seg * 0.5))
+        # full-length capsules: continuous cord look; overlap at joints
+        # is harmless with articulation self-collision disabled
+        cap.GetHeightAttr().Set(seg)
+        cap.GetDisplayColorAttr().Set([(0.05, 0.05, 0.05)])  # rubber black
         UsdPhysics.CollisionAPI.Apply(cap.GetPrim())
         UsdPhysics.RigidBodyAPI.Apply(link.GetPrim())
         UsdPhysics.MassAPI.Apply(link.GetPrim()).CreateMassAttr().Set(
@@ -98,6 +101,11 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
         rel.SetTargets([Sdf.Path("/Cable/PhysicsMaterials/rubber")])
         if i == 0:
             UsdPhysics.ArticulationRootAPI.Apply(link.GetPrim())
+            # wheelchair lesson: articulation self-collision ON + touching
+            # links = contact impulses that ball up or explode the chain
+            link.GetPrim().CreateAttribute(
+                "physxArticulation:enabledSelfCollisions",
+                Sdf.ValueTypeNames.Bool).Set(False)
         else:
             j = UsdPhysics.SphericalJoint.Define(
                 stage, f"/Cable/joints/j_{i:02d}")
@@ -111,16 +119,19 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
             j.CreateLocalPos0Attr().Set(Gf.Vec3f(*(mid - p0)))
             j.CreateLocalPos1Attr().Set(Gf.Vec3f(*(mid - p1)))
             j.CreateAxisAttr().Set("X")
-            # cable bend: generous cone, not floppy-infinite
-            j.CreateConeAngle0LimitAttr().Set(40.0)
-            j.CreateConeAngle1LimitAttr().Set(40.0)
+            # cable bend: a real jacket can't fold 40 deg every 4 cm —
+            # generous cones let the chain ACCORDION into a zigzag ball
+            # (measured: 1.0 m cord compacted to 0.25 m span). 15 deg per
+            # joint is still ~360 deg of total flex over the chain.
+            j.CreateConeAngle0LimitAttr().Set(15.0)
+            j.CreateConeAngle1LimitAttr().Set(15.0)
             # rubber jackets damp fast — undamped the assembly is a
             # perpetual pendulum and solver noise slowly ADDS energy
             # scaled to link gravity torque (~5e-4 N*m for gram links);
             # 0.02 made the cord rigid under its own weight
             j.GetPrim().CreateAttribute(
                 "physxJoint:jointFriction",
-                Sdf.ValueTypeNames.Float).Set(round(link_mass * 9.81 * seg * 0.5, 6))
+                Sdf.ValueTypeNames.Float).Set(round(link_mass * 9.81 * seg * 0.15, 6))
         prev = lp
 
     # attachment points for composing with tools/plugs
@@ -252,7 +263,11 @@ def compose(iron: str, plug: str, out_path: Path,
     # one articulation, rooted at the plug (the anchorable end)
     stage.GetPrimAtPath("/World/Cord/link_00").RemoveAppliedSchema(
         "PhysicsArticulationRootAPI")
-    UsdPhysics.ArticulationRootAPI.Apply(stage.GetPrimAtPath(plug_body))
+    root_prim = stage.GetPrimAtPath(plug_body)
+    UsdPhysics.ArticulationRootAPI.Apply(root_prim)
+    root_prim.CreateAttribute(
+        "physxArticulation:enabledSelfCollisions",
+        Sdf.ValueTypeNames.Bool).Set(False)
 
     UsdPhysics.Scene.Define(stage, Sdf.Path("/PhysicsScene"))
     stage.GetRootLayer().Save()

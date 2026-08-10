@@ -162,9 +162,20 @@ joint needs coincident frames at spawn (default zero frames slam
 origins together); joint frames through scaled scan wrappers are
 treacherous (proxy bodies); friction above link gravity torque makes
 the cord rigid. Electronics priors added (soldering_iron, power_plug,
-power_strip, charger; 'soldering' removed from hand_tool). Remaining:
-plug-socket insertion affordance; cable in scene blueprints; Newton
-cross-check for cable assemblies.
+power_strip, charger; 'soldering' removed from hand_tool). HONEST STATUS after live iteration: assembly is STABLE (no explosion,
+iron carried by cord, plug anchored, wire-baked scans cleaned by
+deactivating the 'wire' mesh + rescaling to the true body) but the cord
+CRUMPLES instead of draping — omni.physx does NOT enforce
+UsdPhysics.SphericalJoint cone limits inside articulations (observed
+90-deg+ folds at 15-deg authored cones), and free ball joints + gram
+links crumple under solver noise with slow energy climb.
+Remaining:
+- [ ] Cable bending done right: D6 joints with per-axis rotation limits
+      + rotational stiffness/damping DRIVES (physxJoint drives) =
+      authored bending stiffness the solver respects; verify in Newton
+      headless (ModelBuilder.add_joint_cable exists there).
+- [ ] plug-socket insertion affordance; cable in scene blueprints;
+      Newton cross-check for cable assemblies.
 Environment-effects ladder (each is a different sim maturity):
 - [ ] Lights: detection SHIPPED (report.lights); next: blueprint light
       placement (UsdLux Sphere/Rect/Dome + intensity/color) for
