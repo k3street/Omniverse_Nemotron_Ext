@@ -146,8 +146,12 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
                 drv.CreateTargetPositionAttr().Set(0.0)  # wants straight
                 # bend stiffness: gentle spring toward straight (angular
                 # drives are in DEGREES in omni.physx)
-                drv.CreateStiffnessAttr().Set(0.0005)
-                drv.CreateDampingAttr().Set(0.0002)
+                # Bend stiffness must hold the cord's shape when it is
+                # SLACK. Under tension (tool hanging) a whisper suffices;
+                # a cord lying loose on a table coils up without real
+                # stiffness. Scaled to link weight so it stays physical.
+                drv.CreateStiffnessAttr().Set(round(link_mass * 4.0, 5))
+                drv.CreateDampingAttr().Set(round(link_mass * 0.8, 5))
         prev = lp
 
     # attachment points for composing with tools/plugs
@@ -236,7 +240,7 @@ def attach_frame(usd_path: str, end: str = "auto"):
 def compose(iron: str, plug: str, out_path: Path,
             length_m: float = 1.0, radius_m: float = 0.004,
             links: int = 24, tool_attach: str = "auto",
-            plug_attach: str = "auto") -> Path:
+            plug_attach: str = "auto", upright: bool = False) -> Path:
     """Iron + cable + plug as ONE fixed-base-able articulation rooted at
     the plug. Physics runs on clean UNSCALED proxy bodies (joint frames
     through scaled scan wrappers are treacherous — that instability cost
@@ -330,18 +334,53 @@ def compose(iron: str, plug: str, out_path: Path,
         m.SetTranslateOnly(weld - m.TransformDir(point))
         return m
 
-    # plug's entry faces +X (toward the cord); tool's faces -X
-    plug_body = _proxy("Plug", plug,
-                       _xform_to(plug_pt, plug_dir, weld_a, Gf.Vec3d(1, 0, 0)),
-                       0.05)
     cable_prim = stage.DefinePrim("/World/Cord", "Xform")
     csrc = Usd.Stage.Open(str(cable_file))
     cable_prim.GetReferences().AddReference(
         str(cable_file), str(csrc.GetDefaultPrim().GetPath()))
-    UsdGeom.XformCommonAPI(cable_prim).SetTranslate(Gf.Vec3d(x_cable, 0, 0))
-    iron_body = _proxy("Iron", iron,
-                       _xform_to(iron_pt, iron_dir, weld_b, Gf.Vec3d(-1, 0, 0)),
-                       0.12)
+
+    if upright:
+        # A lamp/appliance must KEEP ITS POSE and stand on the ground —
+        # rotating it so its cord-exit faces the cord (the hanging-tool
+        # convention) tips it on its side. Here the CORD adapts instead:
+        # the tool sits upright, and the cord runs from its real exit
+        # point to the plug.
+        tdims, _ = _dims(iron)
+        st = Usd.Stage.Open(iron)
+        trng = UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [UsdGeom.Tokens.default_, UsdGeom.Tokens.render],
+        ).ComputeWorldBound(st.GetPseudoRoot()).ComputeAlignedRange()
+        tmpu = UsdGeom.GetStageMetersPerUnit(st)
+        lift = -float(trng.GetMin()[2]) * tmpu          # base onto z=0
+        tool_x = Gf.Matrix4d().SetTranslate(Gf.Vec3d(0, 0, lift))
+        iron_body = _proxy("Iron", iron, tool_x, 0.12)
+        exit_w = Gf.Vec3d(iron_pt[0], iron_pt[1], iron_pt[2] + lift)
+        # cord leaves horizontally along the exit direction's XY heading
+        h = Gf.Vec3d(iron_dir[0], iron_dir[1], 0.0)
+        if h.GetLength() < 1e-6:
+            h = Gf.Vec3d(1, 0, 0)
+        h = h.GetNormalized()
+        weld_a = exit_w
+        weld_b = exit_w + h * length_m
+        # cord: local +X mapped onto the run direction, root at the exit
+        cm = Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(1, 0, 0), h))
+        cm.SetTranslateOnly(weld_a)
+        cxf = UsdGeom.Xformable(cable_prim)
+        cxf.ClearXformOpOrder()
+        cxf.AddTransformOp().Set(cm)
+        # plug at the far end, its entry facing back along the cord
+        plug_body = _proxy("Plug", plug,
+                           _xform_to(plug_pt, plug_dir, weld_b, -h), 0.05)
+    else:
+        # hanging tool: plug's entry faces +X (toward the cord), tool's -X
+        plug_body = _proxy("Plug", plug,
+                           _xform_to(plug_pt, plug_dir, weld_a, Gf.Vec3d(1, 0, 0)),
+                           0.05)
+        UsdGeom.XformCommonAPI(cable_prim).SetTranslate(Gf.Vec3d(x_cable, 0, 0))
+        iron_body = _proxy("Iron", iron,
+                           _xform_to(iron_pt, iron_dir, weld_b, Gf.Vec3d(-1, 0, 0)),
+                           0.12)
 
     cache = UsdGeom.XformCache()
 
@@ -350,22 +389,40 @@ def compose(iron: str, plug: str, out_path: Path,
             stage.GetPrimAtPath(body_path)).GetInverse()
         return Gf.Vec3f(*inv.Transform(world_point))
 
-    j1 = UsdPhysics.FixedJoint.Define(stage, "/World/joints/plug_to_cord")
-    j1.CreateBody0Rel().SetTargets([Sdf.Path(plug_body)])
+    # weld_a is the cord ROOT end, weld_b the tip end — which body sits at
+    # which end flips between modes, and welding them crossed (as an
+    # earlier version did) launches the whole assembly on the first step
+    body_a, body_b = ((iron_body, plug_body) if upright
+                      else (plug_body, iron_body))
+    j1 = UsdPhysics.FixedJoint.Define(stage, "/World/joints/weld_root")
+    j1.CreateBody0Rel().SetTargets([Sdf.Path(body_a)])
     j1.CreateBody1Rel().SetTargets([Sdf.Path("/World/Cord/link_00")])
-    j1.CreateLocalPos0Attr().Set(_local(plug_body, weld_a))
+    j1.CreateLocalPos0Attr().Set(_local(body_a, weld_a))
     j1.CreateLocalPos1Attr().Set(_local("/World/Cord/link_00", weld_a))
     tip = f"/World/Cord/link_{links-1:02d}"
-    j2 = UsdPhysics.FixedJoint.Define(stage, "/World/joints/cord_to_iron")
+    j2 = UsdPhysics.FixedJoint.Define(stage, "/World/joints/weld_tip")
     j2.CreateBody0Rel().SetTargets([Sdf.Path(tip)])
-    j2.CreateBody1Rel().SetTargets([Sdf.Path(iron_body)])
+    j2.CreateBody1Rel().SetTargets([Sdf.Path(body_b)])
     j2.CreateLocalPos0Attr().Set(_local(tip, weld_b))
-    j2.CreateLocalPos1Attr().Set(_local(iron_body, weld_b))
+    j2.CreateLocalPos1Attr().Set(_local(body_b, weld_b))
+
+    # The cord's end links START INSIDE the tool/plug proxy colliders (the
+    # weld point is on the asset surface, and the proxy is a box around
+    # the whole asset). Un-filtered, PhysX resolves that overlap by
+    # ejecting the cord — it coils and gets pushed through the floor.
+    # Filter the welded pairs; the joints hold them together instead.
+    for body, near_links in ((body_a, range(0, min(4, links))),
+                             (body_b, range(max(0, links - 4), links))):
+        prim = stage.GetPrimAtPath(body)
+        api = UsdPhysics.FilteredPairsAPI.Apply(prim)
+        rel = api.CreateFilteredPairsRel()
+        for i in near_links:
+            rel.AddTarget(Sdf.Path(f"/World/Cord/link_{i:02d}"))
 
     # one articulation, rooted at the plug (the anchorable end)
     stage.GetPrimAtPath("/World/Cord/link_00").RemoveAppliedSchema(
         "PhysicsArticulationRootAPI")
-    root_prim = stage.GetPrimAtPath(plug_body)
+    root_prim = stage.GetPrimAtPath(body_a)  # the anchorable end
     UsdPhysics.ArticulationRootAPI.Apply(root_prim)
     root_prim.CreateAttribute(
         "physxArticulation:enabledSelfCollisions",

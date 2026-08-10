@@ -982,6 +982,26 @@
    "typical_materials": [
     "plastic_abs"
    ]
+  },
+  "desk_lamp": {
+   "keywords": [
+    "lamp",
+    "sconce",
+    "luminaire"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.65
+   ],
+   "mass_kg": [
+    0.6,
+    3.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild",
+    "plastic_abs"
+   ]
   }
  }
 }

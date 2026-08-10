@@ -181,7 +181,25 @@ limits, stiffness/damping drives toward straight), link mass FLOORED at
 iterations per link + articulation, physxScene 240 Hz. Scan cleanup:
 Soldering_Iron(1)'s baked cord is a separable mesh named 'wire' —
 deactivate + rescale to true body.
-Remaining:
+Second donor (desk lamp, 2026-08-10) — fixed 3 real bugs, 1 open:
+FIXED: upright mode (a lamp must KEEP its pose and stand; the hanging-
+tool convention rotated it onto its side), weld pairing (weld_a/weld_b
+swap ends between modes — crossed welds launched the assembly), and
+collision filtering on welded pairs (the cord's end links start INSIDE
+the tool's box proxy; unfiltered, PhysX ejects them and they tunnel
+through the floor — lowest cord z went -0.083 -> -0.017). Also a
+classification bug: "Desk_lamp" matched the `table` prior on "desk" and
+scaled to a 1.5 m lamp; new desk_lamp prior (0.3-0.65 m, articulable).
+OPEN — the honest one: a SLACK cord still coils. Under tension (tool
+hanging) the chain hangs straight and correct; lying loose it collapses
+to 0.19 m of 0.7 m even with bend drives scaled to link weight. D6
+rotational drives are not holding shape at this scale.
+- [ ] Slack-cord shape: try (a) much higher drive stiffness in a
+      re-scaled mass/length regime, (b) Newton's native
+      ModelBuilder.add_joint_cable as the reference implementation, or
+      (c) a ROUTED STATIC cord (kinematic spline) for scene dressing —
+      a robot only needs a dynamic cable when it manipulates one, so
+      static routing may be the right default with dynamics opt-in.
 - [ ] Mass-floor honesty: reduce toward physical 2.5 g links via TGS
       solver tuning or Newton (cross-check with add_joint_cable).
 - [ ] plug-socket insertion affordance; cable in scene blueprints.
