@@ -135,6 +135,18 @@ preloaded). Integration plan for scene testing:
       root speed within walk clip's speed_range).
 - [ ] VLM judge on motion clips (Cosmos is video-native): 'does this
       person walk like a person' — same judge stack as visual QA.
+Metropolis People packs DOWNLOADED 2026-08-09 (~/Desktop/assets/
+Metropolis_People, 9.4 GB, 3085 files, 0 failures, from the Isaac 5.1
+content S3 — 6.0 content not yet published there): 232 extended DH
+character variants + 22 DH + 23 stylized = 277 characters across THREE
+rig families (DHGen 78-joint, stylized 101-joint, Biped 81-joint clips).
+Animations folder = the same 24 clips as Collected_People. Spot-check:
+9/9 sampled rigs verify (many are RIG-ONLY — no clip authored, all
+motion from the anim graph at scene time; verify_character now accepts
+that as valid by design). Excluded from the hub watcher
+(ASSET_SCAN_EXCLUDE=Metropolis_People) to avoid flooding the human
+queue; batch verify_character when registering. These are the crowd
+population for IRA scene testing.
 Environment-effects ladder (each is a different sim maturity):
 - [ ] Lights: detection SHIPPED (report.lights); next: blueprint light
       placement (UsdLux Sphere/Rect/Dome + intensity/color) for

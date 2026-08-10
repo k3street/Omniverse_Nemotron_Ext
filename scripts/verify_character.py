@@ -84,15 +84,19 @@ def verify_rig(file_path: str) -> dict:
         a = UsdSkel.Animation(anims[0])
         samples = max(a.GetRotationsAttr().GetNumTimeSamples(),
                       a.GetTranslationsAttr().GetNumTimeSamples())
-    if samples <= 1:
+    if not anims:
+        # rig-only character (Metropolis DH/stylized packs): ALL motion
+        # comes from the animation graph at scene time — valid by design
+        check("animation", True,
+              "no clip authored — rig-only character, motion applies at "
+              "scene time (anim graph / IRA)")
+    elif samples <= 1:
         # a single sample with no default value returns None from Get() —
         # query at EarliestTime to see the authored pose
-        pose_ok = False
-        if anims:
-            a = UsdSkel.Animation(anims[0])
-            t = Usd.TimeCode.EarliestTime()
-            pose_ok = (a.GetRotationsAttr().Get(t) is not None
-                       or a.GetTranslationsAttr().Get(t) is not None)
+        a = UsdSkel.Animation(anims[0])
+        t = Usd.TimeCode.EarliestTime()
+        pose_ok = (a.GetRotationsAttr().Get(t) is not None
+                   or a.GetTranslationsAttr().Get(t) is not None)
         check("animation", pose_ok,
               f"static pose clip ({samples} time sample) — motion applies "
               "at scene time (e.g. omni.anim.people)")
