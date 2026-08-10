@@ -561,3 +561,25 @@ class TestRoutedCord:
         zs = [cache.GetLocalToWorldTransform(p).ExtractTranslation()[2]
               for p in stage.Traverse() if p.GetName().startswith("seg_")]
         assert min(zs) >= 0.0   # clamped to the surface it lies on
+
+    def test_meander_stays_a_fraction_of_the_run(self, tmp_path):
+        # a short cord with lots of slack must not curl like a phone cord
+        pytest.importorskip("pxr")
+        from pxr import Gf, Usd, UsdGeom
+
+        from make_cable import route_cord
+        stage = Usd.Stage.CreateNew(str(tmp_path / "m.usda"))
+        UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+        route_cord(stage, "/Cord", Gf.Vec3d(0, 0, 0.02), Gf.Vec3d(1, 0, 0),
+                   Gf.Vec3d(0.3, 0, 0.01), Gf.Vec3d(-1, 0, 0),
+                   0.9, 0.005, segments=30, ground_z=0.005)
+        cache = UsdGeom.XformCache()
+        ys = [cache.GetLocalToWorldTransform(p).ExtractTranslation()[1]
+              for p in stage.Traverse() if p.GetName().startswith("seg_")]
+        assert max(abs(y) for y in ys) <= 0.3 * 0.25   # <= 25% of the run
+
+
+class TestCordExitPriors:
+    def test_classes_declare_where_their_cord_leaves(self):
+        for cls in ("desk_lamp", "computer_mouse", "appliance_small"):
+            assert PRIORS[cls].get("cord_exit") in ("min", "max"), cls

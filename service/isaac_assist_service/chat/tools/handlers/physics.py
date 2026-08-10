@@ -3491,9 +3491,25 @@ async def _handle_create_corded_asset(args: Dict) -> Dict:
             return {"type": "data",
                     "error": "composing a corded tool needs BOTH tool_asset "
                              "and plug_asset; omit both for a bare cord"}
+        # where a cord leaves an object is CLASS knowledge (a mouse's cord
+        # exits its narrow front, a lamp's its base) — the geometric
+        # fat-end heuristic guesses wrong often enough to encode it
+        tool_attach = args.get("tool_attach") or "auto"
+        if tool_attach == "auto":
+            try:
+                qf = repo / "workspace" / "review_queue" / f"{tool_id}.json"
+                cls = json.loads(qf.read_text()).get(
+                    "report", {}).get("matched_class")
+                priors = json.loads((repo / "workspace" / "knowledge"
+                                     / "asset_class_priors.json").read_text())
+                tool_attach = priors["classes"].get(cls, {}).get(
+                    "cord_exit", "auto")
+            except (OSError, ValueError, KeyError):
+                tool_attach = "auto"
         path = compose(tool_file, plug_file, out, length, radius, links,
                        upright=bool(args.get("upright", True)),
-                       cord_mode=str(args.get("cord_mode", "routed")))
+                       cord_mode=str(args.get("cord_mode", "routed")),
+                       tool_attach=tool_attach)
         kind = "corded_assembly"
     else:
         path = build_cable(out, length, radius, links)

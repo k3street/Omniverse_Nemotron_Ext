@@ -237,6 +237,32 @@ def attach_frame(usd_path: str, end: str = "auto"):
     return Gf.Vec3d(*point), Gf.Vec3d(*(d / n))
 
 
+def strip_baked_cord(usd_path: str) -> int:
+    """Deactivate baked cord geometry (meshes named wire/cable/cord/lead)
+    in a derivative wrapper, in place. Returns how many were removed.
+
+    Scanned corded tools ship their cord sprawled across the scan — it
+    dominates the bounding box (which wrecks auto-scaling) and fights any
+    cord we route. Deactivating leaves the tool intact and re-measurable.
+    """
+    import re as _re
+
+    from pxr import Usd, UsdGeom
+
+    stage = Usd.Stage.Open(usd_path)
+    n = 0
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdGeom.Mesh) or not prim.IsActive():
+            continue
+        if _re.search(r"wire|cable|cord|lead", prim.GetName(), _re.I):
+            prim.SetActive(False)
+            n += 1
+    if n:
+        stage.GetRootLayer().Save()
+    del stage
+    return n
+
+
 def route_cord(stage, root_path: str, p0, d0, p1, d1,
                length_m: float, radius_m: float, segments: int = 40,
                ground_z: float | None = None):
@@ -268,7 +294,9 @@ def route_cord(stage, root_path: str, p0, d0, p1, d1,
     run = (p1 - p0)
     side = Gf.Vec3d(-run[1], run[0], 0.0)
     side = side.GetNormalized() if side.GetLength() > 1e-6 else Gf.Vec3d(0, 1, 0)
-    meander = side * (slack * 0.55 + span * 0.06)
+    # keep the sideways bulge a fraction of the RUN, not of the slack —
+    # unbounded it turns a short cord into a curly telephone cable
+    meander = side * min(slack * 0.35, span * 0.12)
 
     def curve(handle: float, sag: float):
         c0 = p0 + d0 * handle + Gf.Vec3d(0, 0, -sag) + meander
@@ -333,7 +361,7 @@ def compose(iron: str, plug: str, out_path: Path,
             length_m: float = 1.0, radius_m: float = 0.004,
             links: int = 24, tool_attach: str = "auto",
             plug_attach: str = "auto", upright: bool = False,
-            cord_mode: str = "routed") -> Path:
+            cord_mode: str = "routed", strip_cord: bool = True) -> Path:
     """Iron + cable + plug as ONE fixed-base-able articulation rooted at
     the plug. Physics runs on clean UNSCALED proxy bodies (joint frames
     through scaled scan wrappers are treacherous — that instability cost
@@ -345,6 +373,9 @@ def compose(iron: str, plug: str, out_path: Path,
 
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
+    if strip_cord:
+        # a tool that already has a baked cord would otherwise wear two
+        strip_baked_cord(iron)
     cable_file = build_cable(OUT_DIR / "_compose_cable.usda",
                              length_m, radius_m, links, sag=False)
     out_path.parent.mkdir(parents=True, exist_ok=True)

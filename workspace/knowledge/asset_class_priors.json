@@ -143,7 +143,8 @@
    "typical_materials": [
     "plastic_abs",
     "steel_stainless"
-   ]
+   ],
+   "cord_exit": "min"
   },
   "mug": {
    "keywords": [
@@ -754,7 +755,8 @@
    "articulable": false,
    "typical_materials": [
     "plastic_abs"
-   ]
+   ],
+   "cord_exit": "min"
   },
   "headphones": {
    "keywords": [
@@ -824,7 +826,8 @@
    "articulable": false,
    "typical_materials": [
     "plastic_abs"
-   ]
+   ],
+   "cord_exit": "min"
   },
   "toothbrush": {
    "keywords": [
@@ -924,7 +927,8 @@
    "typical_materials": [
     "plastic_abs",
     "steel_stainless"
-   ]
+   ],
+   "cord_exit": "max"
   },
   "power_plug": {
    "keywords": [
@@ -962,7 +966,8 @@
    "articulable": false,
    "typical_materials": [
     "plastic_abs"
-   ]
+   ],
+   "cord_exit": "min"
   },
   "charger": {
    "keywords": [
@@ -981,7 +986,8 @@
    "articulable": false,
    "typical_materials": [
     "plastic_abs"
-   ]
+   ],
+   "cord_exit": "min"
   },
   "desk_lamp": {
    "keywords": [
@@ -1001,7 +1007,8 @@
    "typical_materials": [
     "steel_mild",
     "plastic_abs"
-   ]
+   ],
+   "cord_exit": "min"
   }
  }
 }
