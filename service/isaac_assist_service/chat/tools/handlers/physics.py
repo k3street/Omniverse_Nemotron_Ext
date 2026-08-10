@@ -3421,6 +3421,149 @@ print(json.dumps(result, default=str))
 # Registration
 
 
+async def _handle_create_corded_asset(args: Dict) -> Dict:
+    """Generate a physically accurate cord — standalone, or welded between
+    two ingested assets (tool + plug) as one articulation — and push the
+    result through the normal ingest gate so it lands in the review queue
+    with a report, renders and a proposed category.
+
+    Cord physics recipe (validated live in PhysX): D6 joints with locked
+    translation, +/-20-25 deg rotation limits and stiffness/damping drives
+    toward straight; solver-stable link masses; 64 position iterations;
+    240 Hz scene. See scripts/make_cable.py.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    repo = _Path(__file__).resolve().parents[5]
+    scripts = repo / "scripts"
+    for _p in (str(repo), str(scripts)):
+        if _p not in _sys.path:
+            _sys.path.insert(0, _p)
+
+    try:
+        from make_cable import OUT_DIR, build_cable, compose
+    except ImportError as exc:  # pragma: no cover - env without pxr
+        return {"type": "data", "error": f"cable generator unavailable: {exc}"}
+
+    length = float(args.get("length_m", 1.0))
+    radius = float(args.get("radius_m", 0.004))
+    links = int(args.get("links", 24))
+    tool_id = args.get("tool_asset")
+    plug_id = args.get("plug_asset")
+    name = args.get("name") or (
+        f"{tool_id}_with_cord" if tool_id else "cable")
+
+    def _resolve(asset_id: str) -> Optional[str]:
+        """asset_id -> a USD file: promoted library first, then the
+        review queue's corrected derivative."""
+        if not asset_id:
+            return None
+        reg_path = (repo / "workspace" / "knowledge" / "sim_ready_assets.json")
+        try:
+            reg = json.loads(reg_path.read_text())
+            for a in reg.get("assets", []):
+                if a.get("asset_id") == asset_id and a.get("file"):
+                    return a["file"]
+        except (OSError, ValueError):
+            pass
+        qf = repo / "workspace" / "review_queue" / f"{asset_id}.json"
+        if qf.exists():
+            try:
+                return json.loads(qf.read_text()).get("file")
+            except ValueError:
+                return None
+        return None
+
+    out = OUT_DIR / f"{name}.usda"
+    if tool_id or plug_id:
+        tool_file = _resolve(tool_id)
+        plug_file = _resolve(plug_id)
+        missing = [i for i, f in ((tool_id, tool_file), (plug_id, plug_file))
+                   if i and not f]
+        if missing:
+            return {"type": "data",
+                    "error": f"asset_id(s) not found in library or review "
+                             f"queue: {missing}. Ingest them first "
+                             f"(ingest_asset_report) or list with "
+                             f"list_sim_ready_assets."}
+        if not (tool_file and plug_file):
+            return {"type": "data",
+                    "error": "composing a corded tool needs BOTH tool_asset "
+                             "and plug_asset; omit both for a bare cord"}
+        path = compose(tool_file, plug_file, out, length, radius, links)
+        kind = "corded_assembly"
+    else:
+        path = build_cable(out, length, radius, links)
+        kind = "cable"
+
+    result = {"type": "data", "kind": kind, "file": str(path),
+              "length_m": length, "radius_m": radius, "links": links}
+
+    if args.get("ingest", True):
+        try:
+            import asyncio as _asyncio
+
+            from ingest_asset import queue_file
+            # queue_file drives its own event loop (the report codegen is
+            # async) — calling it inline from this async handler leaves the
+            # coroutine unawaited, so give it a thread of its own
+            entry = await _asyncio.to_thread(
+                queue_file, str(path), args.get("class_hint"), name)
+            report = entry.get("report", {})
+            result["ingested"] = {
+                "asset_id": entry["asset_id"],
+                "proposed_category": entry.get("proposed_category"),
+                "applied_fixes": entry.get("applied_fixes", []),
+                "structure": report.get("structure"),
+                "callouts": report.get("callouts", []),
+            }
+            result["next"] = ("review it in the asset hub, or place it in a "
+                              "scene with build_scene_from_blueprint; anchor "
+                              "the plug end with a FixedJoint to the world")
+        except Exception as exc:  # ingest is best-effort
+            result["ingest_error"] = str(exc)[:200]
+    return result
+
+
+async def _handle_critique_render(args: Dict) -> Dict:
+    """Point the visual judges at a render of OUR OWN authored work before
+    a human is asked to look at it.
+
+    The judges were built to review ingested assets; this turns them on
+    the pipeline's output — a composed assembly, a built scene, a physics
+    result. Capture with capture_viewport first, then pass the image path.
+    Fail-closed: a 'fail' verdict means do not present the work, fix it.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    repo = _Path(__file__).resolve().parents[5]
+    scripts = repo / "scripts"
+    for _p in (str(repo), str(scripts)):
+        if _p not in _sys.path:
+            _sys.path.insert(0, _p)
+
+    image = args.get("image_path")
+    expect = args.get("expect")
+    if not image or not expect:
+        return {"type": "data",
+                "error": "image_path and expect are both required"}
+    images = [image] if isinstance(image, str) else list(image)
+    missing = [i for i in images if not _Path(i).exists()]
+    if missing:
+        return {"type": "data", "error": f"image(s) not found: {missing}"}
+    try:
+        from critique_render import critique
+        result = critique(images, expect)
+    except Exception as exc:
+        return {"type": "data", "error": f"critique failed: {str(exc)[:200]}"}
+    result["type"] = "data"
+    result["policy"] = ("verdict 'fail' means the work is not ready to "
+                        "show — fix the listed problems and re-critique")
+    return result
+
+
 def register(
     data: Dict[str, Callable[..., Any]],
     codegen: Dict[str, Callable[..., Any]],
@@ -3448,6 +3591,8 @@ def register(
     data["get_mass"] = _handle_get_mass
     data["get_physics_errors"] = _handle_get_physics_errors
     data["get_physics_scene_config"] = _handle_get_physics_scene_config
+    data["create_corded_asset"] = _handle_create_corded_asset
+    data["critique_render"] = _handle_critique_render
     data["ingest_asset_report"] = _handle_ingest_asset_report
     data["lookup_material"] = _handle_lookup_material
     data["sim_ready_audit"] = _handle_sim_ready_audit

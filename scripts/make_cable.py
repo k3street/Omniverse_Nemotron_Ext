@@ -165,9 +165,78 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
     return out_path
 
 
+def attach_frame(usd_path: str, end: str = "auto"):
+    """Where a cord actually enters an asset, and which way it points.
+
+    Returns (point, direction) in the asset's own space (meters): the
+    cord-entry point on the surface and the outward axis at that end.
+
+    Heuristic: cords enter at the FAT end of the principal axis — a
+    soldering iron's tip is thin and its handle thick; a plug's pins are
+    thin and its body thick. Cross-section area of the outer slab at each
+    end decides. `end` may be forced to 'min'/'max' along the principal
+    axis when the heuristic guesses wrong.
+    """
+    import numpy as np
+    from pxr import Gf, Usd, UsdGeom
+
+    stage = Usd.Stage.Open(usd_path)
+    mpu = UsdGeom.GetStageMetersPerUnit(stage)
+    cache = UsdGeom.XformCache()
+    pts = []
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdGeom.Mesh) or not prim.IsActive():
+            continue
+        raw = UsdGeom.Mesh(prim).GetPointsAttr().Get()
+        if not raw:
+            continue
+        m = np.array(cache.GetLocalToWorldTransform(prim), dtype=float)
+        pts.append((np.array(raw, dtype=float) @ m[:3, :3] + m[3, :3]) * mpu)
+    if not pts:
+        return Gf.Vec3d(0, 0, 0), Gf.Vec3d(1, 0, 0)
+    P = np.concatenate(pts)
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    axis = int(np.argmax(hi - lo))
+    span = float(hi[axis] - lo[axis]) or 1e-6
+    perp = [i for i in range(3) if i != axis]
+
+    def _slab(at_max: bool):
+        cut = (hi[axis] - 0.15 * span) if at_max else (lo[axis] + 0.15 * span)
+        sel = P[P[:, axis] >= cut] if at_max else P[P[:, axis] <= cut]
+        if len(sel) == 0:
+            sel = P
+        w = sel[:, perp].max(axis=0) - sel[:, perp].min(axis=0)
+        return sel, float(w[0] * w[1])
+
+    slab_max, area_max = _slab(True)
+    slab_min, area_min = _slab(False)
+    at_max = area_max >= area_min if end == "auto" else (end == "max")
+    slab = slab_max if at_max else slab_min
+    point = slab.mean(axis=0)
+    # sit the anchor ON the end face, not inside the slab
+    point[axis] = hi[axis] if at_max else lo[axis]
+    # Direction from the LOCAL geometry, not the bbox axis: a strain-relief
+    # boot curves away from the tool axis, and a cord welded along the bbox
+    # axis meets it at a visible angle (the critic's "two unrelated parts
+    # crossing"). PCA of the end slab gives the boot's own axis.
+    centred = slab - slab.mean(axis=0)
+    if len(slab) >= 8:
+        _, _, vecs = np.linalg.svd(centred, full_matrices=False)
+        d = vecs[0]
+    else:
+        d = np.zeros(3)
+        d[axis] = 1.0
+    outward = 1.0 if at_max else -1.0
+    if d[axis] * outward < 0:          # point it out of the asset
+        d = -d
+    n = float(np.linalg.norm(d)) or 1.0
+    return Gf.Vec3d(*point), Gf.Vec3d(*(d / n))
+
+
 def compose(iron: str, plug: str, out_path: Path,
             length_m: float = 1.0, radius_m: float = 0.004,
-            links: int = 24) -> Path:
+            links: int = 24, tool_attach: str = "auto",
+            plug_attach: str = "auto") -> Path:
     """Iron + cable + plug as ONE fixed-base-able articulation rooted at
     the plug. Physics runs on clean UNSCALED proxy bodies (joint frames
     through scaled scan wrappers are treacherous — that instability cost
@@ -209,11 +278,14 @@ def compose(iron: str, plug: str, out_path: Path,
         return ([s[0] * mpu, s[1] * mpu, s[2] * mpu],
                 Gf.Vec3d(mid[0] * mpu, mid[1] * mpu, mid[2] * mpu))
 
-    def _proxy(name: str, wrapper: str, at: Gf.Vec3d, mass: float) -> str:
+    def _proxy(name: str, wrapper: str, xform: Gf.Matrix4d,
+               mass: float) -> str:
         """Unscaled rigid proxy box + the wrapper as physics-free visual."""
         pp = f"/World/{name}"
         prim = stage.DefinePrim(pp, "Xform")
-        UsdGeom.XformCommonAPI(prim).SetTranslate(at)
+        xf = UsdGeom.Xformable(prim)
+        xf.ClearXformOpOrder()
+        xf.AddTransformOp().Set(xform)
         UsdPhysics.RigidBodyAPI.Apply(prim)
         UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(mass)
         dims, mid = _dims(wrapper)
@@ -242,20 +314,34 @@ def compose(iron: str, plug: str, out_path: Path,
                     p.RemoveAppliedSchema(api)
         return pp
 
-    plug_dims, _ = _dims(plug)
-    iron_dims, _ = _dims(iron)
-    seg = length_m / links
-    x_plug = 0.0
-    x_cable = plug_dims[0] / 2 + 0.01
-    x_iron = x_cable + length_m + iron_dims[0] / 2 + 0.01
+    # Attach frames: rotate each asset so its CORD-ENTRY end faces the
+    # cord, then translate so that entry point sits exactly on the cord
+    # end. Bbox-corner welding put the cord on the wrong faces entirely.
+    plug_pt, plug_dir = attach_frame(plug, plug_attach)
+    iron_pt, iron_dir = attach_frame(iron, tool_attach)
+    x_cable = 0.0
+    weld_a = Gf.Vec3d(x_cable, 0, 0)
+    weld_b = Gf.Vec3d(x_cable + length_m, 0, 0)
 
-    plug_body = _proxy("Plug", plug, Gf.Vec3d(x_plug, 0, 0), 0.05)
+    def _xform_to(point: Gf.Vec3d, direction: Gf.Vec3d,
+                  weld: Gf.Vec3d, face: Gf.Vec3d) -> Gf.Matrix4d:
+        rot = Gf.Rotation(direction, face)
+        m = Gf.Matrix4d().SetRotate(rot)
+        m.SetTranslateOnly(weld - m.TransformDir(point))
+        return m
+
+    # plug's entry faces +X (toward the cord); tool's faces -X
+    plug_body = _proxy("Plug", plug,
+                       _xform_to(plug_pt, plug_dir, weld_a, Gf.Vec3d(1, 0, 0)),
+                       0.05)
     cable_prim = stage.DefinePrim("/World/Cord", "Xform")
     csrc = Usd.Stage.Open(str(cable_file))
     cable_prim.GetReferences().AddReference(
         str(cable_file), str(csrc.GetDefaultPrim().GetPath()))
     UsdGeom.XformCommonAPI(cable_prim).SetTranslate(Gf.Vec3d(x_cable, 0, 0))
-    iron_body = _proxy("Iron", iron, Gf.Vec3d(x_iron, 0, 0), 0.12)
+    iron_body = _proxy("Iron", iron,
+                       _xform_to(iron_pt, iron_dir, weld_b, Gf.Vec3d(-1, 0, 0)),
+                       0.12)
 
     cache = UsdGeom.XformCache()
 
@@ -264,8 +350,6 @@ def compose(iron: str, plug: str, out_path: Path,
             stage.GetPrimAtPath(body_path)).GetInverse()
         return Gf.Vec3f(*inv.Transform(world_point))
 
-    weld_a = Gf.Vec3d(x_cable, 0, 0)
-    weld_b = Gf.Vec3d(x_cable + length_m, 0, 0)
     j1 = UsdPhysics.FixedJoint.Define(stage, "/World/joints/plug_to_cord")
     j1.CreateBody0Rel().SetTargets([Sdf.Path(plug_body)])
     j1.CreateBody1Rel().SetTargets([Sdf.Path("/World/Cord/link_00")])

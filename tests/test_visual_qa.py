@@ -506,3 +506,22 @@ class TestCableGenerator:
         assert abs(m - max(physical, 0.015)) < 1e-6
         meta = st.GetRootLayer().customLayerData["cable"]
         assert abs(meta["physical_mass_kg"] - physical) < 1e-6
+
+
+class TestCordedAssemblyRouting:
+    def test_jointed_cable_assembly_is_articulated_not_deformable(self):
+        from ingest_asset import propose_category
+        # 'cord' matches the rope_cable prior, but authored joints mean
+        # this is an articulation
+        assert propose_category({
+            "matched_class": "rope_cable", "callouts": [],
+            "structure": {"joints": [{"path": "/World/Cord/joints/j_01",
+                                      "type": "PhysicsJoint"}]},
+        }) == "articulated_unverified"
+
+    def test_jointless_rope_still_deformable(self):
+        from ingest_asset import propose_category
+        assert propose_category({
+            "matched_class": "rope_cable", "callouts": [],
+            "structure": {},
+        }) == "deformable_unverified"

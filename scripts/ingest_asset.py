@@ -62,8 +62,11 @@ def propose_category(report: dict) -> str:
         # UsdSkel rig: a character is a kinematic animated collider,
         # never a dynamic rigid body
         return "character_rigged"
-    if _deformable_type(report):
-        # soft-body class: rigid categories would be a physics lie
+    if _deformable_type(report) and not report.get("structure", {}).get("joints"):
+        # soft-body class: rigid categories would be a physics lie. But
+        # AUTHORED JOINTS outrank the class keyword — a jointed cable
+        # assembly is an articulation, not cloth (the composed corded
+        # tool matched 'cord' -> rope_cable and mis-routed).
         return "deformable_unverified"
     if any(c["check"] == "articulation" and "baked" in c["message"] for c in callouts):
         return "rigid_only_baked"

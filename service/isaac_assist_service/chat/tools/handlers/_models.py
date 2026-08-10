@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-10T00:28:59+00:00
-Tool count: 440
+Generated: 2026-08-10T17:48:01+00:00
+Tool count: 442
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -798,6 +798,28 @@ class GenerateSceneBlueprintArgs(BaseModel):
     description: str = Field(..., description="Natural language scene description — e.g. 'a kitchen with a table, 4 chairs, a Franka robot, and a fridge'")
     room_dimensions: Optional[List[float]] = Field(None, description="Room size [length, width, height] in meters. Default: auto from description.")
     available_assets: Optional[List[Dict[str, Any]]] = Field(None, description="Pre-resolved asset list from catalog_search. If omitted, auto-searches.")
+
+
+class CritiqueRenderArgs(BaseModel):
+    """Run the visual judges on a RENDER of work you just authored — a composed assembly, a built scene, a physics result — BEFORE showing it to the user. Capture the viewport with capture_viewport, then pas"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    image_path: str = Field(..., description="Path to the rendered PNG (from capture_viewport)")
+    expect: str = Field(..., description="What the render SHOULD show, described concretely — the judge scores against this")
+
+
+class CreateCordedAssetArgs(BaseModel):
+    """Generate a physically accurate CORD (power cable) — standalone, or welded between two already-ingested assets as ONE articulation (e.g. a soldering iron + its plug). Use for 'give this tool a cord', '"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    tool_asset: Optional[str] = Field(None, description="asset_id of the tool the cord attaches to (e.g. 'soldering_iron_1'). Omit for a bare cord.")
+    plug_asset: Optional[str] = Field(None, description="asset_id of the plug at the far end (e.g. 'power_plug_european'). Required when tool_asset is given.")
+    length_m: Optional[float] = Field(None, description="Cord length in meters. Default: 1.0")
+    radius_m: Optional[float] = Field(None, description="Cord radius in meters. Default: 0.004 (4 mm jacket)")
+    links: Optional[int] = Field(None, description="Capsule links — more = smoother drape, slower sim. Default: 24")
+    name: Optional[str] = Field(None, description="asset_id for the result. Default: '<tool_asset>_with_cord' or 'cable'")
+    class_hint: Optional[str] = Field(None, description="Optional asset class for the ingest report")
+    ingest: Optional[bool] = Field(None, description="Push through the ingest gate into the review queue. Default: true")
 
 
 class BuildSceneFromBlueprintArgs(BaseModel):
@@ -4081,6 +4103,8 @@ MODEL_REGISTRY = {
     "list_local_files": ListLocalFilesArgs,
     "catalog_search": CatalogSearchArgs,
     "generate_scene_blueprint": GenerateSceneBlueprintArgs,
+    "critique_render": CritiqueRenderArgs,
+    "create_corded_asset": CreateCordedAssetArgs,
     "build_scene_from_blueprint": BuildSceneFromBlueprintArgs,
     "create_isaaclab_env": CreateIsaaclabEnvArgs,
     "launch_training": LaunchTrainingArgs,

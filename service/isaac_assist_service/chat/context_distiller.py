@@ -79,6 +79,8 @@ TOOL_CATEGORIES: Dict[str, List[str]] = {
         "catalog_search", "nucleus_browse", "download_asset",
         "make_sim_ready", "sim_ready_audit", "ingest_asset_report",
         "list_sim_ready_assets",
+        "create_corded_asset",
+        "critique_render",
     ],
     "rl_training": ["create_isaaclab_env", "launch_training"],
     "sdg": ["configure_sdg"],

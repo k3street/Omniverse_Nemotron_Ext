@@ -1774,6 +1774,42 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "critique_render",
+            "description": "Run the visual judges on a RENDER of work you just authored — a composed assembly, a built scene, a physics result — BEFORE showing it to the user. Capture the viewport with capture_viewport, then pass the image path plus what it is supposed to show. Returns a verdict (pass/fail), a literal description of what the judge actually sees, concrete problems and suggested fixes. Use this as a self-check whenever you have built something visual: a 'fail' verdict means fix it and re-critique rather than presenting it. Also catches broken renders (empty frames, bad framing) before they are mistaken for broken work.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_path": {"type": "string", "description": "Path to the rendered PNG (from capture_viewport)"},
+                    "expect": {"type": "string", "description": "What the render SHOULD show, described concretely — the judge scores against this"},
+                },
+                "required": ["image_path", "expect"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_corded_asset",
+            "description": "Generate a physically accurate CORD (power cable) — standalone, or welded between two already-ingested assets as ONE articulation (e.g. a soldering iron + its plug). Use for 'give this tool a cord', 'make a power cable', 'a soldering iron plugged into the wall'. The cord is a capsule chain with D6 joints (locked translation, limited + driven rotation) that drapes, swings and bends under gravity — scanned cords are baked geometry and cannot simulate. tool_asset/plug_asset take asset_ids from list_sim_ready_assets or the review queue (ingest first with ingest_asset_report). The result is pushed through the ingest gate automatically: it lands in the review queue with a structure report, renders and a proposed category. Place it in a scene with build_scene_from_blueprint and anchor the plug end.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_asset": {"type": "string", "description": "asset_id of the tool the cord attaches to (e.g. 'soldering_iron_1'). Omit for a bare cord."},
+                    "plug_asset": {"type": "string", "description": "asset_id of the plug at the far end (e.g. 'power_plug_european'). Required when tool_asset is given."},
+                    "length_m": {"type": "number", "description": "Cord length in meters. Default: 1.0"},
+                    "radius_m": {"type": "number", "description": "Cord radius in meters. Default: 0.004 (4 mm jacket)"},
+                    "links": {"type": "integer", "description": "Capsule links — more = smoother drape, slower sim. Default: 24"},
+                    "name": {"type": "string", "description": "asset_id for the result. Default: '<tool_asset>_with_cord' or 'cable'"},
+                    "class_hint": {"type": "string", "description": "Optional asset class for the ingest report"},
+                    "ingest": {"type": "boolean", "description": "Push through the ingest gate into the review queue. Default: true"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "build_scene_from_blueprint",
             "description": "Execute a scene blueprint — creates all prims, places assets, applies physics, and spawns ANIMATED HUMAN CHARACTERS. The blueprint should come from generate_scene_blueprint. Per object: 'sim_ready_asset' (an asset_id from list_sim_ready_assets) references the verified library file with physics already authored; otherwise an optional 'physics' profile ('manipulable'|'tool'|'furniture'|'static'|'decoration') plus 'mass_kg' authors collision (+ rigid body and mass for dynamic profiles) on placement. A PhysicsScene is ensured whenever physics is used. Blueprint may also carry 'characters': a list of {name, position [x,y,z], heading_deg, clip} — clip is one of 'walk'|'walk_2'|'walk_3'|'walk_4'|'sit'|'idle'|'wave'|'look_around'. Characters are animated Biped humans playing real motion clips on a looping timeline (walk clips carry root motion — they cross the floor). For 'humans sitting on furniture', place a 'sit' character at the seat position facing outward. For a MOVING CROWD: spread walkers on a ring or grid (5-10 m apart), vary clips across walk|walk_2|walk_3|walk_4 AND raw mirrored variants (stand_walk_1_mirror ... stand_walk_7_mirror — any clip file name works), vary heading_deg so paths cross, and mix in a few idle/look_around/wave characters for realism.",
             "parameters": {
