@@ -525,3 +525,39 @@ class TestCordedAssemblyRouting:
             "matched_class": "rope_cable", "callouts": [],
             "structure": {},
         }) == "deformable_unverified"
+
+
+class TestRoutedCord:
+    def _build(self, tmp_path, length=0.8):
+        pytest.importorskip("pxr")
+        from pxr import Gf, Usd, UsdGeom
+
+        from make_cable import route_cord
+        stage = Usd.Stage.CreateNew(str(tmp_path / "r.usda"))
+        UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+        got = route_cord(stage, "/Cord",
+                         Gf.Vec3d(0, 0, 0.03), Gf.Vec3d(1, 0, 0),
+                         Gf.Vec3d(0.5, 0, 0.01), Gf.Vec3d(-1, 0, 0),
+                         length, 0.005, segments=30, ground_z=0.005)
+        return stage, got
+
+    def test_arc_length_matches_requested_cord(self, tmp_path):
+        _, got = self._build(tmp_path, length=0.8)
+        assert abs(got - 0.8) < 0.05   # slack shows as droop, not stretch
+
+    def test_cord_is_static_geometry(self, tmp_path):
+        from pxr import UsdPhysics
+        stage, _ = self._build(tmp_path)
+        segs = [p for p in stage.Traverse() if p.GetName().startswith("seg_")]
+        assert len(segs) > 10
+        # collidable scene dressing: colliders, but no rigid bodies to solve
+        assert all(p.HasAPI(UsdPhysics.CollisionAPI) for p in segs)
+        assert not any(p.HasAPI(UsdPhysics.RigidBodyAPI) for p in segs)
+
+    def test_cord_never_dips_below_the_surface(self, tmp_path):
+        from pxr import UsdGeom
+        stage, _ = self._build(tmp_path)
+        cache = UsdGeom.XformCache()
+        zs = [cache.GetLocalToWorldTransform(p).ExtractTranslation()[2]
+              for p in stage.Traverse() if p.GetName().startswith("seg_")]
+        assert min(zs) >= 0.0   # clamped to the surface it lies on

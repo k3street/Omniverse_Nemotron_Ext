@@ -3491,7 +3491,9 @@ async def _handle_create_corded_asset(args: Dict) -> Dict:
             return {"type": "data",
                     "error": "composing a corded tool needs BOTH tool_asset "
                              "and plug_asset; omit both for a bare cord"}
-        path = compose(tool_file, plug_file, out, length, radius, links)
+        path = compose(tool_file, plug_file, out, length, radius, links,
+                       upright=bool(args.get("upright", True)),
+                       cord_mode=str(args.get("cord_mode", "routed")))
         kind = "corded_assembly"
     else:
         path = build_cable(out, length, radius, links)

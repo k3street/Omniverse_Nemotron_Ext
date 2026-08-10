@@ -237,10 +237,103 @@ def attach_frame(usd_path: str, end: str = "auto"):
     return Gf.Vec3d(*point), Gf.Vec3d(*(d / n))
 
 
+def route_cord(stage, root_path: str, p0, d0, p1, d1,
+               length_m: float, radius_m: float, segments: int = 40,
+               ground_z: float | None = None):
+    """A STATIC routed cord: a smooth curve leaving p0 along d0 and
+    arriving at p1 from direction d1 (d1 points back toward p0), arc-length
+    matched to `length_m` so the slack shows as droop, sampled into capsule
+    colliders.
+
+    Why static: a dynamic cable only earns its cost when the robot
+    MANIPULATES it. For scene dressing — a lamp plugged into the wall,
+    an iron on a bench — what matters is that the cord looks right,
+    occupies space, and can be collided with. The dynamic capsule chain
+    stays available (cord_mode='dynamic') for grasping work; it needs
+    tension to hold its shape and coils when slack.
+    """
+    import math
+
+    from pxr import Gf, Sdf, UsdGeom, UsdPhysics
+
+    p0 = Gf.Vec3d(*p0)
+    p1 = Gf.Vec3d(*p1)
+    d0 = Gf.Vec3d(*d0).GetNormalized()
+    d1 = Gf.Vec3d(*d1).GetNormalized()
+    span = (p1 - p0).GetLength() or 1e-6
+    slack = max(0.0, length_m - span)
+
+    # slack cord lying on a surface meanders — a dead-straight run reads
+    # as a rod. Push the control points to opposite sides of the run.
+    run = (p1 - p0)
+    side = Gf.Vec3d(-run[1], run[0], 0.0)
+    side = side.GetNormalized() if side.GetLength() > 1e-6 else Gf.Vec3d(0, 1, 0)
+    meander = side * (slack * 0.55 + span * 0.06)
+
+    def curve(handle: float, sag: float):
+        c0 = p0 + d0 * handle + Gf.Vec3d(0, 0, -sag) + meander
+        c1 = p1 + d1 * handle + Gf.Vec3d(0, 0, -sag) - meander
+        pts = []
+        for i in range(segments + 1):
+            t = i / segments
+            u = 1.0 - t
+            b = (p0 * (u ** 3) + c0 * (3 * u * u * t)
+                 + c1 * (3 * u * t * t) + p1 * (t ** 3))
+            if ground_z is not None and b[2] < ground_z:
+                b = Gf.Vec3d(b[0], b[1], ground_z)   # cords rest on surfaces
+            pts.append(b)
+        return pts
+
+    def arclen(pts):
+        return sum((pts[i + 1] - pts[i]).GetLength() for i in range(len(pts) - 1))
+
+    # grow handle+sag until the curve is as long as the cord really is
+    lo, hi = 0.0, max(span, length_m) * 1.5
+    pts = curve(span * 0.3, slack * 0.5)
+    for _ in range(24):
+        mid = 0.5 * (lo + hi)
+        pts = curve(mid, slack * 0.55 + mid * 0.15)
+        if arclen(pts) < length_m:
+            lo = mid
+        else:
+            hi = mid
+    UsdGeom.Xform.Define(stage, root_path)
+    mat_path = root_path + "/rubber"
+    mat = stage.DefinePrim(mat_path)
+    m = UsdPhysics.MaterialAPI.Apply(mat)
+    m.CreateStaticFrictionAttr().Set(0.9)
+    m.CreateDynamicFrictionAttr().Set(0.8)
+    m.CreateRestitutionAttr().Set(0.05)
+    m.CreateDensityAttr().Set(RUBBER_DENSITY)
+    for i in range(len(pts) - 1):
+        a, b = pts[i], pts[i + 1]
+        seg = (b - a).GetLength()
+        if seg < 1e-6:
+            continue
+        sp = f"{root_path}/seg_{i:03d}"
+        cap = UsdGeom.Capsule.Define(stage, sp)
+        cap.GetAxisAttr().Set("X")
+        cap.GetRadiusAttr().Set(radius_m)
+        cap.GetHeightAttr().Set(seg)
+        cap.GetDisplayColorAttr().Set([(0.05, 0.05, 0.05)])
+        xf = UsdGeom.Xformable(cap.GetPrim())
+        xf.ClearXformOpOrder()
+        rot = Gf.Rotation(Gf.Vec3d(1, 0, 0), (b - a).GetNormalized())
+        mtx = Gf.Matrix4d().SetRotate(rot)
+        mtx.SetTranslateOnly((a + b) * 0.5)
+        xf.AddTransformOp().Set(mtx)
+        UsdPhysics.CollisionAPI.Apply(cap.GetPrim())
+        rel = cap.GetPrim().CreateRelationship(
+            "physics:materialBinding", custom=False)
+        rel.SetTargets([Sdf.Path(mat_path)])
+    return arclen(pts)
+
+
 def compose(iron: str, plug: str, out_path: Path,
             length_m: float = 1.0, radius_m: float = 0.004,
             links: int = 24, tool_attach: str = "auto",
-            plug_attach: str = "auto", upright: bool = False) -> Path:
+            plug_attach: str = "auto", upright: bool = False,
+            cord_mode: str = "routed") -> Path:
     """Iron + cable + plug as ONE fixed-base-able articulation rooted at
     the plug. Physics runs on clean UNSCALED proxy bodies (joint frames
     through scaled scan wrappers are treacherous — that instability cost
@@ -333,6 +426,42 @@ def compose(iron: str, plug: str, out_path: Path,
         m = Gf.Matrix4d().SetRotate(rot)
         m.SetTranslateOnly(weld - m.TransformDir(point))
         return m
+
+    if cord_mode == "routed":
+        # Tool keeps its pose; the cord is a static routed curve from its
+        # real exit to the plug. No solver, no coiling, always looks right.
+        tdims, _ = _dims(iron)
+        st = Usd.Stage.Open(iron)
+        trng = UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [UsdGeom.Tokens.default_, UsdGeom.Tokens.render],
+        ).ComputeWorldBound(st.GetPseudoRoot()).ComputeAlignedRange()
+        tmpu = UsdGeom.GetStageMetersPerUnit(st)
+        lift = (-float(trng.GetMin()[2]) * tmpu) if upright else 0.0
+        tool_x = Gf.Matrix4d().SetTranslate(Gf.Vec3d(0, 0, lift))
+        iron_body = _proxy("Iron", iron, tool_x, 0.12)
+        exit_w = Gf.Vec3d(iron_pt[0], iron_pt[1], iron_pt[2] + lift)
+        h = Gf.Vec3d(iron_dir[0], iron_dir[1], 0.0)
+        if h.GetLength() < 1e-6:
+            h = Gf.Vec3d(1, 0, 0)
+        h = h.GetNormalized()
+        # plug lies on the surface at ~70% of the cord length away
+        plug_at = exit_w + h * (length_m * 0.7)
+        plug_at = Gf.Vec3d(plug_at[0], plug_at[1], radius_m * 2)
+        plug_body = _proxy("Plug", plug,
+                           _xform_to(plug_pt, plug_dir, plug_at, -h), 0.05)
+        # d1 is the direction the cord ARRIVES FROM at the plug — i.e.
+        # pointing back toward the tool. Passing +h made the curve
+        # overshoot past the plug and loop back through it.
+        got = route_cord(stage, "/World/Cord", exit_w, iron_dir,
+                         plug_at, -h, length_m, radius_m,
+                         ground_z=(radius_m if upright else None))
+        stage.GetRootLayer().customLayerData = {
+            "cord": {"mode": "routed", "requested_m": length_m,
+                     "routed_m": round(got, 4), "static": True}}
+        UsdPhysics.Scene.Define(stage, Sdf.Path("/PhysicsScene"))
+        stage.GetRootLayer().Save()
+        return out_path
 
     cable_prim = stage.DefinePrim("/World/Cord", "Xform")
     csrc = Usd.Stage.Open(str(cable_file))

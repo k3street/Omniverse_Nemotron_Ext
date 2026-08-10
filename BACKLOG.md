@@ -194,12 +194,20 @@ OPEN — the honest one: a SLACK cord still coils. Under tension (tool
 hanging) the chain hangs straight and correct; lying loose it collapses
 to 0.19 m of 0.7 m even with bend drives scaled to link weight. D6
 rotational drives are not holding shape at this scale.
-- [ ] Slack-cord shape: try (a) much higher drive stiffness in a
-      re-scaled mass/length regime, (b) Newton's native
-      ModelBuilder.add_joint_cable as the reference implementation, or
-      (c) a ROUTED STATIC cord (kinematic spline) for scene dressing —
-      a robot only needs a dynamic cable when it manipulates one, so
-      static routing may be the right default with dynamics opt-in.
+SOLVED 2026-08-10 via (c): `route_cord` + `cord_mode='routed'` is now
+the DEFAULT. A static Bezier cord leaves the tool's real exit along its
+local axis, arrives at the plug from the correct side (the end tangent
+must point BACK toward the tool — the +h sign bug made the curve
+overshoot and thread through the plug), is arc-length matched to the
+requested cord length so slack shows as droop, meanders laterally so it
+does not read as a rod, and clamps to the surface it lies on. Sampled
+into capsule colliders: collidable scene dressing, zero solver cost,
+always looks right. Validated on the desk lamp: 0.75 m cord leaves the
+base, S-curves across the table, terminates at the plug. Dynamics stay
+opt-in (`cord_mode='dynamic'`) for cords the robot actually grasps —
+that path still needs tension to hold shape.
+- [ ] Dynamic-cord slack shape (only for manipulated cords): Newton's
+      ModelBuilder.add_joint_cable as the reference implementation.
 - [ ] Mass-floor honesty: reduce toward physical 2.5 g links via TGS
       solver tuning or Newton (cross-check with add_joint_cable).
 - [ ] plug-socket insertion affordance; cable in scene blueprints.

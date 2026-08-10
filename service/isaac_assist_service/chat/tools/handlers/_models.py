@@ -11,7 +11,7 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-10T17:48:01+00:00
+Generated: 2026-08-10T22:06:48+00:00
 Tool count: 442
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
@@ -819,6 +819,8 @@ class CreateCordedAssetArgs(BaseModel):
     links: Optional[int] = Field(None, description="Capsule links — more = smoother drape, slower sim. Default: 24")
     name: Optional[str] = Field(None, description="asset_id for the result. Default: '<tool_asset>_with_cord' or 'cable'")
     class_hint: Optional[str] = Field(None, description="Optional asset class for the ingest report")
+    cord_mode: Optional[str] = Field(None, description="'routed' (default): a STATIC cord curve from the tool's exit to the plug — always looks right, collides, no solver cost. Use for scene dressing. 'dynamic': a simulated capsule chain the robot can grab")
+    upright: Optional[bool] = Field(None, description="true (default): the tool keeps its pose and stands on the ground (lamp, appliance, station), and the cord routes from it. false: the tool hangs from the cord (a hand tool suspended from a wall plug).")
     ingest: Optional[bool] = Field(None, description="Push through the ingest gate into the review queue. Default: true")
 
 

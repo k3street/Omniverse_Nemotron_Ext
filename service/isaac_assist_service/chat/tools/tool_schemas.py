@@ -1801,6 +1801,8 @@ ISAAC_SIM_TOOLS = [
                     "links": {"type": "integer", "description": "Capsule links — more = smoother drape, slower sim. Default: 24"},
                     "name": {"type": "string", "description": "asset_id for the result. Default: '<tool_asset>_with_cord' or 'cable'"},
                     "class_hint": {"type": "string", "description": "Optional asset class for the ingest report"},
+                    "cord_mode": {"type": "string", "enum": ["routed", "dynamic"], "description": "'routed' (default): a STATIC cord curve from the tool's exit to the plug — always looks right, collides, no solver cost. Use for scene dressing. 'dynamic': a simulated capsule chain the robot can grab and move; it needs tension to hold its shape and coils when slack, so use it only when the cord is manipulated."},
+                    "upright": {"type": "boolean", "description": "true (default): the tool keeps its pose and stands on the ground (lamp, appliance, station), and the cord routes from it. false: the tool hangs from the cord (a hand tool suspended from a wall plug)."},
                     "ingest": {"type": "boolean", "description": "Push through the ingest gate into the review queue. Default: true"},
                 },
                 "required": [],
