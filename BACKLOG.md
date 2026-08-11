@@ -206,6 +206,25 @@ always looks right. Validated on the desk lamp: 0.75 m cord leaves the
 base, S-curves across the table, terminates at the plug. Dynamics stay
 opt-in (`cord_mode='dynamic'`) for cords the robot actually grasps —
 that path still needs tension to hold shape.
+Routed-mode fixes 2026-08-11 (all found by the human looking at the
+sim, then confirmed numerically):
+- The routed branch RETURNED before the joint code, so the plug was a
+  free rigid body attached to nothing — the static cord's capsules shoved
+  it away on play. A routed assembly is now STATIC throughout (colliders,
+  no rigid bodies): verified zero movement over 8 s of play.
+- Plug orientation: aligning one axis leaves ROLL free, and a scanned
+  plug has no semantic "up" (its local +Z IS the cord axis). Replaced the
+  assumption with a geometric rule — roll about the cord axis to whichever
+  angle lies FLATTEST — then lift to rest and re-route the cord to the
+  moved entry.
+- Plug was 4.8 deg nose-up because it followed the cord's raw end
+  tangent; a plug on a surface is level, so the orientation now uses the
+  tangent's horizontal projection.
+- Cord endpoints are no longer ground-clamped (that opened a 3 cm gap at
+  the join); interior points still clamp. Exit point lifted by one radius
+  so the cord rests ON the surface instead of half-sunk.
+- Kit CACHES USD layers: a file rebuilt on disk keeps serving the old
+  content until Sdf.Layer.Find(path).Reload(force=True).
 - [ ] Dynamic-cord slack shape (only for manipulated cords): Newton's
       ModelBuilder.add_joint_cable as the reference implementation.
 - [ ] Mass-floor honesty: reduce toward physical 2.5 g links via TGS

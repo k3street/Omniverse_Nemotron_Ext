@@ -237,6 +237,32 @@ def attach_frame(usd_path: str, end: str = "auto"):
     return Gf.Vec3d(*point), Gf.Vec3d(*(d / n))
 
 
+def _local_points(usd_path: str):
+    """All mesh points of an asset in its own space (meters)."""
+    import numpy as np
+    from pxr import Usd, UsdGeom
+
+    stage = Usd.Stage.Open(usd_path)
+    mpu = UsdGeom.GetStageMetersPerUnit(stage)
+    cache = UsdGeom.XformCache()
+    out = []
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdGeom.Mesh) or not prim.IsActive():
+            continue
+        raw = UsdGeom.Mesh(prim).GetPointsAttr().Get()
+        if not raw:
+            continue
+        m = np.array(cache.GetLocalToWorldTransform(prim), dtype=float)
+        out.append((np.array(raw, dtype=float) @ m[:3, :3] + m[3, :3]) * mpu)
+    return np.concatenate(out) if out else None
+
+
+def _local_points_cached(usd_path: str, _cache={}):
+    if usd_path not in _cache:
+        _cache[usd_path] = _local_points(usd_path)
+    return _cache[usd_path]
+
+
 def strip_baked_cord(usd_path: str) -> int:
     """Deactivate baked cord geometry (meshes named wire/cable/cord/lead)
     in a derivative wrapper, in place. Returns how many were removed.
@@ -289,25 +315,29 @@ def route_cord(stage, root_path: str, p0, d0, p1, d1,
     span = (p1 - p0).GetLength() or 1e-6
     slack = max(0.0, length_m - span)
 
-    # slack cord lying on a surface meanders — a dead-straight run reads
-    # as a rod. Push the control points to opposite sides of the run.
-    run = (p1 - p0)
+    # Slack cord on a surface BOWS to one side in a single smooth arc.
+    # Control points pushed to OPPOSITE sides make an S with a hairpin
+    # switchback — no cord lies like that. Both to the SAME side bows.
+    run = p1 - p0
     side = Gf.Vec3d(-run[1], run[0], 0.0)
     side = side.GetNormalized() if side.GetLength() > 1e-6 else Gf.Vec3d(0, 1, 0)
-    # keep the sideways bulge a fraction of the RUN, not of the slack —
-    # unbounded it turns a short cord into a curly telephone cable
-    meander = side * min(slack * 0.35, span * 0.12)
+    # bulge stays a fraction of the run, or a short cord curls up
+    bow = side * min(slack * 0.45, span * 0.30)
 
     def curve(handle: float, sag: float):
-        c0 = p0 + d0 * handle + Gf.Vec3d(0, 0, -sag) + meander
-        c1 = p1 + d1 * handle + Gf.Vec3d(0, 0, -sag) - meander
+        c0 = p0 + d0 * handle + Gf.Vec3d(0, 0, -sag) + bow
+        c1 = p1 + d1 * handle + Gf.Vec3d(0, 0, -sag) + bow
         pts = []
         for i in range(segments + 1):
             t = i / segments
             u = 1.0 - t
             b = (p0 * (u ** 3) + c0 * (3 * u * u * t)
                  + c1 * (3 * u * t * t) + p1 * (t ** 3))
-            if ground_z is not None and b[2] < ground_z:
+            # clamp INTERIOR points only: the endpoints are the tool's
+            # cord exit and the plug's entry, and nudging them upward
+            # opens a visible gap at the join
+            if (ground_z is not None and b[2] < ground_z
+                    and 0 < i < segments):
                 b = Gf.Vec3d(b[0], b[1], ground_z)   # cords rest on surfaces
             pts.append(b)
         return pts
@@ -354,7 +384,7 @@ def route_cord(stage, root_path: str, p0, d0, p1, d1,
         rel = cap.GetPrim().CreateRelationship(
             "physics:materialBinding", custom=False)
         rel.SetTargets([Sdf.Path(mat_path)])
-    return arclen(pts)
+    return arclen(pts), pts
 
 
 def compose(iron: str, plug: str, out_path: Path,
@@ -407,15 +437,21 @@ def compose(iron: str, plug: str, out_path: Path,
                 Gf.Vec3d(mid[0] * mpu, mid[1] * mpu, mid[2] * mpu))
 
     def _proxy(name: str, wrapper: str, xform: Gf.Matrix4d,
-               mass: float) -> str:
-        """Unscaled rigid proxy box + the wrapper as physics-free visual."""
+               mass: float, dynamic: bool = True) -> str:
+        """Unscaled proxy collider + the wrapper as physics-free visual.
+
+        dynamic=False makes it a STATIC collider: a routed cord is static
+        geometry, so a dynamic plug welded to nothing simply gets shoved
+        away by the cord's capsules the moment physics starts.
+        """
         pp = f"/World/{name}"
         prim = stage.DefinePrim(pp, "Xform")
         xf = UsdGeom.Xformable(prim)
         xf.ClearXformOpOrder()
         xf.AddTransformOp().Set(xform)
-        UsdPhysics.RigidBodyAPI.Apply(prim)
-        UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(mass)
+        if dynamic:
+            UsdPhysics.RigidBodyAPI.Apply(prim)
+            UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(mass)
         dims, mid = _dims(wrapper)
         box = UsdGeom.Cube.Define(stage, pp + "/collider")
         box.GetSizeAttr().Set(1.0)
@@ -452,9 +488,28 @@ def compose(iron: str, plug: str, out_path: Path,
     weld_b = Gf.Vec3d(x_cable + length_m, 0, 0)
 
     def _xform_to(point: Gf.Vec3d, direction: Gf.Vec3d,
-                  weld: Gf.Vec3d, face: Gf.Vec3d) -> Gf.Matrix4d:
-        rot = Gf.Rotation(direction, face)
-        m = Gf.Matrix4d().SetRotate(rot)
+                  weld: Gf.Vec3d, face: Gf.Vec3d,
+                  keep_upright=None) -> Gf.Matrix4d:
+        m = Gf.Matrix4d().SetRotate(Gf.Rotation(direction, face))
+        if keep_upright is not None and keep_upright is not False:
+            # Aligning ONE axis leaves roll free, so the plug lands on its
+            # side or upside down. There is no reliable semantic "up" on a
+            # scanned plug (its local +Z here IS the cord axis), so use a
+            # geometric rule instead: roll about the entry axis to the
+            # angle that makes the body lie FLATTEST on the surface.
+            import numpy as np
+            pts = _local_points_cached(str(keep_upright))
+            if pts is not None and len(pts):
+                best, best_h = m, None
+                for deg in range(0, 360, 10):
+                    cand = m * Gf.Matrix4d().SetRotate(
+                        Gf.Rotation(face, float(deg)))
+                    r = np.array(cand, dtype=float)[:3, :3]
+                    z = (pts @ r)[:, 2]
+                    h = float(z.max() - z.min())
+                    if best_h is None or h < best_h - 1e-9:
+                        best, best_h = cand, h
+                m = best
         m.SetTranslateOnly(weld - m.TransformDir(point))
         return m
 
@@ -470,8 +525,16 @@ def compose(iron: str, plug: str, out_path: Path,
         tmpu = UsdGeom.GetStageMetersPerUnit(st)
         lift = (-float(trng.GetMin()[2]) * tmpu) if upright else 0.0
         tool_x = Gf.Matrix4d().SetTranslate(Gf.Vec3d(0, 0, lift))
-        iron_body = _proxy("Iron", iron, tool_x, 0.12)
+        # routed assembly = scene dressing: static throughout, so nothing
+        # drifts on play. Use cord_mode='dynamic' for a manipulable tool.
+        iron_body = _proxy("Iron", iron, tool_x, 0.12, dynamic=False)
         exit_w = Gf.Vec3d(iron_pt[0], iron_pt[1], iron_pt[2] + lift)
+        if upright:
+            # the exit often sits at the very bottom of the base, which
+            # sinks the cord's lower half through the surface — lift the
+            # centreline by one radius so the cord rests ON the counter
+            exit_w = Gf.Vec3d(exit_w[0], exit_w[1],
+                              max(exit_w[2], radius_m))
         h = Gf.Vec3d(iron_dir[0], iron_dir[1], 0.0)
         if h.GetLength() < 1e-6:
             h = Gf.Vec3d(1, 0, 0)
@@ -479,14 +542,47 @@ def compose(iron: str, plug: str, out_path: Path,
         # plug lies on the surface at ~70% of the cord length away
         plug_at = exit_w + h * (length_m * 0.7)
         plug_at = Gf.Vec3d(plug_at[0], plug_at[1], radius_m * 2)
-        plug_body = _proxy("Plug", plug,
-                           _xform_to(plug_pt, plug_dir, plug_at, -h), 0.05)
-        # d1 is the direction the cord ARRIVES FROM at the plug — i.e.
-        # pointing back toward the tool. Passing +h made the curve
-        # overshoot past the plug and loop back through it.
-        got = route_cord(stage, "/World/Cord", exit_w, iron_dir,
-                         plug_at, -h, length_m, radius_m,
-                         ground_z=(radius_m if upright else None))
+        # Route FIRST: d1 is the direction the cord ARRIVES FROM at the
+        # plug — pointing back toward the tool. (Passing +h made the
+        # curve overshoot past the plug and loop back through it.)
+        got, pts = route_cord(stage, "/World/Cord", exit_w, iron_dir,
+                              plug_at, -h, length_m, radius_m,
+                              ground_z=(radius_m if upright else None))
+        # THEN orient the plug to the cord's ACTUAL arrival tangent, not
+        # the straight-line heading — with a bowed cord those differ by
+        # tens of degrees, which left the plug sitting askew off the end.
+        tangent = pts[-1] - pts[-2]
+        tangent = (tangent.GetNormalized() if tangent.GetLength() > 1e-9
+                   else h)
+        if upright:
+            # A plug lying on a surface is LEVEL, whatever the cord's
+            # local slope. Using the raw tangent tipped it nose-up by the
+            # cord's approach angle (measured 4.8 deg).
+            flat = Gf.Vec3d(tangent[0], tangent[1], 0.0)
+            if flat.GetLength() > 1e-6:
+                tangent = flat.GetNormalized()
+        plug_x = _xform_to(plug_pt, plug_dir, pts[-1], -tangent,
+                           keep_upright=plug)
+        # the flattest roll can still leave the body sunk into the
+        # surface: lift it to rest, then RE-ROUTE the cord to its new
+        # entry point so the two still meet exactly
+        import numpy as _np
+        _pl = _local_points_cached(plug)
+        if _pl is not None and len(_pl) and upright:
+            _mm = _np.array(plug_x, dtype=float)
+            _wz = (_pl @ _mm[:3, :3] + _mm[3, :3])[:, 2]
+            _lift = -float(_wz.min())
+            if abs(_lift) > 1e-6:
+                _t = plug_x.ExtractTranslation()
+                plug_x.SetTranslateOnly(
+                    Gf.Vec3d(_t[0], _t[1], _t[2] + _lift))
+                entry_w = plug_x.Transform(Gf.Vec3d(*plug_pt))
+                stage.RemovePrim(Sdf.Path("/World/Cord"))
+                got, pts = route_cord(
+                    stage, "/World/Cord", exit_w, iron_dir, entry_w,
+                    -tangent, length_m, radius_m,
+                    ground_z=(radius_m if upright else None))
+        plug_body = _proxy("Plug", plug, plug_x, 0.05, dynamic=False)
         stage.GetRootLayer().customLayerData = {
             "cord": {"mode": "routed", "requested_m": length_m,
                      "routed_m": round(got, 4), "static": True}}
@@ -514,8 +610,16 @@ def compose(iron: str, plug: str, out_path: Path,
         tmpu = UsdGeom.GetStageMetersPerUnit(st)
         lift = -float(trng.GetMin()[2]) * tmpu          # base onto z=0
         tool_x = Gf.Matrix4d().SetTranslate(Gf.Vec3d(0, 0, lift))
-        iron_body = _proxy("Iron", iron, tool_x, 0.12)
+        # routed assembly = scene dressing: static throughout, so nothing
+        # drifts on play. Use cord_mode='dynamic' for a manipulable tool.
+        iron_body = _proxy("Iron", iron, tool_x, 0.12, dynamic=False)
         exit_w = Gf.Vec3d(iron_pt[0], iron_pt[1], iron_pt[2] + lift)
+        if upright:
+            # the exit often sits at the very bottom of the base, which
+            # sinks the cord's lower half through the surface — lift the
+            # centreline by one radius so the cord rests ON the counter
+            exit_w = Gf.Vec3d(exit_w[0], exit_w[1],
+                              max(exit_w[2], radius_m))
         # cord leaves horizontally along the exit direction's XY heading
         h = Gf.Vec3d(iron_dir[0], iron_dir[1], 0.0)
         if h.GetLength() < 1e-6:

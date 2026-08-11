@@ -535,7 +535,7 @@ class TestRoutedCord:
         from make_cable import route_cord
         stage = Usd.Stage.CreateNew(str(tmp_path / "r.usda"))
         UsdGeom.SetStageMetersPerUnit(stage, 1.0)
-        got = route_cord(stage, "/Cord",
+        got, _pts = route_cord(stage, "/Cord",
                          Gf.Vec3d(0, 0, 0.03), Gf.Vec3d(1, 0, 0),
                          Gf.Vec3d(0.5, 0, 0.01), Gf.Vec3d(-1, 0, 0),
                          length, 0.005, segments=30, ground_z=0.005)
@@ -583,3 +583,64 @@ class TestCordExitPriors:
     def test_classes_declare_where_their_cord_leaves(self):
         for cls in ("desk_lamp", "computer_mouse", "appliance_small"):
             assert PRIORS[cls].get("cord_exit") in ("min", "max"), cls
+
+
+class TestRoutedAssemblyIsStatic:
+    """The bug the user caught: in routed mode compose returned BEFORE the
+    joint code, leaving the plug a free rigid body that the static cord's
+    capsules shoved away the moment physics started."""
+
+    def _build(self, tmp_path):
+        pytest.importorskip("pxr")
+        from make_cable import compose
+        return compose(
+            str(REPO / "workspace/assets_fixed/electric_kettle_simready.usda"),
+            str(REPO / "workspace/assets_fixed/power_plug_european_simready.usda"),
+            tmp_path / "a.usda", length_m=0.8, radius_m=0.005,
+            upright=True, cord_mode="routed", tool_attach="min")
+
+    def test_no_free_rigid_bodies(self, tmp_path):
+        from pxr import Usd, UsdPhysics
+        st = Usd.Stage.Open(str(self._build(tmp_path)))
+        bodies = [p for p in st.Traverse()
+                  if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+        assert bodies == [], "a routed assembly must be static dressing"
+        assert any(p.HasAPI(UsdPhysics.CollisionAPI) for p in st.Traverse())
+
+    def test_cord_tip_meets_the_plug_entry(self, tmp_path):
+        from pxr import Gf, Usd, UsdGeom
+        from make_cable import attach_frame
+        out = self._build(tmp_path)
+        st = Usd.Stage.Open(str(out))
+        cache = UsdGeom.XformCache()
+        segs = sorted((p for p in st.Traverse()
+                       if p.GetName().startswith("seg_")),
+                      key=lambda p: p.GetName())
+        half = UsdGeom.Capsule(segs[-1]).GetHeightAttr().Get() / 2.0
+        tip = cache.GetLocalToWorldTransform(segs[-1]).Transform(
+            Gf.Vec3d(half, 0, 0))
+        ppt, _ = attach_frame(
+            str(REPO / "workspace/assets_fixed/power_plug_european_simready.usda"))
+        entry = cache.GetLocalToWorldTransform(
+            st.GetPrimAtPath("/World/Plug")).Transform(Gf.Vec3d(*ppt))
+        assert (tip - entry).GetLength() < 1e-6
+
+    def test_plug_lies_flat_and_level_on_the_surface(self, tmp_path):
+        import math
+
+        from pxr import Gf, Usd, UsdGeom
+        from make_cable import attach_frame
+        st = Usd.Stage.Open(str(self._build(tmp_path)))
+        cache = UsdGeom.XformCache()
+        m = cache.GetLocalToWorldTransform(st.GetPrimAtPath("/World/Plug"))
+        _, pdir = attach_frame(
+            str(REPO / "workspace/assets_fixed/power_plug_european_simready.usda"))
+        axis = m.TransformDir(Gf.Vec3d(*pdir)).GetNormalized()
+        tilt = abs(math.degrees(math.asin(max(-1.0, min(1.0, axis[2])))))
+        assert tilt < 1.0, f"plug tilted {tilt:.1f} deg off horizontal"
+        r = UsdGeom.BBoxCache(Usd.TimeCode.Default(),
+                              [UsdGeom.Tokens.default_]).ComputeWorldBound(
+            st.GetPrimAtPath("/World/Plug")).ComputeAlignedRange()
+        assert r.GetMin()[2] > -0.003          # resting, not sunk
+        size = r.GetSize()
+        assert size[2] == min(size)            # lying flattest
