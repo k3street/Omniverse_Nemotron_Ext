@@ -225,6 +225,16 @@ sim, then confirmed numerically):
   so the cord rests ON the surface instead of half-sunk.
 - Kit CACHES USD layers: a file rebuilt on disk keeps serving the old
   content until Sdf.Layer.Find(path).Reload(force=True).
+Human corrections are now CAPTURABLE (2026-08-11): the user dragged the
+plug to the right join point in the viewport and the correction was lost
+— a forced Sdf.Layer.Reload discards viewport edits (the root-layer
+override spec survives but with no authored properties, which is how it
+was diagnosed). `scripts/capture_attachment.py --asset X --prim ... --cord
+...` reads the corrected pose out of the live stage, converts it into the
+ASSET'S OWN space, and stores it in workspace/knowledge/
+cord_attachments.json; `attach_frame` prefers a stored attachment over
+its geometric guess, so the correction is made once and reused forever.
+CAPTURE BEFORE RELOADING.
 - [ ] Dynamic-cord slack shape (only for manipulated cords): Newton's
       ModelBuilder.add_joint_cable as the reference implementation.
 - [ ] Mass-floor honesty: reduce toward physical 2.5 g links via TGS

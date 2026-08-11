@@ -644,3 +644,37 @@ class TestRoutedAssemblyIsStatic:
         assert r.GetMin()[2] > -0.003          # resting, not sunk
         size = r.GetSize()
         assert size[2] == min(size)            # lying flattest
+
+
+class TestHumanAttachmentCapture:
+    """A person dragging a plug into place in the viewport knows the join
+    better than any heuristic — that correction becomes permanent data."""
+
+    def test_stored_attachment_overrides_the_heuristic(self, tmp_path,
+                                                       monkeypatch):
+        pytest.importorskip("pxr")
+        import importlib
+        import make_cable
+        store = tmp_path / "cord_attachments.json"
+        store.write_text(json.dumps({"attachments": {
+            "power_plug_european": {"local_point": [0.01, 0.02, 0.03],
+                                    "local_dir": [0.0, 0.0, 1.0],
+                                    "source": "human"}}}))
+        monkeypatch.setattr(make_cable, "REPO", tmp_path.parent)
+        # point the module's lookup at our temp store
+        real = tmp_path.parent / "workspace" / "knowledge"
+        real.mkdir(parents=True, exist_ok=True)
+        (real / "cord_attachments.json").write_text(store.read_text())
+        importlib.reload(make_cable)
+        make_cable.REPO = tmp_path.parent
+        pt, d = make_cable.attach_frame(
+            str(REPO / "workspace/assets_fixed/power_plug_european_simready.usda"))
+        assert [round(v, 3) for v in pt] == [0.01, 0.02, 0.03]
+        assert [round(v, 1) for v in d] == [0.0, 0.0, 1.0]
+
+    def test_capture_script_is_wired(self):
+        import ast
+        src = (REPO / "scripts" / "capture_attachment.py").read_text()
+        ast.parse(src)
+        assert "cord_attachments.json" in src
+        assert "local_point" in src and "local_dir" in src

@@ -181,8 +181,24 @@ def attach_frame(usd_path: str, end: str = "auto"):
     end decides. `end` may be forced to 'min'/'max' along the principal
     axis when the heuristic guesses wrong.
     """
+    import json as _json
+
     import numpy as np
     from pxr import Gf, Usd, UsdGeom
+
+    # A HUMAN-captured attachment always wins: someone dragged the part
+    # into place in the viewport and that beats any heuristic.
+    # (scripts/capture_attachment.py writes these.)
+    store = REPO / "workspace" / "knowledge" / "cord_attachments.json"
+    if store.exists():
+        try:
+            key = Path(usd_path).stem.replace("_simready", "")
+            rec = _json.loads(store.read_text())["attachments"].get(key)
+            if rec:
+                return (Gf.Vec3d(*rec["local_point"]),
+                        Gf.Vec3d(*rec["local_dir"]))
+        except (OSError, ValueError, KeyError):
+            pass
 
     stage = Usd.Stage.Open(usd_path)
     mpu = UsdGeom.GetStageMetersPerUnit(stage)
