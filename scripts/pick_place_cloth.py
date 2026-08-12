@@ -397,8 +397,19 @@ class ClothPickPlace:
             self.state_0, self.state_1 = self.state_1, self.state_0
 
     def _viewer(self, frames):
-        """Newton's USD viewer records the whole scene — arm included — so
-        the run can be looked at, not just scored."""
+        """A viewer for the run. PICK_PLACE_RECORD_USD writes the whole
+        scene — arm included — to USD; PICK_PLACE_VIEWER=gl opens a live
+        OpenGL window instead, which is the same simulation watched as it
+        happens rather than scored after the fact."""
+        if os.environ.get("PICK_PLACE_VIEWER") == "gl":
+            import warp as wp
+
+            from newton.viewer import ViewerGL
+            v = ViewerGL(width=1600, height=1000, vsync=True)
+            v.set_model(self.model)
+            # look at the table from the front-right, as the renders do
+            v.set_camera(wp.vec3(1.05, -1.75, 0.95), -46.0, -22.0)
+            return v
         out = os.environ.get("PICK_PLACE_RECORD_USD")
         if not out:
             return None
@@ -411,9 +422,16 @@ class ClothPickPlace:
         np = self.np
         # --- let the cloth land and settle while the arm holds home ---
         settle_frames = int(2.5 / FRAME_DT)
+        live = self._viewer(0) if os.environ.get("PICK_PLACE_VIEWER") == "gl" \
+            else None
         for _ in range(settle_frames):
             self._control(self.state_0)
             self.simulate()
+            if live is not None:
+                live.begin_frame(self.sim_time)
+                live.log_state(self.state_0)
+                live.end_frame()
+            self.sim_time += FRAME_DT
         settled = self.state_0.particle_q.numpy().copy()
         self.settled_loft = float(settled[:, 2].max() - TABLE_TOP)
         self.settled_start_xy = settled.mean(axis=0)[:2].copy()
@@ -425,7 +443,7 @@ class ClothPickPlace:
                   f"{self.grasp_xy[1]:+.3f}, {self.grasp_z:.3f})", flush=True)
 
         frames = int(self.total_time / FRAME_DT)
-        viewer = self._viewer(frames)
+        viewer = live if live is not None else self._viewer(frames)
         centroid_trace = []
         for f in range(frames):
             self._control(self.state_0)
@@ -437,7 +455,7 @@ class ClothPickPlace:
             self.sim_time += FRAME_DT
             pq = self.state_0.particle_q.numpy()
             centroid_trace.append(pq.mean(axis=0).copy())
-            if viewer is not None and f == frames - 1:
+            if viewer is not None and f == frames - 1 and live is None:
                 viewer.close()
             if os.environ.get("PICK_DEBUG") and f % 30 == 0:
                 c = centroid_trace[-1]
@@ -455,6 +473,17 @@ class ClothPickPlace:
                       f"fing={q[-2]:.4f} "
                       f"cloth=({c[0]:+.3f},{c[1]:+.3f},{c[2]:.3f})",
                       flush=True)
+        if live is not None:
+            # Hold the final frame so the result can actually be looked at;
+            # the window closes when the user closes it. The physics is done
+            # by now — this only keeps redrawing the last state.
+            print("  [viewer] run complete — close the window to finish",
+                  flush=True)
+            while live.is_running():
+                live.begin_frame(self.sim_time)
+                live.log_state(self.state_0)
+                live.end_frame()
+            live.close()
         return np.array(centroid_trace)
 
 
