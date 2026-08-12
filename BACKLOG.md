@@ -235,8 +235,26 @@ ASSET'S OWN space, and stores it in workspace/knowledge/
 cord_attachments.json; `attach_frame` prefers a stored attachment over
 its geometric guess, so the correction is made once and reused forever.
 CAPTURE BEFORE RELOADING.
-- [ ] Dynamic-cord slack shape (only for manipulated cords): Newton's
-      ModelBuilder.add_joint_cable as the reference implementation.
+Dynamic cords ANSWERED 2026-08-11 — the user pointed at Vertex Block
+Descent (ankachan.github.io/Projects/VertexBlockDescent; Chen, Liu, Yang
+& Yuksel, SIGGRAPH 2024), which is what Newton's SolverVBD implements —
+the solver we were already using for cloth without connecting it to the
+cable problem. Its stated edge over XPBD at extreme mass ratios is
+exactly our failure. Measured by `scripts/vbd_cable_probe.py` (Newton
+rod + VBD, PHYSICAL masses, no 15 g floor):
+  HANG  100 g tool on 3.02 g segments -> arc 0.954 m, dead straight,
+        hanging 1.200 -> 0.246 m
+  SLACK 1.0 m of cord across a 0.55 m span, both ends pinned -> HOLDS
+        THE BOW (span 0.548 m, z 0.004-0.006, lying flat)
+The PhysX D6 chain collapsed that same slack cord to a 0.19 m hairpin.
+Newton API facts: add_rod builds RIGID BODIES + cable joints (not
+particles); one quaternion per SEGMENT mapping local +Z to the segment
+direction; given positions are the REST shape; VBD needs
+ModelBuilder.color() before finalize; pin by zero inverse mass (a world
+FixedJoint let the rod fall 78 m).
+- [ ] Port cord_mode='dynamic' onto Newton rods + VBD (physical masses)
+      for cords the robot MANIPULATES; routed static cords stay the
+      default for dressing. Then the grasp-and-move cable benchmark.
 - [ ] Mass-floor honesty: reduce toward physical 2.5 g links via TGS
       solver tuning or Newton (cross-check with add_joint_cable).
 - [ ] plug-socket insertion affordance; cable in scene blueprints.
