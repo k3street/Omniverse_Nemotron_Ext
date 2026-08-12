@@ -414,7 +414,8 @@ def compose(iron: str, plug: str, out_path: Path,
             length_m: float = 1.0, radius_m: float = 0.004,
             links: int = 24, tool_attach: str = "auto",
             plug_attach: str = "auto", upright: bool = False,
-            cord_mode: str = "routed", strip_cord: bool = True) -> Path:
+            cord_mode: str = "routed", strip_cord: bool = True,
+            physx_floor: bool = True) -> Path:
     """Iron + cable + plug as ONE fixed-base-able articulation rooted at
     the plug. Physics runs on clean UNSCALED proxy bodies (joint frames
     through scaled scan wrappers are treacherous — that instability cost
@@ -430,7 +431,8 @@ def compose(iron: str, plug: str, out_path: Path,
         # a tool that already has a baked cord would otherwise wear two
         strip_baked_cord(iron)
     cable_file = build_cable(OUT_DIR / "_compose_cable.usda",
-                             length_m, radius_m, links, sag=False)
+                             length_m, radius_m, links, sag=False,
+                             physx_floor=physx_floor)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     layer = Sdf.Layer.Find(str(out_path))
     if layer:
@@ -718,6 +720,7 @@ def compose(iron: str, plug: str, out_path: Path,
     stage.GetRootLayer().customLayerData = {
         "cord": {"mode": "dynamic", "length_m": length_m,
                  "radius_m": radius_m, "links": links,
+                 "physx_floor": physx_floor,
                  "verify_with": "scripts/verify_asset_newton.py cable"}}
     scene = UsdPhysics.Scene.Define(stage, Sdf.Path("/PhysicsScene"))
     # the convergence package that makes the cord DRAPE instead of

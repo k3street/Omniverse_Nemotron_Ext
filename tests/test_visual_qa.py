@@ -718,3 +718,36 @@ class TestDynamicCordPhysicalMass:
         meta = dict(st.GetRootLayer().customLayerData)["cable"]
         assert meta["length_m"] == 0.8 and meta["radius_m"] == 0.005
         assert meta["links"] == 16 and meta["physx_floor"] is False
+
+
+class TestActuatedCable:
+    """The last open case: a gripper grasping and MOVING a cord. The
+    kinematic-driver pattern (zero inverse mass set before finalize, pose
+    driven each substep) works for VBD rigid rods."""
+
+    def test_grasp_benchmark_is_wired(self):
+        import ast
+        src = (REPO / "scripts" / "verify_asset_newton.py").read_text()
+        ast.parse(src)
+        assert "def grasp(" in src
+        assert '"grasp": grasp' in src
+        # the criteria that make it a real benchmark, not a smoke test
+        for k in ("gripper_follow_error_m", "arc_stretch_ratio",
+                  "anchor_drift_m", "cable_survives_manipulation"):
+            assert k in src, k
+
+    def test_dynamic_compose_can_author_physical_mass(self, tmp_path):
+        pytest.importorskip("pxr")
+        from pxr import Usd
+
+        from make_cable import compose
+        out = compose(
+            str(REPO / "workspace/assets_fixed/soldering_iron_1_simready.usda"),
+            str(REPO / "workspace/assets_fixed/power_plug_european_simready.usda"),
+            tmp_path / "d.usda", length_m=0.8, radius_m=0.005, links=20,
+            cord_mode="dynamic", upright=False, physx_floor=False)
+        st = Usd.Stage.Open(str(out))
+        meta = dict(st.GetRootLayer().customLayerData)["cord"]
+        assert meta["mode"] == "dynamic"
+        assert meta["physx_floor"] is False      # Newton runs real mass
+        assert meta["length_m"] == 0.8 and meta["links"] == 20

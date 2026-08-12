@@ -259,8 +259,21 @@ cable <path|id>` rebuilds that cord as a Newton rod and verifies it under
 VBD. First run PASSES: hang straightness 1.000 under a 100 g load, slack
 span 0.548 m of 0.550 intended (ratio 1.00). USD stays the interchange,
 Newton is the verification engine — same split as rigid/drape/fold/squish.
-- [ ] Grasp-and-move cable benchmark (robot gripper drags the cord) —
-      the actuated case, still open for both cloth and cable.
+CABLE ACTUATION CLOSED 2026-08-11: `verify_asset_newton.py grasp` — a
+KINEMATIC gripper body (zero inverse mass set BEFORE finalize, pose
+driven each substep) holds one end while the far end stays anchored.
+Criteria are measured, not smoke: gripper follow error, arc stretch
+ratio (a cable that stretches to reach is not a cable), anchor drift.
+PASSES on a bare cord and on the composed soldering iron: 0.335 m move,
+0.0 mm follow error, arc stretch 1.000-1.001, anchor drift 0.00 mm, at
+3.77 g physical segments. The same pattern that failed for CLOTH
+particles works for rigid rods — mass is baked at finalize either way,
+but VBD integrates driven rigid bodies correctly.
+- [ ] CLOTH actuation (the laundry-fold grasp) is the one still open:
+      driving pinned cloth PARTICLES explodes in this Newton build. The
+      route Newton itself uses is gripper CONTACT (example_cloth_franka)
+      — a rigid gripper pinching the cloth with friction — or the
+      Style3D solver. Same VBD engine, different attachment mechanism.
 - [ ] Mass-floor honesty: reduce toward physical 2.5 g links via TGS
       solver tuning or Newton (cross-check with add_joint_cable).
 - [ ] plug-socket insertion affordance; cable in scene blueprints.

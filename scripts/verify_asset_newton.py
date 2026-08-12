@@ -708,13 +708,127 @@ def cable(target: str) -> str:
             f"segment mass {seg_mass*1000:.2f} g (PhysX floor 15 g)")
 
 
+def grasp(target: str) -> str:
+    """Actuated cable test: a gripper GRASPS the cord and moves it.
+
+    The last open case for both cable and cloth. A kinematic gripper body
+    (zero inverse mass, pose driven each substep) holds one end of the
+    cord while the other end stays anchored — the plugged-in end. Passing
+    means the cord follows the hand without stretching or exploding, and
+    the anchored end holds.
+
+    Measured:
+      follows      — the grasped end tracks the commanded path (error
+                     small relative to the move)
+      inextensible — arc length stays within 10% of rest (a cable that
+                     stretches to reach is not a cable)
+      anchored     — the pinned end does not move
+      stable       — no divergence over the whole motion
+    """
+    import math
+
+    import newton
+    import numpy as np
+    import warp as wp
+    from pxr import Usd
+
+    wp.set_device("cpu")
+
+    path = target
+    entry, qf = None, QUEUE_DIR / f"{target}.json"
+    if qf.exists():
+        entry = json.loads(qf.read_text())
+        path = entry.get("file", target)
+    if not Path(path).exists():
+        return f"{target}: file not found ({path})"
+    _stage = Usd.Stage.Open(path)
+    data = dict(_stage.GetRootLayer().customLayerData or {})
+    meta = dict(data.get("cord") or data.get("cable") or {})
+    L = float(meta.get("length_m", 1.0))
+    R = float(meta.get("radius_m", 0.004))
+    N = max(8, int(meta.get("links", 20)) + 1)
+    seg = L / (N - 1)
+    seg_mass = RUBBER_DENSITY * math.pi * R ** 2 * seg
+
+    b = newton.ModelBuilder()
+    pos = [wp.vec3(i * seg, 0.0, R + 0.002) for i in range(N)]   # laid out flat
+    quats = [wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), math.pi / 2)
+             for _ in range(N - 1)]                              # +Z -> +X
+    b.add_rod(positions=pos, quaternions=quats, radius=R,
+              stretch_stiffness=1.0e5, stretch_damping=1.0e-2,
+              bend_stiffness=5.0e-3, bend_damping=1.0e-4)
+    nb = b.body_count
+    for i in range(nb):
+        b.body_mass[i] = seg_mass
+        b.body_inv_mass[i] = 1.0 / seg_mass
+    b.body_mass[0] = 0.0            # anchored end (the plug)
+    b.body_inv_mass[0] = 0.0
+    b.body_mass[nb - 1] = 0.0       # the GRIPPER: kinematic, pose-driven
+    b.body_inv_mass[nb - 1] = 0.0
+    b.add_ground_plane()
+    b.color()
+    model = b.finalize()
+    solver = newton.solvers.SolverVBD(model, 10)
+
+    s0, s1 = model.state(), model.state()
+    ctrl = model.control()
+    start = np.array(s0.body_q.numpy()[nb - 1][:3], dtype=float)
+    # lift 0.25 m and swing 0.20 m back over the cord — a real pick-up
+    goal = start + np.array([-0.20, 0.10, 0.25])
+    lift_s, hold_s = 2.0, 1.0
+    dt = FRAME_DT / 8
+    frames = int((lift_s + hold_s) / FRAME_DT)
+    for f in range(frames):
+        t = min(1.0, f / (lift_s / FRAME_DT))
+        smooth = t * t * (3 - 2 * t)                 # ease in/out
+        want = start + (goal - start) * smooth
+        for _ in range(8):
+            s0.clear_forces()
+            q = s0.body_q.numpy()
+            q[nb - 1][:3] = want                     # drive the gripper
+            c = model.collide(s0)
+            solver.step(s0, s1, ctrl, c, dt)
+            s0, s1 = s1, s0
+    q = s0.body_q.numpy()[:, :3]
+    if not np.isfinite(q).all():
+        return f"FAIL {target}: solve diverged during the grasp"
+    arc = sum(float(np.linalg.norm(q[i + 1] - q[i])) for i in range(len(q) - 1))
+    rest_arc = seg * (nb - 1)
+    stretch = arc / rest_arc
+    follow_err = float(np.linalg.norm(q[nb - 1] - goal))
+    anchor_drift = float(np.linalg.norm(q[0] - np.array(pos[0], dtype=float)))
+    move_len = float(np.linalg.norm(goal - start))
+    ok = (follow_err < 0.02 and abs(stretch - 1.0) < 0.10
+          and anchor_drift < 0.01)
+    evidence = {
+        "date": date.today().isoformat(),
+        "method": "headless_newton_vbd_grasp_test",
+        "engine": "Newton (warp) SolverVBD — Vertex Block Descent",
+        "segment_mass_kg": round(seg_mass, 6),
+        "commanded_move_m": round(move_len, 4),
+        "gripper_follow_error_m": round(follow_err, 5),
+        "arc_stretch_ratio": round(stretch, 3),
+        "anchor_drift_m": round(anchor_drift, 5),
+        "cable_survives_manipulation": ok,
+    }
+    if entry is not None:
+        entry["grasp_test"] = evidence
+        qf.write_text(json.dumps(entry, indent=1))
+    return (f"{'PASS' if ok else 'FAIL'} {target}: gripper moved "
+            f"{move_len:.3f} m (follow error {follow_err*1000:.1f} mm), "
+            f"arc stretch {stretch:.3f}, anchor drift "
+            f"{anchor_drift*1000:.2f} mm")
+
+
 def main() -> int:
     if len(sys.argv) < 3 or sys.argv[1] not in ("rigid", "drape", "fold",
-                                                 "squish", "cable"):
+                                                 "squish", "cable",
+                                                 "grasp"):
         print(__doc__)
         return 1
     fn = {"rigid": rigid_drop, "drape": drape, "fold": fold,
-          "squish": squish, "cable": cable}[sys.argv[1]]
+          "squish": squish, "cable": cable,
+          "grasp": grasp}[sys.argv[1]]
     failures = 0
     for asset_id in sys.argv[2:]:
         try:
