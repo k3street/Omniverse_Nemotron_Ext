@@ -183,6 +183,10 @@ class LayoutSpecCodeGenerator:
             if physics.get("rigid_body"):
                 mass_kg = float(physics.get("mass_kg") or 0.05)
                 lines.append(f"_apply_rigid_body(prim.GetPrim(), {mass_kg!r})")
+            if physics.get("deformable"):
+                preset = str(physics.get("cloth_preset") or "cloth_cotton")
+                lines.append(
+                    f"_apply_cloth(prim.GetPrim(), {prim_path!r}, {preset!r})")
 
         return "\n".join(lines)
 
@@ -242,6 +246,38 @@ class LayoutSpecCodeGenerator:
             "        UsdPhysics.CollisionAPI.Apply(prim)",
             "    except Exception as exc:",
             "        print(f'[Isaac Assist] collision warning for {label}: {exc}')",
+            "",
+            "def _apply_cloth(prim, label, preset):",
+            "    # PhysX cloth. Deliberately NOT RigidBodyAPI: a garment is",
+            "    # not a rigid body, and the pick-place grasp must hold it by",
+            "    # friction rather than welding a FixedJoint to it.",
+            "    _CLOTH = {",
+            "        'cloth_cotton': (10000.0, 0.02, 0.005, 300.0),",
+            "        'cloth_silk':   (4000.0,  0.005, 0.003, 150.0),",
+            "        'cloth_denim':  (40000.0, 0.15, 0.010, 800.0),",
+            "        'cloth_canvas': (25000.0, 0.08, 0.008, 600.0),",
+            "    }",
+            "    stretch, bend, damping, density = _CLOTH.get(",
+            "        preset, _CLOTH['cloth_cotton'])",
+            "    try:",
+            "        from pxr import PhysxSchema, UsdShade",
+            "        api = PhysxSchema.PhysxDeformableSurfaceAPI.Apply(prim)",
+            "        api.CreateSelfCollisionAttr(True)",
+            "        api.CreateSelfCollisionFilterDistanceAttr(0.002)",
+            "        mat_path = label + '/ClothMaterial'",
+            "        mat_prim = stage.DefinePrim(mat_path,",
+            "                                   'PhysxDeformableSurfaceMaterial')",
+            "        m = PhysxSchema.PhysxDeformableSurfaceMaterialAPI.Apply(mat_prim)",
+            "        m.CreateStretchStiffnessAttr(stretch)",
+            "        m.CreateBendStiffnessAttr(bend)",
+            "        m.CreateDampingAttr(damping)",
+            "        m.CreateDensityAttr(density)",
+            "        UsdShade.MaterialBindingAPI(prim).Bind(",
+            "            UsdShade.Material(stage.GetPrimAtPath(mat_path)),",
+            "            UsdShade.Tokens.strongerThanDescendants)",
+            "        prim.SetCustomDataByKey('isaac_assist:grasp_style', 'friction')",
+            "    except Exception as exc:",
+            "        print(f'[Isaac Assist] cloth warning for {label}: {exc}')",
             "",
             "def _apply_rigid_body(prim, mass_kg):",
             "    try:",
@@ -431,6 +467,14 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
         "cylinder_small", "cylinder_medium", "cylinder_large",
         "sphere", "fruit", "apple", "orange", "hamburger",
         "screw", "nut", "bolt",
+    }
+    # Cloth workpieces. These are picked, but NOT with a rigid body: a
+    # UsdPhysics.RigidBodyAPI on cloth is wrong, and the pick-place grasp
+    # cannot weld to them either (a FixedJoint has no deformable body to
+    # bind). They get PhysxDeformableSurfaceAPI and a friction grasp.
+    _DEFORMABLE_WORKPIECE_CLASSES = {
+        "washcloth", "napkin", "hand_towel", "towel", "tshirt",
+        "cloth", "garment", "rag", "blanket", "sheet",
     }
 
     def _obj_get(obj: Any, attr: str, default: Any = None) -> Any:
@@ -656,6 +700,11 @@ def _build_canonical_code(spec, template_id: Optional[str]) -> str:
                         or str(obj_class).lower() in _RIGID_WORKPIECE_CLASSES
                     ),
                     "rigid_body": str(obj_class).lower() in _RIGID_WORKPIECE_CLASSES,
+                    "deformable": (
+                        str(obj_class).lower() in _DEFORMABLE_WORKPIECE_CLASSES
+                    ),
+                    "cloth_preset": str(
+                        _metadata(obj).get("cloth_preset") or "cloth_cotton"),
                     "mass_kg": float(_metadata(obj).get("mass_kg") or 0.05),
                 },
             },

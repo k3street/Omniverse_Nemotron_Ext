@@ -807,3 +807,88 @@ def test_cloth_damping_is_viscous_not_stiffness():
     src = _newton_src()
     assert "CLOTH_DAMP_HZ" in src
     assert float(src.split('"CLOTH_TRI_KD", "', 1)[1].split('"')[0]) <= 0.1
+
+
+# ---------------------------------------------------------------------------
+# Cloth as a pick-and-place workpiece. The rigid path grasps by welding a
+# UsdPhysics.FixedJoint to the object; a FixedJoint has no deformable body to
+# bind, so on cloth it defines cleanly and holds nothing.
+# ---------------------------------------------------------------------------
+
+def _svc():
+    import sys
+    p = str(Path(__file__).resolve().parents[1] / "service")
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+
+def test_cloth_workpieces_are_in_the_palette():
+    _svc()
+    from isaac_assist_service.multimodal.object_palette import PALETTE
+    cloth = {k for k, v in PALETTE.items() if "deformable" in v.tags}
+    assert {"washcloth", "napkin", "towel", "tshirt"} <= cloth
+    for k in cloth:
+        assert "workpiece" in PALETTE[k].tags, f"{k} must be pickable"
+
+
+def test_cloth_is_never_given_a_rigid_body():
+    """RigidBodyAPI on a garment is simply the wrong physics, and it is what
+    makes the weld-grasp look like it should work."""
+    _svc()
+    from isaac_assist_service.multimodal import instantiator as I
+    src = Path(I.__file__).read_text()
+    rigid = src.split("_RIGID_WORKPIECE_CLASSES = {", 1)[1].split("}", 1)[0]
+    for c in ("washcloth", "napkin", "towel", "tshirt"):
+        assert f'"{c}"' not in rigid, f"{c} must not be a rigid workpiece"
+    deform = src.split("_DEFORMABLE_WORKPIECE_CLASSES = {", 1)[1].split("}", 1)[0]
+    for c in ("washcloth", "napkin", "towel", "tshirt"):
+        assert f'"{c}"' in deform
+
+
+def test_generated_scene_authors_cloth_not_a_rigid_body():
+    _svc()
+    from isaac_assist_service.multimodal.instantiator import (
+        LayoutSpecCodeGenerator,
+    )
+    code = LayoutSpecCodeGenerator().generate_full_script([{
+        "name": "Towel_1", "type": "Mesh", "path": "/World/Towel_1",
+        "position": [0, 0, 0.8],
+        "extra_attrs": {"_isaac_assist_physics": {
+            "collision": True, "rigid_body": False,
+            "deformable": True, "cloth_preset": "cloth_cotton"}},
+    }])
+    assert "_apply_cloth(prim.GetPrim()" in code
+    assert "'cloth_cotton'" in code
+    assert "PhysxDeformableSurfaceAPI" in code
+    assert "_apply_rigid_body(prim.GetPrim()" not in code
+    compile(code, "<generated>", "exec")
+
+
+def test_pick_place_grasps_cloth_by_friction_not_a_fixed_joint():
+    _svc()
+    from isaac_assist_service.chat.tools.handlers.pick_place import (
+        _gen_setup_pick_place_controller,
+    )
+    code = _gen_setup_pick_place_controller({
+        "robot_path": "/World/Franka", "target_source": "cube_tracking",
+        "source_paths": ["/World/Towel_1"], "destination_path": "/World/Bin"})
+    assert "def _is_deformable" in code
+    assert "GRIP_CLOSE_CLOTH" in code
+    # the deformable branch must come BEFORE the joint is defined
+    attach = code.split("def _attach_cube_to_ee", 1)[1]
+    assert attach.index("_is_deformable") < attach.index("FixedJoint.Define")
+    # and the rigid path must be untouched
+    assert "UsdPhysics.FixedJoint.Define(stage, joint_path)" in code
+    compile(code, "<generated>", "exec")
+
+
+def test_newton_cloth_pick_place_measures_where_the_cloth_ended_up():
+    """The verdict must rest on the cloth's own final state, not on whether
+    the arm reached its waypoints — an arm can complete the whole trajectory
+    having never picked anything up."""
+    src = (Path(__file__).resolve().parents[1] / "scripts" /
+           "pick_place_cloth.py").read_text()
+    verdict = [l for l in src.splitlines() if l.strip().startswith("ok =")]
+    assert verdict, "pick_place_cloth must compute a verdict"
+    for need in ("carried", "intact", "landed", "settled"):
+        assert need in verdict[0]

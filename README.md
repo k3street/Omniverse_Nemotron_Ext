@@ -744,7 +744,78 @@ Three things about this are easy to get wrong and fail *silently*:
   because a flat sheet lifted by one corner necessarily loses centroid height
   as it becomes a hanging sheet.
 
-### 10.5 Physics verification
+### 10.5 A robot picks the cloth up
+
+Cloth actuation with abstract finger boxes is a physics result; a robot doing
+it is a task. A Franka FR3 takes a washcloth off a table, carries it, and puts
+it down.
+
+![Franka picking a washcloth off a table, carrying it, and placing it](docs/images/franka_cloth_pick_place.png)
+
+*Approach (the flap overhangs the table edge) → carried clear of the surface →
+set down 30 cm away. Rendered from the recorded simulation, not staged.*
+
+```bash
+/home/kimate/newton/.venv/bin/python scripts/pick_place_cloth.py garment_washcloth
+PICK_PLACE_RECORD_USD=scene.usd ... scripts/pick_place_cloth.py garment_napkin
+```
+
+Measured over 5 consecutive runs on the **washcloth (18 g): 5/5 carried it
+0.20–0.26 m of a commanded 0.30 m**, intact, resting on the table, settled. It
+falls short of the full 0.30 m because the grasp takes a flap rather than the
+whole garment, so the cloth partly drags — which is what real fabric does.
+
+**It does not yet work on the napkin, and that is a real limit rather than a
+tuning detail.** The napkin is 0.45 m square and 41 g — 2.3× the washcloth's
+mass on the same single-flap pinch — and it consistently slips: three runs
+carried it 0.11 m, 0.09 m and 0.09 m of the commanded 0.30 m. A friction grasp
+holds only what its contact patch and normal force can hold, so a one-flap
+pinch is mass-limited. Carrying heavier garments needs a bigger bite, a second
+grasp point, or both hands — which is also what a folding task needs, so it is
+the next piece of work rather than a workaround.
+
+**Why Newton and not the live PhysX path.** NVIDIA's own current reference for
+robot cloth manipulation is exactly this pairing — a Franka under
+`SolverFeatherstone` coupled one-way to cloth under `SolverVBD`
+(`newton.examples cloth_franka`), roughly 300× faster than GPU-IPC. Isaac Lab's
+deformable-object API for this is still an open **proposal**
+([isaac-sim/IsaacLab#5285](https://github.com/isaac-sim/IsaacLab/issues/5285),
+April 2026) with no milestone, so there is no Isaac-native equivalent to
+migrate onto yet. The coupling is deliberately one-way: the arm moves the
+cloth, a 30 g washcloth does not perturb a Franka.
+
+**The finding that shaped the whole task:** *a parallel-jaw gripper cannot pick
+a flat sheet off a table.* The fingers close beside zero-thickness fabric
+pressed against the surface. Dropping the garment first does not fix it either
+— a plain square sheet lands flat again (measured: 8 mm of loft, its own
+thickness). The reference example gets away with it only because a shirt has
+sleeves and a collar holding fabric off the table. So the task is staged the
+way it is really staged: part of the garment over the table edge, where the
+flap hangs in free air with something for each finger to close against. The
+grasp point is then chosen from the *settled* geometry, the way a perception
+stack would, rather than assumed up front.
+
+### 10.6 Cloth as a pick-and-place workpiece (live path)
+
+The existing Isaac Assist pick-place scene and controller now accept cloth.
+Two things had to change, and the second is not a configuration detail:
+
+| Where | Change |
+|---|---|
+| `multimodal/object_palette.py` | 5 deformable workpiece classes: `washcloth`, `napkin`, `hand_towel`, `towel`, `tshirt`. |
+| `multimodal/instantiator.py` | `_DEFORMABLE_WORKPIECE_CLASSES` beside the rigid set; emits `_apply_cloth` (`PhysxDeformableSurfaceAPI` + material preset) instead of `RigidBodyAPI`. |
+| `chat/tools/handlers/pick_place.py` | `_is_deformable()` routes cloth to a **friction grasp**. |
+
+The grasp is the real blocker. The rigid path holds an object by welding a
+`UsdPhysics.FixedJoint` between the end effector and the workpiece. A
+FixedJoint needs a rigid body at both ends and a deformable prim has none, so
+on cloth it **defines cleanly and holds nothing** — the arm completes its whole
+trajectory having picked up air. Cloth is therefore held the way a real gripper
+holds fabric, and the way the Newton run above holds it: friction between fully
+closed fingers and the cloth. A 4 mm gap that grips a cube lets a 0.4 mm sheet
+slide straight out, so cloth closes to zero.
+
+### 10.7 Physics verification
 
 Two independent engines, because agreement between two is a far stronger
 sim2real claim than either alone.
@@ -764,7 +835,7 @@ GPU-parallel method — Newton disables its tiled solve entirely on CPU.
 > authored as flat sheets, so initial z-extent is zero and "collapses to flat"
 > cannot fail. It remains meaningful for scanned deformables.
 
-### 10.6 Rigged characters and crowds
+### 10.8 Rigged characters and crowds
 
 Scenes need people. Rigged characters are detected via UsdSkel, bound to motion
 clips, and spawned as walking crowds.
@@ -782,7 +853,7 @@ Scene blueprints accept a `characters` list, so chat requests like *"spawn a
 scene with people walking and sitting on furniture"* resolve to clip-bound
 characters on the live stage.
 
-### 10.7 Chat tools
+### 10.9 Chat tools
 
 | Tool | Purpose |
 |---|---|
@@ -792,7 +863,7 @@ characters on the live stage.
 | `create_deformable_mesh` | Author cloth / sponge / rubber / gel deformables. |
 | `critique_render` | Ask the vision judges what is wrong with a render. |
 
-### 10.8 Knowledge files
+### 10.10 Knowledge files
 
 | File | Contents |
 |---|---|

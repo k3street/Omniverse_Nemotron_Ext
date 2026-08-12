@@ -23,7 +23,8 @@ class ObjectClass:
     tags: List[str] = field(default_factory=list)
 
 
-# Phase 25 palette — 60 classes. Block 1A's original 17 + 43 new.
+# Phase 25 palette — 65 classes. Block 1A's original 17 + 43 new,
+# + 5 deformable (cloth) workpieces.
 PALETTE: Dict[str, ObjectClass] = {
     # Robots (8)
     "franka_panda": ObjectClass("franka_panda", "Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd",
@@ -51,6 +52,20 @@ PALETTE: Dict[str, ObjectClass] = {
     "screw": ObjectClass("screw", category="prop", footprint_xy_m=(0.01, 0.01), tags=["workpiece"]),
     "nut": ObjectClass("nut", category="prop", footprint_xy_m=(0.012, 0.012), tags=["workpiece"]),
     "bolt": ObjectClass("bolt", category="prop", footprint_xy_m=(0.012, 0.012), tags=["workpiece"]),
+    # Deformable workpieces (5). Tagged "deformable" so the instantiator
+    # authors cloth physics instead of a rigid body, and so pick-place knows
+    # it must grasp by friction — a UsdPhysics.FixedJoint cannot bind to a
+    # deformable prim, which is why these cannot be plain workpieces.
+    "washcloth": ObjectClass("washcloth", category="prop", footprint_xy_m=(0.3, 0.3),
+                             tags=["workpiece", "deformable", "cloth", "laundry"]),
+    "napkin": ObjectClass("napkin", category="prop", footprint_xy_m=(0.45, 0.45),
+                          tags=["workpiece", "deformable", "cloth", "laundry"]),
+    "hand_towel": ObjectClass("hand_towel", category="prop", footprint_xy_m=(0.4, 0.7),
+                              tags=["workpiece", "deformable", "cloth", "laundry"]),
+    "towel": ObjectClass("towel", category="prop", footprint_xy_m=(0.7, 1.4),
+                         tags=["workpiece", "deformable", "cloth", "laundry"]),
+    "tshirt": ObjectClass("tshirt", category="prop", footprint_xy_m=(0.7, 0.75),
+                          tags=["workpiece", "deformable", "cloth", "laundry", "garment"]),
     # Fixtures (12)
     "table_small": ObjectClass("table_small", category="fixture", footprint_xy_m=(0.8, 0.6), tags=["fixture"]),
     "table_medium": ObjectClass("table_medium", category="fixture", footprint_xy_m=(1.2, 0.8), tags=["fixture"]),

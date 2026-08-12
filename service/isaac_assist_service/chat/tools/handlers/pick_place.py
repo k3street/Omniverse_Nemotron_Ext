@@ -630,6 +630,10 @@ amp = ArticulationMotionPolicy(franka, rmpflow, default_physics_dt={_PHYSICS_DT_
 
 # Gripper fingers are NOT articulated by rmpflow — apply direct position
 # targets for open/close. RmpFlow only drives the 7 arm joints.
+# Fabric needs the fingers fully shut, not the rigid-object close gap: a
+# 4 mm gap that grips a cube lets a 0.4 mm sheet slide straight out.
+GRIP_CLOSE_CLOTH = 0.0
+
 def _gripper(value):
     names = franka.dof_names or []
     if not names:
@@ -675,7 +679,36 @@ def _reached(target, tol=0.04):
         return False
     return float(np.linalg.norm(ee - target)) < tol
 
+def _is_deformable(path):
+    # Cloth cannot be welded to. A UsdPhysics.FixedJoint needs a rigid body
+    # on both ends and a deformable prim has none, so defining the joint
+    # silently produces a grasp that holds nothing. Such a workpiece is held
+    # the way a real gripper holds fabric: friction between the closed
+    # fingers and the cloth.
+    prim = stage.GetPrimAtPath(path)
+    if not prim or not prim.IsValid():
+        return False
+    if prim.GetCustomDataByKey('isaac_assist:grasp_style') == 'friction':
+        return True
+    try:
+        from pxr import PhysxSchema
+        for api in (getattr(PhysxSchema, 'PhysxDeformableSurfaceAPI', None),
+                    getattr(PhysxSchema, 'PhysxDeformableBodyAPI', None)):
+            if api is not None and prim.HasAPI(api):
+                return True
+    except Exception:
+        pass
+    return False
+
 def _attach_cube_to_ee(cube_path):
+    if _is_deformable(cube_path):
+        # Friction grasp: close the fingers harder and let contact carry it.
+        # There is nothing to author on the stage, so there is nothing to
+        # remove on release either.
+        _gripper(GRIP_CLOSE_CLOTH)
+        print(f"[pick_place] {{cube_path}} is deformable — friction grasp "
+              f"(no FixedJoint; fingers to {{GRIP_CLOSE_CLOTH}})")
+        return None
     joint_path = f"{{cube_path}}_ppc_grasp"
     ee_path = f"{{ROBOT_PATH}}/{{EE_LINK}}"
     # UsdPhysics.FixedJoint with body0=EE, body1=cube keeps cube rigidly

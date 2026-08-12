@@ -299,6 +299,31 @@ but VBD integrates driven rigid bodies correctly.
       solve at 20, 60 and 120 substeps alike. Viscous per-frame velocity
       damping (CLOTH_DAMP_HZ=2.0) settles the swing instead, and is
       unconditionally stable.
+- [x] ROBOT pick-and-place on cloth SHIPPED 2026-08-12
+      (`scripts/pick_place_cloth.py`): a Franka FR3 under SolverFeatherstone
+      one-way coupled to cloth under SolverVBD — NVIDIA's own current
+      reference pairing (`newton.examples cloth_franka`); Isaac Lab's
+      deformable API for this is still only a proposal (IsaacLab#5285).
+      Washcloth (18 g): 5/5 runs carried it 0.20-0.26 m of a commanded
+      0.30 m, intact, landed on the table, settled.
+      The finding that shaped it: A PARALLEL-JAW GRIPPER CANNOT PICK A FLAT
+      SHEET OFF A TABLE. The fingers close beside zero-thickness fabric
+      pressed against the surface. Dropping it first does not help — a plain
+      square sheet lands flat again (measured 8 mm of loft, its own
+      thickness); the reference gets away with it only because a shirt has
+      sleeves and a collar. Staged instead with a flap over the table edge,
+      and the grasp point chosen from the SETTLED geometry the way a
+      perception stack would.
+      Live path threaded too: 5 cloth workpiece classes in the object
+      palette, `_DEFORMABLE_WORKPIECE_CLASSES` + `_apply_cloth`
+      (PhysxDeformableSurfaceAPI) in the instantiator, and `_is_deformable`
+      routing cloth to a friction grasp in pick_place.py — a
+      UsdPhysics.FixedJoint has no deformable body to bind, so on cloth the
+      weld-grasp defines cleanly and holds NOTHING.
+- [ ] Napkin (41 g, 2.3x the washcloth) SLIPS the one-flap friction pinch:
+      3 runs carried it 0.11 / 0.09 / 0.09 m of a commanded 0.30 m. A
+      friction grasp is mass-limited by contact patch x normal force. Needs
+      a bigger bite, a second grasp point, or two hands.
 - [ ] Next for laundry: two-hand grasp (fold needs both corners held),
       then grasp -> place -> release against a table.
 - [ ] `drape` is VACUOUS for the generated garments — they are authored
