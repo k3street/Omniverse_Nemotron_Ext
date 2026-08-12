@@ -864,6 +864,37 @@ def grasp(target: str) -> str:
             f"{anchor_drift*1000:.2f} mm")
 
 
+def _export_cloth_usd(out_path: str, pts, tris, finger_xforms, half=(0.03, 0.03, 0.008)):
+    """Write a solved cloth state to USD so it can be rendered by the same
+    usdrecord path that produces every other asset view. The grasp runs
+    headless in Newton; without this its result is only ever a number.
+    """
+    from pxr import Gf, Usd, UsdGeom
+
+    stage = Usd.Stage.CreateNew(out_path)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    root = UsdGeom.Xform.Define(stage, "/Grasp")
+    stage.SetDefaultPrim(root.GetPrim())
+
+    mesh = UsdGeom.Mesh.Define(stage, "/Grasp/Cloth")
+    mesh.CreatePointsAttr([Gf.Vec3f(*map(float, p)) for p in pts])
+    mesh.CreateFaceVertexIndicesAttr([int(i) for i in tris])
+    mesh.CreateFaceVertexCountsAttr([3] * (len(tris) // 3))
+    mesh.CreateDoubleSidedAttr(True)
+    mesh.CreateDisplayColorAttr([Gf.Vec3f(0.72, 0.74, 0.80)])
+
+    for i, xf in enumerate(finger_xforms):
+        cube = UsdGeom.Cube.Define(stage, f"/Grasp/Finger_{i}")
+        cube.CreateSizeAttr(2.0)          # unit cube scaled to the half-extents
+        cube.CreateDisplayColorAttr([Gf.Vec3f(0.25, 0.28, 0.34)])
+        x = UsdGeom.Xformable(cube)
+        x.AddTranslateOp().Set(Gf.Vec3d(*map(float, xf)))
+        x.AddScaleOp().Set(Gf.Vec3f(*half))
+    stage.GetRootLayer().Save()
+    return out_path
+
+
 def cloth_grasp(target: str) -> str:
     """THE LAUNDRY GRASP: two fingers pinch a garment corner and lift it.
 
@@ -1038,6 +1069,12 @@ def cloth_grasp(target: str) -> str:
     if entry is not None:
         entry["cloth_grasp_test"] = evidence
         qf.write_text(json.dumps(entry, indent=1))
+    dump = os.environ.get("CLOTH_EXPORT_USD")
+    if dump:
+        fq = s0.body_q.numpy()
+        _export_cloth_usd(dump, pq, tris,
+                          [fq[fingers[0]][:3], fq[fingers[1]][:3]])
+        print(f"  wrote {dump}", flush=True)
     return (f"{'PASS' if ok else 'FAIL'} {target}: lifted "
             f"{lift_to[2]:.2f} m, slip {held_err*1000:.0f} mm, corner rose "
             f"{(pq[corner][2]-grip[2])*100:.0f} cm, drapes {drape*100:.0f} cm, "

@@ -25,7 +25,8 @@
 7. [GUI Smoke Test](#7-gui-smoke-test)
 8. [Configuration Reference](#8-configuration-reference)
 9. [Feature Modules](#9-feature-modules)
-10. [Contributing Data & Helping Train the Model](#10-contributing-data--helping-train-the-model)
+10. [Sim-Ready Asset Pipeline](#10-sim-ready-asset-pipeline)
+11. [Contributing Data & Helping Train the Model](#11-contributing-data--helping-train-the-model)
 
 ---
 
@@ -603,14 +604,211 @@ The current `master` includes the PR 115-117 integration wave:
 - Coexistence protection for Isaac Sim 5.1 and 6.0 extension harnesses.
 - Floor-plan GUI build/test baseline pinned to Vite/Vitest versions that work on Node 18.
 - Cosmos 3 proposal adapter for photo/screenshot/prompt-to-floor-plan scene reconstruction.
+- Sim-ready asset pipeline: autonomous visual approval, corded electronics,
+  deformables and cloth actuation, rigged characters — see
+  [Section 10](#10-sim-ready-asset-pipeline).
 
 ---
 
-## 10. Contributing Data & Helping Train the Model
+## 10. Sim-Ready Asset Pipeline
+
+A downloaded USDZ is not a simulation asset. It has no mass, no collision, no
+material, and often the wrong scale and up-axis. This pipeline takes raw
+downloads to physics-verified, machine-approved assets — and it judges its own
+work before a human ever sees it.
+
+```
+ingest  ->  classify  ->  make sim-ready  ->  render  ->  vision judges
+              |                                              |
+        class priors                                    rubric + verdict
+        (50 classes)                                          |
+                                            live PhysX drop + headless Newton
+                                                              |
+                                                    registry (66 assets)
+```
+
+Current state: **2377 assets ingested**, 2326 with a recorded visual-QA verdict,
+**62 machine-approved**, 66 promoted to the sim-ready registry, **32 of those
+independently re-verified in a second physics engine**.
+
+### 10.1 Autonomous visual approval
+
+Every asset is rendered as four orbit views, because integrity cannot be judged
+from a single frame — a missing back face, a hollow interior, or an untextured
+patch hides from a front view.
+
+![Four orbit views as the vision judges see them](docs/images/visual_qa_orbit.png)
+
+Those views go to an ensemble of vision judges — **Cosmos-Reason2** (local
+vLLM), **Gemma** (local Ollama), and **Claude** with structured outputs — which
+are scored by a rubric rather than trusted directly:
+
+| Check | What it rejects |
+|---|---|
+| `judges_healthy` | A verdict from an ensemble that partly failed to answer. |
+| `identity_agreement` | Judges that disagree about what the object even is. |
+| `integrity` | Holes, missing faces, hollow shells, broken geometry. |
+| `scale_in_prior` | A 4 m coffee mug. Bounds must land in the class prior. |
+| `physics_ready` | Mass outside the class prior, or an implied density outside 15-3000 kg/m3. |
+| `no_error_callouts` | Any judge naming a concrete defect. |
+| `prior_confirmed` | A class the priors do not actually support. |
+| `rigid_scope` | A rigid sign-off on something that is not rigid. |
+
+The rubric is deliberately harsh, and it is applied to the machine's own
+earlier decisions: an implied-density guard caused it to **revoke three of its
+own approvals** after class-midpoint masses produced a 1.26 kg computer mouse.
+
+```bash
+python scripts/visual_qa.py <asset_id> [...]        # judge specific assets
+python scripts/visual_qa.py --all-pending --approve  # judge + sign off the queue
+```
+
+**Deformables never take this path.** Cloth, foam and gel sign-off stays human;
+the machine only records evidence.
+
+### 10.2 The critic runs before the human
+
+The judges are also pointed at our *own* renders before anything is presented
+for review — the same models, asked what is wrong with the picture rather than
+what is in it. This exists because output was repeatedly shown to a human while
+visibly broken.
+
+```bash
+python scripts/critique_render.py <render.png> [...] --expect "a desk lamp with a cord"
+```
+
+It is also exposed as the `critique_render` chat tool.
+
+### 10.3 Corded electronics
+
+Cords are where asset physics and articulation meet. A cord is authored either
+as a **routed static cord** — a Bezier path from the device's cord exit to the
+plug, with a single-sided slack bow, clamped to the surface only in its
+interior so the endpoints stay attached — or as a **dynamic capsule chain**
+with D6 joints.
+
+![Desk lamp with a routed cord and levelled plug](docs/images/corded_desk_lamp.png)
+
+![Corded keyboard with a slack loop lying on the surface](docs/images/corded_keyboard.png)
+
+Cord-exit direction is knowledge, not geometry: it lives in the class priors per
+device type. Where a human corrects an attachment in the viewport,
+`capture_attachment.py` converts that correction into the asset's own space and
+stores it permanently, so it is made once and reused forever. (The store is
+created on first capture; until then `make_cable.py` falls back to its
+geometric fat-end heuristic. Capture *before* reloading the layer — a forced
+reload discards viewport edits.)
+
+```bash
+# a bare cord
+python scripts/make_cable.py cable --length 1.2 --radius 0.004 --out cord.usda
+# a device composed with its cord and plug
+python scripts/make_cable.py compose --iron <iron.usd> --plug <plug.usd> \
+    --length 1.5 --out lamp_corded.usda
+# store a human's viewport correction permanently, in the asset's own space
+python scripts/capture_attachment.py --asset power_plug_european \
+    --prim /World/Kettle/Plug --cord /World/Kettle/Cord
+```
+
+Routed assemblies are **fully static** — an earlier version returned before the
+joint code ran, leaving the plug a free rigid body that flew off on play.
+
+### 10.4 Cloth actuation
+
+The laundry-fold grasp: two kinematic finger boxes pinch a garment corner with
+friction alone (no attachment constraint) and lift it 35 cm.
+
+![A t-shirt grasped by one corner and lifted](docs/images/cloth_grasp_tshirt.png)
+
+![A towel hanging from the gripper](docs/images/cloth_grasp_towel.png)
+
+Both images are the **actual solver state** exported to USD and rendered — not
+mock-ups. 5/5 generated garments pass on CUDA in 90 s: 4 mm slip, the corner
+rises the full 35 cm, and the garment hangs 117-146 cm and settles to under
+0.7 cm of residual swing.
+
+```bash
+/home/kimate/newton/.venv/bin/python scripts/verify_asset_newton.py \
+    cloth_grasp garment_towel
+CLOTH_EXPORT_USD=out.usda ... cloth_grasp garment_tshirt   # export for render
+```
+
+Three things about this are easy to get wrong and fail *silently*:
+
+- `SolverVBD` ignores rigid shapes entirely unless constructed with
+  `integrate_with_external_rigid_solver=True`. Without it the cloth passes
+  through the fingers and falls 25 m, with no error.
+- `wp.array.numpy()` is a **view on CPU but a copy on CUDA**. Pose-driving a
+  gripper by mutating it works on CPU and silently does nothing on GPU.
+- "Did the centroid rise?" is not a grasp test — it fails a *perfect* grasp,
+  because a flat sheet lifted by one corner necessarily loses centroid height
+  as it becomes a hanging sheet.
+
+### 10.5 Physics verification
+
+Two independent engines, because agreement between two is a far stronger
+sim2real claim than either alone.
+
+| Command | What it proves |
+|---|---|
+| `verify_asset_live.py` | Live PhysX drop test inside Isaac. |
+| `verify_asset_newton.py rigid` | The same USD re-dropped in Newton. 32 assets, both engines agree. |
+| `... drape` / `fold` / `squish` | Deformable behaviour: cloth collapses, folds stay folded. |
+| `... cable` | A cord pulls straight under load and holds its bow when slack. |
+| `... grasp` / `cloth_grasp` | A gripper carries a cord, and a gripper carries a garment. |
+
+Newton runs on CUDA by default (`NEWTON_DEVICE` overrides). VBD is a
+GPU-parallel method — Newton disables its tiled solve entirely on CPU.
+
+> **Known gap:** `drape` is vacuous for the *generated* garments. They are
+> authored as flat sheets, so initial z-extent is zero and "collapses to flat"
+> cannot fail. It remains meaningful for scanned deformables.
+
+### 10.6 Rigged characters and crowds
+
+Scenes need people. Rigged characters are detected via UsdSkel, bound to motion
+clips, and spawned as walking crowds.
+
+![A rigged character ingested from the asset library](docs/images/rigged_character.png)
+
+```bash
+# Isaac must be running; clips: stand_walk_1..5,7 (+_mirror), Sit,
+# LookAround, stand_idle_loop, stand_idle_wave_loop
+python scripts/spawn_walking_person.py --clip stand_walk_1 --port 8001
+python scripts/verify_character.py <asset_id> [...]   # skeleton, skin, motion
+```
+
+Scene blueprints accept a `characters` list, so chat requests like *"spawn a
+scene with people walking and sitting on furniture"* resolve to clip-bound
+characters on the live stage.
+
+### 10.7 Chat tools
+
+| Tool | Purpose |
+|---|---|
+| `ingest_asset_report` | Ingest and classify an asset or a whole folder. |
+| `make_sim_ready` | Author mass, collision, material and scale onto a raw asset. |
+| `create_corded_asset` | Compose a device with a physically routed cord. |
+| `create_deformable_mesh` | Author cloth / sponge / rubber / gel deformables. |
+| `critique_render` | Ask the vision judges what is wrong with a render. |
+
+### 10.8 Knowledge files
+
+| File | Contents |
+|---|---|
+| `workspace/knowledge/asset_class_priors.json` | 50 classes: size, mass, density, `deformable`, `cord_exit`. |
+| `workspace/knowledge/cord_attachments.json` | Human-corrected attachment points, in asset space. Written by `capture_attachment.py` and preferred by `make_cable.py` over its geometric guess; created on first capture, so it is absent until a human corrects one. |
+| `workspace/knowledge/product_specs.json` | Looked-up real product dimensions and masses. |
+| `workspace/knowledge/sim_ready_assets.json` | The registry: 66 verified assets with evidence. |
+
+
+---
+
+## 11. Contributing Data & Helping Train the Model
 
 Isaac Assist uses a **version-aware knowledge base** to ground the LLM in verified, working code patterns for each Isaac Sim release. Community contributions to this knowledge base directly improve the quality of generated code for everyone — and can ultimately feed into a fine-tuned model purpose-built for Isaac Sim development.
 
-### 9.1 How the Knowledge Base Works
+### 11.1 How the Knowledge Base Works
 
 The knowledge base lives in `workspace/knowledge/` and consists of:
 
@@ -622,7 +820,7 @@ The knowledge base lives in `workspace/knowledge/` and consists of:
 
 When a user asks the LLM to perform an action, the system automatically retrieves relevant patterns for the active Isaac Sim version and injects them into the prompt. This means the LLM sees **working, tested code** rather than hallucinating outdated Kit commands.
 
-### 9.2 Contributing Code Patterns
+### 11.2 Contributing Code Patterns
 
 Code patterns are stored as JSONL (one JSON object per line). Each entry has this format:
 
@@ -656,7 +854,7 @@ Code patterns are stored as JSONL (one JSON object per line). Each entry has thi
 
 > **Important:** All contributed patterns should use **direct pxr/USD Python APIs** rather than `omni.kit.commands.execute(...)` — Kit commands are unreliable across Isaac Sim versions.
 
-### 9.3 Contributing Documentation
+### 11.3 Contributing Documentation
 
 If you have Isaac Sim documentation, tutorials, or workflow notes, you can contribute them to the RAG index:
 
@@ -664,7 +862,7 @@ If you have Isaac Sim documentation, tutorials, or workflow notes, you can contr
 2. The indexer will chunk and store them in the full-text search index
 3. Submit a PR with your docs and the Isaac Sim version they apply to
 
-### 9.4 Fine-Tuning Data Pipeline
+### 11.4 Fine-Tuning Data Pipeline
 
 Isaac Assist includes a built-in fine-tuning data pipeline. When the "Contribute Fine-Tuning Data" option is enabled in the extension settings, your chat interactions (prompts + approved code patches) are logged locally in `workspace/finetune_exports/`.
 
@@ -677,7 +875,7 @@ Isaac Assist includes a built-in fine-tuning data pipeline. When the "Contribute
 
 The long-term goal is a community-trained model that understands Isaac Sim's full API surface — every contributed pattern and training pair brings that closer.
 
-### 9.5 Contribution Guidelines
+### 11.5 Contribution Guidelines
 
 - **One pattern per line** — keep the JSONL format strict (no trailing commas, valid JSON)
 - **Test before submitting** — every code pattern must be verified in the stated Isaac Sim version
