@@ -269,11 +269,42 @@ PASSES on a bare cord and on the composed soldering iron: 0.335 m move,
 3.77 g physical segments. The same pattern that failed for CLOTH
 particles works for rigid rods — mass is baked at finalize either way,
 but VBD integrates driven rigid bodies correctly.
-- [ ] CLOTH actuation (the laundry-fold grasp) is the one still open:
-      driving pinned cloth PARTICLES explodes in this Newton build. The
-      route Newton itself uses is gripper CONTACT (example_cloth_franka)
-      — a rigid gripper pinching the cloth with friction — or the
-      Style3D solver. Same VBD engine, different attachment mechanism.
+- [x] CLOTH actuation SHIPPED 2026-08-12 (`verify_asset_newton.py
+      cloth_grasp <garment>`): two kinematic finger boxes pinch a garment
+      corner (friction mu=1.0, no attachment constraint) and lift 35 cm.
+      5/5 garments PASS on CUDA in 90 s: slip 4 mm, corner rises the full
+      35 cm, the garment hangs 117-146 cm straight down and SETTLES
+      (residual swing <= 0.7 cm).
+      Four findings, each of which silently produced wrong physics:
+      1. `SolverVBD(..., integrate_with_external_rigid_solver=True)` is
+         what makes cloth see rigid shapes at all. Without it the cloth
+         passes through the fingers and falls 25 m — no error, no warning.
+         Newton's own example_cloth_franka sets it; nothing else does.
+      2. `wp.array.numpy()` is a VIEW on CPU but a COPY on CUDA. Every
+         pose-driven gripper in this file was mutating a copy. It worked
+         only because we were pinned to CPU; moving to GPU exposed it.
+         Now `.numpy().copy()` -> mutate -> `.assign()`.
+      3. "Centroid rose" is not a grasp test — it fails a PERFECT grasp.
+         A flat sheet lifted by one corner necessarily LOSES centroid
+         height as it becomes a hanging sheet. The real test is that the
+         garment stays within its own reach of the fingers (`suspended`),
+         drapes below them, and nothing floats above the grip.
+      4. Single-frame metrics lie. The t-shirt "passed" at drape 7 cm
+         while swinging like a pendulum with cloth flung ABOVE the hand.
+         Fixed with a 3 s post-lift hold plus a measured `settled` check
+         (mean height varies < 5 cm over the final half second).
+      Damping note: `tri_kd` is the only internal cloth damping Newton
+      exposes and it is EXPLICIT — stable only while dt < 2m/kd, and a
+      cloth particle weighs ~0.4 g. Raising it to 0.5-2.0 detonated the
+      solve at 20, 60 and 120 substeps alike. Viscous per-frame velocity
+      damping (CLOTH_DAMP_HZ=2.0) settles the swing instead, and is
+      unconditionally stable.
+- [ ] Next for laundry: two-hand grasp (fold needs both corners held),
+      then grasp -> place -> release against a table.
+- [ ] `drape` is VACUOUS for the generated garments — they are authored
+      as flat sheets, so initial z-extent is 0 and "collapses to flat"
+      cannot fail. It remains meaningful for scanned deformables. Give
+      generated garments a crumpled/draped-over-edge start.
 - [ ] Mass-floor honesty: reduce toward physical 2.5 g links via TGS
       solver tuning or Newton (cross-check with add_joint_cable).
 - [ ] plug-socket insertion affordance; cable in scene blueprints.

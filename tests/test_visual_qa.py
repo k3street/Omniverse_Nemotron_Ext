@@ -751,3 +751,59 @@ class TestActuatedCable:
         assert meta["mode"] == "dynamic"
         assert meta["physx_floor"] is False      # Newton runs real mass
         assert meta["length_m"] == 0.8 and meta["links"] == 20
+
+
+# ---------------------------------------------------------------------------
+# Cloth actuation. Both bugs below were SILENT: the sim ran, printed
+# plausible numbers, and was wrong.
+# ---------------------------------------------------------------------------
+
+def _newton_src():
+    return (Path(__file__).resolve().parents[1] / "scripts" /
+            "verify_asset_newton.py").read_text()
+
+
+def test_device_helper_does_not_recurse():
+    """A blanket replace once made _device()'s CPU fallback call _device()."""
+    body = _newton_src().split("def _device()", 1)[1].split("\ndef ", 1)[0]
+    assert "\n    _device()" not in body, "infinite recursion in _device()"
+    assert 'wp.set_device("cpu")' in body
+
+
+def test_cloth_solver_is_told_bodies_move_externally():
+    """Without this flag VBD ignores rigid shapes entirely and the cloth
+    falls straight through the fingers — no error, just a garment 25 m
+    below the gripper."""
+    body = _newton_src().split("def cloth_grasp", 1)[1]
+    assert "integrate_with_external_rigid_solver=True" in body
+
+
+@pytest.mark.parametrize("fn", ["def grasp", "def cloth_grasp"])
+def test_body_poses_are_assigned_back_not_mutated_in_place(fn):
+    """wp.array.numpy() is a VIEW on CPU but a COPY on CUDA. Mutating it
+    drives the gripper on CPU and does nothing at all on GPU."""
+    body = _newton_src().split(fn, 1)[1].split("\ndef ", 1)[0]
+    if "body_q.numpy()" not in body:
+        pytest.skip(f"{fn} does not pose-drive bodies")
+    assert "body_q.numpy().copy()" in body
+    assert "body_q.assign(" in body
+
+
+def test_grasp_verdict_does_not_require_the_centroid_to_rise():
+    """A garment lifted by one corner from flat MUST lose centroid height —
+    it stops being a sheet and becomes a hanging one. Gating on
+    centroid_rise fails a perfect grasp."""
+    body = _newton_src().split("def cloth_grasp", 1)[1]
+    verdict = [l for l in body.splitlines() if l.strip().startswith("ok =")]
+    assert verdict, "cloth_grasp must compute a verdict"
+    assert "centroid_rise" not in verdict[0]
+    for need in ("held_err", "suspended", "hangs", "settled"):
+        assert need in verdict[0]
+
+
+def test_cloth_damping_is_viscous_not_stiffness():
+    """tri_kd above ~0.1 detonates the cloth at any affordable substep
+    count (the corner flew 100 m). Energy is bled off viscously instead."""
+    src = _newton_src()
+    assert "CLOTH_DAMP_HZ" in src
+    assert float(src.split('"CLOTH_TRI_KD", "', 1)[1].split('"')[0]) <= 0.1

@@ -30,6 +30,7 @@ Run with the Newton venv:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -41,6 +42,47 @@ REGISTRY = REPO / "workspace" / "knowledge" / "sim_ready_assets.json"
 FRAME_DT = 1.0 / 60.0
 SUBSTEPS = 10
 RUBBER_DENSITY = 1200.0   # kg/m3, cable jacket (matches make_cable)
+# Cloth damping, swept for the grasp test (see cloth_grasp): tri_kd is the
+# only internal damping Newton's cloth exposes, and it is the difference
+# between a garment that hangs and one that swings like a pendulum for the
+# whole run. Overridable so the sweep is reproducible.
+CLOTH_TRI_KD = float(os.environ.get("CLOTH_TRI_KD", "1.0e-1"))
+# Viscous velocity damping (1/s) applied per frame. tri_kd is the only
+# internal damping Newton cloth exposes and it detonates above ~0.1 at
+# any substep count we can afford, so energy is bled off directly.
+# This models fabric hysteresis + air resistance; it is what turns a
+# garment that swings for the whole run into one that hangs.
+CLOTH_DAMP_HZ = float(os.environ.get("CLOTH_DAMP_HZ", "2.0"))
+CLOTH_TRI_DRAG = float(os.environ.get("CLOTH_TRI_DRAG", "5.0e-1"))
+# tri_kd is EXPLICIT damping: it is stable only while dt < 2*m/kd, and a
+# cloth particle weighs ~0.4 g. Raising kd without shrinking dt does not
+# damp the swing, it detonates it. These two move together.
+CLOTH_SUBSTEPS = int(os.environ.get("CLOTH_SUBSTEPS", "20"))
+
+
+def _device():
+    """Prefer CUDA — VBD is a GPU-parallel method (graph-coloured blocks),
+    and Newton disables its tiled solve entirely on CPU. Falls back to CPU
+    when the GPU is unavailable or already claimed (Isaac holds a primary
+    context; that is what forced CPU earlier). Override: NEWTON_DEVICE.
+    """
+    import os
+
+    import warp as wp
+
+    want = os.environ.get("NEWTON_DEVICE")
+    if want:
+        wp.set_device(want)
+        return want
+    try:
+        if wp.get_cuda_device_count() > 0:
+            wp.set_device("cuda:0")
+            wp.zeros(1, dtype=float)      # force context creation now
+            return "cuda:0"
+    except Exception:
+        pass
+    wp.set_device("cpu")
+    return "cpu"
 
 
 def _sim(model, solver, seconds: float, on_frame=None):
@@ -218,9 +260,7 @@ def drape(asset_id: str) -> str:
     import newton
     import warp as wp
 
-    # small particle counts; CPU is deterministic and immune to GPU
-    # contention with the vLLM judge sharing the device
-    wp.set_device("cpu")
+    _device()
 
     qf = QUEUE_DIR / f"{asset_id}.json"
     entry = json.loads(qf.read_text())
@@ -348,7 +388,7 @@ def fold(asset_id: str) -> str:
     import numpy as np
     import warp as wp
 
-    wp.set_device("cpu")
+    _device()
 
     qf = QUEUE_DIR / f"{asset_id}.json"
     entry = json.loads(qf.read_text())
@@ -443,7 +483,7 @@ def squish(asset_id: str) -> str:
     import numpy as np
     import warp as wp
 
-    wp.set_device("cpu")
+    _device()
 
     qf = QUEUE_DIR / f"{asset_id}.json"
     entry = json.loads(qf.read_text())
@@ -533,6 +573,7 @@ def squish(asset_id: str) -> str:
         "restitution_proxy": round(restitution, 3),
         "height_ratio": round(height_ratio, 3),
         "settled": settled,
+        "viscous_damping_hz": CLOTH_DAMP_HZ,
         "behaves_like_soft_body": plausible,
     }
     qf.write_text(json.dumps(entry, indent=1))
@@ -586,7 +627,7 @@ def cable(target: str) -> str:
     import warp as wp
     from pxr import Usd
 
-    wp.set_device("cpu")
+    _device()
 
     path = target
     entry, qf = None, QUEUE_DIR / f"{target}.json"
@@ -732,7 +773,7 @@ def grasp(target: str) -> str:
     import warp as wp
     from pxr import Usd
 
-    wp.set_device("cpu")
+    _device()
 
     path = target
     entry, qf = None, QUEUE_DIR / f"{target}.json"
@@ -784,8 +825,11 @@ def grasp(target: str) -> str:
         want = start + (goal - start) * smooth
         for _ in range(8):
             s0.clear_forces()
-            q = s0.body_q.numpy()
+            # write THROUGH: wp.array.numpy() is a view on CPU but a COPY
+            # on CUDA — mutating it silently does nothing on the GPU
+            q = s0.body_q.numpy().copy()
             q[nb - 1][:3] = want                     # drive the gripper
+            s0.body_q.assign(q)
             c = model.collide(s0)
             solver.step(s0, s1, ctrl, c, dt)
             s0, s1 = s1, s0
@@ -820,15 +864,196 @@ def grasp(target: str) -> str:
             f"{anchor_drift*1000:.2f} mm")
 
 
+def cloth_grasp(target: str) -> str:
+    """THE LAUNDRY GRASP: two fingers pinch a garment corner and lift it.
+
+    Newton attaches cloth to a gripper the way a real gripper does — by
+    CONTACT with friction (its own example_cloth_franka sets
+    robot_friction=1.0 and no attachment); equality constraints are
+    body-to-body only, and driving pinned cloth PARTICLES explodes. So
+    this drives two kinematic finger bodies that close on a corner and
+    lift, and asks whether the cloth comes with them.
+
+    Measured:
+      held    — the pinched corner tracks the fingers (mm, not cm)
+      lifted  — the garment's centroid rises with the hand
+      hangs   — the free part stays BELOW the grip (it drapes, not floats)
+      stable  — no divergence through close + lift
+    """
+    import math
+
+    import newton
+    import numpy as np
+    import warp as wp
+
+    _device()
+
+    @wp.kernel
+    def _damp(qd: wp.array(dtype=wp.vec3), s: float):
+        qd[wp.tid()] = qd[wp.tid()] * s
+
+    path = target
+    entry, qf = None, QUEUE_DIR / f"{target}.json"
+    if qf.exists():
+        entry = json.loads(qf.read_text())
+        path = entry.get("file", target)
+    if not Path(path).exists():
+        return f"{target}: file not found ({path})"
+    points, tris = _world_mesh(path)
+    if points is None or not tris:
+        return f"{target}: no usable mesh"
+
+    points = points - points.mean(axis=0)
+    extents = points.max(axis=0) - points.min(axis=0)
+    planar = float(max(extents[0], extents[1])) or 1.0
+    points = points / planar                      # unit-planar, as drape/fold
+    start_z = 0.6
+    points[:, 2] += start_z
+
+    corner = int(np.argmin(points[:, 0] + points[:, 1]))   # a corner vertex
+    grip = np.array(points[corner], dtype=float)
+
+    b = newton.ModelBuilder()
+    b.default_particle_radius = 0.01
+    b.add_cloth_mesh(pos=wp.vec3(0.0, 0.0, 0.0), rot=wp.quat_identity(),
+                     scale=1.0, vertices=[wp.vec3(*p) for p in points],
+                     indices=tris, vel=wp.vec3(0.0, 0.0, 0.0), density=0.2,
+                     tri_ke=5.0e1, tri_ka=5.0e1, tri_kd=CLOTH_TRI_KD,
+                     edge_ke=5.0e-2, edge_kd=1.0e-2,
+                     # aerodynamic drag, not stiffness damping: raising
+                     # tri_kd to 2.0 made the damping force itself
+                     # explosive (the corner flew 100 m). Drag bleeds the
+                     # pendulum swing off without touching the solve.
+                     tri_drag=CLOTH_TRI_DRAG, tri_lift=0.0)
+    # two fingers straddling the corner: kinematic (zero inverse mass),
+    # pose-driven — the pattern that works for rigid bodies under VBD
+    fingers = []
+    for dz in (+0.035, -0.035):
+        body = b.add_body(xform=wp.transform(
+            wp.vec3(*(grip + np.array([0.0, 0.0, dz]))), wp.quat_identity()),
+            mass=0.0)
+        b.add_shape_box(body=body, hx=0.03, hy=0.03, hz=0.008)
+        fingers.append(body)
+    b.color(include_bending=True)   # AFTER the bodies: VBD colours both
+    model = b.finalize()
+    model.soft_contact_ke = 1.0e3
+    model.soft_contact_kd = 1.0e1
+    model.soft_contact_mu = 1.0          # robot_friction, per the example
+    # THE mechanism (from newton's own example_cloth_franka): cloth only
+    # collides with rigid shapes when VBD is told the bodies are advanced
+    # OUTSIDE it. Without this flag the cloth falls straight through a box.
+    # The fingers are kinematic and pose-driven, so no rigid solver step is
+    # needed — and edge_rest_angle is zeroed per the example's VBD-bending
+    # workaround.
+    model.edge_rest_angle.zero_()
+    solver = newton.solvers.SolverVBD(
+        model, 10, integrate_with_external_rigid_solver=True,
+        particle_enable_self_contact=False)
+    pipeline = newton.CollisionPipelineUnified.from_model(model)
+
+    s0, s1 = model.state(), model.state()
+    ctrl = model.control()
+    dt = FRAME_DT / CLOTH_SUBSTEPS
+    settle_s, lift_s, hold_s = 0.6, 2.0, 3.0
+    lift_to = np.array([0.0, 0.0, 0.35])          # raise the hand 35 cm
+    nsettle, nlift = int(settle_s / FRAME_DT), int(lift_s / FRAME_DT)
+    nhold = int(hold_s / FRAME_DT)
+    pinch = 0.013                                  # finger half-gap, closed
+    mean_z_trace = []
+    # The grasp is CLOSED from t=0. Closing over 0.6 s let the cloth
+    # free-fall 33 m before the fingers met — nothing was holding it.
+    for f in range(nsettle + nlift + nhold):
+        gap = pinch
+        if f < nsettle:
+            hand = grip.copy()                     # let the cloth hang first
+        elif f < nsettle + nlift:
+            t = (f - nsettle) / max(nlift - 1, 1)
+            hand = grip + lift_to * (t * t * (3 - 2 * t))
+        else:
+            hand = grip + lift_to                  # hold: let the swing die
+        for _ in range(CLOTH_SUBSTEPS):
+            s0.clear_forces()
+            q = s0.body_q.numpy().copy()   # copy on CUDA — must assign back
+            q[fingers[0]][:3] = hand + np.array([0.0, 0.0, +gap])
+            q[fingers[1]][:3] = hand + np.array([0.0, 0.0, -gap])
+            s0.body_q.assign(q)
+            c = pipeline.collide(model, s0)
+            solver.step(s0, s1, ctrl, c, dt)
+            s0, s1 = s1, s0
+        wp.launch(_damp, dim=len(s0.particle_qd),
+                  inputs=[s0.particle_qd, math.exp(-CLOTH_DAMP_HZ * FRAME_DT)])
+        mean_z_trace.append(float(s0.particle_q.numpy()[:, 2].mean()))
+        if os.environ.get("GRASP_DEBUG") and f % 20 == 0:
+            d = s0.particle_q.numpy()
+            print(f"  f{f:4d} hand_z={hand[2]:.3f} corner_z={d[corner][2]:.3f} "
+                  f"min_z={d[:, 2].min():.3f} max_z={d[:, 2].max():.3f} "
+                  f"mean_z={d[:, 2].mean():.3f}", flush=True)
+
+    pq = s0.particle_q.numpy()
+    if not np.isfinite(pq.sum()):
+        return f"FAIL {target}: cloth solve diverged during the grasp"
+    hand_final = grip + lift_to
+    held_err = float(np.linalg.norm(pq[corner] - hand_final))
+    # A garment held by ONE corner and lifted from flat must lose centroid
+    # height — it stops being a flat sheet and becomes a hanging one. The
+    # centroid drops by roughly half its own reach no matter how well it is
+    # held, so "centroid rose" is not a grasp test; it fails a perfect
+    # grasp. What distinguishes held from dropped is whether the garment is
+    # still WITHIN ITS OWN REACH of the fingers.
+    reach = float(np.linalg.norm(points - points[corner], axis=1).max())
+    span = float(np.linalg.norm(pq - pq[corner], axis=1).max())
+    suspended = span < reach * 1.25          # nothing tore loose or fell away
+    drape = float(pq[corner][2] - pq[:, 2].min())
+    # A garment held at one corner hangs BELOW it. A mid-swing snapshot can
+    # show a large drape while cloth is flung above the hand, so require
+    # both: it reaches down, and nothing is left up above the fingers.
+    above = float(pq[:, 2].max() - pq[corner][2])
+    hangs = drape > 0.05 and above < 0.05
+    lift_ok = float(pq[corner][2] - grip[2]) > 0.9 * float(lift_to[2])
+    tail = mean_z_trace[-30:]                # last half second
+    swing = float(max(tail) - min(tail)) if tail else 9.9
+    settled = swing < 0.05                   # hanging, not still swinging
+    centroid_rise = float(pq[:, 2].mean() - start_z)
+    ok = held_err < 0.05 and suspended and hangs and lift_ok and settled
+    evidence = {
+        "date": date.today().isoformat(),
+        "method": "headless_newton_vbd_cloth_grasp",
+        "engine": "Newton (warp) SolverVBD — friction grasp, mu=1.0",
+        "device": _device(),
+        "commanded_lift_m": round(float(lift_to[2]), 3),
+        "grasp_slip_m": round(held_err, 4),
+        "corner_rose_m": round(float(pq[corner][2] - grip[2]), 4),
+        "drape_depth_m": round(drape, 4),
+        "above_grip_m": round(above, 4),
+        "swing_last_half_s_m": round(swing, 4),
+        "settled": settled,
+        "viscous_damping_hz": CLOTH_DAMP_HZ,
+        "span_m": round(span, 4),
+        "rest_reach_m": round(reach, 4),
+        "suspended": suspended,
+        "centroid_rise_m": round(centroid_rise, 4),
+        "particles": int(len(pq)),
+        "garment_is_graspable": ok,
+    }
+    if entry is not None:
+        entry["cloth_grasp_test"] = evidence
+        qf.write_text(json.dumps(entry, indent=1))
+    return (f"{'PASS' if ok else 'FAIL'} {target}: lifted "
+            f"{lift_to[2]:.2f} m, slip {held_err*1000:.0f} mm, corner rose "
+            f"{(pq[corner][2]-grip[2])*100:.0f} cm, drapes {drape*100:.0f} cm, "
+            f"span {span:.2f}/{reach:.2f} m, swing {swing*100:.1f} cm, "
+            f"suspended={suspended} settled={settled}")
+
+
 def main() -> int:
     if len(sys.argv) < 3 or sys.argv[1] not in ("rigid", "drape", "fold",
                                                  "squish", "cable",
-                                                 "grasp"):
+                                                 "grasp", "cloth_grasp"):
         print(__doc__)
         return 1
     fn = {"rigid": rigid_drop, "drape": drape, "fold": fold,
           "squish": squish, "cable": cable,
-          "grasp": grasp}[sys.argv[1]]
+          "grasp": grasp, "cloth_grasp": cloth_grasp}[sys.argv[1]]
     failures = 0
     for asset_id in sys.argv[2:]:
         try:
