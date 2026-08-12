@@ -767,8 +767,8 @@ whole garment, so the cloth partly drags — which is what real fabric does.
 
 **It does not yet work on the napkin, and that is a real limit rather than a
 tuning detail.** The napkin is 0.45 m square and 41 g — 2.3× the washcloth's
-mass on the same single-flap pinch — and it consistently slips: three runs
-carried it 0.11 m, 0.09 m and 0.09 m of the commanded 0.30 m. A friction grasp
+mass on the same single-flap pinch — and it consistently slips: two runs
+carried it 0.11 m and 0.09 m of the commanded 0.30 m. A friction grasp
 holds only what its contact patch and normal force can hold, so a one-flap
 pinch is mass-limited. Carrying heavier garments needs a bigger bite, a second
 grasp point, or both hands — which is also what a folding task needs, so it is
