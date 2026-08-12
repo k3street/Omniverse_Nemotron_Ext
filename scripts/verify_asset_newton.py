@@ -9,6 +9,13 @@ Two tests the PhysX live path can't cover:
                       stronger sim2real claim than either alone; evidence
                       lands in verification.newton on the registry entry.
 
+  cable <path|id>     Dynamic-cord test with Newton rods + VBD (Vertex
+                      Block Descent, SIGGRAPH 2024). Runs the cord at its
+                      PHYSICAL linear-density mass — PhysX needed a 15 g
+                      link floor and still coiled when slack. Criteria:
+                      pulls straight under a 100 g load, and holds its bow
+                      when slack instead of collapsing to a hairpin.
+
   drape <id...>       Soft-body drape test for QUEUE deformables: the
                       asset's mesh is dropped as a Newton cloth onto the
                       ground. Real cloth collapses (final height-extent a
@@ -33,6 +40,7 @@ REGISTRY = REPO / "workspace" / "knowledge" / "sim_ready_assets.json"
 
 FRAME_DT = 1.0 / 60.0
 SUBSTEPS = 10
+RUBBER_DENSITY = 1200.0   # kg/m3, cable jacket (matches make_cable)
 
 
 def _sim(model, solver, seconds: float, on_frame=None):
@@ -553,13 +561,160 @@ def _measure_dims_local(file_path):
         return None
 
 
+def cable(target: str) -> str:
+    """Dynamic-cord verification with Newton rods + VBD.
+
+    Vertex Block Descent (Chen/Liu/Yang/Yuksel, SIGGRAPH 2024) is what
+    SolverVBD implements; its robustness at extreme mass ratios is why a
+    cord can be simulated at its PHYSICAL linear-density mass here, where
+    PhysX needed link mass floored at 15 g and still coiled when slack.
+
+    Two criteria, both measured:
+      hang  — pinned at one end with a 100 g tool on the other, the cord
+              must pull straight (end-to-end / arc > 0.95)
+      slack — the cord's full length across a 55% span with both ends
+              pinned must HOLD ITS BOW, not collapse into a hairpin
+              (PhysX collapsed 1.0 m to a 0.19 m span)
+
+    `target` is a corded assembly / cable USD (its customLayerData cord
+    block gives length and radius) or a queue asset_id.
+    """
+    import math
+
+    import newton
+    import numpy as np
+    import warp as wp
+    from pxr import Usd
+
+    wp.set_device("cpu")
+
+    path = target
+    entry, qf = None, QUEUE_DIR / f"{target}.json"
+    if qf.exists():
+        entry = json.loads(qf.read_text())
+        path = entry.get("file", target)
+    if not Path(path).exists():
+        return f"{target}: file not found ({path})"
+    # hold the STAGE: Usd.Stage.Open(p).GetRootLayer() lets the stage be
+    # collected immediately and the layer handle expires (Boost.Python
+    # ArgumentError on the next access)
+    _stage = Usd.Stage.Open(path)
+    _lyr = _stage.GetRootLayer()
+    data = dict(_lyr.customLayerData) if _lyr.customLayerData else {}
+    # a bare cord stores its params under "cable", an assembly under "cord"
+    meta = dict(data.get("cord") or data.get("cable") or {})
+    L = float(meta.get("length_m", 1.0))
+    R = float(meta.get("radius_m", 0.004))
+    N = max(8, int(meta.get("links", 20)) + 1)
+    seg = L / (N - 1)
+    seg_mass = RUBBER_DENSITY * math.pi * R ** 2 * seg
+
+    def _q_to(d):
+        d = np.asarray(d, float)
+        d = d / np.linalg.norm(d)
+        z = np.array([0.0, 0.0, 1.0])
+        c = float(np.dot(z, d))
+        if c > 1 - 1e-9:
+            return wp.quat_identity()
+        if c < -1 + 1e-9:
+            return wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), math.pi)
+        ax = np.cross(z, d)
+        ax = ax / np.linalg.norm(ax)
+        return wp.quat_from_axis_angle(wp.vec3(*ax), math.acos(c))
+
+    def _run(hang: bool, tool_kg: float = 0.0):
+        b = newton.ModelBuilder()
+        if hang:
+            pos = [wp.vec3(0.0, 0.0, 1.2 - i * seg) for i in range(N)]
+        else:
+            chord = 0.55 * L
+            lo, hi = chord / 2 + 1e-6, 5.0
+            for _ in range(60):        # radius of a circular arc of length L
+                rad = 0.5 * (lo + hi)
+                a = 2 * rad * math.asin(min(1.0, chord / (2 * rad)))
+                lo, hi = (rad, hi) if a > L else (lo, rad)
+            half = math.asin(min(1.0, chord / (2 * rad)))
+            pos = []
+            for i in range(N):
+                t = -half + 2 * half * i / (N - 1)
+                pos.append(wp.vec3(rad * math.sin(t) + chord / 2,
+                                   rad * (math.cos(t) - math.cos(half)),
+                                   R + 0.002))
+        quats = [_q_to(np.array(pos[i + 1]) - np.array(pos[i]))
+                 for i in range(N - 1)]
+        b.add_rod(positions=pos, quaternions=quats, radius=R,
+                  stretch_stiffness=1.0e5, stretch_damping=1.0e-2,
+                  bend_stiffness=5.0e-3, bend_damping=1.0e-4)
+        nb = b.body_count
+        for i in range(nb):
+            b.body_mass[i] = seg_mass          # PHYSICAL mass, no floor
+            b.body_inv_mass[i] = 1.0 / seg_mass
+        if tool_kg:
+            b.body_mass[nb - 1] = tool_kg
+            b.body_inv_mass[nb - 1] = 1.0 / tool_kg
+        b.body_mass[0] = 0.0                   # pin by zero inverse mass
+        b.body_inv_mass[0] = 0.0
+        if not hang:
+            b.body_mass[nb - 1] = 0.0
+            b.body_inv_mass[nb - 1] = 0.0
+            b.add_ground_plane()
+        b.color()                              # VBD graph colouring
+        model = b.finalize()
+        solver = newton.solvers.SolverVBD(model, 10)
+        s0, s1 = model.state(), model.state()
+        ctrl = model.control()
+        dt = FRAME_DT / 8
+        for _ in range(int(4.0 / FRAME_DT)):
+            for _ in range(8):
+                s0.clear_forces()
+                c = model.collide(s0)
+                solver.step(s0, s1, ctrl, c, dt)
+                s0, s1 = s1, s0
+        q = s0.body_q.numpy()[:, :3]
+        if not np.isfinite(q).all():
+            return None
+        arc = sum(float(np.linalg.norm(q[i + 1] - q[i]))
+                  for i in range(len(q) - 1))
+        return {"arc_m": round(arc, 4),
+                "span_m": round(float(np.linalg.norm(q[-1] - q[0])), 4),
+                "z_min": round(float(q[:, 2].min()), 4),
+                "z_max": round(float(q[:, 2].max()), 4)}
+
+    hang = _run(True, tool_kg=0.1)
+    slack = _run(False)
+    if hang is None or slack is None:
+        return f"FAIL {target}: solve diverged"
+    straight = hang["span_m"] / max(hang["arc_m"], 1e-6)
+    intended_span = 0.55 * L
+    held = slack["span_m"] / intended_span
+    ok = straight > 0.95 and 0.9 <= held <= 1.1 and slack["z_max"] < 0.2 * L
+    evidence = {
+        "date": date.today().isoformat(),
+        "method": "headless_newton_vbd_cable_test",
+        "engine": "Newton (warp) SolverVBD — Vertex Block Descent",
+        "segment_mass_kg": round(seg_mass, 6),
+        "physx_floor_kg": 0.015,
+        "hang": hang, "slack": slack,
+        "straightness_under_load": round(straight, 3),
+        "slack_span_ratio": round(held, 3),
+        "behaves_like_cable": ok,
+    }
+    if entry is not None:
+        entry["cable_test"] = evidence
+        qf.write_text(json.dumps(entry, indent=1))
+    return (f"{'PASS' if ok else 'FAIL'} {target}: hang straightness "
+            f"{straight:.3f}, slack span {slack['span_m']:.3f} m of "
+            f"{intended_span:.3f} intended (ratio {held:.2f}), "
+            f"segment mass {seg_mass*1000:.2f} g (PhysX floor 15 g)")
+
+
 def main() -> int:
     if len(sys.argv) < 3 or sys.argv[1] not in ("rigid", "drape", "fold",
-                                                 "squish"):
+                                                 "squish", "cable"):
         print(__doc__)
         return 1
     fn = {"rigid": rigid_drop, "drape": drape, "fold": fold,
-          "squish": squish}[sys.argv[1]]
+          "squish": squish, "cable": cable}[sys.argv[1]]
     failures = 0
     for asset_id in sys.argv[2:]:
         try:

@@ -252,9 +252,15 @@ particles); one quaternion per SEGMENT mapping local +Z to the segment
 direction; given positions are the REST shape; VBD needs
 ModelBuilder.color() before finalize; pin by zero inverse mass (a world
 FixedJoint let the rod fall 78 m).
-- [ ] Port cord_mode='dynamic' onto Newton rods + VBD (physical masses)
-      for cords the robot MANIPULATES; routed static cords stay the
-      default for dressing. Then the grasp-and-move cable benchmark.
+PORTED 2026-08-11: `build_cable(..., physx_floor=False)` authors the
+PHYSICAL linear-density mass (3.02 g segments, no 15 g fudge) and records
+length/radius/links/both masses in customLayerData; `verify_asset_newton.py
+cable <path|id>` rebuilds that cord as a Newton rod and verifies it under
+VBD. First run PASSES: hang straightness 1.000 under a 100 g load, slack
+span 0.548 m of 0.550 intended (ratio 1.00). USD stays the interchange,
+Newton is the verification engine — same split as rigid/drape/fold/squish.
+- [ ] Grasp-and-move cable benchmark (robot gripper drags the cord) —
+      the actuated case, still open for both cloth and cable.
 - [ ] Mass-floor honesty: reduce toward physical 2.5 g links via TGS
       solver tuning or Newton (cross-check with add_joint_cable).
 - [ ] plug-socket insertion affordance; cable in scene blueprints.

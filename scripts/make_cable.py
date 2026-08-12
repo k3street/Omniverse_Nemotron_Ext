@@ -37,7 +37,8 @@ RUBBER_DENSITY = 1200.0  # kg/m3, cable jacket
 
 
 def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
-                links: int = 24, sag: bool = True) -> Path:
+                links: int = 24, sag: bool = True,
+                physx_floor: bool = True) -> Path:
     """Capsule-chain cable along +X, root at origin. `sag` lays the chain
     out in a shallow catenary so it starts near its rest shape instead of
     a rigid bar."""
@@ -52,7 +53,10 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
     # chain crumples and climbs. 15 g links are stable; recorded in
     # customLayerData so consumers know the fudge.
     physical_mass = RUBBER_DENSITY * math.pi * radius_m ** 2 * seg
-    link_mass = max(physical_mass, 0.015)
+    # PhysX cannot converge gram-scale links carrying a 100 g tool, hence
+    # the floor. Newton + VBD can (measured: 3.02 g segments, stable) —
+    # scripts/verify_asset_newton.py cable simulates the PHYSICAL mass.
+    link_mass = max(physical_mass, 0.015) if physx_floor else physical_mass
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     layer = Sdf.Layer.Find(str(out_path))
@@ -164,7 +168,10 @@ def build_cable(out_path: Path, length_m: float = 1.2, radius_m: float = 0.004,
         "cable": {"length_m": length_m, "radius_m": radius_m,
                   "links": links, "link_mass_kg": round(link_mass, 6),
                   "physical_mass_kg": round(physical_mass, 6),
-                  "note": "link mass floored at 15 g for solver stability"}}
+                  "radius_m": radius_m, "length_m": length_m,
+                  "physx_floor": physx_floor,
+                  "note": ("link mass floored at 15 g for PhysX stability; "
+                           "Newton+VBD runs the physical mass")}}
     stage.GetRootLayer().Save()
     return out_path
 
@@ -708,6 +715,10 @@ def compose(iron: str, plug: str, out_path: Path,
         "physxArticulation:enabledSelfCollisions",
         Sdf.ValueTypeNames.Bool).Set(False)
 
+    stage.GetRootLayer().customLayerData = {
+        "cord": {"mode": "dynamic", "length_m": length_m,
+                 "radius_m": radius_m, "links": links,
+                 "verify_with": "scripts/verify_asset_newton.py cable"}}
     scene = UsdPhysics.Scene.Define(stage, Sdf.Path("/PhysicsScene"))
     # the convergence package that makes the cord DRAPE instead of
     # crumple (validated live): 240 Hz physics + 64 position iterations

@@ -678,3 +678,43 @@ class TestHumanAttachmentCapture:
         ast.parse(src)
         assert "cord_attachments.json" in src
         assert "local_point" in src and "local_dir" in src
+
+
+class TestDynamicCordPhysicalMass:
+    """VBD (Newton) converges where PhysX needed a 15 g link-mass floor —
+    so a dynamic cord can carry its real linear-density mass."""
+
+    def test_physx_floor_is_opt_out(self, tmp_path):
+        pytest.importorskip("pxr")
+        from pxr import Usd, UsdPhysics
+
+        from make_cable import RUBBER_DENSITY, build_cable
+        import math
+        floored = build_cable(tmp_path / "f.usda", length_m=1.0,
+                              radius_m=0.004, links=20)
+        physical = build_cable(tmp_path / "p.usda", length_m=1.0,
+                               radius_m=0.004, links=20, physx_floor=False)
+
+        def first_mass(path):
+            st = Usd.Stage.Open(str(path))
+            for p in st.Traverse():
+                if p.HasAPI(UsdPhysics.MassAPI):
+                    return UsdPhysics.MassAPI(p).GetMassAttr().Get()
+            return None
+
+        real = RUBBER_DENSITY * math.pi * 0.004 ** 2 * (1.0 / 20)
+        assert abs(first_mass(floored) - 0.015) < 1e-6      # PhysX floor
+        assert abs(first_mass(physical) - real) < 1e-6      # physical
+        assert real < 0.015
+
+    def test_cord_metadata_lets_newton_rebuild_it(self, tmp_path):
+        pytest.importorskip("pxr")
+        from pxr import Usd
+
+        from make_cable import build_cable
+        out = build_cable(tmp_path / "c.usda", length_m=0.8, radius_m=0.005,
+                          links=16, physx_floor=False)
+        st = Usd.Stage.Open(str(out))          # keep the stage alive
+        meta = dict(st.GetRootLayer().customLayerData)["cable"]
+        assert meta["length_m"] == 0.8 and meta["radius_m"] == 0.005
+        assert meta["links"] == 16 and meta["physx_floor"] is False
