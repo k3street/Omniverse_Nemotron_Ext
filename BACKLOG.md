@@ -321,7 +321,7 @@ but VBD integrates driven rigid bodies correctly.
       UsdPhysics.FixedJoint has no deformable body to bind, so on cloth the
       weld-grasp defines cleanly and holds NOTHING.
 - [ ] Napkin (41 g, 2.3x the washcloth) SLIPS the one-flap friction pinch:
-      2 runs carried it 0.11 / 0.09 m of a commanded 0.30 m. A
+      3 runs carried it 0.11 / 0.09 / 0.09 m of a commanded 0.30 m. A
       friction grasp is mass-limited by contact patch x normal force. Needs
       a bigger bite, a second grasp point, or two hands.
 - [ ] Next for laundry: two-hand grasp (fold needs both corners held),
