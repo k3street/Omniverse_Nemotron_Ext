@@ -320,6 +320,15 @@ but VBD integrates driven rigid bodies correctly.
       routing cloth to a friction grasp in pick_place.py — a
       UsdPhysics.FixedJoint has no deformable body to bind, so on cloth the
       weld-grasp defines cleanly and holds NOTHING.
+      Entry point closed 2026-08-12: `create_franka_physics_pick_scene`
+      takes a `workpiece` (any pickable palette class) instead of hardcoded
+      cube_small. `_workpiece_profile` derives physics + footprint +
+      spacing from the palette; `require_rigid_body_api_for_workpieces` is
+      conditional; `grip_style` (friction vs fixed_joint) is chosen from
+      what is being picked and reaches the generated controller. Count is
+      FITTED to the table and the shortfall reported
+      (object_count_dropped) — 3 towels would otherwise be placed at
+      x=0.38/2.34/4.30 against a table ending at 1.55.
 - [ ] Napkin (41 g, 2.3x the washcloth) SLIPS the one-flap friction pinch:
       3 runs carried it 0.11 / 0.09 / 0.09 m of a commanded 0.30 m. A
       friction grasp is mass-limited by contact patch x normal force. Needs

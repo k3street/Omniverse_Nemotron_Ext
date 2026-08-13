@@ -797,16 +797,42 @@ stack would, rather than assumed up front.
 
 ### 10.6 Cloth as a pick-and-place workpiece (live path)
 
-The existing Isaac Assist pick-place scene and controller now accept cloth.
-Two things had to change, and the second is not a configuration detail:
+The Franka pick scene is **workpiece-agnostic**. It used to hardcode 5 cm
+rigid cubes, which quietly decided two things it had no business deciding: that
+the workpiece has a rigid body, and how big it is.
+
+```
+create_franka_physics_pick_scene(session_id=..., workpiece="towel")
+```
+
+`workpiece` takes any pickable palette class — `cube_small`, `cylinder_medium`,
+`sphere`, `bolt`, `washcloth`, `napkin`, `hand_towel`, `towel`, `tshirt`.
+Anything that is not pickable is rejected by name rather than silently
+mishandled (`'franka_panda' is not a pickable workpiece (it is a robot)`).
 
 | Where | Change |
 |---|---|
 | `multimodal/object_palette.py` | 5 deformable workpiece classes: `washcloth`, `napkin`, `hand_towel`, `towel`, `tshirt`. |
 | `multimodal/instantiator.py` | `_DEFORMABLE_WORKPIECE_CLASSES` beside the rigid set; emits `_apply_cloth` (`PhysxDeformableSurfaceAPI` + material preset) instead of `RigidBodyAPI`. |
+| `mcp_floorplan_tools.py` | `_workpiece_profile()` derives physics, footprint and spacing from the palette; `require_rigid_body_api_for_workpieces` is now conditional; `grip_style` is chosen from what is being picked. |
 | `chat/tools/handlers/pick_place.py` | `_is_deformable()` routes cloth to a **friction grasp**. |
 
-The grasp is the real blocker. The rigid path holds an object by welding a
+Everything downstream follows from the class:
+
+| | `cube_small` | `towel` |
+|---|---|---|
+| workpiece physics | `dynamic_rigid_body` | `deformable_surface` |
+| rigid-body API required | yes | **no** |
+| grip style | `fixed_joint` | **`friction`** |
+| of 3 requested, placed | 3 | 1 (2 reported dropped) |
+
+That last row matters: spacing comes from the workpiece's own footprint, so a
+large one spaces itself off the end of the table — three 1.4 m towels would be
+placed at x = 0.38, 2.34 and 4.30 against a table that stops at 1.55, two of
+them floating in mid-air. The count is fitted to the surface and the shortfall
+is reported as `object_count_dropped` rather than silently truncated.
+
+The grasp is still the real blocker. The rigid path holds an object by welding a
 `UsdPhysics.FixedJoint` between the end effector and the workpiece. A
 FixedJoint needs a rigid body at both ends and a deformable prim has none, so
 on cloth it **defines cleanly and holds nothing** — the arm completes its whole

@@ -146,10 +146,13 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
         {
             "name": "create_franka_physics_pick_scene",
             "description": (
-                "Create a full-physics Franka tabletop pick scene with rigid workpieces, "
-                "static support fixtures, relation metadata, and an existing pick-place "
-                "controller install plan. Default backend auto-selects cuRobo when available; "
-                "cuMotion/MoveIt requests are recorded as bridge contracts."
+                "Create a full-physics Franka tabletop pick scene, static support "
+                "fixtures, relation metadata, and an existing pick-place controller "
+                "install plan. The thing being picked is any pickable palette class "
+                "via 'workpiece' (default cube_small); deformable classes such as "
+                "towel or washcloth are authored as cloth and grasped by friction "
+                "rather than welded. Default backend auto-selects cuRobo when "
+                "available; cuMotion/MoveIt requests are recorded as bridge contracts."
             ),
             "inputSchema": {
                 "type": "object",
@@ -169,6 +172,15 @@ def mcp_floorplan_tool_schemas() -> List[Dict[str, Any]]:
                         ],
                     },
                     "object_count": {"type": "integer"},
+                    "workpiece": {
+                        "type": "string",
+                        "description": (
+                            "Pickable palette class to pick, e.g. cube_small, "
+                            "cylinder_medium, sphere, bolt, towel, washcloth, "
+                            "napkin, hand_towel, tshirt. Cloth classes are "
+                            "authored as PhysX deformable surfaces."
+                        ),
+                    },
                     "dry_run": {"type": "boolean"},
                     "build": {"type": "boolean"},
                     "resolve_assets": {"type": "boolean"},
@@ -519,9 +531,13 @@ async def create_franka_physics_pick_scene(arguments: Dict[str, Any]) -> Dict[st
     """Create a physically configured Franka pick scene and controller plan."""
 
     session_id = _required_str(arguments, "session_id")
+    workpiece = str(arguments.get("workpiece") or "cube_small").strip().lower()
+    profile = _workpiece_profile(workpiece)      # raises on a bad class
+    kind = "cloth" if profile["deformable"] else "rigid"
     description = str(
         arguments.get("description")
-        or "Franka Panda picks rigid cubes from a table and places them in a bin."
+        or f"Franka Panda picks {kind} {profile['class']} workpieces from a "
+           f"table and places them in a bin."
     )
     motion_backend = str(arguments.get("motion_backend") or "auto").strip().lower()
     object_count = max(1, min(6, int(arguments.get("object_count") or 3)))
@@ -534,6 +550,7 @@ async def create_franka_physics_pick_scene(arguments: Dict[str, Any]) -> Dict[st
         description=description,
         motion_backend=motion_backend,
         object_count=object_count,
+        workpiece=workpiece,
     )
     saved = await _save_new_revision(session_id, spec)
     build_response: Dict[str, Any] = {
@@ -552,6 +569,7 @@ async def create_franka_physics_pick_scene(arguments: Dict[str, Any]) -> Dict[st
         motion_backend=motion_backend,
         object_count=object_count,
         generate_controller_code=generate_controller_code,
+        deformable=profile["deformable"],
     )
     relation_result = normalize_spatial_relations(saved)
     return _session_payload(session_id, saved, {
@@ -1264,12 +1282,92 @@ def _layout_spec(description: str, objects: List[TypedObject], relations: List[S
     )
 
 
+def _workpiece_profile(object_class: str) -> Dict[str, Any]:
+    """Describe ONE pick target, derived from the object palette instead of
+    assumed.
+
+    The pick scene used to hardcode 5 cm rigid cubes, which quietly decided
+    two things it had no business deciding: that the workpiece has a rigid
+    body, and how big it is. Cloth breaks both — a garment must not get
+    UsdPhysics.RigidBodyAPI, and a 0.45 m towel does not sit on a 0.12 m
+    grid. Everything here comes from the palette entry.
+    """
+    from .multimodal.object_palette import PALETTE
+
+    cls = str(object_class or "cube_small").strip().lower()
+    entry = PALETTE.get(cls)
+    if entry is None:
+        raise ValueError(
+            f"unknown workpiece {object_class!r}; it must be a palette class"
+        )
+    if "workpiece" not in entry.tags:
+        pickable = sorted(k for k, v in PALETTE.items() if "workpiece" in v.tags)
+        raise ValueError(
+            f"{cls!r} is not a pickable workpiece (it is a {entry.category}). "
+            f"Pickable classes: {', '.join(pickable)}"
+        )
+
+    fx, fy = entry.footprint_xy_m
+    deformable = "deformable" in entry.tags
+    if deformable:
+        # A garment lies flat and is held by friction; it has no meaningful
+        # convex hull and no rigid mass.
+        physics = {
+            "physics": "deformable_surface",
+            "collision": "mesh",
+            "cloth_preset": "cloth_cotton",
+            "grasp_style": "friction",
+            "height_m": 0.004,
+        }
+    else:
+        physics = {
+            "physics": "dynamic_rigid_body",
+            "mass_kg": 0.05,
+            "collision": "convex",
+            "height_m": round(max(fx, fy), 3),
+        }
+    return {
+        "class": cls,
+        "deformable": deformable,
+        "footprint_xy_m": (fx, fy),
+        # lay them out on the workpiece's own footprint, with a gap
+        "spacing_m": round(max(fx, fy) * 1.4, 3),
+        "metadata": physics,
+    }
+
+
+# The pick table is table_large (2.0 x 1.0 m) centred at x=0.55, and the
+# workpiece row starts at x=0.38.
+_PICK_ROW_X0 = 0.38
+_PICK_TABLE_X_MAX = 0.55 + 2.0 / 2.0
+
+
+def _fit_workpieces(profile: Dict[str, Any], requested: int) -> int:
+    """How many of these actually fit on the table.
+
+    Spacing is the workpiece's own footprint, so a large one spaces itself
+    off the end of the table: three 1.4 m towels at 1.96 m spacing would be
+    placed at x = 0.38, 2.34 and 4.30 against a table that stops at 1.55 —
+    two of them floating in mid-air. Requesting more than fits is clamped,
+    and the caller is told (see object_count_dropped).
+    """
+    fx, fy = profile["footprint_xy_m"]
+    usable = _PICK_TABLE_X_MAX - _PICK_ROW_X0 - max(fx, fy) / 2.0
+    if usable <= 0:
+        return 1
+    return max(1, min(int(requested), 1 + int(usable // profile["spacing_m"])))
+
+
 def _franka_pick_scene_spec(
     *,
     description: str,
     motion_backend: str,
     object_count: int,
+    workpiece: str = "cube_small",
 ) -> LayoutSpec:
+    profile = _workpiece_profile(workpiece)
+    requested_count = int(object_count)
+    object_count = _fit_workpieces(profile, requested_count)
     objects: list[TypedObject] = [
         _typed_object(
             "table_large",
@@ -1332,19 +1430,16 @@ def _franka_pick_scene_spec(
     for index in range(object_count):
         objects.append(
             _typed_object(
-                "cube_small",
+                profile["class"],
                 index,
                 object_count,
                 name=f"PickObject_{index + 1}",
-                x=0.38 + index * 0.12,
+                x=_PICK_ROW_X0 + index * profile["spacing_m"],
                 y=0.18,
                 metadata={
-                    "physics": "dynamic_rigid_body",
-                    "mass_kg": 0.05,
-                    "collision": "convex",
+                    **profile["metadata"],
                     "graspable": True,
                     "pick_order": index + 1,
-                    "height_m": 0.05,
                 },
                 role_hint="pick",
             )
@@ -1401,7 +1496,17 @@ def _franka_pick_scene_spec(
                 "enabled": True,
                 "gravity_mps2": 9.81,
                 "require_collision_api": True,
-                "require_rigid_body_api_for_workpieces": True,
+                # Asserting this unconditionally would fail every cloth
+                # scene: a deformable workpiece has no RigidBodyAPI by
+                # design, and should not be repaired into having one.
+                "require_rigid_body_api_for_workpieces": (
+                    not profile["deformable"]
+                ),
+                "require_deformable_api_for_workpieces": profile["deformable"],
+                "workpiece_class": profile["class"],
+                "object_count_requested": requested_count,
+                "object_count_placed": object_count,
+                "object_count_dropped": max(0, requested_count - object_count),
                 "static_supports": ["Table", "DropBin"],
             },
             "controller": {
@@ -1411,6 +1516,12 @@ def _franka_pick_scene_spec(
                 "motion_backend": motion_backend,
                 "live_pick_controller": "setup_pick_place_controller",
                 "live_target_source": _pick_place_target_source(motion_backend),
+                # cloth cannot be welded to the end effector; the live
+                # controller detects this too, but recording it here makes
+                # the contract explicit for callers that never run it
+                "grasp_style": (
+                    "friction" if profile["deformable"] else "fixed_joint"
+                ),
                 "planner_backend": planner_backend,
                 "articulation_controller": {
                     "enabled": True,
@@ -1489,7 +1600,16 @@ def _typed_object(
     metadata: Dict[str, Any] | None = None,
     role_hint: str | None = None,
 ) -> TypedObject:
-    width, height = _DEFAULT_SIZES.get(object_class, (0.25, 0.25))
+    width, height = _DEFAULT_SIZES.get(object_class, (0.0, 0.0))
+    if not (width and height):
+        # fall back to the palette so every class is sized from one source
+        # rather than silently landing on a 0.25 m default
+        try:
+            from .multimodal.object_palette import PALETTE
+            entry = PALETTE.get(str(object_class).strip().lower())
+            width, height = entry.footprint_xy_m if entry else (0.25, 0.25)
+        except Exception:
+            width, height = 0.25, 0.25
     safe_name = _safe_name(str(name or f"{object_class}_{index + 1}"))
     spacing = 0.65
     px = _float_or(x, (index - (total - 1) / 2.0) * spacing)
@@ -1611,6 +1731,7 @@ def _franka_controller_plan(
     motion_backend: str,
     object_count: int,
     generate_controller_code: bool = False,
+    deformable: bool = False,
 ) -> Dict[str, Any]:
     target_source = _pick_place_target_source(motion_backend)
     args = {
@@ -1629,7 +1750,16 @@ def _franka_controller_plan(
         "drop_height": 0.18,
         "planning_obstacles": ["/World/Table", "/World/DropBin"],
         "require_upright": True,
+        # Cloth is carried by friction. The controller variants that weld a
+        # UsdPhysics.FixedJoint to the workpiece cannot hold a deformable —
+        # the joint defines cleanly and grips nothing — so the grip style
+        # has to be decided HERE, from what is being picked, rather than
+        # left at the rigid default.
+        "grip_style": "friction" if deformable else "fixed_joint",
     }
+    if deformable:
+        # A gap that holds a cube lets a sheet slide straight out.
+        args["gripper_close"] = 0.0
     controller_code = ""
     controller_error = ""
     if generate_controller_code:

@@ -892,3 +892,85 @@ def test_newton_cloth_pick_place_measures_where_the_cloth_ended_up():
     assert verdict, "pick_place_cloth must compute a verdict"
     for need in ("carried", "intact", "landed", "settled"):
         assert need in verdict[0]
+
+
+# ---------------------------------------------------------------------------
+# The Franka pick scene is workpiece-agnostic. It used to hardcode 5 cm rigid
+# cubes, which silently decided both the physics and the layout.
+# ---------------------------------------------------------------------------
+
+def _mcp():
+    _svc()
+    from isaac_assist_service import mcp_floorplan_tools as m
+    return m
+
+
+@pytest.mark.parametrize("bad,why", [
+    ("franka_panda", "robot"), ("table_large", "fixture"),
+    ("no_such_thing", "unknown"),
+])
+def test_only_pickable_classes_are_accepted_as_workpieces(bad, why):
+    m = _mcp()
+    with pytest.raises(ValueError):
+        m._workpiece_profile(bad)
+
+
+def test_cloth_workpiece_gets_cloth_physics_and_no_rigid_mass():
+    m = _mcp()
+    cloth = m._workpiece_profile("towel")
+    assert cloth["deformable"] is True
+    assert cloth["metadata"]["physics"] == "deformable_surface"
+    assert "mass_kg" not in cloth["metadata"], "a garment is not a rigid mass"
+    rigid = m._workpiece_profile("cube_small")
+    assert rigid["deformable"] is False
+    assert rigid["metadata"]["physics"] == "dynamic_rigid_body"
+    assert rigid["metadata"]["mass_kg"] > 0
+
+
+def test_rigid_body_assertion_is_conditional_on_the_workpiece():
+    """Asserting require_rigid_body_api_for_workpieces on a cloth scene would
+    fail every such scene, or worse, 'repair' the garment into a rigid body."""
+    m = _mcp()
+    for wp, rigid_expected in (("cube_small", True), ("towel", False)):
+        spec = m._franka_pick_scene_spec(description="d", motion_backend="auto",
+                                         object_count=2, workpiece=wp)
+        phys = spec.parameters["physics"]
+        assert phys["require_rigid_body_api_for_workpieces"] is rigid_expected
+        assert phys["require_deformable_api_for_workpieces"] is (not rigid_expected)
+        assert phys["workpiece_class"] == wp
+
+
+@pytest.mark.parametrize("wp", ["cube_small", "bolt", "washcloth", "napkin",
+                                "towel", "tshirt"])
+def test_workpieces_are_placed_on_the_table_not_off_the_end(wp):
+    """Spacing comes from the workpiece's own footprint, so a large one would
+    space itself past the table edge — three 1.4 m towels would land at
+    x = 0.38, 2.34 and 4.30 against a table that stops at 1.55."""
+    m = _mcp()
+    spec = m._franka_pick_scene_spec(description="d", motion_backend="auto",
+                                     object_count=3, workpiece=wp)
+    picks = [o.model_dump() for o in spec.objects
+             if str(o.name).startswith("PickObject")]
+    assert picks, "a pick scene needs something to pick"
+    for p in picks:
+        assert p["position"]["x"] <= m._PICK_TABLE_X_MAX + 1e-6, \
+            f"{wp} placed at x={p['position']['x']} beyond the table"
+    phys = spec.parameters["physics"]
+    # whatever could not fit must be REPORTED, never silently dropped
+    assert (phys["object_count_placed"] + phys["object_count_dropped"]
+            == phys["object_count_requested"] == 3)
+    assert phys["object_count_placed"] == len(picks)
+
+
+def test_controller_plan_picks_the_grip_style_from_the_workpiece():
+    m = _mcp()
+    for wp, style in (("cube_small", "fixed_joint"), ("towel", "friction")):
+        plan = m._franka_controller_plan(
+            motion_backend="auto", object_count=1,
+            generate_controller_code=True,
+            deformable=m._workpiece_profile(wp)["deformable"])
+        assert plan["controller_args"]["grip_style"] == style
+        code = plan["controller_code"]
+        assert code, "controller code should have been generated"
+        compile(code, "<generated>", "exec")
+        assert f"GRIP_STYLE = {style!r}" in code
