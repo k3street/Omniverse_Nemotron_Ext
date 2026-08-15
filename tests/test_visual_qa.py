@@ -290,7 +290,47 @@ class TestDeformablePath:
 
     def test_newton_script_syntax(self):
         import ast
-        ast.parse((REPO / "scripts" / "verify_asset_newton.py").read_text())
+        for name in ("newton_runtime.py", "verify_asset_newton.py",
+                     "pick_place_cloth.py", "vbd_cable_probe.py"):
+            ast.parse((REPO / "scripts" / name).read_text())
+
+    def test_newton_15_api_contract(self):
+        sources = "\n".join(
+            (REPO / "scripts" / name).read_text()
+            for name in ("verify_asset_newton.py", "pick_place_cloth.py",
+                         "vbd_cable_probe.py")
+        )
+        for removed in ("CollisionPipelineUnified", "model.collide(",
+                        "pipeline.collide(model"):
+            assert removed not in sources
+        assert "pipeline.contacts()" in (
+            REPO / "scripts" / "newton_runtime.py").read_text()
+        assert "from newton.utils import transform_twist" not in sources
+        assert "body_com" in (
+            REPO / "scripts" / "pick_place_cloth.py").read_text()
+        assert sources.count('body_frame_origin="start"') == 3
+        assert "load_visual_shapes=False" in sources
+        assert "subprocess.run(" in sources
+
+    def test_newton_runtime_is_pinned_separately_from_isaac(self):
+        req = (REPO / "requirements-newton.txt").read_text()
+        assert "newton[importers]==1.5.0" in req
+        assert "warp-lang==1.16.0" in req
+        assert "newton" not in (REPO / "requirements.txt").read_text().lower()
+
+    def test_newton_evidence_records_runtime_versions(self):
+        src = (REPO / "scripts" / "verify_asset_newton.py").read_text()
+        assert "runtime_metadata()" in src
+        helper = (REPO / "scripts" / "newton_runtime.py").read_text()
+        assert '"newton_version"' in helper
+        assert '"warp_version"' in helper
+        assert "newton.use_coord_layout_targets = True" in helper
+        # New measurements must not overwrite the historical unversioned
+        # Newton 0.2 fields in ignored queue/registry runtime state.
+        assert '["newton_1_5"] = evidence' in src
+        assert 'cloth_grasp_test_newton_1_5_{suffix}' in src
+        assert '"cross_engine_ok": rests' in src
+        assert 'asset["verification"]["newton_1_5"] = evidence' in src
 
     def test_rigid_library_assets_not_softened(self):
         from unittest.mock import patch
@@ -773,9 +813,12 @@ def test_device_helper_does_not_recurse():
 def test_cloth_solver_is_told_bodies_move_externally():
     """Without this flag VBD ignores rigid shapes entirely and the cloth
     falls straight through the fingers — no error, just a garment 25 m
-    below the gripper."""
+    below the gripper. Newton 1.5's full-surface A/B instead lets VBD own
+    those rigid bodies, while the supported particle baseline stays external.
+    """
     body = _newton_src().split("def cloth_grasp", 1)[1]
-    assert "integrate_with_external_rigid_solver=True" in body
+    assert ("integrate_with_external_rigid_solver=not full_surface_contact"
+            in body)
 
 
 @pytest.mark.parametrize("fn", ["def grasp", "def cloth_grasp"])

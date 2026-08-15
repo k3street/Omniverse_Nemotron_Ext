@@ -723,14 +723,23 @@ friction alone (no attachment constraint) and lift it 35 cm.
 ![A towel hanging from the gripper](docs/images/cloth_grasp_towel.png)
 
 Both images are the **actual solver state** exported to USD and rendered — not
-mock-ups. 5/5 generated garments pass on CUDA in 90 s: 4 mm slip, the corner
-rises the full 35 cm, and the garment hangs 117-146 cm and settles to under
-0.7 cm of residual swing.
+mock-ups. The Newton 0.2 baseline passed 5/5 generated garments on CUDA in 90
+s: 4 mm slip, the corner rose the full 35 cm, and the garment hung 117-146 cm
+and settled to under 0.7 cm of residual swing. Revalidated on 2026-08-14 with
+Newton 1.5.0 + Warp 1.16.0, the particle-contact path again passes **5/5**;
+measured slip is now 13-37 mm. Versioned evidence records the new results
+without silently replacing the old baseline.
 
 ```bash
-/home/kimate/newton/.venv/bin/python scripts/verify_asset_newton.py \
+python3 -m venv .venv-newton
+.venv-newton/bin/pip install -r requirements-newton.txt
+
+.venv-newton/bin/python scripts/verify_asset_newton.py \
     cloth_grasp garment_towel
 CLOTH_EXPORT_USD=out.usda ... cloth_grasp garment_tshirt   # export for render
+# Newton 1.5 edge/face contact A/B (particle contact remains the default)
+NEWTON_FULL_SURFACE_CONTACT=1 .venv-newton/bin/python \
+    scripts/verify_asset_newton.py cloth_grasp garment_towel
 ```
 
 Three things about this are easy to get wrong and fail *silently*:
@@ -756,14 +765,22 @@ it down.
 set down 30 cm away. Rendered from the recorded simulation, not staged.*
 
 ```bash
-/home/kimate/newton/.venv/bin/python scripts/pick_place_cloth.py garment_washcloth
+.venv-newton/bin/python scripts/pick_place_cloth.py garment_washcloth
 PICK_PLACE_RECORD_USD=scene.usd ... scripts/pick_place_cloth.py garment_napkin
 ```
 
-Measured over 5 consecutive runs on the **washcloth (18 g): 5/5 carried it
-0.20–0.26 m of a commanded 0.30 m**, intact, resting on the table, settled. It
-falls short of the full 0.30 m because the grasp takes a flap rather than the
-whole garment, so the cloth partly drags — which is what real fabric does.
+The Newton 0.2 baseline measured 5 consecutive runs on the **washcloth (18 g):
+5/5 carried it 0.20–0.26 m of a commanded 0.30 m**, intact, resting on the
+table, settled. It falls short of the full 0.30 m because the grasp takes a
+flap rather than the whole garment, so the cloth partly drags — which is what
+real fabric does.
+
+The Newton 1.5 probe runs end to end and carries the washcloth 0.23 m, but it
+does **not** pass the final gate: after opening, particle contact leaves the
+cloth caught on the retreating hand instead of resting on the table. Full
+finger travel and a lateral-withdrawal experiment did not fix that behavior,
+so this is recorded as a release/contact regression rather than hidden by a
+weaker landing threshold.
 
 **It does not yet work on the napkin, and that is a real limit rather than a
 tuning detail.** The napkin is 0.45 m square and 41 g — 2.3× the washcloth's
@@ -774,15 +791,57 @@ pinch is mass-limited. Carrying heavier garments needs a bigger bite, a second
 grasp point, or both hands — which is also what a folding task needs, so it is
 the next piece of work rather than a workaround.
 
-**Why Newton and not the live PhysX path.** NVIDIA's own current reference for
-robot cloth manipulation is exactly this pairing — a Franka under
-`SolverFeatherstone` coupled one-way to cloth under `SolverVBD`
-(`newton.examples cloth_franka`), roughly 300× faster than GPU-IPC. Isaac Lab's
-deformable-object API for this is still an open **proposal**
-([isaac-sim/IsaacLab#5285](https://github.com/isaac-sim/IsaacLab/issues/5285),
-April 2026) with no milestone, so there is no Isaac-native equivalent to
-migrate onto yet. The coupling is deliberately one-way: the arm moves the
-cloth, a 30 g washcloth does not perturb a Franka.
+**Why a standalone Newton path remains useful.** NVIDIA's reference uses a
+Franka under `SolverFeatherstone` coupled one-way to cloth under `SolverVBD`
+(`newton.examples cloth_franka`), roughly 300× faster than GPU-IPC. Isaac Lab
+3.0 Beta 2 now includes experimental VBD deformables and an
+[`Isaac-Lift-Cloth-Franka-v0`](https://isaac-sim.github.io/IsaacLab/release/3.0.0-beta2/source/overview/core-concepts/physical-backends/newton/newton-manager-abstraction.html)
+task, so issue #5285 is no longer the right blocker. That release is still on
+Newton 1.2.1, while these probes pin Newton 1.5.0 and Warp 1.16.0 in a separate
+environment. We should port the task to Isaac Lab after its Newton dependency
+catches up; until then, forcing 1.5 into Isaac's environment would invalidate
+its tested dependency set. The local coupling remains deliberately one-way: a
+30 g washcloth does not materially perturb a Franka.
+
+[Newton 1.5](https://github.com/newton-physics/newton/releases/tag/v1.5.0)
+also adds opt-in full-surface VBD contacts. Set
+`NEWTON_FULL_SURFACE_CONTACT=1` only to reproduce the A/B test: in the current
+washcloth gate it ejects the cloth by tens of metres and fails. Particle
+contact therefore remains the supported default. Cable thresholds were
+revalidated after preserving 1.5's changed shear/twist slots: load/slack and
+friction-grasp gates both pass.
+
+Psyonic hands can use Newton 1.5 hydroelastic contact without changing the
+canonical robot or Isaac Lab's pinned runtime. The generator references the
+canonical USD, selects its generic `Physics=physics` variant, disables the 68
+overlapping hand colliders only in the wrapper, and authors one closed SDF
+collider for each of the 22 hand rigid bodies:
+
+```bash
+WARP_CACHE_PATH=/tmp/newton-warp-cache \
+  .venv-newton/bin/python scripts/make_newton_hydro_hands.py \
+  /path/to/amber_revan_psyonic_lsmall_rsmall.usda \
+  /path/to/amber_revan_psyonic_lsmall_rsmall_newton_hydro.usda
+
+# CUDA-only: build every mesh SDF and test one fingertip contact pair
+WARP_CACHE_PATH=/tmp/newton-warp-cache \
+  .venv-newton/bin/python scripts/smoke_newton_hydro_hands.py \
+  /path/to/amber_revan_psyonic_lsmall_rsmall_newton_hydro.usda \
+  --write-manifest
+```
+
+The generated companion preserves 52 bodies and 52 joints. On the GB10, all
+22 SDFs build and the isolated left-index distal collider produces 64 reduced
+hydroelastic contacts against a temporary sphere at 2 mm penetration. Objects
+the robot grasps must also opt into SDF hydroelastic collision; this is rigid
+distributed-pressure contact, not deformable fingertip tissue.
+
+The robot/Newton workflow is also exposed as the project-owned Agent Skill
+`.agents/skills/newton-hydroelastic-hands`. NVIDIA's official CAD-to-SimReady,
+USD performance-tuning, and realtime-viewer skills can be used alongside it.
+The CPU-only `nvidia_usd_validation` Stage Analyzer pack and the disabled-by-
+default Kit/USD/Isaac MCP endpoint template are documented in
+[`Docs/13_NVIDIA_OMNIVERSE_AGENTS.md`](Docs/13_NVIDIA_OMNIVERSE_AGENTS.md).
 
 **The finding that shaped the whole task:** *a parallel-jaw gripper cannot pick
 a flat sheet off a table.* The fingers close beside zero-thickness fabric
@@ -849,13 +908,17 @@ sim2real claim than either alone.
 | Command | What it proves |
 |---|---|
 | `verify_asset_live.py` | Live PhysX drop test inside Isaac. |
-| `verify_asset_newton.py rigid` | The same USD re-dropped in Newton. 32 assets, both engines agree. |
+| `verify_asset_newton.py rigid` | The same USD re-dropped in Newton. Current registry: Newton 0.2 passed 32/32; Newton 1.5 passes 30/32. |
 | `... drape` / `fold` / `squish` | Deformable behaviour: cloth collapses, folds stay folded. |
 | `... cable` | A cord pulls straight under load and holds its bow when slack. |
 | `... grasp` / `cloth_grasp` | A gripper carries a cord, and a gripper carries a garment. |
 
 Newton runs on CUDA by default (`NEWTON_DEVICE` overrides). VBD is a
 GPU-parallel method — Newton disables its tiled solve entirely on CPU.
+The two Newton 1.5 rigid failures are retained as versioned evidence:
+`frying_pan` has not settled by 4 s, and `planter_round_02_inst_base` does not
+make the expected 10 cm drop with its imported collision hull. The foam-brick
+VBD compression gate also passes on 1.5 (0.10 restitution, 0.94 height ratio).
 
 > **Known gap:** `drape` is vacuous for the *generated* garments. They are
 > authored as flat sheets, so initial z-extent is zero and "collapses to flat"

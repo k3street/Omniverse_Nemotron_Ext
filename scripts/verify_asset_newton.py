@@ -7,7 +7,7 @@ Two tests the PhysX live path can't cover:
                       USD that passed the live PhysX drop is re-run in
                       Newton. Agreement between two engines is a far
                       stronger sim2real claim than either alone; evidence
-                      lands in verification.newton on the registry entry.
+                      lands in verification.newton_1_5 on the registry entry.
 
   cable <path|id>     Dynamic-cord test with Newton rods + VBD (Vertex
                       Block Descent, SIGGRAPH 2024). Runs the cord at its
@@ -20,12 +20,15 @@ Two tests the PhysX live path can't cover:
                       asset's mesh is dropped as a Newton cloth onto the
                       ground. Real cloth collapses (final height-extent a
                       fraction of initial); a rigid shell would not.
-                      Evidence lands on the queue entry (drape_test) for
-                      the human reviewer — deformable sign-off stays human.
+                      Evidence lands on the versioned queue entry for the
+                      human reviewer — deformable sign-off stays human.
 
 Run with the Newton venv:
-    /home/kimate/newton/.venv/bin/python scripts/verify_asset_newton.py rigid beer_bottle
-    /home/kimate/newton/.venv/bin/python scripts/verify_asset_newton.py drape disposable_medical_masks
+    .venv-newton/bin/python scripts/verify_asset_newton.py rigid beer_bottle
+    .venv-newton/bin/python scripts/verify_asset_newton.py drape disposable_medical_masks
+
+Set NEWTON_FULL_SURFACE_CONTACT=1 to A/B Newton 1.5's opt-in VBD edge/face
+contact generation in cloth_grasp. Baseline runs keep particle contact.
 """
 from __future__ import annotations
 
@@ -34,6 +37,9 @@ import os
 import sys
 from datetime import date
 from pathlib import Path
+
+from newton_runtime import (collision_pipeline, require_newton_15,
+                            runtime_label, runtime_metadata)
 
 REPO = Path(__file__).resolve().parents[1]
 QUEUE_DIR = REPO / "workspace" / "review_queue"
@@ -68,7 +74,7 @@ def _device():
     """
     import os
 
-    import warp as wp
+    _, wp = require_newton_15()
 
     want = os.environ.get("NEWTON_DEVICE")
     if want:
@@ -88,6 +94,7 @@ def _device():
 def _sim(model, solver, seconds: float, on_frame=None):
     import warp as wp  # noqa: F401
 
+    pipeline, contacts = collision_pipeline(model)
     state0, state1 = model.state(), model.state()
     control = model.control()
     dt = FRAME_DT / SUBSTEPS
@@ -95,7 +102,7 @@ def _sim(model, solver, seconds: float, on_frame=None):
     for f in range(frames):
         for _ in range(SUBSTEPS):
             state0.clear_forces()
-            contacts = model.collide(state0)
+            pipeline.collide(state0, contacts)
             solver.step(state0, state1, control, contacts, dt)
             state0, state1 = state1, state0
         if on_frame:
@@ -134,6 +141,10 @@ def rigid_drop(asset_id: str) -> str:
         usd_file,
         xform=wp.transform(wp.vec3(0.0, 0.0, spawn_z), wp.quat_identity()),
         collapse_fixed_joints=True,
+        # Newton 1.5 imports static visual-only shapes by default. The drop
+        # verifier needs collision geometry only; retaining render meshes
+        # across a multi-asset batch can exhaust/crash the USD importer.
+        load_visual_shapes=False,
     )
     if builder.body_count == 0:
         return f"{asset_id}: no rigid bodies parsed from USD"
@@ -159,8 +170,10 @@ def rigid_drop(asset_id: str) -> str:
     evidence = {
         "date": date.today().isoformat(),
         "method": "headless_newton_drop_test",
-        "engine": f"Newton (warp) SolverXPBD, headless on "
-                  f"{wp.get_device().name}",
+        "engine": runtime_label(
+            f"SolverXPBD, headless on {wp.get_device().name}"),
+        **runtime_metadata(),
+        "cross_engine_ok": rests,
         "drop": {"drop_measured_m": round(dropped, 4),
                  "drop_predicted_m": drop_h,
                  "settled_last_second": settled,
@@ -168,13 +181,14 @@ def rigid_drop(asset_id: str) -> str:
                  "rests_after_s": 4.0},
     }
     verdict = "PASS" if rests else "FAIL"
-    if verdict == "PASS":
-        asset.setdefault("verification", {})
-        asset["verification"]["newton"] = evidence
-        REGISTRY.write_text(json.dumps(reg, indent=1))
+    # Failure evidence is as important as a pass during an engine migration;
+    # keep it under the versioned key without overwriting the Newton 0.2 run.
+    asset.setdefault("verification", {})
+    asset["verification"]["newton_1_5"] = evidence
+    REGISTRY.write_text(json.dumps(reg, indent=1))
     return (f"{verdict} {asset_id}: dropped {dropped:.4f} m "
             f"(predicted {drop_h}), settled={settled}, vz={vz:.4f}"
-            + (" — cross-engine evidence written" if verdict == "PASS" else ""))
+            + " — cross-engine evidence written")
 
 
 def _world_mesh(usd_file: str):
@@ -308,12 +322,10 @@ def drape(asset_id: str) -> str:
     model.soft_contact_mu = 0.5
     # self-contact defaults assume meter-scale cloth; on a centimeter-scale
     # object the 0.2 m radius swallows the whole mesh and the solve NaNs
-    solver = newton.solvers.SolverVBD(model, 10,
-                                      particle_enable_self_contact=False)
-
-    # particle-vs-shape contacts need the unified pipeline (the default
-    # model.collide path is rigid-only — the cloth would never see ground)
-    pipeline = newton.CollisionPipelineUnified.from_model(model)
+    # Explicit, reusable contact storage is the Newton 1.5 ownership model.
+    pipeline, contacts = collision_pipeline(model)
+    solver = newton.solvers.SolverVBD(
+        model, iterations=10, particle_enable_self_contact=False)
     state0, state1 = model.state(), model.state()
     control = model.control()
     substeps = 20
@@ -321,7 +333,7 @@ def drape(asset_id: str) -> str:
     for _ in range(int(3.0 / FRAME_DT)):
         for _ in range(substeps):
             state0.clear_forces()
-            contacts = pipeline.collide(model, state0)
+            pipeline.collide(state0, contacts)
             solver.step(state0, state1, control, contacts, dt)
             state0, state1 = state1, state0
     state = state0
@@ -334,7 +346,7 @@ def drape(asset_id: str) -> str:
     if z_extent > 100.0:
         # particles blasted away: degenerate scan topology the solver
         # cannot integrate — an asset callout, not a measurement
-        entry["drape_test"] = {
+        entry["drape_test_newton_1_5"] = {
             "date": date.today().isoformat(),
             "method": "headless_newton_drape_test",
             "verdict": "unstable",
@@ -354,8 +366,9 @@ def drape(asset_id: str) -> str:
     evidence = {
         "date": date.today().isoformat(),
         "method": "headless_newton_drape_test",
-        "engine": f"Newton (warp) SolverVBD, headless on "
-                  f"{wp.get_device().name}",
+        "engine": runtime_label(
+            f"SolverVBD, headless on {wp.get_device().name}"),
+        **runtime_metadata(),
         "particles": int(len(pq)),
         "normalized_to_planar_m": round(planar_m, 4),
         "initial_z_extent_norm": round(z_extent0, 4),
@@ -364,7 +377,7 @@ def drape(asset_id: str) -> str:
         "rests_on_ground": on_ground,
         "drapes_like_cloth": draped,
     }
-    entry["drape_test"] = evidence
+    entry["drape_test_newton_1_5"] = evidence
     qf.write_text(json.dumps(entry, indent=1))
     return (f"{'PASS' if draped else 'FAIL'} {asset_id}: final flatness "
             f"{flatness:.3f} (z {z_extent0:.3f} -> {z_extent:.3f} m over "
@@ -431,9 +444,9 @@ def fold(asset_id: str) -> str:
     model.soft_contact_ke = 1.0e2
     model.soft_contact_kd = 1.0e0
     model.soft_contact_mu = 0.7
-    solver = newton.solvers.SolverVBD(model, 10,
-                                      particle_enable_self_contact=False)
-    pipeline = newton.CollisionPipelineUnified.from_model(model)
+    pipeline, contacts = collision_pipeline(model)
+    solver = newton.solvers.SolverVBD(
+        model, iterations=10, particle_enable_self_contact=False)
 
     state0, state1 = model.state(), model.state()
     control = model.control()
@@ -442,7 +455,7 @@ def fold(asset_id: str) -> str:
     for _ in range(int(3.0 / FRAME_DT)):
         for _ in range(substeps):
             state0.clear_forces()
-            contacts = pipeline.collide(model, state0)
+            pipeline.collide(state0, contacts)
             solver.step(state0, state1, control, contacts, dt)
             state0, state1 = state1, state0
     pq = state0.particle_q.numpy()
@@ -455,10 +468,12 @@ def fold(asset_id: str) -> str:
     # flat two-layer stack, resting on ground
     on_ground = float(pq[:, 2].min()) < 0.05
     folded = 0.4 <= ratio <= 0.75 and z_ext < 0.12 and on_ground
-    entry["fold_test"] = {
+    entry["fold_test_newton_1_5"] = {
         "date": date.today().isoformat(),
         "method": "headless_newton_fold_persistence_test",
-        "engine": "Newton (warp) SolverVBD, headless cpu",
+        "engine": runtime_label(
+            f"SolverVBD, headless on {wp.get_device().name}"),
+        **runtime_metadata(),
         "fold_axis_len_ratio": round(ratio, 3),
         "final_z_extent_norm": round(z_ext, 4),
         "rests_on_ground": on_ground,
@@ -534,6 +549,8 @@ def squish(asset_id: str) -> str:
     # (undamped it bounces forever, damped it overshoots the stability
     # limit); XPBD's constraint projection handles tets robustly
     solver = newton.solvers.SolverXPBD(model, iterations=10)
+    pipeline, contacts = collision_pipeline(
+        model, soft_contact_margin=0.001)
 
     state0, state1 = model.state(), model.state()
     control = model.control()
@@ -544,7 +561,7 @@ def squish(asset_id: str) -> str:
     for _ in range(int(2.5 / FRAME_DT)):
         for _ in range(substeps):
             state0.clear_forces()
-            contacts = model.collide(state0, soft_contact_margin=0.001)
+            pipeline.collide(state0, contacts)
             solver.step(state0, state1, control, contacts, dt)
             state0, state1 = state1, state0
         pq = state0.particle_q.numpy()
@@ -564,10 +581,12 @@ def squish(asset_id: str) -> str:
     plausible = (settled and on_ground
                  and 0.25 <= height_ratio <= 1.15
                  and restitution <= 0.9)
-    entry["squish_test"] = {
+    entry["squish_test_newton_1_5"] = {
         "date": date.today().isoformat(),
         "method": "headless_newton_squish_test",
-        "engine": "Newton (warp) SolverSemiImplicit FEM, headless cpu",
+        "engine": runtime_label(
+            f"SolverXPBD FEM, headless on {wp.get_device().name}"),
+        **runtime_metadata(),
         "preset": preset_key,
         "youngs_modulus": E, "poissons_ratio": nu,
         "restitution_proxy": round(restitution, 3),
@@ -665,6 +684,8 @@ def cable(target: str) -> str:
 
     def _run(hang: bool, tool_kg: float = 0.0):
         b = newton.ModelBuilder()
+        newton.solvers.SolverVBD.register_custom_attributes(
+            b, dahl_defaults_enabled=False)
         if hang:
             pos = [wp.vec3(0.0, 0.0, 1.2 - i * seg) for i in range(N)]
         else:
@@ -685,7 +706,8 @@ def cable(target: str) -> str:
                  for i in range(N - 1)]
         b.add_rod(positions=pos, quaternions=quats, radius=R,
                   stretch_stiffness=1.0e5, stretch_damping=1.0e-2,
-                  bend_stiffness=5.0e-3, bend_damping=1.0e-4)
+                  bend_stiffness=5.0e-3, bend_damping=1.0e-4,
+                  body_frame_origin="start")
         nb = b.body_count
         for i in range(nb):
             b.body_mass[i] = seg_mass          # PHYSICAL mass, no floor
@@ -701,15 +723,16 @@ def cable(target: str) -> str:
             b.add_ground_plane()
         b.color()                              # VBD graph colouring
         model = b.finalize()
-        solver = newton.solvers.SolverVBD(model, 10)
+        pipeline, contacts = collision_pipeline(model)
+        solver = newton.solvers.SolverVBD(model, iterations=10)
         s0, s1 = model.state(), model.state()
         ctrl = model.control()
         dt = FRAME_DT / 8
         for _ in range(int(4.0 / FRAME_DT)):
             for _ in range(8):
                 s0.clear_forces()
-                c = model.collide(s0)
-                solver.step(s0, s1, ctrl, c, dt)
+                pipeline.collide(s0, contacts)
+                solver.step(s0, s1, ctrl, contacts, dt)
                 s0, s1 = s1, s0
         q = s0.body_q.numpy()[:, :3]
         if not np.isfinite(q).all():
@@ -732,7 +755,8 @@ def cable(target: str) -> str:
     evidence = {
         "date": date.today().isoformat(),
         "method": "headless_newton_vbd_cable_test",
-        "engine": "Newton (warp) SolverVBD — Vertex Block Descent",
+        "engine": runtime_label("SolverVBD — Vertex Block Descent"),
+        **runtime_metadata(),
         "segment_mass_kg": round(seg_mass, 6),
         "physx_floor_kg": 0.015,
         "hang": hang, "slack": slack,
@@ -741,7 +765,7 @@ def cable(target: str) -> str:
         "behaves_like_cable": ok,
     }
     if entry is not None:
-        entry["cable_test"] = evidence
+        entry["cable_test_newton_1_5"] = evidence
         qf.write_text(json.dumps(entry, indent=1))
     return (f"{'PASS' if ok else 'FAIL'} {target}: hang straightness "
             f"{straight:.3f}, slack span {slack['span_m']:.3f} m of "
@@ -792,12 +816,15 @@ def grasp(target: str) -> str:
     seg_mass = RUBBER_DENSITY * math.pi * R ** 2 * seg
 
     b = newton.ModelBuilder()
+    newton.solvers.SolverVBD.register_custom_attributes(
+        b, dahl_defaults_enabled=False)
     pos = [wp.vec3(i * seg, 0.0, R + 0.002) for i in range(N)]   # laid out flat
     quats = [wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), math.pi / 2)
              for _ in range(N - 1)]                              # +Z -> +X
     b.add_rod(positions=pos, quaternions=quats, radius=R,
               stretch_stiffness=1.0e5, stretch_damping=1.0e-2,
-              bend_stiffness=5.0e-3, bend_damping=1.0e-4)
+              bend_stiffness=5.0e-3, bend_damping=1.0e-4,
+              body_frame_origin="start")
     nb = b.body_count
     for i in range(nb):
         b.body_mass[i] = seg_mass
@@ -809,7 +836,8 @@ def grasp(target: str) -> str:
     b.add_ground_plane()
     b.color()
     model = b.finalize()
-    solver = newton.solvers.SolverVBD(model, 10)
+    pipeline, contacts = collision_pipeline(model)
+    solver = newton.solvers.SolverVBD(model, iterations=10)
 
     s0, s1 = model.state(), model.state()
     ctrl = model.control()
@@ -830,8 +858,8 @@ def grasp(target: str) -> str:
             q = s0.body_q.numpy().copy()
             q[nb - 1][:3] = want                     # drive the gripper
             s0.body_q.assign(q)
-            c = model.collide(s0)
-            solver.step(s0, s1, ctrl, c, dt)
+            pipeline.collide(s0, contacts)
+            solver.step(s0, s1, ctrl, contacts, dt)
             s0, s1 = s1, s0
     q = s0.body_q.numpy()[:, :3]
     if not np.isfinite(q).all():
@@ -847,7 +875,8 @@ def grasp(target: str) -> str:
     evidence = {
         "date": date.today().isoformat(),
         "method": "headless_newton_vbd_grasp_test",
-        "engine": "Newton (warp) SolverVBD — Vertex Block Descent",
+        "engine": runtime_label("SolverVBD — Vertex Block Descent"),
+        **runtime_metadata(),
         "segment_mass_kg": round(seg_mass, 6),
         "commanded_move_m": round(move_len, 4),
         "gripper_follow_error_m": round(follow_err, 5),
@@ -856,7 +885,7 @@ def grasp(target: str) -> str:
         "cable_survives_manipulation": ok,
     }
     if entry is not None:
-        entry["grasp_test"] = evidence
+        entry["grasp_test_newton_1_5"] = evidence
         qf.write_text(json.dumps(entry, indent=1))
     return (f"{'PASS' if ok else 'FAIL'} {target}: gripper moved "
             f"{move_len:.3f} m (follow error {follow_err*1000:.1f} mm), "
@@ -944,6 +973,8 @@ def cloth_grasp(target: str) -> str:
     corner = int(np.argmin(points[:, 0] + points[:, 1]))   # a corner vertex
     grip = np.array(points[corner], dtype=float)
 
+    full_surface_contact = (
+        os.environ.get("NEWTON_FULL_SURFACE_CONTACT", "0") == "1")
     b = newton.ModelBuilder()
     b.default_particle_radius = 0.01
     b.add_cloth_mesh(pos=wp.vec3(0.0, 0.0, 0.0), rot=wp.quat_identity(),
@@ -970,17 +1001,25 @@ def cloth_grasp(target: str) -> str:
     model.soft_contact_ke = 1.0e3
     model.soft_contact_kd = 1.0e1
     model.soft_contact_mu = 1.0          # robot_friction, per the example
-    # THE mechanism (from newton's own example_cloth_franka): cloth only
-    # collides with rigid shapes when VBD is told the bodies are advanced
-    # OUTSIDE it. Without this flag the cloth falls straight through a box.
-    # The fingers are kinematic and pose-driven, so no rigid solver step is
-    # needed — and edge_rest_angle is zeroed per the example's VBD-bending
-    # workaround.
+    # The particle-contact baseline follows example_cloth_franka and tells
+    # VBD that rigid bodies are advanced outside it. Newton 1.5's full-surface
+    # gripper examples instead let VBD own the kinematic fingers; the solver
+    # switch below follows the selected contact mode. edge_rest_angle is
+    # zeroed per the example's VBD-bending workaround.
     model.edge_rest_angle.zero_()
+    pipeline, contacts = collision_pipeline(
+        model,
+        enable_rigid_soft_full_surface_contact=full_surface_contact,
+    )
     solver = newton.solvers.SolverVBD(
-        model, 10, integrate_with_external_rigid_solver=True,
-        particle_enable_self_contact=False)
-    pipeline = newton.CollisionPipelineUnified.from_model(model)
+        model, iterations=10,
+        # Newton's 1.5 full-surface examples let VBD own the kinematic
+        # fingers; the legacy particle path needs the historical external
+        # rigid coupling switch. Mixing both modes ejects the cloth.
+        integrate_with_external_rigid_solver=not full_surface_contact,
+        particle_enable_self_contact=False,
+        rigid_body_contact_buffer_size=512,
+        rigid_body_particle_contact_buffer_size=512)
 
     s0, s1 = model.state(), model.state()
     ctrl = model.control()
@@ -1008,8 +1047,8 @@ def cloth_grasp(target: str) -> str:
             q[fingers[0]][:3] = hand + np.array([0.0, 0.0, +gap])
             q[fingers[1]][:3] = hand + np.array([0.0, 0.0, -gap])
             s0.body_q.assign(q)
-            c = pipeline.collide(model, s0)
-            solver.step(s0, s1, ctrl, c, dt)
+            pipeline.collide(s0, contacts)
+            solver.step(s0, s1, ctrl, contacts, dt)
             s0, s1 = s1, s0
         wp.launch(_damp, dim=len(s0.particle_qd),
                   inputs=[s0.particle_qd, math.exp(-CLOTH_DAMP_HZ * FRAME_DT)])
@@ -1049,8 +1088,10 @@ def cloth_grasp(target: str) -> str:
     evidence = {
         "date": date.today().isoformat(),
         "method": "headless_newton_vbd_cloth_grasp",
-        "engine": "Newton (warp) SolverVBD — friction grasp, mu=1.0",
+        "engine": runtime_label("SolverVBD — friction grasp, mu=1.0"),
+        **runtime_metadata(),
         "device": _device(),
+        "full_surface_contact": full_surface_contact,
         "commanded_lift_m": round(float(lift_to[2]), 3),
         "grasp_slip_m": round(held_err, 4),
         "corner_rose_m": round(float(pq[corner][2] - grip[2]), 4),
@@ -1067,7 +1108,8 @@ def cloth_grasp(target: str) -> str:
         "garment_is_graspable": ok,
     }
     if entry is not None:
-        entry["cloth_grasp_test"] = evidence
+        suffix = "full_surface" if full_surface_contact else "particle"
+        entry[f"cloth_grasp_test_newton_1_5_{suffix}"] = evidence
         qf.write_text(json.dumps(entry, indent=1))
     dump = os.environ.get("CLOTH_EXPORT_USD")
     if dump:
@@ -1088,6 +1130,22 @@ def main() -> int:
                                                  "grasp", "cloth_grasp"):
         print(__doc__)
         return 1
+    require_newton_15()
+    if len(sys.argv) > 3:
+        # Newton's USD importer retains native state across models and can
+        # segfault a long mixed-asset batch. One process per asset also makes
+        # a native crash an attributable failure instead of losing the rest
+        # of the gate. Warp's compiled-kernel cache is shared between them.
+        import subprocess
+
+        child_failures = 0
+        for target in sys.argv[2:]:
+            child_failures += bool(subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()),
+                 sys.argv[1], target],
+                check=False,
+            ).returncode)
+        return int(child_failures > 0)
     fn = {"rigid": rigid_drop, "drape": drape, "fold": fold,
           "squish": squish, "cable": cable,
           "grasp": grasp, "cloth_grasp": cloth_grasp}[sys.argv[1]]

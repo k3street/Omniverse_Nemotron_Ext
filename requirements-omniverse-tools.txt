@@ -1,0 +1,5 @@
+# CPU-only sidecar tooling. Keep isolated from Isaac Sim/Isaac Lab and Newton.
+# NVIDIA's usd-core extra has no Linux ARM64 wheel. usd-exchange supplies the
+# compatible OpenUSD 25.05 pxr bindings on this host instead.
+usd-validation-nvidia==1.21.0
+usd-exchange==2.3.0

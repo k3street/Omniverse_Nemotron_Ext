@@ -62,6 +62,12 @@ Configurable, composable validation rule sets. Each pack is a collection of vali
 | **ROS bridge readiness** | Required action graphs present, topic naming conventions, frame ID consistency, TF tree completeness |
 | **Isaac Lab task sanity** | Task class requirements, observation/action space definitions, reward function references, environment config validity |
 | **Performance warnings** | Excessive prim count, high-poly meshes without LOD, too many rigid bodies, unnecessary visibility |
+| **Sim readiness** | Structural rigid/collision coverage and partial collision subtrees |
+| **NVIDIA USD validation (opt-in)** | Official `usd-validation-nvidia` rules, normalized from its JSON report in an isolated OpenUSD sidecar |
+
+The NVIDIA pack is registered but not default-enabled. Select
+`nvidia_usd_validation` explicitly because it reopens the saved root layer in
+`.venv-omniverse-tools`; it cannot validate an anonymous in-memory stage.
 
 ### FR-05.4 Validation Rule Interface
 
@@ -279,7 +285,8 @@ service/
         │   ├── sensor_completeness.py
         │   ├── ros_bridge.py
         │   ├── isaac_lab_task.py
-        │   └── performance.py
+        │   ├── performance.py
+        │   └── nvidia_usd_validation.py  # opt-in isolated process adapter
         ├── fix_suggestor.py           # Auto-fix suggestion generation
         └── routes.py
 ```

@@ -50,6 +50,33 @@ ground, ball-like 'bandage' honestly FAILS (not cloth), degenerate
 scan topology reported as needs-mesh-repair instead of garbage
 numbers. Also = the headless CI mode #2 wanted: rigid verification now
 needs no live Isaac session.
+Newton 1.5 migration 2026-08-14: standalone probes now pin Newton 1.5.0 +
+Warp 1.16.0 in `requirements-newton.txt`, use explicit reusable
+`CollisionPipeline`/`Contacts`, preserve cable body-frame and Dahl defaults,
+disable Newton 1.5's new visual-only USD import in headless rigid batches, and
+record both package versions in new evidence. Version-suffixed
+`*_newton_1_5` fields preserve the Newton 0.2 baselines rather than relabeling
+or overwriting them. Measured on the GB10: rigid cross-engine gate 30/32
+(frying pan still moving at 4 s; planter collision hull does not make the
+expected 10 cm drop); cable load/slack PASS; cable grasp PASS; foam-brick
+soft-body compression PASS; and particle-contact cloth grasp 5/5 PASS with
+13-37 mm slip. Newton 1.5 full-surface VBD contact is NOT ready here: the
+washcloth is ejected by tens of metres, so the option remains an explicit A/B
+flag and is disabled by default. The Franka probe executes and carries the
+washcloth 0.23 m, but FAILS release/landing because the cloth rides up with the
+retreating hand. The Isaac Lab environment stays separate: 3.0 Beta 2 has
+experimental VBD cloth, coupled solvers and `Isaac-Lift-Cloth-Franka-v0`, but
+its release dependency is Newton 1.2.1. Revisit the task port when Isaac Lab
+officially consumes 1.5.
+Psyonic hydroelastic hands SHIPPED 2026-08-14: the non-destructive
+`make_newton_hydro_hands.py` wrapper generator keeps the canonical robot and
+Isaac runtime untouched, selects generic `Physics=physics`, replaces 68
+overlapping/open hand colliders with 22 watertight Newton SDF hulls, and adds
+20 adjacent-link filters. CPU topology/import validation preserves the
+52-body/52-joint articulation with zero superseded shapes still colliding.
+GB10 validation builds all 22 SDFs; an isolated distal-index/probe pair emits
+64 reduced hydroelastic contacts at 2 mm penetration. Reproduce the CUDA gate
+with `smoke_newton_hydro_hands.py`; grasped objects must also be hydroelastic.
 Laundry-folding mission (2026-08-08 — user: "laundry folding is a big
 reason for the robot"; cloth is CORE, not peripheral):
 `scripts/make_garment.py` generates clean parametric garments (towel,
@@ -302,9 +329,10 @@ but VBD integrates driven rigid bodies correctly.
 - [x] ROBOT pick-and-place on cloth SHIPPED 2026-08-12
       (`scripts/pick_place_cloth.py`): a Franka FR3 under SolverFeatherstone
       one-way coupled to cloth under SolverVBD — NVIDIA's own current
-      reference pairing (`newton.examples cloth_franka`); Isaac Lab's
-      deformable API for this is still only a proposal (IsaacLab#5285).
-      Washcloth (18 g): 5/5 runs carried it 0.20-0.26 m of a commanded
+      reference pairing (`newton.examples cloth_franka`). Isaac Lab 3.0 Beta 2
+      now has an experimental cloth-lift equivalent, but pins Newton 1.2.1;
+      keep this 1.5 probe isolated until that integration catches up.
+      Newton 0.2 baseline — washcloth (18 g): 5/5 runs carried it 0.20-0.26 m of a commanded
       0.30 m, intact, landed on the table, settled.
       The finding that shaped it: A PARALLEL-JAW GRIPPER CANNOT PICK A FLAT
       SHEET OFF A TABLE. The fingers close beside zero-thickness fabric

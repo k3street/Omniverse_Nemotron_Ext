@@ -2,7 +2,7 @@
 """Evidence probe: Newton Cosserat rod + VBD as the DYNAMIC cord model.
 
 Run with the Newton venv:
-    /home/kimate/newton/.venv/bin/python scripts/vbd_cable_probe.py
+    .venv-newton/bin/python scripts/vbd_cable_probe.py
 
 Vertex Block Descent (Chen, Liu, Yang & Yuksel, SIGGRAPH 2024 —
 ankachan.github.io/Projects/VertexBlockDescent) is what Newton's
@@ -31,6 +31,9 @@ import numpy as np
 import newton
 import warp as wp
 
+from newton_runtime import collision_pipeline, require_newton_15
+
+require_newton_15()
 wp.set_device("cpu")
 L, R, N = 1.0, 0.004, 21
 RUBBER = 1200.0
@@ -73,9 +76,12 @@ def run(hang: bool, tool_kg: float = 0.0):
                                rad * (math.cos(t) - math.cos(half)),
                                R + 0.002))
     quats = [_q_to(np.array(pos[i + 1]) - np.array(pos[i])) for i in range(N - 1)]
+    newton.solvers.SolverVBD.register_custom_attributes(
+        b, dahl_defaults_enabled=False)
     b.add_rod(positions=pos, quaternions=quats, radius=R,
               stretch_stiffness=1.0e5, stretch_damping=1.0e-2,
-              bend_stiffness=5.0e-3, bend_damping=1.0e-4)
+              bend_stiffness=5.0e-3, bend_damping=1.0e-4,
+              body_frame_origin="start")
     nb = b.body_count
     for i in range(nb):            # PHYSICAL masses
         b.body_mass[i] = seg_mass
@@ -94,15 +100,16 @@ def run(hang: bool, tool_kg: float = 0.0):
         b.add_ground_plane()
     b.color()          # VBD parallelises over graph colours (paper S4)
     model = b.finalize()
-    solver = newton.solvers.SolverVBD(model, 10)
+    pipeline, contacts = collision_pipeline(model)
+    solver = newton.solvers.SolverVBD(model, iterations=10)
     s0, s1 = model.state(), model.state()
     ctrl = model.control()
     dt = 1.0 / 60.0 / 8
     for _ in range(int(4.0 * 60)):
         for _ in range(8):
             s0.clear_forces()
-            c = model.collide(s0)
-            solver.step(s0, s1, ctrl, c, dt)
+            pipeline.collide(s0, contacts)
+            solver.step(s0, s1, ctrl, contacts, dt)
             s0, s1 = s1, s0
     q = s0.body_q.numpy()[:, :3]
     if not np.isfinite(q).all():

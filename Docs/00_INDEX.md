@@ -38,6 +38,7 @@ Each file below is a self-contained code-generation spec for one module. Files a
 | [08_KNOWLEDGE_BASE.md](./08_KNOWLEDGE_BASE.md) | Local knowledge base + experiential memory | Background | 4 |
 | [09_TELEMETRY_EVAL.md](./09_TELEMETRY_EVAL.md) | Telemetry pipeline + evaluation framework | Background | 4 |
 | [10_CHAT_UX.md](./10_CHAT_UX.md) | Conversational UX + escalation flows | Extension | 1–4 |
+| [13_NVIDIA_OMNIVERSE_AGENTS.md](./13_NVIDIA_OMNIVERSE_AGENTS.md) | NVIDIA validator, skills, and MCP sidecars | Background / dev tooling | Optional |
 
 ---
 

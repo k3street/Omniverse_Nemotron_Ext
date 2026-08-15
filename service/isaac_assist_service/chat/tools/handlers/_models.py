@@ -1226,7 +1226,7 @@ class RunStageAnalysisArgs(BaseModel):
     """Run the Stage Analyzer to diagnose problems in the current scene. Checks for broken references, physics/material mismatches, articulation issues, sensor wiring, ROS2 bridge readiness, and performance"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    packs: Optional[List[str]] = Field(None, description="Optional list of validator packs to run. Available: schema_consistency, import_health, material_physics, articulation_integrity, sensor_completeness, ros_bridge_readiness, performance_warnings, isaacl")
+    packs: Optional[List[str]] = Field(None, description="Optional validator packs. Add nvidia_usd_validation to run NVIDIA's isolated USD validator sidecar.")
 
 
 class ListSceneTemplatesArgs(BaseModel):

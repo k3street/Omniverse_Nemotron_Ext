@@ -1,0 +1,4 @@
+interface:
+  display_name: "Newton Hydroelastic Hands"
+  short_description: "Build and validate Newton hydroelastic robot hands"
+  default_prompt: "Use $newton-hydroelastic-hands to create and validate a non-destructive Newton 1.5 hydroelastic hand wrapper for this robot USD."

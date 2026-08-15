@@ -7,21 +7,23 @@ kinematic finger boxes. This uses an actual Franka FR3 arm with its real
 hand, driven through a full pick-and-place cycle, and asks whether the cloth
 ends up where the robot put it.
 
-Why Newton rather than the live PhysX pick-place path: NVIDIA's own current
-reference for robot cloth manipulation is exactly this pairing — a Franka
-under SolverFeatherstone coupled one-way to cloth under SolverVBD (see
-newton/examples/cloth/example_cloth_franka.py, from which the Jacobian
-velocity-IK and the coupling order here are adapted). Isaac Lab's own
-deformable API for this is still only a proposal (isaac-sim/IsaacLab#5285),
-so there is no Isaac-native equivalent to migrate onto yet.
+Why the standalone Newton path: NVIDIA's reference for robot cloth
+manipulation uses this pairing — a Franka under SolverFeatherstone coupled
+one-way to cloth under SolverVBD (see example_cloth_franka.py, from which the
+Jacobian velocity-IK and coupling order here are adapted). Isaac Lab 3.0 Beta
+2 now has an experimental Newton cloth-lift path, but it pins an older Newton;
+this probe isolates Newton 1.5 so its measured baseline stays reproducible.
 
 The coupling is ONE-WAY: the arm moves the cloth, the cloth does not push
 the arm back. That is what the reference does and it is acceptable here —
 a 30 g washcloth does not perturb a Franka.
 
 Usage (Newton venv):
-    python scripts/pick_place_cloth.py garment_washcloth
+    .venv-newton/bin/python scripts/pick_place_cloth.py garment_washcloth
     PICK_PLACE_EXPORT_USD=out.usda python scripts/pick_place_cloth.py garment_napkin
+
+Set NEWTON_FULL_SURFACE_CONTACT=1 to A/B Newton 1.5's opt-in VBD edge/face
+contact path. The default remains particle contact for baseline continuity.
 
 Criteria (all measured, none assumed):
     carried  — the cloth's centroid moves with the arm to the place target
@@ -37,6 +39,9 @@ import os
 import sys
 from datetime import date
 from pathlib import Path
+
+from newton_runtime import (collision_pipeline, require_newton_15,
+                            runtime_label, runtime_metadata)
 
 REPO = Path(__file__).resolve().parents[1]
 QUEUE_DIR = REPO / "workspace" / "review_queue"
@@ -62,7 +67,7 @@ GRIP_CLOSE = 0.06
 def _device():
     """Prefer CUDA — VBD is GPU-parallel and Newton disables its tiled solve
     on CPU. Override with NEWTON_DEVICE."""
-    import warp as wp
+    _, wp = require_newton_15()
 
     want = os.environ.get("NEWTON_DEVICE")
     if want:
@@ -123,8 +128,15 @@ class ClothPickPlace:
 
         scene = ModelBuilder()
 
+        self.full_surface_contact = (
+            os.environ.get("NEWTON_FULL_SURFACE_CONTACT", "0") == "1")
+
         # ---- the robot -------------------------------------------------
         franka = ModelBuilder()
+        if self.full_surface_contact:
+            # Full-surface contact requires volume SDFs for participating
+            # mesh/convex colliders; primitives do not need this conversion.
+            franka.default_shape_cfg.configure_sdf(force_sdf=True)
         asset = newton.utils.download_asset("franka_emika_panda")
         franka.add_urdf(
             str(asset / "urdf" / "fr3_franka_hand.urdf"),
@@ -141,8 +153,8 @@ class ClothPickPlace:
                                                wp.quat_identity())
 
         # ---- the table -------------------------------------------------
-        scene.add_shape_box(-1, wp.transform(wp.vec3(*TABLE_CENTER),
-                                             wp.quat_identity()),
+        scene.add_shape_box(-1, xform=wp.transform(wp.vec3(*TABLE_CENTER),
+                                                  wp.quat_identity()),
                             hx=TABLE_HALF[0], hy=TABLE_HALF[1],
                             hz=TABLE_HALF[2])
 
@@ -191,8 +203,11 @@ class ClothPickPlace:
         self.state_0, self.state_1 = self.model.state(), self.model.state()
         self.control = self.model.control()
         self.target_joint_qd = wp.empty_like(self.state_0.joint_qd)
-        self.collision_pipeline = newton.CollisionPipelineUnified.from_model(
-            self.model)
+        self.collision_pipeline, self.contacts = collision_pipeline(
+            self.model,
+            soft_contact_margin=0.01,
+            enable_rigid_soft_full_surface_contact=self.full_surface_contact,
+        )
 
         self.robot_solver = SolverFeatherstone(
             self.model, update_mass_matrix_interval=SUBSTEPS)
@@ -211,8 +226,12 @@ class ClothPickPlace:
 
         # gravity is swapped per substep: the robot integrates without it
         # (it is position-controlled), the cloth integrates with it
-        self.gravity_zero = wp.zeros(1, dtype=wp.vec3)
-        self.gravity_earth = wp.array(wp.vec3(0.0, 0.0, -9.81), dtype=wp.vec3)
+        gravity_count = self.model.gravity.shape[0]
+        self.gravity_zero = wp.zeros(
+            gravity_count, dtype=wp.vec3, device=self.model.device)
+        self.gravity_earth = wp.full(
+            gravity_count, wp.vec3(0.0, 0.0, -9.81),
+            dtype=wp.vec3, device=self.model.device)
 
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd,
                        self.state_0)
@@ -285,7 +304,6 @@ class ClothPickPlace:
     # -- Jacobian velocity IK (adapted from the reference) -----------------
     def _setup_ik(self):
         import warp as wp
-        from newton.utils import transform_twist
 
         ee_id, ee_off = self.endeffector_id, self.endeffector_offset
 
@@ -304,11 +322,25 @@ class ClothPickPlace:
             ee_delta[0] = wp.spatial_vector(d[0], d[1], d[2], a[0], a[1], a[2])
 
         @wp.kernel
-        def compute_body_out(body_qd: wp.array(dtype=wp.spatial_vector),
+        def compute_body_out(body_q: wp.array(dtype=wp.transform),
+                             body_qd: wp.array(dtype=wp.spatial_vector),
+                             body_com: wp.array(dtype=wp.vec3),
                              body_out: wp.array(dtype=float)):
-            mv = transform_twist(wp.static(ee_off), body_qd[wp.static(ee_id)])
-            for i in range(6):
-                body_out[i] = mv[i]
+            # Newton 1.5 body_qd is COM-referenced in world space. Convert it
+            # to velocity at the tool tip, matching compute_ee_delta.
+            body_id = wp.static(ee_id)
+            offset = wp.static(wp.vec3(*ee_off.p))
+            xform = body_q[body_id]
+            r_world = wp.transform_vector(xform, offset - body_com[body_id])
+            twist = body_qd[body_id]
+            omega = wp.spatial_bottom(twist)
+            linear = wp.spatial_top(twist) + wp.cross(omega, r_world)
+            body_out[0] = linear[0]
+            body_out[1] = linear[1]
+            body_out[2] = linear[2]
+            body_out[3] = omega[0]
+            body_out[4] = omega[1]
+            body_out[5] = omega[2]
 
         self._k_ee_delta = compute_ee_delta
         self._k_body_out = compute_body_out
@@ -332,7 +364,9 @@ class ClothPickPlace:
         with tape:
             eval_fk(self.model, joint_q, joint_qd, self._temp_state)
             wp.launch(self._k_body_out, 1,
-                      inputs=[self._temp_state.body_qd],
+                      inputs=[self._temp_state.body_q,
+                              self._temp_state.body_qd,
+                              self.model.body_com],
                       outputs=[self._body_out])
         n = self.model.joint_dof_count
         for i in range(6):
@@ -388,12 +422,9 @@ class ClothPickPlace:
             self.model.gravity.assign(self.gravity_earth)
 
             # CLOTH: now sees where the robot got to.
-            self.collision_pipeline.soft_contact_margin = 0.01
-            contacts = self.model.collide(
-                self.state_0, collision_pipeline=self.collision_pipeline,
-                soft_contact_margin=0.01)
+            self.collision_pipeline.collide(self.state_0, self.contacts)
             self.cloth_solver.step(self.state_0, self.state_1, self.control,
-                                   contacts, FRAME_DT / SUBSTEPS)
+                                   self.contacts, FRAME_DT / SUBSTEPS)
             self.state_0, self.state_1 = self.state_1, self.state_0
 
     def _viewer(self, frames):
@@ -524,9 +555,12 @@ def pick_place(target: str) -> str:
     evidence = {
         "date": date.today().isoformat(),
         "method": "headless_newton_franka_cloth_pick_place",
-        "engine": "Newton — SolverFeatherstone (Franka FR3) one-way coupled "
-                  "to SolverVBD (cloth), friction grasp mu=1.0",
+        "engine": runtime_label(
+            "SolverFeatherstone (Franka FR3) one-way coupled to SolverVBD "
+            "(cloth), friction grasp mu=1.0"),
+        **runtime_metadata(),
         "device": _device(),
+        "full_surface_contact": sim.full_surface_contact,
         "commanded_move_m": round(sim.commanded_move, 4),
         "cloth_moved_m": round(moved, 4),
         "moved_along_command_m": round(along, 4),
@@ -541,7 +575,8 @@ def pick_place(target: str) -> str:
         "robot_pick_place_ok": ok,
     }
     if sim.entry is not None:
-        sim.entry["cloth_pick_place_test"] = evidence
+        suffix = "full_surface" if sim.full_surface_contact else "particle"
+        sim.entry[f"cloth_pick_place_test_newton_1_5_{suffix}"] = evidence
         (QUEUE_DIR / f"{target}.json").write_text(
             json.dumps(sim.entry, indent=1))
 

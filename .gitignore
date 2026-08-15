@@ -2,6 +2,8 @@
 .env
 .env.local
 .venv
+.venv-newton/
+.venv-omniverse-tools/
 env/
 venv/
 ENV/
@@ -31,6 +33,9 @@ logs/
 # Brainstorming notes (local only)
 brainstorm/
 .local-research/
+
+# NVIDIA Kit/USD agent sidecars (cloned/built by the opt-in setup workflow)
+workspace/nvidia/
 
 # IDEs
 .idea/

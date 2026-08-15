@@ -11,6 +11,7 @@ from .ros_bridge_readiness import ROSBridgeReadinessValidator
 from .performance_warnings import PerformanceWarningsValidator
 from .isaaclab_sanity import IsaacLabSanityValidator
 from .sim_readiness import SimReadinessRule
+from .nvidia_usd_validation import NvidiaUsdValidationRule
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,26 @@ logger = logging.getLogger(__name__)
 # custom validators at runtime, or rely on auto-registration below.
 
 _REGISTRY: Dict[str, Type[ValidationRule]] = {}
+_DEFAULT_ENABLED: set[str] = set()
 
 
-def register_validator(pack: str, cls: Type[ValidationRule]) -> None:
-    """Register a validator class under a pack name."""
+def register_validator(
+    pack: str,
+    cls: Type[ValidationRule],
+    *,
+    default_enabled: bool = True,
+) -> None:
+    """Register a validator class under a pack name.
+
+    External or comparatively expensive validators can register with
+    ``default_enabled=False``.  They remain discoverable and can be selected
+    explicitly without changing the deterministic built-in analysis path.
+    """
     _REGISTRY[pack] = cls
+    if default_enabled:
+        _DEFAULT_ENABLED.add(pack)
+    else:
+        _DEFAULT_ENABLED.discard(pack)
     logger.debug(f"Registered validator pack: {pack}")
 
 
@@ -32,16 +48,22 @@ def get_registered_validators() -> Dict[str, Type[ValidationRule]]:
     return dict(_REGISTRY)
 
 
+def get_default_enabled_validators() -> set[str]:
+    """Return pack names included when no explicit pack list is supplied."""
+    return set(_DEFAULT_ENABLED)
+
+
 def create_all_validators(
     enabled_packs: List[str] | None = None,
 ) -> List[ValidationRule]:
     """
     Instantiate validators from the registry.
-    If `enabled_packs` is None, all registered packs are enabled.
+    If `enabled_packs` is None, all default-enabled packs are enabled.
     """
+    selected = _DEFAULT_ENABLED if enabled_packs is None else set(enabled_packs)
     instances = []
     for pack, cls in _REGISTRY.items():
-        if enabled_packs is None or pack in enabled_packs:
+        if pack in selected:
             instances.append(cls())
     return instances
 
@@ -56,6 +78,11 @@ register_validator("ros_bridge_readiness", ROSBridgeReadinessValidator)
 register_validator("performance_warnings", PerformanceWarningsValidator)
 register_validator("isaaclab_sanity", IsaacLabSanityValidator)
 register_validator("sim_readiness", SimReadinessRule)
+register_validator(
+    "nvidia_usd_validation",
+    NvidiaUsdValidationRule,
+    default_enabled=False,
+)
 
 
 __all__ = [
@@ -69,7 +96,9 @@ __all__ = [
     "PerformanceWarningsValidator",
     "IsaacLabSanityValidator",
     "SimReadinessRule",
+    "NvidiaUsdValidationRule",
     "register_validator",
     "get_registered_validators",
+    "get_default_enabled_validators",
     "create_all_validators",
 ]

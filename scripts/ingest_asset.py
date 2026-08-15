@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import io
 import json
+import os
 import re
 import sys
 from datetime import date
@@ -24,6 +25,28 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 QUEUE_DIR = REPO / "workspace" / "review_queue"
 sys.path.insert(0, str(REPO))
+
+
+def optional_nvidia_validation(file_path: str) -> dict | None:
+    """Run NVIDIA validation when its sidecar is installed or explicitly set.
+
+    ``NVIDIA_USD_VALIDATION_ON_INGEST=0`` disables the hook.  In the default
+    ``auto`` mode, ingest remains unchanged when the dedicated executable is
+    absent; no Isaac Sim or Newton environment is modified.
+    """
+    mode = os.environ.get("NVIDIA_USD_VALIDATION_ON_INGEST", "auto").lower()
+    if mode in {"0", "false", "no", "off"}:
+        return None
+    from service.isaac_assist_service.analysis.validators.nvidia_usd_validation import (
+        findings_record,
+        resolve_validator_command,
+        validate_asset,
+    )
+
+    command = resolve_validator_command()
+    if not command and mode == "auto":
+        return None
+    return findings_record(validate_asset(file_path, command=command))
 
 
 def run_report(file_path: str, class_hint: str | None) -> dict:
@@ -465,6 +488,11 @@ def queue_file(file_path: str, class_hint: str | None = None,
             entry["report"] = run_report(entry["file"], class_hint)
             entry["report"].update(features)
             entry["proposed_category"] = propose_category(entry["report"])
+    # Validate the final derivative, after any scale/physics fixes.  The hook
+    # is a no-op unless the isolated NVIDIA sidecar exists (or is forced on).
+    nvidia_validation = optional_nvidia_validation(entry["file"])
+    if nvidia_validation is not None:
+        entry.setdefault("validation", {})["nvidia_usd"] = nvidia_validation
     # the class from name matching is only a guess until a human (or VLM)
     # looks at the object itself
     entry["class_source"] = "hint" if class_hint else "filename_guess"

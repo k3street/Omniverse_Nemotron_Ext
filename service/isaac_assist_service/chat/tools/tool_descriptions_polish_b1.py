@@ -291,7 +291,7 @@ POLISH_B1 = {
 
     # ── Stage Analysis ────────────────────────────────────────────────────────
     "run_stage_analysis": (
-        "WHAT: Run the Stage Analyzer (8 validator packs: schema_consistency, import_health, material_physics, articulation_integrity, sensor_completeness, ros_bridge_readiness, performance_warnings, isaaclab_sanity). "
+        "WHAT: Run the Stage Analyzer (9 built-in validator packs plus the opt-in nvidia_usd_validation sidecar pack). "
         "WHEN: 'diagnose the scene', pre-flight before sim play, 'what's wrong with my robot import'. "
         "RETURNS: {total_findings, summary: {severity: count}, findings: [{rule, severity, prim, message, fix_hint}], truncated}. "
         "CAVEATS: requires Kit RPC alive. "

@@ -1,0 +1,6 @@
+# Standalone cross-engine verification runtime. Isaac Lab owns a separate,
+# currently older Newton pin; do not merge this file into requirements.txt.
+newton[importers]==1.5.0
+warp-lang==1.16.0
+GitPython>=3.1.47
+pyglet>=2.1.6,<3

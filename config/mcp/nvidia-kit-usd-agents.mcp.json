@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "nvidia-omni-ui": {
+      "type": "http",
+      "url": "http://127.0.0.1:9901/mcp"
+    },
+    "nvidia-kit": {
+      "type": "http",
+      "url": "http://127.0.0.1:9902/mcp"
+    },
+    "nvidia-usd-code": {
+      "type": "http",
+      "url": "http://127.0.0.1:9903/mcp"
+    },
+    "nvidia-isaac-sim": {
+      "type": "http",
+      "url": "http://127.0.0.1:9904/mcp"
+    }
+  }
+}

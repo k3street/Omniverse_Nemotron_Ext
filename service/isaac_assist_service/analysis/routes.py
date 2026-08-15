@@ -9,6 +9,10 @@ Exposes two endpoints under the ``/analysis`` prefix:
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 from .orchestrator import AnalysisOrchestrator
+from .validators import (
+    get_default_enabled_validators,
+    get_registered_validators,
+)
 
 router = APIRouter()
 orchestrator = AnalysisOrchestrator()
@@ -32,8 +36,15 @@ def run_analysis(stage_data: Dict[str, Any]):
         HTTPException: 500 if any validator raises an unhandled exception.
     """
     try:
-        # Run validations
-        result = orchestrator.run_analysis(stage_data)
+        # A request may opt into external packs (notably
+        # nvidia_usd_validation) without changing process-wide defaults.
+        requested_packs = stage_data.get("packs")
+        selected = (
+            AnalysisOrchestrator(enabled_packs=requested_packs)
+            if requested_packs is not None
+            else orchestrator
+        )
+        result = selected.run_analysis(stage_data)
         return result.model_dump()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -45,12 +56,17 @@ def list_packs():
     Returns:
         dict: ``{"packs": [{name, rule_count, enabled}]}`` for each registered pack.
     """
-    packs = {}
-    for rule in orchestrator.rules:
-        if rule.pack not in packs:
-            packs[rule.pack] = 0
-        packs[rule.pack] += 1
+    registered = get_registered_validators()
+    defaults = get_default_enabled_validators()
 
     return {
-        "packs": [{"name": p, "rule_count": c, "enabled": True} for p, c in packs.items()]
+        "packs": [
+            {
+                "name": name,
+                "rule_count": 1,
+                "enabled": name in defaults,
+                "opt_in": name not in defaults,
+            }
+            for name in registered
+        ]
     }
