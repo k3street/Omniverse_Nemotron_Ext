@@ -69,9 +69,8 @@ class SwarmPlanGenerator:
             max_iterations=3,
         )
 
-        import asyncio
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, pm.run, task)
+        from ..runtime_compat import run_sync_compatible
+        result = await run_sync_compatible(pm.run, task)
         
         # Parse PM LoopResult
         status = result.status

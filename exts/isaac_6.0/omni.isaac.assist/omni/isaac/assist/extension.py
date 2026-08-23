@@ -101,6 +101,12 @@ class IsaacAssistExtension(omni.ext.IExt):
         global _window, _rpc_server, _ros2_bridge, _ros2_articulation_auto_attach, _physics_watchdog
         carb.log_warn("[IsaacAssist] on_shutdown")
 
+        try:
+            from .telemetry import shutdown_telemetry
+            shutdown_telemetry()
+        except Exception:
+            pass
+
         if getattr(self, "_rpc_server", None) is not None:
             try:
                 from .context.kit_rpc import stop_exec_tick

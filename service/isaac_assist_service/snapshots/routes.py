@@ -18,7 +18,7 @@ router = APIRouter()
 snap_manager = SnapshotManager()
 
 @router.post("")
-def create_snapshot(req: SnapshotInitRequest):
+async def create_snapshot(req: SnapshotInitRequest):
     """Persist the current USD layer state to disk as a named snapshot.
 
     Collects an environment fingerprint via ``collect_fingerprint()`` and
@@ -47,7 +47,7 @@ def create_snapshot(req: SnapshotInitRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("")
-def list_snapshots():
+async def list_snapshots():
     """Return all persisted snapshot manifests, newest first.
 
     Returns:
@@ -55,12 +55,13 @@ def list_snapshots():
         dicts and ``total`` is the count.
     """
     try:
-        return {"snapshots": snap_manager.list_snapshots(), "total": len(snap_manager.list_snapshots())}
+        snapshots = snap_manager.list_snapshots()
+        return {"snapshots": snapshots, "total": len(snapshots)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{snapshot_id}/rollback")
-def execute_rollback(snapshot_id: str):
+async def execute_rollback(snapshot_id: str):
     """Return the stored USDA layer payloads for a snapshot so the UI can restore them.
 
     MVP implementation: reads the USDA files back from disk and instructs

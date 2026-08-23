@@ -1,29 +1,27 @@
-"""Phase 88 — Linux pre-built binary CI pipeline.
+"""Compatibility import for the canonical Phase 88 CI implementation."""
 
-Scaffold for spec coverage. Full implementation requires runtime
-testing or external dependencies (Kit RPC, GR00T weights, GPU,
-Gemini API, etc.). Module contract exists; body is TODO.
+from .linux_ci_pipeline import (  # noqa: F401
+    BUILD_TARGETS,
+    PHASE_ID,
+    PHASE_STATUS,
+    PHASE_TITLE,
+    CIBuildTarget,
+    CIMatrixEntry,
+    LinuxCIMatrix,
+    get_phase_metadata,
+    parse_workflow_yaml,
+    validate_workflow_matrix_matches_spec,
+)
 
-Per specs/IA_FULL_SPEC_2026-05-10.md Phase 88.
-"""
-from __future__ import annotations
-from typing import Any, Dict, List, Optional
-
-
-PHASE_ID = 88
-PHASE_TITLE = "Linux pre-built binary CI pipeline"
-PHASE_STATUS = "scaffold"
-
-
-def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase identification and status for this phase.
-
-    Returns:
-        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
-    """
-    return {
-        "phase": PHASE_ID,
-        "title": PHASE_TITLE,
-        "status": PHASE_STATUS,
-        "spec_ref": "specs/IA_FULL_SPEC_2026-05-10.md Phase 88",
-    }
+__all__ = [
+    "BUILD_TARGETS",
+    "PHASE_ID",
+    "PHASE_STATUS",
+    "PHASE_TITLE",
+    "CIBuildTarget",
+    "CIMatrixEntry",
+    "LinuxCIMatrix",
+    "get_phase_metadata",
+    "parse_workflow_yaml",
+    "validate_workflow_matrix_matches_spec",
+]

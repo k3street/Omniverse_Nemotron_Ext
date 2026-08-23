@@ -5,7 +5,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-pytestmark = [pytest.mark.l2, pytest.mark.asyncio]
+pytestmark = pytest.mark.l2
 
 
 @pytest.fixture()
@@ -54,8 +54,8 @@ class TestMCPSchemaConversion:
 
     def test_mcp_tool_count_matches_openai_plus_settings(self, mcp_server):
         from service.isaac_assist_service.chat.tools.tool_schemas import ISAAC_SIM_TOOLS
-        # OpenAI tools + get_settings + update_settings + 7 floor-plan MCP tools
-        expected = len(ISAAC_SIM_TOOLS) + 9
+        # OpenAI tools + two settings tools + the current floor-plan surface.
+        expected = len(ISAAC_SIM_TOOLS) + 2 + len(mcp_server._floorplan_tools)
         assert len(mcp_server._mcp_tools) == expected
 
     def test_no_duplicate_mcp_tool_names(self, mcp_server):
@@ -63,6 +63,7 @@ class TestMCPSchemaConversion:
         assert len(names) == len(set(names))
 
 
+@pytest.mark.asyncio
 class TestMCPHandleRequest:
 
     async def test_initialize(self, mcp_server):
@@ -162,6 +163,7 @@ class TestMCPHandleRequest:
         assert "Unknown tool" in result["content"][0]["text"]
 
 
+@pytest.mark.asyncio
 class TestMCPResponseFormat:
 
     async def test_success_response_format(self, mcp_server):

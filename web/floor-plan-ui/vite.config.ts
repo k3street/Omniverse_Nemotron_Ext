@@ -30,5 +30,15 @@ export default defineConfig({
     build: {
         outDir: "dist",
         sourcemap: true,
+        rollupOptions: {
+            output: {
+                // Keep heavyweight rendering/runtime libraries out of the app
+                // entry chunk so browsers can cache them independently.
+                manualChunks: {
+                    react: ["react", "react-dom", "zustand"],
+                    canvas: ["konva"],
+                },
+            },
+        },
     },
 });

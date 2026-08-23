@@ -30,7 +30,7 @@ def _load_specs() -> List[Dict]:
 
 
 @router.get("/specs")
-def list_product_specs(
+async def list_product_specs(
     sensor_type: Optional[str] = Query(None, description="Filter by type: camera, lidar, imu, gripper, force_torque_sensor"),
     manufacturer: Optional[str] = Query(None),
 ):
@@ -44,7 +44,7 @@ def list_product_specs(
 
 
 @router.get("/specs/lookup")
-def lookup_product_spec(product_name: str = Query(..., description="Product name to search for")):
+async def lookup_product_spec(product_name: str = Query(..., description="Product name to search for")):
     """Fuzzy-match a product name against the sensor specs database."""
     query = product_name.lower()
     specs = _load_specs()
@@ -77,12 +77,12 @@ def lookup_product_spec(product_name: str = Query(..., description="Product name
             "available_types": list(set(s.get("type") for s in _load_specs()))}
 
 @router.get("/sources")
-def list_sources():
+async def list_sources():
     """Return all enabled documentation sources from the source registry."""
     return {"sources": registry.get_sources()}
 
 @router.post("/query")
-def execute_query(req: RetrievalQuery):
+async def execute_query(req: RetrievalQuery):
     """
     Called by ChatOrchestrator to fetch factual USD pipeline examples.
     """
@@ -113,7 +113,7 @@ def execute_query(req: RetrievalQuery):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/sources/{source_id}/index_mock")
-def index_mock_doc(source_id: str):
+async def index_mock_doc(source_id: str):
     """
     MVP Endpoint: Inject a fake document simulating an Omniverse scraping run.
     """

@@ -8,8 +8,10 @@
 name: linux_prebuilt_binary
 
 on:
-  # Manual-only — auto-triggers disabled to avoid email noise.
-  # Build runs need self-hosted runner with proper toolchain; enable once that's set up.
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
@@ -17,19 +19,20 @@ permissions:
 
 jobs:
   build_linux_binary:
-    name: "build (${{ matrix.os }}, py${{ matrix.python }}, ${{ matrix.arch }})"
+    name: "build (${{ matrix.os }}, py${{ matrix.python }})"
     runs-on: ${{ matrix.os }}
-    # aarch64 cross-compilation is expensive — only run on scheduled nightly
-    if: >-
-      matrix.arch == 'x86_64' ||
-      github.event_name == 'schedule'
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
-        python: ['3.10', '3.11', '3.12']
-        arch: [x86_64, aarch64]
+        include:
+          - os: ubuntu-22.04
+            python: '3.10'
+            arch: x86_64
+          - os: ubuntu-24.04
+            python: '3.12'
+            arch: x86_64
 
     steps:
       - name: Checkout repository
@@ -56,35 +59,58 @@ jobs:
           pip install -r requirements-test.txt
           pip install pyinstaller
 
-      - name: Run pytest (l0 gate)
-        run: python -m pytest tests/ -m l0 --tb=short -q
+      - name: Run pytest (bounded l0 gate)
+        run: python -m pytest tests/ -m l0 --tb=short -q --timeout=30
 
       - name: Build wheel
         run: |
           pip install build
           python -m build --wheel --outdir dist/
+          python -m pip install --force-reinstall dist/*.whl
+          python -c "import isaac_assist_service; print(isaac_assist_service.__version__)"
 
       - name: Build PyInstaller binary
         run: |
           pyinstaller \
             --onefile \
-            --name isaac_assist_${{ matrix.arch }} \
+            --name isaac_assist_x86_64 \
             --distpath dist/pyinstaller/ \
-            service/isaac_assist_service/__main__.py || \
-          echo "PyInstaller target not available; skipping binary build"
+            service/isaac_assist_service/__main__.py
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: isaac_assist_wheel-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.arch }}
+          name: isaac_assist_wheel-${{ matrix.os }}-py${{ matrix.python }}
           path: dist/*.whl
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
       - name: Upload PyInstaller binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: isaac_assist_binary-${{ matrix.os }}-py${{ matrix.python }}-${{ matrix.arch }}
+          name: isaac_assist_binary-${{ matrix.os }}-py${{ matrix.python }}
           path: dist/pyinstaller/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
+
+  build_container:
+    name: build container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Build service image
+        run: docker build --tag isaac-assist:${{ github.sha }} .
+      - name: Export service image
+        run: |
+          mkdir -p dist
+          docker save --output dist/isaac-assist-docker.tar isaac-assist:${{ github.sha }}
+          gzip dist/isaac-assist-docker.tar
+      - name: Upload container artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: isaac_assist_container
+          path: dist/isaac-assist-docker.tar.gz
+          if-no-files-found: error
+          retention-days: 14

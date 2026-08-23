@@ -1,5 +1,10 @@
 # Sim-Ready Asset Pipeline — Backlog
 
+> This file is the detailed engineering journal for the asset pipeline. See
+> `ROADMAP.md` for the current release gates and cross-product priorities.
+> New general product work belongs in the roadmap; keep this file focused on
+> measured asset, material, and simulation findings.
+
 Ordered by leverage. Top item first.
 
 ## 0. Autonomous visual approval (machine sign-off) — ✅ core SHIPPED 2026-08-07

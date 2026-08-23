@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "isaac-assist-service"
+version = "1.0.0"
+description = "Local FastAPI service for the Isaac Assist Omniverse extension"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+  "aiohttp>=3.9.0",
+  "beautifulsoup4>=4.12.0",
+  "fastapi>=0.100.0",
+  "pydantic>=2.0.0",
+  "python-dotenv>=1.0.0",
+  "uvicorn[standard]>=0.23.0",
+]
+
+[project.optional-dependencies]
+runtime = [
+  "livekit>=0.11.0",
+  "livekit-agents>=0.7.0",
+  "livekit-plugins-google>=0.3.0",
+  "livekit-plugins-noise-cancellation>=0.2.0",
+  "livekit-plugins-silero>=0.5.0",
+  "mediapipe",
+  "opencv-python",
+  "ros-mcp>=3.0.0",
+  "tensorboard>=2.14.0",
+  "websockets",
+]
+test = [
+  "aioresponses>=0.7",
+  "httpx>=0.27",
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "pytest-timeout>=2.2",
+]
+
+[project.scripts]
+isaac-assist-service = "isaac_assist_service.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "service" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["service"]
+include = ["isaac_assist_service*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+isaac_assist_service = ["knowledge/*.jsonl"]

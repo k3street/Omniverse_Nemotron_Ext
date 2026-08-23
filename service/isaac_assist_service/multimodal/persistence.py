@@ -311,11 +311,12 @@ class MultimodalStore:
         Returns the persisted spec (with the fresh revision applied).
         """
         async with self._session_lock(session_id):
-            # SQLite transactions live on the connection thread; we hop to a
-            # thread executor so we don't block the asyncio loop on disk IO.
-            return await asyncio.get_running_loop().run_in_executor(
-                None,
-                self._save_with_cas_sync,
+            # Keep the short transaction on the request thread. Connections
+            # are thread-local, and moving this operation through the default
+            # executor can strand its Future during event-loop teardown. The
+            # per-session lock plus SQLite BEGIN IMMEDIATE still provide the
+            # required CAS serialization.
+            return self._save_with_cas_sync(
                 session_id, new_spec, parent_revision,
             )
 

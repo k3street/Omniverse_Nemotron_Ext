@@ -15,10 +15,11 @@ from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .models import GovernanceConfig, AuditEntry
+from .models import ApprovalDecision, GovernanceConfig, AuditEntry
 from .policy_engine import PolicyEngine
 from .secret_redactor import SecretRedactor
 from .audit_log import AuditLogger
+from .decision_store import record_decision
 from service.isaac_assist_service.planner.models import PatchAction
 
 router = APIRouter()
@@ -46,6 +47,20 @@ class AuditRequest(BaseModel):
     """
 
     entry: AuditEntry
+
+
+@router.post("/decisions")
+async def create_decision(decision: ApprovalDecision):
+    """Record an operator decision for a patch plan and return its proof ID."""
+    decision_id = record_decision(decision)
+    audit_logger.log_entry(AuditEntry(
+        entry_id=str(uuid.uuid4()),
+        event_type="patch_approval_decision",
+        plan_id=decision.request_id,
+        user_decision=decision.decision,
+        metadata={"decision_id": decision_id},
+    ))
+    return {"status": "success", "decision_id": decision_id}
 
 @router.post("/evaluate")
 async def evaluate_actions(req: EvaluationRequest):

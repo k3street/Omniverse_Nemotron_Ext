@@ -270,8 +270,10 @@ def test_apw_runs_against_real_spec(apw):
     """Audit must complete on the real IA_FULL_SPEC and produce ≥ 100 phases."""
     matrix = apw.build_matrix()
     assert len(matrix.phases) >= 100, f"Expected ≥100 phases, got {len(matrix.phases)}"
-    # Phase 0b should be parsed
-    assert "0b" in matrix.phases
+    # Verify the actual boundary phases in the authoritative 1–106 spec.
+    # Suffixed IDs remain covered by test_apw_handles_b_suffixed_phase_ids.
+    assert "1" in matrix.phases
+    assert "106" in matrix.phases
 
 
 def test_ahcr_runs_against_real_executor(ahcr):

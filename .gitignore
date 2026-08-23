@@ -15,11 +15,17 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Python packaging output
+/build/
+/dist/
+*.egg-info/
+
 # Models and data
 lora_model/
 .nim-cache/
 *.gguf
-data/
+data/*
+!data/bin_interior_metadata.yaml
 outputs/
 workspace/*
 !workspace/knowledge/

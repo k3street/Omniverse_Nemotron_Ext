@@ -22,8 +22,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import chromadb
-
 # Wilson helper for honest small-n verification
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stats  # type: ignore  # noqa: E402
@@ -134,6 +132,10 @@ def main() -> int:
         if not perfect_ids:
             return 0
         wilson_meta = None
+
+    # ChromaDB is only required for the write phase. Keeping this import local
+    # lets the pure scoring helpers run in lightweight/Isaac Python runtimes.
+    import chromadb
 
     client = chromadb.PersistentClient(path=INDEX_PATH)
     coll = client.get_collection(COLLECTION)

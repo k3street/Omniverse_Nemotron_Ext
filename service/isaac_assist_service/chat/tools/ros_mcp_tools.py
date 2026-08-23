@@ -61,9 +61,9 @@ def _get_ws_manager():
 
 
 async def _run_sync(fn, *args, **kwargs):
-    """Run a blocking function in the default executor (thread pool)."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+    """Run a blocking rosbridge function with Isaac-Python compatibility."""
+    from ...runtime_compat import run_sync_compatible
+    return await run_sync_compatible(fn, *args, **kwargs)
 
 
 # ---------------------------------------------------------------------------

@@ -14,23 +14,29 @@ _MAX_BUFFER = 200
 _buffer: deque = deque(maxlen=_MAX_BUFFER)
 _lock = threading.Lock()
 _subscription = None
+_logging = None
 
 
 def attach_log_listener() -> None:
     """Call once from extension.on_startup() to start buffering log lines."""
-    global _subscription
+    global _subscription, _logging
 
-    def _on_log(level: int, filename: str, line: int, func: str, msg: str) -> None:
+    if _subscription is not None:
+        return
+
+    def _on_log(source: str, level: int, filename: str, line: int, msg: str) -> None:
         entry = {
             "level": _level_name(level),
             "msg": msg.strip(),
             "source": f"{filename}:{line}",
+            "channel": source,
         }
         with _lock:
             _buffer.append(entry)
 
     try:
-        _subscription = carb.log.get_framework().add_listener(_on_log)
+        _logging = carb.logging.acquire_logging()
+        _subscription = _logging.add_logger(_on_log)
         carb.log_info("[IsaacAssist] Console log listener attached")
     except Exception as e:
         carb.log_warn(f"[IsaacAssist] Could not attach log listener: {e}")
@@ -38,13 +44,14 @@ def attach_log_listener() -> None:
 
 def detach_log_listener() -> None:
     """Call from extension.on_shutdown()."""
-    global _subscription
-    if _subscription is not None:
+    global _subscription, _logging
+    if _subscription is not None and _logging is not None:
         try:
-            carb.log.get_framework().remove_listener(_subscription)
+            _logging.remove_logger(_subscription)
         except Exception:
             pass
-        _subscription = None
+    _subscription = None
+    _logging = None
 
 
 def get_recent_logs(n: int = 50, min_level: str = "warning") -> List[Dict]:
@@ -64,10 +71,10 @@ def get_recent_logs(n: int = 50, min_level: str = "warning") -> List[Dict]:
 
 def _level_name(level: int) -> str:
     mapping = {
-        carb.log.LEVEL_VERBOSE: "verbose",
-        carb.log.LEVEL_INFO: "info",
-        carb.log.LEVEL_WARN: "warning",
-        carb.log.LEVEL_ERROR: "error",
-        carb.log.LEVEL_FATAL: "fatal",
+        carb.logging.LEVEL_VERBOSE: "verbose",
+        carb.logging.LEVEL_INFO: "info",
+        carb.logging.LEVEL_WARN: "warning",
+        carb.logging.LEVEL_ERROR: "error",
+        carb.logging.LEVEL_FATAL: "fatal",
     }
     return mapping.get(level, "unknown")

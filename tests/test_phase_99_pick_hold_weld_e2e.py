@@ -7,3 +7,4 @@ def test_phase_99_metadata():
     from service.isaac_assist_service.multimodal.pick_hold_weld_e2e import get_phase_metadata
     md = get_phase_metadata()
     assert md["phase"] == 99
+    assert md["status"] == "implemented_unvalidated"

@@ -101,27 +101,11 @@ class TestWorkflowMatrix:
         job = jobs.get("build_linux_binary") or next(iter(jobs.values()), {})
         self.matrix = job.get("strategy", {}).get("matrix", {})
 
-    def test_matrix_has_os_key(self):
-        assert "os" in self.matrix
-
-    def test_matrix_has_python_key(self):
-        assert "python" in self.matrix
-
-    def test_matrix_has_arch_key(self):
-        assert "arch" in self.matrix
-
-    def test_matrix_os_values(self):
-        assert set(self.matrix["os"]) == {"ubuntu-22.04", "ubuntu-24.04"}
-
-    def test_matrix_python_values(self):
-        assert set(str(p) for p in self.matrix["python"]) == {
-            "3.10",
-            "3.11",
-            "3.12",
-        }
-
-    def test_matrix_arch_values(self):
-        assert set(self.matrix["arch"]) == {"x86_64", "aarch64"}
+    def test_matrix_has_explicit_entries(self):
+        assert self.matrix["include"] == [
+            {"os": "ubuntu-22.04", "python": "3.10", "arch": "x86_64"},
+            {"os": "ubuntu-24.04", "python": "3.12", "arch": "x86_64"},
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -129,10 +113,10 @@ class TestWorkflowMatrix:
 # ---------------------------------------------------------------------------
 
 class TestLinuxCIMatrixExpand:
-    def test_expand_returns_12_entries(self):
+    def test_expand_returns_two_entries(self):
         m = LinuxCIMatrix()
         entries = m.expand()
-        assert len(entries) == 12, f"Expected 12 entries, got {len(entries)}"
+        assert len(entries) == 2, f"Expected 2 entries, got {len(entries)}"
 
     def test_expand_entries_are_ci_matrix_entry(self):
         m = LinuxCIMatrix()
@@ -147,20 +131,15 @@ class TestLinuxCIMatrixExpand:
     def test_all_python_represented(self):
         m = LinuxCIMatrix()
         py_set = {e.python for e in m.expand()}
-        assert py_set == {"3.10", "3.11", "3.12"}
+        assert py_set == {"3.10", "3.12"}
 
     def test_all_arch_represented(self):
         m = LinuxCIMatrix()
         arch_set = {e.arch for e in m.expand()}
-        assert arch_set == {"x86_64", "aarch64"}
+        assert arch_set == {"x86_64"}
 
-    def test_aarch64_is_scheduled_only(self):
-        m = LinuxCIMatrix()
-        for e in m.expand():
-            if e.arch == "aarch64":
-                assert e.scheduled_only is True
-            else:
-                assert e.scheduled_only is False
+    def test_hosted_entries_are_not_cross_compilation_labels(self):
+        assert all(e.arch == "x86_64" and not e.scheduled_only for e in LinuxCIMatrix().expand())
 
 
 # ---------------------------------------------------------------------------
@@ -168,34 +147,34 @@ class TestLinuxCIMatrixExpand:
 # ---------------------------------------------------------------------------
 
 class TestLinuxCIMatrixExpandForEvent:
-    def test_push_returns_6_entries(self):
+    def test_push_returns_two_entries(self):
         m = LinuxCIMatrix()
         entries = m.expand_for_event("push")
-        assert len(entries) == 6, (
-            f"push event should yield 6 entries (x86_64 only), got {len(entries)}"
+        assert len(entries) == 2, (
+            f"push event should yield 2 entries, got {len(entries)}"
         )
 
-    def test_pull_request_returns_6_entries(self):
+    def test_pull_request_returns_two_entries(self):
         m = LinuxCIMatrix()
         entries = m.expand_for_event("pull_request")
-        assert len(entries) == 6
+        assert len(entries) == 2
 
     def test_push_has_no_aarch64(self):
         m = LinuxCIMatrix()
         for e in m.expand_for_event("push"):
             assert e.arch != "aarch64", "aarch64 must not appear on push event"
 
-    def test_schedule_returns_all_12(self):
+    def test_schedule_returns_all_entries(self):
         m = LinuxCIMatrix()
         entries = m.expand_for_event("schedule")
-        assert len(entries) == 12, (
-            f"schedule event should yield all 12 entries, got {len(entries)}"
+        assert len(entries) == 2, (
+            f"schedule event should yield all entries, got {len(entries)}"
         )
 
-    def test_schedule_includes_aarch64(self):
+    def test_schedule_does_not_fake_aarch64(self):
         m = LinuxCIMatrix()
         archs = {e.arch for e in m.expand_for_event("schedule")}
-        assert "aarch64" in archs
+        assert "aarch64" not in archs
 
 
 # ---------------------------------------------------------------------------
@@ -203,14 +182,14 @@ class TestLinuxCIMatrixExpandForEvent:
 # ---------------------------------------------------------------------------
 
 class TestLinuxCIMatrixCount:
-    def test_count_no_event_is_12(self):
-        assert LinuxCIMatrix().count() == 12
+    def test_count_no_event_is_two(self):
+        assert LinuxCIMatrix().count() == 2
 
-    def test_count_push_is_6(self):
-        assert LinuxCIMatrix().count("push") == 6
+    def test_count_push_is_two(self):
+        assert LinuxCIMatrix().count("push") == 2
 
-    def test_count_schedule_is_12(self):
-        assert LinuxCIMatrix().count("schedule") == 12
+    def test_count_schedule_is_two(self):
+        assert LinuxCIMatrix().count("schedule") == 2
 
 
 # ---------------------------------------------------------------------------

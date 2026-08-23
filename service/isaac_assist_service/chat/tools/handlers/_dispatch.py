@@ -33,6 +33,7 @@ from . import (
     teleop,
     training,
     vision,
+    video_to_data,
     workflow,
 )
 
@@ -55,6 +56,7 @@ _THEME_MODULES = (
     diagnostics,
     arena,
     vision,
+    video_to_data,
     rendering,
     animation,
     pick_place,

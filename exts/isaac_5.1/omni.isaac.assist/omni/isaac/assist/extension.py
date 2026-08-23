@@ -80,6 +80,12 @@ class IsaacAssistExtension(omni.ext.IExt):
         global _window, _rpc_server
         carb.log_warn("[IsaacAssist] on_shutdown")
 
+        try:
+            from .telemetry import shutdown_telemetry
+            shutdown_telemetry()
+        except Exception:
+            pass
+
         # Stop RPC server
         if self._rpc_server is not None:
             try:

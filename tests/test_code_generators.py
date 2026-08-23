@@ -102,6 +102,27 @@ _TEST_VECTORS = [
         ["PhysxSchema", "Deformable"],
     ),
     (
+        "make_sim_ready",
+        {"prim_path": "/World/Part", "profile": "manipulable", "mass_kg": 2.0},
+        ["UsdPhysics.CollisionAPI", "UsdPhysics.RigidBodyAPI", "_explicit_mass = 2.0"],
+    ),
+    (
+        "articulate_asset",
+        {
+            "prim_path": "/World/Cabinet",
+            "joints": [{
+                "name": "drawer_joint",
+                "joint_type": "prismatic",
+                "parent_prim": "Base",
+                "child_prim": "Drawer",
+                "axis": "X",
+                "lower_limit": 0.0,
+                "upper_limit": 0.4,
+            }],
+        },
+        ["UsdPhysics.ArticulationRootAPI", "UsdPhysics.PrismaticJoint", "drawer_joint"],
+    ),
+    (
         "create_omnigraph",
         {
             "graph_path": "/World/OG",
@@ -114,7 +135,7 @@ _TEST_VECTORS = [
     (
         "create_material",
         {"material_path": "/World/Mat", "shader_type": "OmniPBR"},
-        ["UsdShade.Material", "OmniPBR.mdl", "diffuse_color"],
+        ["UsdShade.Material", "UsdPreviewSurface", "diffuseColor"],
     ),
     (
         "create_material",
@@ -238,11 +259,10 @@ _TEST_VECTORS = [
             "target_position": [0.4, 0.0, 0.3],
             "robot_type": "franka",
         },
-        # Default planner is RMPflow (reactive). Generated code uses
-        # load_supported_motion_gen_config (the modern name; the older
-        # load_supported_motion_policy_config no longer exists).
+        # Default planner is RMPflow (reactive). The Isaac 6.0 compatibility
+        # extension still exposes load_supported_motion_policy_config.
         ["RmpFlow", "set_end_effector_target", "apply_action",
-         "load_supported_motion_gen_config", "SingleArticulation"],
+         "load_supported_motion_policy_config", "SingleArticulation"],
     ),
     (
         "move_to_pose",
@@ -254,7 +274,7 @@ _TEST_VECTORS = [
         },
         # Handler migrated from LulaRRTMotionPolicy to
         # LulaTaskSpaceTrajectoryGenerator (single-shot global planner)
-        ["LulaTaskSpaceTrajectoryGenerator", "load_supported_lula_rrt_config"],
+        ["LulaTaskSpaceTrajectoryGenerator", "load_supported_path_planner_config"],
     ),
     (
         "plan_trajectory",

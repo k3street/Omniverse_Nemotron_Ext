@@ -1,0 +1,73 @@
+# Industrial bin geometry registry used for placement/drop-target planning.
+# All dimensions are [width, depth, height] in millimetres. Payloads are kg.
+# Values are planning metadata, not safety/load-rating certification.
+
+- sku: AKRO-MILS-30220
+  name: AkroBin 30220
+  manufacturer: Akro-Mils
+  exterior_mm: [374.7, 209.6, 177.8]
+  interior_mm: [330.0, 178.0, 165.0]
+  wall_thickness_mm: 3.0
+  max_payload_kg: 22.7
+  stackable: true
+  opening_orientation: top
+
+- sku: QUANTUM-QSB-211
+  name: Shelf Bin QSB211
+  manufacturer: Quantum Storage Systems
+  exterior_mm: [298.5, 104.8, 101.6]
+  interior_mm: [274.0, 89.0, 95.0]
+  wall_thickness_mm: 2.5
+  max_payload_kg: 13.6
+  stackable: true
+  opening_orientation: top
+
+- sku: LEWISBINS-NEX2415-6
+  name: NEX 2415-6 Attached-Lid Container
+  manufacturer: LewisBins+
+  exterior_mm: [609.6, 381.0, 165.1]
+  interior_mm: [559.0, 343.0, 143.0]
+  wall_thickness_mm: 4.0
+  max_payload_kg: 31.8
+  stackable: true
+  opening_orientation: top
+
+- sku: SCHAEFER-LF6280
+  name: LF 6280 Euro Container
+  manufacturer: SSI SCHAEFER
+  exterior_mm: [600.0, 400.0, 280.0]
+  interior_mm: [565.0, 366.0, 261.0]
+  wall_thickness_mm: 4.0
+  max_payload_kg: 50.0
+  stackable: true
+  opening_orientation: top
+
+- sku: STEEL-TOTE-241612
+  name: Heavy-Duty Steel Tote 24x16x12
+  manufacturer: Generic Industrial
+  exterior_mm: [609.6, 406.4, 304.8]
+  interior_mm: [584.2, 381.0, 279.4]
+  wall_thickness_mm: 2.0
+  max_payload_kg: 136.0
+  stackable: false
+  opening_orientation: top
+
+- sku: AKRO-MILS-39105
+  name: Akro-Grid 39105
+  manufacturer: Akro-Mils
+  exterior_mm: [269.9, 171.5, 127.0]
+  interior_mm: [241.0, 152.0, 117.0]
+  wall_thickness_mm: 3.0
+  max_payload_kg: 18.1
+  stackable: true
+  opening_orientation: top
+
+- sku: QUANTUM-DG93000
+  name: Double-Sided Giant Hopper DG93000
+  manufacturer: Quantum Storage Systems
+  exterior_mm: [762.0, 482.6, 457.2]
+  interior_mm: [711.0, 432.0, 406.0]
+  wall_thickness_mm: 5.0
+  max_payload_kg: 113.4
+  stackable: false
+  opening_orientation: side

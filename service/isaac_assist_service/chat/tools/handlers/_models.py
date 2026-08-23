@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-10T22:44:37+00:00
-Tool count: 442
+Generated: 2026-08-23T00:30:11+00:00
+Tool count: 447
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -1226,7 +1226,7 @@ class RunStageAnalysisArgs(BaseModel):
     """Run the Stage Analyzer to diagnose problems in the current scene. Checks for broken references, physics/material mismatches, articulation issues, sensor wiring, ROS2 bridge readiness, and performance"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
-    packs: Optional[List[str]] = Field(None, description="Optional validator packs. Add nvidia_usd_validation to run NVIDIA's isolated USD validator sidecar.")
+    packs: Optional[List[str]] = Field(None, description="Optional list of validator packs to run. Default-enabled: schema_consistency, import_health, material_physics, articulation_integrity, sensor_completeness, ros_bridge_readiness, performance_warnings, ")
 
 
 class ListSceneTemplatesArgs(BaseModel):
@@ -4016,6 +4016,55 @@ class RebindRoleArgs(BaseModel):
     target: str = Field(..., description="object_id in the LayoutSpec to bind the role to.")
 
 
+class V2dStatusArgs(BaseModel):
+    """Inspect the optional NVIDIA Video to Data installation and execution gate."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    pass
+
+
+class V2dIngestVideoArgs(BaseModel):
+    """Segment a demonstration video and build V2D's queryable action database. Defaults to a safe command-only dry run."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    video_path: str
+    output_dir: str
+    config_path: str
+    verify: Optional[bool] = Field(None)
+    dry_run: Optional[bool] = Field(None, description="Return the argv plan without execution; default true.")
+
+
+class V2dRetrieveClipsArgs(BaseModel):
+    """Query a V2D action database using natural language. Defaults to a safe command-only dry run."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    query: str
+    database_dir: str
+    config_path: str
+    dry_run: Optional[bool] = Field(None, description="Return the argv plan without execution; default true.")
+
+
+class V2dReconstructDepthArgs(BaseModel):
+    """Run V2D's containerized MoGe video-to-depth stage. Defaults to a safe command-only dry run."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    video_path: str
+    output_dir: str
+    weights_path: str
+    dry_run: Optional[bool] = Field(None, description="Return the argv plan without execution; default true.")
+
+
+class V2dGroundMotionArgs(BaseModel):
+    """Run V2D robotic-grounding preprocessing for a supported human-motion dataset. Defaults to a safe command-only dry run."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    dataset: str = Field(..., description="Dataset name such as taco, hot3d, or arctic.")
+    hmd_root: str
+    mano_dir: str
+    max_sequences: Optional[int] = Field(None)
+    dry_run: Optional[bool] = Field(None, description="Return the argv plan without execution; default true.")
+
+
 # ---------------------------------------------------------------------------
 # Tool-name → model-class lookup
 
@@ -4462,4 +4511,9 @@ MODEL_REGISTRY = {
     "validate_joint_post": ValidateJointPostArgs,
     "execute_contact_sequence_plan": ExecuteContactSequencePlanArgs,
     "rebind_role": RebindRoleArgs,
+    "v2d_status": V2dStatusArgs,
+    "v2d_ingest_video": V2dIngestVideoArgs,
+    "v2d_retrieve_clips": V2dRetrieveClipsArgs,
+    "v2d_reconstruct_depth": V2dReconstructDepthArgs,
+    "v2d_ground_motion": V2dGroundMotionArgs,
 }

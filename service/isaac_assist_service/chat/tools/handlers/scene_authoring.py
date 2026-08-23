@@ -4961,6 +4961,46 @@ async def _handle_restore_delta_snapshot(args: Dict) -> Dict:
     }
 
 
+async def _handle_validate_usd_reference_post(args: Dict) -> Dict[str, Any]:
+    """Run the Phase 66 post-spawn validator for an authored USD reference."""
+    from service.isaac_assist_service.multimodal.spawn_validator_usd_ref import (
+        USDReferenceState,
+        USDReferenceValidator,
+    )
+
+    state = USDReferenceState(
+        prim_path=str(args.get("prim_path", "")),
+        reference_target=str(args.get("reference_target", "")),
+        asset_exists=bool(args.get("asset_exists", True)),
+        asset_size_bytes=int(args.get("asset_size_bytes", 0)),
+        prim_type_after=args.get("prim_type_after"),
+        parent_path=args.get("parent_path"),
+        depth=int(args.get("depth", 1)),
+        is_circular=bool(args.get("is_circular", False)),
+    )
+    validator = USDReferenceValidator(
+        strict=bool(args.get("strict", False)),
+        max_depth=int(args.get("max_depth", 8)),
+        max_size_mb=int(args.get("max_size_mb", 500)),
+    )
+    findings = validator.validate(state)
+    counts: Dict[str, int] = {"error": 0, "warn": 0, "info": 0}
+    for finding in findings:
+        counts[finding.severity] += 1
+    return {
+        "passed": validator.passed(findings),
+        "findings": [
+            {
+                "check_id": finding.check_id,
+                "severity": finding.severity,
+                "message": finding.message,
+            }
+            for finding in findings
+        ],
+        "severity_counts": counts,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Registration
 
@@ -5013,6 +5053,7 @@ def register(
     data["scene_diff"] = _handle_scene_diff
     data["scene_summary"] = _handle_scene_summary
     data["select_by_criteria"] = _handle_select_by_criteria
+    data["validate_usd_reference_post"] = _handle_validate_usd_reference_post
 
     # Code-gen handlers (39)
     codegen["activate_area"] = _gen_activate_area

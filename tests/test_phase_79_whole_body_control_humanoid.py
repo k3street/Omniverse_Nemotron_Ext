@@ -7,4 +7,5 @@ def test_phase_79_metadata():
     from service.isaac_assist_service.multimodal.whole_body_control_humanoid import get_phase_metadata
     md = get_phase_metadata()
     assert md["phase"] == 79
-    assert md["status"] == "scaffold"
+    assert md["status"] == "implemented_unvalidated"
+    assert "RMS error < 0.05 m" in md["acceptance_gate"]

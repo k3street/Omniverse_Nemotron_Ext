@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import gzip
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -162,7 +161,7 @@ def test_already_archived_gz_deleted_at_delete_threshold(tmp_path: Path):
     gz_path = tmp_path / "old_archive.log.gz"
     with gzip.open(gz_path, "wb") as fh:
         fh.write(b"old data\n")
-    past_ts = time.time() - 45 * 86400  # 45 days old
+    past_ts = _ref_now().timestamp() - 45 * 86400  # 45 days old
     os.utime(gz_path, (past_ts, past_ts))
 
     # A fresh file that should be kept

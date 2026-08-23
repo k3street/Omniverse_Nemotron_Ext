@@ -43,7 +43,9 @@ def _load_retriever():
     """Return a fresh import of template_retriever (no cached module state)."""
     mod_name = "service.isaac_assist_service.chat.tools.template_retriever"
     if mod_name in sys.modules:
-        del sys.modules[mod_name]
+        # Reload in place so functions imported by other test modules retain
+        # the same module globals instead of becoming stale references.
+        return importlib.reload(sys.modules[mod_name])
     return importlib.import_module(mod_name)
 
 

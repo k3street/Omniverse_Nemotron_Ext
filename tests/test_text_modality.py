@@ -221,7 +221,9 @@ def test_llm_extractor_rejects_invalid_pattern():
 def test_llm_schema_has_closed_enum():
     """Schema constrains pattern_hint to closed enum."""
     enum = LLM_INTENT_JSON_SCHEMA["properties"]["pattern_hint"]["enum"]
-    assert set(enum) == {"pick_place", "sort", "reorient", "navigate"}
+    assert set(enum) == {
+        "pick_place", "sort", "reorient", "navigate", "insert", "train", "other"
+    }
 
 
 def test_llm_schema_rejects_additional_properties():

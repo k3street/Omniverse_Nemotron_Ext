@@ -586,8 +586,8 @@ class TestRoutedCord:
         assert abs(got - 0.8) < 0.05   # slack shows as droop, not stretch
 
     def test_cord_is_static_geometry(self, tmp_path):
-        from pxr import UsdPhysics
         stage, _ = self._build(tmp_path)
+        from pxr import UsdPhysics
         segs = [p for p in stage.Traverse() if p.GetName().startswith("seg_")]
         assert len(segs) > 10
         # collidable scene dressing: colliders, but no rigid bodies to solve
@@ -595,8 +595,8 @@ class TestRoutedCord:
         assert not any(p.HasAPI(UsdPhysics.RigidBodyAPI) for p in segs)
 
     def test_cord_never_dips_below_the_surface(self, tmp_path):
-        from pxr import UsdGeom
         stage, _ = self._build(tmp_path)
+        from pxr import UsdGeom
         cache = UsdGeom.XformCache()
         zs = [cache.GetLocalToWorldTransform(p).ExtractTranslation()[2]
               for p in stage.Traverse() if p.GetName().startswith("seg_")]
@@ -640,17 +640,18 @@ class TestRoutedAssemblyIsStatic:
             upright=True, cord_mode="routed", tool_attach="min")
 
     def test_no_free_rigid_bodies(self, tmp_path):
+        out = self._build(tmp_path)
         from pxr import Usd, UsdPhysics
-        st = Usd.Stage.Open(str(self._build(tmp_path)))
+        st = Usd.Stage.Open(str(out))
         bodies = [p for p in st.Traverse()
                   if p.HasAPI(UsdPhysics.RigidBodyAPI)]
         assert bodies == [], "a routed assembly must be static dressing"
         assert any(p.HasAPI(UsdPhysics.CollisionAPI) for p in st.Traverse())
 
     def test_cord_tip_meets_the_plug_entry(self, tmp_path):
+        out = self._build(tmp_path)
         from pxr import Gf, Usd, UsdGeom
         from make_cable import attach_frame
-        out = self._build(tmp_path)
         st = Usd.Stage.Open(str(out))
         cache = UsdGeom.XformCache()
         segs = sorted((p for p in st.Traverse()
@@ -668,9 +669,10 @@ class TestRoutedAssemblyIsStatic:
     def test_plug_lies_flat_and_level_on_the_surface(self, tmp_path):
         import math
 
+        out = self._build(tmp_path)
         from pxr import Gf, Usd, UsdGeom
         from make_cable import attach_frame
-        st = Usd.Stage.Open(str(self._build(tmp_path)))
+        st = Usd.Stage.Open(str(out))
         cache = UsdGeom.XformCache()
         m = cache.GetLocalToWorldTransform(st.GetPrimAtPath("/World/Plug"))
         _, pdir = attach_frame(

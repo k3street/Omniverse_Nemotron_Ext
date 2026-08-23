@@ -1,6 +1,6 @@
 """Governance data models — decisions, audit entries, and policy configuration."""
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Literal, Optional
 from datetime import datetime, timezone
 
 
@@ -17,9 +17,9 @@ class ApprovalDecision(BaseModel):
         decided_at: UTC timestamp of the decision.
     """
     request_id: str
-    decision: str # "approved" | "rejected" | "skipped"
-    approved_action_ids: List[str] = []
-    rejected_action_ids: List[str] = []
+    decision: Literal["approved", "rejected", "skipped"]
+    approved_action_ids: List[str] = Field(default_factory=list)
+    rejected_action_ids: List[str] = Field(default_factory=list)
     remember: bool = False
     user_note: Optional[str] = None
     decided_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -53,10 +53,10 @@ class AuditEntry(BaseModel):
     target: Optional[str] = None
     user_decision: Optional[str] = None
     snapshot_id: Optional[str] = None
-    sources_consulted: List[str] = []
+    sources_consulted: List[str] = Field(default_factory=list)
     confidence: Optional[float] = None
     error: Optional[str] = None
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class GovernanceConfig(BaseModel):
     """Policy configuration for the governance engine.
@@ -78,13 +78,13 @@ class GovernanceConfig(BaseModel):
     """
     operational_mode: str = "interactive" # "interactive" | "semi_autonomous" | "explain_only"
     network_mode: str = "official_only"
-    network_allowlist: List[str] = ["https://docs.isaacsim.omniverse.nvidia.com"]
-    secret_patterns: List[str] = [
+    network_allowlist: List[str] = Field(default_factory=lambda: ["https://docs.isaacsim.omniverse.nvidia.com"])
+    secret_patterns: List[str] = Field(default_factory=lambda: [
         r"(?i)aws_access_key_id",
         r"(?i)sk-[a-zA-Z0-9]{32,}",
         r"(?i)bearer\s+[a-zA-Z0-9\-\._~+/]+="
-    ]
-    secret_paths: List[str] = []
+    ])
+    secret_paths: List[str] = Field(default_factory=list)
     max_auto_apply_confidence: float = 0.9
     audit_log_path: str = "workspace/audit.jsonl"
     audit_retention_days: int = 30

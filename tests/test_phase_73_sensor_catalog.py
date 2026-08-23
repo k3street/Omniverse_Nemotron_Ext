@@ -20,6 +20,18 @@ def _load_catalog():
     return [json.loads(l) for l in _CATALOG_PATH.read_text().splitlines() if l.strip()]
 
 
+def test_phase_module_validates_checked_in_catalog():
+    from service.isaac_assist_service.multimodal.sensor_catalog_expansion import (
+        catalog_counts,
+        load_sensor_catalog,
+        validate_sensor_catalog,
+    )
+
+    records = load_sensor_catalog(_CATALOG_PATH)
+    assert catalog_counts(records)["total"] >= 100
+    assert validate_sensor_catalog(records) == []
+
+
 def test_catalog_has_100_plus_entries():
     """Phase 73 contract: catalog ≥ 100 entries."""
     specs = _load_catalog()

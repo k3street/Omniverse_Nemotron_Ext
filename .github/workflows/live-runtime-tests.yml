@@ -1,0 +1,25 @@
+name: live-runtime-tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Live suite to run on an Isaac Sim host
+        required: true
+        default: l3
+        type: choice
+        options: [l3, compliance_e2e]
+
+permissions:
+  contents: read
+
+jobs:
+  isaac-runtime:
+    runs-on: [self-hosted, isaac-sim]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test package
+        run: python -m pip install ".[test,runtime]"
+      - name: Run selected live suite
+        run: python -m pytest tests/ -m "${{ inputs.suite }}" --timeout=300 --tb=short -q

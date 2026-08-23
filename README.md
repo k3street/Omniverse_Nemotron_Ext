@@ -126,13 +126,39 @@ cd /path/to/Omniverse_Nemotron_Ext
 # Or pass the LLM mode directly
 ./launch_service.sh anthropic   # Claude
 ./launch_service.sh local       # Ollama (local GPU)
-./launch_service.sh cloud       # Gemini
+./launch_service.sh google      # Gemini
 ./launch_service.sh openai      # OpenAI
 ./launch_service.sh grok        # xAI Grok
 ```
 
 The service starts at **`http://localhost:8000`**.  
 Interactive API docs are available at **`http://localhost:8000/docs`**.
+
+The launcher prefers a project `.venv`, then a complete system Python, and
+finally Isaac Sim's bundled `python.sh`. Override discovery with
+`SERVICE_PYTHON=/path/to/python`; override the loopback bind with
+`ISAAC_ASSIST_HOST` or `ISAAC_ASSIST_PORT` when needed. Container startup
+continues to bind `0.0.0.0` explicitly. Development hot reload is opt-in with
+`ISAAC_ASSIST_RELOAD=1` so the Isaac Python fallback does not spawn a divergent
+child interpreter by default.
+
+#### NVIDIA Video to Data
+
+An optional adapter exposes NVIDIA's video-ingestion, depth-reconstruction,
+clip-retrieval, and robotic-grounding pipelines as dry-run-first tools. V2D is
+installed separately so its GPU/container dependencies do not enter the
+sidecar environment. See [the V2D integration guide](docs/integrations/video-to-data.md).
+
+#### Containerized service
+
+The container packages the core HTTP service. Live ROS2, Kit, and voice
+integrations still require their host-side services and explicit networking.
+
+```bash
+docker build -t isaac-assist:local .
+docker run --rm -p 8000:8000 --env-file .env isaac-assist:local
+curl http://localhost:8000/health
+```
 
 #### Hot-switch LLM mode at runtime (no restart needed)
 

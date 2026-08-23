@@ -46,12 +46,13 @@ def _fresh_module(tmp_index_path: Path):
     each test gets isolated state (no shared _collection, _client,
     _template_cache).  Returns the module object.
     """
-    # Remove cached module so importlib gives a fresh instance
+    # Reload in place so functions imported elsewhere keep a live reference to
+    # this module's globals; deleting sys.modules creates cross-test ghosts.
     mod_name = "service.isaac_assist_service.chat.tools.template_retriever"
     if mod_name in sys.modules:
-        del sys.modules[mod_name]
-
-    mod = importlib.import_module(mod_name)
+        mod = importlib.reload(sys.modules[mod_name])
+    else:
+        mod = importlib.import_module(mod_name)
     # Redirect persisted index to a temp dir
     mod._PERSIST_DIR = tmp_index_path
     mod._TEMPLATES_DIR = _TEMPLATES_DIR

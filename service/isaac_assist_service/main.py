@@ -3,7 +3,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # Package remains importable in minimal/test environments.
+    def load_dotenv(*_args, **_kwargs):
+        return False
 
 # Load all local configurations from .env
 load_dotenv()

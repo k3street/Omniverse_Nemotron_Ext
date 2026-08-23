@@ -19,7 +19,7 @@ import asyncio
 import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 import uuid
@@ -46,7 +46,7 @@ class ChatMessageRequest(BaseModel):
 
     session_id: str
     message: str
-    attachments: Optional[List[str]] = []
+    attachments: List[str] = Field(default_factory=list)
     context: Optional[Dict[str, Any]] = None
 
 

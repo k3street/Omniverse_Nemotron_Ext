@@ -59,37 +59,27 @@ class CIMatrixEntry:
 
 
 class LinuxCIMatrix:
-    """Full Cartesian CI matrix mirroring the GitHub Actions YAML.
+    """Truthful hosted-runner matrix mirroring the GitHub Actions YAML.
 
-    Dimensions:
-      * os      — ubuntu-22.04, ubuntu-24.04          (2)
-      * python  — '3.10', '3.11', '3.12'              (3)
-      * arch    — x86_64, aarch64                     (2)
-                                                     ------
-      Total                                            12
+    GitHub's Ubuntu runners are x86_64. An aarch64-labelled matrix cell does
+    not cross-compile by itself, so native aarch64 packaging belongs on a
+    separately provisioned ARM runner.
     """
 
-    _OS = ["ubuntu-22.04", "ubuntu-24.04"]
-    _PYTHON = ["3.10", "3.11", "3.12"]
-    _ARCH = ["x86_64", "aarch64"]
-    _SCHEDULED_ARCHS = {"aarch64"}
+    _ENTRIES = (
+        ("ubuntu-22.04", "3.10", "x86_64"),
+        ("ubuntu-24.04", "3.12", "x86_64"),
+    )
 
     def __init__(self) -> None:
-        """Build the full 12-entry Cartesian matrix (2 OS × 3 Python × 2 arch)."""
+        """Build the supported native-runner matrix."""
         self._entries: List[CIMatrixEntry] = [
-            CIMatrixEntry(
-                os=os,
-                python=py,
-                arch=arch,
-                scheduled_only=(arch in self._SCHEDULED_ARCHS),
-            )
-            for os in self._OS
-            for py in self._PYTHON
-            for arch in self._ARCH
+            CIMatrixEntry(os=os, python=py, arch=arch)
+            for os, py, arch in self._ENTRIES
         ]
 
     def expand(self) -> List[CIMatrixEntry]:
-        """Return all 12 matrix entries (all OS × Python × arch combinations).
+        """Return all supported matrix entries.
 
         Returns:
             List[CIMatrixEntry]: All 12 entries regardless of event type.
@@ -101,9 +91,7 @@ class LinuxCIMatrix:
     ) -> List[CIMatrixEntry]:
         """Return the entries that would run for the given GitHub event.
 
-        * ``push`` / ``pull_request`` — excludes scheduled-only entries
-          (i.e. aarch64 is filtered out).
-        * ``schedule`` — returns all entries.
+        All declared entries run for each supported event.
         """
         if event == "schedule":
             return list(self._entries)
@@ -214,16 +202,10 @@ def validate_workflow_matrix_matches_spec(yaml_path: Path) -> bool:
         return False
 
     spec = LinuxCIMatrix()
-    spec_os = set(spec._OS)
-    spec_py = set(spec._PYTHON)
-    spec_arch = set(spec._ARCH)
-
-    yaml_os = set(yaml_matrix.get("os", []))
-    yaml_py = set(str(p) for p in yaml_matrix.get("python", []))
-    yaml_arch = set(yaml_matrix.get("arch", []))
-
-    return (
-        yaml_os == spec_os
-        and yaml_py == spec_py
-        and yaml_arch == spec_arch
-    )
+    includes = yaml_matrix.get("include", [])
+    yaml_entries = {
+        (item.get("os"), str(item.get("python")), item.get("arch", "x86_64"))
+        for item in includes
+    }
+    spec_entries = {(entry.os, entry.python, entry.arch) for entry in spec.expand()}
+    return yaml_entries == spec_entries

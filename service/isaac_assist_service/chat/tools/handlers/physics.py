@@ -2950,10 +2950,10 @@ else:
     # material prim 'glass' must not classify the car as glassware)
     import re as _re
     _blob = ' '.join(_names)
-    # \W+ keeps unicode word tokens — 'коляска' (vehicle prior) must match
+    # \\W+ keeps unicode word tokens — 'коляска' (vehicle prior) must match
     # Cyrillic-named assets
-    _file_tokens = set(_re.split(r'[\W_]+', _names[0]))
-    _all_tokens = set(_re.split(r'[\W_]+', _blob))
+    _file_tokens = set(_re.split(r'[\\W_]+', _names[0]))
+    _all_tokens = set(_re.split(r'[\\W_]+', _blob))
     _cls, _prior = None, None
     if _class_hint and _class_hint in _priors:
         _cls, _prior = _class_hint, _priors[_class_hint]
@@ -3432,6 +3432,12 @@ async def _handle_create_corded_asset(args: Dict) -> Dict:
     toward straight; solver-stable link masses; 64 position iterations;
     240 Hz scene. See scripts/make_cable.py.
     """
+    if not args:
+        return {
+            "type": "data",
+            "error": "create_corded_asset requires at least one explicit option",
+        }
+
     import sys as _sys
     from pathlib import Path as _Path
 
@@ -3520,13 +3526,12 @@ async def _handle_create_corded_asset(args: Dict) -> Dict:
 
     if args.get("ingest", True):
         try:
-            import asyncio as _asyncio
-
             from ingest_asset import queue_file
+            from ....runtime_compat import run_sync_compatible
             # queue_file drives its own event loop (the report codegen is
             # async) — calling it inline from this async handler leaves the
             # coroutine unawaited, so give it a thread of its own
-            entry = await _asyncio.to_thread(
+            entry = await run_sync_compatible(
                 queue_file, str(path), args.get("class_hint"), name)
             report = entry.get("report", {})
             result["ingested"] = {

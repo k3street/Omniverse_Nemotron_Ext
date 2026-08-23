@@ -18,7 +18,7 @@ router = APIRouter()
 orchestrator = AnalysisOrchestrator()
 
 @router.post("/run")
-def run_analysis(stage_data: Dict[str, Any]):
+async def run_analysis(stage_data: Dict[str, Any]):
     """Run all registered validators against the supplied stage data.
 
     Receives JSON-serialized viewport stage data directly from the native
@@ -50,7 +50,7 @@ def run_analysis(stage_data: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/packs")
-def list_packs():
+async def list_packs():
     """List all currently enabled validator packs.
 
     Returns:

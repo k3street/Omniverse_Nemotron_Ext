@@ -10033,5 +10033,83 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "v2d_status",
+            "description": "Inspect the optional NVIDIA Video to Data installation and execution gate.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "v2d_ingest_video",
+            "description": "Segment a demonstration video and build V2D's queryable action database. Defaults to a safe command-only dry run.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "video_path": {"type": "string"},
+                    "output_dir": {"type": "string"},
+                    "config_path": {"type": "string"},
+                    "verify": {"type": "boolean"},
+                    "dry_run": {"type": "boolean", "description": "Return the argv plan without execution; default true."},
+                },
+                "required": ["video_path", "output_dir", "config_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "v2d_retrieve_clips",
+            "description": "Query a V2D action database using natural language. Defaults to a safe command-only dry run.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "database_dir": {"type": "string"},
+                    "config_path": {"type": "string"},
+                    "dry_run": {"type": "boolean", "description": "Return the argv plan without execution; default true."},
+                },
+                "required": ["query", "database_dir", "config_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "v2d_reconstruct_depth",
+            "description": "Run V2D's containerized MoGe video-to-depth stage. Defaults to a safe command-only dry run.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "video_path": {"type": "string"},
+                    "output_dir": {"type": "string"},
+                    "weights_path": {"type": "string"},
+                    "dry_run": {"type": "boolean", "description": "Return the argv plan without execution; default true."},
+                },
+                "required": ["video_path", "output_dir", "weights_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "v2d_ground_motion",
+            "description": "Run V2D robotic-grounding preprocessing for a supported human-motion dataset. Defaults to a safe command-only dry run.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dataset": {"type": "string", "description": "Dataset name such as taco, hot3d, or arctic."},
+                    "hmd_root": {"type": "string"},
+                    "mano_dir": {"type": "string"},
+                    "max_sequences": {"type": "integer"},
+                    "dry_run": {"type": "boolean", "description": "Return the argv plan without execution; default true."},
+                },
+                "required": ["dataset", "hmd_root", "mano_dir"],
+            },
+        },
+    },
 
 ]

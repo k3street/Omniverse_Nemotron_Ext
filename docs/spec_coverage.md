@@ -2,6 +2,14 @@
 
 Generated 2026-05-13.
 
+> **Historical snapshot:** the counts below describe the repository as it
+> existed on 2026-05-13 and must not be used as current release status. The
+> current codebase has many later implementations, plus some duplicate legacy
+> module names. As of 2026-08-22, 5 modules still explicitly declare
+> `PHASE_STATUS = "scaffold"`. Current release priorities and runtime gates are
+> tracked in [`../ROADMAP.md`](../ROADMAP.md); a module may be called landed only
+> when its operational body and proportional verification exist.
+
 ## Summary
 
 | Status | Count | % |

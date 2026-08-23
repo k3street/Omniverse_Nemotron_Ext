@@ -1,27 +1,9 @@
-"""Phase 31b — industrial bridge lifecycle.
+"""Compatibility alias for the canonical Phase 31b bridge lifecycle."""
 
-Sub-phase scaffold for spec coverage.
-
-Per specs/IA_FULL_SPEC_2026-05-10.md Phase 31b.
-"""
-from __future__ import annotations
-from typing import Any, Dict
-
-
-PHASE_ID = "31b"
-PHASE_TITLE = "industrial bridge lifecycle"
-PHASE_STATUS = "scaffold"
-
-
-def get_phase_metadata() -> Dict[str, Any]:
-    """Return phase identification and status for this phase.
-
-    Returns:
-        Dict[str, Any]: Keys ``phase``, ``title``, ``status``, and ``spec_ref``.
-    """
-    return {
-        "phase": PHASE_ID,
-        "title": PHASE_TITLE,
-        "status": PHASE_STATUS,
-        "spec_ref": "specs/IA_FULL_SPEC_2026-05-10.md Phase 31b",
-    }
+from .sub_phase_31b_industrial_bridges_full import *  # noqa: F401,F403
+from .sub_phase_31b_industrial_bridges_full import (
+    PHASE_ID,
+    PHASE_STATUS,
+    PHASE_TITLE,
+    get_phase_metadata,
+)

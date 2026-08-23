@@ -67,26 +67,67 @@ else
 fi
 
 export LLM_MODE="$MODE"
+SERVICE_HOST="${ISAAC_ASSIST_HOST:-127.0.0.1}"
+SERVICE_PORT="${ISAAC_ASSIST_PORT:-8000}"
 
-UVICORN_BIN="${UVICORN_BIN:-uvicorn}"
-if [ -x "$SCRIPT_DIR/.venv/bin/uvicorn" ]; then
-    UVICORN_BIN="$SCRIPT_DIR/.venv/bin/uvicorn"
+RUNNER=()
+RUNNER_LABEL=""
+
+if [ -n "${UVICORN_BIN:-}" ]; then
+    RUNNER=("$UVICORN_BIN")
+    RUNNER_LABEL="$UVICORN_BIN"
+elif [ -n "${SERVICE_PYTHON:-}" ]; then
+    RUNNER=("$SERVICE_PYTHON" -m uvicorn)
+    RUNNER_LABEL="$SERVICE_PYTHON -m uvicorn"
+elif [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+    RUNNER=("$SCRIPT_DIR/.venv/bin/python" -m uvicorn)
+    RUNNER_LABEL="${RUNNER[*]}"
+elif python3 -c 'import aiohttp, fastapi, uvicorn' >/dev/null 2>&1; then
+    RUNNER=(python3 -m uvicorn)
+    RUNNER_LABEL="${RUNNER[*]}"
+else
+    # Isaac Sim ships a Python environment with the HTTP stack needed by both
+    # the extension and sidecar. Reuse it when the host Python is incomplete.
+    ISAAC_PYTHON_CANDIDATES=()
+    for root in "${ISAAC_SIM_ROOT:-}" "${ISAAC_SIM_PATH:-}" "${ISAACSIM_PATH:-}"; do
+        [ -n "$root" ] && ISAAC_PYTHON_CANDIDATES+=("$root/python.sh")
+    done
+    for candidate in "$HOME"/Documents/Github/isaacsim/_build/*/release/python.sh \
+                     "$HOME"/isaac-sim/*/python.sh \
+                     "$HOME"/.local/share/ov/pkg/isaac-sim-*/python.sh; do
+        [ -x "$candidate" ] && ISAAC_PYTHON_CANDIDATES+=("$candidate")
+    done
+
+    for candidate in "${ISAAC_PYTHON_CANDIDATES[@]}"; do
+        if "$candidate" -c 'import aiohttp, fastapi, uvicorn' >/dev/null 2>&1; then
+            RUNNER=("$candidate" -m uvicorn)
+            RUNNER_LABEL="${RUNNER[*]}"
+            export ISAAC_ASSIST_ISAAC_PYTHON=1
+            break
+        fi
+    done
+fi
+
+if [ "${#RUNNER[@]}" -eq 0 ]; then
+    echo "Error: no Python environment contains aiohttp, FastAPI, and Uvicorn."
+    echo "Create .venv with 'python3 -m pip install -e .' or set SERVICE_PYTHON."
+    exit 1
 fi
 
 echo ""
 echo "Starting Isaac Assist service..."
 echo "  Mode:  $MODE"
 echo "  Model: $MODEL"
-echo "  Port:  8000"
-echo "  Uvicorn: $UVICORN_BIN"
+echo "  URL:   http://$SERVICE_HOST:$SERVICE_PORT"
+echo "  Runner: $RUNNER_LABEL"
 echo ""
 
 RELOAD_ARGS=()
-if [ "${ISAAC_ASSIST_RELOAD:-1}" != "0" ]; then
+if [ "${ISAAC_ASSIST_RELOAD:-0}" = "1" ]; then
     RELOAD_ARGS=(--reload)
 fi
 
-exec "$UVICORN_BIN" service.isaac_assist_service.main:app \
-    --host 0.0.0.0 \
-    --port 8000 \
+exec "${RUNNER[@]}" service.isaac_assist_service.main:app \
+    --host "$SERVICE_HOST" \
+    --port "$SERVICE_PORT" \
     "${RELOAD_ARGS[@]}"

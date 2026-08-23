@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 from .models import PlanGenerationRequest
 from .swarm_generator import SwarmPlanGenerator
@@ -20,7 +20,7 @@ class PlanGenerateBody(BaseModel):
     """Extended request body that can carry stage data for real analysis."""
     request: PlanGenerationRequest
     stage_data: Optional[Dict[str, Any]] = None
-    mock_findings: List[Dict[str, Any]] = []
+    mock_findings: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 @router.post("/generate")
@@ -86,16 +86,32 @@ class PlanOutcomeRequest(BaseModel):
     error_output: str = ""
     code: str = ""
     user_message: str = ""
-    steps: List[Dict[str, Any]] = []
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
+    decision_id: Optional[str] = None
+    snapshot_id: Optional[str] = None
 
 
 @router.post("/{plan_id}/apply")
-def notify_applied(plan_id: str, req: Optional[PlanOutcomeRequest] = None):
+async def notify_applied(plan_id: str, req: Optional[PlanOutcomeRequest] = None):
     """
     Called by the UI extension once it finishes translating the patch to pxr limits.
     Now also captures the outcome in the knowledge base for learning.
     """
-    if req and req.user_message:
+    if req is None:
+        raise HTTPException(status_code=400, detail="apply outcome is required")
+    if req.plan_id != plan_id:
+        raise HTTPException(status_code=409, detail="path plan_id does not match request plan_id")
+    if req.success:
+        from ..governance.decision_store import get_decision
+        decision = get_decision(req.decision_id or "")
+        if decision is None or decision.request_id != plan_id:
+            raise HTTPException(status_code=403, detail="matching approval decision is required")
+        if decision.decision != "approved":
+            raise HTTPException(status_code=403, detail=f"plan decision is {decision.decision}")
+        if not req.snapshot_id:
+            raise HTTPException(status_code=422, detail="successful apply requires a real snapshot_id")
+
+    if req.user_message:
         version = detect_isaac_version()
         try:
             _kb.capture_plan_outcome(
@@ -113,4 +129,4 @@ def notify_applied(plan_id: str, req: Optional[PlanOutcomeRequest] = None):
         except Exception as e:
             logger.warning(f"[planner] Failed to capture plan outcome: {e}")
 
-    return {"status": "success", "snapshot_id": "auto_cached"}
+    return {"status": "success", "snapshot_id": req.snapshot_id}

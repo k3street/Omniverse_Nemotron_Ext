@@ -5682,8 +5682,9 @@ async def _handle_setup_isaac_ros_cumotion_moveit(args: Dict[str, Any]) -> Dict[
         f"    request_adapters: ''\n"
     )
     try:
-        await asyncio.to_thread(os.makedirs, output_dir, exist_ok=True)
-        await asyncio.to_thread(Path(yaml_path).write_text, yaml)
+        from ....runtime_compat import run_sync_compatible
+        await run_sync_compatible(os.makedirs, output_dir, exist_ok=True)
+        await run_sync_compatible(Path(yaml_path).write_text, yaml)
     except Exception as e:
         return {"error": f"yaml_write_failed: {type(e).__name__}: {e}"}
 

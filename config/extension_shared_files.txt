@@ -1,0 +1,19 @@
+# Files intentionally identical in the Isaac 5.1 and 6.0 extension harnesses.
+# Isaac 6.0 is canonical for these paths. Add a path only after confirming it
+# contains no runtime-version-specific imports or behavior.
+analyzers/prim_inspector.py
+context/__init__.py
+context/console_log.py
+context/kit_rpc.py
+context/physics_state.py
+context/prim_properties.py
+context/spatial_tools.py
+context/stage_reader.py
+context/viewport_capture.py
+executor/__init__.py
+executor/usd_executor.py
+telemetry.py
+ui/__init__.py
+ui/animations.py
+ui/canvas_mirror.py
+ui/verbs.py
