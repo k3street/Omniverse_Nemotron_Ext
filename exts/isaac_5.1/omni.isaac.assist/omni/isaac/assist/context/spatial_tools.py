@@ -293,3 +293,82 @@ def build_draw_axes_code(position, quat_wxyz, scale: float = 0.1) -> str:
         f"d.draw_lines({starts!r}, {ends!r}, {colors!r}, [3.0, 3.0, 3.0])\n"
         "print('axes drawn')\n"
     )
+
+
+def prim_bounds(prim_path: str, in_frame: str = "world",
+                prefer: str = "fabric", include_proxy: bool = False) -> dict:
+    """Geometric size of a prim, paired with its live pose.
+
+    Size and pose come from different places on purpose.  Isaac Lab steps
+    physics through Fabric and never writes back to the USD stage, so a USD
+    world bound is the authoring-time box wherever the object *started*, not
+    where it is now.  Extents, however, are rigid: a cup is the same size
+    wherever physics has moved it.  So the half extents are read from USD
+    geometry with every ancestor transform ignored, and the centre comes from
+    the same Fabric-preferred pose ``get_prim_pose`` returns.  ``extent_source``
+    and ``source`` label which answered, so a stale bound cannot masquerade as
+    live state.
+
+    The returned box is axis-aligned in the prim's OWN frame.  A caller that
+    treats it as axis-aligned in the world silently ignores the prim's
+    rotation; ``quaternion_wxyz`` in the reply is what it must apply, and
+    ``world_aligned_half_extents`` is offered for the axis-aligned case with
+    the enclosing-box inflation stated.
+    """
+    from pxr import Gf, Usd, UsdGeom
+    import omni.usd
+
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        raise ValueError("no stage open")
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim or not prim.IsValid():
+        raise ValueError(f"prim not found: {prim_path}")
+
+    purposes = [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]
+    if include_proxy:
+        purposes.append(UsdGeom.Tokens.proxy)
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), purposes,
+                              useExtentsHint=True)
+    # Untransformed: the prim's own and every ancestor's transform ignored, so
+    # this is geometry size rather than where the stage last placed it.
+    local_range = cache.ComputeUntransformedBound(prim).ComputeAlignedRange()
+    if local_range.IsEmpty():
+        raise ValueError(
+            f"prim has no computable extent (no boundable geometry): {prim_path}")
+    minimum = local_range.GetMin()
+    maximum = local_range.GetMax()
+    half_extents = [float(maximum[i] - minimum[i]) / 2.0 for i in range(3)]
+    local_centre = [float(maximum[i] + minimum[i]) / 2.0 for i in range(3)]
+
+    pose = get_prim_pose(prim_path, in_frame, prefer)
+
+    # An axis-aligned enclosing box for callers that cannot apply the rotation.
+    rotation = _quat_wxyz_to_matrix(*pose["quaternion_wxyz"])
+    enclosing = [
+        float(sum(abs(rotation[row][col]) * half_extents[col]
+                  for col in range(3)))
+        for row in range(3)
+    ]
+    inflation = [round(enclosing[i] - half_extents[i], 6) for i in range(3)]
+
+    return {
+        "prim_path": prim_path,
+        "in_frame": pose["in_frame"],
+        "position": pose["position"],
+        "quaternion_wxyz": pose["quaternion_wxyz"],
+        "quaternion_xyzw": pose["quaternion_xyzw"],
+        "half_extents": [round(v, 6) for v in half_extents],
+        "size": [round(2.0 * v, 6) for v in half_extents],
+        "local_centre_offset": [round(v, 6) for v in local_centre],
+        "world_aligned_half_extents": [round(v, 6) for v in enclosing],
+        "world_aligned_inflation": inflation,
+        "extent_source": "usd_untransformed_bound",
+        "source": pose["source"],
+        "purposes": [str(p) for p in purposes],
+        "note": (
+            "half_extents are in the prim's own frame; apply quaternion_wxyz, "
+            "or use world_aligned_half_extents to ignore rotation at the cost "
+            "of world_aligned_inflation metres per axis"
+        ),
+    }

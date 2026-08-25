@@ -200,6 +200,15 @@ def tool_grasp_gap(args):
     })
 
 
+def tool_bounds(args):
+    return _service("/bounds", {
+        "prim_path": args["prim_path"],
+        "in_frame": args.get("in_frame", "world"),
+        "prefer": args.get("prefer", "fabric"),
+        "include_proxy": bool(args.get("include_proxy", False)),
+    })
+
+
 def tool_get_contacts(args):
     return _service("/contacts", {
         "filter": args.get("filter", ""),
@@ -302,6 +311,23 @@ TOOLS = {
                                     "items": {"type": "number"}},
             "prefer": {"type": "string", "enum": ["fabric", "usd"]}},
          "required": ["object", "hand_frame", "digit_tips"]}),
+    "bounds": (
+        tool_bounds,
+        "LIVE SIM: geometric size of a prim with its live pose — half "
+        "extents in the prim's own frame, plus a world-axis-aligned "
+        "enclosing box and the inflation that costs. Extents are read "
+        "from USD geometry with ancestor transforms ignored while the "
+        "centre comes from Fabric, because a USD world bound under Isaac "
+        "Lab is the authoring-time box wherever the object started. "
+        "list_prims returns paths and types only; this is where bounds "
+        "come from.",
+        {"type": "object", "properties": {
+            "prim_path": {"type": "string"},
+            "in_frame": {"type": "string",
+                         "description": "world (default) or a prim path"},
+            "prefer": {"type": "string", "enum": ["fabric", "usd"]},
+            "include_proxy": {"type": "boolean"}},
+         "required": ["prim_path"]}),
     "get_contacts": (
         tool_get_contacts,
         "LIVE SIM: PhysX contact report aggregated per body pair "

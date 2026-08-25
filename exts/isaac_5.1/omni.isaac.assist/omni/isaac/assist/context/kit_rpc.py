@@ -164,6 +164,7 @@ class KitRPCServer:
         app.router.add_get("/list_prims", self._handle_list_prims)
         app.router.add_post("/check_placement", self._handle_check_placement)
         app.router.add_post("/get_pose", self._handle_get_pose)
+        app.router.add_post("/bounds", self._handle_bounds)
         app.router.add_post("/draw_axes", self._handle_draw_axes)
         app.router.add_post("/grasp_gap", self._handle_grasp_gap)
         app.router.add_post("/contacts", self._handle_contacts)
@@ -317,6 +318,29 @@ class KitRPCServer:
                 body.get("in_frame", "world"),
                 body.get("prefer", "fabric"))
             return web.json_response(pose)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_bounds(self, request) -> "web.Response":
+        """Geometric size of a prim paired with its live pose.  Body:
+        {"prim_path": "...", "in_frame": "world"|prim path,
+         "prefer": "fabric"|"usd", "include_proxy": false}.
+
+        Extents come from USD geometry with every ancestor transform
+        ignored, because a USD *world* bound under Isaac Lab is the
+        authoring-time box wherever the object started; the centre comes
+        from the same Fabric-preferred pose /get_pose returns.  Callers
+        that could previously only be handed extents by hand can now read
+        them, which is what /list_prims never exposed."""
+        from aiohttp import web
+        try:
+            body = await request.json()
+            from .spatial_tools import prim_bounds
+            return web.json_response(prim_bounds(
+                body.get("prim_path", ""),
+                body.get("in_frame", "world"),
+                body.get("prefer", "fabric"),
+                bool(body.get("include_proxy", False))))
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
