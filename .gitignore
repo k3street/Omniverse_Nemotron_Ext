@@ -24,6 +24,7 @@ __pycache__/
 lora_model/
 .nim-cache/
 *.gguf
+/artifacts/
 data/*
 !data/bin_interior_metadata.yaml
 outputs/

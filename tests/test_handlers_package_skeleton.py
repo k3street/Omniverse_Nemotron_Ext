@@ -44,6 +44,7 @@ THEMED_MODULES = (
     "rendering",
     "compliance",
     "contact_sequence",
+    "groot_n17",
     "video_to_data",
 )
 

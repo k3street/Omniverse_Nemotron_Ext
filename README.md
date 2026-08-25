@@ -149,6 +149,12 @@ clip-retrieval, and robotic-grounding pipelines as dry-run-first tools. V2D is
 installed separately so its GPU/container dependencies do not enter the
 sidecar environment. See [the V2D integration guide](docs/integrations/video-to-data.md).
 
+An isolated, dry-run-first adapter also exposes NVIDIA Isaac GR00T N1.7
+status, inference, policy serving, and fine-tuning commands. See the
+[GR00T N1.7 integration guide](docs/integrations/groot-n17.md).
+Use `./launch_groot_robolab.sh replay` for the bundled Isaac Sim visualization,
+or `./launch_groot_robolab.sh live` to connect RoboLab to a GR00T policy server.
+
 #### Containerized service
 
 The container packages the core HTTP service. Live ROS2, Kit, and voice

@@ -3222,7 +3222,7 @@ ISAAC_SIM_TOOLS = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "model_id": {"type": "string", "description": "HuggingFace model ID. Default: 'nvidia/GR00T-N1.6-3B'", "default": "nvidia/GR00T-N1.6-3B"},
+                        "model_id": {"type": "string", "description": "HuggingFace model ID. Default: 'nvidia/GR00T-N1.7-3B'", "default": "nvidia/GR00T-N1.7-3B"},
                         "robot_path": {"type": "string", "description": "USD path to the robot articulation, e.g. '/World/Robot'"},
                         "embodiment": {
                             "type": "string",
@@ -3242,7 +3242,7 @@ ISAAC_SIM_TOOLS = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "model_id": {"type": "string", "description": "HuggingFace model ID. Default: 'nvidia/GR00T-N1.6-3B'", "default": "nvidia/GR00T-N1.6-3B"},
+                        "model_id": {"type": "string", "description": "HuggingFace model ID. Default: 'nvidia/GR00T-N1.7-3B'", "default": "nvidia/GR00T-N1.7-3B"},
                         "task": {"type": "string", "description": "Evaluation task name, e.g. 'Isaac-GR00T-Reach-v0'"},
                         "num_episodes": {"type": "integer", "description": "Number of evaluation episodes. Default: 50", "default": 50},
                         "checkpoint": {"type": "string", "description": "Optional path to a custom fine-tuned checkpoint"},
@@ -3259,7 +3259,7 @@ ISAAC_SIM_TOOLS = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "model_id": {"type": "string", "description": "HuggingFace model ID. Default: 'nvidia/GR00T-N1.6-3B'", "default": "nvidia/GR00T-N1.6-3B"},
+                        "model_id": {"type": "string", "description": "HuggingFace model ID. Default: 'nvidia/GR00T-N1.7-3B'", "default": "nvidia/GR00T-N1.7-3B"},
                         "demo_data": {"type": "string", "description": "Path to demonstration data in LeRobot v2 format"},
                         "num_steps": {"type": "integer", "description": "Number of training steps. Default: 10000", "default": 10000},
                         "lora": {"type": "boolean", "description": "Use LoRA for lower VRAM requirements. Default: true", "default": True},
@@ -10039,6 +10039,73 @@ ISAAC_SIM_TOOLS = [
             "name": "v2d_status",
             "description": "Inspect the optional NVIDIA Video to Data installation and execution gate.",
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "groot_n17_status",
+            "description": "Inspect the isolated NVIDIA Isaac GR00T N1.7 checkout, Python environment, Spark readiness, demo data, and live-execution gate.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "groot_n17_infer",
+            "description": "Run GR00T N1.7 open-loop inference on a GR00T/LeRobot-v2 dataset. Defaults to a safe argv-only dry run.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dataset_path": {"type": "string"},
+                    "embodiment_tag": {"type": "string"},
+                    "model_path": {"type": "string", "default": "nvidia/GR00T-N1.7-3B"},
+                    "trajectory_ids": {"type": "array", "items": {"type": "integer"}},
+                    "inference_mode": {"type": "string", "enum": ["pytorch", "tensorrt", "trt_full_pipeline"]},
+                    "execution_horizon": {"type": "integer", "default": 8},
+                    "dry_run": {"type": "boolean", "description": "Return the exact command without executing; default true."},
+                },
+                "required": ["dataset_path", "embodiment_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "groot_n17_serve",
+            "description": "Start the GR00T N1.7 ZeroMQ policy server command. Defaults to dry run; use an external supervisor for long-running live service.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "embodiment_tag": {"type": "string"},
+                    "model_path": {"type": "string", "default": "nvidia/GR00T-N1.7-3B"},
+                    "port": {"type": "integer", "default": 5555},
+                    "device": {"type": "string", "default": "cuda:0"},
+                    "dry_run": {"type": "boolean", "description": "Return the exact command without executing; default true."},
+                },
+                "required": ["embodiment_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "groot_n17_finetune",
+            "description": "Fine-tune GR00T N1.7 on GR00T LeRobot-v2 data with an explicit modality configuration. Defaults to dry run.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dataset_path": {"type": "string"},
+                    "modality_config_path": {"type": "string"},
+                    "output_dir": {"type": "string"},
+                    "embodiment_tag": {"type": "string", "default": "NEW_EMBODIMENT"},
+                    "model_path": {"type": "string", "default": "nvidia/GR00T-N1.7-3B"},
+                    "max_steps": {"type": "integer", "default": 2000},
+                    "global_batch_size": {"type": "integer", "default": 32},
+                    "dry_run": {"type": "boolean", "description": "Return the exact command without executing; default true."},
+                },
+                "required": ["dataset_path", "modality_config_path", "output_dir"],
+            },
         },
     },
     {
