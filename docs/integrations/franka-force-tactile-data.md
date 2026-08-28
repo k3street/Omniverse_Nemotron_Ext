@@ -89,10 +89,30 @@ resolved from the manifest directory:
     "trajectory": "episode_000/trajectory.h5",
     "exterior_video": "episode_000/exterior.mp4",
     "wrist_video": "episode_000/wrist.mp4",
-    "instruction": "Pick up the banana and put it on the plate"
+    "instruction": "Pick up the banana and put it on the plate",
+    "success": true
   }
 ]
 ```
+
+Audit the pilot batch before conversion:
+
+```bash
+/home/kimate/Documents/Github/Isaac-GR00T/.venv/bin/python \
+  scripts/audit_real_droid_episode.py \
+  --manifest episodes.json \
+  --require-success \
+  --output-json artifacts/audits/real_banana_pilot.json
+```
+
+The command exits with status 2 when any episode is unsafe to convert. It
+checks required state and action shapes, finite values, joint ranges and jumps,
+robot timestamp gaps, measured/external torque coverage, camera readability,
+frame count and frame-rate alignment, language, and recorded task success. Its
+JSON report is suitable for a collection gate or CI artifact. Legacy data can
+be inspected with `--no-require-timestamps`, `--no-require-actions`, or
+`--no-require-external-torque`; these relaxations should not be used for a new
+pilot collection.
 
 The real-data converter retains the DROID state/action layout, converts the
 Cartesian XYZ/RPY pose to GR00T's XYZ+rotation-6D representation, copies actual
@@ -124,3 +144,33 @@ The model must be post-trained for these new state dimensions; the base model
 does not gain tactile understanding zero-shot. When physical fingertip sensors
 are selected later, add their hardware-specific array as another schema
 version rather than changing the meaning or width of an existing channel.
+
+## Live sensor-aware inference in RoboLab
+
+The existing live command now registers additive torque/contact observation
+terms and includes every schema-v2 state key in each GR00T replan request:
+
+```bash
+./launch_groot_robolab.sh live \
+  --task BananaOnPlateTask \
+  --open-loop-horizon 10
+```
+
+Base DROID checkpoints remain compatible because GR00T ignores state keys not
+declared by their modality configuration. A checkpoint post-trained with
+`droid_force_modality.py` consumes the same request without a client change.
+In Isaac Sim, commanded torque and contact force/touch are marked valid;
+measured torque, external torque, wrench, and joint-contact channels remain
+zero and mask-invalid because the simulator does not physically measure them.
+
+Start a sensor-aware checkpoint with the sim wrapper before launching RoboLab:
+
+```bash
+cd /home/kimate/Documents/Github/Isaac-GR00T
+uv run python gr00t/eval/run_gr00t_server.py \
+  --model-path /path/to/sensor-aware-checkpoint \
+  --embodiment-tag NEW_EMBODIMENT \
+  --host 0.0.0.0 \
+  --port 5555 \
+  --use-sim-policy-wrapper
+```

@@ -16,7 +16,7 @@ Usage: ./launch_groot_robolab.sh [replay|live] [options]
 
 Modes:
   replay  Visualize RoboLab's bundled recorded demonstration (default).
-  live    Connect Isaac Sim to a running GR00T N1.7 policy server.
+  live    Connect Isaac Sim to GR00T with additive torque/contact state.
 
 Options:
   --task NAME       RoboLab task name.

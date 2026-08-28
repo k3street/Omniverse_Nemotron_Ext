@@ -88,6 +88,10 @@ Then launch a single Isaac Sim environment from this repository:
 ./launch_groot_robolab.sh live --task BananaOnPlateTask
 ```
 
+The live wrapper also emits the versioned Franka torque/contact state and its
+validity mask. Existing DROID checkpoints ignore these additive keys; a
+sensor-aware `NEW_EMBODIMENT` checkpoint consumes them directly.
+
 The base `nvidia/GR00T-N1.7-3B` checkpoint is useful for open-loop DROID
 inference. RoboLab's validated closed-loop simulation configuration uses the
 post-trained `nvidia/GR00T-N1.7-DROID` checkpoint, two DROID cameras, and an
