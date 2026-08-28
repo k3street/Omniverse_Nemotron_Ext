@@ -4,18 +4,25 @@ from __future__ import annotations
 import torch
 
 
+def bounded_vector_step(error: torch.Tensor, max_step: float) -> torch.Tensor:
+    """Return a direction-preserving vector correction with a bounded norm."""
+    if error.ndim != 1 or error.numel() == 0:
+        raise ValueError(f"expected a non-empty vector, got shape {tuple(error.shape)}")
+    if max_step <= 0:
+        raise ValueError("max_step must be positive")
+    if not bool(torch.isfinite(error).all()):
+        raise ValueError("vector error contains a non-finite value")
+    norm = torch.linalg.vector_norm(error)
+    if float(norm) <= max_step:
+        return error.clone()
+    return error * (max_step / norm)
+
+
 def bounded_xy_step(error_xy: torch.Tensor, max_step_m: float) -> torch.Tensor:
     """Return an XY correction with preserved direction and bounded norm."""
     if error_xy.shape != (2,):
         raise ValueError(f"expected XY error shape (2,), got {tuple(error_xy.shape)}")
-    if max_step_m <= 0:
-        raise ValueError("max_step_m must be positive")
-    if not bool(torch.isfinite(error_xy).all()):
-        raise ValueError("XY error contains a non-finite value")
-    norm = torch.linalg.vector_norm(error_xy)
-    if float(norm) <= max_step_m:
-        return error_xy.clone()
-    return error_xy * (max_step_m / norm)
+    return bounded_vector_step(error_xy, max_step_m)
 
 
 def bounded_scalar_step(error: torch.Tensor, max_step: float) -> torch.Tensor:

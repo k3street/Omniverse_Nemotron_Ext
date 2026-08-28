@@ -157,6 +157,13 @@ or `./launch_groot_robolab.sh live` to connect RoboLab to a GR00T policy server.
 Franka torque/contact collection and masked sensor-aware datasets are documented
 in [the force/contact data guide](docs/integrations/franka-force-tactile-data.md).
 
+The separate [Gemini Robotics ER 2 RoboLab workflow](docs/integrations/gemini-robotics-er2-robolab.md)
+uses Gemini as a visual phase supervisor and bounded local IK to retarget the
+current DROID/Franka robot to live banana and plate poses.
+Its [RGB-D collision supervision guide](docs/integrations/rgbd-collision-supervision.md)
+covers detector box/mask plus depth fusion, swept robot-capsule clearance, and
+the real-camera calibration inputs required for local collision stops.
+
 #### Containerized service
 
 The container packages the core HTTP service. Live ROS2, Kit, and voice

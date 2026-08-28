@@ -3,6 +3,7 @@ import torch
 
 from scripts.residual_centering import (
     bounded_scalar_step,
+    bounded_vector_step,
     bounded_xy_step,
     damped_least_squares_delta,
 )
@@ -18,6 +19,13 @@ def test_bounded_xy_step_preserves_direction_and_norm_limit():
 def test_bounded_xy_step_keeps_small_error_unchanged():
     error = torch.tensor([0.003, -0.004])
     assert torch.equal(bounded_xy_step(error, 0.02), error)
+
+
+def test_bounded_vector_step_limits_xyz_without_changing_direction():
+    error = torch.tensor([0.03, 0.04, 0.0])
+    step = bounded_vector_step(error, 0.02)
+    assert torch.linalg.vector_norm(step).item() == pytest.approx(0.02)
+    assert step[0].item() / step[1].item() == pytest.approx(0.75)
 
 
 def test_bounded_scalar_step_clamps_without_changing_direction():
@@ -41,6 +49,8 @@ def test_damped_least_squares_maps_cartesian_step_and_bounds_joints():
 def test_residual_helpers_reject_non_finite_inputs():
     with pytest.raises(ValueError, match="non-finite"):
         bounded_xy_step(torch.tensor([float("nan"), 0.0]), 0.02)
+    with pytest.raises(ValueError, match="non-finite"):
+        bounded_vector_step(torch.tensor([0.0, float("inf"), 0.0]), 0.02)
     with pytest.raises(ValueError, match="non-finite"):
         damped_least_squares_delta(
             torch.full((6, 7), float("nan")),

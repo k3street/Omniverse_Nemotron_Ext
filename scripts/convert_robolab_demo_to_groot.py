@@ -42,6 +42,36 @@ DROID_EEF_ROTATION_CORRECT = np.array(
 )
 
 
+def episode_provenance(hdf5_path: Path, demo_key: str) -> dict:
+    """Read admission/provenance metadata and reject non-successful demos."""
+    with h5py.File(hdf5_path, "r") as source:
+        demo = source[f"data/{demo_key}"]
+        if not bool(demo.attrs.get("success", False)):
+            raise ValueError(f"Episode is not marked successful: {hdf5_path}:{demo_key}")
+        convention = str(demo.attrs.get("quaternion_convention", "wxyz"))
+        if convention != "wxyz":
+            raise ValueError(
+                f"Unsupported recorded quaternion convention {convention!r}: "
+                f"{hdf5_path}:{demo_key}"
+            )
+        raw_metadata = demo.attrs.get("episode_metadata_json", "{}")
+        if isinstance(raw_metadata, bytes):
+            raw_metadata = raw_metadata.decode("utf-8")
+        try:
+            metadata = json.loads(str(raw_metadata))
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"Invalid episode_metadata_json in {hdf5_path}:{demo_key}"
+            ) from error
+        if not isinstance(metadata, dict):
+            raise ValueError("episode_metadata_json must contain a JSON object")
+        return {
+            "source_policy": str(demo.attrs.get("source_policy", "unknown")),
+            "quaternion_convention": convention,
+            "collection": metadata,
+        }
+
+
 def quat_wxyz_to_matrix(quaternions: np.ndarray) -> np.ndarray:
     q = np.asarray(quaternions, dtype=np.float64)
     q = q / np.linalg.norm(q, axis=-1, keepdims=True)
@@ -186,6 +216,7 @@ def convert_many(
     global_index = 0
     dataset_fps: float | None = None
     for episode_index, (hdf5_path, video_path, demo_key) in enumerate(episodes):
+        provenance = episode_provenance(hdf5_path, demo_key)
         (
             observation_state,
             action,
@@ -233,6 +264,7 @@ def convert_many(
             "sensor_schema_version": SENSOR_SCHEMA_VERSION,
             "sensor_coverage": sensor_coverage,
             "sensor_source_paths": sensor_source_paths,
+            **provenance,
         })
         global_index += length
 

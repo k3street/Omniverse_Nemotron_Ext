@@ -1,0 +1,56 @@
+{
+  "topics": {
+    "rgb": "/camera/color/image_raw",
+    "depth": "/camera/aligned_depth_to_color/image_raw",
+    "camera_info": "/camera/color/camera_info",
+    "detections": "/detections",
+    "robot_self_mask": "/camera/robot_self_mask",
+    "instance_mask": "/camera/instance_ids",
+    "phase": "/isaac_assist/task_phase",
+    "proposed_capsules": "/isaac_assist/proposed_link_capsules",
+    "stop": "/isaac_assist/safety_stop",
+    "status": "/isaac_assist/rgbd_collision_status",
+    "overlay": "/isaac_assist/rgbd_collision_overlay",
+    "stop_service": null,
+    "reset_service": "/isaac_assist/reset_safety_stop"
+  },
+  "frames": {
+    "base": "panda_link0",
+    "camera": null
+  },
+  "capsules": [
+    {"start_frame": "panda_link0", "end_frame": "panda_link1", "radius_m": 0.10},
+    {"start_frame": "panda_link1", "end_frame": "panda_link2", "radius_m": 0.09},
+    {"start_frame": "panda_link2", "end_frame": "panda_link3", "radius_m": 0.09},
+    {"start_frame": "panda_link3", "end_frame": "panda_link4", "radius_m": 0.08},
+    {"start_frame": "panda_link4", "end_frame": "panda_link5", "radius_m": 0.075},
+    {"start_frame": "panda_link5", "end_frame": "panda_link6", "radius_m": 0.07},
+    {"start_frame": "panda_link6", "end_frame": "panda_link7", "radius_m": 0.07},
+    {"start_frame": "panda_link7", "end_frame": "robotiq_85_base_link", "radius_m": 0.075}
+  ],
+  "safety": {
+    "score_threshold": 0.45,
+    "minimum_clearance_m": 0.03,
+    "capsule_uncertainty_m": 0.015,
+    "depth_scale_16u": 0.001,
+    "depth_tolerance_m": 0.08,
+    "point_stride": 2,
+    "minimum_points": 8,
+    "sync_queue": 12,
+    "sync_slop_s": 0.05,
+    "tf_timeout_s": 0.05,
+    "prediction_horizon_s": 0.15,
+    "proposed_capsule_timeout_s": 0.5,
+    "clear_frames_to_reset": 5,
+    "latch_stop": true,
+    "frame_timeout_s": 0.5,
+    "fail_safe_on_invalid_input": true
+  },
+  "allowed_contacts_by_phase": {
+    "grasp": ["banana"],
+    "recovery_descend": ["banana"],
+    "recovery_lift": ["banana"],
+    "lower_to_plate": ["banana", "plate"],
+    "release": ["banana", "plate"]
+  }
+}
