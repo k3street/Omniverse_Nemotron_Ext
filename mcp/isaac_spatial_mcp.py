@@ -314,8 +314,9 @@ TOOLS = {
     "bounds": (
         tool_bounds,
         "LIVE SIM: geometric size of a prim with its live pose — half "
-        "extents in the prim's own frame, plus a world-axis-aligned "
-        "enclosing box and the inflation that costs. Extents are read "
+        "extents in the prim's own frame (covering its descendants too), "
+        "plus a world-axis-aligned enclosing box and the volume ratio that "
+        "approximation costs. Extents are read "
         "from USD geometry with ancestor transforms ignored while the "
         "centre comes from Fabric, because a USD world bound under Isaac "
         "Lab is the authoring-time box wherever the object started. "

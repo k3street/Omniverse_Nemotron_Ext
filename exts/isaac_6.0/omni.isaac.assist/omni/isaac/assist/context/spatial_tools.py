@@ -350,7 +350,14 @@ def prim_bounds(prim_path: str, in_frame: str = "world",
                   for col in range(3)))
         for row in range(3)
     ]
-    inflation = [round(enclosing[i] - half_extents[i], 6) for i in range(3)]
+    # Cost of the axis-aligned approximation as a volume ratio, not a per-axis
+    # difference: enclosing[i] is an extent along a WORLD axis while
+    # half_extents[i] is along an OBJECT axis, so subtracting them compares
+    # incommensurable quantities and goes negative for a rotated oblong. The
+    # ratio is >= 1 always, and exactly 1 for an axis-aligned or 90-degree box.
+    true_volume = half_extents[0] * half_extents[1] * half_extents[2]
+    enclosing_volume = enclosing[0] * enclosing[1] * enclosing[2]
+    volume_ratio = (enclosing_volume / true_volume) if true_volume > 0.0 else None
 
     return {
         "prim_path": prim_path,
@@ -362,13 +369,15 @@ def prim_bounds(prim_path: str, in_frame: str = "world",
         "size": [round(2.0 * v, 6) for v in half_extents],
         "local_centre_offset": [round(v, 6) for v in local_centre],
         "world_aligned_half_extents": [round(v, 6) for v in enclosing],
-        "world_aligned_inflation": inflation,
+        "world_aligned_volume_ratio": (
+            None if volume_ratio is None else round(volume_ratio, 4)),
         "extent_source": "usd_untransformed_bound",
         "source": pose["source"],
         "purposes": [str(p) for p in purposes],
         "note": (
-            "half_extents are in the prim's own frame; apply quaternion_wxyz, "
-            "or use world_aligned_half_extents to ignore rotation at the cost "
-            "of world_aligned_inflation metres per axis"
+            "half_extents are in the prim's own frame and cover the prim AND "
+            "its descendants; apply quaternion_wxyz, or use "
+            "world_aligned_half_extents to ignore rotation at the cost of "
+            "world_aligned_volume_ratio times the true volume"
         ),
     }
