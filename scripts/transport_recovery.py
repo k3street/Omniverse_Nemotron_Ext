@@ -34,6 +34,7 @@ class SupportContactMonitor:
     maximum_oriented_center_lift_m: float = 0.120
     minimum_downward_progress_m: float = 0.0015
     consecutive_stall_samples: int = 3
+    require_eef_stall: bool = True
     _previous_object_z: float | None = None
     _previous_eef_z: float | None = None
     _stall_samples: int = 0
@@ -92,8 +93,11 @@ class SupportContactMonitor:
                 object_lift <= self.maximum_oriented_center_lift_m
             )
             motion_stalled = (
-                eef_progress < self.minimum_downward_progress_m
-                and object_progress < self.minimum_downward_progress_m
+                object_progress < self.minimum_downward_progress_m
+                and (
+                    not self.require_eef_stall
+                    or eef_progress < self.minimum_downward_progress_m
+                )
             )
             if target_remains and within_support_envelope and motion_stalled:
                 self._stall_samples += 1
@@ -116,7 +120,74 @@ class SupportContactMonitor:
             "object_downward_progress_m": object_progress,
             "consecutive_stall_samples": self._stall_samples,
             "maximum_oriented_center_lift_m": self.maximum_oriented_center_lift_m,
+            "require_eef_stall": self.require_eef_stall,
         }
+
+
+def assess_release_detachment(
+    *,
+    controlled_start_xyz: np.ndarray,
+    controlled_final_xyz: np.ndarray,
+    subject_start_xyz: np.ndarray,
+    subject_final_xyz: np.ndarray,
+    released: bool,
+    goal_relation_holds: bool,
+    terminal: bool,
+    minimum_retreat_m: float = 0.040,
+    minimum_separation_growth_m: float = 0.040,
+    maximum_following_motion_m: float = 0.020,
+) -> dict[str, object]:
+    """Verify detachment while allowing independent settling on the goal surface."""
+    controlled_start = np.asarray(controlled_start_xyz, dtype=np.float64)
+    controlled_final = np.asarray(controlled_final_xyz, dtype=np.float64)
+    subject_start = np.asarray(subject_start_xyz, dtype=np.float64)
+    subject_final = np.asarray(subject_final_xyz, dtype=np.float64)
+    thresholds = np.asarray(
+        [minimum_retreat_m, minimum_separation_growth_m, maximum_following_motion_m],
+        dtype=np.float64,
+    )
+    if any(
+        value.shape != (3,)
+        for value in (controlled_start, controlled_final, subject_start, subject_final)
+    ):
+        raise ValueError("detachment positions must have shape (3,)")
+    if not all(
+        np.isfinite(value).all()
+        for value in (controlled_start, controlled_final, subject_start, subject_final)
+    ) or not np.isfinite(thresholds).all():
+        raise ValueError("detachment inputs must be finite")
+    if np.any(thresholds < 0):
+        raise ValueError("detachment thresholds must be non-negative")
+    controlled_delta = controlled_final - controlled_start
+    subject_delta = subject_final - subject_start
+    retreat = float(np.linalg.norm(controlled_delta))
+    if retreat > 1.0e-9:
+        following_motion = float(np.dot(subject_delta, controlled_delta / retreat))
+    else:
+        following_motion = 0.0
+    separation_before = float(np.linalg.norm(controlled_start - subject_start))
+    separation_after = float(np.linalg.norm(controlled_final - subject_final))
+    separation_growth = separation_after - separation_before
+    converged = bool(
+        retreat >= minimum_retreat_m
+        and separation_growth >= minimum_separation_growth_m
+        and following_motion <= maximum_following_motion_m
+        and released
+        and goal_relation_holds
+        and not terminal
+    )
+    return {
+        "converged": converged,
+        "controlled_retreat_m": retreat,
+        "separation_before_m": separation_before,
+        "separation_after_m": separation_after,
+        "separation_growth_m": separation_growth,
+        "subject_motion_along_retreat_m": following_motion,
+        "maximum_following_motion_m": maximum_following_motion_m,
+        "released": bool(released),
+        "goal_relation_holds": bool(goal_relation_holds),
+        "terminal": bool(terminal),
+    }
 
 
 def assess_recovery_hold(

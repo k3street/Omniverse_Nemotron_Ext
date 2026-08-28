@@ -1,6 +1,12 @@
 from pathlib import Path
 
-from scripts.run_gemini_groot_campaign import command_for_variation, plan_variations
+import json
+
+from scripts.run_gemini_groot_campaign import (
+    command_for_variation,
+    contact_admission_for_episode,
+    plan_variations,
+)
 
 
 def test_campaign_plan_is_reproducible_bounded_and_diverse():
@@ -53,3 +59,22 @@ def test_campaign_command_points_at_success_gated_training_output():
     assert "--light-intensity" in command
     assert "--randomize-background" in command
     assert "--headless" in command
+
+
+def test_campaign_counts_only_manifest_rows_with_passing_contact_gate(tmp_path):
+    manifest = tmp_path / "collection_manifest.jsonl"
+    rows = [
+        {"episode_index": 3, "contact_telemetry": {"passed": False}},
+        {
+            "episode_index": 4,
+            "contact_telemetry": {
+                "passed": True,
+                "coverage": 1.0,
+                "touch_samples": 12,
+            },
+        },
+    ]
+    manifest.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    assert contact_admission_for_episode(tmp_path, 3)["passed"] is False
+    assert contact_admission_for_episode(tmp_path, 4)["touch_samples"] == 12
+    assert contact_admission_for_episode(tmp_path, 5) is None

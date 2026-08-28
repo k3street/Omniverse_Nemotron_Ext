@@ -116,6 +116,28 @@ def command_for_variation(
     return command
 
 
+def contact_admission_for_episode(
+    episode_dir: Path, episode_index: int
+) -> dict[str, Any] | None:
+    """Read the recorder's append-only contact gate evidence for an episode."""
+    manifest = episode_dir / "collection_manifest.jsonl"
+    if not manifest.is_file():
+        return None
+    match = None
+    for line in manifest.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("episode_index") == episode_index:
+            match = row.get("contact_telemetry")
+    if not isinstance(match, dict):
+        return None
+    return match
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-successes", type=int, default=100)
@@ -154,10 +176,13 @@ def main() -> int:
         start_index=args.start_index,
     )
     plan = {
-        "schema_version": 1,
+        "schema_version": 2,
         "teacher": "gemini-robotics-er-2-preview semantic supervision",
         "executor": "local closed-loop object-relative SE(3) IK",
-        "admission": "physical success plus clean release; failures are not episodes",
+        "admission": (
+            "physical success, clean release, and valid nonzero gripper-contact "
+            "telemetry; failures are not episodes"
+        ),
         "target_successes": args.target_successes,
         "maximum_attempts": attempts,
         "implemented_variations": [
@@ -186,9 +211,22 @@ def main() -> int:
         episode_index = variation["episode_index"]
         hdf5_path = episode_dir / f"run_{episode_index}.hdf5"
         if hdf5_path.is_file():
-            success_count += 1
-            results.append({**variation, "status": "already_complete"})
-            continue
+            contact_admission = contact_admission_for_episode(
+                episode_dir, episode_index
+            )
+            if contact_admission and contact_admission.get("passed") is True:
+                success_count += 1
+                results.append(
+                    {
+                        **variation,
+                        "status": "already_complete",
+                        "contact_telemetry": contact_admission,
+                    }
+                )
+                continue
+            raise RuntimeError(
+                f"Existing episode {hdf5_path} has no passing contact admission evidence"
+            )
         artifact_dir = attempts_dir / f"attempt_{variation['attempt']:06d}"
         command = command_for_variation(
             variation,
@@ -202,13 +240,20 @@ def main() -> int:
             continue
         artifact_dir.mkdir(parents=True, exist_ok=True)
         completed = subprocess.run(command, cwd=REPO_ROOT, env=environment, check=False)
-        admitted = completed.returncode == 0 and hdf5_path.is_file()
+        contact_admission = contact_admission_for_episode(episode_dir, episode_index)
+        admitted = (
+            completed.returncode == 0
+            and hdf5_path.is_file()
+            and contact_admission is not None
+            and contact_admission.get("passed") is True
+        )
         success_count += int(admitted)
         results.append(
             {
                 **variation,
                 "status": "success" if admitted else "failed_not_admitted",
                 "returncode": completed.returncode,
+                "contact_telemetry": contact_admission,
             }
         )
         (output / "campaign_results.json").write_text(

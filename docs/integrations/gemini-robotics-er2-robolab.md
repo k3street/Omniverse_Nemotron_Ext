@@ -159,9 +159,13 @@ python3 scripts/convert_robolab_demo_to_groot.py \
 
 The converter rechecks the HDF5 success flag and quaternion convention and
 copies collection provenance/randomization values into `meta/episodes.jsonl`.
-The live validation shard currently converts three admitted episodes and
-2,872 frames into `artifacts/gemini_groot_smoke/lerobot_v3`; failed recovery
-attempts were not admitted.
+The campaign additionally checks the recorder's append-only manifest and
+counts an episode only when its real gripper-contact admission summary passes.
+The live contact-sensor pilot admitted three episodes from three attempts and
+converted 3,291 frames into `artifacts/contact_sensor_pilot/lerobot`. All three
+episodes had 100% contact-sensor coverage; one includes a supervised physical
+set-down, visual reacquisition, contact-confirmed regrasp, second lift, and
+successful placement. Failed or contact-invalid attempts are not admitted.
 The per-attempt launcher is intentionally simple and resumable. Before scaling
 past a few hundred episodes, replace it with persistent Isaac Sim workers so
 the simulator and model client are reused across resets; the episode admission

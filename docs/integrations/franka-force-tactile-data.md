@@ -52,6 +52,15 @@ this signal and remain mask-invalid.
 correctly labeled as commanded torque—not measured torque. Simulated contact
 force and touch are valid only when RoboLab has a live contact sensor.
 
+The Gemini/Sim 6 collection path installs one unfiltered PhysX contact sensor
+over both Robotiq inner-finger rigid bodies. This avoids RoboLab's legacy
+object-filter expressions while retaining real aggregate force and per-finger
+touch detection. Successful episode publication requires at least 95% valid
+contact coverage and at least one measured touch sample by default. During
+transport recovery, a stable geometric hold is relatched only while the live
+finger sensor still confirms touch; loss of touch selects the physical
+set-down/reacquire branch.
+
 Convert as before:
 
 ```bash

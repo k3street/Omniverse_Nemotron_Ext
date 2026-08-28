@@ -36,6 +36,14 @@ parser = argparse.ArgumentParser(
     description="Run all visible Gemini Robotics ER 2 tests on RoboLab's current DROID robot."
 )
 parser.add_argument("--task", default="BananaOnPlateTask")
+parser.add_argument(
+    "--instruction",
+    default="Pick up the yellow banana and put it on the white plate",
+    help=(
+        "Natural-language instruction evaluated by the world-intent shadow only; "
+        "it does not change physical motion."
+    ),
+)
 parser.add_argument("--model", default="gemini-robotics-er-2-preview")
 parser.add_argument("--retry-steps", type=int, default=20)
 parser.add_argument(
@@ -59,7 +67,7 @@ parser.add_argument(
 )
 parser.add_argument("--maximum-grasp-drift", type=float, default=0.025)
 parser.add_argument("--minimum-transport-lift", type=float, default=0.030)
-parser.add_argument("--max-transport-recoveries", type=int, default=2)
+parser.add_argument("--max-transport-recoveries", type=int, default=8)
 parser.add_argument("--recovery-hold-steps", type=int, default=24)
 parser.add_argument("--recovery-stability-drift", type=float, default=0.008)
 parser.add_argument("--recovery-set-down-clearance", type=float, default=0.006)
@@ -142,6 +150,8 @@ parser.add_argument(
     help="Keep the final robot pose visible for this many physics steps.",
 )
 parser.add_argument("--timeout", type=float, default=120.0)
+parser.add_argument("--model-max-retries", type=int, default=2)
+parser.add_argument("--model-retry-backoff", type=float, default=2.0)
 parser.add_argument(
     "--artifact-dir",
     type=Path,
@@ -165,9 +175,29 @@ parser.add_argument(
     help="Run evaluation only; no successful completion is admitted as training data.",
 )
 parser.add_argument(
+    "--disable-contact-telemetry",
+    action="store_true",
+    help="Disable the Sim 6 two-finger sensor and its success-admission gate.",
+)
+parser.add_argument("--minimum-contact-coverage", type=float, default=0.95)
+parser.add_argument("--minimum-touch-samples", type=int, default=1)
+parser.add_argument(
     "--disable-critic-guidance",
     action="store_true",
     help="Ignore phase-scoped lessons from the previous passive local critique.",
+)
+parser.add_argument(
+    "--disable-world-intent-shadow",
+    action="store_true",
+    help="Skip the non-authoritative embodiment-neutral Gemini intent probe.",
+)
+parser.add_argument(
+    "--world-intent-clearance-authority",
+    action="store_true",
+    help=(
+        "Allow only a validated vertical_clearance_m world predicate to raise "
+        "legacy lift/transport targets."
+    ),
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli, _ = parser.parse_known_args()
@@ -202,14 +232,35 @@ from residual_centering import (  # noqa: E402
     bounded_xy_step,
     damped_least_squares_delta,
 )
+from franka_sensor_schema import (  # noqa: E402
+    SENSOR_DIM,
+    SIGNAL_SLICES,
+    VALIDITY_DIM,
+    SensorCaptureBuffer,
+    empty_sensor_frame,
+    sensor_frame_from_isaac_env,
+    summarize_contact_telemetry,
+)
 from gemini_episode_dataset import GeminiEpisodeDatasetRecorder  # noqa: E402
 from rgbd_collision_safety import assess_motion_safety  # noqa: E402
+from robolab_contact_telemetry import (  # noqa: E402
+    contact_sensor_runtime_info,
+    install_sim6_gripper_contact_sensor,
+)
 from transport_recovery import (  # noqa: E402
     SupportContactMonitor,
+    assess_release_detachment,
     assess_recovery_hold,
     placement_completion_event,
     support_aligned_object_quaternion_wxyz,
 )
+from world_intent_contract import (  # noqa: E402
+    WORLD_INTENT_SCHEMA_VERSION,
+    WorldIntent,
+    build_world_intent_prompt,
+    minimum_vertical_clearance_m,
+)
+from world_constraint_governor import governed_vertical_target  # noqa: E402
 
 
 MODEL_ID = args_cli.model
@@ -225,11 +276,13 @@ BANANA_GRASP_OFFSET = torch.tensor([-0.010, -0.023, 0.147], dtype=torch.float32)
 BANANA_GRASP_QUAT = torch.tensor([0.555, 0.385, 0.616, -0.406], dtype=torch.float32)
 BANANA_GRASP_QUAT /= torch.linalg.norm(BANANA_GRASP_QUAT)
 GRIPPER_BASE_TO_FINGERTIP_M = 0.149
-TOTAL_TESTS = 9
+TOTAL_TESTS = 10
 VALID_CRITIC_PHASES = {
     "global", "approach_banana", "descend", "grasp", "lift", "above_plate", "release"
 }
 ACTIVE_EPISODE_RECORDER: GeminiEpisodeDatasetRecorder | None = None
+ACTIVE_SENSOR_MONITOR: SensorCaptureBuffer | None = None
+ACTIVE_SENSOR_SAMPLE_INDEX = 0
 
 
 def _json_from_text(text: str) -> dict[str, Any]:
@@ -334,7 +387,24 @@ class GeminiRoboticsER2:
             "generationConfig": {"temperature": 0.2},
         }
         started = time.perf_counter()
-        response = self.session.post(GEMINI_URL, json=payload, timeout=self.timeout)
+        response = None
+        for attempt in range(args_cli.model_max_retries + 1):
+            try:
+                response = self.session.post(
+                    GEMINI_URL, json=payload, timeout=self.timeout
+                )
+                break
+            except requests.RequestException as error:
+                if attempt >= args_cli.model_max_retries:
+                    raise
+                delay = args_cli.model_retry_backoff * (2**attempt)
+                print(
+                    f"[ER2] transient request failure ({type(error).__name__}); "
+                    f"retry {attempt + 1}/{args_cli.model_max_retries} in {delay:.1f}s",
+                    flush=True,
+                )
+                time.sleep(delay)
+        assert response is not None
         latency = time.perf_counter() - started
         if not response.ok:
             raise RuntimeError(
@@ -396,7 +466,16 @@ def _eef_quaternion(env: Any) -> torch.Tensor:
 
 def _step_env(env: Any, action: torch.Tensor):
     """Step once and mirror the executed transition into the active collector."""
+    global ACTIVE_SENSOR_SAMPLE_INDEX
     result = env.step(action)
+    sensor_frame = None
+    if ACTIVE_SENSOR_MONITOR is not None:
+        try:
+            sensor_frame = sensor_frame_from_isaac_env(env)
+        except Exception:
+            sensor_frame = empty_sensor_frame()
+        ACTIVE_SENSOR_MONITOR.append(sensor_frame, ACTIVE_SENSOR_SAMPLE_INDEX / 15.0)
+        ACTIVE_SENSOR_SAMPLE_INDEX += 1
     if ACTIVE_EPISODE_RECORDER is not None:
         ACTIVE_EPISODE_RECORDER.append(
             env,
@@ -404,8 +483,23 @@ def _step_env(env: Any, action: torch.Tensor):
             result[0],
             eef_position=_eef_position(env).numpy(),
             eef_quaternion_wxyz=_eef_quaternion(env).numpy(),
+            sensor_frame=sensor_frame,
         )
     return result
+
+
+def _active_contact_summary() -> dict[str, Any]:
+    if ACTIVE_SENSOR_MONITOR is None:
+        values = np.zeros((0, SENSOR_DIM), dtype=np.float32)
+        validity = np.zeros((0, VALIDITY_DIM), dtype=np.float32)
+    else:
+        values, validity, _ = ACTIVE_SENSOR_MONITOR.arrays()
+    return summarize_contact_telemetry(
+        values,
+        validity,
+        minimum_coverage=args_cli.minimum_contact_coverage,
+        minimum_touch_samples=args_cli.minimum_touch_samples,
+    )
 
 
 def _set_sim6_camera_views(env: Any) -> None:
@@ -1040,17 +1134,43 @@ def _recover_transport_grasp(
         maximum_hold_drift_m=args_cli.recovery_stability_drift,
         minimum_carried_lift_m=args_cli.minimum_transport_lift,
     )
+    try:
+        contact_frame = sensor_frame_from_isaac_env(env)
+        contact_valid = bool(
+            contact_frame.validity[5] > 0.5 and contact_frame.validity[6] > 0.5
+        )
+        contact_touch = bool(
+            contact_frame.values[SIGNAL_SLICES["gripper_touch"]][0] >= 0.5
+        )
+        contact_force = contact_frame.values[
+            SIGNAL_SLICES["gripper_contact_force"]
+        ]
+        contact_force_n = float(np.linalg.vector_norm(contact_force))
+    except Exception:
+        contact_valid = False
+        contact_touch = False
+        contact_force_n = 0.0
+    contact_confirms_grasp = (
+        args_cli.disable_contact_telemetry or (contact_valid and contact_touch)
+    )
     report: dict[str, Any] = {
         "strategy": hold_assessment.strategy,
         "hold_steps": args_cli.recovery_hold_steps,
         "offset_before_hold_m": offset_before.tolist(),
         "offset_after_hold_m": offset_after.tolist(),
         "hold_assessment": hold_assessment.to_dict(),
+        "contact_confirmation": {
+            "required": not args_cli.disable_contact_telemetry,
+            "valid": contact_valid,
+            "touch": contact_touch,
+            "net_force_n": contact_force_n,
+            "confirms_grasp": contact_confirms_grasp,
+        },
         "segments": segments,
         "completed": False,
     }
 
-    if hold_assessment.safe_to_resume:
+    if hold_assessment.safe_to_resume and contact_confirms_grasp:
         decision = checkpoint_callback(
             obs,
             {
@@ -1086,6 +1206,9 @@ def _recover_transport_grasp(
             )
         report["strategy"] = "set_down_and_regrasp"
         report["stability_override"] = "coach_requested_physical_regrasp"
+    elif hold_assessment.safe_to_resume:
+        report["strategy"] = "set_down_and_regrasp"
+        report["stability_override"] = "contact_sensor_did_not_confirm_grasp"
 
     def move_segment(
         name: str,
@@ -1384,12 +1507,18 @@ def _residual_center_over_plate(
     terminal = False
     iterations: list[dict[str, Any]] = []
     contact_detected = False
+    support_contact_event: dict[str, Any] | None = None
     banana_start = _local_position(env, "banana")
     plate_start = _local_position(env, "plate_large")
     error_start = float(torch.linalg.vector_norm(plate_start[:2] - banana_start[:2]))
     height_start = float(banana_start[2] - plate_start[2])
     previous_error = error_start
     previous_height_error = abs(args_cli.release_height - height_start)
+    support_monitor = SupportContactMonitor(
+        object_initial_z=initial_banana_z,
+        set_down_clearance_m=args_cli.recovery_set_down_clearance,
+        require_eef_stall=False,
+    )
 
     for iteration in range(args_cli.center_max_iterations):
         banana = _local_position(env, "banana")
@@ -1398,6 +1527,7 @@ def _residual_center_over_plate(
         error_norm = float(torch.linalg.vector_norm(error_xy))
         height_above_plate = float(banana[2] - plate[2])
         height_error = args_cli.release_height - height_above_plate
+        eef_z_before = float(_eef_position(env)[2])
         if (
             error_norm <= args_cli.center_tolerance
             and abs(height_error) <= args_cli.release_height_tolerance
@@ -1469,6 +1599,13 @@ def _residual_center_over_plate(
         lifted_after = float(banana_after[2]) - initial_banana_z
         height_after = float(banana_after[2] - plate_after[2])
         height_error_after = abs(args_cli.release_height - height_after)
+        if correction_mode == "z" and error_after <= args_cli.center_tolerance:
+            support_contact_event = support_monitor.update(
+                object_z=float(banana_after[2]),
+                eef_z=float(_eef_position(env)[2]),
+                target_eef_z=eef_z_before + height_error,
+                target_tolerance_m=args_cli.release_height_tolerance,
+            )
         contact_after = (
             error_after <= 0.12
             and 0.0 <= height_after <= args_cli.plate_contact_height
@@ -1485,6 +1622,7 @@ def _residual_center_over_plate(
             "height_above_plate_after_m": height_after,
             "banana_lift_after_m": lifted_after,
             "banana_plate_contact_proxy": contact_after,
+            "support_contact_event": support_contact_event,
             "terminal": terminal,
         }
         iterations.append(iteration_record)
@@ -1503,6 +1641,14 @@ def _residual_center_over_plate(
             print(
                 "[center] plate contact proxy became active; "
                 "suppressing further Cartesian correction until release",
+                flush=True,
+            )
+            break
+        if support_contact_event is not None:
+            contact_detected = True
+            print(
+                "[center] aligned object stopped descending inside the support "
+                "envelope; suppressing further correction before release",
                 flush=True,
             )
             break
@@ -1542,6 +1688,7 @@ def _residual_center_over_plate(
         "release_height_tolerance_m": args_cli.release_height_tolerance,
         "plate_contact_height_m": args_cli.plate_contact_height,
         "banana_plate_contact_proxy": contact_detected,
+        "support_contact_event": support_contact_event,
         "converged": (
             contact_detected
             or (
@@ -1661,17 +1808,19 @@ def _retreat_after_release(
         banana_plate_xy_error <= 0.12
         and 0.0 <= banana_height_above_plate <= 0.20
     )
-    max_detached_object_motion = 0.75 * args_cli.retreat_distance
     state_final = _state(env, float(banana_start[2]))
     gripper_open = state_final["gripper_closed_fraction"] <= 0.10
-    converged = (
-        retreat_z >= max(0.040, args_cli.retreat_distance - 0.020)
-        and banana_motion <= max_detached_object_motion
-        and final_separation - start_separation >= 0.040
-        and gripper_open
-        and on_plate
-        and not terminal
+    detachment = assess_release_detachment(
+        controlled_start_xyz=eef_start.numpy(),
+        controlled_final_xyz=eef_final.numpy(),
+        subject_start_xyz=banana_start.numpy(),
+        subject_final_xyz=banana_final.numpy(),
+        released=gripper_open,
+        goal_relation_holds=on_plate,
+        terminal=terminal,
+        minimum_retreat_m=max(0.040, args_cli.retreat_distance - 0.020),
     )
+    converged = bool(detachment["converged"])
     report = {
         "enabled": True,
         "requested_retreat_m": args_cli.retreat_distance,
@@ -1681,13 +1830,13 @@ def _retreat_after_release(
         "banana_start_xyz": banana_start.tolist(),
         "banana_final_xyz": banana_final.tolist(),
         "banana_motion_during_retreat_m": banana_motion,
-        "maximum_detached_object_motion_m": max_detached_object_motion,
         "banana_plate_xy_error_after_m": banana_plate_xy_error,
         "banana_height_above_plate_after_m": banana_height_above_plate,
         "banana_remained_on_plate": on_plate,
         "eef_banana_separation_before_m": start_separation,
         "eef_banana_separation_after_m": final_separation,
         "gripper_closed_fraction_after": state_final["gripper_closed_fraction"],
+        "detachment_evidence": detachment,
         "converged": converged,
         "iterations": iterations,
     }
@@ -1695,7 +1844,7 @@ def _retreat_after_release(
 
 
 def main() -> int:
-    global ACTIVE_EPISODE_RECORDER
+    global ACTIVE_EPISODE_RECORDER, ACTIVE_SENSOR_MONITOR, ACTIVE_SENSOR_SAMPLE_INDEX
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY in the environment")
@@ -1766,6 +1915,12 @@ def main() -> int:
         raise ValueError("episode-index must be -1 or a non-negative integer")
     if args_cli.record_video_scale <= 0:
         raise ValueError("record-video-scale must be positive")
+    if args_cli.model_max_retries < 0 or args_cli.model_retry_backoff < 0:
+        raise ValueError("model retry count and backoff must be non-negative")
+    if not 0.0 <= args_cli.minimum_contact_coverage <= 1.0:
+        raise ValueError("minimum-contact-coverage must be in [0, 1]")
+    if args_cli.minimum_touch_samples < 1:
+        raise ValueError("minimum-touch-samples must be positive")
 
     demo_path = args_cli.demo.expanduser().resolve()
     if not demo_path.is_file():
@@ -1801,8 +1956,8 @@ def main() -> int:
         else _load_critic_guidance(critic_memory_path, args_cli.task)
     )
     robolab.constants.set_output_dir(str(args_cli.artifact_dir / "robolab_output"))
-    # RoboLab's 5.x contact-filter expressions do not resolve under the Sim 6
-    # tensor API yet. This test scores physical lift/place geometrically.
+    # Use an unfiltered two-finger sensor below instead of RoboLab's brittle
+    # legacy object-pair filter graph.
     robolab.constants.ENABLE_SUBTASK_PROGRESS_CHECKING = False
     robolab.constants.RECORD_IMAGE_DATA = False
     robolab.constants.VERBOSE = False
@@ -1812,6 +1967,10 @@ def main() -> int:
     print(f"Model: {MODEL_ID}")
     print(f"Task:  {args_cli.task}")
     print(f"GUI:   {'off (headless)' if args_cli.headless else 'on'}")
+    print(
+        "World-intent shadow: "
+        + ("disabled" if args_cli.disable_world_intent_shadow else args_cli.instruction)
+    )
     print(f"Local motion primitive: {demo_path} ({len(recorded_actions)} steps)")
     print("Control cadence: one ER 2 call per semantic phase; physics remains local")
     print(
@@ -1896,6 +2055,8 @@ def main() -> int:
         asset_cfg = getattr(env_cfg.scene, asset_name)
         w, x, y, z = asset_cfg.init_state.rot
         asset_cfg.init_state.rot = (x, y, z, w)
+    if not args_cli.disable_contact_telemetry:
+        install_sim6_gripper_contact_sensor(env_cfg)
     if args_cli.randomize_background:
         from robolab.variations.backgrounds import find_background_files
 
@@ -1929,6 +2090,10 @@ def main() -> int:
     env_cfg.recorders = None
     env, _ = create_env(env_cfg, use_fabric=True, policy="gemini-er2")
     obs, _ = env.reset()
+    ACTIVE_SENSOR_MONITOR = SensorCaptureBuffer()
+    ACTIVE_SENSOR_SAMPLE_INDEX = 0
+    contact_sensor_info = contact_sensor_runtime_info(env)
+    print(f"[contact-sensor] {contact_sensor_info}", flush=True)
     baseline_banana_xyz = _local_position(env, "banana")
     baseline_banana_quat = _local_quaternion(env, "banana")
     grasp_offset_object, object_to_grasp_quat = derive_object_relative_grasp(
@@ -1968,6 +2133,7 @@ def main() -> int:
     digests: list[str] = []
     eef_trace: list[list[float]] = [_eef_position(env).tolist()]
     model_calls = 0
+    world_vertical_clearance_m: float | None = None
     terminal = False
     episode_trace: dict[str, Any] = {
         "schema_version": 2,
@@ -2000,6 +2166,21 @@ def main() -> int:
             "enabled": args_cli.rgbd_safety,
             "motion_checkpoint_depth_panel": args_cli.rgbd_safety,
         },
+        "contact_sensor": contact_sensor_info,
+        "world_intent_shadow": {
+            "status": (
+                "disabled" if args_cli.disable_world_intent_shadow else "pending"
+            ),
+            "contract_version": WORLD_INTENT_SCHEMA_VERSION,
+            "motion_authority": bool(args_cli.world_intent_clearance_authority),
+            "authority_scope": (
+                ["vertical_clearance_m"]
+                if args_cli.world_intent_clearance_authority
+                else []
+            ),
+            "instruction": args_cli.instruction,
+        },
+        "world_constraint_applications": [],
         "transport_recovery": {
             "maximum_attempts": args_cli.max_transport_recoveries,
             "stability_hold_steps": args_cli.recovery_hold_steps,
@@ -2045,6 +2226,9 @@ def main() -> int:
             unpack_images=unpack_image_obs,
             fps=15,
             video_scale=args_cli.record_video_scale,
+            require_contact_telemetry=not args_cli.disable_contact_telemetry,
+            minimum_contact_coverage=args_cli.minimum_contact_coverage,
+            minimum_touch_samples=args_cli.minimum_touch_samples,
         )
         ACTIVE_EPISODE_RECORDER = episode_recorder
         episode_trace["training_capture"] = {
@@ -2060,6 +2244,103 @@ def main() -> int:
             str(args_cli.artifact_dir / "00_scene.jpg"),
             cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
         )
+        if not args_cli.disable_world_intent_shadow:
+            try:
+                shadow_payload, shadow_latency, shadow_digest = coach.reason(
+                    build_world_intent_prompt(args_cli.instruction),
+                    frame,
+                )
+                shadow_intent = WorldIntent.from_mapping(shadow_payload)
+                requested_vertical_clearance = minimum_vertical_clearance_m(
+                    shadow_intent
+                )
+                if args_cli.world_intent_clearance_authority:
+                    world_vertical_clearance_m = requested_vertical_clearance
+                episode_trace["world_intent_shadow"] = {
+                    "status": "valid",
+                    "contract_version": WORLD_INTENT_SCHEMA_VERSION,
+                    "motion_authority": bool(
+                        args_cli.world_intent_clearance_authority
+                        and world_vertical_clearance_m is not None
+                    ),
+                    "authority_scope": (
+                        ["vertical_clearance_m"]
+                        if args_cli.world_intent_clearance_authority
+                        and world_vertical_clearance_m is not None
+                        else []
+                    ),
+                    "instruction": args_cli.instruction,
+                    "intent": shadow_intent.to_dict(),
+                    "requested_vertical_clearance_m": requested_vertical_clearance,
+                    "applied_vertical_clearance_m": world_vertical_clearance_m,
+                    "latency_s": shadow_latency,
+                    "image_digest": shadow_digest,
+                }
+                authority = (
+                    f"vertical_clearance_m={world_vertical_clearance_m:.3f}"
+                    if world_vertical_clearance_m is not None
+                    else "none"
+                )
+                print(
+                    f"[world-intent] VALID operation={shadow_intent.operation} "
+                    f"goals={len(shadow_intent.goals)} "
+                    f"constraints={len(shadow_intent.constraints)} "
+                    f"latency={shadow_latency:.2f}s authority={authority}",
+                    flush=True,
+                )
+            except Exception as shadow_error:
+                episode_trace["world_intent_shadow"] = {
+                    "status": "invalid",
+                    "contract_version": WORLD_INTENT_SCHEMA_VERSION,
+                    "motion_authority": False,
+                    "authority_scope": [],
+                    "instruction": args_cli.instruction,
+                    "error": {
+                        "type": type(shadow_error).__name__,
+                        "message": str(shadow_error),
+                    },
+                }
+                print(
+                    f"[world-intent] INVALID {type(shadow_error).__name__}: "
+                    f"{shadow_error} authority=none",
+                    flush=True,
+                )
+            _write_trace(trace_path, episode_trace)
+
+        def apply_authorized_clearance(
+            phase: str, nominal_target: torch.Tensor, current_state: dict[str, Any]
+        ) -> torch.Tensor:
+            if (
+                world_vertical_clearance_m is None
+                or phase not in {"lift", "above_plate"}
+            ):
+                return nominal_target
+            governed = nominal_target.clone()
+            nominal_z = float(governed[2])
+            governed_z = governed_vertical_target(
+                nominal_target_z=nominal_z,
+                controlled_frame_z=float(current_state["eef_gripper_base_xyz"][2]),
+                subject_z=float(current_state["banana_xyz"][2]),
+                reference_z=float(current_state["plate_xyz"][2]),
+                minimum_clearance_m=world_vertical_clearance_m,
+            )
+            governed[2] = governed.new_tensor(governed_z)
+            application = {
+                "phase": phase,
+                "predicate": "vertical_clearance_m",
+                "minimum_m": world_vertical_clearance_m,
+                "nominal_target_z_m": nominal_z,
+                "governed_target_z_m": governed_z,
+            }
+            episode_trace["world_constraint_applications"].append(application)
+            print(
+                f"[world-constraint] phase={phase} clearance="
+                f"{world_vertical_clearance_m:.3f}m target_z="
+                f"{nominal_z:.3f}→{governed_z:.3f}m",
+                flush=True,
+            )
+            return governed
+
         scene, latency, digest = coach.reason(
             _scene_prompt(
                 _state(env, initial_banana_z),
@@ -2193,6 +2474,7 @@ def main() -> int:
                     lift_clearance=args_cli.lift_clearance,
                     plate_hover_height=args_cli.plate_hover_height,
                 )
+                nominal = apply_authorized_clearance(phase, nominal, current)
                 target_source = "live_object_pose"
             elif phase == "release":
                 nominal = _eef_position(env)
@@ -2288,6 +2570,7 @@ def main() -> int:
                             lift_clearance=args_cli.lift_clearance,
                             plate_hover_height=args_cli.plate_hover_height,
                         )
+                        nominal = apply_authorized_clearance(phase, nominal, current)
                     frame = _single_exterior_frame(obs)
                     decision, latency, digest = coach.reason(
                         _stage_prompt(
@@ -2486,6 +2769,9 @@ def main() -> int:
                         lift_clearance=args_cli.lift_clearance,
                         plate_hover_height=args_cli.plate_hover_height,
                     )
+                    nominal = apply_authorized_clearance(
+                        "above_plate", nominal, resumed_state
+                    )
                     nominal_quaternion = latched_carry_quaternion
                 if placement_completed_during_recovery:
                     orientation_error = torch.linalg.vector_norm(
@@ -2587,6 +2873,15 @@ def main() -> int:
                 f"banana={banana_now.tolist()} terminal={terminal}",
                 flush=True,
             )
+            phase_contact_summary = _active_contact_summary()
+            if phase in {"grasp", "lift", "release"}:
+                print(
+                    f"[contact] after={phase} "
+                    f"coverage={phase_contact_summary['coverage']:.3f} "
+                    f"touch_samples={phase_contact_summary['touch_samples']} "
+                    f"peak_net_force={phase_contact_summary['peak_net_force_n']:.3f}N",
+                    flush=True,
+                )
             episode_trace["stages"].append({
                 "phase": phase,
                 "frame": frame_path.name,
@@ -2605,6 +2900,7 @@ def main() -> int:
                 "eef_target_error_m": pos_error,
                 "banana_after_xyz": banana_now.tolist(),
                 "terminal": terminal,
+                "contact_telemetry_after": phase_contact_summary,
             })
             _write_trace(trace_path, episode_trace)
 
@@ -2730,10 +3026,25 @@ def main() -> int:
         )
         xy_error = float(torch.linalg.norm(banana_final[:2] - plate_final[:2]))
         height_above_plate = float(banana_final[2] - plate_final[2])
+        contact_summary = _active_contact_summary()
+        contact_passed = (
+            True if args_cli.disable_contact_telemetry else bool(contact_summary["passed"])
+        )
+        tests["contact_telemetry"] = contact_passed
+        _test_line(
+            9,
+            "real gripper contact telemetry",
+            contact_passed,
+            "disabled" if args_cli.disable_contact_telemetry else (
+                f"coverage={contact_summary['coverage']:.3f} "
+                f"touch_samples={contact_summary['touch_samples']} "
+                f"peak_net_force={contact_summary['peak_net_force_n']:.3f}N"
+            ),
+        )
         success = xy_error <= 0.12 and 0.0 <= height_above_plate <= 0.20
         tests["success"] = success
         _test_line(
-            9,
+            10,
             "banana-on-plate geometric outcome",
             success,
             f"xy_error={xy_error:.3f}m height_above_plate={height_above_plate:.3f}m",
@@ -2745,6 +3056,7 @@ def main() -> int:
             "banana_plate_xy_error_m": xy_error,
             "banana_height_above_plate_m": height_above_plate,
             "tests": tests,
+            "contact_telemetry": contact_summary,
             "all_tests_passed": all(tests.values()),
             "coach_model_calls": model_calls,
         }
@@ -2813,10 +3125,13 @@ def main() -> int:
                 "reason": "exception_before_all_success_gates",
                 "samples_discarded": episode_recorder.sample_count,
             }
+        episode_trace["contact_telemetry_at_failure"] = _active_contact_summary()
         _write_trace(trace_path, episode_trace)
         raise
     finally:
         ACTIVE_EPISODE_RECORDER = None
+        ACTIVE_SENSOR_MONITOR = None
+        ACTIVE_SENSOR_SAMPLE_INDEX = 0
         if episode_recorder is not None:
             episode_recorder.discard()
         end_episode(env)

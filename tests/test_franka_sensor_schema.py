@@ -16,7 +16,13 @@ from scripts.franka_sensor_schema import (
     masked_sensor_stats,
     sensor_frame_from_isaac_env,
     sensor_frame_from_robot_state,
+    summarize_contact_telemetry,
     write_sensor_group,
+)
+from scripts.robolab_contact_telemetry import (
+    GRIPPER_CONTACT_PRIM_PATH,
+    GRIPPER_CONTACT_SENSOR_NAME,
+    install_sim6_gripper_contact_sensor,
 )
 from scripts.patch_droid_external_torque import patch_checkout
 
@@ -111,6 +117,59 @@ def test_isaac_capture_labels_applied_torque_as_commanded_only():
     assert frame.validity[5] == 1.0
     assert frame.validity[6] == 1.0
     assert frame.values[SIGNAL_SLICES["gripper_touch"]][0] == 1.0
+
+
+def test_two_finger_touch_does_not_disappear_when_opposing_forces_cancel():
+    robot = SimpleNamespace(
+        data=SimpleNamespace(
+            joint_names=[*[f"panda_joint{i}" for i in range(1, 8)], "finger_joint"],
+            applied_torque=np.zeros((1, 8), dtype=np.float32),
+        )
+    )
+    contact = SimpleNamespace(
+        data=SimpleNamespace(
+            net_forces_w=np.array(
+                [[[2.0, 0.0, 0.0], [-2.0, 0.0, 0.0]]], dtype=np.float32
+            )
+        )
+    )
+
+    class Scene(dict):
+        sensors = {"gripper__all_contacts": contact}
+
+    frame = sensor_frame_from_isaac_env(SimpleNamespace(scene=Scene(robot=robot)))
+    np.testing.assert_array_equal(
+        frame.values[SIGNAL_SLICES["gripper_contact_force"]], np.zeros(3)
+    )
+    assert frame.values[SIGNAL_SLICES["gripper_touch"]][0] == 1.0
+
+
+def test_contact_summary_requires_coverage_and_a_real_touch():
+    values = np.zeros((4, SENSOR_DIM), dtype=np.float32)
+    validity = np.zeros((4, VALIDITY_DIM), dtype=np.float32)
+    validity[:, 5:7] = 1.0
+    assert not summarize_contact_telemetry(values, validity)["passed"]
+    values[2, SIGNAL_SLICES["gripper_touch"]] = 1.0
+    summary = summarize_contact_telemetry(values, validity)
+    assert summary["passed"]
+    assert summary["coverage"] == 1.0
+    assert summary["touch_samples"] == 1
+
+
+def test_sim6_contact_installer_uses_unfiltered_two_finger_expression():
+    captured = {}
+
+    def factory(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(**kwargs)
+
+    env_cfg = SimpleNamespace(scene=SimpleNamespace())
+    installed = install_sim6_gripper_contact_sensor(
+        env_cfg, sensor_cfg_factory=factory
+    )
+    assert getattr(env_cfg.scene, GRIPPER_CONTACT_SENSOR_NAME) is installed
+    assert captured["prim_path"] == GRIPPER_CONTACT_PRIM_PATH
+    assert captured["filter_prim_paths_expr"] == []
 
 
 def test_droid_external_torque_patcher_is_narrow_and_idempotent(tmp_path):

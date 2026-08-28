@@ -76,22 +76,40 @@ def joint_contact(env: Any):
     return _zeros(env, 7)
 
 
-def _contact_force_and_validity(env: Any):
+def _contact_force_validity_and_peak(env: Any):
     import torch
 
     zeros = _zeros(env, 3)
     sensors = getattr(env.scene, "sensors", {})
-    sensor = sensors.get("gripper__all_objs") if hasattr(sensors, "get") else None
+    sensor = None
+    if hasattr(sensors, "get"):
+        sensor = sensors.get("gripper__all_contacts")
+        if sensor is None:
+            sensor = sensors.get("gripper__all_objs")
     if sensor is None or getattr(getattr(sensor, "data", None), "net_forces_w", None) is None:
-        return zeros, zeros.new_zeros((zeros.shape[0], 1))
+        invalid = zeros.new_zeros((zeros.shape[0], 1))
+        return zeros, invalid, invalid
     force = _torch(sensor.data.net_forces_w)
-    while force.ndim > 2:
-        force = force.sum(dim=1)
-    if force.ndim != 2 or force.shape[-1] != 3:
-        return zeros, zeros.new_zeros((zeros.shape[0], 1))
-    finite = torch.isfinite(force).all(dim=1, keepdim=True)
-    force = torch.where(finite, force, torch.zeros_like(force))
-    return force.to(dtype=zeros.dtype, device=zeros.device), finite.to(dtype=zeros.dtype)
+    if force.ndim < 2 or force.shape[-1] != 3 or force.shape[0] != zeros.shape[0]:
+        invalid = zeros.new_zeros((zeros.shape[0], 1))
+        return zeros, invalid, invalid
+    body_forces = force.reshape(force.shape[0], -1, 3)
+    finite = torch.isfinite(body_forces).all(dim=2).all(dim=1, keepdim=True)
+    body_forces = torch.where(
+        finite.unsqueeze(-1), body_forces, torch.zeros_like(body_forces)
+    )
+    net_force = body_forces.sum(dim=1)
+    peak_force = torch.linalg.vector_norm(body_forces, dim=2).amax(dim=1, keepdim=True)
+    return (
+        net_force.to(dtype=zeros.dtype, device=zeros.device),
+        finite.to(dtype=zeros.dtype, device=zeros.device),
+        peak_force.to(dtype=zeros.dtype, device=zeros.device),
+    )
+
+
+def _contact_force_and_validity(env: Any):
+    force, validity, _ = _contact_force_validity_and_peak(env)
+    return force, validity
 
 
 def gripper_contact_force(env: Any):
@@ -101,10 +119,8 @@ def gripper_contact_force(env: Any):
 def gripper_touch(env: Any, threshold_n: float = 0.1):
     import torch
 
-    force, validity = _contact_force_and_validity(env)
-    touch = (torch.linalg.vector_norm(force, dim=1, keepdim=True) >= threshold_n).to(
-        dtype=force.dtype
-    )
+    force, validity, peak_force = _contact_force_validity_and_peak(env)
+    touch = (peak_force >= threshold_n).to(dtype=force.dtype)
     return touch * validity
 
 

@@ -1,4 +1,5 @@
 import aiohttp
+import base64
 import logging
 import json
 import os
@@ -162,52 +163,7 @@ class GeminiProvider:
         )
 
     async def complete(self, messages: List[Dict], context: Dict) -> LLMResponse:
-        # Per-call override via context (used by intent classifier to avoid
-        # racing a shared instance attr), then instance override, then
-        # distilled system message, then default.
-        system = context.get("system_override") or getattr(self, "_system_override", None)
-        if not system:
-            sys_msgs = [m for m in messages if m.get("role") == "system"]
-            if sys_msgs:
-                system = sys_msgs[0].get("content", "") or SYSTEM_PROMPT
-            else:
-                system = SYSTEM_PROMPT
-        gemini_messages = self._format_messages(messages)
-
-        gen_config = {
-            "temperature": 0.2,
-            "maxOutputTokens": 4096,
-        }
-        if _EXPOSE_THOUGHTS:
-            # Ask Gemini 3 to return thought-parts. includeThoughts=True turns
-            # on the `thought: true` marker on returned parts; thinkingBudget
-            # caps the max thought-token spend per turn (1024 is enough for
-            # most agent-turn reasoning without blowing the budget).
-            gen_config["thinkingConfig"] = {
-                "includeThoughts": True,
-                "thinkingBudget": 1024,
-            }
-        payload = {
-            "system_instruction": {"parts": [{"text": system}]},
-            "contents": gemini_messages,
-            "generationConfig": gen_config,
-        }
-
-        # Convert OpenAI tool schemas to Gemini function declarations
-        tools = context.get("tools")
-        if tools:
-            function_declarations = []
-            for t in tools:
-                fn = t.get("function", {})
-                params = fn.get("parameters", {"type": "object", "properties": {}})
-                # Gemini doesn't support 'default' in parameters — strip them
-                cleaned_params = self._clean_params(params)
-                function_declarations.append({
-                    "name": fn["name"],
-                    "description": fn.get("description", ""),
-                    "parameters": cleaned_params,
-                })
-            payload["tools"] = [{"function_declarations": function_declarations}]
+        payload = self._build_request_payload(messages, context)
 
         # Retry on transient errors (503 overload, 429 rate-limit, connection drops).
         # Google recommends exponential backoff for these; keep total wait bounded
@@ -237,7 +193,8 @@ class GeminiProvider:
         _call_t0 = _time_rt.monotonic()
         logger.warning(
             f"[GeminiCall] start payload={_payload_bytes} bytes "
-            f"messages={len(messages)} tools={len(payload.get('tools', [{}])[0].get('functionDeclarations', []))}"
+            f"messages={len(messages)} tools="
+            f"{len(payload.get('tools', [{}])[0].get('function_declarations', []))}"
         )
 
         for attempt in range(1, max_attempts + 1):
@@ -326,6 +283,56 @@ class GeminiProvider:
             "Backend is overloaded after several retries. Please try again in a minute."
         ))
 
+    def _build_request_payload(self, messages: List[Dict], context: Dict) -> Dict:
+        """Build one Gemini request that may contain both images and tools."""
+        # Per-call override via context (used by intent classifier to avoid
+        # racing a shared instance attr), then instance override, then
+        # distilled system message, then default.
+        system = context.get("system_override") or getattr(self, "_system_override", None)
+        if not system:
+            sys_msgs = [m for m in messages if m.get("role") == "system"]
+            if sys_msgs:
+                system = sys_msgs[0].get("content", "") or SYSTEM_PROMPT
+            else:
+                system = SYSTEM_PROMPT
+        gemini_messages = self._format_messages(messages)
+
+        gen_config = {
+            "temperature": 0.2,
+            "maxOutputTokens": 4096,
+        }
+        if _EXPOSE_THOUGHTS:
+            # Ask Gemini 3 to return thought-parts. includeThoughts=True turns
+            # on the `thought: true` marker on returned parts; thinkingBudget
+            # caps the max thought-token spend per turn (1024 is enough for
+            # most agent-turn reasoning without blowing the budget).
+            gen_config["thinkingConfig"] = {
+                "includeThoughts": True,
+                "thinkingBudget": 1024,
+            }
+        payload = {
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": gemini_messages,
+            "generationConfig": gen_config,
+        }
+
+        # Convert OpenAI tool schemas to Gemini function declarations
+        tools = context.get("tools")
+        if tools:
+            function_declarations = []
+            for t in tools:
+                fn = t.get("function", {})
+                params = fn.get("parameters", {"type": "object", "properties": {}})
+                # Gemini doesn't support 'default' in parameters — strip them
+                cleaned_params = self._clean_params(params)
+                function_declarations.append({
+                    "name": fn["name"],
+                    "description": fn.get("description", ""),
+                    "parameters": cleaned_params,
+                })
+            payload["tools"] = [{"function_declarations": function_declarations}]
+        return payload
+
     def _format_messages(self, messages: List[Dict]) -> List[Dict]:
         """Converts OpenAI style messages to Gemini format, including tool results."""
         gemini_msgs = []
@@ -379,14 +386,64 @@ class GeminiProvider:
                 gemini_msgs.append({"role": "model", "parts": parts})
                 continue
 
-            # Normal text message
+            # Normal text or OpenAI-style multimodal message. The orchestrator
+            # injects fresh viewport frames using image_url data URIs; keeping
+            # them in the same request as function declarations lets Gemini
+            # choose a tool from current visual evidence.
             gemini_role = "user" if role in ("user",) else "model"
             gemini_msgs.append({
                 "role": gemini_role,
-                "parts": [{"text": msg.get("content", "")}]
+                "parts": self._format_content_parts(msg.get("content", ""))
             })
 
         return gemini_msgs
+
+    @staticmethod
+    def _format_content_parts(content) -> List[Dict]:
+        """Convert OpenAI text/image content into Gemini REST content parts."""
+        if isinstance(content, str):
+            return [{"text": content}]
+        if not isinstance(content, list):
+            raise ValueError("Gemini message content must be text or a content-part list")
+
+        parts: List[Dict] = []
+        for index, item in enumerate(content):
+            if not isinstance(item, dict):
+                raise ValueError(f"Gemini content part {index} must be an object")
+            part_type = item.get("type")
+            if part_type == "text":
+                text = item.get("text")
+                if not isinstance(text, str):
+                    raise ValueError(f"Gemini text content part {index} must contain text")
+                parts.append({"text": text})
+                continue
+            if part_type != "image_url":
+                raise ValueError(f"Unsupported Gemini content part type: {part_type!r}")
+
+            image = item.get("image_url")
+            url = image.get("url") if isinstance(image, dict) else image
+            if not isinstance(url, str) or not url.startswith("data:"):
+                raise ValueError(
+                    "Gemini image_url must be an inline data URI; external image URLs "
+                    "are not fetched by the provider"
+                )
+            try:
+                header, encoded = url.split(",", 1)
+                mime_type, encoding = header[5:].split(";", 1)
+            except ValueError as error:
+                raise ValueError("Malformed Gemini image data URI") from error
+            if encoding.lower() != "base64" or not mime_type.startswith("image/"):
+                raise ValueError("Gemini image data URI must contain a base64 image")
+            try:
+                base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError) as error:
+                raise ValueError("Gemini image data URI contains invalid base64") from error
+            parts.append(
+                {"inline_data": {"mime_type": mime_type, "data": encoded}}
+            )
+        if not parts:
+            return [{"text": ""}]
+        return parts
 
     def _parse_response(self, data: Dict) -> LLMResponse:
         """Parse Gemini response which may contain text and/or functionCall parts."""

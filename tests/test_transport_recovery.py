@@ -3,6 +3,7 @@ import pytest
 
 from scripts.transport_recovery import (
     SupportContactMonitor,
+    assess_release_detachment,
     assess_recovery_hold,
     object_support_contact_event,
     placement_completion_event,
@@ -110,6 +111,62 @@ def test_stall_above_support_envelope_does_not_claim_contact():
             target_tolerance_m=0.012,
         )
     assert event is None
+
+
+def test_aligned_set_down_detects_object_support_while_tool_continues_down():
+    monitor = SupportContactMonitor(
+        object_initial_z=0.02,
+        set_down_clearance_m=0.006,
+        consecutive_stall_samples=3,
+        require_eef_stall=False,
+    )
+    event = None
+    for object_z, eef_z in (
+        (0.0900, 0.28),
+        (0.0895, 0.27),
+        (0.0890, 0.26),
+        (0.0885, 0.25),
+    ):
+        event = monitor.update(
+            object_z=object_z,
+            eef_z=eef_z,
+            target_eef_z=0.20,
+            target_tolerance_m=0.012,
+        )
+
+    assert event is not None
+    assert event["reason"] == "set_down_motion_stalled_at_support_envelope"
+    assert event["require_eef_stall"] is False
+
+
+def test_detachment_allows_subject_to_settle_away_from_retreat_direction():
+    result = assess_release_detachment(
+        controlled_start_xyz=np.array([0.0, 0.0, 0.25]),
+        controlled_final_xyz=np.array([0.0, 0.0, 0.33]),
+        subject_start_xyz=np.array([0.02, 0.0, 0.10]),
+        subject_final_xyz=np.array([0.10, 0.02, 0.03]),
+        released=True,
+        goal_relation_holds=True,
+        terminal=False,
+    )
+
+    assert result["converged"] is True
+    assert result["subject_motion_along_retreat_m"] < 0.0
+
+
+def test_detachment_rejects_subject_following_the_retreat():
+    result = assess_release_detachment(
+        controlled_start_xyz=np.array([0.0, 0.0, 0.25]),
+        controlled_final_xyz=np.array([0.0, 0.0, 0.33]),
+        subject_start_xyz=np.array([0.0, 0.0, 0.10]),
+        subject_final_xyz=np.array([0.0, 0.0, 0.18]),
+        released=True,
+        goal_relation_holds=True,
+        terminal=False,
+    )
+
+    assert result["converged"] is False
+    assert result["subject_motion_along_retreat_m"] > 0.02
 
 
 def test_recovery_orientation_discards_roll_pitch_but_preserves_yaw():

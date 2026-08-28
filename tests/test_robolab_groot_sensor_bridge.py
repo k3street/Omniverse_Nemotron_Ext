@@ -9,6 +9,7 @@ import torch
 from scripts.robolab_groot_sensor_bridge import (
     extract_sensor_state,
     gripper_contact_force,
+    gripper_touch,
     make_sensor_aware_client,
     pack_sensor_state,
     sensor_validity,
@@ -48,6 +49,30 @@ def test_sim_sensor_terms_label_only_available_signals():
         sensor_validity(env).numpy(),
         np.tile([0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0], (2, 1)),
     )
+
+
+def test_live_bridge_uses_any_finger_force_for_touch():
+    robot = SimpleNamespace(
+        data=SimpleNamespace(
+            joint_names=[*[f"panda_joint{i}" for i in range(1, 8)], "finger_joint"],
+            joint_pos=torch.zeros((1, 8)),
+            applied_torque=torch.zeros((1, 8)),
+        )
+    )
+    contact = SimpleNamespace(
+        data=SimpleNamespace(
+            net_forces_w=torch.tensor(
+                [[[2.0, 0.0, 0.0], [-2.0, 0.0, 0.0]]], dtype=torch.float32
+            )
+        )
+    )
+
+    class Scene(dict):
+        sensors = {"gripper__all_contacts": contact}
+
+    env = SimpleNamespace(scene=Scene(robot=robot))
+    np.testing.assert_array_equal(gripper_contact_force(env).numpy(), [[0.0, 0.0, 0.0]])
+    np.testing.assert_array_equal(gripper_touch(env).numpy(), [[1.0]])
 
 
 def test_extract_and_pack_sensor_state_preserves_mask_semantics():

@@ -17,16 +17,20 @@ import numpy as np
 
 try:
     from franka_sensor_schema import (
+        SensorFrame,
         SensorCaptureBuffer,
         empty_sensor_frame,
         sensor_frame_from_isaac_env,
+        summarize_contact_telemetry,
         write_sensor_group,
     )
 except ModuleNotFoundError:
     from scripts.franka_sensor_schema import (
+        SensorFrame,
         SensorCaptureBuffer,
         empty_sensor_frame,
         sensor_frame_from_isaac_env,
+        summarize_contact_telemetry,
         write_sensor_group,
     )
 
@@ -42,6 +46,9 @@ class GeminiEpisodeDatasetRecorder:
     unpack_images: Callable[..., dict[str, np.ndarray]]
     fps: int = 15
     video_scale: float = 0.5
+    require_contact_telemetry: bool = False
+    minimum_contact_coverage: float = 0.95
+    minimum_touch_samples: int = 1
     _actions: list[np.ndarray] = field(default_factory=list, init=False)
     _joints: list[np.ndarray] = field(default_factory=list, init=False)
     _eef_positions: list[np.ndarray] = field(default_factory=list, init=False)
@@ -109,6 +116,7 @@ class GeminiEpisodeDatasetRecorder:
         *,
         eef_position: np.ndarray,
         eef_quaternion_wxyz: np.ndarray,
+        sensor_frame: SensorFrame | None = None,
     ) -> None:
         if self._closed:
             raise RuntimeError("cannot append to a closed episode recorder")
@@ -131,10 +139,11 @@ class GeminiEpisodeDatasetRecorder:
         )
         self._banana_poses.append(banana)
         self._plate_poses.append(plate)
-        try:
-            sensor_frame = sensor_frame_from_isaac_env(env)
-        except Exception:
-            sensor_frame = empty_sensor_frame()
+        if sensor_frame is None:
+            try:
+                sensor_frame = sensor_frame_from_isaac_env(env)
+            except Exception:
+                sensor_frame = empty_sensor_frame()
         self._sensors.append(sensor_frame, (self.sample_count - 1) / self.fps)
         combined = self.unpack_images(
             observation, scale=self.video_scale, env_id=0
@@ -146,6 +155,15 @@ class GeminiEpisodeDatasetRecorder:
             self._video.release()
             self._video = None
 
+    def contact_telemetry_summary(self) -> dict[str, Any]:
+        values, validity, _ = self._sensors.arrays()
+        return summarize_contact_telemetry(
+            values,
+            validity,
+            minimum_coverage=self.minimum_contact_coverage,
+            minimum_touch_samples=self.minimum_touch_samples,
+        )
+
     def publish_success(self, *, trace_path: Path) -> dict[str, Any]:
         """Atomically publish one successful training episode and manifest row."""
         if self._closed:
@@ -153,6 +171,13 @@ class GeminiEpisodeDatasetRecorder:
         if self.sample_count < 41:
             raise ValueError(
                 "successful episode is too short for GR00T's 40-step action horizon"
+            )
+        contact_summary = self.contact_telemetry_summary()
+        if self.require_contact_telemetry and not contact_summary["passed"]:
+            raise ValueError(
+                "contact telemetry admission gate failed: "
+                f"coverage={contact_summary['coverage']:.3f}, "
+                f"touch_samples={contact_summary['touch_samples']}"
             )
         self._close_video()
         if not self._partial_video_path.is_file():
@@ -206,6 +231,7 @@ class GeminiEpisodeDatasetRecorder:
             "video": self.video_path.name,
             "trace": str(trace_path),
             "samples": self.sample_count,
+            "contact_telemetry": contact_summary,
             **self.metadata,
         }
         with (self.output_dir / "collection_manifest.jsonl").open(

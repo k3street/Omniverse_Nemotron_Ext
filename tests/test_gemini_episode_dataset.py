@@ -6,6 +6,12 @@ import numpy as np
 import pytest
 
 from scripts.convert_robolab_demo_to_groot import episode_provenance
+from scripts.franka_sensor_schema import (
+    SENSOR_DIM,
+    SIGNAL_SLICES,
+    VALIDITY_DIM,
+    SensorFrame,
+)
 from scripts.gemini_episode_dataset import GeminiEpisodeDatasetRecorder
 
 
@@ -46,7 +52,7 @@ def fake_env():
     return SimpleNamespace(scene={"robot": robot, "banana": banana, "plate_large": plate})
 
 
-def append_samples(recorder, count=41):
+def append_samples(recorder, count=41, sensor_frame=None):
     env = fake_env()
     for _ in range(count):
         recorder.append(
@@ -55,6 +61,7 @@ def append_samples(recorder, count=41):
             {},
             eef_position=np.array([0.4, 0.1, 0.2], dtype=np.float32),
             eef_quaternion_wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+            sensor_frame=sensor_frame,
         )
 
 
@@ -129,3 +136,43 @@ def test_new_attempt_removes_only_unpublished_stale_partial(tmp_path):
     )
     recorder.discard()
     assert not stale.exists()
+
+
+def test_contact_gate_rejects_zero_validity_episode(tmp_path):
+    recorder = GeminiEpisodeDatasetRecorder(
+        output_dir=tmp_path,
+        episode_index=8,
+        metadata={},
+        video_writer_factory=FakeVideoWriter,
+        unpack_images=fake_unpack,
+        require_contact_telemetry=True,
+    )
+    empty = SensorFrame(
+        values=np.zeros(SENSOR_DIM, dtype=np.float32),
+        validity=np.zeros(VALIDITY_DIM, dtype=np.float32),
+    )
+    append_samples(recorder, sensor_frame=empty)
+    with pytest.raises(ValueError, match="contact telemetry admission gate failed"):
+        recorder.publish_success(trace_path=tmp_path / "trace.json")
+    recorder.discard()
+    assert not recorder.hdf5_path.exists()
+
+
+def test_contact_gate_publishes_episode_with_valid_touch(tmp_path):
+    values = np.zeros(SENSOR_DIM, dtype=np.float32)
+    validity = np.zeros(VALIDITY_DIM, dtype=np.float32)
+    values[SIGNAL_SLICES["gripper_contact_force"]] = [0.0, 0.0, 2.0]
+    values[SIGNAL_SLICES["gripper_touch"]] = 1.0
+    validity[5:7] = 1.0
+    recorder = GeminiEpisodeDatasetRecorder(
+        output_dir=tmp_path,
+        episode_index=9,
+        metadata={},
+        video_writer_factory=FakeVideoWriter,
+        unpack_images=fake_unpack,
+        require_contact_telemetry=True,
+    )
+    append_samples(recorder, sensor_frame=SensorFrame(values, validity))
+    row = recorder.publish_success(trace_path=tmp_path / "trace.json")
+    assert row["contact_telemetry"]["passed"]
+    assert row["contact_telemetry"]["touch_samples"] == 41

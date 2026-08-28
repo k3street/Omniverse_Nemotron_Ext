@@ -215,7 +215,13 @@ def sensor_frame_from_isaac_env(env: Any, *, touch_threshold_n: float = 0.1) -> 
         validity[1] = 1.0
 
     sensors = getattr(env.scene, "sensors", {})
-    batch_sensor = sensors.get("gripper__all_objs") if hasattr(sensors, "get") else None
+    batch_sensor = None
+    if hasattr(sensors, "get"):
+        # Prefer the Sim 6 unfiltered two-finger sensor.  Fall back to the
+        # legacy filtered RoboLab batch sensor for older runtimes/datasets.
+        batch_sensor = sensors.get("gripper__all_contacts")
+        if batch_sensor is None:
+            batch_sensor = sensors.get("gripper__all_objs")
     candidates = (
         [batch_sensor]
         if batch_sensor is not None
@@ -228,21 +234,70 @@ def sensor_frame_from_isaac_env(env: Any, *, touch_threshold_n: float = 0.1) -> 
     )
     if candidates:
         forces = []
+        individual_force_norms = []
         for sensor in candidates:
             raw = sensor.data.net_forces_w
             if raw is None:
                 continue
-            array = _numpy(raw)
-            if array.size:
-                forces.append(array.reshape(-1, 3).sum(axis=0))
+            array = _numpy(raw).astype(np.float32, copy=False)
+            if array.size and np.isfinite(array).all():
+                body_forces = array.reshape(-1, 3)
+                forces.append(body_forces.sum(axis=0))
+                individual_force_norms.extend(
+                    np.linalg.vector_norm(body_forces, axis=1).tolist()
+                )
         if forces:
             force = np.sum(forces, axis=0, dtype=np.float32)
             values[SIGNAL_SLICES["gripper_contact_force"]] = force
             values[SIGNAL_SLICES["gripper_touch"]] = float(
-                np.linalg.norm(force) >= touch_threshold_n
+                bool(individual_force_norms)
+                and max(individual_force_norms) >= touch_threshold_n
             )
             validity[5:7] = 1.0
     return SensorFrame(values=values, validity=validity)
+
+
+def summarize_contact_telemetry(
+    values: np.ndarray,
+    validity: np.ndarray,
+    *,
+    minimum_coverage: float = 0.95,
+    minimum_touch_samples: int = 1,
+) -> dict[str, Any]:
+    """Summarize and gate an episode's real gripper-contact telemetry."""
+    values = np.asarray(values)
+    validity = np.asarray(validity)
+    if values.ndim != 2 or values.shape[1] != SENSOR_DIM:
+        raise ValueError(f"sensor values must have shape (N, {SENSOR_DIM})")
+    if validity.shape != (len(values), VALIDITY_DIM):
+        raise ValueError(
+            f"sensor validity must have shape ({len(values)}, {VALIDITY_DIM})"
+        )
+    force_valid = validity[:, 5] > 0.5
+    touch_valid = validity[:, 6] > 0.5
+    jointly_valid = force_valid & touch_valid
+    coverage = float(jointly_valid.mean()) if len(jointly_valid) else 0.0
+    force = values[:, SIGNAL_SLICES["gripper_contact_force"]]
+    touch = values[:, SIGNAL_SLICES["gripper_touch"]].reshape(-1)
+    valid_force_norm = np.linalg.vector_norm(force[jointly_valid], axis=1)
+    touch_samples = int(np.count_nonzero(touch[jointly_valid] >= 0.5))
+    peak_force_n = float(valid_force_norm.max()) if len(valid_force_norm) else 0.0
+    passed = coverage >= minimum_coverage and touch_samples >= minimum_touch_samples
+    return {
+        "passed": bool(passed),
+        "samples": int(len(values)),
+        "valid_samples": int(np.count_nonzero(jointly_valid)),
+        "coverage": coverage,
+        "touch_samples": touch_samples,
+        "touch_fraction": (
+            float(touch_samples / np.count_nonzero(jointly_valid))
+            if np.count_nonzero(jointly_valid)
+            else 0.0
+        ),
+        "peak_net_force_n": peak_force_n,
+        "minimum_coverage": float(minimum_coverage),
+        "minimum_touch_samples": int(minimum_touch_samples),
+    }
 
 
 class SensorCaptureBuffer:
