@@ -9,6 +9,7 @@ import traceback
 from pathlib import Path
 
 import cv2  # Must precede Isaac Lab imports.
+import h5py
 import torch
 from isaaclab.app import AppLauncher
 
@@ -31,6 +32,13 @@ from robolab.core.observations.observation_utils import unpack_image_obs  # noqa
 from robolab.core.utils.video_utils import VideoWriter  # noqa: E402
 from robolab.registrations.droid.auto_env_registrations_abs_ik import (  # noqa: E402
     auto_register_droid_abs_ik_envs,
+)
+from franka_sensor_schema import (  # noqa: E402
+    SIGNAL_SPECS,
+    SensorCaptureBuffer,
+    empty_sensor_frame,
+    sensor_frame_from_isaac_env,
+    write_sensor_group,
 )
 
 
@@ -56,7 +64,9 @@ def jitter_object(env, name: str, amount: float, generator: torch.Generator) -> 
     asset.write_root_velocity_to_sim(torch.zeros_like(asset.data.root_vel_w))
 
 
-def run_episode(env, hold_steps: int, episode: int, output: Path) -> bool:
+def run_episode(
+    env, hold_steps: int, episode: int, output: Path
+) -> tuple[bool, SensorCaptureBuffer]:
     obs, _ = env.reset()
     # Arm recording only after reset. Arming before reset causes the recorder to
     # finalize an empty episode and leaves subsequent simulator steps unrecorded.
@@ -90,6 +100,10 @@ def run_episode(env, hold_steps: int, episode: int, output: Path) -> bool:
     action = torch.zeros((1, 8), dtype=torch.float32, device=env.device)
     action_quat = BANANA_GRASP_QUAT.to(env.device)
     terminated = False
+    sensor_buffer = SensorCaptureBuffer()
+    sensor_warning_printed = False
+    sample_index = 0
+    step_dt = float(getattr(env, "step_dt", 1.0 / 15.0))
     for label, target, gripper, steps in waypoints:
         action[0, :3] = target.to(env.device)
         action[0, 3:7] = action_quat
@@ -97,6 +111,17 @@ def run_episode(env, hold_steps: int, episode: int, output: Path) -> bool:
         print(f"[oracle] {label}: target={target.tolist()} gripper={gripper}")
         for _ in range(steps):
             obs, _, term, trunc, _ = env.step(action)
+            try:
+                sensor_frame = sensor_frame_from_isaac_env(env)
+            except Exception as error:
+                # Sensor capture is additive. Keep the episode, but make the
+                # missing sample explicit through an all-zero validity mask.
+                sensor_frame = empty_sensor_frame()
+                if not sensor_warning_printed:
+                    print(f"[oracle] optional sensor capture unavailable: {error}")
+                    sensor_warning_printed = True
+            sensor_buffer.append(sensor_frame, sample_index * step_dt)
+            sample_index += 1
             if video is not None:
                 video.write(unpack_image_obs(obs, env_id=0)["combined_image"])
             if bool(torch.as_tensor(term).any()) or bool(torch.as_tensor(trunc).any()):
@@ -110,7 +135,31 @@ def run_episode(env, hold_steps: int, episode: int, output: Path) -> bool:
     if video is not None:
         video.release()
     print(f"[oracle] result: success={success} details={results}")
-    return success
+    return success, sensor_buffer
+
+
+def attach_sensor_recording(
+    hdf5_path: Path, sensor_buffer: SensorCaptureBuffer, demo_key: str = "demo_0"
+) -> None:
+    values, validity, timestamps = sensor_buffer.arrays()
+    with h5py.File(hdf5_path, "r+") as target:
+        demo = target[f"data/{demo_key}"]
+        write_sensor_group(
+            demo,
+            values,
+            validity,
+            timestamps,
+            source="isaac_sim_contact_and_actuator_telemetry",
+        )
+        sample_count = int(demo.attrs["num_samples"])
+    coverage = {
+        spec.name: (float(validity[:, index].mean()) if len(validity) else 0.0)
+        for index, spec in enumerate(SIGNAL_SPECS)
+    }
+    print(
+        f"[oracle] sensor schema attached to {hdf5_path.name}: "
+        f"samples={sample_count} captured={len(values)} coverage={coverage}"
+    )
 
 
 def main() -> None:
@@ -128,9 +177,14 @@ def main() -> None:
         # RoboLab's streaming recorder is single-shot after a terminal episode;
         # use a fresh manager per demo so all state/action streams are re-armed.
         env, _ = create_env("BananaOnPlateTask", num_envs=1, use_fabric=True)
-        successes += int(run_episode(env, args.hold_steps, episode, output))
+        success, sensor_buffer = run_episode(env, args.hold_steps, episode, output)
+        successes += int(success)
         end_episode(env)
         env.close()
+        hdf5_path = output / f"run_{episode}.hdf5"
+        if not hdf5_path.is_file():
+            raise FileNotFoundError(f"RoboLab recorder did not create {hdf5_path}")
+        attach_sensor_recording(hdf5_path, sensor_buffer)
     simulation_app.close()
     print(f"[oracle] complete: {successes}/{args.episodes} successful")
     if successes != args.episodes:

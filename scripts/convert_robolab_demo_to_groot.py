@@ -10,7 +10,31 @@ from pathlib import Path
 import cv2
 import h5py
 import numpy as np
-import pandas as pd
+
+try:
+    from franka_sensor_schema import (
+        SENSOR_COLUMN,
+        SENSOR_DIM,
+        SENSOR_SCHEMA_VERSION,
+        SIGNAL_SPECS,
+        VALIDITY_COLUMN,
+        VALIDITY_DIM,
+        load_sensor_block,
+        masked_sensor_stats,
+        sensor_modality_metadata,
+    )
+except ModuleNotFoundError:  # Support imports as scripts.convert_robolab_demo_to_groot.
+    from scripts.franka_sensor_schema import (
+        SENSOR_COLUMN,
+        SENSOR_DIM,
+        SENSOR_SCHEMA_VERSION,
+        SIGNAL_SPECS,
+        VALIDITY_COLUMN,
+        VALIDITY_DIM,
+        load_sensor_block,
+        masked_sensor_stats,
+        sensor_modality_metadata,
+    )
 
 
 DROID_EEF_ROTATION_CORRECT = np.array(
@@ -65,11 +89,16 @@ def write_video_half(source: Path, output: Path, *, x: int, width: int, height: 
     )
 
 
-def stats(values: np.ndarray) -> dict[str, list[float]]:
+def stats(
+    values: np.ndarray, *, unit_std_for_constant: bool = False
+) -> dict[str, list[float]]:
     values = np.asarray(values, dtype=np.float32)
+    std = values.std(axis=0)
+    if unit_std_for_constant:
+        std = np.where(std < 1.0e-8, 1.0, std)
     return {
         "mean": values.mean(axis=0).tolist(),
-        "std": values.std(axis=0).tolist(),
+        "std": std.tolist(),
         "min": values.min(axis=0).tolist(),
         "max": values.max(axis=0).tolist(),
         "q01": np.quantile(values, 0.01, axis=0).tolist(),
@@ -79,7 +108,17 @@ def stats(values: np.ndarray) -> dict[str, list[float]]:
 
 def read_episode(
     hdf5_path: Path, video_path: Path, *, demo_key: str, action_mode: str
-) -> tuple[np.ndarray, np.ndarray, int, int, float]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    dict[str, float],
+    dict[str, str | None],
+    int,
+    int,
+    float,
+]:
     width, height, video_frames, fps = video_info(video_path)
     if width % 2:
         raise ValueError(f"Expected an even-width two-camera video, got {width}x{height}")
@@ -90,10 +129,10 @@ def read_episode(
         joints = np.asarray(demo["states/articulation/robot/joint_position"], dtype=np.float32)
         ee_position = np.asarray(demo["ee_pose/position"], dtype=np.float32)
         ee_quaternion = np.asarray(demo["ee_pose/orientation"], dtype=np.float32)
-
-    length = min(video_frames, len(actions), len(joints), len(ee_position))
-    if length < 41:
-        raise ValueError(f"Episode is too short for GR00T's 40-step action horizon: {length}")
+        length = min(video_frames, len(actions), len(joints), len(ee_position))
+        if length < 41:
+            raise ValueError(f"Episode is too short for GR00T's 40-step action horizon: {length}")
+        sensor_block = load_sensor_block(demo, length)
 
     state_eef = eef_9d(ee_position[:length], ee_quaternion[:length])
     state_joint = joints[:length, :7]
@@ -109,12 +148,24 @@ def read_episode(
     else:
         action_joint = actions[:length, :7].astype(np.float32)
     action = np.concatenate([action_eef, action_gripper, action_joint], axis=-1)
-    return observation_state, action, width, height, fps
+    return (
+        observation_state,
+        action,
+        sensor_block.values,
+        sensor_block.validity,
+        sensor_block.coverage,
+        sensor_block.source_paths,
+        width,
+        height,
+        fps,
+    )
 
 
 def convert_many(
     episodes: list[tuple[Path, Path, str]], output: Path, instruction: str, action_mode: str
 ) -> None:
+    import pandas as pd
+
     if not episodes:
         raise ValueError("No HDF5/video episode pairs were found")
 
@@ -122,15 +173,30 @@ def convert_many(
     meta_dir = output / "meta"
     data_dir.mkdir(parents=True, exist_ok=True)
     meta_dir.mkdir(parents=True, exist_ok=True)
+    relative_stats = meta_dir / "relative_stats.json"
+    if relative_stats.exists():
+        relative_stats.unlink()
 
     videos = output / "videos" / "chunk-000"
     all_states: list[np.ndarray] = []
     all_actions: list[np.ndarray] = []
+    all_sensors: list[np.ndarray] = []
+    all_sensor_validity: list[np.ndarray] = []
     episode_metadata: list[dict] = []
     global_index = 0
     dataset_fps: float | None = None
     for episode_index, (hdf5_path, video_path, demo_key) in enumerate(episodes):
-        observation_state, action, width, height, fps = read_episode(
+        (
+            observation_state,
+            action,
+            sensor_values,
+            sensor_validity,
+            sensor_coverage,
+            sensor_source_paths,
+            width,
+            height,
+            fps,
+        ) = read_episode(
             hdf5_path, video_path, demo_key=demo_key, action_mode=action_mode
         )
         if dataset_fps is None:
@@ -141,6 +207,8 @@ def convert_many(
         frame = pd.DataFrame(
             {
                 "observation.state": list(observation_state),
+                SENSOR_COLUMN: list(sensor_values),
+                VALIDITY_COLUMN: list(sensor_validity),
                 "action": list(action),
                 "timestamp": np.arange(length, dtype=np.float32) / fps,
                 "frame_index": np.arange(length, dtype=np.int64),
@@ -152,16 +220,27 @@ def convert_many(
         name = f"episode_{episode_index:06d}"
         frame.to_parquet(data_dir / f"{name}.parquet", index=False)
         half = width // 2
-        write_video_half(video_path, videos / "observation.images.exterior_1_left" / f"{name}.mp4", x=0, width=half, height=height)
-        write_video_half(video_path, videos / "observation.images.wrist_left" / f"{name}.mp4", x=half, width=half, height=height)
+        write_video_half(video_path, videos / "observation.images.exterior_image_1_left" / f"{name}.mp4", x=0, width=half, height=height)
+        write_video_half(video_path, videos / "observation.images.wrist_image_left" / f"{name}.mp4", x=half, width=half, height=height)
         all_states.append(observation_state)
         all_actions.append(action)
-        episode_metadata.append({"episode_index": episode_index, "tasks": [instruction], "length": length})
+        all_sensors.append(sensor_values)
+        all_sensor_validity.append(sensor_validity)
+        episode_metadata.append({
+            "episode_index": episode_index,
+            "tasks": [instruction],
+            "length": length,
+            "sensor_schema_version": SENSOR_SCHEMA_VERSION,
+            "sensor_coverage": sensor_coverage,
+            "sensor_source_paths": sensor_source_paths,
+        })
         global_index += length
 
     assert dataset_fps is not None
     observation_state = np.concatenate(all_states)
     action = np.concatenate(all_actions)
+    sensor_values = np.concatenate(all_sensors)
+    sensor_validity = np.concatenate(all_sensor_validity)
 
     info = {
         "codebase_version": "v2.1",
@@ -174,11 +253,20 @@ def convert_many(
         "chunks_size": 1000,
         "splits": {"train": f"0:{len(episodes)}"},
         "features": {
-            "observation.images.exterior_1_left": {"dtype": "video", "shape": [180, 320, 3]},
-            "observation.images.wrist_left": {"dtype": "video", "shape": [180, 320, 3]},
+            "observation.images.exterior_image_1_left": {"dtype": "video", "shape": [180, 320, 3]},
+            "observation.images.wrist_image_left": {"dtype": "video", "shape": [180, 320, 3]},
             "observation.state": {"dtype": "float32", "shape": [17]},
+            SENSOR_COLUMN: {"dtype": "float32", "shape": [SENSOR_DIM]},
+            VALIDITY_COLUMN: {"dtype": "float32", "shape": [VALIDITY_DIM]},
             "action": {"dtype": "float32", "shape": [17]},
             "task_index": {"dtype": "int64", "shape": [1]},
+        },
+        "sensor_schema": {
+            "version": SENSOR_SCHEMA_VERSION,
+            "missing_policy": "zero_fill_with_validity_mask",
+            "signals": [
+                {"name": spec.name, "width": spec.width} for spec in SIGNAL_SPECS
+            ],
         },
     }
     modality = {
@@ -186,6 +274,7 @@ def convert_many(
             "eef_9d": {"start": 0, "end": 9},
             "gripper_position": {"start": 9, "end": 10},
             "joint_position": {"start": 10, "end": 17},
+            **sensor_modality_metadata(),
         },
         "action": {
             "eef_9d": {"start": 0, "end": 9},
@@ -193,8 +282,8 @@ def convert_many(
             "joint_position": {"start": 10, "end": 17},
         },
         "video": {
-            "exterior_1_left": {"original_key": "observation.images.exterior_1_left"},
-            "wrist_left": {"original_key": "observation.images.wrist_left"},
+            "exterior_image_1_left": {"original_key": "observation.images.exterior_image_1_left"},
+            "wrist_image_left": {"original_key": "observation.images.wrist_image_left"},
         },
         "annotation": {
             "language.language_instruction": {"original_key": "task_index"},
@@ -209,10 +298,25 @@ def convert_many(
         "".join(json.dumps(item) + "\n" for item in episode_metadata)
     )
     (meta_dir / "stats.json").write_text(
-        json.dumps({"observation.state": stats(observation_state), "action": stats(action)}, indent=2)
+        json.dumps(
+            {
+                "observation.state": stats(observation_state),
+                SENSOR_COLUMN: masked_sensor_stats(sensor_values, sensor_validity),
+                VALIDITY_COLUMN: stats(sensor_validity, unit_std_for_constant=True),
+                "action": stats(action),
+            },
+            indent=2,
+        )
         + "\n"
     )
-    print(f"Converted {len(episodes)} episodes / {global_index} frames to {output}")
+    coverage = {
+        spec.name: float(sensor_validity[:, index].mean())
+        for index, spec in enumerate(SIGNAL_SPECS)
+    }
+    print(
+        f"Converted {len(episodes)} episodes / {global_index} frames to {output}; "
+        f"sensor_coverage={coverage}"
+    )
 
 
 def main() -> None:

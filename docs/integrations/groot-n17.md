@@ -93,6 +93,10 @@ inference. RoboLab's validated closed-loop simulation configuration uses the
 post-trained `nvidia/GR00T-N1.7-DROID` checkpoint, two DROID cameras, and an
 execution horizon of eight.
 
+For versioned Franka torque/contact capture, legacy-episode validity masks, and
+sensor-aware post-training, see
+[Franka force/contact data for DROID and GR00T](franka-force-tactile-data.md).
+
 On DGX Spark, RoboLab needs its aarch64 Isaac Sim 5.1 environment and a CUDA 13
 NVRTC mapping for the GB10 `sm_121` GPU. The launcher also supplies Isaac Sim's
 required aarch64 `libgomp` preload. Override checkout locations with

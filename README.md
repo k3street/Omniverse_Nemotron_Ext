@@ -154,6 +154,8 @@ status, inference, policy serving, and fine-tuning commands. See the
 [GR00T N1.7 integration guide](docs/integrations/groot-n17.md).
 Use `./launch_groot_robolab.sh replay` for the bundled Isaac Sim visualization,
 or `./launch_groot_robolab.sh live` to connect RoboLab to a GR00T policy server.
+Franka torque/contact collection and masked sensor-aware datasets are documented
+in [the force/contact data guide](docs/integrations/franka-force-tactile-data.md).
 
 #### Containerized service
 
