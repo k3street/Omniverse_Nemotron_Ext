@@ -331,6 +331,13 @@ class GeminiProvider:
                     "parameters": cleaned_params,
                 })
             payload["tools"] = [{"function_declarations": function_declarations}]
+            if context.get("tool_choice") == "required":
+                # Gemini's ANY mode constrains the response to a native
+                # functionCall part. This is required for control paths where
+                # prose or tool-shaped JSON must never become executable.
+                payload["toolConfig"] = {
+                    "functionCallingConfig": {"mode": "ANY"}
+                }
         return payload
 
     def _format_messages(self, messages: List[Dict]) -> List[Dict]:
@@ -491,10 +498,18 @@ class GeminiProvider:
         )
 
     def _clean_params(self, params: Dict) -> Dict:
-        """Recursively strip 'default' keys that Gemini doesn't support."""
+        """Normalize JSON Schema to Gemini's supported function subset."""
         cleaned = {}
         for k, v in params.items():
-            if k == "default":
+            if k in {"default", "additionalProperties"}:
+                # Runtime validators still enforce both. Gemini's function
+                # declaration schema accepts neither keyword.
+                continue
+            if k == "const":
+                # Gemini function declarations do not accept JSON-Schema
+                # ``const``. A single-value enum preserves the observation
+                # token restriction in the advertised schema.
+                cleaned["enum"] = [v]
                 continue
             if isinstance(v, dict):
                 cleaned[k] = self._clean_params(v)

@@ -8,7 +8,6 @@ from scripts.world_intent_contract import (
     WorldIntent,
     WorldIntentValidationError,
     build_world_intent_prompt,
-    minimum_vertical_clearance_m,
     parse_world_intent_json,
     world_intent_json_schema,
 )
@@ -150,7 +149,6 @@ def test_prompt_requests_world_state_without_embedding_control_vocabulary():
 
     assert "maintaining clearance from entity c" in lowered
     assert "predicates in `constraints`" in lowered
-    assert 'attribute: "vertical_clearance_m"' in lowered
     for forbidden in (
         "joint target",
         "end effector",
@@ -162,35 +160,20 @@ def test_prompt_requests_world_state_without_embedding_control_vocabulary():
         assert forbidden not in lowered
 
 
-def test_extracts_only_canonical_vertical_clearance_constraint():
+def test_constraints_remain_model_defined_world_predicates():
     payload = relation_intent()
     payload["constraints"] = [
         {
             "subject_id": "entity-17",
-            "attribute": "vertical_clearance_m",
-            "operator": "at_least",
-            "value": 0.2,
+            "attribute": "model_defined_spatial_relation",
+            "operator": "maintain",
+            "value": {"distance_m": 0.2, "axis": "observed_up"},
             "reference_id": "entity-4",
         }
     ]
-
-    assert minimum_vertical_clearance_m(WorldIntent.from_mapping(payload)) == 0.2
-
-
-def test_noncanonical_or_unsafe_vertical_clearance_is_rejected():
-    payload = relation_intent()
-    payload["constraints"] = [
-        {
-            "subject_id": "entity-17",
-            "attribute": "vertical_clearance_m",
-            "operator": "equals",
-            "value": 0.2,
-            "reference_id": "entity-4",
-        }
-    ]
-    with pytest.raises(WorldIntentValidationError, match="operator 'at_least'"):
-        minimum_vertical_clearance_m(WorldIntent.from_mapping(payload))
-
-    payload["constraints"][0].update(operator="at_least", value=1.5)
-    with pytest.raises(WorldIntentValidationError, match=r"within \[0, 1\]"):
-        minimum_vertical_clearance_m(WorldIntent.from_mapping(payload))
+    intent = WorldIntent.from_mapping(payload)
+    assert intent.constraints[0].attribute == "model_defined_spatial_relation"
+    assert intent.constraints[0].value == {
+        "distance_m": 0.2,
+        "axis": "observed_up",
+    }

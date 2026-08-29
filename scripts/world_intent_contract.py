@@ -271,37 +271,6 @@ entities with stable semantic identifiers derived from the observation. Do not
 describe mechanisms, body parts, controllers, trajectories, or motor commands.
 Represent requirements that must remain true while the goal is being realized
 as world-state predicates in `constraints`.
-For a vertical clearance stated in meters, use the canonical predicate
-`attribute: "vertical_clearance_m"`, `operator: "at_least"`, a numeric `value`,
-and the relevant `reference_id`.
 Return exactly one JSON object matching this schema, with no Markdown:
 {schema}
 """
-
-
-def minimum_vertical_clearance_m(intent: WorldIntent) -> float | None:
-    """Return the strict canonical vertical-clearance constraint, if present."""
-    clearances: list[float] = []
-    for index, predicate in enumerate(intent.constraints):
-        if predicate.attribute != "vertical_clearance_m":
-            continue
-        if predicate.operator != "at_least":
-            raise WorldIntentValidationError(
-                "vertical_clearance_m requires operator 'at_least'"
-            )
-        if predicate.reference_id is None:
-            raise WorldIntentValidationError(
-                "vertical_clearance_m requires a reference_id"
-            )
-        value = predicate.value
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise WorldIntentValidationError(
-                f"constraints[{index}].value must be a numeric clearance in meters"
-            )
-        value = float(value)
-        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
-            raise WorldIntentValidationError(
-                f"constraints[{index}].value clearance must be within [0, 1] meters"
-            )
-        clearances.append(value)
-    return max(clearances) if clearances else None

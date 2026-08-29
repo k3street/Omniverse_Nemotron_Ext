@@ -9,6 +9,7 @@ every semantic phase instead of calling the model every simulator step.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import hashlib
 import json
@@ -30,6 +31,8 @@ from isaaclab.app import AppLauncher
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 load_dotenv(REPO_ROOT / ".env")
 
 parser = argparse.ArgumentParser(
@@ -40,8 +43,8 @@ parser.add_argument(
     "--instruction",
     default="Pick up the yellow banana and put it on the white plate",
     help=(
-        "Natural-language instruction evaluated by the world-intent shadow only; "
-        "it does not change physical motion."
+        "Natural-language instruction supplied to the model at every fresh "
+        "observation-bound motion decision."
     ),
 )
 parser.add_argument("--model", default="gemini-robotics-er-2-preview")
@@ -64,6 +67,14 @@ parser.add_argument(
     type=int,
     default=10,
     help="Send a fresh mid-motion observation to Gemini every N local IK chunks.",
+)
+parser.add_argument(
+    "--maximum-model-target-correction",
+    type=float,
+    default=0.10,
+    help=(
+        "Safety envelope for one model-issued XYZ target correction in meters."
+    ),
 )
 parser.add_argument("--maximum-grasp-drift", type=float, default=0.025)
 parser.add_argument("--minimum-transport-lift", type=float, default=0.030)
@@ -191,14 +202,6 @@ parser.add_argument(
     action="store_true",
     help="Skip the non-authoritative embodiment-neutral Gemini intent probe.",
 )
-parser.add_argument(
-    "--world-intent-clearance-authority",
-    action="store_true",
-    help=(
-        "Allow only a validated vertical_clearance_m world predicate to raise "
-        "legacy lift/transport targets."
-    ),
-)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, _ = parser.parse_known_args()
 args_cli.enable_cameras = True
@@ -218,7 +221,6 @@ from robolab.registrations.droid.auto_env_registrations_abs_ik import (  # noqa:
 from robolab.robots.droid import DroidJointPositionActionCfg  # noqa: E402
 from adaptive_pick_place import (  # noqa: E402
     apply_object_relative_grasp,
-    apply_lift_test_contract,
     derive_object_relative_grasp,
     derive_manipulation_feedback,
     live_phase_target,
@@ -247,6 +249,18 @@ from robolab_contact_telemetry import (  # noqa: E402
     contact_sensor_runtime_info,
     install_sim6_gripper_contact_sensor,
 )
+from observation_bound_motion_tools import (  # noqa: E402
+    ActuatorExecutorRegistry,
+    ActuatorExecutorSpec,
+    MotionExecutorRegistry,
+    MotionExecutorSpec,
+    MotionToolValidationError,
+    ObservationBoundActuatorGate,
+    ObservationBoundMotionGate,
+    actuator_tool_schemas,
+    motion_report_yields_to_actuator,
+    motion_tool_schemas,
+)
 from transport_recovery import (  # noqa: E402
     SupportContactMonitor,
     assess_release_detachment,
@@ -258,9 +272,8 @@ from world_intent_contract import (  # noqa: E402
     WORLD_INTENT_SCHEMA_VERSION,
     WorldIntent,
     build_world_intent_prompt,
-    minimum_vertical_clearance_m,
 )
-from world_constraint_governor import governed_vertical_target  # noqa: E402
+from service.isaac_assist_service.chat.llm_gemini import GeminiProvider  # noqa: E402
 
 
 MODEL_ID = args_cli.model
@@ -502,6 +515,37 @@ def _active_contact_summary() -> dict[str, Any]:
     )
 
 
+def _current_contact_observation(env: Any) -> dict[str, Any]:
+    """Expose the fresh contact sample to the same model observation."""
+    try:
+        frame = sensor_frame_from_isaac_env(env)
+        force_valid = bool(frame.validity[5] > 0.5)
+        touch_valid = bool(frame.validity[6] > 0.5)
+        force = np.asarray(
+            frame.values[SIGNAL_SLICES["gripper_contact_force"]],
+            dtype=np.float32,
+        )
+        touch = bool(
+            frame.values[SIGNAL_SLICES["gripper_touch"]][0] >= 0.5
+        )
+        return {
+            "available": force_valid and touch_valid,
+            "touch": touch if touch_valid else None,
+            "net_force_xyz_n": force.tolist() if force_valid else None,
+            "net_force_n": (
+                float(np.linalg.vector_norm(force)) if force_valid else None
+            ),
+        }
+    except Exception as error:
+        return {
+            "available": False,
+            "touch": None,
+            "net_force_xyz_n": None,
+            "net_force_n": None,
+            "error": f"{type(error).__name__}: {error}",
+        }
+
+
 def _set_sim6_camera_views(env: Any) -> None:
     """Use look-at poses instead of legacy Sim 5 camera quaternions."""
     origins = env.scene.env_origins
@@ -633,6 +677,7 @@ def _state(env: Any, initial_banana_z: float) -> dict[str, Any]:
         "fingertip_banana_distance_m": fingertip_distance,
         "finger_joint_rad": finger_joint_rad,
         "gripper_closed_fraction": closed_fraction,
+        "current_contact": _current_contact_observation(env),
         "banana_lift_m": banana_lift,
         "banana_plate_xy_error_m": plate_xy_error,
         "banana_height_above_plate_m": height_above_plate,
@@ -761,6 +806,442 @@ bounded motion. Use complete when the image and state show that the banana is
 already on the plate and no more grasp/transport motion is needed."""
 
 
+def _local_dls_executor_registry() -> MotionExecutorRegistry:
+    """Register the currently available executor and its configurable surface."""
+    registry = MotionExecutorRegistry()
+    registry.register(
+        MotionExecutorSpec(
+            executor_id="bounded_dls_ik",
+            tool_name="execute_bounded_dls_ik",
+            description=(
+                "Execute the current world-space target with bounded damped "
+                "least-squares inverse kinematics. The target controls the pose "
+                "reported as eef_gripper_base_xyz in observed state; it is not "
+                "the fingertip or object position. Account for the observed "
+                "gripper_base_to_fingertip_m offset before correcting it. "
+                "Optionally correct the target and configure this invocation "
+                "from the fresh observation."
+            ),
+            configuration_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "position_tolerance_m": {
+                        "type": "number", "minimum": 0.001, "maximum": 0.05,
+                    },
+                    "translation_step_limit_m": {
+                        "type": "number", "minimum": 0.001, "maximum": 0.05,
+                    },
+                    "maximum_iterations": {
+                        "type": "integer", "minimum": 1, "maximum": 100,
+                    },
+                    "settle_steps": {
+                        "type": "integer", "minimum": 1, "maximum": 60,
+                    },
+                    "joint_step_limit_rad": {
+                        "type": "number", "minimum": 0.001, "maximum": 0.20,
+                    },
+                    "damping": {
+                        "type": "number", "minimum": 0.001, "maximum": 1.0,
+                    },
+                    "orientation_tolerance_deg": {
+                        "type": "number", "minimum": 0.1, "maximum": 30.0,
+                    },
+                    "rotation_step_limit_deg": {
+                        "type": "number", "minimum": 0.1, "maximum": 30.0,
+                    },
+                },
+            },
+        )
+    )
+    return registry
+
+
+def _local_binary_actuator_registry() -> ActuatorExecutorRegistry:
+    """Register the current runtime actuator without changing the protocol."""
+    registry = ActuatorExecutorRegistry()
+    registry.register(
+        ActuatorExecutorSpec(
+            executor_id="binary_end_effector_clamp",
+            tool_name="execute_binary_end_effector_clamp",
+            description=(
+                "Command the current binary end-effector clamp from fresh "
+                "visual, actuator, and contact evidence. Engage closes the "
+                "clamp, disengage opens it, and maintain preserves its current "
+                "command. Configure how long the command settles before the "
+                "next observation."
+            ),
+            command_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "state": {
+                        "type": "string",
+                        "enum": ["engage", "disengage", "maintain"],
+                    }
+                },
+                "required": ["state"],
+            },
+            configuration_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "settle_steps": {
+                        "type": "integer",
+                        "minimum": 8,
+                        "maximum": 120,
+                    }
+                },
+            },
+        )
+    )
+    return registry
+
+
+def _motion_governor_prompt(
+    *,
+    instruction: str,
+    observation_id: str,
+    state: dict[str, Any],
+    motion_context: dict[str, Any],
+    rgbd_summary: dict[str, Any] | None,
+    critic_context: str,
+) -> str:
+    """Build a tool-only motion decision request without task-specific rules."""
+    return f"""Govern the next bounded world-space movement using the attached
+fresh observation and exactly one advertised tool.
+
+Human instruction:
+{instruction}
+
+Fresh observation token: {observation_id}
+Observed world state:
+{json.dumps(state, indent=2)}
+Current motion context:
+{json.dumps(motion_context, indent=2)}
+RGB-D summary:
+{json.dumps(rgbd_summary, indent=2)}
+
+The image contains RGB on the left and depth on the right when depth is
+available. Select a registered executor tool to continue or correct the current
+world-space target. Select hold_motion when a new observation is required before
+movement, or abort_motion when movement is unsafe. Executor settings are
+optional and must stay inside their advertised schema. Ground any target
+correction and configuration change in current evidence. Measured contact and
+touch in observed world state are current physical evidence; interpret them
+together with the requested actuator state instead of requiring an unloaded
+actuator to reach its full travel. Do not emit prose or JSON outside the single
+native tool call.
+
+{critic_context}"""
+
+
+def _choose_observation_bound_motion_tool(
+    provider: GeminiProvider,
+    registry: MotionExecutorRegistry,
+    *,
+    instruction: str,
+    observation_prefix: str,
+    frame: np.ndarray,
+    state: dict[str, Any],
+    current_target: torch.Tensor,
+    motion_context: dict[str, Any],
+    rgbd_summary: dict[str, Any] | None,
+    critic_context: str,
+) -> tuple[dict[str, Any], float, str]:
+    """Ask the selected model to invoke one fresh-observation motion tool."""
+    encoded, digest = _encode_frame(frame)
+    observation_id = f"{observation_prefix}:{digest}"
+    gate = ObservationBoundMotionGate(
+        observation_id=observation_id,
+        current_target_m=current_target.tolist(),
+        maximum_correction_m=args_cli.maximum_model_target_correction,
+        registry=registry,
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a visual motion governor. Every movement decision must "
+                "be expressed as exactly one of the runtime-advertised tools."
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{encoded}",
+                        "detail": "high",
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": _motion_governor_prompt(
+                        instruction=instruction,
+                        observation_id=observation_id,
+                        state=state,
+                        motion_context=motion_context,
+                        rgbd_summary=rgbd_summary,
+                        critic_context=critic_context,
+                    ),
+                },
+            ],
+        },
+    ]
+    started = time.perf_counter()
+    response = asyncio.run(
+        asyncio.wait_for(
+            provider.complete(
+                messages,
+                {
+                    "tools": motion_tool_schemas(observation_id, registry),
+                    "tool_choice": "required",
+                },
+            ),
+            timeout=args_cli.timeout,
+        )
+    )
+    latency = time.perf_counter() - started
+    tool_calls = response.tool_calls or []
+    if len(tool_calls) != 1:
+        error = (
+            "model must issue exactly one motion tool call; "
+            f"received {len(tool_calls)}"
+        )
+        return (
+            {
+                "decision": "retry",
+                "grasp_ready": False,
+                "confidence": 0.0,
+                "assessment": f"Motion tool rejected by safety gate: {error}",
+                "motion_tool": {
+                    "status": "rejected",
+                    "observation_id": observation_id,
+                    "tool_name": None,
+                    "arguments": None,
+                    "error": error,
+                    "model_text": str(response.text or "")[:500],
+                },
+                "target_xyz_m": current_target.tolist(),
+                "executor_id": None,
+                "executor_config": {},
+            },
+            latency,
+            digest,
+        )
+    try:
+        outcome = gate.dispatch(tool_calls[0])
+    except MotionToolValidationError as error:
+        function = tool_calls[0].get("function", {})
+        return (
+            {
+                "decision": "retry",
+                "grasp_ready": False,
+                "confidence": 0.0,
+                "assessment": f"Motion tool rejected by safety gate: {error}",
+                "motion_tool": {
+                    "status": "rejected",
+                    "observation_id": observation_id,
+                    "tool_name": function.get("name"),
+                    "arguments": function.get("arguments"),
+                    "error": str(error),
+                },
+                "target_xyz_m": current_target.tolist(),
+                "executor_id": None,
+                "executor_config": {},
+            },
+            latency,
+            digest,
+        )
+    decision = {
+        "decision": (
+            "execute"
+            if outcome.action == "execute"
+            else "retry" if outcome.action == "hold" else "abort"
+        ),
+        "grasp_ready": outcome.action == "execute",
+        "confidence": outcome.confidence,
+        "assessment": outcome.reason,
+        "motion_tool": outcome.to_dict(),
+        "target_xyz_m": list(outcome.target_after_m),
+        "executor_id": outcome.executor_id,
+        "executor_config": dict(outcome.executor_config),
+    }
+    return decision, latency, digest
+
+
+def _actuator_governor_prompt(
+    *,
+    instruction: str,
+    observation_id: str,
+    state: dict[str, Any],
+    actuator_context: dict[str, Any],
+    rgbd_summary: dict[str, Any] | None,
+    critic_context: str,
+) -> str:
+    """Build a task-neutral actuator decision request."""
+    return f"""Govern the next bounded actuator transition using the attached
+fresh observation and exactly one advertised tool.
+
+Human instruction:
+{instruction}
+
+Fresh observation token: {observation_id}
+Observed world state:
+{json.dumps(state, indent=2)}
+Current actuator context:
+{json.dumps(actuator_context, indent=2)}
+RGB-D summary:
+{json.dumps(rgbd_summary, indent=2)}
+
+The image contains RGB on the left and depth on the right when depth is
+available. Choose a registered actuator executor only when its command advances
+the human instruction and is safe in the fresh observed state. Select
+hold_actuation when another observation is required before changing the
+actuator, or abort_actuation when the transition is unsafe. Measured touch and
+force are physical evidence: incomplete travel with touch can indicate an
+object is obstructing closure, while disengagement should remove retained
+contact. Executor settings are optional and must remain inside their advertised
+schema. Do not emit prose or JSON outside the single native tool call.
+
+{critic_context}"""
+
+
+def _choose_observation_bound_actuator_tool(
+    provider: GeminiProvider,
+    registry: ActuatorExecutorRegistry,
+    *,
+    instruction: str,
+    observation_prefix: str,
+    frame: np.ndarray,
+    state: dict[str, Any],
+    actuator_context: dict[str, Any],
+    rgbd_summary: dict[str, Any] | None,
+    critic_context: str,
+) -> tuple[dict[str, Any], float, str]:
+    """Ask the selected model for one fresh-observation actuator call."""
+    encoded, digest = _encode_frame(frame)
+    observation_id = f"{observation_prefix}:{digest}"
+    gate = ObservationBoundActuatorGate(
+        observation_id=observation_id,
+        registry=registry,
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a visual actuator governor. Every actuator decision "
+                "must be exactly one runtime-advertised native tool call."
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{encoded}",
+                        "detail": "high",
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": _actuator_governor_prompt(
+                        instruction=instruction,
+                        observation_id=observation_id,
+                        state=state,
+                        actuator_context=actuator_context,
+                        rgbd_summary=rgbd_summary,
+                        critic_context=critic_context,
+                    ),
+                },
+            ],
+        },
+    ]
+    started = time.perf_counter()
+    response = asyncio.run(
+        asyncio.wait_for(
+            provider.complete(
+                messages,
+                {
+                    "tools": actuator_tool_schemas(observation_id, registry),
+                    "tool_choice": "required",
+                },
+            ),
+            timeout=args_cli.timeout,
+        )
+    )
+    latency = time.perf_counter() - started
+    tool_calls = response.tool_calls or []
+    if len(tool_calls) != 1:
+        error = (
+            "model must issue exactly one actuator tool call; "
+            f"received {len(tool_calls)}"
+        )
+        return (
+            {
+                "decision": "retry",
+                "confidence": 0.0,
+                "assessment": f"Actuator tool rejected by safety gate: {error}",
+                "actuator_tool": {
+                    "status": "rejected",
+                    "observation_id": observation_id,
+                    "tool_name": None,
+                    "arguments": None,
+                    "error": error,
+                    "model_text": str(response.text or "")[:500],
+                },
+                "executor_id": None,
+                "command": {},
+                "executor_config": {},
+            },
+            latency,
+            digest,
+        )
+    try:
+        outcome = gate.dispatch(tool_calls[0])
+    except MotionToolValidationError as error:
+        function = tool_calls[0].get("function", {})
+        return (
+            {
+                "decision": "retry",
+                "confidence": 0.0,
+                "assessment": f"Actuator tool rejected by safety gate: {error}",
+                "actuator_tool": {
+                    "status": "rejected",
+                    "observation_id": observation_id,
+                    "tool_name": function.get("name"),
+                    "arguments": function.get("arguments"),
+                    "error": str(error),
+                },
+                "executor_id": None,
+                "command": {},
+                "executor_config": {},
+            },
+            latency,
+            digest,
+        )
+    return (
+        {
+            "decision": (
+                "execute"
+                if outcome.action == "execute"
+                else "retry" if outcome.action == "hold" else "abort"
+            ),
+            "confidence": outcome.confidence,
+            "assessment": outcome.reason,
+            "actuator_tool": outcome.to_dict(),
+            "executor_id": outcome.executor_id,
+            "command": dict(outcome.command),
+            "executor_config": dict(outcome.executor_config),
+        },
+        latency,
+        digest,
+    )
+
+
 def _test_line(index: int, name: str, passed: bool, detail: str) -> None:
     status = "PASS" if passed else "FAIL"
     print(f"[TEST {index}/{TOTAL_TESTS}] {status} | {name} | {detail}", flush=True)
@@ -829,6 +1310,69 @@ def _hold_joint_action(
     return obs, terminal
 
 
+def _execute_binary_actuator_tool(
+    env: Any,
+    obs: dict[str, Any],
+    last_action: torch.Tensor,
+    decision: dict[str, Any],
+    *,
+    initial_banana_z: float,
+) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
+    """Adapt one admitted runtime actuator call to RoboLab's binary action."""
+    if decision.get("executor_id") != "binary_end_effector_clamp":
+        raise RuntimeError(
+            f"Unsupported actuator executor: {decision.get('executor_id')!r}"
+        )
+    requested_state = decision.get("command", {}).get("state")
+    if requested_state not in {"engage", "disengage", "maintain"}:
+        raise RuntimeError(f"Invalid admitted actuator state: {requested_state!r}")
+    command = last_action.clone()
+    engaged_before = bool(float(command[0, 7].detach().cpu()) > 0.5)
+    engaged_after = (
+        True
+        if requested_state == "engage"
+        else False if requested_state == "disengage" else engaged_before
+    )
+    settle_steps = int(decision.get("executor_config", {}).get("settle_steps", 35))
+    state_before = _state(env, initial_banana_z)
+    obs, terminal = _hold_joint_action(
+        env,
+        obs,
+        command,
+        settle_steps,
+        gripper_closed=engaged_after,
+    )
+    command[0, 7] = 1.0 if engaged_after else 0.0
+    state_after = _state(env, initial_banana_z)
+    return (
+        obs,
+        terminal,
+        command,
+        {
+            "executor_id": decision["executor_id"],
+            "requested_state": requested_state,
+            "engaged_before": engaged_before,
+            "engaged_after": engaged_after,
+            "settle_steps": settle_steps,
+            "state_before": {
+                "finger_joint_rad": state_before["finger_joint_rad"],
+                "gripper_closed_fraction": state_before[
+                    "gripper_closed_fraction"
+                ],
+                "current_contact": state_before["current_contact"],
+            },
+            "state_after": {
+                "finger_joint_rad": state_after["finger_joint_rad"],
+                "gripper_closed_fraction": state_after[
+                    "gripper_closed_fraction"
+                ],
+                "current_contact": state_after["current_contact"],
+            },
+            "terminal": terminal,
+        },
+    )
+
+
 def _move_eef_to_target(
     env: Any,
     obs: dict[str, Any],
@@ -839,6 +1383,7 @@ def _move_eef_to_target(
     *,
     gripper_closed: bool,
     initial_banana_z: float,
+    executor_config: dict[str, Any] | None = None,
     carry_reference_offset: torch.Tensor | None = None,
     checkpoint_callback: Callable[
         [dict[str, Any], dict[str, Any]], dict[str, Any]
@@ -855,6 +1400,17 @@ def _move_eef_to_target(
         raise ValueError(
             f"Invalid adaptive orientation target for {phase}: {target_quaternion_wxyz}"
         )
+    effective_config = {
+        "position_tolerance_m": args_cli.adaptive_tolerance,
+        "translation_step_limit_m": args_cli.adaptive_max_step,
+        "maximum_iterations": args_cli.adaptive_max_iterations,
+        "settle_steps": args_cli.adaptive_settle_steps,
+        "joint_step_limit_rad": args_cli.adaptive_max_joint_step,
+        "damping": args_cli.adaptive_damping,
+        "orientation_tolerance_deg": args_cli.adaptive_orientation_tolerance_deg,
+        "rotation_step_limit_deg": args_cli.adaptive_max_angle_step_deg,
+    }
+    effective_config.update(executor_config or {})
     robot = env.scene["robot"]
     arm_joint_ids = [robot.data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)]
     body_idx = robot.data.body_names.index("base_link")
@@ -864,8 +1420,10 @@ def _move_eef_to_target(
     command[0, 7] = 1.0 if gripper_closed else 0.0
     target_cpu = target.detach().cpu().to(dtype=torch.float32)
     target_quat_cpu = target_quaternion_wxyz.detach().cpu().to(dtype=torch.float32)
-    orientation_tolerance = np.deg2rad(args_cli.adaptive_orientation_tolerance_deg)
-    maximum_angle_step = np.deg2rad(args_cli.adaptive_max_angle_step_deg)
+    orientation_tolerance = np.deg2rad(
+        effective_config["orientation_tolerance_deg"]
+    )
+    maximum_angle_step = np.deg2rad(effective_config["rotation_step_limit_deg"])
     terminal = False
     iterations: list[dict[str, Any]] = []
     eef_start = _eef_position(env)
@@ -880,7 +1438,7 @@ def _move_eef_to_target(
     recovery_request: dict[str, Any] | None = None
     early_stop: dict[str, Any] | None = None
 
-    for iteration in range(args_cli.adaptive_max_iterations):
+    for iteration in range(int(effective_config["maximum_iterations"])):
         eef_before = _eef_position(env)
         error = target_cpu - eef_before
         error_norm = float(torch.linalg.vector_norm(error))
@@ -889,12 +1447,12 @@ def _move_eef_to_target(
         )
         orientation_error_norm = float(torch.linalg.vector_norm(orientation_error))
         if (
-            error_norm <= args_cli.adaptive_tolerance
+            error_norm <= effective_config["position_tolerance_m"]
             and orientation_error_norm <= orientation_tolerance
         ):
             break
         xyz_step = bounded_vector_step(
-            error.to(device=env.device), args_cli.adaptive_max_step
+            error.to(device=env.device), effective_config["translation_step_limit_m"]
         )
         desired_twist_w = torch.zeros(6, dtype=torch.float32, device=env.device)
         desired_twist_w[:3] = xyz_step
@@ -907,8 +1465,8 @@ def _move_eef_to_target(
         delta_joint = damped_least_squares_delta(
             jacobian_w,
             desired_twist_w,
-            args_cli.adaptive_damping,
-            args_cli.adaptive_max_joint_step,
+            effective_config["damping"],
+            effective_config["joint_step_limit_rad"],
         )
         joint_pos = robot.data.joint_pos.torch[0, arm_joint_ids]
         joint_limits = robot.data.soft_joint_pos_limits.torch[0, arm_joint_ids]
@@ -921,7 +1479,7 @@ def _move_eef_to_target(
             env,
             obs,
             command,
-            args_cli.adaptive_settle_steps,
+            int(effective_config["settle_steps"]),
             gripper_closed=gripper_closed,
         )
         eef_after = _eef_position(env)
@@ -969,6 +1527,7 @@ def _move_eef_to_target(
         periodic_checkpoint = (
             (iteration + 1) % args_cli.coach_interval_iterations == 0
         )
+        target_changed = False
         if early_stop is None and checkpoint_callback is not None and (
             periodic_checkpoint or checkpoint_reason is not None
         ):
@@ -979,9 +1538,42 @@ def _move_eef_to_target(
                 "target_error_m": error_after,
                 "orientation_error_deg": float(np.rad2deg(orientation_error_after)),
                 "local_safety": record.get("local_safety"),
+                "current_target_xyz_m": target_cpu.tolist(),
+                "executor_id": "bounded_dls_ik",
+                "executor_config": dict(effective_config),
             }
             checkpoint_decision = checkpoint_callback(obs, checkpoint)
             record["coach_checkpoint"] = checkpoint_decision
+            if checkpoint_decision.get("decision") == "execute":
+                updated_target = torch.tensor(
+                    checkpoint_decision.get("target_xyz_m", target_cpu.tolist()),
+                    dtype=torch.float32,
+                )
+                if updated_target.shape != (3,) or not bool(
+                    torch.isfinite(updated_target).all()
+                ):
+                    raise RuntimeError(
+                        f"Model returned an invalid world target: {updated_target}"
+                    )
+                target_changed = not bool(torch.allclose(updated_target, target_cpu))
+                if target_changed:
+                    record["target_before_model_correction_m"] = target_cpu.tolist()
+                    target_cpu = updated_target
+                    record["target_after_model_correction_m"] = target_cpu.tolist()
+                    error_after = float(torch.linalg.vector_norm(target_cpu - eef_after))
+                    record["target_error_after_model_correction_m"] = error_after
+                updated_config = checkpoint_decision.get("executor_config") or {}
+                if updated_config:
+                    effective_config.update(updated_config)
+                    orientation_tolerance = np.deg2rad(
+                        effective_config["orientation_tolerance_deg"]
+                    )
+                    maximum_angle_step = np.deg2rad(
+                        effective_config["rotation_step_limit_deg"]
+                    )
+                    record["executor_config_after_model_call"] = dict(
+                        effective_config
+                    )
             if checkpoint_reason is not None:
                 if checkpoint_decision.get("decision") == "abort":
                     raise RuntimeError(
@@ -993,13 +1585,10 @@ def _move_eef_to_target(
                     **checkpoint,
                     "coach_decision": checkpoint_decision,
                 }
-            elif (
-                checkpoint_decision.get("decision") == "pause_regrasp"
-                and phase == "above_plate"
-            ):
+            elif checkpoint_decision.get("decision") == "retry":
                 recovery_request = {
                     **checkpoint,
-                    "reason": "coach_requested_regrasp",
+                    "reason": "model_requested_hold",
                     "coach_decision": checkpoint_decision,
                 }
             elif checkpoint_decision.get("decision") != "execute":
@@ -1032,7 +1621,7 @@ def _move_eef_to_target(
             break
         if terminal:
             break
-        if error_after > previous_error + 0.008:
+        if not target_changed and error_after > previous_error + 0.008:
             raise RuntimeError(
                 f"Adaptive IK diverged in {phase}: "
                 f"target error {previous_error:.4f}→{error_after:.4f} m"
@@ -1065,8 +1654,12 @@ def _move_eef_to_target(
         "target_error_after_m": error_final,
         "orientation_error_before_deg": float(np.rad2deg(orientation_error_start)),
         "orientation_error_after_deg": float(np.rad2deg(orientation_error_final)),
-        "orientation_tolerance_deg": args_cli.adaptive_orientation_tolerance_deg,
-        "target_tolerance_m": args_cli.adaptive_tolerance,
+        "executor_id": "bounded_dls_ik",
+        "executor_config": effective_config,
+        "orientation_tolerance_deg": effective_config[
+            "orientation_tolerance_deg"
+        ],
+        "target_tolerance_m": effective_config["position_tolerance_m"],
         "recovery_requested": recovery_request is not None,
         "recovery_request": recovery_request,
         "early_stop": early_stop,
@@ -1074,7 +1667,7 @@ def _move_eef_to_target(
             not terminal
             and (
             (
-                error_final <= args_cli.adaptive_tolerance
+                error_final <= effective_config["position_tolerance_m"]
                 and orientation_error_final <= orientation_tolerance
                 and recovery_request is None
             )
@@ -1859,6 +2452,9 @@ def main() -> int:
             "adaptive_orientation_tolerance_deg": args_cli.adaptive_orientation_tolerance_deg,
             "adaptive_max_angle_step_deg": args_cli.adaptive_max_angle_step_deg,
             "coach_interval_iterations": args_cli.coach_interval_iterations,
+            "maximum_model_target_correction": (
+                args_cli.maximum_model_target_correction
+            ),
             "maximum_grasp_drift": args_cli.maximum_grasp_drift,
             "minimum_transport_lift": args_cli.minimum_transport_lift,
             "recovery_hold_steps": args_cli.recovery_hold_steps,
@@ -1972,7 +2568,18 @@ def main() -> int:
         + ("disabled" if args_cli.disable_world_intent_shadow else args_cli.instruction)
     )
     print(f"Local motion primitive: {demo_path} ({len(recorded_actions)} steps)")
-    print("Control cadence: one ER 2 call per semantic phase; physics remains local")
+    print(
+        "Control cadence: one observation-bound model tool per semantic phase "
+        f"and every {args_cli.coach_interval_iterations} local IK chunks"
+    )
+    print(
+        "Motion executor: runtime-registered bounded DLS IK; model-configurable "
+        f"with target correction≤{args_cli.maximum_model_target_correction:.3f}m"
+    )
+    print(
+        "Actuator executor: runtime-registered binary clamp; model-selectable "
+        "engage/disengage/maintain with 8–120 settling steps"
+    )
     print(
         "Live-pose adaptive IK: "
         + (
@@ -2115,6 +2722,9 @@ def main() -> int:
     env.sim.render()
     obs = env.observation_manager.compute()
     coach = GeminiRoboticsER2(api_key, args_cli.timeout)
+    motion_tool_provider = GeminiProvider(api_key, MODEL_ID)
+    motion_executor_registry = _local_dls_executor_registry()
+    actuator_executor_registry = _local_binary_actuator_registry()
     initial_banana = _local_position(env, "banana")
     initial_banana_z = float(initial_banana[2])
     initial_eef = _eef_position(env)
@@ -2133,7 +2743,6 @@ def main() -> int:
     digests: list[str] = []
     eef_trace: list[list[float]] = [_eef_position(env).tolist()]
     model_calls = 0
-    world_vertical_clearance_m: float | None = None
     terminal = False
     episode_trace: dict[str, Any] = {
         "schema_version": 2,
@@ -2172,15 +2781,38 @@ def main() -> int:
                 "disabled" if args_cli.disable_world_intent_shadow else "pending"
             ),
             "contract_version": WORLD_INTENT_SCHEMA_VERSION,
-            "motion_authority": bool(args_cli.world_intent_clearance_authority),
-            "authority_scope": (
-                ["vertical_clearance_m"]
-                if args_cli.world_intent_clearance_authority
-                else []
-            ),
+            "motion_authority": False,
+            "authority_scope": [],
             "instruction": args_cli.instruction,
         },
-        "world_constraint_applications": [],
+        "motion_tool_protocol": {
+            "observation_bound": True,
+            "maximum_target_correction_m": (
+                args_cli.maximum_model_target_correction
+            ),
+            "registered_executors": [
+                {
+                    "executor_id": spec.executor_id,
+                    "tool_name": spec.tool_name,
+                    "configuration_schema": spec.configuration_schema,
+                }
+                for spec in motion_executor_registry.specs()
+            ],
+            "calls": [],
+        },
+        "actuator_tool_protocol": {
+            "observation_bound": True,
+            "registered_executors": [
+                {
+                    "executor_id": spec.executor_id,
+                    "tool_name": spec.tool_name,
+                    "command_schema": spec.command_schema,
+                    "configuration_schema": spec.configuration_schema,
+                }
+                for spec in actuator_executor_registry.specs()
+            ],
+            "calls": [],
+        },
         "transport_recovery": {
             "maximum_attempts": args_cli.max_transport_recoveries,
             "stability_hold_steps": args_cli.recovery_hold_steps,
@@ -2213,7 +2845,7 @@ def main() -> int:
             episode_index=episode_index,
             metadata={
                 "task": args_cli.task,
-                "instruction": "Pick up the banana and put it on the plate",
+                "instruction": args_cli.instruction,
                 "coach_model": MODEL_ID,
                 "sim_version": sim_version,
                 "banana_offset_xy_m": list(args_cli.banana_offset),
@@ -2251,41 +2883,21 @@ def main() -> int:
                     frame,
                 )
                 shadow_intent = WorldIntent.from_mapping(shadow_payload)
-                requested_vertical_clearance = minimum_vertical_clearance_m(
-                    shadow_intent
-                )
-                if args_cli.world_intent_clearance_authority:
-                    world_vertical_clearance_m = requested_vertical_clearance
                 episode_trace["world_intent_shadow"] = {
                     "status": "valid",
                     "contract_version": WORLD_INTENT_SCHEMA_VERSION,
-                    "motion_authority": bool(
-                        args_cli.world_intent_clearance_authority
-                        and world_vertical_clearance_m is not None
-                    ),
-                    "authority_scope": (
-                        ["vertical_clearance_m"]
-                        if args_cli.world_intent_clearance_authority
-                        and world_vertical_clearance_m is not None
-                        else []
-                    ),
+                    "motion_authority": False,
+                    "authority_scope": [],
                     "instruction": args_cli.instruction,
                     "intent": shadow_intent.to_dict(),
-                    "requested_vertical_clearance_m": requested_vertical_clearance,
-                    "applied_vertical_clearance_m": world_vertical_clearance_m,
                     "latency_s": shadow_latency,
                     "image_digest": shadow_digest,
                 }
-                authority = (
-                    f"vertical_clearance_m={world_vertical_clearance_m:.3f}"
-                    if world_vertical_clearance_m is not None
-                    else "none"
-                )
                 print(
                     f"[world-intent] VALID operation={shadow_intent.operation} "
                     f"goals={len(shadow_intent.goals)} "
                     f"constraints={len(shadow_intent.constraints)} "
-                    f"latency={shadow_latency:.2f}s authority={authority}",
+                    f"latency={shadow_latency:.2f}s authority=none",
                     flush=True,
                 )
             except Exception as shadow_error:
@@ -2306,40 +2918,6 @@ def main() -> int:
                     flush=True,
                 )
             _write_trace(trace_path, episode_trace)
-
-        def apply_authorized_clearance(
-            phase: str, nominal_target: torch.Tensor, current_state: dict[str, Any]
-        ) -> torch.Tensor:
-            if (
-                world_vertical_clearance_m is None
-                or phase not in {"lift", "above_plate"}
-            ):
-                return nominal_target
-            governed = nominal_target.clone()
-            nominal_z = float(governed[2])
-            governed_z = governed_vertical_target(
-                nominal_target_z=nominal_z,
-                controlled_frame_z=float(current_state["eef_gripper_base_xyz"][2]),
-                subject_z=float(current_state["banana_xyz"][2]),
-                reference_z=float(current_state["plate_xyz"][2]),
-                minimum_clearance_m=world_vertical_clearance_m,
-            )
-            governed[2] = governed.new_tensor(governed_z)
-            application = {
-                "phase": phase,
-                "predicate": "vertical_clearance_m",
-                "minimum_m": world_vertical_clearance_m,
-                "nominal_target_z_m": nominal_z,
-                "governed_target_z_m": governed_z,
-            }
-            episode_trace["world_constraint_applications"].append(application)
-            print(
-                f"[world-constraint] phase={phase} clearance="
-                f"{world_vertical_clearance_m:.3f}m target_z="
-                f"{nominal_z:.3f}→{governed_z:.3f}m",
-                flush=True,
-            )
-            return governed
 
         scene, latency, digest = coach.reason(
             _scene_prompt(
@@ -2377,25 +2955,33 @@ def main() -> int:
                 str(args_cli.artifact_dir / frame_name),
                 cv2.cvtColor(checkpoint_frame, cv2.COLOR_RGB2BGR),
             )
-            decision, latency, digest = coach.reason(
-                _motion_checkpoint_prompt(
-                    str(checkpoint["phase"]), checkpoint_state, checkpoint
+            # Recovery/status checkpoints may report a measured condition
+            # without proposing a destination. Bind those calls to the fresh
+            # measured end-effector pose so the model can hold, abort, or apply
+            # a bounded correction through the same executor protocol.
+            checkpoint.setdefault(
+                "current_target_xyz_m",
+                checkpoint_state["eef_gripper_base_xyz"],
+            )
+            current_target = torch.tensor(
+                checkpoint["current_target_xyz_m"], dtype=torch.float32
+            )
+            decision, latency, digest = _choose_observation_bound_motion_tool(
+                motion_tool_provider,
+                motion_executor_registry,
+                instruction=args_cli.instruction,
+                observation_prefix=f"checkpoint-{checkpoint_index}",
+                frame=checkpoint_frame,
+                state=checkpoint_state,
+                current_target=current_target,
+                motion_context=checkpoint,
+                rgbd_summary=depth_summary,
+                critic_context=_critic_context(
+                    critic_memory, str(checkpoint["phase"])
                 ),
-                checkpoint_frame,
             )
             model_calls += 1
             digests.append(digest)
-            if decision.get("decision") not in {
-                "execute",
-                "pause_regrasp",
-                "complete",
-                "abort",
-            }:
-                decision = {
-                    **decision,
-                    "decision": "abort",
-                    "normalization": "invalid_mid_motion_decision",
-                }
             event = {
                 **checkpoint,
                 "frame": frame_name,
@@ -2405,14 +2991,122 @@ def main() -> int:
                 "image_digest": digest,
             }
             episode_trace["motion_checkpoints"].append(event)
+            episode_trace["motion_tool_protocol"]["calls"].append(
+                decision["motion_tool"]
+            )
             _write_trace(trace_path, episode_trace)
             print(
                 f"[ER2 checkpoint] phase={checkpoint['phase']} "
                 f"iteration={checkpoint['iteration']} reason={checkpoint['reason']} "
+                f"tool={decision['motion_tool']['tool_name']} "
                 f"decision={decision.get('decision')} latency={latency:.2f}s",
                 flush=True,
             )
             return decision
+
+        def actuator_transition_handler(
+            transition_obs: dict[str, Any],
+            current_action: torch.Tensor,
+            *,
+            phase_label: str,
+            observation_prefix: str,
+        ) -> tuple[dict[str, Any], bool, dict[str, Any], float, str]:
+            """Obtain one admitted actuator call, with one fail-closed retry."""
+            nonlocal model_calls
+            previous_outcome: dict[str, Any] | None = None
+            total_latency = 0.0
+            terminal = False
+            digest = ""
+            for attempt in range(2):
+                transition_state = _state(env, initial_banana_z)
+                transition_frame = _single_exterior_frame(transition_obs)
+                transition_frame, depth_summary = _rgbd_checkpoint_frame(
+                    env, transition_frame
+                )
+                frame_name = (
+                    f"{observation_prefix}"
+                    f"{'_retry' if attempt else ''}.jpg"
+                )
+                cv2.imwrite(
+                    str(args_cli.artifact_dir / frame_name),
+                    cv2.cvtColor(transition_frame, cv2.COLOR_RGB2BGR),
+                )
+                current_engaged = bool(
+                    float(current_action[0, 7].detach().cpu()) > 0.5
+                )
+                decision, latency, digest = (
+                    _choose_observation_bound_actuator_tool(
+                        motion_tool_provider,
+                        actuator_executor_registry,
+                        instruction=args_cli.instruction,
+                        observation_prefix=(
+                            f"{observation_prefix}-attempt-{attempt + 1}"
+                        ),
+                        frame=transition_frame,
+                        state=transition_state,
+                        actuator_context={
+                            "phase_label": phase_label,
+                            "current_binary_command": (
+                                "engaged" if current_engaged else "disengaged"
+                            ),
+                            "transition_opportunity": True,
+                            "previous_tool_outcome": previous_outcome,
+                            "executor_candidates": [
+                                spec.executor_id
+                                for spec in actuator_executor_registry.specs()
+                            ],
+                        },
+                        rgbd_summary=depth_summary,
+                        critic_context=_critic_context(
+                            critic_memory, phase_label
+                        ),
+                    )
+                )
+                total_latency += latency
+                model_calls += 1
+                digests.append(digest)
+                event = {
+                    **decision["actuator_tool"],
+                    "phase_label": phase_label,
+                    "attempt": attempt + 1,
+                    "frame": frame_name,
+                    "state": transition_state,
+                    "latency_s": latency,
+                }
+                episode_trace["actuator_tool_protocol"]["calls"].append(event)
+                _write_trace(trace_path, episode_trace)
+                print(
+                    f"[ER2 actuator] phase={phase_label} "
+                    f"tool={decision['actuator_tool'].get('tool_name')} "
+                    f"decision={decision.get('decision')} "
+                    f"confidence={decision.get('confidence', 0.0):.2f} "
+                    f"latency={latency:.2f}s image={digest}\n"
+                    f"      {decision.get('assessment', '')}",
+                    flush=True,
+                )
+                if decision.get("decision") == "execute":
+                    return transition_obs, terminal, decision, total_latency, digest
+                if decision.get("decision") == "abort":
+                    raise RuntimeError(
+                        f"Actuator governor aborted during {phase_label}: {decision}"
+                    )
+                previous_outcome = decision.get("actuator_tool")
+                if attempt == 0:
+                    transition_obs, terminal = _hold_joint_action(
+                        env,
+                        transition_obs,
+                        current_action,
+                        args_cli.retry_steps,
+                        gripper_closed=None,
+                    )
+                    if terminal:
+                        raise RuntimeError(
+                            "Environment terminated during actuator retry hold"
+                        )
+            raise RuntimeError(
+                f"Actuator governor did not admit a transition during "
+                f"{phase_label}: {previous_outcome}"
+            )
 
         stages = []
         for phase, start, end in zip(phase_names, boundaries[:-1], boundaries[1:]):
@@ -2446,6 +3140,13 @@ def main() -> int:
             joint_states[0, :7], dtype=torch.float32, device=env.device
         )
         for stage_index, (phase, start, end, close) in enumerate(stages, start=1):
+            actuator_engaged_at_stage_start = bool(
+                float(last_action[0, 7].detach().cpu()) > 0.5
+            )
+            actuator_decision: dict[str, Any] | None = None
+            actuator_execution: dict[str, Any] | None = None
+            actuator_latency = 0.0
+            actuator_digest: str | None = None
             current = _state(env, initial_banana_z)
             if not args_cli.disable_adaptive_ik and phase != "release":
                 banana_xyz = torch.tensor(current["banana_xyz"], dtype=torch.float32)
@@ -2474,7 +3175,6 @@ def main() -> int:
                     lift_clearance=args_cli.lift_clearance,
                     plate_hover_height=args_cli.plate_hover_height,
                 )
-                nominal = apply_authorized_clearance(phase, nominal, current)
                 target_source = "live_object_pose"
             elif phase == "release":
                 nominal = _eef_position(env)
@@ -2488,26 +3188,76 @@ def main() -> int:
                 )
                 target_source = "recorded_demonstration"
             frame = _single_exterior_frame(obs)
+            stage_depth_summary = None
+            if not args_cli.disable_adaptive_ik and phase != "release":
+                frame, stage_depth_summary = _rgbd_checkpoint_frame(env, frame)
             frame_path = args_cli.artifact_dir / f"{stage_index:02d}_{phase}_before.jpg"
             cv2.imwrite(str(frame_path), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-            decision, latency, digest = coach.reason(
-                _stage_prompt(
-                    phase,
-                    current,
-                    nominal,
-                    nominal_quaternion,
-                    close,
-                    _critic_context(critic_memory, phase),
-                ),
-                frame,
-            )
-            decision = apply_lift_test_contract(
-                phase,
-                decision,
-                float(current["gripper_closed_fraction"]),
-            )
-            model_calls += 1
-            digests.append(digest)
+            selected_executor_config: dict[str, Any] = {}
+            if not args_cli.disable_adaptive_ik and phase != "release":
+                decision, latency, digest = _choose_observation_bound_motion_tool(
+                    motion_tool_provider,
+                    motion_executor_registry,
+                    instruction=args_cli.instruction,
+                    observation_prefix=f"stage-{stage_index}",
+                    frame=frame,
+                    state=current,
+                    current_target=nominal,
+                    motion_context={
+                        "phase_label": phase,
+                        "current_target_xyz_m": nominal.tolist(),
+                        "current_target_quaternion_wxyz": (
+                            nominal_quaternion.tolist()
+                        ),
+                        "current_actuator_state": (
+                            "engaged"
+                            if actuator_engaged_at_stage_start
+                            else "disengaged"
+                        ),
+                        "executor_candidates": [
+                            spec.executor_id
+                            for spec in motion_executor_registry.specs()
+                        ],
+                    },
+                    rgbd_summary=stage_depth_summary,
+                    critic_context=_critic_context(critic_memory, phase),
+                )
+                nominal = torch.tensor(decision["target_xyz_m"], dtype=torch.float32)
+                selected_executor_config = dict(decision["executor_config"])
+                target_source = "model_motion_tool"
+                episode_trace["motion_tool_protocol"]["calls"].append(
+                    decision["motion_tool"]
+                )
+                stage_model_called = True
+            elif not args_cli.disable_adaptive_ik and phase == "release":
+                _, digest = _encode_frame(frame)
+                decision = {
+                    "decision": "execute",
+                    "grasp_ready": True,
+                    "confidence": 1.0,
+                    "assessment": (
+                        "Workspace pose is held; the fresh actuator tool call "
+                        "governs the physical transition."
+                    ),
+                }
+                latency = 0.0
+                stage_model_called = False
+            else:
+                decision, latency, digest = coach.reason(
+                    _stage_prompt(
+                        phase,
+                        current,
+                        nominal,
+                        nominal_quaternion,
+                        close,
+                        _critic_context(critic_memory, phase),
+                    ),
+                        frame,
+                    )
+                stage_model_called = True
+            if stage_model_called:
+                model_calls += 1
+                digests.append(digest)
             confidence = float(decision.get("confidence", 0.0))
             assessment = str(decision.get("assessment", ""))
             print(
@@ -2523,11 +3273,12 @@ def main() -> int:
                 phase == "grasp" and not bool(decision.get("grasp_ready"))
             )
             if needs_retry:
-                if phase in {"grasp", "lift"}:
+                if phase in {"grasp", "lift"} or "motion_tool" in decision:
                     retry_performed = True
+                    previous_motion_tool = decision.get("motion_tool")
                     print(
-                        f"[coach] {phase} requested retry; re-holding "
-                        + ("closed grip" if phase == "lift" else "open pre-grasp pose"),
+                        f"[coach] {phase} requested retry; holding for a fresh "
+                        "observation",
                         flush=True,
                     )
                     obs, terminal = _hold_joint_action(
@@ -2535,7 +3286,7 @@ def main() -> int:
                         obs,
                         last_action,
                         args_cli.retry_steps,
-                        gripper_closed=phase == "lift",
+                        gripper_closed=None,
                     )
                     current = _state(env, initial_banana_z)
                     if not args_cli.disable_adaptive_ik:
@@ -2570,23 +3321,48 @@ def main() -> int:
                             lift_clearance=args_cli.lift_clearance,
                             plate_hover_height=args_cli.plate_hover_height,
                         )
-                        nominal = apply_authorized_clearance(phase, nominal, current)
                     frame = _single_exterior_frame(obs)
-                    decision, latency, digest = coach.reason(
-                        _stage_prompt(
-                            phase,
-                            current,
-                            nominal,
-                            nominal_quaternion,
-                            close,
-                            _critic_context(critic_memory, phase),
-                        ),
-                        frame,
+                    retry_depth_summary = None
+                    if not args_cli.disable_adaptive_ik:
+                        frame, retry_depth_summary = _rgbd_checkpoint_frame(env, frame)
+                    decision, latency, digest = (
+                        _choose_observation_bound_motion_tool(
+                            motion_tool_provider,
+                            motion_executor_registry,
+                            instruction=args_cli.instruction,
+                            observation_prefix=f"stage-{stage_index}-retry",
+                            frame=frame,
+                            state=current,
+                            current_target=nominal,
+                            motion_context={
+                                "phase_label": phase,
+                                "retry": True,
+                                "current_target_xyz_m": nominal.tolist(),
+                                "current_target_quaternion_wxyz": (
+                                    nominal_quaternion.tolist()
+                                ),
+                                "current_actuator_state": (
+                                    "engaged"
+                                    if bool(
+                                        float(
+                                            last_action[0, 7].detach().cpu()
+                                        )
+                                        > 0.5
+                                    )
+                                    else "disengaged"
+                                ),
+                                "previous_tool_outcome": previous_motion_tool,
+                            },
+                            rgbd_summary=retry_depth_summary,
+                            critic_context=_critic_context(critic_memory, phase),
+                        )
                     )
-                    decision = apply_lift_test_contract(
-                        phase,
-                        decision,
-                        float(current["gripper_closed_fraction"]),
+                    nominal = torch.tensor(
+                        decision["target_xyz_m"], dtype=torch.float32
+                    )
+                    selected_executor_config = dict(decision["executor_config"])
+                    episode_trace["motion_tool_protocol"]["calls"].append(
+                        decision["motion_tool"]
                     )
                     model_calls += 1
                     digests.append(digest)
@@ -2650,20 +3426,16 @@ def main() -> int:
             )
             print(
                 f"[executor] {phase}: source={target_source} "
-                f"target={nominal.tolist()} gripper={'closed' if close else 'open'}",
+                f"target={nominal.tolist()} actuator_current="
+                f"{'engaged' if bool(float(last_action[0, 7].detach().cpu()) > 0.5) else 'disengaged'}",
                 flush=True,
             )
             motion_report: dict[str, Any]
             if phase == "release":
-                obs, terminal = _hold_joint_action(
-                    env, obs, last_action, 35, gripper_closed=False
-                )
-                last_action[0, 7] = 0.0
                 motion_report = {
                     "enabled": True,
-                    "executor": "hold_and_open",
+                    "executor": "current_workspace_pose_hold",
                     "target_source": target_source,
-                    "hold_steps": 35,
                     "converged": not terminal,
                 }
             elif not args_cli.disable_adaptive_ik:
@@ -2686,8 +3458,11 @@ def main() -> int:
                         nominal,
                         nominal_quaternion,
                         phase,
-                        gripper_closed=close and phase != "grasp",
+                        gripper_closed=bool(
+                            float(last_action[0, 7].detach().cpu()) > 0.5
+                        ),
                         initial_banana_z=initial_banana_z,
+                        executor_config=selected_executor_config,
                         carry_reference_offset=(
                             latched_carry_offset if phase == "above_plate" else None
                         ),
@@ -2695,6 +3470,25 @@ def main() -> int:
                     )
                     motion_attempts.append(attempt_report)
                     if not bool(attempt_report.get("recovery_requested")):
+                        break
+                    actuator_transition_pending = bool(close) != bool(
+                        float(last_action[0, 7].detach().cpu()) > 0.5
+                    )
+                    if motion_report_yields_to_actuator(
+                        attempt_report,
+                        actuator_transition_pending=actuator_transition_pending,
+                    ):
+                        attempt_report["yielded_to_actuator"] = True
+                        attempt_report["yield_reason"] = (
+                            "model_hold_with_pending_actuator_transition"
+                        )
+                        attempt_report["recovery_requested"] = False
+                        attempt_report["converged"] = True
+                        print(
+                            f"[executor handoff] {phase}: model hold yielded "
+                            "to pending actuator tool",
+                            flush=True,
+                        )
                         break
                     if phase != "above_plate":
                         raise RuntimeError(
@@ -2769,9 +3563,6 @@ def main() -> int:
                         lift_clearance=args_cli.lift_clearance,
                         plate_hover_height=args_cli.plate_hover_height,
                     )
-                    nominal = apply_authorized_clearance(
-                        "above_plate", nominal, resumed_state
-                    )
                     nominal_quaternion = latched_carry_quaternion
                 if placement_completed_during_recovery:
                     orientation_error = torch.linalg.vector_norm(
@@ -2821,26 +3612,6 @@ def main() -> int:
                         f"Adaptive IK did not reach the live {phase} target: "
                         f"error={motion_report['target_error_after_m']:.4f} m"
                     )
-                if phase == "grasp":
-                    obs, terminal = _hold_joint_action(
-                        env, obs, last_action, 35, gripper_closed=True
-                    )
-                    last_action[0, 7] = 1.0
-                    motion_report["grasp_close_hold_steps"] = 35
-                    # Once contact is established, object orientation can be
-                    # noisy or slip inside the fingers. Preserve the measured
-                    # carry transform instead of commanding that noise back to
-                    # the wrist during lift/transport.
-                    latched_carry_offset = (
-                        _eef_position(env) - _local_position(env, "banana")
-                    )
-                    latched_carry_quaternion = _eef_quaternion(env)
-                    motion_report["latched_carry_offset_m"] = (
-                        latched_carry_offset.tolist()
-                    )
-                    motion_report["latched_carry_quaternion_wxyz"] = (
-                        latched_carry_quaternion.tolist()
-                    )
             else:
                 obs, terminal, last_action = _run_joint_segment(
                     env, obs, joint_states, recorded_actions, start, end
@@ -2863,6 +3634,69 @@ def main() -> int:
                         last_action,
                         args_cli.retry_steps,
                         gripper_closed=True,
+                    )
+            actuator_engaged_before_transition = bool(
+                float(last_action[0, 7].detach().cpu()) > 0.5
+            )
+            if (
+                not args_cli.disable_adaptive_ik
+                and bool(close) != actuator_engaged_before_transition
+            ):
+                (
+                    obs,
+                    terminal,
+                    actuator_decision,
+                    actuator_latency,
+                    actuator_digest,
+                ) = actuator_transition_handler(
+                    obs,
+                    last_action,
+                    phase_label=phase,
+                    observation_prefix=(
+                        f"actuator_stage_{stage_index:02d}_{phase}"
+                    ),
+                )
+                obs, terminal, last_action, actuator_execution = (
+                    _execute_binary_actuator_tool(
+                        env,
+                        obs,
+                        last_action,
+                        actuator_decision,
+                        initial_banana_z=initial_banana_z,
+                    )
+                )
+                episode_trace["actuator_tool_protocol"]["calls"][-1][
+                    "execution"
+                ] = actuator_execution
+                motion_report["actuator_execution"] = actuator_execution
+                _write_trace(trace_path, episode_trace)
+                print(
+                    f"[actuator executor] phase={phase} "
+                    f"state={actuator_execution['requested_state']} "
+                    f"settle_steps={actuator_execution['settle_steps']} "
+                    f"touch_after="
+                    f"{actuator_execution['state_after']['current_contact']['touch']}",
+                    flush=True,
+                )
+                if terminal:
+                    raise RuntimeError(
+                        f"Environment terminated during {phase} actuator transition"
+                    )
+                if (
+                    not actuator_engaged_before_transition
+                    and actuator_execution["engaged_after"]
+                ):
+                    # Preserve the fresh measured carry transform after the
+                    # admitted actuator command, not before contact.
+                    latched_carry_offset = (
+                        _eef_position(env) - _local_position(env, "banana")
+                    )
+                    latched_carry_quaternion = _eef_quaternion(env)
+                    motion_report["latched_carry_offset_m"] = (
+                        latched_carry_offset.tolist()
+                    )
+                    motion_report["latched_carry_quaternion_wxyz"] = (
+                        latched_carry_quaternion.tolist()
                     )
             eef = _eef_position(env)
             eef_trace.append(eef.tolist())
@@ -2895,7 +3729,18 @@ def main() -> int:
                 "target_source": target_source,
                 "demonstrated_steps": end - start,
                 "motion_report": motion_report,
-                "requested_gripper": "closed" if close else "open",
+                "upstream_actuator_state_hint": (
+                    "engaged" if close else "disengaged"
+                ),
+                "actuator_state_at_stage_start": (
+                    "engaged"
+                    if actuator_engaged_at_stage_start
+                    else "disengaged"
+                ),
+                "actuator_tool_decision": actuator_decision,
+                "actuator_tool_latency_s": actuator_latency,
+                "actuator_tool_image_digest": actuator_digest,
+                "actuator_execution": actuator_execution,
                 "eef_after_xyz": eef.tolist(),
                 "eef_target_error_m": pos_error,
                 "banana_after_xyz": banana_now.tolist(),

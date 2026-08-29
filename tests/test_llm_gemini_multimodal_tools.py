@@ -84,6 +84,55 @@ def test_plain_text_messages_remain_compatible():
     ) == [{"role": "user", "parts": [{"text": "observe"}]}]
 
 
+def test_required_tool_choice_forces_native_function_call_mode():
+    payload = _provider()._build_request_payload(
+        [{"role": "user", "content": "Choose exactly one tool."}],
+        {"tools": [_tool_schema()], "tool_choice": "required"},
+    )
+
+    assert payload["toolConfig"] == {
+        "functionCallingConfig": {"mode": "ANY"}
+    }
+
+
+def test_tool_choice_remains_automatic_unless_explicitly_required():
+    payload = _provider()._build_request_payload(
+        [{"role": "user", "content": "Use a tool if helpful."}],
+        {"tools": [_tool_schema()]},
+    )
+
+    assert "toolConfig" not in payload
+
+
+def test_const_schema_is_sent_as_single_value_enum():
+    cleaned = _provider()._clean_params(
+        {
+            "type": "object",
+            "properties": {
+                "observation_id": {"type": "string", "const": "fresh-9"}
+            },
+        }
+    )
+    assert cleaned["properties"]["observation_id"] == {
+        "type": "string",
+        "enum": ["fresh-9"],
+    }
+
+
+def test_runtime_only_schema_keywords_are_not_sent_to_gemini():
+    cleaned = _provider()._clean_params(
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "count": {"type": "integer", "default": 3},
+            },
+        }
+    )
+    assert "additionalProperties" not in cleaned
+    assert "default" not in cleaned["properties"]["count"]
+
+
 @pytest.mark.parametrize(
     "url",
     [
