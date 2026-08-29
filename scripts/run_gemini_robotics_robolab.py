@@ -13,13 +13,14 @@ import asyncio
 import base64
 import hashlib
 import json
+import math
 import os
 import random
 import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import cv2  # Must precede Isaac Lab imports.
 import h5py
@@ -50,6 +51,15 @@ parser.add_argument(
 parser.add_argument("--model", default="gemini-robotics-er-2-preview")
 parser.add_argument("--retry-steps", type=int, default=20)
 parser.add_argument(
+    "--motion-checkpoint-replans",
+    type=int,
+    default=3,
+    help=(
+        "Maximum fresh, observation-bound model attempts after a motion "
+        "checkpoint tool call is rejected by the local safety gate."
+    ),
+)
+parser.add_argument(
     "--disable-adaptive-ik",
     action="store_true",
     help="Replay the fixed demonstration instead of targeting live object poses.",
@@ -67,6 +77,15 @@ parser.add_argument(
     type=int,
     default=10,
     help="Send a fresh mid-motion observation to Gemini every N local IK chunks.",
+)
+parser.add_argument(
+    "--periodic-motion-observations",
+    action=argparse.BooleanOptionalAction,
+    default=False,
+    help=(
+        "Also poll Gemini at --coach-interval-iterations; disabled by default "
+        "so a motion lease runs until completion or local invalidation."
+    ),
 )
 parser.add_argument(
     "--maximum-model-target-correction",
@@ -87,6 +106,41 @@ parser.add_argument(
     action=argparse.BooleanOptionalAction,
     default=True,
     help="Render depth and include a depth visualization/metrics at motion checkpoints.",
+)
+parser.add_argument(
+    "--ros2-sensor-ingress",
+    action=argparse.BooleanOptionalAction,
+    default=False,
+    help=(
+        "Subscribe to normalized ROS 2 touch, force, RGB-D, tracked-object, "
+        "collision-stop, and motion-feedback topics when ROS 2 is available; "
+        "disabled by default while simulator-native sensing is used."
+    ),
+)
+parser.add_argument(
+    "--ros2-touch-topic", default="/isaac_assist/gripper_touch"
+)
+parser.add_argument(
+    "--ros2-contact-wrench-topic",
+    default="/isaac_assist/gripper_contact_wrench",
+)
+parser.add_argument(
+    "--ros2-contact-status-topic",
+    default="/isaac_assist/gripper_contact_status",
+)
+parser.add_argument(
+    "--ros2-rgbd-status-topic",
+    default="/isaac_assist/rgbd_collision_status",
+)
+parser.add_argument(
+    "--ros2-safety-stop-topic", default="/isaac_assist/safety_stop"
+)
+parser.add_argument(
+    "--ros2-tracked-object-status-topic",
+    default="/isaac_assist/tracked_object_status",
+)
+parser.add_argument(
+    "--ros2-motion-status-topic", default="/isaac_assist/motion_status"
 )
 parser.add_argument("--approach-clearance", type=float, default=0.10)
 parser.add_argument("--lift-clearance", type=float, default=0.14)
@@ -127,7 +181,7 @@ parser.add_argument(
 parser.add_argument(
     "--disable-residual-centering",
     action="store_true",
-    help="Run the fixed demonstrated transport without the bounded Cartesian correction.",
+    help="Skip the fresh model-governed placement operation after transport.",
 )
 parser.add_argument("--center-tolerance", type=float, default=0.040)
 parser.add_argument("--center-max-step", type=float, default=0.008)
@@ -193,6 +247,24 @@ parser.add_argument(
 parser.add_argument("--minimum-contact-coverage", type=float, default=0.95)
 parser.add_argument("--minimum-touch-samples", type=int, default=1)
 parser.add_argument(
+    "--actuator-feedback-position-change",
+    type=float,
+    default=0.05,
+    help=(
+        "Minimum normalized actuator-position change which, together with a "
+        "tactile change, immediately returns control to the model."
+    ),
+)
+parser.add_argument(
+    "--actuator-feedback-force-change",
+    type=float,
+    default=0.25,
+    help=(
+        "Minimum tactile-force delta in newtons that counts as a significant "
+        "post-actuation observation change."
+    ),
+)
+parser.add_argument(
     "--disable-critic-guidance",
     action="store_true",
     help="Ignore phase-scoped lessons from the previous passive local critique.",
@@ -244,22 +316,47 @@ from franka_sensor_schema import (  # noqa: E402
     summarize_contact_telemetry,
 )
 from gemini_episode_dataset import GeminiEpisodeDatasetRecorder  # noqa: E402
-from rgbd_collision_safety import assess_motion_safety  # noqa: E402
 from robolab_contact_telemetry import (  # noqa: E402
     contact_sensor_runtime_info,
     install_sim6_gripper_contact_sensor,
 )
 from observation_bound_motion_tools import (  # noqa: E402
+    ActuatorFeedbackEventPolicy,
     ActuatorExecutorRegistry,
     ActuatorExecutorSpec,
     MotionExecutorRegistry,
     MotionExecutorSpec,
+    MotionLeaseConditions,
     MotionToolValidationError,
     ObservationBoundActuatorGate,
     ObservationBoundMotionGate,
+    ObservationBoundOperationGate,
+    OperationCandidate,
+    assess_actuator_feedback_event,
     actuator_tool_schemas,
-    motion_report_yields_to_actuator,
+    motion_report_yields_to_scheduler,
+    motion_lease_source_errors,
     motion_tool_schemas,
+    operation_scheduler_tool_schemas,
+)
+from rgbd_object_axis_tracking import (  # noqa: E402
+    estimate_masked_object_axis,
+    instance_mask_for_prim_label,
+    sign_invariant_axis_error_deg,
+)
+from sensor_invalidation_registry import (  # noqa: E402
+    PredicateResult,
+    SensorObservation,
+    SensorObservationSnapshot,
+    SensorPredicateLease,
+    SensorPredicateRegistry,
+    SensorPredicateSpec,
+)
+from sensor_invalidation_ros2 import (  # noqa: E402
+    ROS2SensorIngress,
+    ROS2SensorIngressConfig,
+    overlay_sensor_observations,
+    start_ros2_sensor_ingress,
 )
 from transport_recovery import (  # noqa: E402
     SupportContactMonitor,
@@ -291,11 +388,13 @@ BANANA_GRASP_QUAT /= torch.linalg.norm(BANANA_GRASP_QUAT)
 GRIPPER_BASE_TO_FINGERTIP_M = 0.149
 TOTAL_TESTS = 10
 VALID_CRITIC_PHASES = {
-    "global", "approach_banana", "descend", "grasp", "lift", "above_plate", "release"
+    "global", "approach_banana", "descend", "grasp", "lift", "above_plate",
+    "place", "release"
 }
 ACTIVE_EPISODE_RECORDER: GeminiEpisodeDatasetRecorder | None = None
 ACTIVE_SENSOR_MONITOR: SensorCaptureBuffer | None = None
 ACTIVE_SENSOR_SAMPLE_INDEX = 0
+ACTIVE_ROS2_SENSOR_INGRESS: ROS2SensorIngress | None = None
 
 
 def _json_from_text(text: str) -> dict[str, Any]:
@@ -643,6 +742,58 @@ def _rgbd_checkpoint_frame(
     return np.ascontiguousarray(composite), summary
 
 
+def _rgbd_object_axis_observation(
+    env: Any,
+    *,
+    prim_label_fragment: str,
+    reference_axis: np.ndarray | None = None,
+) -> dict[str, Any]:
+    """Read a masked RGB-D principal axis without using rigid-body pose state."""
+    sensor = env.scene.sensors["over_shoulder_left_camera"]
+    depth_value = sensor.data.output.get("depth")
+    instance_value = sensor.data.output.get("instance_id_segmentation_fast")
+    if depth_value is None or instance_value is None:
+        raise ValueError("RGB-D depth or instance-id output is unavailable")
+
+    def _camera_numpy(value: Any) -> np.ndarray:
+        value = getattr(value, "torch", value)
+        if isinstance(value, torch.Tensor):
+            value = value[0].detach().cpu().numpy()
+        return np.asarray(value).squeeze()
+
+    depth = _camera_numpy(depth_value)
+    instance_ids = _camera_numpy(instance_value)
+    info = (sensor.data.info or {}).get("instance_id_segmentation_fast")
+    mask, identity = instance_mask_for_prim_label(
+        instance_ids,
+        info,
+        prim_label_fragment,
+    )
+    intrinsics = getattr(sensor.data.intrinsic_matrices, "torch", None)
+    if intrinsics is None:
+        intrinsics = sensor.data.intrinsic_matrices
+    if isinstance(intrinsics, torch.Tensor):
+        intrinsics = intrinsics[0].detach().cpu().numpy()
+    observation = estimate_masked_object_axis(
+        depth,
+        mask,
+        np.asarray(intrinsics),
+    )
+    result = {
+        "available": True,
+        "source": "rgbd_instance_depth_major_axis",
+        "prim_label_fragment": prim_label_fragment,
+        **identity,
+        **observation.to_dict(),
+    }
+    if reference_axis is not None:
+        result["orientation_error_deg"] = sign_invariant_axis_error_deg(
+            reference_axis,
+            observation.major_axis_camera,
+        )
+    return result
+
+
 def _state(env: Any, initial_banana_z: float) -> dict[str, Any]:
     banana = _local_position(env, "banana")
     plate = _local_position(env, "plate_large")
@@ -806,8 +957,71 @@ bounded motion. Use complete when the image and state show that the banana is
 already on the plate and no more grasp/transport motion is needed."""
 
 
-def _local_dls_executor_registry() -> MotionExecutorRegistry:
+def _local_dls_executor_registry(
+    trackable_object_ids: Sequence[str] = (),
+) -> MotionExecutorRegistry:
     """Register the currently available executor and its configurable surface."""
+    normalized_object_ids = sorted(
+        {
+            str(object_id)
+            for object_id in trackable_object_ids
+            if isinstance(object_id, str) and object_id
+        }
+    )
+    configuration_properties: dict[str, Any] = {
+        "position_tolerance_m": {
+            "type": "number", "minimum": 0.001, "maximum": 0.05,
+        },
+        "translation_step_limit_m": {
+            "type": "number", "minimum": 0.001, "maximum": 0.05,
+        },
+        "maximum_iterations": {
+            "type": "integer", "minimum": 1, "maximum": 400,
+        },
+        "settle_steps": {
+            "type": "integer", "minimum": 1, "maximum": 60,
+        },
+        "joint_step_limit_rad": {
+            "type": "number", "minimum": 0.001, "maximum": 0.20,
+        },
+        "damping": {
+            "type": "number", "minimum": 0.001, "maximum": 1.0,
+        },
+        "orientation_tolerance_deg": {
+            "type": "number", "minimum": 0.1, "maximum": 30.0,
+        },
+        "rotation_step_limit_deg": {
+            "type": "number", "minimum": 0.1, "maximum": 30.0,
+        },
+        "minimum_progress_m": {
+            "type": "number", "minimum": 0.0001, "maximum": 0.01,
+        },
+        "maximum_stalled_observations": {
+            "type": "integer", "minimum": 2, "maximum": 20,
+        },
+        "require_contact": {"type": "boolean"},
+        "minimum_contact_force_n": {
+            "type": "number", "minimum": 0.0, "maximum": 100.0,
+        },
+        "maximum_tracked_pose_error_m": {
+            "type": "number", "minimum": 0.001, "maximum": 0.30,
+        },
+        "maximum_tracked_orientation_error_deg": {
+            "type": "number", "minimum": 1.0, "maximum": 90.0,
+        },
+        "minimum_observed_clearance_m": {
+            "type": "number", "minimum": 0.0, "maximum": 0.50,
+        },
+    }
+    if normalized_object_ids:
+        configuration_properties["tracked_object_id"] = {
+            "type": "string",
+            "enum": normalized_object_ids,
+            "description": (
+                "Runtime-advertised object whose RGB-D orientation lease is "
+                "being configured."
+            ),
+        }
     registry = MotionExecutorRegistry()
     registry.register(
         MotionExecutorSpec(
@@ -825,32 +1039,7 @@ def _local_dls_executor_registry() -> MotionExecutorRegistry:
             configuration_schema={
                 "type": "object",
                 "additionalProperties": False,
-                "properties": {
-                    "position_tolerance_m": {
-                        "type": "number", "minimum": 0.001, "maximum": 0.05,
-                    },
-                    "translation_step_limit_m": {
-                        "type": "number", "minimum": 0.001, "maximum": 0.05,
-                    },
-                    "maximum_iterations": {
-                        "type": "integer", "minimum": 1, "maximum": 100,
-                    },
-                    "settle_steps": {
-                        "type": "integer", "minimum": 1, "maximum": 60,
-                    },
-                    "joint_step_limit_rad": {
-                        "type": "number", "minimum": 0.001, "maximum": 0.20,
-                    },
-                    "damping": {
-                        "type": "number", "minimum": 0.001, "maximum": 1.0,
-                    },
-                    "orientation_tolerance_deg": {
-                        "type": "number", "minimum": 0.1, "maximum": 30.0,
-                    },
-                    "rotation_step_limit_deg": {
-                        "type": "number", "minimum": 0.1, "maximum": 30.0,
-                    },
-                },
+                "properties": configuration_properties,
             },
         )
     )
@@ -898,6 +1087,259 @@ def _local_binary_actuator_registry() -> ActuatorExecutorRegistry:
     return registry
 
 
+def _motion_lease_conditions_from_config(
+    config: dict[str, Any],
+) -> MotionLeaseConditions:
+    """Build the generic lease contract from one executor's optional settings."""
+    return MotionLeaseConditions(
+        require_contact=bool(config.get("require_contact", False)),
+        minimum_contact_force_n=float(config.get("minimum_contact_force_n", 0.0)),
+        maximum_tracked_pose_error_m=config.get(
+            "maximum_tracked_pose_error_m"
+        ),
+        minimum_observed_clearance_m=config.get(
+            "minimum_observed_clearance_m"
+        ),
+    )
+
+
+def _contact_retained_predicate(
+    values: dict[str, Any], parameters: dict[str, Any]
+) -> PredicateResult:
+    touch = values["gripper.touch"]
+    force = values["gripper.contact_force_n"]
+    minimum = float(parameters.get("minimum_force_n", 0.0))
+    if not isinstance(touch, bool):
+        raise ValueError("gripper.touch must be boolean")
+    if touch is not True:
+        return PredicateResult(False, "contact_lost", {"touch": touch})
+    if isinstance(force, bool) or not isinstance(force, (int, float)):
+        raise ValueError("gripper.contact_force_n must be numeric")
+    if float(force) < minimum:
+        return PredicateResult(
+            False,
+            "contact_force_below_lease_minimum",
+            {"contact_force_n": float(force), "minimum_force_n": minimum},
+        )
+    return PredicateResult(
+        True,
+        "contact_retained",
+        {"touch": touch, "contact_force_n": float(force)},
+    )
+
+
+def _numeric_bound_predicate(
+    values: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    channel: str,
+    bound_name: str,
+    valid_reason: str,
+    invalid_reason: str,
+    maximum: bool,
+) -> PredicateResult:
+    observed = values[channel]
+    bound = parameters[bound_name]
+    if (
+        isinstance(observed, bool)
+        or not isinstance(observed, (int, float))
+        or isinstance(bound, bool)
+        or not isinstance(bound, (int, float))
+    ):
+        raise ValueError("numeric predicate values must be numbers")
+    observed = float(observed)
+    bound = float(bound)
+    if not math.isfinite(observed) or not math.isfinite(bound):
+        raise ValueError("numeric predicate values must be finite")
+    valid = observed <= bound if maximum else observed >= bound
+    return PredicateResult(
+        valid,
+        valid_reason if valid else invalid_reason,
+        {channel: observed, bound_name: bound},
+    )
+
+
+def _motion_progress_predicate(
+    values: dict[str, Any], parameters: dict[str, Any]
+) -> PredicateResult:
+    stalled = values["motion.stalled_observation_count"]
+    maximum = parameters["maximum_stalled_observations"]
+    if (
+        isinstance(stalled, bool)
+        or not isinstance(stalled, int)
+        or isinstance(maximum, bool)
+        or not isinstance(maximum, int)
+    ):
+        raise ValueError("motion stall counts must be integers")
+    valid = stalled < maximum
+    return PredicateResult(
+        valid,
+        "motion_progress_observed" if valid else "motion_progress_stalled",
+        {
+            "stalled_observation_count": stalled,
+            "maximum_stalled_observations": maximum,
+        },
+    )
+
+
+def _collision_stop_clear_predicate(
+    values: dict[str, Any], _parameters: dict[str, Any]
+) -> PredicateResult:
+    stopped = values["scene.collision_stop"]
+    if not isinstance(stopped, bool):
+        raise ValueError("scene collision-stop observation must be boolean")
+    return PredicateResult(
+        not stopped,
+        "collision_path_clear" if not stopped else "rgbd_collision_stop_requested",
+        {"scene.collision_stop": stopped},
+    )
+
+
+def _motion_sensor_predicate_registry() -> SensorPredicateRegistry:
+    """Register available local predicate plugins; the lease core stays generic."""
+    registry = SensorPredicateRegistry()
+    registry.register(
+        SensorPredicateSpec(
+            predicate_id="scene.no_collision_stop",
+            description=(
+                "The ROS 2 RGB-D collision monitor has not requested a stop."
+            ),
+            required_channels=("scene.collision_stop",),
+            maximum_age_s=0.5,
+            evaluator=_collision_stop_clear_predicate,
+        )
+    )
+    registry.register(
+        SensorPredicateSpec(
+            predicate_id="motion.progress_not_stalled",
+            description=(
+                "Fresh robot kinematic feedback continues to reduce target error."
+            ),
+            required_channels=("motion.stalled_observation_count",),
+            maximum_age_s=0.5,
+            evaluator=_motion_progress_predicate,
+        )
+    )
+    registry.register(
+        SensorPredicateSpec(
+            predicate_id="gripper.contact_retained",
+            description="Touch and minimum contact force remain observed.",
+            required_channels=("gripper.touch", "gripper.contact_force_n"),
+            maximum_age_s=0.5,
+            evaluator=_contact_retained_predicate,
+        )
+    )
+    registry.register(
+        SensorPredicateSpec(
+            predicate_id="object.translation_within_error",
+            description="Tracked object translation remains inside its lease.",
+            required_channels=("object.tracked_translation_error_m",),
+            maximum_age_s=0.5,
+            evaluator=lambda values, parameters: _numeric_bound_predicate(
+                values,
+                parameters,
+                channel="object.tracked_translation_error_m",
+                bound_name="maximum_error_m",
+                valid_reason="tracked_translation_within_tolerance",
+                invalid_reason="tracked_pose_error_exceeded",
+                maximum=True,
+            ),
+        )
+    )
+    registry.register(
+        SensorPredicateSpec(
+            predicate_id="object.orientation_within_error",
+            description=(
+                "RGB-D tracked object major-axis orientation remains inside "
+                "its model-issued tolerance."
+            ),
+            required_channels=("rgbd.object_orientation_error_deg",),
+            maximum_age_s=0.5,
+            evaluator=lambda values, parameters: _numeric_bound_predicate(
+                values,
+                parameters,
+                channel="rgbd.object_orientation_error_deg",
+                bound_name="maximum_error_deg",
+                valid_reason="tracked_orientation_within_tolerance",
+                invalid_reason="rgbd_object_orientation_error_exceeded",
+                maximum=True,
+            ),
+        )
+    )
+    registry.register(
+        SensorPredicateSpec(
+            predicate_id="scene.clearance_above_minimum",
+            description="Observed object-to-support clearance remains sufficient.",
+            required_channels=("scene.observed_clearance_m",),
+            maximum_age_s=0.5,
+            evaluator=lambda values, parameters: _numeric_bound_predicate(
+                values,
+                parameters,
+                channel="scene.observed_clearance_m",
+                bound_name="minimum_clearance_m",
+                valid_reason="observed_clearance_sufficient",
+                invalid_reason="observed_clearance_below_lease_minimum",
+                maximum=False,
+            ),
+        )
+    )
+    return registry
+
+
+def _motion_sensor_predicate_leases(
+    config: dict[str, Any],
+) -> tuple[SensorPredicateLease, ...]:
+    leases: list[SensorPredicateLease] = []
+    leases.append(
+        SensorPredicateLease(
+            "motion.progress_not_stalled",
+            {
+                "maximum_stalled_observations": int(
+                    config.get("maximum_stalled_observations", 3)
+                )
+            },
+        )
+    )
+    if bool(config.get("require_contact", False)):
+        leases.append(
+            SensorPredicateLease(
+                "gripper.contact_retained",
+                {"minimum_force_n": float(config.get("minimum_contact_force_n", 0.0))},
+            )
+        )
+    if config.get("maximum_tracked_pose_error_m") is not None:
+        leases.append(
+            SensorPredicateLease(
+                "object.translation_within_error",
+                {"maximum_error_m": float(config["maximum_tracked_pose_error_m"])},
+            )
+        )
+    if config.get("maximum_tracked_orientation_error_deg") is not None:
+        leases.append(
+            SensorPredicateLease(
+                "object.orientation_within_error",
+                {
+                    "maximum_error_deg": float(
+                        config["maximum_tracked_orientation_error_deg"]
+                    ),
+                    "tracked_object_id": config.get("tracked_object_id"),
+                },
+            )
+        )
+    if config.get("minimum_observed_clearance_m") is not None:
+        leases.append(
+            SensorPredicateLease(
+                "scene.clearance_above_minimum",
+                {
+                    "minimum_clearance_m": float(
+                        config["minimum_observed_clearance_m"]
+                    )
+                },
+            )
+        )
+    return tuple(leases)
+
+
 def _motion_governor_prompt(
     *,
     instruction: str,
@@ -930,10 +1372,73 @@ optional and must stay inside their advertised schema. Ground any target
 correction and configuration change in current evidence. Measured contact and
 touch in observed world state are current physical evidence; interpret them
 together with the requested actuator state instead of requiring an unloaded
-actuator to reach its full travel. Do not emit prose or JSON outside the single
-native tool call.
+actuator to reach its full travel. Configure a sufficiently long
+maximum_iterations horizon for the target. When the observed state indicates
+that an object is being carried, advertise only the invariants needed for this
+motion through require_contact, minimum_contact_force_n,
+maximum_tracked_pose_error_m, and minimum_observed_clearance_m. These are lease
+conditions evaluated locally while the model is not being polled. When an
+RGB-D tracked-orientation source is available for a carried object, also set a
+maximum_tracked_orientation_error_deg appropriate to the observed geometry so
+object rotation or slip interrupts the lease, and identify that object with
+tracked_object_id from the runtime-advertised enum. The
+lease_condition_sources map in motion context is authoritative: never include a
+condition whose corresponding source is null or unavailable. Do not emit prose
+or JSON outside the single native tool call.
+
+An invalidated lease is a stopped recovery checkpoint, not automatically a
+terminal task failure. Inspect the fresh evidence and choose the next safe
+solution. If contact, actuator feedback, and visual tracking show that a carried
+object remains stably grasped while the current route or clearance is invalid,
+correct the target to restore safe clearance and continue. If the grasp is
+unstable, detached, or cannot be established from current evidence, hold for a
+fresh operation decision instead of blindly continuing. When
+previous_motion_tool_outcome is present, correct that rejected proposal while
+preserving the local safety bounds.
+
+When scheduler_decision explicitly dispatches continue.runtime_motion after a
+previous hold, the fresh operation decision has already resolved whether to
+wait for another operation. Do not repeat hold_motion solely because the same
+state is still visible. Use the current evidence to select a bounded movement
+that can safely change that state and advance the instruction, or select
+abort_motion when no such movement is safe. The recovery movement itself is
+your decision; it is not supplied by a phase-specific controller.
 
 {critic_context}"""
+
+
+def _motion_registry_for_observation_sources(
+    registry: MotionExecutorRegistry,
+    source_context: dict[str, Any],
+) -> MotionExecutorRegistry:
+    """Advertise only lease settings backed by this observation's sensors."""
+    unavailable_fields: set[str] = set()
+    if source_context.get("contact") is None:
+        unavailable_fields.update(("require_contact", "minimum_contact_force_n"))
+    if source_context.get("tracked_pose") is None:
+        unavailable_fields.add("maximum_tracked_pose_error_m")
+    orientation_sources = source_context.get("tracked_orientation")
+    if not isinstance(orientation_sources, dict) or not orientation_sources:
+        unavailable_fields.update(
+            ("maximum_tracked_orientation_error_deg", "tracked_object_id")
+        )
+    if source_context.get("observed_clearance") is None:
+        unavailable_fields.add("minimum_observed_clearance_m")
+    filtered = MotionExecutorRegistry()
+    for spec in registry.specs():
+        schema = json.loads(json.dumps(spec.configuration_schema))
+        properties = schema.get("properties", {})
+        for field in unavailable_fields:
+            properties.pop(field, None)
+        filtered.register(
+            MotionExecutorSpec(
+                executor_id=spec.executor_id,
+                tool_name=spec.tool_name,
+                description=spec.description,
+                configuration_schema=schema,
+            )
+        )
+    return filtered
 
 
 def _choose_observation_bound_motion_tool(
@@ -952,11 +1457,18 @@ def _choose_observation_bound_motion_tool(
     """Ask the selected model to invoke one fresh-observation motion tool."""
     encoded, digest = _encode_frame(frame)
     observation_id = f"{observation_prefix}:{digest}"
+    source_context = motion_context.get("lease_condition_sources", {})
+    if not isinstance(source_context, dict):
+        source_context = {}
+    observation_registry = _motion_registry_for_observation_sources(
+        registry,
+        source_context,
+    )
     gate = ObservationBoundMotionGate(
         observation_id=observation_id,
         current_target_m=current_target.tolist(),
         maximum_correction_m=args_cli.maximum_model_target_correction,
-        registry=registry,
+        registry=observation_registry,
     )
     messages = [
         {
@@ -996,7 +1508,9 @@ def _choose_observation_bound_motion_tool(
             provider.complete(
                 messages,
                 {
-                    "tools": motion_tool_schemas(observation_id, registry),
+                    "tools": motion_tool_schemas(
+                        observation_id, observation_registry
+                    ),
                     "tool_choice": "required",
                 },
             ),
@@ -1055,6 +1569,59 @@ def _choose_observation_bound_motion_tool(
             latency,
             digest,
         )
+    if outcome.action == "execute":
+        lease_conditions = _motion_lease_conditions_from_config(
+            dict(outcome.executor_config)
+        )
+        source_errors = motion_lease_source_errors(
+            lease_conditions,
+            contact_available=source_context.get("contact") is not None,
+            tracked_pose_available=source_context.get("tracked_pose") is not None,
+            observed_clearance_available=(
+                source_context.get("observed_clearance") is not None
+            ),
+        )
+        if (
+            outcome.executor_config.get(
+                "maximum_tracked_orientation_error_deg"
+            )
+            is not None
+        ):
+            tracked_object_id = outcome.executor_config.get("tracked_object_id")
+            orientation_sources = source_context.get("tracked_orientation")
+            if not isinstance(tracked_object_id, str) or not tracked_object_id:
+                source_errors = (
+                    *source_errors,
+                    "tracked_object_id is required for an RGB-D orientation lease",
+                )
+            elif not isinstance(orientation_sources, dict) or (
+                orientation_sources.get(tracked_object_id) is None
+            ):
+                source_errors = (
+                    *source_errors,
+                    "RGB-D tracked-orientation source is unavailable for "
+                    f"{tracked_object_id!r}",
+                )
+        if source_errors:
+            error = "lease references unavailable observations: " + "; ".join(
+                source_errors
+            )
+            rejected_tool = outcome.to_dict()
+            rejected_tool.update({"status": "rejected", "error": error})
+            return (
+                {
+                    "decision": "retry",
+                    "grasp_ready": False,
+                    "confidence": 0.0,
+                    "assessment": f"Motion tool rejected by safety gate: {error}",
+                    "motion_tool": rejected_tool,
+                    "target_xyz_m": current_target.tolist(),
+                    "executor_id": None,
+                    "executor_config": {},
+                },
+                latency,
+                digest,
+            )
     decision = {
         "decision": (
             "execute"
@@ -1100,7 +1667,11 @@ The image contains RGB on the left and depth on the right when depth is
 available. Choose a registered actuator executor only when its command advances
 the human instruction and is safe in the fresh observed state. Select
 hold_actuation when another observation is required before changing the
-actuator, or abort_actuation when the transition is unsafe. Measured touch and
+actuator. abort_actuation is a terminal task abort, not a request to stop this
+transition and replan. If the current actuator operation should stop but the
+human instruction remains recoverable, select hold_actuation so the fresh
+operation scheduler can choose another capability. Select abort_actuation only
+when no safe recovery can continue the overall instruction. Measured touch and
 force are physical evidence: incomplete travel with touch can indicate an
 object is obstructing closure, while disengagement should remove retained
 contact. Executor settings are optional and must remain inside their advertised
@@ -1242,6 +1813,201 @@ def _choose_observation_bound_actuator_tool(
     )
 
 
+def _post_motion_operation_candidates(
+    *, actuator_transition_available: bool = True
+) -> tuple[OperationCandidate, ...]:
+    """Advertise only operations admitted by current runtime preconditions."""
+    candidates = [
+        OperationCandidate(
+            operation_id="continue.runtime_motion",
+            kind="motion",
+            description=(
+                "Preserve all current actuator commands and continue to the "
+                "next runtime-proposed motion operation."
+            ),
+        ),
+    ]
+    if actuator_transition_available:
+        candidates.append(OperationCandidate(
+            operation_id="evaluate.runtime_actuator",
+            kind="actuation",
+            description=(
+                "Request a fresh model-governed actuator command before any "
+                "later runtime-proposed motion."
+            ),
+        ))
+    return tuple(candidates)
+
+
+def _operation_scheduler_prompt(
+    *,
+    instruction: str,
+    observation_id: str,
+    state: dict[str, Any],
+    operation_context: dict[str, Any],
+    candidates: tuple[OperationCandidate, ...],
+    rgbd_summary: dict[str, Any] | None,
+    critic_context: str,
+) -> str:
+    """Build a task-neutral next-operation request from runtime candidates."""
+    return f"""Select the next operation using the attached fresh observation
+and exactly one advertised scheduler tool.
+
+Human instruction:
+{instruction}
+
+Fresh observation token: {observation_id}
+Observed world state:
+{json.dumps(state, indent=2)}
+Operation context:
+{json.dumps(operation_context, indent=2)}
+Runtime-advertised candidates:
+{json.dumps([candidate.to_dict() for candidate in candidates], indent=2)}
+RGB-D summary:
+{json.dumps(rgbd_summary, indent=2)}
+
+A bounded runtime operation has just completed or yielded on measured evidence.
+Dispatch evaluate.runtime_actuator when changing or confirming an actuator
+command is the next physical operation needed to advance the human instruction.
+Dispatch continue.runtime_motion only when current actuator commands should be
+preserved while the runtime proposes the next movement. Use observe_again when
+the evidence is insufficient, complete_task only when the physical instruction
+is already achieved, or abort_task when neither advertised operation is safe.
+Do not infer a transition from a prerecorded action or phase schedule. Do not
+emit prose or JSON outside the single native tool call.
+
+{critic_context}"""
+
+
+def _choose_observation_bound_operation(
+    provider: GeminiProvider,
+    *,
+    instruction: str,
+    observation_prefix: str,
+    frame: np.ndarray,
+    state: dict[str, Any],
+    operation_context: dict[str, Any],
+    candidates: tuple[OperationCandidate, ...],
+    rgbd_summary: dict[str, Any] | None,
+    critic_context: str,
+) -> tuple[dict[str, Any], float, str]:
+    """Ask the selected model to route one fresh-observation operation."""
+    encoded, digest = _encode_frame(frame)
+    observation_id = f"{observation_prefix}:{digest}"
+    gate = ObservationBoundOperationGate(
+        observation_id=observation_id,
+        candidates=candidates,
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a visual operation scheduler. Every next-operation "
+                "decision must be exactly one runtime-advertised native tool call."
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{encoded}",
+                        "detail": "high",
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": _operation_scheduler_prompt(
+                        instruction=instruction,
+                        observation_id=observation_id,
+                        state=state,
+                        operation_context=operation_context,
+                        candidates=candidates,
+                        rgbd_summary=rgbd_summary,
+                        critic_context=critic_context,
+                    ),
+                },
+            ],
+        },
+    ]
+    started = time.perf_counter()
+    response = asyncio.run(
+        asyncio.wait_for(
+            provider.complete(
+                messages,
+                {
+                    "tools": operation_scheduler_tool_schemas(
+                        observation_id, candidates
+                    ),
+                    "tool_choice": "required",
+                },
+            ),
+            timeout=args_cli.timeout,
+        )
+    )
+    latency = time.perf_counter() - started
+    tool_calls = response.tool_calls or []
+    if len(tool_calls) != 1:
+        error = (
+            "model must issue exactly one scheduler tool call; "
+            f"received {len(tool_calls)}"
+        )
+        return (
+            {
+                "decision": "observe",
+                "confidence": 0.0,
+                "assessment": f"Scheduler tool rejected by safety gate: {error}",
+                "scheduler_tool": {
+                    "status": "rejected",
+                    "observation_id": observation_id,
+                    "tool_name": None,
+                    "arguments": None,
+                    "error": error,
+                    "model_text": str(response.text or "")[:500],
+                },
+                "operation_id": None,
+                "operation_kind": None,
+            },
+            latency,
+            digest,
+        )
+    try:
+        outcome = gate.dispatch(tool_calls[0])
+    except MotionToolValidationError as error:
+        function = tool_calls[0].get("function", {})
+        return (
+            {
+                "decision": "observe",
+                "confidence": 0.0,
+                "assessment": f"Scheduler tool rejected by safety gate: {error}",
+                "scheduler_tool": {
+                    "status": "rejected",
+                    "observation_id": observation_id,
+                    "tool_name": function.get("name"),
+                    "arguments": function.get("arguments"),
+                    "error": str(error),
+                },
+                "operation_id": None,
+                "operation_kind": None,
+            },
+            latency,
+            digest,
+        )
+    return (
+        {
+            "decision": outcome.action,
+            "confidence": outcome.confidence,
+            "assessment": outcome.reason,
+            "scheduler_tool": outcome.to_dict(),
+            "operation_id": outcome.operation_id,
+            "operation_kind": outcome.operation_kind,
+        },
+        latency,
+        digest,
+    )
+
+
 def _test_line(index: int, name: str, passed: bool, detail: str) -> None:
     status = "PASS" if passed else "FAIL"
     print(f"[TEST {index}/{TOTAL_TESTS}] {status} | {name} | {detail}", flush=True)
@@ -1373,6 +2139,25 @@ def _execute_binary_actuator_tool(
     )
 
 
+def _actuator_feedback_event_from_execution(
+    execution: dict[str, Any],
+    policy: ActuatorFeedbackEventPolicy,
+) -> dict[str, Any]:
+    """Translate adapter telemetry into the task-neutral feedback-event contract."""
+    before = execution["state_before"]
+    after = execution["state_after"]
+    event = assess_actuator_feedback_event(
+        position_before=float(before["gripper_closed_fraction"]),
+        position_after=float(after["gripper_closed_fraction"]),
+        force_before_n=float(before["current_contact"]["net_force_n"]),
+        force_after_n=float(after["current_contact"]["net_force_n"]),
+        touch_before=bool(before["current_contact"]["touch"]),
+        touch_after=bool(after["current_contact"]["touch"]),
+        policy=policy,
+    )
+    return event.to_dict()
+
+
 def _move_eef_to_target(
     env: Any,
     obs: dict[str, Any],
@@ -1385,6 +2170,7 @@ def _move_eef_to_target(
     initial_banana_z: float,
     executor_config: dict[str, Any] | None = None,
     carry_reference_offset: torch.Tensor | None = None,
+    rgbd_axis_references: dict[str, np.ndarray] | None = None,
     checkpoint_callback: Callable[
         [dict[str, Any], dict[str, Any]], dict[str, Any]
     ]
@@ -1409,8 +2195,18 @@ def _move_eef_to_target(
         "damping": args_cli.adaptive_damping,
         "orientation_tolerance_deg": args_cli.adaptive_orientation_tolerance_deg,
         "rotation_step_limit_deg": args_cli.adaptive_max_angle_step_deg,
+        "minimum_progress_m": 0.00025,
+        "maximum_stalled_observations": 3,
+        "require_contact": False,
+        "minimum_contact_force_n": 0.0,
+        "maximum_tracked_pose_error_m": None,
+        "maximum_tracked_orientation_error_deg": None,
+        "minimum_observed_clearance_m": None,
     }
     effective_config.update(executor_config or {})
+    lease_conditions = _motion_lease_conditions_from_config(effective_config)
+    sensor_predicate_registry = _motion_sensor_predicate_registry()
+    sensor_predicate_leases = _motion_sensor_predicate_leases(effective_config)
     robot = env.scene["robot"]
     arm_joint_ids = [robot.data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)]
     body_idx = robot.data.body_names.index("base_link")
@@ -1437,6 +2233,7 @@ def _move_eef_to_target(
     previous_orientation_error = orientation_error_start
     recovery_request: dict[str, Any] | None = None
     early_stop: dict[str, Any] | None = None
+    stalled_observations = 0
 
     for iteration in range(int(effective_config["maximum_iterations"])):
         eef_before = _eef_position(env)
@@ -1503,20 +2300,190 @@ def _move_eef_to_target(
             "terminal": terminal,
         }
         checkpoint_reason: str | None = None
-        if carry_reference_offset is not None and phase == "above_plate":
-            banana_after = _local_position(env, "banana")
-            safety = assess_motion_safety(
-                phase=phase,
-                eef_xyz=eef_after.numpy(),
-                object_xyz=banana_after.numpy(),
-                reference_eef_minus_object=carry_reference_offset.numpy(),
-                object_initial_z=initial_banana_z,
-                maximum_grasp_drift_m=args_cli.maximum_grasp_drift,
-                minimum_carried_lift_m=args_cli.minimum_transport_lift,
+        tracked_pose_error_m = None
+        if carry_reference_offset is not None:
+            tracked_object = _local_position(env, "banana")
+            tracked_pose_error_m = float(
+                torch.linalg.vector_norm(
+                    (eef_after - tracked_object) - carry_reference_offset
+                )
             )
-            record["local_safety"] = safety.to_dict()
-            if not safety.safe:
-                checkpoint_reason = "local_anomaly:" + ",".join(safety.reasons)
+        observed_clearance_m = None
+        if lease_conditions.minimum_observed_clearance_m is not None:
+            observed_clearance_m = float(
+                _local_position(env, "banana")[2]
+                - _local_position(env, "plate_large")[2]
+            )
+        current_contact = _current_contact_observation(env)
+        observed_at_s = time.monotonic()
+        sensor_observations: list[SensorObservation] = []
+        progress_m = previous_error - error_after
+        if progress_m < float(effective_config["minimum_progress_m"]):
+            stalled_observations += 1
+        else:
+            stalled_observations = 0
+        sensor_observations.append(
+            SensorObservation(
+                channel_id="motion.stalled_observation_count",
+                source_id="sim6.robot_kinematic_state_adapter",
+                sequence=iteration + 1,
+                timestamp_s=observed_at_s,
+                value=stalled_observations,
+            )
+        )
+        record["measured_target_progress_m"] = progress_m
+        record["stalled_observation_count"] = stalled_observations
+        if bool(current_contact.get("available")):
+            sensor_observations.extend(
+                (
+                    SensorObservation(
+                        channel_id="gripper.touch",
+                        source_id="sim6.gripper_contact_sensor",
+                        sequence=iteration + 1,
+                        timestamp_s=observed_at_s,
+                        value=bool(current_contact["touch"]),
+                    ),
+                    SensorObservation(
+                        channel_id="gripper.contact_force_n",
+                        source_id="sim6.gripper_contact_sensor",
+                        sequence=iteration + 1,
+                        timestamp_s=observed_at_s,
+                        value=float(current_contact["net_force_n"]),
+                    ),
+                )
+            )
+        if tracked_pose_error_m is not None:
+            sensor_observations.append(
+                SensorObservation(
+                    channel_id="object.tracked_translation_error_m",
+                    source_id="sim6.privileged_relative_pose_adapter",
+                    sequence=iteration + 1,
+                    timestamp_s=observed_at_s,
+                    value=tracked_pose_error_m,
+                )
+            )
+        rgbd_axis_observation = None
+        rgbd_axis_error = None
+        rgbd_axis_error_message = None
+        if (
+            effective_config.get("maximum_tracked_orientation_error_deg")
+            is not None
+        ):
+            try:
+                tracked_object_id = effective_config.get("tracked_object_id")
+                if not isinstance(tracked_object_id, str) or not tracked_object_id:
+                    raise ValueError(
+                        "tracked_object_id is unavailable for the RGB-D lease"
+                    )
+                reference_axis = (rgbd_axis_references or {}).get(
+                    tracked_object_id
+                )
+                if reference_axis is None:
+                    raise ValueError(
+                        "RGB-D tracked-orientation reference is unavailable for "
+                        f"{tracked_object_id!r}"
+                    )
+                rgbd_axis_observation = _rgbd_object_axis_observation(
+                    env,
+                    prim_label_fragment=f"/scene/{tracked_object_id}",
+                    reference_axis=reference_axis,
+                )
+                rgbd_axis_error = float(
+                    rgbd_axis_observation["orientation_error_deg"]
+                )
+                sensor_observations.append(
+                    SensorObservation(
+                        channel_id="rgbd.object_orientation_error_deg",
+                        source_id="rgbd.instance_depth_major_axis",
+                        sequence=iteration + 1,
+                        timestamp_s=observed_at_s,
+                        value=rgbd_axis_error,
+                        frame_id="over_shoulder_left_camera",
+                    )
+                )
+            except ValueError as exc:
+                rgbd_axis_error_message = str(exc)
+        if observed_clearance_m is not None:
+            sensor_observations.append(
+                SensorObservation(
+                    channel_id="scene.observed_clearance_m",
+                    source_id="sim6.privileged_object_to_support_height_adapter",
+                    sequence=iteration + 1,
+                    timestamp_s=observed_at_s,
+                    value=observed_clearance_m,
+                )
+            )
+        ros2_overlay_channels: list[str] = []
+        if (
+            ACTIVE_ROS2_SENSOR_INGRESS is not None
+            and ACTIVE_ROS2_SENSOR_INGRESS.available
+        ):
+            ros2_snapshot = ACTIVE_ROS2_SENSOR_INGRESS.buffer.snapshot()
+            ros2_overlay_channels = list(ros2_snapshot.channels())
+            sensor_observations = list(
+                overlay_sensor_observations(sensor_observations, ros2_snapshot)
+            )
+        observation_snapshot = SensorObservationSnapshot(sensor_observations)
+        iteration_predicate_leases = sensor_predicate_leases
+        if observation_snapshot.get("scene.collision_stop") is not None:
+            iteration_predicate_leases = (
+                *iteration_predicate_leases,
+                SensorPredicateLease("scene.no_collision_stop", {}),
+            )
+        lease_assessment = sensor_predicate_registry.assess(
+            iteration_predicate_leases,
+            observation_snapshot,
+            evaluated_at_s=observed_at_s,
+        )
+        channel_sources = {
+            item.channel_id: item.source_id for item in sensor_observations
+        }
+        record["motion_lease"] = {
+            **lease_assessment.to_dict(),
+            "active_predicates": [
+                item.to_dict() for item in iteration_predicate_leases
+            ],
+            "observation_channels": [
+                item.to_dict() for item in sensor_observations
+            ],
+            "ros2_overlay_channels": ros2_overlay_channels,
+            "contact_source": (
+                channel_sources.get("gripper.touch")
+                if channel_sources.get("gripper.touch")
+                == channel_sources.get("gripper.contact_force_n")
+                else "+".join(
+                    sorted(
+                        {
+                            source
+                            for source in (
+                                channel_sources.get("gripper.touch"),
+                                channel_sources.get("gripper.contact_force_n"),
+                            )
+                            if source is not None
+                        }
+                    )
+                )
+            ),
+            "tracked_pose_source": channel_sources.get(
+                "object.tracked_translation_error_m"
+            ),
+            "observed_clearance_source": channel_sources.get(
+                "scene.observed_clearance_m"
+            ),
+            "tracked_orientation_source": channel_sources.get(
+                "rgbd.object_orientation_error_deg"
+            ),
+            "collision_stop_source": channel_sources.get("scene.collision_stop"),
+            "tracked_orientation_object_id": effective_config.get(
+                "tracked_object_id"
+            ),
+            "rgbd_tracked_axis": rgbd_axis_observation,
+            "rgbd_tracking_error": rgbd_axis_error_message,
+        }
+        if not lease_assessment.valid:
+            checkpoint_reason = "lease_invalidated:" + ",".join(
+                lease_assessment.invalidation_reasons
+            )
         if early_stop_callback is not None:
             early_stop = early_stop_callback()
             if early_stop is not None:
@@ -1525,7 +2492,8 @@ def _move_eef_to_target(
         # pause raises below. This is audit evidence, never success admission.
         iterations.append(record)
         periodic_checkpoint = (
-            (iteration + 1) % args_cli.coach_interval_iterations == 0
+            args_cli.periodic_motion_observations
+            and (iteration + 1) % args_cli.coach_interval_iterations == 0
         )
         target_changed = False
         if early_stop is None and checkpoint_callback is not None and (
@@ -1537,11 +2505,45 @@ def _move_eef_to_target(
                 "iteration": iteration + 1,
                 "target_error_m": error_after,
                 "orientation_error_deg": float(np.rad2deg(orientation_error_after)),
-                "local_safety": record.get("local_safety"),
+                "motion_lease": record.get("motion_lease"),
+                "lease_condition_sources": {
+                    "contact": record["motion_lease"].get("contact_source"),
+                    "tracked_pose": record["motion_lease"].get(
+                        "tracked_pose_source"
+                    ),
+                    "tracked_orientation": record["motion_lease"].get(
+                        "tracked_orientation_source"
+                    ),
+                    "observed_clearance": record["motion_lease"].get(
+                        "observed_clearance_source"
+                    ),
+                    "collision_stop": record["motion_lease"].get(
+                        "collision_stop_source"
+                    ),
+                    "model_polling": (
+                        "periodic_or_event"
+                        if args_cli.periodic_motion_observations
+                        else "event_or_completion_only"
+                    ),
+                },
                 "current_target_xyz_m": target_cpu.tolist(),
                 "executor_id": "bounded_dls_ik",
                 "executor_config": dict(effective_config),
             }
+            tracked_orientation_object_id = record["motion_lease"].get(
+                "tracked_orientation_object_id"
+            )
+            tracked_orientation_source = checkpoint[
+                "lease_condition_sources"
+            ].get("tracked_orientation")
+            checkpoint["lease_condition_sources"]["tracked_orientation"] = (
+                {
+                    tracked_orientation_object_id: tracked_orientation_source
+                }
+                if tracked_orientation_object_id
+                and tracked_orientation_source is not None
+                else {}
+            )
             checkpoint_decision = checkpoint_callback(obs, checkpoint)
             record["coach_checkpoint"] = checkpoint_decision
             if checkpoint_decision.get("decision") == "execute":
@@ -1565,6 +2567,12 @@ def _move_eef_to_target(
                 updated_config = checkpoint_decision.get("executor_config") or {}
                 if updated_config:
                     effective_config.update(updated_config)
+                    lease_conditions = _motion_lease_conditions_from_config(
+                        effective_config
+                    )
+                    sensor_predicate_leases = _motion_sensor_predicate_leases(
+                        effective_config
+                    )
                     orientation_tolerance = np.deg2rad(
                         effective_config["orientation_tolerance_deg"]
                     )
@@ -1581,10 +2589,16 @@ def _move_eef_to_target(
                         f"iteration {iteration + 1}: {checkpoint_reason}; "
                         f"coach={checkpoint_decision}"
                     )
-                recovery_request = {
-                    **checkpoint,
-                    "coach_decision": checkpoint_decision,
-                }
+                if checkpoint_decision.get("decision") == "execute":
+                    record["lease_reauthorized_by_model"] = True
+                    stalled_observations = 0
+                else:
+                    recovery_request = {
+                        **checkpoint,
+                        "reason": "model_requested_hold",
+                        "lease_invalidation_reason": checkpoint_reason,
+                        "coach_decision": checkpoint_decision,
+                    }
             elif checkpoint_decision.get("decision") == "retry":
                 recovery_request = {
                     **checkpoint,
@@ -1656,6 +2670,37 @@ def _move_eef_to_target(
         "orientation_error_after_deg": float(np.rad2deg(orientation_error_final)),
         "executor_id": "bounded_dls_ik",
         "executor_config": effective_config,
+        "motion_lease": {
+            "conditions": lease_conditions.to_dict(),
+            "active_predicates": [
+                item.to_dict() for item in sensor_predicate_leases
+            ],
+            "maximum_iterations": int(effective_config["maximum_iterations"]),
+            "model_observation_mode": (
+                "periodic_or_event"
+                if args_cli.periodic_motion_observations
+                else "event_or_completion_only"
+            ),
+            "tracking_source": (
+                "sim_privileged_relative_pose"
+                if carry_reference_offset is not None
+                else None
+            ),
+            "tracked_orientation_source": (
+                "rgbd_instance_depth_major_axis"
+                if effective_config.get("tracked_object_id")
+                in (rgbd_axis_references or {})
+                else None
+            ),
+            "tracked_orientation_object_id": effective_config.get(
+                "tracked_object_id"
+            ),
+            "clearance_source": (
+                "sim_privileged_object_to_support_height"
+                if lease_conditions.minimum_observed_clearance_m is not None
+                else None
+            ),
+        },
         "orientation_tolerance_deg": effective_config[
             "orientation_tolerance_deg"
         ],
@@ -2438,6 +3483,7 @@ def _retreat_after_release(
 
 def main() -> int:
     global ACTIVE_EPISODE_RECORDER, ACTIVE_SENSOR_MONITOR, ACTIVE_SENSOR_SAMPLE_INDEX
+    global ACTIVE_ROS2_SENSOR_INGRESS
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY in the environment")
@@ -2452,6 +3498,7 @@ def main() -> int:
             "adaptive_orientation_tolerance_deg": args_cli.adaptive_orientation_tolerance_deg,
             "adaptive_max_angle_step_deg": args_cli.adaptive_max_angle_step_deg,
             "coach_interval_iterations": args_cli.coach_interval_iterations,
+            "motion_checkpoint_replans": args_cli.motion_checkpoint_replans,
             "maximum_model_target_correction": (
                 args_cli.maximum_model_target_correction
             ),
@@ -2517,6 +3564,10 @@ def main() -> int:
         raise ValueError("minimum-contact-coverage must be in [0, 1]")
     if args_cli.minimum_touch_samples < 1:
         raise ValueError("minimum-touch-samples must be positive")
+    actuator_feedback_policy = ActuatorFeedbackEventPolicy(
+        minimum_position_change=args_cli.actuator_feedback_position_change,
+        minimum_force_change_n=args_cli.actuator_feedback_force_change,
+    )
 
     demo_path = args_cli.demo.expanduser().resolve()
     if not demo_path.is_file():
@@ -2569,8 +3620,13 @@ def main() -> int:
     )
     print(f"Local motion primitive: {demo_path} ({len(recorded_actions)} steps)")
     print(
-        "Control cadence: one observation-bound model tool per semantic phase "
-        f"and every {args_cli.coach_interval_iterations} local IK chunks"
+        "Control cadence: one observation-bound model tool per runtime operation; "
+        + (
+            f"periodic + event checkpoints every {args_cli.coach_interval_iterations} "
+            "local IK chunks"
+            if args_cli.periodic_motion_observations
+            else "event/completion checkpoints only during each multi-step IK lease"
+        )
     )
     print(
         "Motion executor: runtime-registered bounded DLS IK; model-configurable "
@@ -2579,6 +3635,16 @@ def main() -> int:
     print(
         "Actuator executor: runtime-registered binary clamp; model-selectable "
         "engage/disengage/maintain with 8–120 settling steps"
+    )
+    print(
+        "Operation scheduler: fresh-observation routing between continued "
+        "motion and actuator evaluation; no recorded gripper-state hints"
+    )
+    print(
+        "Post-actuation feedback: immediate Gemini reschedule when position "
+        f"change≥{actuator_feedback_policy.minimum_position_change:.3f} and "
+        "touch changes or force delta≥"
+        f"{actuator_feedback_policy.minimum_force_change_n:.3f}N"
     )
     print(
         "Live-pose adaptive IK: "
@@ -2596,15 +3662,14 @@ def main() -> int:
         )
     )
     print(
-        "Residual plate centering: "
+        "Model-governed placement: "
         + (
             "off (baseline mode)"
             if args_cli.disable_residual_centering
             else (
-                f"on (tolerance={args_cli.center_tolerance:.3f}m, "
-                f"step≤{args_cli.center_max_step:.3f}m, "
-                f"release_height={args_cli.release_height:.3f}m, "
-                f"iterations≤{args_cli.center_max_iterations})"
+                "on (fresh RGB-D/state motion tool; "
+                f"measured XY tolerance={args_cli.center_tolerance:.3f}m, "
+                f"release height={args_cli.release_height:.3f}m)"
             )
         )
     )
@@ -2630,6 +3695,14 @@ def main() -> int:
             "disabled"
             if args_cli.disable_training_recording
             else f"successful Gemini completions only → {training_episode_dir}"
+        )
+    )
+    print(
+        "ROS 2 sensor ingress: "
+        + (
+            "configured (subscriber availability checked after scene startup)"
+            if args_cli.ros2_sensor_ingress
+            else "disabled"
         )
     )
     print("=" * 78, flush=True)
@@ -2685,6 +3758,13 @@ def main() -> int:
             camera_cfg = getattr(env_cfg.scene, camera_name)
             if "depth" not in camera_cfg.data_types:
                 camera_cfg.data_types = [*camera_cfg.data_types, "depth"]
+        exterior_camera_cfg = env_cfg.scene.over_shoulder_left_camera
+        if "instance_id_segmentation_fast" not in exterior_camera_cfg.data_types:
+            exterior_camera_cfg.data_types = [
+                *exterior_camera_cfg.data_types,
+                "instance_id_segmentation_fast",
+            ]
+        exterior_camera_cfg.renderer_cfg.colorize_instance_id_segmentation = False
         env_cfg.scene.lazy_sensor_update = False
     # Sim 6's absolute-IK bridge currently resolves the Robotiq control body
     # incorrectly. Replay the demonstrated arm states through the stable joint
@@ -2723,7 +3803,12 @@ def main() -> int:
     obs = env.observation_manager.compute()
     coach = GeminiRoboticsER2(api_key, args_cli.timeout)
     motion_tool_provider = GeminiProvider(api_key, MODEL_ID)
-    motion_executor_registry = _local_dls_executor_registry()
+    trackable_object_ids = tuple(
+        object_id
+        for object_id in env_cfg.contact_object_list
+        if isinstance(object_id, str) and object_id
+    )
+    motion_executor_registry = _local_dls_executor_registry(trackable_object_ids)
     actuator_executor_registry = _local_binary_actuator_registry()
     initial_banana = _local_position(env, "banana")
     initial_banana_z = float(initial_banana[2])
@@ -2774,6 +3859,29 @@ def main() -> int:
         "rgbd_safety": {
             "enabled": args_cli.rgbd_safety,
             "motion_checkpoint_depth_panel": args_cli.rgbd_safety,
+            "tracked_object_translation_source": (
+                "ros2_tracked_object_status_when_published_else_"
+                "sim_privileged_relative_pose"
+            ),
+            "tracked_object_orientation_source": (
+                "ros2_tracked_object_status_when_published_else_"
+                "rgbd_instance_depth_major_axis"
+                if args_cli.rgbd_safety
+                else None
+            ),
+            "tracked_object_rgbd_axis_adapter_implemented": True,
+        },
+        "checkpoint_recovery": {
+            "rejected_tool_replan_limit": args_cli.motion_checkpoint_replans,
+            "preserves_local_correction_limit_m": (
+                args_cli.maximum_model_target_correction
+            ),
+            "stable_grasp_clearance_recovery_is_model_selected": True,
+        },
+        "ros2_sensor_ingress": {
+            "enabled": args_cli.ros2_sensor_ingress,
+            "available": None,
+            "status": "pending" if args_cli.ros2_sensor_ingress else "disabled",
         },
         "contact_sensor": contact_sensor_info,
         "world_intent_shadow": {
@@ -2787,6 +3895,22 @@ def main() -> int:
         },
         "motion_tool_protocol": {
             "observation_bound": True,
+            "lease_model_observation_mode": (
+                "periodic_or_event"
+                if args_cli.periodic_motion_observations
+                else "event_or_completion_only"
+            ),
+            "tracked_pose_source": (
+                "ros2_tracked_object_status_when_published_else_"
+                "sim_privileged_relative_pose"
+            ),
+            "rgbd_tracked_orientation_source": (
+                "ros2_tracked_object_status_when_published_else_"
+                "rgbd_instance_depth_major_axis"
+                if args_cli.rgbd_safety
+                else None
+            ),
+            "rgbd_tracked_axis_adapter_implemented": True,
             "maximum_target_correction_m": (
                 args_cli.maximum_model_target_correction
             ),
@@ -2813,6 +3937,20 @@ def main() -> int:
             ],
             "calls": [],
         },
+        "operation_scheduler_protocol": {
+            "observation_bound": True,
+            "candidate_source": "runtime",
+            "recorded_actuator_hints": False,
+            "post_actuation_feedback_policy": {
+                "minimum_position_change": (
+                    actuator_feedback_policy.minimum_position_change
+                ),
+                "minimum_force_change_n": (
+                    actuator_feedback_policy.minimum_force_change_n
+                ),
+            },
+            "calls": [],
+        },
         "transport_recovery": {
             "maximum_attempts": args_cli.max_transport_recoveries,
             "stability_hold_steps": args_cli.recovery_hold_steps,
@@ -2834,6 +3972,7 @@ def main() -> int:
     trace_path = args_cli.artifact_dir / "sequence_trace.json"
     _write_trace(trace_path, episode_trace)
     episode_recorder: GeminiEpisodeDatasetRecorder | None = None
+    ros2_sensor_ingress: ROS2SensorIngress | None = None
     if not args_cli.disable_training_recording:
         episode_index = (
             args_cli.episode_index
@@ -2871,6 +4010,37 @@ def main() -> int:
         _write_trace(trace_path, episode_trace)
 
     try:
+        if args_cli.ros2_sensor_ingress:
+            ros2_sensor_ingress = start_ros2_sensor_ingress(
+                ROS2SensorIngressConfig(
+                    touch_topic=args_cli.ros2_touch_topic,
+                    contact_wrench_topic=args_cli.ros2_contact_wrench_topic,
+                    contact_status_topic=args_cli.ros2_contact_status_topic,
+                    rgbd_status_topic=args_cli.ros2_rgbd_status_topic,
+                    safety_stop_topic=args_cli.ros2_safety_stop_topic,
+                    tracked_object_status_topic=(
+                        args_cli.ros2_tracked_object_status_topic
+                    ),
+                    motion_status_topic=args_cli.ros2_motion_status_topic,
+                )
+            )
+            ACTIVE_ROS2_SENSOR_INGRESS = ros2_sensor_ingress
+            episode_trace["ros2_sensor_ingress"] = {
+                "enabled": True,
+                "status": (
+                    "subscribed"
+                    if ros2_sensor_ingress.available
+                    else "unavailable_using_simulator_fallback"
+                ),
+                **ros2_sensor_ingress.status(),
+            }
+            print(
+                "[ros2-ingress] "
+                f"status={episode_trace['ros2_sensor_ingress']['status']} "
+                f"error={ros2_sensor_ingress.error}",
+                flush=True,
+            )
+            _write_trace(trace_path, episode_trace)
         frame = _single_exterior_frame(obs)
         cv2.imwrite(
             str(args_cli.artifact_dir / "00_scene.jpg"),
@@ -2943,66 +4113,268 @@ def main() -> int:
             checkpoint_obs: dict[str, Any], checkpoint: dict[str, Any]
         ) -> dict[str, Any]:
             nonlocal model_calls
-            checkpoint_state = _state(env, initial_banana_z)
-            checkpoint_frame = _single_exterior_frame(checkpoint_obs)
-            checkpoint_frame, depth_summary = _rgbd_checkpoint_frame(
-                env, checkpoint_frame
-            )
-            checkpoint["rgbd"] = depth_summary
-            checkpoint_index = len(episode_trace["motion_checkpoints"])
-            frame_name = f"motion_checkpoint_{checkpoint_index:03d}.jpg"
-            cv2.imwrite(
-                str(args_cli.artifact_dir / frame_name),
-                cv2.cvtColor(checkpoint_frame, cv2.COLOR_RGB2BGR),
-            )
             # Recovery/status checkpoints may report a measured condition
             # without proposing a destination. Bind those calls to the fresh
             # measured end-effector pose so the model can hold, abort, or apply
             # a bounded correction through the same executor protocol.
-            checkpoint.setdefault(
-                "current_target_xyz_m",
-                checkpoint_state["eef_gripper_base_xyz"],
+            previous_outcome: dict[str, Any] | None = checkpoint.get(
+                "previous_motion_tool_outcome"
             )
-            current_target = torch.tensor(
-                checkpoint["current_target_xyz_m"], dtype=torch.float32
-            )
-            decision, latency, digest = _choose_observation_bound_motion_tool(
-                motion_tool_provider,
-                motion_executor_registry,
-                instruction=args_cli.instruction,
-                observation_prefix=f"checkpoint-{checkpoint_index}",
-                frame=checkpoint_frame,
-                state=checkpoint_state,
-                current_target=current_target,
-                motion_context=checkpoint,
-                rgbd_summary=depth_summary,
-                critic_context=_critic_context(
-                    critic_memory, str(checkpoint["phase"])
-                ),
-            )
-            model_calls += 1
-            digests.append(digest)
-            event = {
-                **checkpoint,
-                "frame": frame_name,
-                "state": checkpoint_state,
-                "coach_decision": decision,
-                "coach_latency_s": latency,
-                "image_digest": digest,
-            }
-            episode_trace["motion_checkpoints"].append(event)
-            episode_trace["motion_tool_protocol"]["calls"].append(
-                decision["motion_tool"]
-            )
-            _write_trace(trace_path, episode_trace)
-            print(
-                f"[ER2 checkpoint] phase={checkpoint['phase']} "
-                f"iteration={checkpoint['iteration']} reason={checkpoint['reason']} "
-                f"tool={decision['motion_tool']['tool_name']} "
-                f"decision={decision.get('decision')} latency={latency:.2f}s",
-                flush=True,
-            )
+            max_attempts = max(1, int(args_cli.motion_checkpoint_replans))
+            decision: dict[str, Any] = {}
+            for attempt in range(max_attempts):
+                checkpoint_state = _state(env, initial_banana_z)
+                checkpoint_frame = _single_exterior_frame(checkpoint_obs)
+                checkpoint_frame, depth_summary = _rgbd_checkpoint_frame(
+                    env, checkpoint_frame
+                )
+                checkpoint_index = len(episode_trace["motion_checkpoints"])
+                frame_name = f"motion_checkpoint_{checkpoint_index:03d}.jpg"
+                cv2.imwrite(
+                    str(args_cli.artifact_dir / frame_name),
+                    cv2.cvtColor(checkpoint_frame, cv2.COLOR_RGB2BGR),
+                )
+                motion_context = {
+                    **checkpoint,
+                    "rgbd": depth_summary,
+                    "replan_attempt": attempt + 1,
+                    "maximum_replan_attempts": max_attempts,
+                    "previous_motion_tool_outcome": previous_outcome,
+                }
+                motion_context.setdefault(
+                    "current_target_xyz_m",
+                    checkpoint_state["eef_gripper_base_xyz"],
+                )
+                current_target = torch.tensor(
+                    motion_context["current_target_xyz_m"], dtype=torch.float32
+                )
+                decision, latency, digest = _choose_observation_bound_motion_tool(
+                    motion_tool_provider,
+                    motion_executor_registry,
+                    instruction=args_cli.instruction,
+                    observation_prefix=f"checkpoint-{checkpoint_index}",
+                    frame=checkpoint_frame,
+                    state=checkpoint_state,
+                    current_target=current_target,
+                    motion_context=motion_context,
+                    rgbd_summary=depth_summary,
+                    critic_context=_critic_context(
+                        critic_memory, str(checkpoint["phase"])
+                    ),
+                )
+                model_calls += 1
+                digests.append(digest)
+                event = {
+                    **motion_context,
+                    "frame": frame_name,
+                    "state": checkpoint_state,
+                    "coach_decision": decision,
+                    "coach_latency_s": latency,
+                    "image_digest": digest,
+                }
+                episode_trace["motion_checkpoints"].append(event)
+                episode_trace["motion_tool_protocol"]["calls"].append(
+                    decision["motion_tool"]
+                )
+                _write_trace(trace_path, episode_trace)
+                tool = decision["motion_tool"]
+                scheduler_selected_motion = bool(
+                    isinstance(checkpoint.get("scheduler_decision"), dict)
+                    and checkpoint["scheduler_decision"].get("decision")
+                    == "dispatch"
+                    and checkpoint["scheduler_decision"].get("operation_id")
+                    == "continue.runtime_motion"
+                )
+                if (
+                    scheduler_selected_motion
+                    and tool.get("action") == "hold"
+                    and tool.get("status") != "rejected"
+                ):
+                    semantic_error = (
+                        "hold_motion cannot repeat after the fresh operation "
+                        "scheduler dispatched continue.runtime_motion; issue a "
+                        "bounded corrective movement or abort"
+                    )
+                    tool["status"] = "rejected"
+                    tool["error"] = semantic_error
+                    decision["assessment"] = (
+                        "Motion tool rejected by scheduler-motion contract: "
+                        f"{semantic_error}"
+                    )
+                print(
+                    f"[ER2 checkpoint] phase={checkpoint['phase']} "
+                    f"iteration={checkpoint['iteration']} reason={checkpoint['reason']} "
+                    f"replan={attempt + 1}/{max_attempts} "
+                    f"tool={tool['tool_name']} status={tool.get('status')} "
+                    f"decision={decision.get('decision')} latency={latency:.2f}s",
+                    flush=True,
+                )
+                # A valid execute, explicit model hold, or explicit abort is a
+                # real decision. Only locally rejected calls are coached again.
+                if tool.get("status") != "rejected":
+                    return decision
+                previous_outcome = {
+                    "decision": decision.get("decision"),
+                    "assessment": decision.get("assessment"),
+                    "motion_tool": tool,
+                }
+            decision["replan_attempts_exhausted"] = True
+            decision["replan_attempt_count"] = max_attempts
             return decision
+
+        def operation_scheduler_handler(
+            schedule_obs: dict[str, Any],
+            current_action: torch.Tensor,
+            *,
+            phase_label: str,
+            observation_prefix: str,
+            motion_report: dict[str, Any],
+            trigger_event: dict[str, Any] | None = None,
+        ) -> tuple[dict[str, Any], bool, dict[str, Any], float, str]:
+            """Route the next runtime operation, with one fail-closed retry."""
+            nonlocal model_calls
+            previous_outcome: dict[str, Any] | None = None
+            total_latency = 0.0
+            terminal = False
+            digest = ""
+            for attempt in range(2):
+                schedule_state = _state(env, initial_banana_z)
+                schedule_frame = _single_exterior_frame(schedule_obs)
+                schedule_frame, depth_summary = _rgbd_checkpoint_frame(
+                    env, schedule_frame
+                )
+                frame_name = (
+                    f"{observation_prefix}"
+                    f"{'_retry' if attempt else ''}.jpg"
+                )
+                cv2.imwrite(
+                    str(args_cli.artifact_dir / frame_name),
+                    cv2.cvtColor(schedule_frame, cv2.COLOR_RGB2BGR),
+                )
+                current_engaged = bool(
+                    float(current_action[0, 7].detach().cpu()) > 0.5
+                )
+                # The task adapter supplies measured goal contact while the
+                # contact sensor supplies retained-contact evidence. Preserve
+                # a loaded clamp away from the goal, but expose its actuator
+                # again after contact loss so the model can recover instead of
+                # being forced into an impossible motion-only branch.
+                goal_contact_observed = bool(
+                    schedule_state.get("banana_plate_contact_proxy", False)
+                )
+                current_contact = schedule_state.get("current_contact")
+                retained_contact_observed = bool(
+                    isinstance(current_contact, dict)
+                    and current_contact.get("available")
+                    and current_contact.get("touch")
+                )
+                actuator_recovery_observed = bool(
+                    current_engaged and not retained_contact_observed
+                )
+                actuator_transition_available = bool(
+                    not current_engaged
+                    or goal_contact_observed
+                    or actuator_recovery_observed
+                )
+                candidates = _post_motion_operation_candidates(
+                    actuator_transition_available=(
+                        actuator_transition_available
+                    )
+                )
+                decision, latency, digest = _choose_observation_bound_operation(
+                    motion_tool_provider,
+                    instruction=args_cli.instruction,
+                    observation_prefix=(
+                        f"{observation_prefix}-attempt-{attempt + 1}"
+                    ),
+                    frame=schedule_frame,
+                    state=schedule_state,
+                    operation_context={
+                        "runtime_label": phase_label,
+                        "current_actuator_state": (
+                            "engaged" if current_engaged else "disengaged"
+                        ),
+                        "actuator_transition_admission": {
+                            "available": actuator_transition_available,
+                            "source": "measured_runtime_actuator_preconditions",
+                            "goal_contact_observed": goal_contact_observed,
+                            "retained_contact_observed": (
+                                retained_contact_observed
+                            ),
+                            "contact_loss_recovery": actuator_recovery_observed,
+                        },
+                        "previous_operation_outcome": previous_outcome,
+                        "trigger_event": trigger_event,
+                        "completed_motion": {
+                            "converged": motion_report.get("converged"),
+                            "yielded_to_scheduler": motion_report.get(
+                                "yielded_to_scheduler", False
+                            ),
+                            "target_error_after_m": motion_report.get(
+                                "target_error_after_m"
+                            ),
+                            "orientation_error_after_deg": motion_report.get(
+                                "orientation_error_after_deg"
+                            ),
+                            "recovery_request": motion_report.get(
+                                "recovery_request"
+                            ),
+                        },
+                    },
+                    candidates=candidates,
+                    rgbd_summary=depth_summary,
+                    critic_context=_critic_context(critic_memory, phase_label),
+                )
+                total_latency += latency
+                model_calls += 1
+                digests.append(digest)
+                event = {
+                    **decision["scheduler_tool"],
+                    "runtime_label": phase_label,
+                    "attempt": attempt + 1,
+                    "frame": frame_name,
+                    "state": schedule_state,
+                    "advertised_candidates": [
+                        candidate.to_dict() for candidate in candidates
+                    ],
+                    "latency_s": latency,
+                }
+                episode_trace["operation_scheduler_protocol"]["calls"].append(event)
+                _write_trace(trace_path, episode_trace)
+                print(
+                    f"[ER2 scheduler] label={phase_label} "
+                    f"tool={decision['scheduler_tool'].get('tool_name')} "
+                    f"operation={decision.get('operation_id')} "
+                    f"kind={decision.get('operation_kind')} "
+                    f"decision={decision.get('decision')} "
+                    f"confidence={decision.get('confidence', 0.0):.2f} "
+                    f"latency={latency:.2f}s image={digest}\n"
+                    f"      {decision.get('assessment', '')}",
+                    flush=True,
+                )
+                if decision.get("decision") in {"dispatch", "complete"}:
+                    return schedule_obs, terminal, decision, total_latency, digest
+                if decision.get("decision") == "abort":
+                    raise RuntimeError(
+                        f"Operation scheduler aborted during {phase_label}: {decision}"
+                    )
+                previous_outcome = decision
+                if attempt == 0:
+                    schedule_obs, terminal = _hold_joint_action(
+                        env,
+                        schedule_obs,
+                        current_action,
+                        args_cli.retry_steps,
+                        gripper_closed=None,
+                    )
+                    if terminal:
+                        raise RuntimeError(
+                            "Environment terminated during scheduler retry hold"
+                        )
+            raise RuntimeError(
+                f"Operation scheduler did not dispatch during {phase_label}: "
+                f"{previous_outcome}"
+            )
 
         def actuator_transition_handler(
             transition_obs: dict[str, Any],
@@ -3087,6 +4459,29 @@ def main() -> int:
                 if decision.get("decision") == "execute":
                     return transition_obs, terminal, decision, total_latency, digest
                 if decision.get("decision") == "abort":
+                    if attempt == 0:
+                        previous_outcome = {
+                            **decision["actuator_tool"],
+                            "status": "confirmation_required",
+                            "error": (
+                                "abort_actuation terminates the overall task; "
+                                "use hold_actuation for recoverable replanning "
+                                "or confirm abort on the next fresh observation"
+                            ),
+                        }
+                        transition_obs, terminal = _hold_joint_action(
+                            env,
+                            transition_obs,
+                            current_action,
+                            args_cli.retry_steps,
+                            gripper_closed=None,
+                        )
+                        if terminal:
+                            raise RuntimeError(
+                                "Environment terminated during actuator abort "
+                                "confirmation hold"
+                            )
+                        continue
                     raise RuntimeError(
                         f"Actuator governor aborted during {phase_label}: {decision}"
                     )
@@ -3115,7 +4510,21 @@ def main() -> int:
                     phase,
                     int(start),
                     int(end),
+                    # Retained only for the explicitly requested legacy fixed
+                    # replay path. Adaptive execution must not route actuator
+                    # opportunities from this recorded value.
                     bool(recorded_actions[start, 7] > 0.5),
+                )
+            )
+        # Placement is a fresh model-issued world-space operation. Its motion
+        # seed is the measured current pose, not a locally computed XY/Z target.
+        if not args_cli.disable_residual_centering:
+            stages.append(
+                (
+                    "place",
+                    len(recorded_actions),
+                    len(recorded_actions),
+                    True,
                 )
             )
         # The source episode reached RoboLab's success predicate while carrying
@@ -3132,6 +4541,7 @@ def main() -> int:
         pregrasp_passed = False
         latched_carry_offset: torch.Tensor | None = None
         latched_carry_quaternion: torch.Tensor | None = None
+        latched_rgbd_axis_references: dict[str, np.ndarray] = {}
         transport_recovery_count = 0
         placement_completed_during_recovery = False
         episode_trace["recoveries"] = []
@@ -3139,7 +4549,13 @@ def main() -> int:
         last_action[0, :7] = torch.as_tensor(
             joint_states[0, :7], dtype=torch.float32, device=env.device
         )
-        for stage_index, (phase, start, end, close) in enumerate(stages, start=1):
+        task_completed_by_scheduler = False
+        for stage_index, (
+            phase,
+            start,
+            end,
+            legacy_recorded_gripper_closed,
+        ) in enumerate(stages, start=1):
             actuator_engaged_at_stage_start = bool(
                 float(last_action[0, 7].detach().cpu()) > 0.5
             )
@@ -3147,8 +4563,27 @@ def main() -> int:
             actuator_execution: dict[str, Any] | None = None
             actuator_latency = 0.0
             actuator_digest: str | None = None
+            scheduler_decision: dict[str, Any] | None = None
+            scheduler_latency = 0.0
+            scheduler_digest: str | None = None
             current = _state(env, initial_banana_z)
-            if not args_cli.disable_adaptive_ik and phase != "release":
+            if (
+                not args_cli.disable_adaptive_ik
+                and phase == "place"
+            ):
+                nominal = torch.tensor(
+                    current["eef_gripper_base_xyz"], dtype=torch.float32
+                )
+                nominal_quaternion = (
+                    latched_carry_quaternion
+                    if latched_carry_quaternion is not None
+                    else torch.tensor(
+                        current["eef_gripper_base_quaternion_wxyz"],
+                        dtype=torch.float32,
+                    )
+                )
+                target_source = "current_observation_model_seed"
+            elif not args_cli.disable_adaptive_ik and phase != "release":
                 banana_xyz = torch.tensor(current["banana_xyz"], dtype=torch.float32)
                 if phase in {"lift", "above_plate"} and latched_carry_offset is not None:
                     grasp_xyz = banana_xyz + latched_carry_offset
@@ -3191,6 +4626,25 @@ def main() -> int:
             stage_depth_summary = None
             if not args_cli.disable_adaptive_ik and phase != "release":
                 frame, stage_depth_summary = _rgbd_checkpoint_frame(env, frame)
+                if latched_rgbd_axis_references:
+                    tracked_axes: dict[str, Any] = {}
+                    for object_id, reference_axis in (
+                        latched_rgbd_axis_references.items()
+                    ):
+                        try:
+                            tracked_axes[object_id] = _rgbd_object_axis_observation(
+                                env,
+                                prim_label_fragment=f"/scene/{object_id}",
+                                reference_axis=reference_axis,
+                            )
+                        except ValueError as exc:
+                            tracked_axes[object_id] = {
+                                "available": False,
+                                "error": str(exc),
+                            }
+                    if stage_depth_summary is None:
+                        stage_depth_summary = {}
+                    stage_depth_summary["tracked_object_axes"] = tracked_axes
             frame_path = args_cli.artifact_dir / f"{stage_index:02d}_{phase}_before.jpg"
             cv2.imwrite(str(frame_path), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
             selected_executor_config: dict[str, Any] = {}
@@ -3209,6 +4663,13 @@ def main() -> int:
                         "current_target_quaternion_wxyz": (
                             nominal_quaternion.tolist()
                         ),
+                        "target_seed_semantics": (
+                            "The target is the current measured workspace pose; "
+                            "select any evidence-grounded correction needed to "
+                            "advance the human instruction."
+                            if phase == "place"
+                            else "runtime-proposed phase target"
+                        ),
                         "current_actuator_state": (
                             "engaged"
                             if actuator_engaged_at_stage_start
@@ -3218,6 +4679,32 @@ def main() -> int:
                             spec.executor_id
                             for spec in motion_executor_registry.specs()
                         ],
+                        "lease_condition_sources": {
+                            "contact": "sim6_gripper_contact_sensor",
+                            "tracked_pose": (
+                                "sim_privileged_relative_pose"
+                                if latched_carry_offset is not None
+                                else None
+                            ),
+                            "tracked_orientation": (
+                                {
+                                    object_id: "rgbd_instance_depth_major_axis"
+                                    for object_id in latched_rgbd_axis_references
+                                }
+                                if latched_rgbd_axis_references
+                                else {}
+                            ),
+                            "observed_clearance": (
+                                "sim_privileged_object_to_support_height"
+                                if phase in {"above_plate", "place"}
+                                else None
+                            ),
+                            "model_polling": (
+                                "periodic_or_event"
+                                if args_cli.periodic_motion_observations
+                                else "event_or_completion_only"
+                            ),
+                        },
                     },
                     rgbd_summary=stage_depth_summary,
                     critic_context=_critic_context(critic_memory, phase),
@@ -3249,7 +4736,7 @@ def main() -> int:
                         current,
                         nominal,
                         nominal_quaternion,
-                        close,
+                        legacy_recorded_gripper_closed,
                         _critic_context(critic_memory, phase),
                     ),
                         frame,
@@ -3293,7 +4780,22 @@ def main() -> int:
                         banana_xyz = torch.tensor(
                             current["banana_xyz"], dtype=torch.float32
                         )
-                        if (
+                        if phase == "place":
+                            nominal = torch.tensor(
+                                current["eef_gripper_base_xyz"],
+                                dtype=torch.float32,
+                            )
+                            nominal_quaternion = (
+                                latched_carry_quaternion
+                                if latched_carry_quaternion is not None
+                                else torch.tensor(
+                                    current[
+                                        "eef_gripper_base_quaternion_wxyz"
+                                    ],
+                                    dtype=torch.float32,
+                                )
+                            )
+                        elif (
                             phase in {"lift", "above_plate"}
                             and latched_carry_offset is not None
                         ):
@@ -3309,18 +4811,22 @@ def main() -> int:
                                 grasp_offset_object,
                                 object_to_grasp_quat,
                             )
-                        nominal = live_phase_target(
-                            phase,
-                            banana_xyz,
-                            torch.tensor(current["plate_xyz"], dtype=torch.float32),
-                            grasp_xyz - banana_xyz,
-                            eef_xyz=torch.tensor(
-                                current["eef_gripper_base_xyz"], dtype=torch.float32
-                            ),
-                            approach_clearance=args_cli.approach_clearance,
-                            lift_clearance=args_cli.lift_clearance,
-                            plate_hover_height=args_cli.plate_hover_height,
-                        )
+                        if phase != "place":
+                            nominal = live_phase_target(
+                                phase,
+                                banana_xyz,
+                                torch.tensor(
+                                    current["plate_xyz"], dtype=torch.float32
+                                ),
+                                grasp_xyz - banana_xyz,
+                                eef_xyz=torch.tensor(
+                                    current["eef_gripper_base_xyz"],
+                                    dtype=torch.float32,
+                                ),
+                                approach_clearance=args_cli.approach_clearance,
+                                lift_clearance=args_cli.lift_clearance,
+                                plate_hover_height=args_cli.plate_hover_height,
+                            )
                     frame = _single_exterior_frame(obs)
                     retry_depth_summary = None
                     if not args_cli.disable_adaptive_ik:
@@ -3341,6 +4847,13 @@ def main() -> int:
                                 "current_target_quaternion_wxyz": (
                                     nominal_quaternion.tolist()
                                 ),
+                                "target_seed_semantics": (
+                                    "The target is the current measured workspace "
+                                    "pose; correct the rejected proposal using "
+                                    "fresh evidence and the human instruction."
+                                    if phase == "place"
+                                    else "runtime-proposed phase target"
+                                ),
                                 "current_actuator_state": (
                                     "engaged"
                                     if bool(
@@ -3352,6 +4865,32 @@ def main() -> int:
                                     else "disengaged"
                                 ),
                                 "previous_tool_outcome": previous_motion_tool,
+                                "lease_condition_sources": {
+                                    "contact": "sim6_gripper_contact_sensor",
+                                    "tracked_pose": (
+                                        "sim_privileged_relative_pose"
+                                        if latched_carry_offset is not None
+                                        else None
+                                    ),
+                                    "tracked_orientation": (
+                                        {
+                                            object_id: "rgbd_instance_depth_major_axis"
+                                            for object_id in latched_rgbd_axis_references
+                                        }
+                                        if latched_rgbd_axis_references
+                                        else {}
+                                    ),
+                                    "observed_clearance": (
+                                        "sim_privileged_object_to_support_height"
+                                        if phase in {"above_plate", "place"}
+                                        else None
+                                    ),
+                                    "model_polling": (
+                                        "periodic_or_event"
+                                        if args_cli.periodic_motion_observations
+                                        else "event_or_completion_only"
+                                    ),
+                                },
                             },
                             rgbd_summary=retry_depth_summary,
                             critic_context=_critic_context(critic_memory, phase),
@@ -3373,6 +4912,182 @@ def main() -> int:
                         f"image={digest}",
                         flush=True,
                     )
+                if (
+                    decision.get("decision") != "execute"
+                    and isinstance(decision.get("motion_tool"), dict)
+                    and decision["motion_tool"].get("status") == "rejected"
+                ):
+                    decision = motion_checkpoint_handler(
+                        obs,
+                        {
+                            "reason": "phase_boundary_motion_tool_rejected",
+                            "phase": phase,
+                            "iteration": 0,
+                            "current_target_xyz_m": nominal.tolist(),
+                            "current_target_quaternion_wxyz": (
+                                nominal_quaternion.tolist()
+                            ),
+                            "previous_motion_tool_outcome": decision[
+                                "motion_tool"
+                            ],
+                            "lease_condition_sources": {
+                                "contact": "sim6.gripper_contact_sensor",
+                                "tracked_pose": (
+                                    "sim6.privileged_relative_pose_adapter"
+                                    if latched_carry_offset is not None
+                                    else None
+                                ),
+                                "tracked_orientation": (
+                                    {
+                                        object_id: (
+                                            "rgbd.instance_depth_major_axis"
+                                        )
+                                        for object_id in (
+                                            latched_rgbd_axis_references
+                                        )
+                                    }
+                                    if latched_rgbd_axis_references
+                                    else {}
+                                ),
+                                "observed_clearance": (
+                                    "sim6.privileged_object_to_support_height_adapter"
+                                    if phase in {"above_plate", "place"}
+                                    else None
+                                ),
+                            },
+                        },
+                    )
+                    nominal = torch.tensor(
+                        decision["target_xyz_m"], dtype=torch.float32
+                    )
+                    selected_executor_config = dict(
+                        decision.get("executor_config") or {}
+                    )
+                    confidence = float(decision.get("confidence", 0.0))
+                if (
+                    decision.get("decision") == "retry"
+                    and isinstance(decision.get("motion_tool"), dict)
+                    and decision["motion_tool"].get("action") == "hold"
+                ):
+                    boundary_hold = decision
+                    (
+                        obs,
+                        terminal,
+                        boundary_schedule,
+                        boundary_scheduler_latency,
+                        boundary_scheduler_digest,
+                    ) = operation_scheduler_handler(
+                        obs,
+                        last_action,
+                        phase_label=f"{phase}:boundary_hold",
+                        observation_prefix=(
+                            f"scheduler_boundary_hold_{stage_index:02d}_{phase}"
+                        ),
+                        motion_report={
+                            "converged": False,
+                            "yielded_to_scheduler": True,
+                            "recovery_request": {
+                                "reason": "model_requested_hold",
+                                "coach_decision": boundary_hold,
+                            },
+                        },
+                        trigger_event={
+                            "type": "phase_boundary_model_hold",
+                            "phase_label": phase,
+                            "model_decision": boundary_hold,
+                        },
+                    )
+                    scheduler_decision = boundary_schedule
+                    scheduler_latency += boundary_scheduler_latency
+                    scheduler_digest = boundary_scheduler_digest
+                    if boundary_schedule.get("decision") == "complete":
+                        task_completed_by_scheduler = True
+                    elif boundary_schedule.get("operation_kind") == "actuation":
+                        (
+                            obs,
+                            terminal,
+                            boundary_actuator_decision,
+                            boundary_actuator_latency,
+                            boundary_actuator_digest,
+                        ) = actuator_transition_handler(
+                            obs,
+                            last_action,
+                            phase_label=f"{phase}:boundary_hold",
+                            observation_prefix=(
+                                f"actuator_boundary_hold_{stage_index:02d}_{phase}"
+                            ),
+                        )
+                        (
+                            obs,
+                            terminal,
+                            last_action,
+                            boundary_actuator_execution,
+                        ) = _execute_binary_actuator_tool(
+                            env,
+                            obs,
+                            last_action,
+                            boundary_actuator_decision,
+                            initial_banana_z=initial_banana_z,
+                        )
+                        episode_trace["actuator_tool_protocol"]["calls"][-1][
+                            "execution"
+                        ] = boundary_actuator_execution
+                        actuator_decision = boundary_actuator_decision
+                        actuator_execution = boundary_actuator_execution
+                        actuator_latency += boundary_actuator_latency
+                        actuator_digest = boundary_actuator_digest
+                    if not task_completed_by_scheduler:
+                        decision = motion_checkpoint_handler(
+                            obs,
+                            {
+                                "reason": "scheduler_requested_boundary_replan",
+                                "phase": phase,
+                                "iteration": 0,
+                                "current_target_xyz_m": (
+                                    _eef_position(env).tolist()
+                                ),
+                                "current_target_quaternion_wxyz": (
+                                    _eef_quaternion(env).tolist()
+                                ),
+                                "previous_motion_tool_outcome": boundary_hold[
+                                    "motion_tool"
+                                ],
+                                "scheduler_decision": boundary_schedule,
+                                "lease_condition_sources": {
+                                    "contact": "sim6.gripper_contact_sensor",
+                                    "tracked_pose": (
+                                        "sim6.privileged_relative_pose_adapter"
+                                        if latched_carry_offset is not None
+                                        else None
+                                    ),
+                                    "tracked_orientation": (
+                                        {
+                                            object_id: (
+                                                "rgbd.instance_depth_major_axis"
+                                            )
+                                            for object_id in (
+                                                latched_rgbd_axis_references
+                                            )
+                                        }
+                                        if latched_rgbd_axis_references
+                                        else {}
+                                    ),
+                                    "observed_clearance": (
+                                        "sim6.privileged_object_to_support_height_adapter"
+                                        if phase in {"above_plate", "place"}
+                                        else None
+                                    ),
+                                },
+                            },
+                        )
+                        nominal = torch.tensor(
+                            decision["target_xyz_m"], dtype=torch.float32
+                        )
+                        nominal_quaternion = _eef_quaternion(env)
+                        selected_executor_config = dict(
+                            decision.get("executor_config") or {}
+                        )
+                        confidence = float(decision.get("confidence", 0.0))
                 if decision.get("decision") != "execute" or (
                     phase == "grasp" and not bool(decision.get("grasp_ready"))
                 ):
@@ -3463,36 +5178,29 @@ def main() -> int:
                         ),
                         initial_banana_z=initial_banana_z,
                         executor_config=selected_executor_config,
-                        carry_reference_offset=(
-                            latched_carry_offset if phase == "above_plate" else None
-                        ),
+                        carry_reference_offset=latched_carry_offset,
+                        rgbd_axis_references=latched_rgbd_axis_references,
                         checkpoint_callback=motion_checkpoint_handler,
                     )
                     motion_attempts.append(attempt_report)
                     if not bool(attempt_report.get("recovery_requested")):
                         break
-                    actuator_transition_pending = bool(close) != bool(
-                        float(last_action[0, 7].detach().cpu()) > 0.5
-                    )
-                    if motion_report_yields_to_actuator(
-                        attempt_report,
-                        actuator_transition_pending=actuator_transition_pending,
-                    ):
-                        attempt_report["yielded_to_actuator"] = True
+                    if motion_report_yields_to_scheduler(attempt_report):
+                        attempt_report["yielded_to_scheduler"] = True
                         attempt_report["yield_reason"] = (
-                            "model_hold_with_pending_actuator_transition"
+                            "model_hold_requires_fresh_operation_selection"
                         )
                         attempt_report["recovery_requested"] = False
                         attempt_report["converged"] = True
                         print(
                             f"[executor handoff] {phase}: model hold yielded "
-                            "to pending actuator tool",
+                            "to the fresh operation scheduler",
                             flush=True,
                         )
                         break
                     if phase != "above_plate":
                         raise RuntimeError(
-                            f"Recovery requested during unsupported phase {phase}: "
+                            f"Motion recovery replan budget exhausted in {phase}: "
                             f"{attempt_report.get('recovery_request')}"
                         )
                     if transport_recovery_count >= args_cli.max_transport_recoveries:
@@ -3638,9 +5346,36 @@ def main() -> int:
             actuator_engaged_before_transition = bool(
                 float(last_action[0, 7].detach().cpu()) > 0.5
             )
+            if not args_cli.disable_adaptive_ik:
+                (
+                    obs,
+                    terminal,
+                    scheduler_decision,
+                    scheduler_latency,
+                    scheduler_digest,
+                ) = operation_scheduler_handler(
+                    obs,
+                    last_action,
+                    phase_label=phase,
+                    observation_prefix=(
+                        f"scheduler_stage_{stage_index:02d}_{phase}"
+                    ),
+                    motion_report=motion_report,
+                )
+                if scheduler_decision.get("decision") == "complete":
+                    task_completed_by_scheduler = True
+                    motion_report["scheduler_declared_task_complete"] = True
+                elif scheduler_decision.get("operation_kind") not in {
+                    "motion",
+                    "actuation",
+                }:
+                    raise RuntimeError(
+                        f"Scheduler returned unsupported operation during {phase}: "
+                        f"{scheduler_decision}"
+                    )
             if (
-                not args_cli.disable_adaptive_ik
-                and bool(close) != actuator_engaged_before_transition
+                scheduler_decision is not None
+                and scheduler_decision.get("operation_kind") == "actuation"
             ):
                 (
                     obs,
@@ -3669,7 +5404,6 @@ def main() -> int:
                     "execution"
                 ] = actuator_execution
                 motion_report["actuator_execution"] = actuator_execution
-                _write_trace(trace_path, episode_trace)
                 print(
                     f"[actuator executor] phase={phase} "
                     f"state={actuator_execution['requested_state']} "
@@ -3682,9 +5416,116 @@ def main() -> int:
                     raise RuntimeError(
                         f"Environment terminated during {phase} actuator transition"
                     )
+                post_feedback_decisions: list[dict[str, Any]] = []
+                post_feedback_executions: list[dict[str, Any]] = []
+                current_actuator_execution = actuator_execution
+                for feedback_index in range(3):
+                    feedback_event = _actuator_feedback_event_from_execution(
+                        current_actuator_execution,
+                        actuator_feedback_policy,
+                    )
+                    current_actuator_execution["feedback_event"] = feedback_event
+                    _write_trace(trace_path, episode_trace)
+                    print(
+                        f"[post-actuation event] phase={phase} "
+                        f"triggered={feedback_event['triggered']} "
+                        f"position_delta="
+                        f"{feedback_event['actuator_position_change']:.3f} "
+                        f"force_delta="
+                        f"{feedback_event['tactile_force_change_n']:.3f}N "
+                        f"touch_changed={feedback_event['touch_changed']}",
+                        flush=True,
+                    )
+                    if not feedback_event["triggered"]:
+                        break
+                    (
+                        obs,
+                        terminal,
+                        post_feedback_decision,
+                        post_feedback_latency,
+                        post_feedback_digest,
+                    ) = operation_scheduler_handler(
+                        obs,
+                        last_action,
+                        phase_label=f"{phase}:post_actuation",
+                        observation_prefix=(
+                            f"scheduler_post_actuator_{stage_index:02d}_{phase}_"
+                            f"{feedback_index + 1}"
+                        ),
+                        motion_report=motion_report,
+                        trigger_event={
+                            "type": "actuator_and_tactile_state_changed",
+                            **feedback_event,
+                        },
+                    )
+                    post_feedback_decisions.append(post_feedback_decision)
+                    scheduler_latency += post_feedback_latency
+                    scheduler_digest = post_feedback_digest
+                    if post_feedback_decision.get("decision") == "complete":
+                        task_completed_by_scheduler = True
+                        motion_report["scheduler_declared_task_complete"] = True
+                        break
+                    if post_feedback_decision.get("operation_kind") == "motion":
+                        break
+                    if post_feedback_decision.get("operation_kind") != "actuation":
+                        raise RuntimeError(
+                            "Post-actuation scheduler returned unsupported "
+                            f"operation: {post_feedback_decision}"
+                        )
+                    (
+                        obs,
+                        terminal,
+                        repeated_actuator_decision,
+                        repeated_actuator_latency,
+                        actuator_digest,
+                    ) = actuator_transition_handler(
+                        obs,
+                        last_action,
+                        phase_label=f"{phase}:post_actuation",
+                        observation_prefix=(
+                            f"actuator_post_feedback_{stage_index:02d}_{phase}_"
+                            f"{feedback_index + 1}"
+                        ),
+                    )
+                    actuator_latency += repeated_actuator_latency
+                    (
+                        obs,
+                        terminal,
+                        last_action,
+                        repeated_execution,
+                    ) = _execute_binary_actuator_tool(
+                        env,
+                        obs,
+                        last_action,
+                        repeated_actuator_decision,
+                        initial_banana_z=initial_banana_z,
+                    )
+                    episode_trace["actuator_tool_protocol"]["calls"][-1][
+                        "execution"
+                    ] = repeated_execution
+                    post_feedback_executions.append(repeated_execution)
+                    current_actuator_execution = repeated_execution
+                    if terminal:
+                        raise RuntimeError(
+                            "Environment terminated during post-feedback actuation"
+                        )
+                else:
+                    raise RuntimeError(
+                        "Post-actuation feedback reschedule budget exhausted"
+                    )
+                actuator_execution["post_feedback_scheduler_decisions"] = (
+                    post_feedback_decisions
+                )
+                actuator_execution["post_feedback_executions"] = (
+                    post_feedback_executions
+                )
+                motion_report["post_actuation_scheduler_decisions"] = (
+                    post_feedback_decisions
+                )
+                _write_trace(trace_path, episode_trace)
                 if (
                     not actuator_engaged_before_transition
-                    and actuator_execution["engaged_after"]
+                    and bool(float(last_action[0, 7].detach().cpu()) > 0.5)
                 ):
                     # Preserve the fresh measured carry transform after the
                     # admitted actuator command, not before contact.
@@ -3697,6 +5538,32 @@ def main() -> int:
                     )
                     motion_report["latched_carry_quaternion_wxyz"] = (
                         latched_carry_quaternion.tolist()
+                    )
+                    latched_rgbd_axis_references = {}
+                    rgbd_reference_observations: dict[str, Any] = {}
+                    for object_id in trackable_object_ids:
+                        try:
+                            rgbd_reference = _rgbd_object_axis_observation(
+                                env,
+                                prim_label_fragment=f"/scene/{object_id}",
+                            )
+                            latched_rgbd_axis_references[object_id] = np.asarray(
+                                rgbd_reference["major_axis_camera"],
+                                dtype=np.float64,
+                            )
+                            rgbd_reference_observations[object_id] = rgbd_reference
+                        except ValueError as exc:
+                            rgbd_reference_observations[object_id] = {
+                                "available": False,
+                                "error": str(exc),
+                            }
+                    motion_report["latched_rgbd_axis_references"] = (
+                        rgbd_reference_observations
+                    )
+                    print(
+                        "[rgbd-tracker] latched observable object axes="
+                        f"{sorted(latched_rgbd_axis_references)}",
+                        flush=True,
                     )
             eef = _eef_position(env)
             eef_trace.append(eef.tolist())
@@ -3729,9 +5596,12 @@ def main() -> int:
                 "target_source": target_source,
                 "demonstrated_steps": end - start,
                 "motion_report": motion_report,
-                "upstream_actuator_state_hint": (
-                    "engaged" if close else "disengaged"
+                "recorded_actuator_hint_used": bool(
+                    args_cli.disable_adaptive_ik
                 ),
+                "operation_scheduler_decision": scheduler_decision,
+                "operation_scheduler_latency_s": scheduler_latency,
+                "operation_scheduler_image_digest": scheduler_digest,
                 "actuator_state_at_stage_start": (
                     "engaged"
                     if actuator_engaged_at_stage_start
@@ -3783,42 +5653,595 @@ def main() -> int:
                     tests["centering"] = True
                     _test_line(7, "residual plate centering", True, "disabled (baseline mode)")
                 else:
-                    obs, terminal, last_action, centering_report = _residual_center_over_plate(
-                        env,
-                        obs,
-                        last_action,
-                        initial_banana_z,
-                    )
-                    centered = bool(centering_report["converged"])
-                    tests["centering"] = centered
-                    _test_line(
-                        7,
-                        "bounded residual plate centering",
-                        centered,
-                        f"xy_error={centering_report['xy_error_before_m']:.3f}→"
-                        f"{centering_report['xy_error_after_m']:.3f}m "
-                        f"height={centering_report['height_above_plate_before_m']:.3f}→"
-                        f"{centering_report['height_above_plate_after_m']:.3f}m "
-                        f"iterations={len(centering_report['iterations'])}",
-                    )
-                    if not centered:
-                        raise RuntimeError(
-                            "Residual centering did not reach the release tolerance; refusing release"
-                        )
+                    centering_report = {
+                        "enabled": True,
+                        "converged": None,
+                        "reason": (
+                            "pending_fresh_observation_bound_place_operation"
+                        ),
+                        "legacy_local_xy_z_controller_used": False,
+                    }
                 episode_trace["residual_centering"] = centering_report
                 _write_trace(trace_path, episode_trace)
 
+            if phase == "place" and not terminal:
+                placement_state = _state(env, initial_banana_z)
+                centered = bool(
+                    placement_state["banana_plate_contact_proxy"]
+                    or (
+                        placement_state["banana_plate_xy_error_m"]
+                        <= args_cli.center_tolerance
+                        and abs(
+                            placement_state["banana_height_above_plate_m"]
+                            - args_cli.release_height
+                        )
+                        <= args_cli.release_height_tolerance
+                    )
+                )
+                placement_outcome_recoveries: list[dict[str, Any]] = []
+                for recovery_index in range(args_cli.max_transport_recoveries):
+                    if centered or terminal:
+                        break
+                    trigger_event = {
+                        "type": "measured_stage_outcome_not_met",
+                        "predicate_id": (
+                            "object.target_contact_or_release_envelope"
+                        ),
+                        "observed_values": {
+                            "target_contact": placement_state[
+                                "banana_plate_contact_proxy"
+                            ],
+                            "target_xy_error_m": placement_state[
+                                "banana_plate_xy_error_m"
+                            ],
+                            "height_above_target_m": placement_state[
+                                "banana_height_above_plate_m"
+                            ],
+                        },
+                        "admission_values": {
+                            "maximum_target_xy_error_m": (
+                                args_cli.center_tolerance
+                            ),
+                            "target_release_height_m": args_cli.release_height,
+                            "release_height_tolerance_m": (
+                                args_cli.release_height_tolerance
+                            ),
+                        },
+                        "instruction": args_cli.instruction,
+                    }
+                    print(
+                        "[outcome recovery] measured placement is outside the "
+                        f"release envelope (xy="
+                        f"{placement_state['banana_plate_xy_error_m']:.3f}m, "
+                        f"height="
+                        f"{placement_state['banana_height_above_plate_m']:.3f}m); "
+                        f"requesting fresh operation {recovery_index + 1}/"
+                        f"{args_cli.max_transport_recoveries}",
+                        flush=True,
+                    )
+                    (
+                        obs,
+                        terminal,
+                        recovery_schedule,
+                        recovery_scheduler_latency,
+                        recovery_scheduler_digest,
+                    ) = operation_scheduler_handler(
+                        obs,
+                        last_action,
+                        phase_label="place:measured_outcome_not_met",
+                        observation_prefix=(
+                            f"scheduler_outcome_{stage_index:02d}_place_"
+                            f"{recovery_index + 1}"
+                        ),
+                        motion_report={
+                            "converged": False,
+                            "yielded_to_scheduler": True,
+                            "recovery_request": trigger_event,
+                        },
+                        trigger_event=trigger_event,
+                    )
+                    scheduler_latency += recovery_scheduler_latency
+                    scheduler_digest = recovery_scheduler_digest
+                    recovery_event: dict[str, Any] = {
+                        "kind": "measured_stage_outcome_recovery",
+                        "index": recovery_index + 1,
+                        "phase": phase,
+                        "trigger": trigger_event,
+                        "state_before": placement_state,
+                        "scheduler_decision": recovery_schedule,
+                    }
+                    if recovery_schedule.get("decision") == "complete":
+                        recovery_event["completion_admitted"] = False
+                        recovery_event["completion_rejection_reason"] = (
+                            "measured outcome predicate remains false"
+                        )
+                    elif recovery_schedule.get("operation_kind") == "actuation":
+                        (
+                            obs,
+                            terminal,
+                            recovery_actuator_decision,
+                            recovery_actuator_latency,
+                            recovery_actuator_digest,
+                        ) = actuator_transition_handler(
+                            obs,
+                            last_action,
+                            phase_label="place:measured_outcome_not_met",
+                            observation_prefix=(
+                                f"actuator_outcome_{stage_index:02d}_place_"
+                                f"{recovery_index + 1}"
+                            ),
+                        )
+                        (
+                            obs,
+                            terminal,
+                            last_action,
+                            recovery_actuator_execution,
+                        ) = _execute_binary_actuator_tool(
+                            env,
+                            obs,
+                            last_action,
+                            recovery_actuator_decision,
+                            initial_banana_z=initial_banana_z,
+                        )
+                        episode_trace["actuator_tool_protocol"]["calls"][-1][
+                            "execution"
+                        ] = recovery_actuator_execution
+                        actuator_latency += recovery_actuator_latency
+                        actuator_digest = recovery_actuator_digest
+                        actuator_decision = recovery_actuator_decision
+                        actuator_execution = recovery_actuator_execution
+                        recovery_event["actuator_decision"] = (
+                            recovery_actuator_decision
+                        )
+                        recovery_event["actuator_execution"] = (
+                            recovery_actuator_execution
+                        )
+                        actuator_state_after = recovery_actuator_execution[
+                            "state_after"
+                        ]
+                        if (
+                            recovery_actuator_execution["engaged_after"]
+                            and not recovery_actuator_execution["engaged_before"]
+                            and actuator_state_after["current_contact"].get(
+                                "touch"
+                            )
+                        ):
+                            latched_carry_offset = (
+                                _eef_position(env)
+                                - _local_position(env, "banana")
+                            )
+                            latched_carry_quaternion = _eef_quaternion(env)
+                            latched_rgbd_axis_references = {}
+                            for object_id in trackable_object_ids:
+                                try:
+                                    axis_observation = (
+                                        _rgbd_object_axis_observation(
+                                            env,
+                                            prim_label_fragment=(
+                                                f"/scene/{object_id}"
+                                            ),
+                                        )
+                                    )
+                                    latched_rgbd_axis_references[object_id] = (
+                                        np.asarray(
+                                            axis_observation[
+                                                "major_axis_camera"
+                                            ],
+                                            dtype=np.float64,
+                                        )
+                                    )
+                                except ValueError:
+                                    continue
+                            recovery_event["carry_latched_after_actuation"] = {
+                                "eef_minus_object_m": (
+                                    latched_carry_offset.tolist()
+                                ),
+                                "tracked_rgbd_objects": sorted(
+                                    latched_rgbd_axis_references
+                                ),
+                            }
+                    elif recovery_schedule.get("operation_kind") == "motion":
+                        recovery_contact = placement_state.get(
+                            "current_contact", {}
+                        )
+                        carry_observed = bool(
+                            float(last_action[0, 7].detach().cpu()) > 0.5
+                            and isinstance(recovery_contact, dict)
+                            and recovery_contact.get("touch")
+                            and latched_carry_offset is not None
+                        )
+                        recovery_motion_decision = motion_checkpoint_handler(
+                            obs,
+                            {
+                                "reason": "measured_stage_outcome_not_met",
+                                "phase": "place:outcome_recovery",
+                                "iteration": recovery_index + 1,
+                                "current_target_xyz_m": (
+                                    _eef_position(env).tolist()
+                                ),
+                                "current_target_quaternion_wxyz": (
+                                    _eef_quaternion(env).tolist()
+                                ),
+                                "scheduler_decision": recovery_schedule,
+                                "measured_outcome": trigger_event,
+                                "lease_condition_sources": {
+                                    "contact": "sim6.gripper_contact_sensor",
+                                    "tracked_pose": (
+                                        "sim6.privileged_relative_pose_adapter"
+                                        if carry_observed
+                                        else None
+                                    ),
+                                    "tracked_orientation": (
+                                        {
+                                            object_id: (
+                                                "rgbd.instance_depth_major_axis"
+                                            )
+                                            for object_id in (
+                                                latched_rgbd_axis_references
+                                            )
+                                        }
+                                        if carry_observed
+                                        else {}
+                                    ),
+                                    "observed_clearance": (
+                                        "sim6.privileged_object_to_support_height_adapter"
+                                        if carry_observed
+                                        else None
+                                    ),
+                                },
+                            },
+                        )
+                        recovery_event["motion_decision"] = (
+                            recovery_motion_decision
+                        )
+                        if recovery_motion_decision.get("decision") != "execute":
+                            raise RuntimeError(
+                                "Model did not admit a bounded recovery motion "
+                                f"after measured placement failure: "
+                                f"{recovery_motion_decision}"
+                            )
+                        recovery_target = torch.tensor(
+                            recovery_motion_decision["target_xyz_m"],
+                            dtype=torch.float32,
+                        )
+                        (
+                            obs,
+                            terminal,
+                            last_action,
+                            recovery_motion_report,
+                        ) = _move_eef_to_target(
+                            env,
+                            obs,
+                            last_action,
+                            recovery_target,
+                            _eef_quaternion(env),
+                            "place:outcome_recovery",
+                            gripper_closed=bool(
+                                float(last_action[0, 7].detach().cpu()) > 0.5
+                            ),
+                            initial_banana_z=initial_banana_z,
+                            executor_config=dict(
+                                recovery_motion_decision.get(
+                                    "executor_config"
+                                )
+                                or {}
+                            ),
+                            carry_reference_offset=(
+                                latched_carry_offset if carry_observed else None
+                            ),
+                            rgbd_axis_references=(
+                                latched_rgbd_axis_references
+                                if carry_observed
+                                else {}
+                            ),
+                            checkpoint_callback=motion_checkpoint_handler,
+                        )
+                        recovery_event["motion_report"] = recovery_motion_report
+                    else:
+                        raise RuntimeError(
+                            "Placement outcome scheduler returned unsupported "
+                            f"operation: {recovery_schedule}"
+                        )
+                    placement_state = _state(env, initial_banana_z)
+                    recovery_event["state_after"] = placement_state
+                    placement_outcome_recoveries.append(recovery_event)
+                    episode_trace["recoveries"].append(recovery_event)
+                    centered = bool(
+                        placement_state["banana_plate_contact_proxy"]
+                        or (
+                            placement_state["banana_plate_xy_error_m"]
+                            <= args_cli.center_tolerance
+                            and abs(
+                                placement_state[
+                                    "banana_height_above_plate_m"
+                                ]
+                                - args_cli.release_height
+                            )
+                            <= args_cli.release_height_tolerance
+                        )
+                    )
+                    _write_trace(trace_path, episode_trace)
+                centering_report = {
+                    "enabled": True,
+                    "controller": "observation_bound_model_motion_tool",
+                    "legacy_local_xy_z_controller_used": False,
+                    "converged": centered,
+                    "banana_plate_contact_proxy": placement_state[
+                        "banana_plate_contact_proxy"
+                    ],
+                    "xy_error_after_m": placement_state[
+                        "banana_plate_xy_error_m"
+                    ],
+                    "height_above_plate_after_m": placement_state[
+                        "banana_height_above_plate_m"
+                    ],
+                    "motion_report": motion_report,
+                    "measured_outcome_recoveries": (
+                        placement_outcome_recoveries
+                    ),
+                }
+                episode_trace["stages"][-1]["measured_outcome_recoveries"] = (
+                    placement_outcome_recoveries
+                )
+                episode_trace["stages"][-1]["eef_after_xyz"] = (
+                    _eef_position(env).tolist()
+                )
+                episode_trace["stages"][-1]["banana_after_xyz"] = (
+                    _local_position(env, "banana").tolist()
+                )
+                episode_trace["residual_centering"] = centering_report
+                tests["centering"] = centered
+                _test_line(
+                    7,
+                    "model-governed plate placement",
+                    centered,
+                    f"xy_error={placement_state['banana_plate_xy_error_m']:.3f}m "
+                    f"height={placement_state['banana_height_above_plate_m']:.3f}m "
+                    f"contact={placement_state['banana_plate_contact_proxy']}",
+                )
+                _write_trace(trace_path, episode_trace)
+                if not centered:
+                    raise RuntimeError(
+                        "Measured placement recovery budget exhausted without "
+                        "satisfying the runtime release predicate"
+                    )
+
             if phase == "lift":
-                lifted = float(banana_now[2]) - initial_banana_z >= 0.05
+                lift_outcome_recoveries: list[dict[str, Any]] = []
+                lifted = (
+                    float(banana_now[2]) - initial_banana_z
+                    >= args_cli.minimum_transport_lift
+                )
+                for recovery_index in range(args_cli.max_transport_recoveries):
+                    if lifted or terminal:
+                        break
+                    recovery_state_before = _state(env, initial_banana_z)
+                    observed_lift_m = float(
+                        recovery_state_before["banana_lift_m"]
+                    )
+                    trigger_event = {
+                        "type": "measured_stage_outcome_not_met",
+                        "predicate_id": "object.lift_above_minimum",
+                        "observed_value_m": observed_lift_m,
+                        "minimum_value_m": args_cli.minimum_transport_lift,
+                        "instruction": args_cli.instruction,
+                    }
+                    print(
+                        "[outcome recovery] measured object lift "
+                        f"{observed_lift_m:.3f}m is below "
+                        f"{args_cli.minimum_transport_lift:.3f}m; requesting "
+                        f"fresh operation {recovery_index + 1}/"
+                        f"{args_cli.max_transport_recoveries}",
+                        flush=True,
+                    )
+                    (
+                        obs,
+                        terminal,
+                        recovery_schedule,
+                        recovery_scheduler_latency,
+                        recovery_scheduler_digest,
+                    ) = operation_scheduler_handler(
+                        obs,
+                        last_action,
+                        phase_label="lift:measured_outcome_not_met",
+                        observation_prefix=(
+                            f"scheduler_outcome_{stage_index:02d}_lift_"
+                            f"{recovery_index + 1}"
+                        ),
+                        motion_report={
+                            "converged": False,
+                            "yielded_to_scheduler": True,
+                            "recovery_request": trigger_event,
+                        },
+                        trigger_event=trigger_event,
+                    )
+                    scheduler_latency += recovery_scheduler_latency
+                    scheduler_digest = recovery_scheduler_digest
+                    recovery_event: dict[str, Any] = {
+                        "kind": "measured_stage_outcome_recovery",
+                        "index": recovery_index + 1,
+                        "phase": phase,
+                        "trigger": trigger_event,
+                        "state_before": recovery_state_before,
+                        "scheduler_decision": recovery_schedule,
+                    }
+                    if recovery_schedule.get("decision") == "complete":
+                        recovery_event["completion_admitted"] = False
+                        recovery_event["completion_rejection_reason"] = (
+                            "measured outcome predicate remains false"
+                        )
+                    elif recovery_schedule.get("operation_kind") == "actuation":
+                        (
+                            obs,
+                            terminal,
+                            recovery_actuator_decision,
+                            recovery_actuator_latency,
+                            recovery_actuator_digest,
+                        ) = actuator_transition_handler(
+                            obs,
+                            last_action,
+                            phase_label="lift:measured_outcome_not_met",
+                            observation_prefix=(
+                                f"actuator_outcome_{stage_index:02d}_lift_"
+                                f"{recovery_index + 1}"
+                            ),
+                        )
+                        (
+                            obs,
+                            terminal,
+                            last_action,
+                            recovery_actuator_execution,
+                        ) = _execute_binary_actuator_tool(
+                            env,
+                            obs,
+                            last_action,
+                            recovery_actuator_decision,
+                            initial_banana_z=initial_banana_z,
+                        )
+                        episode_trace["actuator_tool_protocol"]["calls"][-1][
+                            "execution"
+                        ] = recovery_actuator_execution
+                        actuator_latency += recovery_actuator_latency
+                        actuator_digest = recovery_actuator_digest
+                        actuator_decision = recovery_actuator_decision
+                        actuator_execution = recovery_actuator_execution
+                        recovery_event["actuator_decision"] = (
+                            recovery_actuator_decision
+                        )
+                        recovery_event["actuator_execution"] = (
+                            recovery_actuator_execution
+                        )
+                    elif recovery_schedule.get("operation_kind") == "motion":
+                        recovery_contact = recovery_state_before.get(
+                            "current_contact", {}
+                        )
+                        carry_observed = bool(
+                            float(last_action[0, 7].detach().cpu()) > 0.5
+                            and isinstance(recovery_contact, dict)
+                            and recovery_contact.get("touch")
+                            and latched_carry_offset is not None
+                        )
+                        recovery_motion_decision = motion_checkpoint_handler(
+                            obs,
+                            {
+                                "reason": "measured_stage_outcome_not_met",
+                                "phase": "lift:outcome_recovery",
+                                "iteration": recovery_index + 1,
+                                "current_target_xyz_m": (
+                                    _eef_position(env).tolist()
+                                ),
+                                "current_target_quaternion_wxyz": (
+                                    _eef_quaternion(env).tolist()
+                                ),
+                                "scheduler_decision": recovery_schedule,
+                                "measured_outcome": trigger_event,
+                                "lease_condition_sources": {
+                                    "contact": "sim6.gripper_contact_sensor",
+                                    "tracked_pose": (
+                                        "sim6.privileged_relative_pose_adapter"
+                                        if carry_observed
+                                        else None
+                                    ),
+                                    "tracked_orientation": (
+                                        {
+                                            object_id: (
+                                                "rgbd.instance_depth_major_axis"
+                                            )
+                                            for object_id in (
+                                                latched_rgbd_axis_references
+                                            )
+                                        }
+                                        if carry_observed
+                                        else {}
+                                    ),
+                                    "observed_clearance": None,
+                                },
+                            },
+                        )
+                        recovery_event["motion_decision"] = (
+                            recovery_motion_decision
+                        )
+                        if recovery_motion_decision.get("decision") != "execute":
+                            raise RuntimeError(
+                                "Model did not admit a bounded recovery motion "
+                                f"after measured lift failure: "
+                                f"{recovery_motion_decision}"
+                            )
+                        recovery_target = torch.tensor(
+                            recovery_motion_decision["target_xyz_m"],
+                            dtype=torch.float32,
+                        )
+                        (
+                            obs,
+                            terminal,
+                            last_action,
+                            recovery_motion_report,
+                        ) = _move_eef_to_target(
+                            env,
+                            obs,
+                            last_action,
+                            recovery_target,
+                            _eef_quaternion(env),
+                            "lift:outcome_recovery",
+                            gripper_closed=bool(
+                                float(last_action[0, 7].detach().cpu()) > 0.5
+                            ),
+                            initial_banana_z=initial_banana_z,
+                            executor_config=dict(
+                                recovery_motion_decision.get(
+                                    "executor_config"
+                                )
+                                or {}
+                            ),
+                            carry_reference_offset=(
+                                latched_carry_offset if carry_observed else None
+                            ),
+                            rgbd_axis_references=(
+                                latched_rgbd_axis_references
+                                if carry_observed
+                                else {}
+                            ),
+                            checkpoint_callback=motion_checkpoint_handler,
+                        )
+                        recovery_event["motion_report"] = recovery_motion_report
+                    else:
+                        raise RuntimeError(
+                            "Outcome recovery scheduler returned unsupported "
+                            f"operation: {recovery_schedule}"
+                        )
+                    recovery_state_after = _state(env, initial_banana_z)
+                    recovery_event["state_after"] = recovery_state_after
+                    lift_outcome_recoveries.append(recovery_event)
+                    episode_trace["recoveries"].append(recovery_event)
+                    lifted = bool(
+                        recovery_state_after["banana_lift_m"]
+                        >= args_cli.minimum_transport_lift
+                    )
+                    _write_trace(trace_path, episode_trace)
+
+                banana_now = _local_position(env, "banana")
+                eef = _eef_position(env)
                 tests["lift"] = lifted
                 _test_line(
                     6,
                     "physical banana lift",
                     lifted,
-                    f"delta_z={float(banana_now[2]) - initial_banana_z:.3f}m",
+                    f"delta_z={float(banana_now[2]) - initial_banana_z:.3f}m "
+                    f"recoveries={len(lift_outcome_recoveries)}",
+                )
+                episode_trace["stages"][-1]["measured_outcome_recoveries"] = (
+                    lift_outcome_recoveries
+                )
+                episode_trace["stages"][-1]["eef_after_xyz"] = eef.tolist()
+                episode_trace["stages"][-1]["banana_after_xyz"] = (
+                    banana_now.tolist()
                 )
                 if not lifted:
-                    raise RuntimeError("Gripper moved to lift pose but banana did not follow")
+                    _write_trace(trace_path, episode_trace)
+                    raise RuntimeError(
+                        "Measured lift recovery budget exhausted without "
+                        "satisfying the runtime outcome predicate"
+                    )
                 latched_carry_offset = _eef_position(env) - banana_now
                 latched_carry_quaternion = _eef_quaternion(env)
                 episode_trace["post_lift_carry_latch"] = {
@@ -3826,6 +6249,13 @@ def main() -> int:
                     "eef_quaternion_wxyz": latched_carry_quaternion.tolist(),
                 }
                 _write_trace(trace_path, episode_trace)
+            if task_completed_by_scheduler:
+                print(
+                    f"[scheduler] physical task declared complete after {phase}; "
+                    "skipping remaining runtime-proposed stages",
+                    flush=True,
+                )
+                break
             if terminal:
                 break
 
@@ -3977,6 +6407,19 @@ def main() -> int:
         ACTIVE_EPISODE_RECORDER = None
         ACTIVE_SENSOR_MONITOR = None
         ACTIVE_SENSOR_SAMPLE_INDEX = 0
+        if ros2_sensor_ingress is not None:
+            episode_trace["ros2_sensor_ingress"] = {
+                "enabled": True,
+                "status": (
+                    "subscribed"
+                    if ros2_sensor_ingress.available
+                    else "unavailable_using_simulator_fallback"
+                ),
+                **ros2_sensor_ingress.status(),
+            }
+            _write_trace(trace_path, episode_trace)
+            ros2_sensor_ingress.stop()
+        ACTIVE_ROS2_SENSOR_INGRESS = None
         if episode_recorder is not None:
             episode_recorder.discard()
         end_episode(env)

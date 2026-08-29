@@ -106,6 +106,8 @@ def command_for_variation(
         str(variation["episode_index"]),
         "--artifact-dir",
         str(artifact_dir),
+        "--no-periodic-motion-observations",
+        "--no-ros2-sensor-ingress",
         "--linger-steps",
         "0",
     ]
@@ -176,13 +178,17 @@ def main() -> int:
         start_index=args.start_index,
     )
     plan = {
-        "schema_version": 2,
+        "schema_version": 3,
         "teacher": "gemini-robotics-er-2-preview semantic supervision",
-        "executor": "local closed-loop object-relative SE(3) IK",
-        "admission": (
-            "physical success, clean release, and valid nonzero gripper-contact "
-            "telemetry; failures are not episodes"
+        "executor": (
+            "runtime-registered, model-configurable bounded motion and actuator tools"
         ),
+        "admission": (
+            "measured RGB-D/contact outcome predicates, clean release, and valid "
+            "nonzero gripper-contact telemetry; failures are not episodes"
+        ),
+        "sensor_ingress": "simulator-native; ROS 2 deferred",
+        "replanning": "event-driven local invalidation; periodic polling disabled",
         "target_successes": args.target_successes,
         "maximum_attempts": attempts,
         "implemented_variations": [

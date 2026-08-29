@@ -7,6 +7,11 @@ know about tasks, embodiments, joints, objects, phases, or controller types.
 
 Actuator executors use the same fresh-token and fail-closed rules, but own a
 runtime-defined command schema instead of a world-space target.
+
+Operation schedulers choose among runtime-advertised next operations using the
+same single-use observation token. Candidate descriptions are supplied by the
+runtime, so the scheduling contract does not encode a task, phase sequence,
+embodiment, or executor implementation.
 """
 from __future__ import annotations
 
@@ -21,7 +26,11 @@ CONTROL_TOOL_NAMES = frozenset({"hold_motion", "abort_motion"})
 ACTUATOR_CONTROL_TOOL_NAMES = frozenset(
     {"hold_actuation", "abort_actuation"}
 )
+SCHEDULER_CONTROL_TOOL_NAMES = frozenset(
+    {"observe_again", "complete_task", "abort_task"}
+)
 _TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+_OPERATION_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 
 
 class MotionToolValidationError(ValueError):
@@ -704,3 +713,465 @@ def motion_report_yields_to_actuator(
         return False
     tool = decision.get("motion_tool")
     return isinstance(tool, Mapping) and tool.get("action") == "hold"
+
+
+@dataclass(frozen=True)
+class OperationCandidate:
+    """One runtime-proposed next operation, independent of its implementation."""
+
+    operation_id: str
+    kind: str
+    description: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.operation_id, str) or not _OPERATION_ID.fullmatch(
+            self.operation_id
+        ):
+            raise MotionToolValidationError("operation_id has an invalid format")
+        _required_text(self.kind, "kind")
+        _required_text(self.description, "description")
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "operation_id": self.operation_id,
+            "kind": self.kind,
+            "description": self.description,
+        }
+
+
+def _normalize_operation_candidates(
+    candidates: Sequence[OperationCandidate],
+) -> tuple[OperationCandidate, ...]:
+    normalized = tuple(candidates)
+    if not normalized:
+        raise MotionToolValidationError("at least one operation candidate is required")
+    if any(not isinstance(item, OperationCandidate) for item in normalized):
+        raise MotionToolValidationError(
+            "candidates must contain OperationCandidate values"
+        )
+    operation_ids = [item.operation_id for item in normalized]
+    if len(operation_ids) != len(set(operation_ids)):
+        raise MotionToolValidationError("operation candidate ids must be unique")
+    return normalized
+
+
+def operation_scheduler_tool_schemas(
+    observation_id: str,
+    candidates: Sequence[OperationCandidate],
+) -> list[dict[str, Any]]:
+    """Advertise current runtime operations plus observe/complete/abort controls."""
+    observation_id = _required_text(observation_id, "observation_id")
+    normalized = _normalize_operation_candidates(candidates)
+    common = _common_properties(observation_id)
+    dispatch_properties = dict(common)
+    dispatch_properties["operation_id"] = {
+        "type": "string",
+        "enum": [item.operation_id for item in normalized],
+        "description": "One operation advertised for this fresh observation.",
+    }
+    schemas = [
+        {
+            "type": "function",
+            "function": {
+                "name": "dispatch_operation",
+                "description": (
+                    "Dispatch exactly one of the runtime-advertised next operations."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": dispatch_properties,
+                    "required": [
+                        "observation_id",
+                        "operation_id",
+                        "confidence",
+                        "reason",
+                    ],
+                },
+            },
+        }
+    ]
+    for name, description in (
+        (
+            "observe_again",
+            "Preserve current commands and require a new observation before scheduling.",
+        ),
+        (
+            "complete_task",
+            "Declare that the human instruction is already physically complete.",
+        ),
+        ("abort_task", "Abort because no advertised operation is currently safe."),
+    ):
+        schemas.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": common,
+                        "required": ["observation_id", "confidence", "reason"],
+                    },
+                },
+            }
+        )
+    return schemas
+
+
+@dataclass(frozen=True)
+class ScheduledOperationOutcome:
+    tool_name: str
+    observation_id: str
+    action: str
+    confidence: float
+    reason: str
+    operation_id: str | None
+    operation_kind: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tool_name": self.tool_name,
+            "observation_id": self.observation_id,
+            "action": self.action,
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "operation_id": self.operation_id,
+            "operation_kind": self.operation_kind,
+        }
+
+
+class ObservationBoundOperationGate:
+    """Consume one scheduling call for one fresh observation."""
+
+    def __init__(
+        self,
+        *,
+        observation_id: str,
+        candidates: Sequence[OperationCandidate],
+    ):
+        self.observation_id = _required_text(observation_id, "observation_id")
+        normalized = _normalize_operation_candidates(candidates)
+        self._by_id = {item.operation_id: item for item in normalized}
+        self._consumed = False
+
+    def dispatch(self, call: Mapping[str, Any]) -> ScheduledOperationOutcome:
+        if self._consumed:
+            raise MotionToolValidationError(
+                "this observation has already authorized one scheduler call"
+            )
+        self._consumed = True
+        name, arguments = _tool_name_and_arguments(call)
+        if name != "dispatch_operation" and name not in SCHEDULER_CONTROL_TOOL_NAMES:
+            raise MotionToolValidationError(f"unregistered scheduler tool {name!r}")
+        allowed = {"observation_id", "confidence", "reason"}
+        if name == "dispatch_operation":
+            allowed.add("operation_id")
+        unknown = set(arguments) - allowed
+        missing = {"observation_id", "confidence", "reason"} - set(arguments)
+        if name == "dispatch_operation" and "operation_id" not in arguments:
+            missing.add("operation_id")
+        if unknown:
+            raise MotionToolValidationError(
+                f"tool arguments contain unknown fields: {sorted(unknown)}"
+            )
+        if missing:
+            raise MotionToolValidationError(
+                f"tool arguments are missing fields: {sorted(missing)}"
+            )
+        if arguments["observation_id"] != self.observation_id:
+            raise MotionToolValidationError(
+                "scheduler tool call uses a stale observation"
+            )
+        confidence = arguments["confidence"]
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+            raise MotionToolValidationError("confidence must be a number in [0, 1]")
+        confidence = float(confidence)
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            raise MotionToolValidationError("confidence must be a number in [0, 1]")
+        reason = _required_text(arguments["reason"], "reason")
+        candidate = None
+        if name == "dispatch_operation":
+            operation_id = _required_text(arguments["operation_id"], "operation_id")
+            candidate = self._by_id.get(operation_id)
+            if candidate is None:
+                raise MotionToolValidationError(
+                    f"operation {operation_id!r} was not advertised"
+                )
+            action = "dispatch"
+        else:
+            action = {
+                "observe_again": "observe",
+                "complete_task": "complete",
+                "abort_task": "abort",
+            }[name]
+        return ScheduledOperationOutcome(
+            tool_name=name,
+            observation_id=self.observation_id,
+            action=action,
+            confidence=confidence,
+            reason=" ".join(reason.split()),
+            operation_id=None if candidate is None else candidate.operation_id,
+            operation_kind=None if candidate is None else candidate.kind,
+        )
+
+
+def motion_report_yields_to_scheduler(motion_report: Mapping[str, Any]) -> bool:
+    """Return whether an actual model hold should yield to fresh scheduling."""
+    if not isinstance(motion_report, Mapping):
+        return False
+    recovery = motion_report.get("recovery_request")
+    if not isinstance(recovery, Mapping):
+        return False
+    if recovery.get("reason") != "model_requested_hold":
+        return False
+    decision = recovery.get("coach_decision")
+    if not isinstance(decision, Mapping):
+        return False
+    tool = decision.get("motion_tool")
+    return isinstance(tool, Mapping) and tool.get("action") == "hold"
+
+
+@dataclass(frozen=True)
+class ActuatorFeedbackEventPolicy:
+    """Configurable trigger for returning changed physical state to a governor."""
+
+    minimum_position_change: float
+    minimum_force_change_n: float
+
+    def __post_init__(self) -> None:
+        for name, value, allow_zero in (
+            ("minimum_position_change", self.minimum_position_change, False),
+            ("minimum_force_change_n", self.minimum_force_change_n, True),
+        ):
+            value = float(value)
+            if not math.isfinite(value) or value < 0.0 or (
+                not allow_zero and value == 0.0
+            ):
+                qualifier = "non-negative" if allow_zero else "positive"
+                raise MotionToolValidationError(f"{name} must be finite and {qualifier}")
+
+
+@dataclass(frozen=True)
+class ActuatorFeedbackEvent:
+    triggered: bool
+    actuator_position_changed: bool
+    tactile_changed: bool
+    actuator_position_change: float
+    tactile_force_change_n: float
+    touch_changed: bool
+    policy: ActuatorFeedbackEventPolicy
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "triggered": self.triggered,
+            "actuator_position_changed": self.actuator_position_changed,
+            "tactile_changed": self.tactile_changed,
+            "actuator_position_change": self.actuator_position_change,
+            "tactile_force_change_n": self.tactile_force_change_n,
+            "touch_changed": self.touch_changed,
+            "policy": {
+                "minimum_position_change": self.policy.minimum_position_change,
+                "minimum_force_change_n": self.policy.minimum_force_change_n,
+            },
+        }
+
+
+def assess_actuator_feedback_event(
+    *,
+    position_before: float,
+    position_after: float,
+    force_before_n: float,
+    force_after_n: float,
+    touch_before: bool,
+    touch_after: bool,
+    policy: ActuatorFeedbackEventPolicy,
+) -> ActuatorFeedbackEvent:
+    """Fuse actuator displacement and tactile change into one re-observe event."""
+    if not isinstance(policy, ActuatorFeedbackEventPolicy):
+        raise MotionToolValidationError(
+            "policy must be an ActuatorFeedbackEventPolicy"
+        )
+    numeric: dict[str, float] = {}
+    for name, value in (
+        ("position_before", position_before),
+        ("position_after", position_after),
+        ("force_before_n", force_before_n),
+        ("force_after_n", force_after_n),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise MotionToolValidationError(f"{name} must be a finite number")
+        value = float(value)
+        if not math.isfinite(value):
+            raise MotionToolValidationError(f"{name} must be a finite number")
+        numeric[name] = value
+    if not isinstance(touch_before, bool) or not isinstance(touch_after, bool):
+        raise MotionToolValidationError("touch values must be boolean")
+    position_change = abs(numeric["position_after"] - numeric["position_before"])
+    force_change = abs(numeric["force_after_n"] - numeric["force_before_n"])
+    touch_changed = touch_before != touch_after
+    position_changed = position_change >= policy.minimum_position_change
+    tactile_changed = touch_changed or force_change >= policy.minimum_force_change_n
+    return ActuatorFeedbackEvent(
+        triggered=position_changed and tactile_changed,
+        actuator_position_changed=position_changed,
+        tactile_changed=tactile_changed,
+        actuator_position_change=position_change,
+        tactile_force_change_n=force_change,
+        touch_changed=touch_changed,
+        policy=policy,
+    )
+
+
+@dataclass(frozen=True)
+class MotionLeaseConditions:
+    """Runtime-evaluable invariants attached to a longer-lived motion call."""
+
+    require_contact: bool = False
+    minimum_contact_force_n: float = 0.0
+    maximum_tracked_pose_error_m: float | None = None
+    minimum_observed_clearance_m: float | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.require_contact, bool):
+            raise MotionToolValidationError("require_contact must be boolean")
+        force = float(self.minimum_contact_force_n)
+        if not math.isfinite(force) or force < 0.0:
+            raise MotionToolValidationError(
+                "minimum_contact_force_n must be finite and non-negative"
+            )
+        for name, value in (
+            ("maximum_tracked_pose_error_m", self.maximum_tracked_pose_error_m),
+            ("minimum_observed_clearance_m", self.minimum_observed_clearance_m),
+        ):
+            if value is None:
+                continue
+            value = float(value)
+            if not math.isfinite(value) or value < 0.0:
+                raise MotionToolValidationError(
+                    f"{name} must be finite and non-negative when supplied"
+                )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "require_contact": self.require_contact,
+            "minimum_contact_force_n": self.minimum_contact_force_n,
+            "maximum_tracked_pose_error_m": self.maximum_tracked_pose_error_m,
+            "minimum_observed_clearance_m": self.minimum_observed_clearance_m,
+        }
+
+
+@dataclass(frozen=True)
+class MotionLeaseAssessment:
+    valid: bool
+    invalidation_reasons: tuple[str, ...]
+    evidence: Mapping[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "valid": self.valid,
+            "invalidation_reasons": list(self.invalidation_reasons),
+            "evidence": _copy_json(self.evidence, "evidence"),
+        }
+
+
+def assess_motion_lease(
+    conditions: MotionLeaseConditions,
+    *,
+    contact_available: bool,
+    touch: bool | None,
+    contact_force_n: float | None,
+    tracked_pose_error_m: float | None,
+    observed_clearance_m: float | None,
+) -> MotionLeaseAssessment:
+    """Evaluate advertised lease conditions without task or executor knowledge."""
+    if not isinstance(conditions, MotionLeaseConditions):
+        raise MotionToolValidationError("conditions must be MotionLeaseConditions")
+    if not isinstance(contact_available, bool):
+        raise MotionToolValidationError("contact_available must be boolean")
+    if touch is not None and not isinstance(touch, bool):
+        raise MotionToolValidationError("touch must be boolean or null")
+
+    numeric: dict[str, float | None] = {}
+    for name, value in (
+        ("contact_force_n", contact_force_n),
+        ("tracked_pose_error_m", tracked_pose_error_m),
+        ("observed_clearance_m", observed_clearance_m),
+    ):
+        if value is None:
+            numeric[name] = None
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise MotionToolValidationError(f"{name} must be finite or null")
+        value = float(value)
+        if not math.isfinite(value):
+            raise MotionToolValidationError(f"{name} must be finite or null")
+        numeric[name] = value
+
+    reasons: list[str] = []
+    if conditions.require_contact:
+        if not contact_available:
+            reasons.append("contact_observation_unavailable")
+        elif touch is not True:
+            reasons.append("contact_lost")
+        elif numeric["contact_force_n"] is None:
+            reasons.append("contact_force_unavailable")
+        elif numeric["contact_force_n"] < conditions.minimum_contact_force_n:
+            reasons.append("contact_force_below_lease_minimum")
+    if conditions.maximum_tracked_pose_error_m is not None:
+        tracked_error = numeric["tracked_pose_error_m"]
+        if tracked_error is None:
+            reasons.append("tracked_pose_unavailable")
+        elif tracked_error > conditions.maximum_tracked_pose_error_m:
+            reasons.append("tracked_pose_error_exceeded")
+    if conditions.minimum_observed_clearance_m is not None:
+        clearance = numeric["observed_clearance_m"]
+        if clearance is None:
+            reasons.append("observed_clearance_unavailable")
+        elif clearance < conditions.minimum_observed_clearance_m:
+            reasons.append("observed_clearance_below_lease_minimum")
+    evidence = {
+        "contact_available": contact_available,
+        "touch": touch,
+        **numeric,
+        "conditions": conditions.to_dict(),
+    }
+    return MotionLeaseAssessment(
+        valid=not reasons,
+        invalidation_reasons=tuple(reasons),
+        evidence=evidence,
+    )
+
+
+def motion_lease_source_errors(
+    conditions: MotionLeaseConditions,
+    *,
+    contact_available: bool,
+    tracked_pose_available: bool,
+    observed_clearance_available: bool,
+) -> tuple[str, ...]:
+    """Reject lease conditions whose required observation source is unavailable."""
+    if not isinstance(conditions, MotionLeaseConditions):
+        raise MotionToolValidationError("conditions must be MotionLeaseConditions")
+    for name, value in (
+        ("contact_available", contact_available),
+        ("tracked_pose_available", tracked_pose_available),
+        ("observed_clearance_available", observed_clearance_available),
+    ):
+        if not isinstance(value, bool):
+            raise MotionToolValidationError(f"{name} must be boolean")
+    errors: list[str] = []
+    if conditions.require_contact and not contact_available:
+        errors.append("contact source is unavailable")
+    if (
+        conditions.maximum_tracked_pose_error_m is not None
+        and not tracked_pose_available
+    ):
+        errors.append("tracked-pose source is unavailable")
+    if (
+        conditions.minimum_observed_clearance_m is not None
+        and not observed_clearance_available
+    ):
+        errors.append("observed-clearance source is unavailable")
+    return tuple(errors)

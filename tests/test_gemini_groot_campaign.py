@@ -59,6 +59,8 @@ def test_campaign_command_points_at_success_gated_training_output():
     assert "--light-intensity" in command
     assert "--randomize-background" in command
     assert "--headless" in command
+    assert "--no-periodic-motion-observations" in command
+    assert "--no-ros2-sensor-ingress" in command
 
 
 def test_campaign_counts_only_manifest_rows_with_passing_contact_gate(tmp_path):
