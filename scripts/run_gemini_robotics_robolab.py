@@ -19,7 +19,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import cv2  # Must precede Isaac Lab imports.
 import h5py
@@ -360,7 +360,75 @@ parser.add_argument(
 parser.add_argument(
     "--disable-world-intent-shadow",
     action="store_true",
-    help="Skip the non-authoritative embodiment-neutral Gemini intent probe.",
+    help=(
+        "Skip the non-authoritative embodiment-neutral Gemini intent and "
+        "causal goal-graph probes."
+    ),
+)
+parser.add_argument(
+    "--world-goal-revision-attempts",
+    type=int,
+    default=1,
+    help=(
+        "Maximum bounded Gemini graph revisions when an admitted graph has "
+        "no activatable goal and exposes exact evidence blockers."
+    ),
+)
+parser.add_argument(
+    "--world-scope-revision-attempts",
+    type=int,
+    default=1,
+    help=(
+        "Maximum bounded graph corrections when a fresh task-membership "
+        "audit conflicts with proposed entity scope."
+    ),
+)
+parser.add_argument(
+    "--shadow-plan-only",
+    action="store_true",
+    help=(
+        "Run live scene observation, embodiment-neutral intent/goal-graph "
+        "reasoning, and shadow goal selection, then exit before loading a "
+        "demonstration, creating execution providers, or authorizing motion."
+    ),
+)
+parser.add_argument(
+    "--world-effect-runtime-lease-duration-s",
+    type=float,
+    default=5.0,
+    help=(
+        "Runtime-owned lifetime for one issued exact-invocation lease. The "
+        "lease remains non-dispatching until a later dispatch permit boundary."
+    ),
+)
+parser.add_argument(
+    "--guarded-world-effect-execution",
+    action="store_true",
+    help=(
+        "Execute exactly one validated world-effect invocation through a fresh-"
+        "evidence, single-use permit, then stop with a replan-ready observation."
+    ),
+)
+parser.add_argument(
+    "--world-effect-dispatch-evidence-max-age-s",
+    type=float,
+    default=0.75,
+    help="Maximum age of the final fresh evidence used to mint a dispatch permit.",
+)
+parser.add_argument(
+    "--world-effect-dispatch-permit-lifetime-s",
+    type=float,
+    default=0.75,
+    help="Maximum lifetime of the single-use permit before handler entry.",
+)
+parser.add_argument(
+    "--world-effect-preflight-settle-steps",
+    type=int,
+    default=12,
+    help=(
+        "Physics-only stabilization steps, with the robot held at its current "
+        "joint state, before world-effect evidence and authority are created."
+    ),
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli, _ = parser.parse_known_args()
@@ -378,7 +446,7 @@ simulation_app = app_launcher.app
 
 import robolab.constants  # noqa: E402
 import omni.usd  # noqa: E402
-from pxr import Gf, Usd, UsdGeom  # noqa: E402
+from pxr import Gf, Usd, UsdGeom, UsdPhysics  # noqa: E402
 from isaaclab.utils.math import (  # noqa: E402
     convert_camera_frame_orientation_convention,
 )
@@ -450,6 +518,8 @@ from observation_bound_motion_tools import (  # noqa: E402
     operation_scheduler_tool_schemas,
     actuator_transition_is_admissible,
     retained_contact_supports_loaded_actuator,
+    runtime_transition_admission,
+    runtime_transition_motion_handoff,
     task_feasibility_tool_schema,
 )
 from rgbd_object_axis_tracking import (  # noqa: E402
@@ -488,6 +558,75 @@ from world_intent_contract import (  # noqa: E402
     WorldIntent,
     build_world_intent_prompt,
 )
+from world_goal_graph_contract import (  # noqa: E402
+    SEMANTIC_SCENE_INVENTORY_SCHEMA_VERSION,
+    WORLD_GOAL_GRAPH_SCHEMA_VERSION,
+    WorldGoalGraph,
+    build_world_goal_graph_prompt,
+    semantic_scene_inventory_from_state,
+    validate_world_goal_graph_entity_references,
+    validate_world_goal_graph_revision,
+)
+from world_goal_graph_membership import (  # noqa: E402
+    SceneMembershipLease,
+    assess_world_goal_graph_scene_scope,
+)
+from world_goal_activation import (  # noqa: E402
+    WorldGoalActivationGate,
+    build_goal_activation_candidates,
+    build_world_goal_activation_prompt,
+    shadow_world_capability_registry,
+)
+from world_entity_physical_evidence import (  # noqa: E402
+    build_entity_physical_evidence,
+)
+from world_effect_provider_registry import (  # noqa: E402
+    RuntimeToolCapability,
+    default_world_effect_provider_registry,
+)
+from world_effect_session import (  # noqa: E402
+    WorldEffectSessionGate,
+    build_world_effect_session_candidates,
+    build_world_effect_session_prompt,
+)
+from world_effect_operation_plan import (  # noqa: E402
+    PlanningToolFactory,
+    PlanningToolFactoryCatalog,
+    WorldEffectOperationGate,
+    build_planning_world_effect_provider_instance,
+    build_world_effect_operation_candidates,
+    build_world_effect_operation_prompt,
+)
+from world_effect_execution_lease import (  # noqa: E402
+    ShadowExecutionLeaseGate,
+    build_shadow_execution_lease_candidates,
+    build_shadow_execution_lease_prompt,
+)
+from world_effect_tool_invocation import (  # noqa: E402
+    RUNTIME_TOOL_OBSERVATION_SCHEMA_VERSION,
+    ShadowToolInvocationGate,
+    build_shadow_tool_invocation_candidates,
+    build_shadow_tool_invocation_prompt,
+)
+from world_effect_runtime_lease import (  # noqa: E402
+    issue_world_effect_runtime_lease,
+)
+from world_effect_guarded_dispatch import (  # noqa: E402
+    assess_fused_target_geometry,
+    DispatchInvalidationEvent,
+    GuardedWorldEffectDispatcher,
+    RuntimeWorldEffectHandlerRegistry,
+    build_fresh_dispatch_evidence,
+)
+from world_scope_membership_audit import (  # noqa: E402
+    WorldScopeMembershipAuditGate,
+    assess_world_goal_graph_membership_audit,
+    build_world_scope_membership_audit_prompt,
+    world_scope_membership_observation_id,
+)
+from world_predicate_evaluator_registry import (  # noqa: E402
+    rgbd_world_predicate_evaluator_registry,
+)
 from service.isaac_assist_service.chat.llm_gemini import GeminiProvider  # noqa: E402
 
 
@@ -498,6 +637,16 @@ GEMINI_URL = (
 )
 
 GRIPPER_BASE_TO_FINGERTIP_M = 0.149
+SPATIAL_MOTION_CAPABILITY_TAGS = (
+    "spatial.pose_target",
+    "motion.observation_bound",
+    "motion.invalidation_feedback",
+)
+REVERSIBLE_ATTACHMENT_CAPABILITY_TAGS = (
+    "entity_attachment.acquire",
+    "entity_attachment.release",
+    "actuation.observation_bound",
+)
 DEFAULT_OBJECT_GRASP_OFFSET = torch.tensor(
     [0.0, 0.0, GRIPPER_BASE_TO_FINGERTIP_M], dtype=torch.float32
 )
@@ -655,6 +804,21 @@ def _local_position(env: Any, asset_name: str) -> torch.Tensor:
         root_pos_w[0]
         - env.scene.env_origins[0]
     ).detach().cpu().clone()
+
+
+def _tracked_entity_positions_m(
+    env: Any, entity_ids: Iterable[str]
+) -> dict[str, list[float]]:
+    """Read task-neutral entity poses from the active runtime tracker adapter."""
+    positions: dict[str, list[float]] = {}
+    for entity_id in entity_ids:
+        try:
+            position = _local_position(env, entity_id)
+        except (KeyError, AttributeError, TypeError):
+            continue
+        if position.shape == (3,) and bool(torch.isfinite(position).all()):
+            positions[entity_id] = [float(value) for value in position.tolist()]
+    return positions
 
 
 def _movable_object_position(env: Any) -> torch.Tensor:
@@ -1236,6 +1400,14 @@ def _state(env: Any, initial_object_z: float) -> dict[str, Any]:
         object_height_above_target_m=height_above_target,
         contact_height_m=args_cli.plate_contact_height,
     )
+    goal_relation_satisfied = bool(
+        feedback["object_target_contact_proxy"]
+        or (
+            target_xy_error <= args_cli.center_tolerance
+            and abs(height_above_target - args_cli.release_height)
+            <= args_cli.release_height_tolerance
+        )
+    )
     try:
         rgbd_scene_geometry = _rgbd_scene_geometry_observation(env)
     except (KeyError, ValueError, np.linalg.LinAlgError) as exc:
@@ -1286,7 +1458,121 @@ def _state(env: Any, initial_object_z: float) -> dict[str, Any]:
         "grasp_candidate": feedback["grasp_candidate"],
         "grasp_confirmed": feedback["grasp_confirmed"],
         "object_target_contact_proxy": feedback["object_target_contact_proxy"],
+        "goal_relation": {
+            "satisfied": goal_relation_satisfied,
+            "source": "runtime_task_relation_adapter",
+            "evidence": {
+                "target_contact_proxy": feedback[
+                    "object_target_contact_proxy"
+                ],
+                "target_xy_error_m": target_xy_error,
+                "maximum_target_xy_error_m": args_cli.center_tolerance,
+                "object_height_above_target_m": height_above_target,
+                "target_release_height_m": args_cli.release_height,
+                "release_height_tolerance_m": (
+                    args_cli.release_height_tolerance
+                ),
+            },
+        },
     }
+
+
+def _runtime_scene_entity_physical_evidence(
+    env: Any,
+    state: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Publish mobility and mass for every entity in the current inventory."""
+
+    entity_ids: set[str] = set()
+    geometries = state.get("rgbd_scene_geometry", {}).get("geometries", [])
+    if isinstance(geometries, list):
+        entity_ids.update(
+            str(item["runtime_id"]).strip()
+            for item in geometries
+            if isinstance(item, Mapping)
+            and isinstance(item.get("runtime_id"), str)
+            and str(item["runtime_id"]).strip()
+        )
+    scene_roles = state.get("scene_roles", {})
+    if isinstance(scene_roles, Mapping):
+        entity_ids.update(
+            str(role["asset"]).strip()
+            for role in scene_roles.values()
+            if isinstance(role, Mapping)
+            and isinstance(role.get("asset"), str)
+            and str(role["asset"]).strip()
+        )
+
+    stage = omni.usd.get_context().get_stage()
+    rigid_objects = getattr(env.scene, "rigid_objects", {})
+    deformable_objects = getattr(env.scene, "deformable_objects", {})
+    result: dict[str, dict[str, Any]] = {}
+    for entity_id in sorted(entity_ids):
+        prim_path = f"/World/envs/env_0/scene/{entity_id}"
+        root = stage.GetPrimAtPath(prim_path) if stage is not None else None
+        prim_observed = bool(root is not None and root.IsValid())
+        rigid_body_records: list[dict[str, Any]] = []
+        if prim_observed:
+            for prim in Usd.PrimRange(root):
+                if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                    continue
+                rigid_body_api = UsdPhysics.RigidBodyAPI(prim)
+                raw_enabled = rigid_body_api.GetRigidBodyEnabledAttr().Get()
+                raw_kinematic = rigid_body_api.GetKinematicEnabledAttr().Get()
+                rigid_body_records.append(
+                    {
+                        "prim_path": str(prim.GetPath()),
+                        "enabled": (
+                            True if raw_enabled is None else bool(raw_enabled)
+                        ),
+                        "kinematic": (
+                            False
+                            if raw_kinematic is None
+                            else bool(raw_kinematic)
+                        ),
+                    }
+                )
+
+        runtime_asset = (
+            rigid_objects.get(entity_id)
+            if isinstance(rigid_objects, Mapping)
+            else None
+        )
+        mass_kg: float | None = None
+        if runtime_asset is not None:
+            try:
+                body_mass = getattr(runtime_asset.data.body_mass, "torch", None)
+                if body_mass is None:
+                    body_mass = runtime_asset.data.body_mass
+                if not isinstance(body_mass, torch.Tensor):
+                    body_mass = torch.as_tensor(body_mass)
+                candidate_mass = float(
+                    torch.sum(body_mass[0].detach().cpu())
+                )
+                if math.isfinite(candidate_mass) and candidate_mass >= 0.0:
+                    mass_kg = candidate_mass
+            except (AttributeError, IndexError, TypeError, ValueError):
+                mass_kg = None
+
+        result[entity_id] = build_entity_physical_evidence(
+            entity_id=entity_id,
+            prim_path=prim_path if prim_observed else None,
+            rigid_body_records=rigid_body_records,
+            registered_dynamic=(
+                isinstance(rigid_objects, Mapping)
+                and entity_id in rigid_objects
+            ),
+            registered_deformable=(
+                isinstance(deformable_objects, Mapping)
+                and entity_id in deformable_objects
+            ),
+            prim_observed=prim_observed,
+            mass_kg=mass_kg,
+            mass_source=(
+                "live_physx_body_mass" if mass_kg is not None else None
+            ),
+        )
+    return result
 
 
 def _runtime_task_capability_evidence(
@@ -1911,6 +2197,37 @@ def _local_dls_executor_registry(
                 "additionalProperties": False,
                 "properties": configuration_properties,
             },
+            capability_tags=SPATIAL_MOTION_CAPABILITY_TAGS,
+            invocation_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "target_position_m": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 3,
+                        "maxItems": 3,
+                    },
+                    "target_quaternion_wxyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 4,
+                        "maxItems": 4,
+                    },
+                },
+                "required": [
+                    "target_position_m",
+                    "target_quaternion_wxyz",
+                ],
+                "x-runtime-constraints": {
+                    "coordinate_frame": "robot_root",
+                    "workspace_min_m": [-0.75, -0.75, 0.02],
+                    "workspace_max_m": [0.90, 0.90, 1.40],
+                    "maximum_displacement_m": 0.80,
+                    "maximum_grounding_offset_m": 0.35,
+                    "maximum_alignment_error_deg": 15.0,
+                },
+            },
         )
     )
     return registry
@@ -1952,6 +2269,7 @@ def _local_binary_actuator_registry() -> ActuatorExecutorRegistry:
                     }
                 },
             },
+            capability_tags=REVERSIBLE_ATTACHMENT_CAPABILITY_TAGS,
         )
     )
     return registry
@@ -2345,6 +2663,8 @@ def _motion_registry_for_observation_sources(
                 tool_name=spec.tool_name,
                 description=spec.description,
                 configuration_schema=schema,
+                capability_tags=spec.capability_tags,
+                invocation_schema=spec.invocation_schema,
             )
         )
     return filtered
@@ -2841,6 +3161,14 @@ false, actuation has intentionally not been advertised. Dispatch motion so the
 motion governor can rotate the wrist using the fresh pregrasp_axis_alignment
 axis comparisons. Do not describe another descent or translation-only move as
 fixing a measured angular error.
+When trigger_event says runtime_transition_not_admitted, the legacy runtime
+label is only telemetry and cannot advance itself. Select the physical operation
+that establishes the named required_capability from fresh evidence. For
+supported_loaded_interaction, establish an engaged actuator with supported
+loaded contact and observed interaction geometry before any carrying motion.
+For released_interaction, dispatch actuator evaluation when the task relation
+adapter reports goal_relation.satisfied, and do not choose retreat motion until
+disengagement is physically observed.
 When trigger_event says actuator_outcome_invalidated, the previous actuator
 command produced neither measured actuator motion nor sensor-supported loaded
 contact. Do not treat the commanded state as a physical grasp and do not repeat
@@ -2986,6 +3314,295 @@ def _test_line(index: int, name: str, passed: bool, detail: str) -> None:
     print(f"[TEST {index}/{TOTAL_TESTS}] {status} | {name} | {detail}", flush=True)
 
 
+def _runtime_geometry_by_id(state: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    scene_geometry = state.get("rgbd_scene_geometry", {})
+    geometries = (
+        scene_geometry.get("geometries", [])
+        if isinstance(scene_geometry, Mapping)
+        else []
+    )
+    if not isinstance(geometries, list):
+        return {}
+    return {
+        str(item["runtime_id"]): item
+        for item in geometries
+        if isinstance(item, Mapping)
+        and isinstance(item.get("runtime_id"), str)
+        and item.get("runtime_id")
+    }
+
+
+def _point_aabb_clearance_m(
+    point: Sequence[float],
+    lower: Sequence[float],
+    upper: Sequence[float],
+) -> float:
+    point_np = np.asarray(point, dtype=np.float64)
+    lower_np = np.asarray(lower, dtype=np.float64)
+    upper_np = np.asarray(upper, dtype=np.float64)
+    if point_np.shape != (3,) or lower_np.shape != (3,) or upper_np.shape != (3,):
+        return float("inf")
+    if not (
+        np.isfinite(point_np).all()
+        and np.isfinite(lower_np).all()
+        and np.isfinite(upper_np).all()
+    ):
+        return float("inf")
+    outside = np.maximum(np.maximum(lower_np - point_np, point_np - upper_np), 0.0)
+    return float(np.linalg.norm(outside))
+
+
+def _interaction_path_clearance_m(
+    current_interaction_position_m: Sequence[float],
+    target_interaction_position_m: Sequence[float],
+    geometries: Mapping[str, Mapping[str, Any]],
+) -> tuple[float, str | None]:
+    current = np.asarray(current_interaction_position_m, dtype=np.float64)
+    target = np.asarray(target_interaction_position_m, dtype=np.float64)
+    if current.shape != (3,) or target.shape != (3,):
+        return float("inf"), None
+    minimum = float("inf")
+    nearest_id: str | None = None
+    for alpha in np.linspace(0.0, 1.0, 17):
+        sample = (1.0 - alpha) * current + alpha * target
+        for entity_id, geometry in geometries.items():
+            lower = geometry.get("visible_aabb_min_base_m")
+            upper = geometry.get("visible_aabb_max_base_m")
+            if not isinstance(lower, (list, tuple)) or not isinstance(
+                upper, (list, tuple)
+            ):
+                continue
+            clearance = _point_aabb_clearance_m(sample, lower, upper)
+            if clearance < minimum:
+                minimum = clearance
+                nearest_id = entity_id
+    return minimum, nearest_id
+
+
+def _axis_set_error_deg(
+    reference_axis: Sequence[float],
+    current_axes: Any,
+) -> float | None:
+    reference = np.asarray(reference_axis, dtype=np.float64)
+    if reference.shape != (3,) or not np.isfinite(reference).all():
+        return None
+    reference_norm = float(np.linalg.norm(reference))
+    if reference_norm <= 1.0e-9 or not isinstance(current_axes, (list, tuple)):
+        return None
+    reference /= reference_norm
+    errors: list[float] = []
+    for raw_axis in current_axes:
+        axis = np.asarray(raw_axis, dtype=np.float64)
+        if axis.shape != (3,) or not np.isfinite(axis).all():
+            continue
+        norm = float(np.linalg.norm(axis))
+        if norm <= 1.0e-9:
+            continue
+        cosine = abs(float(np.dot(reference, axis / norm)))
+        errors.append(float(np.degrees(np.arccos(np.clip(cosine, 0.0, 1.0)))))
+    return min(errors) if errors else None
+
+
+def _guarded_dispatch_invalidation_events(
+    *,
+    runtime_lease: Any,
+    lease_candidate: Any,
+    invocation_candidate: Any,
+    invocation_decision: Any,
+    baseline_membership_ids: set[str],
+    current_provider_instance_id: str,
+    state: Mapping[str, Any],
+    baseline_tracked_positions_m: Mapping[str, Sequence[float]],
+    current_tracked_positions_m: Mapping[str, Sequence[float]],
+) -> tuple[DispatchInvalidationEvent, ...]:
+    """Evaluate the issued condition set from fresh simulator/RGB-D evidence."""
+    current_geometry = _runtime_geometry_by_id(state)
+    baseline_geometry = {
+        item.entity_id: item.geometry for item in lease_candidate.geometry_bindings
+    }
+    current_inventory = semantic_scene_inventory_from_state(state)
+    current_membership_ids = {
+        str(item["entity_id"])
+        for item in current_inventory.get("entities", [])
+        if isinstance(item, Mapping) and isinstance(item.get("entity_id"), str)
+    }
+    config = runtime_lease.lease.tool_configuration
+    invalidations: list[DispatchInvalidationEvent] = []
+
+    def emit(binding: Any, evidence: Mapping[str, Any], reason: str) -> None:
+        invalidations.append(
+            DispatchInvalidationEvent(
+                condition_id=binding.condition_id,
+                evidence_source_id=binding.evidence_source_id,
+                evidence=evidence,
+                reason=reason,
+            )
+        )
+
+    target_ids = set(lease_candidate.operation_target_entity_ids)
+    for binding in runtime_lease.lease.invalidation_bindings:
+        condition_id = binding.condition_id
+        targets = set(binding.target_entity_ids) or target_ids
+        if condition_id == "lease.membership_changed":
+            if current_membership_ids != baseline_membership_ids:
+                emit(
+                    binding,
+                    {
+                        "expected_entity_ids": sorted(baseline_membership_ids),
+                        "observed_entity_ids": sorted(current_membership_ids),
+                    },
+                    "task membership changed",
+                )
+        elif condition_id == "provider.instance_changed":
+            if current_provider_instance_id != runtime_lease.lease.provider_instance_id:
+                emit(
+                    binding,
+                    {
+                        "expected_provider_instance_id": (
+                            runtime_lease.lease.provider_instance_id
+                        ),
+                        "observed_provider_instance_id": current_provider_instance_id,
+                    },
+                    "world-effect provider instance changed",
+                )
+        elif condition_id == "scene.target_visibility_lost":
+            missing = sorted(targets - set(current_geometry))
+            if missing:
+                emit(binding, {"missing_entity_ids": missing}, "RGB-D target lost")
+        elif condition_id == "scene.target_geometry_drift":
+            center_limit = float(binding.parameters["maximum_center_shift_m"])
+            extent_limit = float(
+                binding.parameters["maximum_extent_change_fraction"]
+            )
+            for entity_id in sorted(targets):
+                baseline = baseline_geometry.get(entity_id)
+                current = current_geometry.get(entity_id)
+                if not isinstance(baseline, Mapping) or not isinstance(
+                    current, Mapping
+                ):
+                    continue
+                assessment = assess_fused_target_geometry(
+                    baseline_geometry=baseline,
+                    current_geometry=current,
+                    maximum_center_shift_m=center_limit,
+                    maximum_extent_change_fraction=extent_limit,
+                    baseline_tracked_position_m=(
+                        baseline_tracked_positions_m.get(entity_id)
+                    ),
+                    current_tracked_position_m=(
+                        current_tracked_positions_m.get(entity_id)
+                    ),
+                )
+                if assessment["invalidated"]:
+                    emit(
+                        binding,
+                        {"entity_id": entity_id, **assessment},
+                        "fused tracked-pose/RGB-D geometry exceeded the issued lease",
+                    )
+                    break
+        elif condition_id == "scene.tracked_pose_error_exceeded":
+            center_limit = float(config["maximum_tracked_pose_error_m"])
+            for entity_id in sorted(targets):
+                baseline_position = baseline_tracked_positions_m.get(entity_id)
+                current_position = current_tracked_positions_m.get(entity_id)
+                if baseline_position is None or current_position is None:
+                    emit(
+                        binding,
+                        {
+                            "entity_id": entity_id,
+                            "tracked_pose_available": False,
+                            "maximum_tracked_pose_error_m": center_limit,
+                        },
+                        "required runtime tracked pose is unavailable",
+                    )
+                    break
+                tracked_error = float(
+                    np.linalg.norm(
+                        np.asarray(current_position, dtype=np.float64)
+                        - np.asarray(baseline_position, dtype=np.float64)
+                    )
+                )
+                if tracked_error > center_limit:
+                    emit(
+                        binding,
+                        {
+                            "entity_id": entity_id,
+                            "tracked_pose_error_m": tracked_error,
+                            "maximum_tracked_pose_error_m": center_limit,
+                            "tracked_pose_source": "runtime_entity_pose_tracker",
+                        },
+                        "tracked entity pose exceeded the issued lease",
+                    )
+                    break
+        elif condition_id == "scene.tracked_orientation_error_exceeded":
+            selected_axis = next(
+                (
+                    item
+                    for item in invocation_candidate.orientation_axes
+                    if item.alignment_id
+                    == invocation_decision.orientation_alignment_id
+                ),
+                None,
+            )
+            if selected_axis is not None:
+                current = current_geometry.get(selected_axis.entity_id)
+                error = (
+                    _axis_set_error_deg(
+                        selected_axis.axis_robot_root,
+                        current.get("oriented_footprint_axes_base"),
+                    )
+                    if isinstance(current, Mapping)
+                    else None
+                )
+                limit = float(
+                    config.get("maximum_tracked_orientation_error_deg", math.inf)
+                )
+                if error is None or error > limit:
+                    emit(
+                        binding,
+                        {
+                            "entity_id": selected_axis.entity_id,
+                            "orientation_error_deg": error,
+                            "maximum_orientation_error_deg": limit,
+                        },
+                        "tracked RGB-D orientation exceeded the issued lease",
+                    )
+        elif condition_id == "scene.observed_clearance_below_minimum":
+            interaction = state.get("actuator_contact_geometry", {})
+            current_position = (
+                interaction.get("contact_center_xyz_m")
+                if isinstance(interaction, Mapping)
+                else None
+            )
+            target_position = invocation_decision.grounding_assessment.get(
+                "realized_interaction_position_m"
+            )
+            if isinstance(current_position, (list, tuple)) and isinstance(
+                target_position, (list, tuple)
+            ):
+                clearance, nearest_id = _interaction_path_clearance_m(
+                    current_position, target_position, current_geometry
+                )
+                limit = float(config.get("minimum_observed_clearance_m", 0.0))
+                if clearance < limit:
+                    emit(
+                        binding,
+                        {
+                            "path_clearance_m": clearance,
+                            "minimum_clearance_m": limit,
+                            "nearest_entity_id": nearest_id,
+                        },
+                        "RGB-D interaction path clearance is below the lease minimum",
+                    )
+        elif condition_id == "contact.required_contact_lost" and config.get(
+            "require_contact"
+        ):
+            contact = state.get("current_contact", {})
+            if not isinstance(contact, Mapping) or not contact.get("touch"):
+                emit(binding, {"contact": contact}, "required contact was lost")
+    return tuple(invalidations)
+
+
 def _write_trace(path: Path, trace: dict[str, Any]) -> None:
     """Atomically publish the latest episode evidence, including partial runs."""
     temporary = path.with_suffix(".json.tmp")
@@ -3047,6 +3664,22 @@ def _hold_joint_action(
         if terminal:
             break
     return obs, terminal
+
+
+def _current_robot_joint_action(
+    env: Any, *, gripper_closed_fraction: float
+) -> torch.Tensor:
+    """Create a hold command from the active embodiment's current joint state."""
+    robot = env.scene["robot"]
+    joint_positions = getattr(robot.data.joint_pos, "torch", robot.data.joint_pos)
+    action = torch.zeros((1, 8), dtype=torch.float32, device=env.device)
+    arm_ids = [
+        robot.data.joint_names.index(f"panda_joint{index}")
+        for index in range(1, 8)
+    ]
+    action[0, :7] = joint_positions[0, arm_ids]
+    action[0, 7] = 1.0 if gripper_closed_fraction > 0.5 else 0.0
+    return action
 
 
 def _execute_binary_actuator_tool(
@@ -3161,7 +3794,13 @@ def _move_eef_to_target(
     initial_object_z: float,
     executor_config: dict[str, Any] | None = None,
     carry_reference_offset: torch.Tensor | None = None,
+    tracked_position_references_m: Mapping[str, Sequence[float]] | None = None,
     rgbd_axis_references: dict[str, np.ndarray] | None = None,
+    tracked_orientation_observer: Callable[
+        [str, np.ndarray], tuple[float, str, Mapping[str, Any]]
+    ]
+    | None = None,
+    observed_clearance_observer: Callable[[], tuple[float, str]] | None = None,
     checkpoint_callback: Callable[
         [dict[str, Any], dict[str, Any]], dict[str, Any]
     ]
@@ -3292,19 +3931,49 @@ def _move_eef_to_target(
         }
         checkpoint_reason: str | None = None
         tracked_pose_error_m = None
-        if carry_reference_offset is not None:
+        tracked_pose_source_id = None
+        tracked_object_id = effective_config.get("tracked_object_id")
+        tracked_position_reference = (
+            tracked_position_references_m.get(tracked_object_id)
+            if isinstance(tracked_object_id, str)
+            and tracked_position_references_m is not None
+            else None
+        )
+        if tracked_position_reference is not None:
+            tracked_pose_error_m = float(
+                torch.linalg.vector_norm(
+                    _local_position(env, tracked_object_id)
+                    - torch.as_tensor(
+                        tracked_position_reference, dtype=torch.float32
+                    )
+                )
+            )
+            tracked_pose_source_id = "sim6.runtime_entity_pose_tracker"
+        elif carry_reference_offset is not None:
             tracked_object = _movable_object_position(env)
             tracked_pose_error_m = float(
                 torch.linalg.vector_norm(
                     (eef_after - tracked_object) - carry_reference_offset
                 )
             )
+            tracked_pose_source_id = "sim6.privileged_relative_pose_adapter"
         observed_clearance_m = None
+        observed_clearance_source_id = None
         if lease_conditions.minimum_observed_clearance_m is not None:
-            observed_clearance_m = float(
-                _movable_object_position(env)[2]
-                - _target_receptacle_position(env)[2]
-            )
+            if observed_clearance_observer is not None:
+                (
+                    observed_clearance_m,
+                    observed_clearance_source_id,
+                ) = observed_clearance_observer()
+                observed_clearance_m = float(observed_clearance_m)
+            else:
+                observed_clearance_m = float(
+                    _movable_object_position(env)[2]
+                    - _target_receptacle_position(env)[2]
+                )
+                observed_clearance_source_id = (
+                    "sim6.privileged_object_to_support_height_adapter"
+                )
         current_contact = _current_contact_observation(env)
         observed_at_s = time.monotonic()
         sensor_observations: list[SensorObservation] = []
@@ -3347,7 +4016,7 @@ def _move_eef_to_target(
             sensor_observations.append(
                 SensorObservation(
                     channel_id="object.tracked_translation_error_m",
-                    source_id="sim6.privileged_relative_pose_adapter",
+                    source_id=str(tracked_pose_source_id),
                     sequence=iteration + 1,
                     timestamp_s=observed_at_s,
                     value=tracked_pose_error_m,
@@ -3356,6 +4025,7 @@ def _move_eef_to_target(
         rgbd_axis_observation = None
         rgbd_axis_error = None
         rgbd_axis_error_message = None
+        rgbd_axis_source_id = None
         if (
             effective_config.get("maximum_tracked_orientation_error_deg")
             is not None
@@ -3374,18 +4044,29 @@ def _move_eef_to_target(
                         "RGB-D tracked-orientation reference is unavailable for "
                         f"{tracked_object_id!r}"
                     )
-                rgbd_axis_observation = _rgbd_object_axis_observation(
-                    env,
-                    prim_label_fragment=f"/scene/{tracked_object_id}",
-                    reference_axis=reference_axis,
-                )
-                rgbd_axis_error = float(
-                    rgbd_axis_observation["orientation_error_deg"]
-                )
+                if tracked_orientation_observer is not None:
+                    (
+                        rgbd_axis_error,
+                        rgbd_axis_source_id,
+                        rgbd_axis_observation,
+                    ) = tracked_orientation_observer(
+                        tracked_object_id, reference_axis
+                    )
+                    rgbd_axis_error = float(rgbd_axis_error)
+                else:
+                    rgbd_axis_observation = _rgbd_object_axis_observation(
+                        env,
+                        prim_label_fragment=f"/scene/{tracked_object_id}",
+                        reference_axis=reference_axis,
+                    )
+                    rgbd_axis_error = float(
+                        rgbd_axis_observation["orientation_error_deg"]
+                    )
+                    rgbd_axis_source_id = "rgbd.instance_depth_major_axis"
                 sensor_observations.append(
                     SensorObservation(
                         channel_id="rgbd.object_orientation_error_deg",
-                        source_id="rgbd.instance_depth_major_axis",
+                        source_id=str(rgbd_axis_source_id),
                         sequence=iteration + 1,
                         timestamp_s=observed_at_s,
                         value=rgbd_axis_error,
@@ -3398,7 +4079,7 @@ def _move_eef_to_target(
             sensor_observations.append(
                 SensorObservation(
                     channel_id="scene.observed_clearance_m",
-                    source_id="sim6.privileged_object_to_support_height_adapter",
+                    source_id=str(observed_clearance_source_id),
                     sequence=iteration + 1,
                     timestamp_s=observed_at_s,
                     value=observed_clearance_m,
@@ -4385,13 +5066,17 @@ def _retreat_after_release(
     last_action: torch.Tensor,
 ) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
     """Raise the open gripper and verify that the released object stays behind."""
+    if bool(float(last_action[0, 7].detach().cpu()) > 0.5):
+        raise RuntimeError(
+            "Release retreat requires a separately executed and observed "
+            "actuator disengagement"
+        )
     robot = env.scene["robot"]
     arm_joint_ids = [robot.data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)]
     body_idx = robot.data.body_names.index("base_link")
     jacobi_body_idx = body_idx - 1 if robot.is_fixed_base else body_idx
     jacobi_joint_ids = [index + robot.num_base_dofs for index in arm_joint_ids]
     command = last_action.clone()
-    command[0, 7] = 0.0
     terminal = False
     iterations: list[dict[str, Any]] = []
     eef_start = _eef_position(env)
@@ -4526,6 +5211,39 @@ def main() -> int:
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY in the environment")
+    world_effect_only_mode = bool(
+        args_cli.shadow_plan_only or args_cli.guarded_world_effect_execution
+    )
+    if world_effect_only_mode and args_cli.disable_world_intent_shadow:
+        raise ValueError(
+            "world-effect-only modes cannot be combined with "
+            "--disable-world-intent-shadow"
+        )
+    if args_cli.shadow_plan_only and args_cli.guarded_world_effect_execution:
+        raise ValueError(
+            "--shadow-plan-only and --guarded-world-effect-execution are "
+            "mutually exclusive"
+        )
+    if args_cli.world_effect_runtime_lease_duration_s <= 0:
+        raise ValueError("world-effect-runtime-lease-duration-s must be positive")
+    if args_cli.world_effect_dispatch_evidence_max_age_s <= 0:
+        raise ValueError(
+            "world-effect-dispatch-evidence-max-age-s must be positive"
+        )
+    if args_cli.world_effect_dispatch_permit_lifetime_s <= 0:
+        raise ValueError(
+            "world-effect-dispatch-permit-lifetime-s must be positive"
+        )
+    if args_cli.world_effect_preflight_settle_steps < 0:
+        raise ValueError("world-effect-preflight-settle-steps must be non-negative")
+    if (
+        args_cli.guarded_world_effect_execution
+        and args_cli.world_effect_preflight_settle_steps == 0
+    ):
+        raise ValueError(
+            "guarded world-effect execution requires at least one preflight "
+            "physics settle step"
+        )
     if not args_cli.disable_adaptive_ik:
         positive_adaptive_values = {
             "adaptive_tolerance": args_cli.adaptive_tolerance,
@@ -4605,6 +5323,10 @@ def main() -> int:
         raise ValueError("record-video-scale must be positive")
     if args_cli.model_max_retries < 0 or args_cli.model_retry_backoff < 0:
         raise ValueError("model retry count and backoff must be non-negative")
+    if args_cli.world_goal_revision_attempts < 0:
+        raise ValueError("world-goal-revision-attempts must be non-negative")
+    if args_cli.world_scope_revision_attempts < 0:
+        raise ValueError("world-scope-revision-attempts must be non-negative")
     if not 0.0 <= args_cli.minimum_contact_coverage <= 1.0:
         raise ValueError("minimum-contact-coverage must be in [0, 1]")
     if args_cli.minimum_touch_samples < 1:
@@ -4632,26 +5354,40 @@ def main() -> int:
         minimum_force_change_n=args_cli.actuator_feedback_force_change,
     )
 
-    demo_path = args_cli.demo.expanduser().resolve()
-    if not demo_path.is_file():
-        raise FileNotFoundError(f"Successful local motion primitive not found: {demo_path}")
-    with h5py.File(demo_path, "r") as source:
-        demo = source["data/demo_0"]
-        if not bool(demo.attrs.get("success", False)):
-            raise RuntimeError(f"Refusing to execute a demonstration not marked successful: {demo_path}")
-        recorded_actions = np.asarray(demo["actions"], dtype=np.float32)
-        joint_states = np.asarray(
-            demo["states/articulation/robot/joint_position"], dtype=np.float32
-        )
-    change_points = np.flatnonzero(
-        np.max(np.abs(np.diff(recorded_actions, axis=0)), axis=1) > 1.0e-5
-    ) + 1
-    boundaries = np.concatenate(([0], change_points, [len(recorded_actions)]))
+    demo_path: Path | None = None
+    recorded_actions = np.empty((0, 8), dtype=np.float32)
+    joint_states = np.empty((0, 8), dtype=np.float32)
+    boundaries = np.empty((0,), dtype=np.int64)
     phase_names = ["approach_object", "descend", "grasp", "lift", "above_plate"]
-    if len(boundaries) - 1 != len(phase_names):
-        raise RuntimeError(
-            f"Expected {len(phase_names)} semantic trajectory segments, got {len(boundaries) - 1}"
+    if not world_effect_only_mode:
+        demo_path = args_cli.demo.expanduser().resolve()
+        if not demo_path.is_file():
+            raise FileNotFoundError(
+                f"Successful local motion primitive not found: {demo_path}"
+            )
+        with h5py.File(demo_path, "r") as source:
+            demo = source["data/demo_0"]
+            if not bool(demo.attrs.get("success", False)):
+                raise RuntimeError(
+                    "Refusing to execute a demonstration not marked successful: "
+                    f"{demo_path}"
+                )
+            recorded_actions = np.asarray(demo["actions"], dtype=np.float32)
+            joint_states = np.asarray(
+                demo["states/articulation/robot/joint_position"],
+                dtype=np.float32,
+            )
+        change_points = np.flatnonzero(
+            np.max(np.abs(np.diff(recorded_actions, axis=0)), axis=1) > 1.0e-5
+        ) + 1
+        boundaries = np.concatenate(
+            ([0], change_points, [len(recorded_actions)])
         )
+        if len(boundaries) - 1 != len(phase_names):
+            raise RuntimeError(
+                f"Expected {len(phase_names)} semantic trajectory segments, "
+                f"got {len(boundaries) - 1}"
+            )
 
     args_cli.artifact_dir.mkdir(parents=True, exist_ok=True)
     training_episode_dir = (
@@ -4688,8 +5424,39 @@ def main() -> int:
         "World-intent shadow: "
         + ("disabled" if args_cli.disable_world_intent_shadow else args_cli.instruction)
     )
-    print(f"Local motion primitive: {demo_path} ({len(recorded_actions)} steps)")
     print(
+        "World-goal-graph shadow: "
+        + (
+            "disabled"
+            if args_cli.disable_world_intent_shadow
+            else "full observed scene inventory; no motion authority"
+        )
+    )
+    print(
+        "Execution boundary: "
+        + (
+            "GUARDED WORLD-EFFECT EXECUTION; one exact invocation"
+            if args_cli.guarded_world_effect_execution
+            else (
+                "SHADOW PLAN ONLY; legacy demonstration/providers/motion disabled"
+                if args_cli.shadow_plan_only
+                else "full task runtime"
+            )
+        )
+    )
+    print(
+        "Local motion primitive: not loaded"
+        if world_effect_only_mode
+        else f"Local motion primitive: {demo_path} ({len(recorded_actions)} steps)"
+    )
+    runtime_detail: Callable[..., None] = (
+        (lambda *unused_args, **unused_kwargs: None)
+        if args_cli.shadow_plan_only
+        else print
+    )
+    if world_effect_only_mode:
+        print("Legacy runtime details: skipped")
+    runtime_detail(
         "Control cadence: one observation-bound model tool per runtime operation; "
         + (
             f"periodic + event checkpoints every {args_cli.coach_interval_iterations} "
@@ -4698,27 +5465,27 @@ def main() -> int:
             else "event/completion checkpoints only during each multi-step IK lease"
         )
     )
-    print(
+    runtime_detail(
         "Motion executor: runtime-registered bounded DLS IK; model-configurable "
         f"with target correction≤{args_cli.maximum_model_target_correction:.3f}m "
         "and rotation correction≤"
         f"{args_cli.maximum_model_rotation_correction_deg:.1f}deg"
     )
-    print(
+    runtime_detail(
         "Actuator executor: runtime-registered binary clamp; model-selectable "
         "engage/disengage/maintain with 8–120 settling steps"
     )
-    print(
+    runtime_detail(
         "Operation scheduler: fresh-observation routing between continued "
         "motion and actuator evaluation; no recorded gripper-state hints"
     )
-    print(
+    runtime_detail(
         "Post-actuation feedback: immediate Gemini reschedule when position "
         f"change≥{actuator_feedback_policy.minimum_position_change:.3f} and "
         "touch changes or force delta≥"
         f"{actuator_feedback_policy.minimum_force_change_n:.3f}N"
     )
-    print(
+    runtime_detail(
         "Live-pose adaptive IK: "
         + (
             "off (fixed demonstration replay)"
@@ -4733,7 +5500,7 @@ def main() -> int:
             )
         )
     )
-    print(
+    runtime_detail(
         "Model-governed placement: "
         + (
             "off (baseline mode)"
@@ -4745,7 +5512,7 @@ def main() -> int:
             )
         )
     )
-    print(
+    runtime_detail(
         "Passive critic memory: "
         + (
             f"{len(critic_memory['lessons'])} lessons from {critic_memory['source_model']}"
@@ -4753,7 +5520,7 @@ def main() -> int:
             else "none"
         )
     )
-    print(
+    runtime_detail(
         "Post-release detachment check: "
         + (
             "off"
@@ -4761,15 +5528,15 @@ def main() -> int:
             else f"on (open-gripper retreat={args_cli.retreat_distance:.3f}m)"
         )
     )
-    print(
+    runtime_detail(
         "Training capture: "
         + (
             "disabled"
-            if args_cli.disable_training_recording
+            if args_cli.disable_training_recording or world_effect_only_mode
             else f"successful Gemini completions only → {training_episode_dir}"
         )
     )
-    print(
+    runtime_detail(
         "ROS 2 sensor ingress: "
         + (
             "configured (subscriber availability checked after scene startup)"
@@ -4880,14 +5647,88 @@ def main() -> int:
     env.sim.render()
     obs = env.observation_manager.compute()
     coach = GeminiRoboticsER2(api_key, args_cli.timeout)
-    motion_tool_provider = GeminiProvider(api_key, MODEL_ID)
+    motion_tool_provider: GeminiProvider | None = None
     trackable_object_ids = tuple(
         object_id
         for object_id in env_cfg.contact_object_list
         if isinstance(object_id, str) and object_id
     )
-    motion_executor_registry = _local_dls_executor_registry(trackable_object_ids)
-    actuator_executor_registry = _local_binary_actuator_registry()
+    motion_executor_registry: MotionExecutorRegistry | None = None
+    actuator_executor_registry: ActuatorExecutorRegistry | None = None
+    if not args_cli.shadow_plan_only or args_cli.guarded_world_effect_execution:
+        motion_tool_provider = GeminiProvider(api_key, MODEL_ID)
+        motion_executor_registry = _local_dls_executor_registry(
+            trackable_object_ids
+        )
+        actuator_executor_registry = _local_binary_actuator_registry()
+    runtime_effect_tools: list[RuntimeToolCapability] = [
+        RuntimeToolCapability(
+            tool_id="sensor.rgbd_scene_geometry",
+            tool_family="sensor",
+            capability_tags=("scene.geometry.rgbd",),
+            activation_status="active",
+            source="live_synchronized_rgbd_instance_geometry",
+        )
+    ]
+    if motion_executor_registry is None:
+        runtime_effect_tools.append(
+            RuntimeToolCapability(
+                tool_id="factory.spatial_pose_target",
+                tool_family="motion",
+                capability_tags=SPATIAL_MOTION_CAPABILITY_TAGS,
+                activation_status="factory_available",
+                source="runtime_executor_factory_catalog",
+            )
+        )
+    else:
+        runtime_effect_tools.extend(
+            RuntimeToolCapability(
+                tool_id=spec.executor_id,
+                tool_family="motion",
+                capability_tags=spec.capability_tags,
+                activation_status="active",
+                source="active_motion_executor_registry",
+                tool_advertisement=spec.advertisement(),
+            )
+            for spec in motion_executor_registry.specs()
+        )
+    if actuator_executor_registry is None:
+        runtime_effect_tools.append(
+            RuntimeToolCapability(
+                tool_id="factory.reversible_entity_attachment",
+                tool_family="actuator",
+                capability_tags=REVERSIBLE_ATTACHMENT_CAPABILITY_TAGS,
+                activation_status="factory_available",
+                source="runtime_executor_factory_catalog",
+            )
+        )
+    else:
+        runtime_effect_tools.extend(
+            RuntimeToolCapability(
+                tool_id=spec.executor_id,
+                tool_family="actuator",
+                capability_tags=spec.capability_tags,
+                activation_status="active",
+                source="active_actuator_executor_registry",
+                tool_advertisement=spec.advertisement(),
+            )
+            for spec in actuator_executor_registry.specs()
+        )
+    world_effect_provider_registry = default_world_effect_provider_registry()
+    inside_effect_provider_assessment = world_effect_provider_registry.assess(
+        "world_relation.realize_inside",
+        runtime_effect_tools,
+    )
+    world_predicate_evaluator_registry = (
+        rgbd_world_predicate_evaluator_registry()
+    )
+    world_predicate_evaluator_advertisement = (
+        world_predicate_evaluator_registry.advertisement()
+    )
+    world_capability_registry = shadow_world_capability_registry(
+        effect_provider_assessment=inside_effect_provider_assessment.to_dict()
+    )
+    world_capability_advertisement = world_capability_registry.advertisement()
     initial_object = _movable_object_position(env)
     initial_object_z = float(initial_object[2])
     initial_eef = _eef_position(env)
@@ -4909,6 +5750,26 @@ def main() -> int:
     terminal = False
     episode_trace: dict[str, Any] = {
         "schema_version": 4,
+        "execution_mode": (
+            "guarded_world_effect_execution"
+            if args_cli.guarded_world_effect_execution
+            else (
+                "shadow_plan_only"
+                if args_cli.shadow_plan_only
+                else "full_task_runtime"
+            )
+        ),
+        "execution_boundary": {
+            "demonstration_loaded": demo_path is not None,
+            "motion_provider_created": motion_tool_provider is not None,
+            "motion_executor_registry_created": (
+                motion_executor_registry is not None
+            ),
+            "actuator_executor_registry_created": (
+                actuator_executor_registry is not None
+            ),
+            "motion_authority": False if world_effect_only_mode else None,
+        },
         "task": args_cli.task,
         "instruction": args_cli.instruction,
         "scene_roles": SCENE_ROLES.to_dict(),
@@ -4917,9 +5778,13 @@ def main() -> int:
         "sim_version": sim_version,
         "physics_steps_are_local": True,
         "motion_executor": (
-            "fixed_demonstration_replay"
-            if args_cli.disable_adaptive_ik
-            else "live_pose_bounded_dls_ik"
+            None
+            if world_effect_only_mode
+            else (
+                "fixed_demonstration_replay"
+                if args_cli.disable_adaptive_ik
+                else "live_pose_bounded_dls_ik"
+            )
         ),
         "requested_relocation_xy_m": {
             "movable_object": list(args_cli.movable_object_offset),
@@ -4976,6 +5841,149 @@ def main() -> int:
             "authority_scope": [],
             "instruction": args_cli.instruction,
         },
+        "world_goal_graph_shadow": {
+            "status": (
+                "disabled" if args_cli.disable_world_intent_shadow else "pending"
+            ),
+            "contract_version": WORLD_GOAL_GRAPH_SCHEMA_VERSION,
+            "inventory_contract_version": (
+                SEMANTIC_SCENE_INVENTORY_SCHEMA_VERSION
+            ),
+            "motion_authority": False,
+            "authority_scope": [],
+            "instruction": args_cli.instruction,
+            "revision_policy": {
+                "trigger": "no_activatable_goal_with_evidence_blockers",
+                "maximum_attempts": args_cli.world_goal_revision_attempts,
+                "complete_replacement_required": True,
+                "execution_authority": False,
+            },
+        },
+        "world_scope_membership_audit_shadow": {
+            "status": (
+                "disabled" if args_cli.disable_world_intent_shadow else "pending"
+            ),
+            "feasibility_is_membership_authority": False,
+            "maximum_revision_attempts": args_cli.world_scope_revision_attempts,
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+        },
+        "world_predicate_evaluator_protocol": {
+            "shadow_only": True,
+            "motion_authority": False,
+            "advertisement": world_predicate_evaluator_advertisement,
+        },
+        "scene_membership_lease_protocol": {
+            "shadow_only": True,
+            "motion_authority": False,
+            "scope_coverage_required": True,
+            "unknown_scope_is_admitted": False,
+            "resolved_subset_with_deferred_unknowns_is_admitted": True,
+            "deferred_unknowns_receive_execution_authority": False,
+            "replan_after_goal_completion": True,
+            "fresh_complete_graph_required_before_task_completion": True,
+        },
+        "world_goal_activation_shadow": {
+            "status": (
+                "disabled" if args_cli.disable_world_intent_shadow else "pending"
+            ),
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+            "capability_advertisement": world_capability_advertisement,
+        },
+        "world_effect_provider_protocol": {
+            "shadow_only": True,
+            "motion_authority": False,
+            "execution_authority": False,
+            "runtime_tools": [item.to_dict() for item in runtime_effect_tools],
+            "provider_advertisement": (
+                world_effect_provider_registry.advertisement()
+            ),
+            "inside_relation_assessment": (
+                inside_effect_provider_assessment.to_dict()
+            ),
+        },
+        "world_effect_session_shadow": {
+            "status": (
+                "disabled" if args_cli.disable_world_intent_shadow else "pending"
+            ),
+            "provider_instantiated": False,
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+        },
+        "world_effect_operation_plan_shadow": {
+            "status": (
+                "disabled" if args_cli.disable_world_intent_shadow else "pending"
+            ),
+            "planning_provider_instantiated": False,
+            "execution_provider_created": False,
+            "handler_bound": False,
+            "dispatch_enabled": False,
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+        },
+        "world_effect_execution_lease_shadow": {
+            "status": (
+                "disabled" if args_cli.disable_world_intent_shadow else "pending"
+            ),
+            "configuration_validated": False,
+            "execution_lease_issued": False,
+            "tool_called": False,
+            "handler_bound": False,
+            "dispatch_enabled": False,
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+        },
+        "world_effect_tool_invocation_shadow": {
+            "status": (
+                "disabled" if args_cli.disable_world_intent_shadow else "pending"
+            ),
+            "invocation_validated": False,
+            "execution_lease_issued": False,
+            "tool_called": False,
+            "handler_bound": False,
+            "dispatch_enabled": False,
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+        },
+        "world_effect_runtime_lease": {
+            "status": (
+                "disabled" if args_cli.disable_world_intent_shadow else "pending"
+            ),
+            "execution_lease_issued": False,
+            "lease_armed": False,
+            "revocable": False,
+            "dispatch_permit_issued": False,
+            "tool_called": False,
+            "handler_bound": False,
+            "dispatch_enabled": False,
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+        },
+        "world_effect_guarded_dispatch": {
+            "status": (
+                "pending"
+                if args_cli.guarded_world_effect_execution
+                else "disabled"
+            ),
+            "fresh_evidence_validated": False,
+            "dispatch_permit_issued": False,
+            "dispatch_performed": False,
+            "handler_bound": False,
+            "tool_called": False,
+            "requires_model_replan": False,
+            "dispatch_enabled": False,
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+        },
         "motion_tool_protocol": {
             "observation_bound": True,
             "lease_model_observation_mode": (
@@ -5006,7 +6014,11 @@ def main() -> int:
                     "tool_name": spec.tool_name,
                     "configuration_schema": spec.configuration_schema,
                 }
-                for spec in motion_executor_registry.specs()
+                for spec in (
+                    motion_executor_registry.specs()
+                    if motion_executor_registry is not None
+                    else ()
+                )
             ],
             "calls": [],
         },
@@ -5019,7 +6031,11 @@ def main() -> int:
                     "command_schema": spec.command_schema,
                     "configuration_schema": spec.configuration_schema,
                 }
-                for spec in actuator_executor_registry.specs()
+                for spec in (
+                    actuator_executor_registry.specs()
+                    if actuator_executor_registry is not None
+                    else ()
+                )
             ],
             "calls": [],
         },
@@ -5035,6 +6051,11 @@ def main() -> int:
                     actuator_feedback_policy.minimum_force_change_n
                 ),
             },
+            "calls": [],
+        },
+        "runtime_transition_protocol": {
+            "authority": "fresh_runtime_capability_evidence",
+            "legacy_phase_index_is_control_authority": False,
             "calls": [],
         },
         "transport_recovery": {
@@ -5086,7 +6107,13 @@ def main() -> int:
     _write_trace(trace_path, episode_trace)
     episode_recorder: GeminiEpisodeDatasetRecorder | None = None
     ros2_sensor_ingress: ROS2SensorIngress | None = None
-    if not args_cli.disable_training_recording:
+    issued_runtime_lease = None
+    issued_execution_lease_candidates = None
+    issued_execution_lease_decision = None
+    issued_invocation_candidates = None
+    issued_invocation_decision = None
+    issued_planning_provider_instance = None
+    if not args_cli.disable_training_recording and not world_effect_only_mode:
         episode_index = (
             args_cli.episode_index
             if args_cli.episode_index >= 0
@@ -5159,11 +6186,94 @@ def main() -> int:
                 flush=True,
             )
             _write_trace(trace_path, episode_trace)
+        if args_cli.guarded_world_effect_execution:
+            settle_state_before = _state(env, initial_object_z)
+            visible_entity_ids_before = set(
+                _runtime_geometry_by_id(settle_state_before)
+            )
+            tracked_positions_before = _tracked_entity_positions_m(
+                env, visible_entity_ids_before
+            )
+            settle_action = _current_robot_joint_action(
+                env,
+                gripper_closed_fraction=float(
+                    settle_state_before["gripper_closed_fraction"]
+                ),
+            )
+            obs, settle_terminal = _hold_joint_action(
+                env,
+                obs,
+                settle_action,
+                args_cli.world_effect_preflight_settle_steps,
+            )
+            if settle_terminal:
+                raise RuntimeError(
+                    "environment terminated during world-effect preflight settling"
+                )
+            env.sim.render()
+            settle_state_after = _state(env, initial_object_z)
+            visible_entity_ids_after = set(_runtime_geometry_by_id(settle_state_after))
+            tracked_entity_ids = visible_entity_ids_before | visible_entity_ids_after
+            tracked_positions_after = _tracked_entity_positions_m(
+                env, tracked_entity_ids
+            )
+            displacement_by_entity_m = {
+                entity_id: float(
+                    np.linalg.norm(
+                        np.asarray(tracked_positions_after[entity_id])
+                        - np.asarray(tracked_positions_before[entity_id])
+                    )
+                )
+                for entity_id in sorted(
+                    set(tracked_positions_before) & set(tracked_positions_after)
+                )
+            }
+            episode_trace["world_effect_preflight_settle"] = {
+                "status": "complete",
+                "steps": args_cli.world_effect_preflight_settle_steps,
+                "robot_command": "hold_current_joint_state",
+                "motion_authority": False,
+                "task_operation_performed": False,
+                "tracked_entity_displacement_m": displacement_by_entity_m,
+                "maximum_tracked_entity_displacement_m": max(
+                    displacement_by_entity_m.values(), default=0.0
+                ),
+                "evidence_created_after_settle": True,
+            }
+            _write_trace(trace_path, episode_trace)
+            print(
+                "[world-effect-preflight] SETTLED "
+                f"steps={args_cli.world_effect_preflight_settle_steps} "
+                "authority=none",
+                flush=True,
+            )
         frame = _single_exterior_frame(obs)
         cv2.imwrite(
             str(args_cli.artifact_dir / "00_scene.jpg"),
             cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
         )
+        preflight_state = _state(env, initial_object_z)
+        preflight_state["entity_physical_evidence"] = (
+            _runtime_scene_entity_physical_evidence(env, preflight_state)
+        )
+        semantic_scene_inventory = semantic_scene_inventory_from_state(
+            preflight_state
+        )
+        preflight_entity_ids = {
+            str(item["entity_id"])
+            for item in semantic_scene_inventory.get("entities", [])
+            if isinstance(item, Mapping) and isinstance(item.get("entity_id"), str)
+        }
+        preflight_tracked_positions_m = _tracked_entity_positions_m(
+            env, preflight_entity_ids
+        )
+        semantic_scene_inventory_digest = hashlib.sha256(
+            json.dumps(
+                semantic_scene_inventory,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:16]
         if not args_cli.disable_world_intent_shadow:
             try:
                 shadow_payload, shadow_latency, shadow_digest = coach.reason(
@@ -5207,7 +6317,2177 @@ def main() -> int:
                 )
             _write_trace(trace_path, episode_trace)
 
-        preflight_state = _state(env, initial_object_z)
+            try:
+                (
+                    goal_graph_payload,
+                    goal_graph_latency,
+                    goal_graph_image_digest,
+                ) = coach.reason(
+                    build_world_goal_graph_prompt(
+                        args_cli.instruction,
+                        semantic_scene_inventory,
+                        world_predicate_evaluator_advertisement,
+                    ),
+                    frame,
+                )
+                goal_graph = WorldGoalGraph.from_mapping(goal_graph_payload)
+                validate_world_goal_graph_entity_references(
+                    goal_graph,
+                    semantic_scene_inventory,
+                )
+                initial_goal_graph = goal_graph
+                scope_membership_observation_id = (
+                    world_scope_membership_observation_id(
+                        args_cli.instruction,
+                        semantic_scene_inventory,
+                        initial_goal_graph,
+                    )
+                )
+                (
+                    scope_membership_payload,
+                    scope_membership_latency,
+                    scope_membership_image_digest,
+                ) = coach.reason(
+                    build_world_scope_membership_audit_prompt(
+                        instruction=args_cli.instruction,
+                        observation_id=scope_membership_observation_id,
+                        inventory=semantic_scene_inventory,
+                        graph=initial_goal_graph,
+                    ),
+                    frame,
+                )
+                scope_membership_audit = WorldScopeMembershipAuditGate(
+                    scope_membership_observation_id,
+                    semantic_scene_inventory,
+                ).dispatch(scope_membership_payload)
+                initial_scope_membership_assessment = (
+                    assess_world_goal_graph_membership_audit(
+                        initial_goal_graph,
+                        scope_membership_audit,
+                    )
+                )
+                goal_graph_scope_membership_assessment = (
+                    initial_scope_membership_assessment
+                )
+                scope_membership_revision_attempts: list[dict[str, Any]] = []
+                audited_included_entity_ids = tuple(
+                    item.entity_id
+                    for item in scope_membership_audit.decisions
+                    if item.status == "included"
+                )
+                for scope_revision_index in range(
+                    args_cli.world_scope_revision_attempts
+                ):
+                    if (
+                        goal_graph_scope_membership_assessment.admitted
+                        or goal_graph_scope_membership_assessment.resolved_subset_admitted
+                    ):
+                        break
+                    scope_revision_context = {
+                        "revision_attempt": scope_revision_index + 1,
+                        "trigger": "task_membership_audit_conflict",
+                        "previous_graph": goal_graph.to_dict(),
+                        "task_membership_audit": (
+                            scope_membership_audit.to_dict()
+                        ),
+                        "membership_assessment": (
+                            goal_graph_scope_membership_assessment.to_dict()
+                        ),
+                        "requirements": {
+                            "complete_replacement_graph": True,
+                            "preserve_exact_audited_scope": True,
+                            "feasibility_is_membership_authority": False,
+                            "execution_authority": False,
+                        },
+                    }
+                    scope_revision_latency: float | None = None
+                    scope_revision_image_digest: str | None = None
+                    try:
+                        (
+                            scope_revised_payload,
+                            scope_revision_latency,
+                            scope_revision_image_digest,
+                        ) = coach.reason(
+                            build_world_goal_graph_prompt(
+                                args_cli.instruction,
+                                semantic_scene_inventory,
+                                world_predicate_evaluator_advertisement,
+                                revision_context=scope_revision_context,
+                            ),
+                            frame,
+                        )
+                        scope_revised_graph = WorldGoalGraph.from_mapping(
+                            scope_revised_payload
+                        )
+                        validate_world_goal_graph_entity_references(
+                            scope_revised_graph,
+                            semantic_scene_inventory,
+                        )
+                        validate_world_goal_graph_revision(
+                            goal_graph,
+                            scope_revised_graph,
+                            (),
+                            preserve_included_entity_ids=(
+                                audited_included_entity_ids
+                            ),
+                        )
+                        scope_revised_assessment = (
+                            assess_world_goal_graph_membership_audit(
+                                scope_revised_graph,
+                                scope_membership_audit,
+                            )
+                        )
+                        scope_membership_revision_attempts.append(
+                            {
+                                "attempt": scope_revision_index + 1,
+                                "status": (
+                                    "admitted"
+                                    if scope_revised_assessment.admitted
+                                    else "not_admitted"
+                                ),
+                                "replacement_goal_graph": (
+                                    scope_revised_graph.to_dict()
+                                ),
+                                "membership_assessment": (
+                                    scope_revised_assessment.to_dict()
+                                ),
+                                "latency_s": scope_revision_latency,
+                                "image_digest": scope_revision_image_digest,
+                                "motion_authority": False,
+                                "execution_authority": False,
+                                "authority_scope": [],
+                            }
+                        )
+                        if (
+                            scope_revised_assessment.admitted
+                            or scope_revised_assessment.resolved_subset_admitted
+                        ):
+                            goal_graph = scope_revised_graph
+                            goal_graph_scope_membership_assessment = (
+                                scope_revised_assessment
+                            )
+                            print(
+                                "[world-scope-membership] CORRECTED "
+                                f"attempt={scope_revision_index + 1} "
+                                f"graph={goal_graph.graph_id} authority=none",
+                                flush=True,
+                            )
+                            break
+                    except Exception as scope_revision_error:
+                        scope_membership_revision_attempts.append(
+                            {
+                                "attempt": scope_revision_index + 1,
+                                "status": "invalid",
+                                "error": {
+                                    "type": type(scope_revision_error).__name__,
+                                    "message": str(scope_revision_error),
+                                },
+                                "latency_s": scope_revision_latency,
+                                "image_digest": scope_revision_image_digest,
+                                "motion_authority": False,
+                                "execution_authority": False,
+                                "authority_scope": [],
+                            }
+                        )
+                        print(
+                            "[world-scope-membership] REVISION_INVALID "
+                            f"attempt={scope_revision_index + 1} "
+                            f"{type(scope_revision_error).__name__}: "
+                            f"{scope_revision_error} authority=none",
+                            flush=True,
+                        )
+                episode_trace["world_scope_membership_audit_shadow"] = {
+                    "status": "valid",
+                    "observation_id": scope_membership_observation_id,
+                    "audit": scope_membership_audit.to_dict(),
+                    "initial_assessment": (
+                        initial_scope_membership_assessment.to_dict()
+                    ),
+                    "final_assessment": (
+                        goal_graph_scope_membership_assessment.to_dict()
+                    ),
+                    "revision_attempts": scope_membership_revision_attempts,
+                    "latency_s": scope_membership_latency,
+                    "image_digest": scope_membership_image_digest,
+                    "feasibility_is_membership_authority": False,
+                    "motion_authority": False,
+                    "execution_authority": False,
+                    "authority_scope": [],
+                }
+                print(
+                    "[world-scope-membership] VALID scope="
+                    f"{scope_membership_audit.instruction_scope} "
+                    "initial_admitted="
+                    f"{initial_scope_membership_assessment.admitted} "
+                    "final_admitted="
+                    f"{goal_graph_scope_membership_assessment.admitted} "
+                    "resolved_subset_admitted="
+                    f"{goal_graph_scope_membership_assessment.resolved_subset_admitted} "
+                    "deferred_unknowns="
+                    f"{len(goal_graph_scope_membership_assessment.unknown_entity_ids)} "
+                    "mismatches="
+                    f"{len(goal_graph_scope_membership_assessment.mismatches)} "
+                    f"latency={scope_membership_latency:.2f}s authority=none",
+                    flush=True,
+                )
+                goal_graph_predicate_admission = (
+                    world_predicate_evaluator_registry.assess_graph(
+                        goal_graph,
+                        semantic_scene_inventory,
+                    )
+                )
+                goal_graph_scene_scope_admission = (
+                    assess_world_goal_graph_scene_scope(
+                        goal_graph,
+                        semantic_scene_inventory,
+                    )
+                )
+                task_membership_activation_admitted = bool(
+                    goal_graph_scope_membership_assessment.admitted
+                    or goal_graph_scope_membership_assessment.resolved_subset_admitted
+                )
+                predicate_activation_admitted = bool(
+                    goal_graph_predicate_admission.admitted
+                    or goal_graph_predicate_admission.resolved_subset_admitted
+                )
+                scene_scope_activation_admitted = bool(
+                    goal_graph_scene_scope_admission.admitted
+                    or goal_graph_scene_scope_admission.resolved_subset_admitted
+                )
+                goal_graph_membership_lease = (
+                    SceneMembershipLease.issue(
+                        goal_graph,
+                        semantic_scene_inventory,
+                        goal_graph_scene_scope_admission,
+                    )
+                    if scene_scope_activation_admitted
+                    else None
+                )
+                goal_graph_shadow_admitted = bool(
+                    task_membership_activation_admitted
+                    and predicate_activation_admitted
+                    and scene_scope_activation_admitted
+                    and goal_graph_membership_lease is not None
+                )
+                resolved_subset_activation = bool(
+                    goal_graph_shadow_admitted
+                    and not goal_graph_scope_membership_assessment.admitted
+                )
+                episode_trace["world_goal_graph_shadow"] = {
+                    "status": "valid",
+                    "contract_version": WORLD_GOAL_GRAPH_SCHEMA_VERSION,
+                    "inventory_contract_version": (
+                        SEMANTIC_SCENE_INVENTORY_SCHEMA_VERSION
+                    ),
+                    "motion_authority": False,
+                    "authority_scope": [],
+                    "instruction": args_cli.instruction,
+                    "scene_inventory_digest": semantic_scene_inventory_digest,
+                    "scene_inventory": semantic_scene_inventory,
+                    "initial_goal_graph": initial_goal_graph.to_dict(),
+                    "goal_graph": goal_graph.to_dict(),
+                    "task_membership_audit_admission": (
+                        goal_graph_scope_membership_assessment.to_dict()
+                    ),
+                    "scope_revision_attempts": (
+                        scope_membership_revision_attempts
+                    ),
+                    "predicate_evaluator_admission": (
+                        goal_graph_predicate_admission.to_dict()
+                    ),
+                    "scene_scope_admission": (
+                        goal_graph_scene_scope_admission.to_dict()
+                    ),
+                    "scene_membership_lease": (
+                        None
+                        if goal_graph_membership_lease is None
+                        else goal_graph_membership_lease.to_dict()
+                    ),
+                    "combined_shadow_admission": {
+                        "admitted": goal_graph_shadow_admitted,
+                        "admission_mode": (
+                            "resolved_subset"
+                            if resolved_subset_activation
+                            else "complete_scope"
+                        ),
+                        "scope_resolution_complete": (
+                            goal_graph_scope_membership_assessment.scope_resolution_complete
+                        ),
+                        "deferred_unknown_entity_ids": list(
+                            goal_graph_scope_membership_assessment.unknown_entity_ids
+                        ),
+                        "task_completion_allowed": bool(
+                            goal_graph_scope_membership_assessment.scope_resolution_complete
+                            and goal_graph.status == "complete"
+                        ),
+                        "task_membership_admitted": (
+                            goal_graph_scope_membership_assessment.admitted
+                        ),
+                        "resolved_subset_admitted": (
+                            goal_graph_scope_membership_assessment.resolved_subset_admitted
+                        ),
+                        "motion_authority": False,
+                        "authority_scope": [],
+                    },
+                    "latency_s": goal_graph_latency,
+                    "image_digest": goal_graph_image_digest,
+                    "revision_policy": {
+                        "trigger": (
+                            "no_activatable_goal_with_evidence_blockers"
+                        ),
+                        "maximum_attempts": (
+                            args_cli.world_goal_revision_attempts
+                        ),
+                        "complete_replacement_required": True,
+                        "execution_authority": False,
+                    },
+                    "revision_attempts": [],
+                }
+                print(
+                    f"[world-goal-graph] VALID status={goal_graph.status} "
+                    f"goals={len(goal_graph.goals)} "
+                    f"roots={list(goal_graph.root_goal_ids)} "
+                    "predicate_admitted="
+                    f"{predicate_activation_admitted} "
+                    "scope_admitted="
+                    f"{scene_scope_activation_admitted} "
+                    "membership_admitted="
+                    f"{task_membership_activation_admitted} "
+                    "admission_mode="
+                    f"{'resolved_subset' if resolved_subset_activation else 'complete_scope'} "
+                    f"entities={len(semantic_scene_inventory['entities'])} "
+                    f"latency={goal_graph_latency:.2f}s authority=none",
+                    flush=True,
+                )
+                if goal_graph_shadow_admitted:
+                    try:
+                        goal_activation_candidates = (
+                            build_goal_activation_candidates(
+                                goal_graph,
+                                goal_graph_membership_lease,
+                                world_predicate_evaluator_registry,
+                                world_capability_registry,
+                                semantic_scene_inventory,
+                            )
+                        )
+                        goal_graph_revision_attempts: list[dict[str, Any]] = []
+                        for revision_index in range(
+                            args_cli.world_goal_revision_attempts
+                        ):
+                            if (
+                                goal_activation_candidates.candidates
+                                or not goal_activation_candidates.evidence_blocked_goal_ids
+                            ):
+                                break
+                            previous_goal_graph = goal_graph
+                            previous_blocked_goal_ids = (
+                                goal_activation_candidates.evidence_blocked_goal_ids
+                            )
+                            revision_context = {
+                                "revision_attempt": revision_index + 1,
+                                "trigger": (
+                                    "no_activatable_goal_with_evidence_blockers"
+                                ),
+                                "previous_graph": previous_goal_graph.to_dict(),
+                                "activation_candidate_set": (
+                                    goal_activation_candidates.to_dict()
+                                ),
+                                "runtime_effect_provider_assessment": (
+                                    inside_effect_provider_assessment.to_dict()
+                                ),
+                                "task_membership_audit": (
+                                    scope_membership_audit.to_dict()
+                                ),
+                                "requirements": {
+                                    "complete_replacement_graph": True,
+                                    "preserve_scene_membership": True,
+                                    "preserve_unresolved_blocked_outcomes": True,
+                                    "separate_independent_world_state_changes": True,
+                                    "execution_authority": False,
+                                },
+                            }
+                            revision_latency: float | None = None
+                            revision_image_digest: str | None = None
+                            try:
+                                (
+                                    revised_goal_graph_payload,
+                                    revision_latency,
+                                    revision_image_digest,
+                                ) = coach.reason(
+                                    build_world_goal_graph_prompt(
+                                        args_cli.instruction,
+                                        semantic_scene_inventory,
+                                        world_predicate_evaluator_advertisement,
+                                        revision_context=revision_context,
+                                    ),
+                                    frame,
+                                )
+                                revised_goal_graph = WorldGoalGraph.from_mapping(
+                                    revised_goal_graph_payload
+                                )
+                                validate_world_goal_graph_entity_references(
+                                    revised_goal_graph,
+                                    semantic_scene_inventory,
+                                )
+                                validate_world_goal_graph_revision(
+                                    previous_goal_graph,
+                                    revised_goal_graph,
+                                    previous_blocked_goal_ids,
+                                )
+                                revised_predicate_admission = (
+                                    world_predicate_evaluator_registry.assess_graph(
+                                        revised_goal_graph,
+                                        semantic_scene_inventory,
+                                    )
+                                )
+                                revised_scope_membership_assessment = (
+                                    assess_world_goal_graph_membership_audit(
+                                        revised_goal_graph,
+                                        scope_membership_audit,
+                                    )
+                                )
+                                revised_scene_scope_admission = (
+                                    assess_world_goal_graph_scene_scope(
+                                        revised_goal_graph,
+                                        semantic_scene_inventory,
+                                    )
+                                )
+                                revised_membership_lease = (
+                                    SceneMembershipLease.issue(
+                                        revised_goal_graph,
+                                        semantic_scene_inventory,
+                                        revised_scene_scope_admission,
+                                    )
+                                    if revised_scene_scope_admission.admitted
+                                    else None
+                                )
+                                revised_shadow_admitted = bool(
+                                    revised_scope_membership_assessment.admitted
+                                    and revised_predicate_admission.admitted
+                                    and revised_scene_scope_admission.admitted
+                                    and revised_membership_lease is not None
+                                )
+                                revision_record: dict[str, Any] = {
+                                    "attempt": revision_index + 1,
+                                    "status": (
+                                        "admitted"
+                                        if revised_shadow_admitted
+                                        else "not_admitted"
+                                    ),
+                                    "trigger_evidence": (
+                                        goal_activation_candidates.to_dict()
+                                    ),
+                                    "replacement_goal_graph": (
+                                        revised_goal_graph.to_dict()
+                                    ),
+                                    "predicate_evaluator_admission": (
+                                        revised_predicate_admission.to_dict()
+                                    ),
+                                    "scene_scope_admission": (
+                                        revised_scene_scope_admission.to_dict()
+                                    ),
+                                    "task_membership_audit_admission": (
+                                        revised_scope_membership_assessment.to_dict()
+                                    ),
+                                    "scene_membership_lease": (
+                                        None
+                                        if revised_membership_lease is None
+                                        else revised_membership_lease.to_dict()
+                                    ),
+                                    "latency_s": revision_latency,
+                                    "image_digest": revision_image_digest,
+                                    "motion_authority": False,
+                                    "execution_authority": False,
+                                    "authority_scope": [],
+                                }
+                                if not revised_shadow_admitted:
+                                    goal_graph_revision_attempts.append(
+                                        revision_record
+                                    )
+                                    print(
+                                        "[world-goal-revision] NOT_ADMITTED "
+                                        f"attempt={revision_index + 1} "
+                                        "authority=none",
+                                        flush=True,
+                                    )
+                                    continue
+                                revised_activation_candidates = (
+                                    build_goal_activation_candidates(
+                                        revised_goal_graph,
+                                        revised_membership_lease,
+                                        world_predicate_evaluator_registry,
+                                        world_capability_registry,
+                                        semantic_scene_inventory,
+                                    )
+                                )
+                                revision_record["activation_candidate_set"] = (
+                                    revised_activation_candidates.to_dict()
+                                )
+                                goal_graph_revision_attempts.append(revision_record)
+                                goal_graph = revised_goal_graph
+                                goal_graph_predicate_admission = (
+                                    revised_predicate_admission
+                                )
+                                goal_graph_scene_scope_admission = (
+                                    revised_scene_scope_admission
+                                )
+                                goal_graph_membership_lease = (
+                                    revised_membership_lease
+                                )
+                                goal_graph_scope_membership_assessment = (
+                                    revised_scope_membership_assessment
+                                )
+                                goal_graph_shadow_admitted = True
+                                goal_activation_candidates = (
+                                    revised_activation_candidates
+                                )
+                                print(
+                                    "[world-goal-revision] ADMITTED "
+                                    f"attempt={revision_index + 1} "
+                                    f"goals={len(goal_graph.goals)} "
+                                    "candidates="
+                                    f"{len(goal_activation_candidates.candidates)} "
+                                    "evidence_blocked="
+                                    f"{list(goal_activation_candidates.evidence_blocked_goal_ids)} "
+                                    "authority=none",
+                                    flush=True,
+                                )
+                            except Exception as revision_error:
+                                goal_graph_revision_attempts.append(
+                                    {
+                                        "attempt": revision_index + 1,
+                                        "status": "invalid",
+                                        "trigger_evidence": (
+                                            goal_activation_candidates.to_dict()
+                                        ),
+                                        "error": {
+                                            "type": type(revision_error).__name__,
+                                            "message": str(revision_error),
+                                        },
+                                        "latency_s": revision_latency,
+                                        "image_digest": revision_image_digest,
+                                        "motion_authority": False,
+                                        "execution_authority": False,
+                                        "authority_scope": [],
+                                    }
+                                )
+                                print(
+                                    "[world-goal-revision] INVALID "
+                                    f"attempt={revision_index + 1} "
+                                    f"{type(revision_error).__name__}: "
+                                    f"{revision_error} authority=none",
+                                    flush=True,
+                                )
+                        goal_graph_trace = episode_trace[
+                            "world_goal_graph_shadow"
+                        ]
+                        goal_graph_trace["revision_attempts"] = (
+                            goal_graph_revision_attempts
+                        )
+                        goal_graph_trace["revision_count"] = len(
+                            goal_graph_revision_attempts
+                        )
+                        goal_graph_trace["goal_graph"] = goal_graph.to_dict()
+                        goal_graph_trace["predicate_evaluator_admission"] = (
+                            goal_graph_predicate_admission.to_dict()
+                        )
+                        goal_graph_trace["scene_scope_admission"] = (
+                            goal_graph_scene_scope_admission.to_dict()
+                        )
+                        goal_graph_trace["task_membership_audit_admission"] = (
+                            goal_graph_scope_membership_assessment.to_dict()
+                        )
+                        goal_graph_trace["scene_membership_lease"] = (
+                            goal_graph_membership_lease.to_dict()
+                        )
+                        goal_graph_trace["combined_shadow_admission"] = {
+                            "admitted": goal_graph_shadow_admitted,
+                            "task_membership_admitted": (
+                                goal_graph_scope_membership_assessment.admitted
+                            ),
+                            "motion_authority": False,
+                            "authority_scope": [],
+                        }
+                        goal_graph_digest = hashlib.sha256(
+                            json.dumps(
+                                goal_graph.to_dict(),
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ).encode("utf-8")
+                        ).hexdigest()[:16]
+                        goal_activation_observation_id = (
+                            "goal-activation:"
+                            f"{semantic_scene_inventory_digest}:"
+                            f"{goal_graph_digest}"
+                        )
+                        (
+                            goal_activation_payload,
+                            goal_activation_latency,
+                            goal_activation_image_digest,
+                        ) = coach.reason(
+                            build_world_goal_activation_prompt(
+                                instruction=args_cli.instruction,
+                                observation_id=(
+                                    goal_activation_observation_id
+                                ),
+                                graph=goal_graph,
+                                membership_lease=(
+                                    goal_graph_membership_lease
+                                ),
+                                inventory=semantic_scene_inventory,
+                                capability_advertisement=(
+                                    world_capability_advertisement
+                                ),
+                                candidate_set=goal_activation_candidates,
+                            ),
+                            frame,
+                        )
+                        goal_activation_decision = WorldGoalActivationGate(
+                            goal_activation_observation_id,
+                            goal_activation_candidates,
+                        ).dispatch(goal_activation_payload)
+                        episode_trace["world_goal_activation_shadow"] = {
+                            "status": "valid",
+                            "motion_authority": False,
+                            "execution_authority": False,
+                            "authority_scope": [],
+                            "observation_id": goal_activation_observation_id,
+                            "goal_graph_id": goal_graph.graph_id,
+                            "goal_graph_digest": goal_graph_digest,
+                            "candidate_set": (
+                                goal_activation_candidates.to_dict()
+                            ),
+                            "decision": goal_activation_decision.to_dict(),
+                            "latency_s": goal_activation_latency,
+                            "image_digest": goal_activation_image_digest,
+                        }
+                        print(
+                            "[world-goal-activation] VALID decision="
+                            f"{goal_activation_decision.decision} "
+                            f"goal={goal_activation_decision.goal_id} "
+                            "capability="
+                            f"{goal_activation_decision.capability_id} "
+                            f"latency={goal_activation_latency:.2f}s "
+                            "authority=none",
+                            flush=True,
+                        )
+                        if goal_activation_decision.decision == "select_goal":
+                            effect_session_latency: float | None = None
+                            effect_session_image_digest: str | None = None
+                            try:
+                                selected_provider_assessment = (
+                                    world_effect_provider_registry.assess(
+                                        goal_activation_decision.capability_id,
+                                        runtime_effect_tools,
+                                    )
+                                )
+                                effect_session_candidates = (
+                                    build_world_effect_session_candidates(
+                                        goal_graph,
+                                        goal_graph_membership_lease,
+                                        goal_activation_candidates,
+                                        goal_activation_decision,
+                                        selected_provider_assessment,
+                                    )
+                                )
+                                (
+                                    effect_session_payload,
+                                    effect_session_latency,
+                                    effect_session_image_digest,
+                                ) = coach.reason(
+                                    build_world_effect_session_prompt(
+                                        instruction=args_cli.instruction,
+                                        graph=goal_graph,
+                                        membership_lease=(
+                                            goal_graph_membership_lease
+                                        ),
+                                        activation_decision=(
+                                            goal_activation_decision
+                                        ),
+                                        candidate_set=effect_session_candidates,
+                                    ),
+                                    frame,
+                                )
+                                effect_session_decision = WorldEffectSessionGate(
+                                    effect_session_candidates
+                                ).dispatch(effect_session_payload)
+                                episode_trace["world_effect_session_shadow"] = {
+                                    "status": "valid",
+                                    "provider_assessment": (
+                                        selected_provider_assessment.to_dict()
+                                    ),
+                                    "candidate_set": (
+                                        effect_session_candidates.to_dict()
+                                    ),
+                                    "decision": effect_session_decision.to_dict(),
+                                    "latency_s": effect_session_latency,
+                                    "image_digest": effect_session_image_digest,
+                                    "provider_instantiated": False,
+                                    "motion_authority": False,
+                                    "execution_authority": False,
+                                    "authority_scope": [],
+                                }
+                                print(
+                                    "[world-effect-session] VALID decision="
+                                    f"{effect_session_decision.decision} "
+                                    "provider="
+                                    f"{effect_session_decision.provider_id} "
+                                    f"latency={effect_session_latency:.2f}s "
+                                    "instantiated=false authority=none",
+                                    flush=True,
+                                )
+                                if (
+                                    effect_session_decision.decision
+                                    == "select_provider"
+                                ):
+                                    operation_latency: float | None = None
+                                    operation_image_digest: str | None = None
+                                    try:
+                                        planning_factory_catalog = (
+                                            PlanningToolFactoryCatalog()
+                                        )
+                                        planning_factory_catalog.register(
+                                            PlanningToolFactory(
+                                                factory_tool_id=(
+                                                    "factory.spatial_pose_target"
+                                                ),
+                                                tool_family="motion",
+                                                capability_tags=(
+                                                    SPATIAL_MOTION_CAPABILITY_TAGS
+                                                ),
+                                                activator=lambda: (
+                                                    _local_dls_executor_registry(
+                                                        trackable_object_ids
+                                                    ).advertisement()
+                                                ),
+                                            )
+                                        )
+                                        planning_factory_catalog.register(
+                                            PlanningToolFactory(
+                                                factory_tool_id=(
+                                                    "factory.reversible_"
+                                                    "entity_attachment"
+                                                ),
+                                                tool_family="actuator",
+                                                capability_tags=(
+                                                    REVERSIBLE_ATTACHMENT_CAPABILITY_TAGS
+                                                ),
+                                                activator=lambda: (
+                                                    _local_binary_actuator_registry(
+                                                    ).advertisement()
+                                                ),
+                                            )
+                                        )
+                                        planning_provider_instance = (
+                                            build_planning_world_effect_provider_instance(
+                                                effect_session_candidates,
+                                                effect_session_decision,
+                                                runtime_effect_tools,
+                                                planning_factory_catalog,
+                                            )
+                                        )
+                                        effect_operation_candidates = (
+                                            build_world_effect_operation_candidates(
+                                                planning_provider_instance,
+                                                semantic_scene_inventory,
+                                            )
+                                        )
+                                        (
+                                            operation_payload,
+                                            operation_latency,
+                                            operation_image_digest,
+                                        ) = coach.reason(
+                                            build_world_effect_operation_prompt(
+                                                instruction=(
+                                                    args_cli.instruction
+                                                ),
+                                                inventory=(
+                                                    semantic_scene_inventory
+                                                ),
+                                                instance=(
+                                                    planning_provider_instance
+                                                ),
+                                                candidate_set=(
+                                                    effect_operation_candidates
+                                                ),
+                                            ),
+                                            frame,
+                                        )
+                                        effect_operation_decision = (
+                                            WorldEffectOperationGate(
+                                                effect_operation_candidates
+                                            ).dispatch(operation_payload)
+                                        )
+                                        episode_trace["world_effect_operation_plan_shadow"] = {
+                                            "status": "valid",
+                                            "planning_provider_instance": (
+                                                planning_provider_instance.to_dict()
+                                            ),
+                                            "candidate_set": (
+                                                effect_operation_candidates.to_dict()
+                                            ),
+                                            "decision": (
+                                                effect_operation_decision.to_dict()
+                                            ),
+                                            "latency_s": operation_latency,
+                                            "image_digest": (
+                                                operation_image_digest
+                                            ),
+                                            "planning_provider_instantiated": True,
+                                            "execution_provider_created": False,
+                                            "handler_bound": False,
+                                            "dispatch_enabled": False,
+                                            "motion_authority": False,
+                                            "execution_authority": False,
+                                            "authority_scope": [],
+                                        }
+                                        print(
+                                            "[world-effect-operation] VALID "
+                                            "decision="
+                                            f"{effect_operation_decision.decision} "
+                                            "requirement="
+                                            f"{effect_operation_decision.requirement_id} "
+                                            "tool="
+                                            f"{effect_operation_decision.tool_id} "
+                                            "purpose="
+                                            f"{effect_operation_decision.purpose} "
+                                            "planning_provider=true "
+                                            "dispatch=false authority=none",
+                                            flush=True,
+                                        )
+                                        if (
+                                            effect_operation_decision.decision
+                                            == "propose_operation"
+                                        ):
+                                            lease_latency: float | None = None
+                                            lease_image_digest: str | None = None
+                                            try:
+                                                execution_lease_candidates = (
+                                                    build_shadow_execution_lease_candidates(
+                                                        planning_provider_instance,
+                                                        effect_operation_candidates,
+                                                        effect_operation_decision,
+                                                        semantic_scene_inventory,
+                                                    )
+                                                )
+                                                (
+                                                    lease_payload,
+                                                    lease_latency,
+                                                    lease_image_digest,
+                                                ) = coach.reason(
+                                                    build_shadow_execution_lease_prompt(
+                                                        instruction=(
+                                                            args_cli.instruction
+                                                        ),
+                                                        candidate_set=(
+                                                            execution_lease_candidates
+                                                        ),
+                                                    ),
+                                                    frame,
+                                                )
+                                                execution_lease_decision = (
+                                                    ShadowExecutionLeaseGate(
+                                                        execution_lease_candidates
+                                                    ).dispatch(lease_payload)
+                                                )
+                                                episode_trace["world_effect_execution_lease_shadow"] = {
+                                                    "status": "valid",
+                                                    "candidate_set": (
+                                                        execution_lease_candidates.to_dict()
+                                                    ),
+                                                    "decision": (
+                                                        execution_lease_decision.to_dict()
+                                                    ),
+                                                    "latency_s": lease_latency,
+                                                    "image_digest": (
+                                                        lease_image_digest
+                                                    ),
+                                                    "configuration_validated": (
+                                                        execution_lease_decision.decision
+                                                        == "propose_lease"
+                                                    ),
+                                                    "execution_lease_issued": False,
+                                                    "tool_called": False,
+                                                    "handler_bound": False,
+                                                    "dispatch_enabled": False,
+                                                    "motion_authority": False,
+                                                    "execution_authority": False,
+                                                    "authority_scope": [],
+                                                }
+                                                print(
+                                                    "[world-effect-execution-lease] "
+                                                    "VALID decision="
+                                                    f"{execution_lease_decision.decision} "
+                                                    "tool="
+                                                    f"{execution_lease_decision.tool_id} "
+                                                    "groundings="
+                                                    f"{list(execution_lease_decision.grounding_entity_ids)} "
+                                                    "invalidations="
+                                                    f"{len(execution_lease_decision.invalidation_conditions)} "
+                                                    "issued=false dispatch=false "
+                                                    "authority=none",
+                                                    flush=True,
+                                                )
+                                                if (
+                                                    execution_lease_decision.decision
+                                                    == "propose_lease"
+                                                ):
+                                                    invocation_latency: float | None = None
+                                                    invocation_image_digest: str | None = None
+                                                    try:
+                                                        interaction_geometry = (
+                                                            preflight_state.get(
+                                                                "actuator_contact_geometry",
+                                                                {},
+                                                            )
+                                                        )
+                                                        if not isinstance(
+                                                            interaction_geometry,
+                                                            Mapping,
+                                                        ):
+                                                            raise ValueError(
+                                                                "runtime interaction geometry "
+                                                                "must be an object"
+                                                            )
+                                                        runtime_tool_observation = {
+                                                            "schema_version": (
+                                                                RUNTIME_TOOL_OBSERVATION_SCHEMA_VERSION
+                                                            ),
+                                                            "source": (
+                                                                "fresh_simulator_controlled_"
+                                                                "and_interaction_frames"
+                                                            ),
+                                                            "coordinate_frame": (
+                                                                semantic_scene_inventory.get(
+                                                                    "frame",
+                                                                    "unknown",
+                                                                )
+                                                            ),
+                                                            "controlled_frame": {
+                                                                "position_m": (
+                                                                    preflight_state[
+                                                                        "eef_gripper_base_xyz"
+                                                                    ]
+                                                                ),
+                                                                "quaternion_wxyz": (
+                                                                    preflight_state[
+                                                                        "eef_gripper_base_"
+                                                                        "quaternion_wxyz"
+                                                                    ]
+                                                                ),
+                                                            },
+                                                            "interaction_frame": {
+                                                                "origin_offset_local_m": (
+                                                                    interaction_geometry.get(
+                                                                        "contact_center_local_m"
+                                                                    )
+                                                                ),
+                                                                "alignment_axis_local": (
+                                                                    interaction_geometry.get(
+                                                                        "closing_axis_local"
+                                                                    )
+                                                                ),
+                                                                "alignment_relation": (
+                                                                    "surface_tangent"
+                                                                ),
+                                                            },
+                                                        }
+                                                        invocation_candidates = (
+                                                            build_shadow_tool_invocation_candidates(
+                                                                planning_provider_instance,
+                                                                execution_lease_candidates,
+                                                                execution_lease_decision,
+                                                                runtime_tool_observation,
+                                                            )
+                                                        )
+                                                        (
+                                                            invocation_payload,
+                                                            invocation_latency,
+                                                            invocation_image_digest,
+                                                        ) = coach.reason(
+                                                            build_shadow_tool_invocation_prompt(
+                                                                instruction=(
+                                                                    args_cli.instruction
+                                                                ),
+                                                                candidate_set=(
+                                                                    invocation_candidates
+                                                                ),
+                                                            ),
+                                                            frame,
+                                                        )
+                                                        invocation_decision = (
+                                                            ShadowToolInvocationGate(
+                                                                invocation_candidates
+                                                            ).dispatch(
+                                                                invocation_payload
+                                                            )
+                                                        )
+                                                        episode_trace["world_effect_tool_invocation_shadow"] = {
+                                                            "status": "valid",
+                                                            "runtime_observation": (
+                                                                runtime_tool_observation
+                                                            ),
+                                                            "candidate_set": (
+                                                                invocation_candidates.to_dict()
+                                                            ),
+                                                            "decision": (
+                                                                invocation_decision.to_dict()
+                                                            ),
+                                                            "latency_s": (
+                                                                invocation_latency
+                                                            ),
+                                                            "image_digest": (
+                                                                invocation_image_digest
+                                                            ),
+                                                            "invocation_validated": (
+                                                                invocation_decision.decision
+                                                                == "propose_invocation"
+                                                            ),
+                                                            "execution_lease_issued": False,
+                                                            "tool_called": False,
+                                                            "handler_bound": False,
+                                                            "dispatch_enabled": False,
+                                                            "motion_authority": False,
+                                                            "execution_authority": False,
+                                                            "authority_scope": [],
+                                                        }
+                                                        print(
+                                                            "[world-effect-tool-invocation] "
+                                                            "VALID decision="
+                                                            f"{invocation_decision.decision} "
+                                                            "tool="
+                                                            f"{invocation_decision.tool_id} "
+                                                            "position_anchor="
+                                                            f"{invocation_decision.position_anchor_id} "
+                                                            "orientation_axis="
+                                                            f"{invocation_decision.orientation_alignment_id} "
+                                                            "issued=false called=false "
+                                                            "dispatch=false authority=none",
+                                                            flush=True,
+                                                        )
+                                                        if (
+                                                            invocation_decision.decision
+                                                            == "propose_invocation"
+                                                        ):
+                                                            try:
+                                                                runtime_lease = (
+                                                                    issue_world_effect_runtime_lease(
+                                                                        lease_candidates=(
+                                                                            execution_lease_candidates
+                                                                        ),
+                                                                        lease_decision=(
+                                                                            execution_lease_decision
+                                                                        ),
+                                                                        invocation_candidates=(
+                                                                            invocation_candidates
+                                                                        ),
+                                                                        invocation_decision=(
+                                                                            invocation_decision
+                                                                        ),
+                                                                        maximum_duration_s=(
+                                                                            args_cli.world_effect_runtime_lease_duration_s
+                                                                        ),
+                                                                    )
+                                                                )
+                                                                runtime_lease_record = (
+                                                                    runtime_lease.to_dict()
+                                                                )
+                                                                issued_runtime_lease = runtime_lease
+                                                                issued_execution_lease_candidates = (
+                                                                    execution_lease_candidates
+                                                                )
+                                                                issued_execution_lease_decision = (
+                                                                    execution_lease_decision
+                                                                )
+                                                                issued_invocation_candidates = (
+                                                                    invocation_candidates
+                                                                )
+                                                                issued_invocation_decision = (
+                                                                    invocation_decision
+                                                                )
+                                                                issued_planning_provider_instance = (
+                                                                    planning_provider_instance
+                                                                )
+                                                                episode_trace[
+                                                                    "world_effect_runtime_lease"
+                                                                ] = {
+                                                                    "status": "valid",
+                                                                    "lease": (
+                                                                        runtime_lease_record
+                                                                    ),
+                                                                    "execution_lease_issued": True,
+                                                                    "lease_armed": (
+                                                                        runtime_lease.active
+                                                                    ),
+                                                                    "revocable": True,
+                                                                    "revocation_conditions_bound": True,
+                                                                    "dispatch_permit_issued": False,
+                                                                    "tool_called": False,
+                                                                    "handler_bound": False,
+                                                                    "dispatch_enabled": False,
+                                                                    "motion_authority": False,
+                                                                    "execution_authority": False,
+                                                                    "authority_scope": [],
+                                                                }
+                                                                episode_trace[
+                                                                    "world_effect_tool_invocation_shadow"
+                                                                ][
+                                                                    "execution_lease_issued"
+                                                                ] = True
+                                                                print(
+                                                                    "[world-effect-runtime-lease] "
+                                                                    "VALID state="
+                                                                    f"{runtime_lease.state} "
+                                                                    "lease="
+                                                                    f"{runtime_lease.lease.issued_lease_id} "
+                                                                    "invalidations="
+                                                                    f"{len(runtime_lease.lease.invalidation_bindings)} "
+                                                                    "permit=false called=false "
+                                                                    "dispatch=false authority=none",
+                                                                    flush=True,
+                                                                )
+                                                            except Exception as runtime_lease_error:
+                                                                episode_trace[
+                                                                    "world_effect_runtime_lease"
+                                                                ] = {
+                                                                    "status": "invalid",
+                                                                    "error": {
+                                                                        "type": type(
+                                                                            runtime_lease_error
+                                                                        ).__name__,
+                                                                        "message": str(
+                                                                            runtime_lease_error
+                                                                        ),
+                                                                    },
+                                                                    "execution_lease_issued": False,
+                                                                    "lease_armed": False,
+                                                                    "revocable": False,
+                                                                    "dispatch_permit_issued": False,
+                                                                    "tool_called": False,
+                                                                    "handler_bound": False,
+                                                                    "dispatch_enabled": False,
+                                                                    "motion_authority": False,
+                                                                    "execution_authority": False,
+                                                                    "authority_scope": [],
+                                                                }
+                                                                print(
+                                                                    "[world-effect-runtime-lease] "
+                                                                    "INVALID "
+                                                                    f"{type(runtime_lease_error).__name__}: "
+                                                                    f"{runtime_lease_error} "
+                                                                    "issued=false permit=false "
+                                                                    "dispatch=false authority=none",
+                                                                    flush=True,
+                                                                )
+                                                        else:
+                                                            episode_trace[
+                                                                "world_effect_runtime_lease"
+                                                            ] = {
+                                                                "status": "not_requested",
+                                                                "reason": (
+                                                                    "typed invocation decision did "
+                                                                    "not propose an invocation"
+                                                                ),
+                                                                "execution_lease_issued": False,
+                                                                "lease_armed": False,
+                                                                "revocable": False,
+                                                                "dispatch_permit_issued": False,
+                                                                "tool_called": False,
+                                                                "handler_bound": False,
+                                                                "dispatch_enabled": False,
+                                                                "motion_authority": False,
+                                                                "execution_authority": False,
+                                                                "authority_scope": [],
+                                                            }
+                                                    except Exception as invocation_error:
+                                                        episode_trace["world_effect_tool_invocation_shadow"] = {
+                                                            "status": "invalid",
+                                                            "error": {
+                                                                "type": type(
+                                                                    invocation_error
+                                                                ).__name__,
+                                                                "message": str(
+                                                                    invocation_error
+                                                                ),
+                                                            },
+                                                            "latency_s": (
+                                                                invocation_latency
+                                                            ),
+                                                            "image_digest": (
+                                                                invocation_image_digest
+                                                            ),
+                                                            "invocation_validated": False,
+                                                            "execution_lease_issued": False,
+                                                            "tool_called": False,
+                                                            "handler_bound": False,
+                                                            "dispatch_enabled": False,
+                                                            "motion_authority": False,
+                                                            "execution_authority": False,
+                                                            "authority_scope": [],
+                                                        }
+                                                        print(
+                                                            "[world-effect-tool-invocation] "
+                                                            "INVALID "
+                                                            f"{type(invocation_error).__name__}: "
+                                                            f"{invocation_error} "
+                                                            "issued=false called=false "
+                                                            "dispatch=false authority=none",
+                                                            flush=True,
+                                                        )
+                                                else:
+                                                    episode_trace["world_effect_tool_invocation_shadow"] = {
+                                                        "status": "not_requested",
+                                                        "reason": (
+                                                            "execution lease decision did "
+                                                            "not propose a lease"
+                                                        ),
+                                                        "invocation_validated": False,
+                                                        "execution_lease_issued": False,
+                                                        "tool_called": False,
+                                                        "handler_bound": False,
+                                                        "dispatch_enabled": False,
+                                                        "motion_authority": False,
+                                                        "execution_authority": False,
+                                                        "authority_scope": [],
+                                                    }
+                                            except Exception as lease_error:
+                                                episode_trace["world_effect_execution_lease_shadow"] = {
+                                                    "status": "invalid",
+                                                    "error": {
+                                                        "type": type(
+                                                            lease_error
+                                                        ).__name__,
+                                                        "message": str(
+                                                            lease_error
+                                                        ),
+                                                    },
+                                                    "latency_s": lease_latency,
+                                                    "image_digest": (
+                                                        lease_image_digest
+                                                    ),
+                                                    "configuration_validated": False,
+                                                    "execution_lease_issued": False,
+                                                    "tool_called": False,
+                                                    "handler_bound": False,
+                                                    "dispatch_enabled": False,
+                                                    "motion_authority": False,
+                                                    "execution_authority": False,
+                                                    "authority_scope": [],
+                                                }
+                                                print(
+                                                    "[world-effect-execution-lease] "
+                                                    "INVALID "
+                                                    f"{type(lease_error).__name__}: "
+                                                    f"{lease_error} issued=false "
+                                                    "dispatch=false authority=none",
+                                                    flush=True,
+                                                )
+                                                episode_trace["world_effect_tool_invocation_shadow"] = {
+                                                    "status": "not_requested",
+                                                    "reason": (
+                                                        "shadow execution-lease "
+                                                        "proposal was invalid"
+                                                    ),
+                                                    "invocation_validated": False,
+                                                    "execution_lease_issued": False,
+                                                    "tool_called": False,
+                                                    "handler_bound": False,
+                                                    "dispatch_enabled": False,
+                                                    "motion_authority": False,
+                                                    "execution_authority": False,
+                                                    "authority_scope": [],
+                                                }
+                                        else:
+                                            episode_trace["world_effect_execution_lease_shadow"] = {
+                                                "status": "not_requested",
+                                                "reason": (
+                                                    "semantic operation did not "
+                                                    "propose a tool operation"
+                                                ),
+                                                "configuration_validated": False,
+                                                "execution_lease_issued": False,
+                                                "tool_called": False,
+                                                "handler_bound": False,
+                                                "dispatch_enabled": False,
+                                                "motion_authority": False,
+                                                "execution_authority": False,
+                                                "authority_scope": [],
+                                            }
+                                    except Exception as operation_error:
+                                        episode_trace[
+                                            "world_effect_operation_plan_shadow"
+                                        ] = {
+                                            "status": "invalid",
+                                            "error": {
+                                                "type": type(
+                                                    operation_error
+                                                ).__name__,
+                                                "message": str(
+                                                    operation_error
+                                                ),
+                                            },
+                                            "latency_s": operation_latency,
+                                            "image_digest": (
+                                                operation_image_digest
+                                            ),
+                                            "planning_provider_instantiated": False,
+                                            "execution_provider_created": False,
+                                            "handler_bound": False,
+                                            "dispatch_enabled": False,
+                                            "motion_authority": False,
+                                            "execution_authority": False,
+                                            "authority_scope": [],
+                                        }
+                                        print(
+                                            "[world-effect-operation] INVALID "
+                                            f"{type(operation_error).__name__}: "
+                                            f"{operation_error} "
+                                            "dispatch=false authority=none",
+                                            flush=True,
+                                        )
+                                        episode_trace["world_effect_execution_lease_shadow"] = {
+                                            "status": "not_requested",
+                                            "reason": (
+                                                "semantic operation proposal was "
+                                                "invalid"
+                                            ),
+                                            "configuration_validated": False,
+                                            "execution_lease_issued": False,
+                                            "tool_called": False,
+                                            "handler_bound": False,
+                                            "dispatch_enabled": False,
+                                            "motion_authority": False,
+                                            "execution_authority": False,
+                                            "authority_scope": [],
+                                        }
+                                else:
+                                    episode_trace[
+                                        "world_effect_operation_plan_shadow"
+                                    ] = {
+                                        "status": "not_requested",
+                                        "reason": (
+                                            "effect session did not select a "
+                                            "provider"
+                                        ),
+                                        "planning_provider_instantiated": False,
+                                        "execution_provider_created": False,
+                                        "handler_bound": False,
+                                        "dispatch_enabled": False,
+                                        "motion_authority": False,
+                                        "execution_authority": False,
+                                        "authority_scope": [],
+                                    }
+                            except Exception as effect_session_error:
+                                episode_trace["world_effect_session_shadow"] = {
+                                    "status": "invalid",
+                                    "error": {
+                                        "type": type(effect_session_error).__name__,
+                                        "message": str(effect_session_error),
+                                    },
+                                    "latency_s": effect_session_latency,
+                                    "image_digest": effect_session_image_digest,
+                                    "provider_instantiated": False,
+                                    "motion_authority": False,
+                                    "execution_authority": False,
+                                    "authority_scope": [],
+                                }
+                                print(
+                                    "[world-effect-session] INVALID "
+                                    f"{type(effect_session_error).__name__}: "
+                                    f"{effect_session_error} "
+                                    "instantiated=false authority=none",
+                                    flush=True,
+                                )
+                                episode_trace[
+                                    "world_effect_operation_plan_shadow"
+                                ] = {
+                                    "status": "not_requested",
+                                    "reason": "effect session was invalid",
+                                    "planning_provider_instantiated": False,
+                                    "execution_provider_created": False,
+                                    "handler_bound": False,
+                                    "dispatch_enabled": False,
+                                    "motion_authority": False,
+                                    "execution_authority": False,
+                                    "authority_scope": [],
+                                }
+                        else:
+                            episode_trace["world_effect_session_shadow"] = {
+                                "status": "not_requested",
+                                "reason": (
+                                    "goal activation did not select a world "
+                                    "goal/capability pair"
+                                ),
+                                "activation_decision": (
+                                    goal_activation_decision.to_dict()
+                                ),
+                                "provider_instantiated": False,
+                                "motion_authority": False,
+                                "execution_authority": False,
+                                "authority_scope": [],
+                            }
+                    except Exception as goal_activation_error:
+                        episode_trace["world_goal_activation_shadow"] = {
+                            "status": "invalid",
+                            "motion_authority": False,
+                            "execution_authority": False,
+                            "authority_scope": [],
+                            "error": {
+                                "type": type(goal_activation_error).__name__,
+                                "message": str(goal_activation_error),
+                            },
+                        }
+                        print(
+                            "[world-goal-activation] INVALID "
+                            f"{type(goal_activation_error).__name__}: "
+                            f"{goal_activation_error} authority=none",
+                            flush=True,
+                        )
+                        episode_trace["world_effect_session_shadow"] = {
+                            "status": "not_requested",
+                            "reason": "goal activation was invalid",
+                            "provider_instantiated": False,
+                            "motion_authority": False,
+                            "execution_authority": False,
+                            "authority_scope": [],
+                        }
+                else:
+                    episode_trace["world_goal_activation_shadow"] = {
+                        "status": "not_admitted",
+                        "motion_authority": False,
+                        "execution_authority": False,
+                        "authority_scope": [],
+                        "reason": (
+                            "goal graph task-membership, predicate, or scene "
+                            "scope admission did not pass"
+                        ),
+                    }
+                    episode_trace["world_effect_session_shadow"] = {
+                        "status": "not_requested",
+                        "reason": "world goal graph was not admitted",
+                        "provider_instantiated": False,
+                        "motion_authority": False,
+                        "execution_authority": False,
+                        "authority_scope": [],
+                    }
+            except Exception as goal_graph_error:
+                if episode_trace[
+                    "world_scope_membership_audit_shadow"
+                ].get("status") == "pending":
+                    episode_trace["world_scope_membership_audit_shadow"] = {
+                        "status": "invalid",
+                        "reason": "goal graph or membership audit failed",
+                        "error": {
+                            "type": type(goal_graph_error).__name__,
+                            "message": str(goal_graph_error),
+                        },
+                        "feasibility_is_membership_authority": False,
+                        "motion_authority": False,
+                        "execution_authority": False,
+                        "authority_scope": [],
+                    }
+                episode_trace["world_goal_graph_shadow"] = {
+                    "status": "invalid",
+                    "contract_version": WORLD_GOAL_GRAPH_SCHEMA_VERSION,
+                    "inventory_contract_version": (
+                        SEMANTIC_SCENE_INVENTORY_SCHEMA_VERSION
+                    ),
+                    "motion_authority": False,
+                    "authority_scope": [],
+                    "instruction": args_cli.instruction,
+                    "scene_inventory_digest": semantic_scene_inventory_digest,
+                    "scene_inventory": semantic_scene_inventory,
+                    "predicate_evaluator_advertisement": (
+                        world_predicate_evaluator_advertisement
+                    ),
+                    "error": {
+                        "type": type(goal_graph_error).__name__,
+                        "message": str(goal_graph_error),
+                    },
+                }
+                print(
+                    "[world-goal-graph] INVALID "
+                    f"{type(goal_graph_error).__name__}: {goal_graph_error} "
+                    "authority=none",
+                    flush=True,
+                )
+            if episode_trace[
+                "world_effect_operation_plan_shadow"
+            ].get("status") == "pending":
+                episode_trace[
+                    "world_effect_operation_plan_shadow"
+                ] = {
+                    "status": "not_requested",
+                    "reason": (
+                        "no selected world-effect provider reached the "
+                        "planning-only operation boundary"
+                    ),
+                    "planning_provider_instantiated": False,
+                    "execution_provider_created": False,
+                    "handler_bound": False,
+                    "dispatch_enabled": False,
+                    "motion_authority": False,
+                    "execution_authority": False,
+                    "authority_scope": [],
+                }
+            if episode_trace[
+                "world_effect_execution_lease_shadow"
+            ].get("status") == "pending":
+                episode_trace["world_effect_execution_lease_shadow"] = {
+                    "status": "not_requested",
+                    "reason": (
+                        "no semantic provider operation reached the fresh "
+                        "execution-lease boundary"
+                    ),
+                    "configuration_validated": False,
+                    "execution_lease_issued": False,
+                    "tool_called": False,
+                    "handler_bound": False,
+                    "dispatch_enabled": False,
+                    "motion_authority": False,
+                    "execution_authority": False,
+                    "authority_scope": [],
+                }
+            if episode_trace[
+                "world_effect_tool_invocation_shadow"
+            ].get("status") == "pending":
+                episode_trace["world_effect_tool_invocation_shadow"] = {
+                    "status": "not_requested",
+                    "reason": (
+                        "no validated shadow execution lease reached the "
+                        "typed invocation boundary"
+                    ),
+                    "invocation_validated": False,
+                    "execution_lease_issued": False,
+                    "tool_called": False,
+                    "handler_bound": False,
+                    "dispatch_enabled": False,
+                    "motion_authority": False,
+                    "execution_authority": False,
+                    "authority_scope": [],
+                }
+            if episode_trace[
+                "world_effect_runtime_lease"
+            ].get("status") == "pending":
+                episode_trace["world_effect_runtime_lease"] = {
+                    "status": "not_requested",
+                    "reason": (
+                        "no validated typed invocation reached the runtime "
+                        "lease issuance boundary"
+                    ),
+                    "execution_lease_issued": False,
+                    "lease_armed": False,
+                    "revocable": False,
+                    "dispatch_permit_issued": False,
+                    "tool_called": False,
+                    "handler_bound": False,
+                    "dispatch_enabled": False,
+                    "motion_authority": False,
+                    "execution_authority": False,
+                    "authority_scope": [],
+                }
+            _write_trace(trace_path, episode_trace)
+
+        if args_cli.guarded_world_effect_execution:
+            guarded_trace = episode_trace["world_effect_guarded_dispatch"]
+            try:
+                required_handoff = {
+                    "runtime_lease": issued_runtime_lease,
+                    "lease_candidates": issued_execution_lease_candidates,
+                    "lease_decision": issued_execution_lease_decision,
+                    "invocation_candidates": issued_invocation_candidates,
+                    "invocation_decision": issued_invocation_decision,
+                    "planning_provider": issued_planning_provider_instance,
+                    "motion_registry": motion_executor_registry,
+                }
+                missing_handoff = sorted(
+                    name for name, value in required_handoff.items() if value is None
+                )
+                if missing_handoff:
+                    raise RuntimeError(
+                        "guarded execution handoff is incomplete: "
+                        f"{missing_handoff}"
+                    )
+                runtime_lease = issued_runtime_lease
+                execution_lease_candidates = issued_execution_lease_candidates
+                execution_lease_decision = issued_execution_lease_decision
+                invocation_candidates = issued_invocation_candidates
+                invocation_decision = issued_invocation_decision
+                planning_provider_instance = issued_planning_provider_instance
+                assert runtime_lease is not None
+                assert execution_lease_candidates is not None
+                assert execution_lease_decision is not None
+                assert invocation_candidates is not None
+                assert invocation_decision is not None
+                assert planning_provider_instance is not None
+                assert motion_executor_registry is not None
+
+                lease_candidate = next(
+                    item
+                    for item in execution_lease_candidates.candidates
+                    if item.candidate_id == execution_lease_decision.candidate_id
+                )
+                invocation_candidate = next(
+                    item
+                    for item in invocation_candidates.candidates
+                    if item.candidate_id == invocation_decision.candidate_id
+                )
+                runtime_motion_spec = next(
+                    (
+                        item
+                        for item in motion_executor_registry.specs()
+                        if item.executor_id == runtime_lease.lease.tool_id
+                    ),
+                    None,
+                )
+                if runtime_motion_spec is None:
+                    raise RuntimeError(
+                        "issued tool has no active runtime motion executor"
+                    )
+                if runtime_motion_spec.invocation_schema is None:
+                    raise RuntimeError(
+                        "active runtime motion executor has no invocation schema"
+                    )
+                baseline_membership_ids = {
+                    str(item["entity_id"])
+                    for item in semantic_scene_inventory.get("entities", [])
+                    if isinstance(item, Mapping)
+                    and isinstance(item.get("entity_id"), str)
+                }
+                baseline_tracked_positions_m = {
+                    entity_id: preflight_tracked_positions_m[entity_id]
+                    for entity_id in lease_candidate.operation_target_entity_ids
+                    if entity_id in preflight_tracked_positions_m
+                }
+                fresh_dispatch_state = _state(env, initial_object_z)
+                fresh_tracked_positions_m = _tracked_entity_positions_m(
+                    env, lease_candidate.operation_target_entity_ids
+                )
+                fresh_events = _guarded_dispatch_invalidation_events(
+                    runtime_lease=runtime_lease,
+                    lease_candidate=lease_candidate,
+                    invocation_candidate=invocation_candidate,
+                    invocation_decision=invocation_decision,
+                    baseline_membership_ids=baseline_membership_ids,
+                    current_provider_instance_id=(
+                        planning_provider_instance.instance_id
+                    ),
+                    state=fresh_dispatch_state,
+                    baseline_tracked_positions_m=(
+                        baseline_tracked_positions_m
+                    ),
+                    current_tracked_positions_m=fresh_tracked_positions_m,
+                )
+                fresh_evidence = build_fresh_dispatch_evidence(
+                    runtime_lease=runtime_lease,
+                    source="live_simulator_rgbd_state",
+                    observation={
+                        "controlled_frame": {
+                            "position_m": fresh_dispatch_state[
+                                "eef_gripper_base_xyz"
+                            ],
+                            "quaternion_wxyz": fresh_dispatch_state[
+                                "eef_gripper_base_quaternion_wxyz"
+                            ],
+                        },
+                        "interaction_frame": fresh_dispatch_state.get(
+                            "actuator_contact_geometry"
+                        ),
+                        "rgbd_scene_geometry": fresh_dispatch_state.get(
+                            "rgbd_scene_geometry"
+                        ),
+                        "tracked_entity_positions_m": (
+                            fresh_tracked_positions_m
+                        ),
+                    },
+                    invalidation_events=fresh_events,
+                )
+                selected_orientation_axis = next(
+                    (
+                        item
+                        for item in invocation_candidate.orientation_axes
+                        if item.alignment_id
+                        == invocation_decision.orientation_alignment_id
+                    ),
+                    None,
+                )
+                guarded_rgbd_axis_references = (
+                    {
+                        selected_orientation_axis.entity_id: np.asarray(
+                            selected_orientation_axis.axis_robot_root,
+                            dtype=np.float64,
+                        )
+                    }
+                    if selected_orientation_axis is not None
+                    else {}
+                )
+                issued_geometry_by_id = {
+                    item.entity_id: item.geometry
+                    for item in lease_candidate.geometry_bindings
+                }
+                handler_registry = RuntimeWorldEffectHandlerRegistry()
+                monitored_events: list[dict[str, Any]] = []
+
+                def guarded_motion_handler(
+                    invocation_arguments: Mapping[str, Any],
+                    tool_configuration: Mapping[str, Any],
+                    active_lease: Any,
+                ) -> Mapping[str, Any]:
+                    nonlocal obs, terminal
+                    target_position = torch.tensor(
+                        invocation_arguments["target_position_m"],
+                        dtype=torch.float32,
+                    )
+                    target_quaternion = torch.tensor(
+                        invocation_arguments["target_quaternion_wxyz"],
+                        dtype=torch.float32,
+                    )
+                    initial_action = _current_robot_joint_action(
+                        env,
+                        gripper_closed_fraction=float(
+                            fresh_dispatch_state["gripper_closed_fraction"]
+                        ),
+                    )
+
+                    def observe_guarded_path_clearance() -> tuple[float, str]:
+                        interaction = _actuator_contact_geometry(
+                            env, _eef_position(env)
+                        )
+                        current_position = interaction.get(
+                            "contact_center_xyz_m"
+                        )
+                        target_interaction_position = (
+                            invocation_decision.grounding_assessment.get(
+                                "realized_interaction_position_m"
+                            )
+                        )
+                        if not isinstance(current_position, (list, tuple)) or not isinstance(
+                            target_interaction_position, (list, tuple)
+                        ):
+                            raise RuntimeError(
+                                "guarded clearance observer lacks a live interaction frame"
+                            )
+                        clearance, _ = _interaction_path_clearance_m(
+                            current_position,
+                            target_interaction_position,
+                            issued_geometry_by_id,
+                        )
+                        if not math.isfinite(clearance):
+                            raise RuntimeError(
+                                "guarded clearance observer produced no finite path clearance"
+                            )
+                        return (
+                            clearance,
+                            "sim6.live_interaction_frame_plus_issued_rgbd_geometry",
+                        )
+
+                    def observe_guarded_orientation(
+                        entity_id: str, reference_axis: np.ndarray
+                    ) -> tuple[float, str, Mapping[str, Any]]:
+                        scene_geometry = _rgbd_scene_geometry_observation(env)
+                        current_geometry = next(
+                            (
+                                item
+                                for item in scene_geometry.get("geometries", [])
+                                if isinstance(item, Mapping)
+                                and item.get("runtime_id") == entity_id
+                            ),
+                            None,
+                        )
+                        if not isinstance(current_geometry, Mapping):
+                            raise ValueError(
+                                f"RGB-D orientation target {entity_id!r} is not visible"
+                            )
+                        error_deg = _axis_set_error_deg(
+                            reference_axis,
+                            current_geometry.get("oriented_footprint_axes_base"),
+                        )
+                        if error_deg is None:
+                            raise ValueError(
+                                "RGB-D oriented-footprint axis set is unavailable"
+                            )
+                        return (
+                            error_deg,
+                            "rgbd.oriented_footprint_axis_set_robot_root",
+                            {
+                                "entity_id": entity_id,
+                                "reference_axis_robot_root": (
+                                    reference_axis.tolist()
+                                ),
+                                "observed_axes_robot_root": current_geometry.get(
+                                    "oriented_footprint_axes_base"
+                                ),
+                                "orientation_error_deg": error_deg,
+                            },
+                        )
+
+                    def monitor_lease() -> dict[str, Any] | None:
+                        if not active_lease.active:
+                            event = {
+                                "condition_id": "runtime.maximum_duration_elapsed",
+                                "reason": "issued runtime lease is no longer active",
+                                "lease_state": active_lease.state,
+                            }
+                            monitored_events.append(event)
+                            return {**event, "converged": False}
+                        monitor_state = _state(env, initial_object_z)
+                        monitor_tracked_positions_m = _tracked_entity_positions_m(
+                            env, lease_candidate.operation_target_entity_ids
+                        )
+                        events = _guarded_dispatch_invalidation_events(
+                            runtime_lease=active_lease,
+                            lease_candidate=lease_candidate,
+                            invocation_candidate=invocation_candidate,
+                            invocation_decision=invocation_decision,
+                            baseline_membership_ids=baseline_membership_ids,
+                            current_provider_instance_id=(
+                                planning_provider_instance.instance_id
+                            ),
+                            state=monitor_state,
+                            baseline_tracked_positions_m=(
+                                baseline_tracked_positions_m
+                            ),
+                            current_tracked_positions_m=(
+                                monitor_tracked_positions_m
+                            ),
+                        )
+                        if not events:
+                            return None
+                        event = events[0]
+                        active_lease.observe_invalidation(
+                            event.condition_id, event.evidence
+                        )
+                        serialized = event.to_dict()
+                        monitored_events.append(serialized)
+                        return {
+                            **serialized,
+                            "lease_state": active_lease.state,
+                            "converged": False,
+                        }
+
+                    (
+                        obs,
+                        terminal,
+                        final_action,
+                        motion_report,
+                    ) = _move_eef_to_target(
+                        env,
+                        obs,
+                        initial_action,
+                        target_position,
+                        target_quaternion,
+                        phase=(
+                            "world_effect:"
+                            f"{lease_candidate.purpose}"
+                        ),
+                        gripper_closed=bool(
+                            float(initial_action[0, 7].detach().cpu()) > 0.5
+                        ),
+                        initial_object_z=initial_object_z,
+                        executor_config=dict(tool_configuration),
+                        tracked_position_references_m=(
+                            baseline_tracked_positions_m
+                        ),
+                        rgbd_axis_references=guarded_rgbd_axis_references,
+                        tracked_orientation_observer=(
+                            observe_guarded_orientation
+                        ),
+                        observed_clearance_observer=(
+                            observe_guarded_path_clearance
+                        ),
+                        checkpoint_callback=None,
+                        early_stop_callback=monitor_lease,
+                    )
+                    post_state = _state(env, initial_object_z)
+                    post_tracked_positions_m = _tracked_entity_positions_m(
+                        env, lease_candidate.operation_target_entity_ids
+                    )
+                    post_events = _guarded_dispatch_invalidation_events(
+                        runtime_lease=active_lease,
+                        lease_candidate=lease_candidate,
+                        invocation_candidate=invocation_candidate,
+                        invocation_decision=invocation_decision,
+                        baseline_membership_ids=baseline_membership_ids,
+                        current_provider_instance_id=(
+                            planning_provider_instance.instance_id
+                        ),
+                        state=post_state,
+                        baseline_tracked_positions_m=(
+                            baseline_tracked_positions_m
+                        ),
+                        current_tracked_positions_m=post_tracked_positions_m,
+                    )
+                    if post_events and active_lease.active:
+                        event = post_events[0]
+                        active_lease.observe_invalidation(
+                            event.condition_id, event.evidence
+                        )
+                        monitored_events.append(event.to_dict())
+                    if (
+                        not motion_report.get("converged")
+                        and active_lease.active
+                    ):
+                        active_lease.revoke(
+                            reason="dispatch.motion_not_converged",
+                            evidence={
+                                "target_error_after_m": motion_report.get(
+                                    "target_error_after_m"
+                                ),
+                                "orientation_error_after_deg": motion_report.get(
+                                    "orientation_error_after_deg"
+                                ),
+                                "terminal": terminal,
+                            },
+                        )
+                    post_frame = _single_exterior_frame(obs)
+                    cv2.imwrite(
+                        str(
+                            args_cli.artifact_dir
+                            / "01_guarded_post_dispatch.jpg"
+                        ),
+                        cv2.cvtColor(post_frame, cv2.COLOR_RGB2BGR),
+                    )
+                    return {
+                        "executor_id": runtime_motion_spec.executor_id,
+                        "executor_tool_name": runtime_motion_spec.tool_name,
+                        "motion_report": motion_report,
+                        "monitored_invalidation_events": monitored_events,
+                        "terminal": terminal,
+                        "final_action": final_action.detach().cpu().tolist(),
+                        "post_dispatch_observation": {
+                            "eef_gripper_base_xyz": post_state[
+                                "eef_gripper_base_xyz"
+                            ],
+                            "eef_gripper_base_quaternion_wxyz": post_state[
+                                "eef_gripper_base_quaternion_wxyz"
+                            ],
+                            "actuator_contact_geometry": post_state.get(
+                                "actuator_contact_geometry"
+                            ),
+                            "rgbd_scene_geometry": post_state.get(
+                                "rgbd_scene_geometry"
+                            ),
+                            "tracked_entity_positions_m": (
+                                post_tracked_positions_m
+                            ),
+                            "current_contact": post_state.get("current_contact"),
+                        },
+                        "requires_model_replan": True,
+                        "replan_reason": (
+                            "operation_completed"
+                            if motion_report.get("converged")
+                            else "operation_invalidated_or_not_converged"
+                        ),
+                    }
+
+                handler_registry.register(
+                    runtime_lease.lease.tool_id, guarded_motion_handler
+                )
+                dispatcher = GuardedWorldEffectDispatcher(
+                    runtime_lease=runtime_lease,
+                    handlers=handler_registry,
+                    maximum_evidence_age_s=(
+                        args_cli.world_effect_dispatch_evidence_max_age_s
+                    ),
+                    maximum_permit_lifetime_s=(
+                        args_cli.world_effect_dispatch_permit_lifetime_s
+                    ),
+                )
+                permit = dispatcher.mint_permit(fresh_evidence)
+                episode_trace["world_effect_guarded_dispatch"] = {
+                    "status": "permitted",
+                    "fresh_evidence": fresh_evidence.to_dict(),
+                    "permit": permit.to_dict(),
+                    "fresh_evidence_validated": True,
+                    "dispatch_permit_issued": True,
+                    "dispatch_performed": False,
+                    "handler_bound": False,
+                    "tool_called": False,
+                    "requires_model_replan": False,
+                    "dispatch_enabled": True,
+                    "motion_authority": True,
+                    "execution_authority": True,
+                    "authority_scope": ["invoke_exact_tool_once"],
+                }
+                _write_trace(trace_path, episode_trace)
+                print(
+                    "[world-effect-guarded-dispatch] PERMITTED "
+                    f"tool={permit.tool_id} evidence={permit.evidence_id} "
+                    "single_use=true",
+                    flush=True,
+                )
+                dispatch_outcome = dispatcher.dispatch(permit)
+                outcome_record = dispatch_outcome.to_dict()
+                episode_trace["world_effect_guarded_dispatch"] = {
+                    "status": "valid",
+                    "fresh_evidence": fresh_evidence.to_dict(),
+                    "permit": permit.to_dict(),
+                    "outcome": outcome_record,
+                    "runtime_lease_after": runtime_lease.to_dict(),
+                    "fresh_evidence_validated": True,
+                    "dispatch_permit_issued": True,
+                    "dispatch_performed": True,
+                    "handler_bound": True,
+                    "tool_called": True,
+                    "requires_model_replan": True,
+                    "dispatch_enabled": False,
+                    "motion_authority": False,
+                    "execution_authority": False,
+                    "authority_scope": [],
+                }
+                episode_trace["world_effect_runtime_lease"] = {
+                    **episode_trace["world_effect_runtime_lease"],
+                    "lease": runtime_lease.to_dict(),
+                    "lease_armed": runtime_lease.active,
+                }
+                handler_result = outcome_record["handler_result"]
+                motion_report = handler_result["motion_report"]
+                episode_trace["stages"].append(
+                    {
+                        "phase": f"world_effect:{lease_candidate.purpose}",
+                        "source": "guarded_world_effect_dispatch",
+                        "tool_id": runtime_lease.lease.tool_id,
+                        "permit_id": permit.permit_id,
+                        "motion_report": motion_report,
+                    }
+                )
+                episode_trace["status"] = "guarded_first_operation_complete"
+                episode_trace["guarded_world_effect_result"] = {
+                    "complete": True,
+                    "dispatch_performed": True,
+                    "motion_converged": bool(motion_report.get("converged")),
+                    "final_lease_state": runtime_lease.state,
+                    "requires_model_replan": True,
+                    "motion_stage_count": len(episode_trace["stages"]),
+                    "demonstration_loaded": False,
+                }
+                _write_trace(trace_path, episode_trace)
+                print(
+                    "[world-effect-guarded-dispatch] COMPLETE "
+                    f"converged={bool(motion_report.get('converged'))} "
+                    f"lease={runtime_lease.state} "
+                    f"iterations={len(motion_report.get('iterations', []))} "
+                    "replan=true authority=none",
+                    flush=True,
+                )
+                print(f"Trace: {trace_path}", flush=True)
+                return 0
+            except Exception as guarded_error:
+                episode_trace["world_effect_guarded_dispatch"] = {
+                    **guarded_trace,
+                    "status": "invalid",
+                    "error": {
+                        "type": type(guarded_error).__name__,
+                        "message": str(guarded_error),
+                    },
+                    "fresh_evidence_validated": False,
+                    "dispatch_performed": False,
+                    "requires_model_replan": True,
+                    "dispatch_enabled": False,
+                    "motion_authority": False,
+                    "execution_authority": False,
+                    "authority_scope": [],
+                }
+                episode_trace["status"] = "guarded_first_operation_not_admitted"
+                _write_trace(trace_path, episode_trace)
+                print(
+                    "[world-effect-guarded-dispatch] INVALID "
+                    f"{type(guarded_error).__name__}: {guarded_error} "
+                    "authority=none",
+                    flush=True,
+                )
+                print(f"Trace: {trace_path}", flush=True)
+                return 2
+
+        if args_cli.shadow_plan_only:
+            required_shadow_statuses = {
+                "world_intent_shadow": episode_trace[
+                    "world_intent_shadow"
+                ].get("status"),
+                "world_goal_graph_shadow": episode_trace[
+                    "world_goal_graph_shadow"
+                ].get("status"),
+                "world_scope_membership_audit_shadow": episode_trace[
+                    "world_scope_membership_audit_shadow"
+                ].get("status"),
+                "world_goal_activation_shadow": episode_trace[
+                    "world_goal_activation_shadow"
+                ].get("status"),
+                "world_effect_session_shadow": episode_trace[
+                    "world_effect_session_shadow"
+                ].get("status"),
+                "world_effect_operation_plan_shadow": episode_trace[
+                    "world_effect_operation_plan_shadow"
+                ].get("status"),
+                "world_effect_execution_lease_shadow": episode_trace[
+                    "world_effect_execution_lease_shadow"
+                ].get("status"),
+                "world_effect_tool_invocation_shadow": episode_trace[
+                    "world_effect_tool_invocation_shadow"
+                ].get("status"),
+                "world_effect_runtime_lease": episode_trace[
+                    "world_effect_runtime_lease"
+                ].get("status"),
+            }
+            optional_handoff_components = {
+                "world_effect_session_shadow",
+                "world_effect_operation_plan_shadow",
+                "world_effect_execution_lease_shadow",
+                "world_effect_tool_invocation_shadow",
+                "world_effect_runtime_lease",
+            }
+            shadow_complete = all(
+                status == "valid"
+                for name, status in required_shadow_statuses.items()
+                if name not in optional_handoff_components
+            ) and all(
+                required_shadow_statuses[name] in {"valid", "not_requested"}
+                for name in optional_handoff_components
+            )
+            episode_trace["status"] = (
+                "shadow_plan_complete"
+                if shadow_complete
+                else "shadow_plan_not_admitted"
+            )
+            episode_trace["shadow_plan_only_result"] = {
+                "complete": shadow_complete,
+                "component_statuses": required_shadow_statuses,
+                "motion_stage_count": len(episode_trace["stages"]),
+                "feasibility_called": False,
+                "demonstration_loaded": False,
+                "execution_provider_created": False,
+                "planning_provider_instantiated": episode_trace[
+                    "world_effect_operation_plan_shadow"
+                ].get("planning_provider_instantiated", False),
+                "execution_lease_issued": episode_trace[
+                    "world_effect_runtime_lease"
+                ].get("execution_lease_issued", False),
+                "lease_armed": episode_trace[
+                    "world_effect_runtime_lease"
+                ].get("lease_armed", False),
+                "invocation_validated": episode_trace[
+                    "world_effect_tool_invocation_shadow"
+                ].get("invocation_validated", False),
+                "tool_called": False,
+                "handler_bound": False,
+                "dispatch_enabled": False,
+                "motion_authority": False,
+                "execution_authority": False,
+            }
+            _write_trace(trace_path, episode_trace)
+            print(
+                "[shadow-plan-only] "
+                f"status={episode_trace['status']} "
+                "motion_stages=0 feasibility=skipped "
+                "demonstration=not_loaded execution_providers=not_created "
+                "lease="
+                f"{episode_trace['world_effect_runtime_lease'].get('status')} "
+                "dispatch=false",
+                flush=True,
+            )
+            print(f"Trace: {trace_path}", flush=True)
+            return 0 if shadow_complete else 2
+
         preflight_frame, preflight_depth_summary = _rgbd_checkpoint_frame(
             env, frame
         )
@@ -5504,13 +8784,15 @@ def main() -> int:
                 current_engaged = bool(
                     float(current_action[0, 7].detach().cpu()) > 0.5
                 )
-                # The task adapter supplies measured goal contact while the
-                # contact sensor supplies retained-contact evidence. Preserve
-                # a loaded clamp away from the goal, but expose its actuator
-                # again after contact loss so the model can recover instead of
-                # being forced into an impossible motion-only branch.
-                goal_contact_observed = bool(
-                    schedule_state.get("object_target_contact_proxy", False)
+                # The task adapter supplies the measured goal relation while
+                # the contact sensor supplies retained-contact evidence.
+                # Preserve a loaded actuator away from the goal, but expose it
+                # at the goal or after contact loss so the model can transition
+                # or recover instead of being forced into motion-only routing.
+                goal_relation = schedule_state.get("goal_relation", {})
+                goal_relation_observed = bool(
+                    isinstance(goal_relation, Mapping)
+                    and goal_relation.get("satisfied") is True
                 )
                 current_contact = schedule_state.get("current_contact")
                 touch_observed = bool(
@@ -5573,7 +8855,7 @@ def main() -> int:
                     pregrasp_axis_alignment_ready
                     and actuator_transition_is_admissible(
                         actuator_engaged=current_engaged,
-                        goal_contact_observed=goal_contact_observed,
+                        goal_contact_observed=goal_relation_observed,
                         retained_contact_observed=(
                             retained_contact_observed
                             if current_engaged
@@ -5612,7 +8894,8 @@ def main() -> int:
                         "actuator_transition_admission": {
                             "available": actuator_transition_available,
                             "source": "measured_runtime_actuator_preconditions",
-                            "goal_contact_observed": goal_contact_observed,
+                            "goal_relation_observed": goal_relation_observed,
+                            "goal_relation": goal_relation,
                             "retained_contact_observed": (
                                 retained_contact_observed
                             ),
@@ -6118,6 +9401,410 @@ def main() -> int:
                 raise RuntimeError(
                     "Visual/metric pre-grasp gate rejected gripper closure"
                 )
+
+        def transition_admission_snapshot(
+            required_capability: str,
+            current_action: torch.Tensor,
+        ) -> tuple[dict[str, Any], dict[str, Any]]:
+            """Read the fresh evidence that may admit a runtime transition."""
+            transition_state = _state(env, initial_object_z)
+            current_contact = transition_state.get("current_contact")
+            admission = runtime_transition_admission(
+                required_capability,
+                actuator_engaged=bool(
+                    float(current_action[0, 7].detach().cpu()) > 0.5
+                ),
+                retained_contact_observed=(
+                    retained_contact_supports_loaded_actuator(current_contact)
+                ),
+                interaction_candidate_observed=bool(
+                    transition_state.get("grasp_candidate")
+                ),
+                interaction_confirmed_observed=bool(
+                    transition_state.get("grasp_confirmed")
+                ),
+                actuator_disengaged_observed=bool(
+                    transition_state["gripper_closed_fraction"] <= 0.10
+                ),
+            )
+            admission["state"] = transition_state
+            return transition_state, admission
+
+        def resolve_runtime_transition(
+            transition_obs: dict[str, Any],
+            current_action: torch.Tensor,
+            *,
+            required_capability: str,
+            runtime_label: str,
+            observation_prefix: str,
+        ) -> tuple[
+            dict[str, Any],
+            bool,
+            torch.Tensor,
+            dict[str, Any],
+        ]:
+            """Keep scheduling fresh operations until evidence admits a boundary."""
+            nonlocal latched_carry_offset
+            nonlocal latched_carry_quaternion
+            nonlocal latched_rgbd_axis_references
+            terminal = False
+            operation_events: list[dict[str, Any]] = []
+            pending_trigger_event: dict[str, Any] | None = None
+            previous_transition_motion_outcome: dict[str, Any] | None = None
+            maximum_operations = max(
+                3, 2 * int(args_cli.motion_checkpoint_replans) + 1
+            )
+
+            for operation_index in range(maximum_operations + 1):
+                transition_state, admission = transition_admission_snapshot(
+                    required_capability,
+                    current_action,
+                )
+                if admission["admitted"]:
+                    report = {
+                        "runtime_label": runtime_label,
+                        "required_capability": required_capability,
+                        "admitted": True,
+                        "operation_count": len(operation_events),
+                        "maximum_operations": maximum_operations,
+                        "final_admission": admission,
+                        "operations": operation_events,
+                    }
+                    print(
+                        "[runtime transition] "
+                        f"label={runtime_label} "
+                        f"required={required_capability} admitted=True "
+                        f"operations={len(operation_events)}",
+                        flush=True,
+                    )
+                    return (
+                        transition_obs,
+                        terminal,
+                        current_action,
+                        report,
+                    )
+                if operation_index >= maximum_operations:
+                    break
+
+                trigger_event = pending_trigger_event or {
+                    "type": "runtime_transition_not_admitted",
+                    "runtime_label": runtime_label,
+                    "required_capability": required_capability,
+                    "admission": admission,
+                    "instruction": args_cli.instruction,
+                }
+                pending_trigger_event = None
+                print(
+                    "[runtime transition] "
+                    f"label={runtime_label} "
+                    f"required={required_capability} admitted=False "
+                    f"missing={admission['missing_evidence']} "
+                    f"operation={operation_index + 1}/{maximum_operations}",
+                    flush=True,
+                )
+                (
+                    transition_obs,
+                    terminal,
+                    scheduler_operation,
+                    scheduler_latency,
+                    scheduler_digest,
+                ) = operation_scheduler_handler(
+                    transition_obs,
+                    current_action,
+                    phase_label=f"{runtime_label}:transition_pending",
+                    observation_prefix=(
+                        f"{observation_prefix}_{operation_index + 1}"
+                    ),
+                    motion_report={
+                        "converged": False,
+                        "yielded_to_scheduler": True,
+                        "recovery_request": trigger_event,
+                    },
+                    trigger_event=trigger_event,
+                )
+                event: dict[str, Any] = {
+                    "index": operation_index + 1,
+                    "runtime_label": runtime_label,
+                    "required_capability": required_capability,
+                    "admission_before": admission,
+                    "trigger_event": trigger_event,
+                    "scheduler_decision": scheduler_operation,
+                    "scheduler_latency_s": scheduler_latency,
+                    "scheduler_image_digest": scheduler_digest,
+                }
+                if scheduler_operation.get("decision") == "complete":
+                    event["completion_admitted"] = False
+                    event["completion_rejection_reason"] = (
+                        "required runtime capability remains unobserved"
+                    )
+                    operation_events.append(event)
+                    episode_trace["runtime_transition_protocol"]["calls"].append(
+                        event
+                    )
+                    _write_trace(trace_path, episode_trace)
+                    raise RuntimeError(
+                        "Operation scheduler declared completion before the "
+                        f"{required_capability} transition was physically admitted"
+                    )
+
+                operation_kind = scheduler_operation.get("operation_kind")
+                if operation_kind == "actuation":
+                    (
+                        transition_obs,
+                        terminal,
+                        transition_actuator_decision,
+                        transition_actuator_latency,
+                        transition_actuator_digest,
+                    ) = actuator_transition_handler(
+                        transition_obs,
+                        current_action,
+                        phase_label=f"{runtime_label}:transition_pending",
+                        observation_prefix=(
+                            f"actuator_{observation_prefix}_"
+                            f"{operation_index + 1}"
+                        ),
+                        trigger_event=trigger_event,
+                        scheduler_dispatch=scheduler_operation,
+                        yield_on_hold=True,
+                    )
+                    event["actuator_decision"] = transition_actuator_decision
+                    event["actuator_latency_s"] = transition_actuator_latency
+                    event["actuator_image_digest"] = transition_actuator_digest
+                    if transition_actuator_decision.get("decision") == "execute":
+                        admit_pregrasp_transition(
+                            transition_actuator_decision,
+                            current_target=_eef_position(env),
+                        )
+                        engaged_before = bool(
+                            float(current_action[0, 7].detach().cpu()) > 0.5
+                        )
+                        (
+                            transition_obs,
+                            terminal,
+                            current_action,
+                            transition_actuator_execution,
+                        ) = _execute_binary_actuator_tool(
+                            env,
+                            transition_obs,
+                            current_action,
+                            transition_actuator_decision,
+                            initial_object_z=initial_object_z,
+                        )
+                        reconcile_carry_latch_after_actuation(
+                            transition_actuator_execution,
+                            source=f"{runtime_label}:transition_pending",
+                        )
+                        feedback_event = _actuator_feedback_event_from_execution(
+                            transition_actuator_execution,
+                            actuator_feedback_policy,
+                        )
+                        transition_actuator_execution["feedback_event"] = (
+                            feedback_event
+                        )
+                        record_unsupported_grasp_attempt(
+                            transition_actuator_execution,
+                            feedback_event,
+                            source=f"{runtime_label}:transition_pending",
+                        )
+                        episode_trace["actuator_tool_protocol"]["calls"][-1][
+                            "execution"
+                        ] = transition_actuator_execution
+                        event["actuator_execution"] = transition_actuator_execution
+                        engaged_after = bool(
+                            transition_actuator_execution.get("engaged_after")
+                        )
+                        if not engaged_before and engaged_after:
+                            event["grasp_attempt"] = capture_grasp_attempt(
+                                f"runtime_transition:{runtime_label}"
+                            )
+                            latched_carry_offset = (
+                                _eef_position(env) - _movable_object_position(env)
+                            )
+                            latched_carry_quaternion = _eef_quaternion(env)
+                            latched_rgbd_axis_references = {}
+                            for object_id in trackable_object_ids:
+                                try:
+                                    axis_observation = (
+                                        _rgbd_object_axis_observation(
+                                            env,
+                                            prim_label_fragment=(
+                                                f"/scene/{object_id}"
+                                            ),
+                                        )
+                                    )
+                                    latched_rgbd_axis_references[object_id] = (
+                                        np.asarray(
+                                            axis_observation["major_axis_camera"],
+                                            dtype=np.float64,
+                                        )
+                                    )
+                                except ValueError:
+                                    continue
+                            event["carry_latched_after_actuation"] = {
+                                "eef_minus_object_m": (
+                                    latched_carry_offset.tolist()
+                                ),
+                                "eef_quaternion_wxyz": (
+                                    latched_carry_quaternion.tolist()
+                                ),
+                                "tracked_rgbd_objects": sorted(
+                                    latched_rgbd_axis_references
+                                ),
+                            }
+                        pending_trigger_event = {
+                            "type": "runtime_transition_actuation_observed",
+                            "runtime_label": runtime_label,
+                            "required_capability": required_capability,
+                            **feedback_event,
+                        }
+                    else:
+                        episode_trace["actuator_tool_protocol"]["calls"][-1][
+                            "scheduler_handoff"
+                        ] = True
+                        pending_trigger_event = {
+                            "type": "actuator_governor_yielded_to_scheduler",
+                            "runtime_label": runtime_label,
+                            "required_capability": required_capability,
+                            "actuator_governor_decision": (
+                                transition_actuator_decision
+                            ),
+                        }
+                elif operation_kind == "motion":
+                    transition_motion_decision = motion_checkpoint_handler(
+                        transition_obs,
+                        {
+                            "reason": "runtime_transition_not_admitted",
+                            "phase": f"{runtime_label}:transition_pending",
+                            "iteration": operation_index + 1,
+                            "current_target_xyz_m": (
+                                _eef_position(env).tolist()
+                            ),
+                            "current_target_quaternion_wxyz": (
+                                _eef_quaternion(env).tolist()
+                            ),
+                            "scheduler_decision": scheduler_operation,
+                            "runtime_transition_admission": admission,
+                            "previous_recovery_motion_outcome": (
+                                previous_transition_motion_outcome
+                            ),
+                            "lease_condition_sources": {
+                                "contact": "sim6.gripper_contact_sensor",
+                                "tracked_pose": (
+                                    "sim6.privileged_relative_pose_adapter"
+                                    if latched_carry_offset is not None
+                                    else None
+                                ),
+                                "tracked_orientation": (
+                                    {
+                                        object_id: (
+                                            "rgbd.instance_depth_major_axis"
+                                        )
+                                        for object_id in (
+                                            latched_rgbd_axis_references
+                                        )
+                                    }
+                                    if latched_rgbd_axis_references
+                                    else {}
+                                ),
+                                "observed_clearance": None,
+                            },
+                        },
+                    )
+                    event["motion_decision"] = transition_motion_decision
+                    if transition_motion_decision.get("decision") != "execute":
+                        pending_trigger_event = {
+                            "type": "motion_governor_yielded_to_scheduler",
+                            "runtime_label": runtime_label,
+                            "required_capability": required_capability,
+                            "motion_governor_decision": (
+                                transition_motion_decision
+                            ),
+                        }
+                    else:
+                        (
+                            transition_obs,
+                            terminal,
+                            current_action,
+                            transition_motion_report,
+                        ) = _move_eef_to_target(
+                            env,
+                            transition_obs,
+                            current_action,
+                            torch.tensor(
+                                transition_motion_decision["target_xyz_m"],
+                                dtype=torch.float32,
+                            ),
+                            torch.tensor(
+                                transition_motion_decision[
+                                    "target_quaternion_wxyz"
+                                ],
+                                dtype=torch.float32,
+                            ),
+                            f"{runtime_label}:transition_pending",
+                            gripper_closed=bool(
+                                float(current_action[0, 7].detach().cpu()) > 0.5
+                            ),
+                            initial_object_z=initial_object_z,
+                            executor_config=dict(
+                                transition_motion_decision.get(
+                                    "executor_config"
+                                )
+                                or {}
+                            ),
+                            carry_reference_offset=latched_carry_offset,
+                            rgbd_axis_references=latched_rgbd_axis_references,
+                            checkpoint_callback=motion_checkpoint_handler,
+                        )
+                        event["motion_report"] = transition_motion_report
+                        pending_trigger_event = {
+                            "type": "runtime_transition_motion_completed",
+                            "runtime_label": runtime_label,
+                            "required_capability": required_capability,
+                            "motion_outcome": recovery_motion_handoff_from_report(
+                                transition_motion_report
+                            ),
+                        }
+                else:
+                    raise RuntimeError(
+                        "Runtime transition scheduler returned unsupported "
+                        f"operation: {scheduler_operation}"
+                    )
+
+                if terminal:
+                    raise RuntimeError(
+                        "Environment terminated before runtime transition "
+                        f"{required_capability} was admitted"
+                    )
+                _, event["admission_after"] = transition_admission_snapshot(
+                    required_capability,
+                    current_action,
+                )
+                if isinstance(event.get("motion_report"), Mapping):
+                    previous_transition_motion_outcome = (
+                        runtime_transition_motion_handoff(
+                            event["motion_report"],
+                            admission_before=admission,
+                            admission_after=event["admission_after"],
+                        )
+                    )
+                    event["motion_handoff_outcome"] = (
+                        previous_transition_motion_outcome
+                    )
+                    if isinstance(pending_trigger_event, dict):
+                        pending_trigger_event["motion_outcome"] = (
+                            previous_transition_motion_outcome
+                        )
+                operation_events.append(event)
+                episode_trace["runtime_transition_protocol"]["calls"].append(
+                    event
+                )
+                _write_trace(trace_path, episode_trace)
+
+            raise RuntimeError(
+                "Runtime transition operation budget exhausted without fresh "
+                f"evidence for {required_capability}: "
+                f"{len(operation_events)}/{maximum_operations} operations"
+            )
 
         episode_trace["recoveries"] = []
         last_action = torch.zeros((1, 8), dtype=torch.float32, device=env.device)
@@ -8607,6 +12294,36 @@ def main() -> int:
                     "eef_quaternion_wxyz": latched_carry_quaternion.tolist(),
                 }
                 _write_trace(trace_path, episode_trace)
+            next_runtime_label = (
+                stages[stage_index][0]
+                if stage_index < len(stages)
+                else None
+            )
+            if (
+                not args_cli.disable_adaptive_ik
+                and not task_completed_by_scheduler
+                and next_runtime_label == "lift"
+                and not terminal
+            ):
+                (
+                    obs,
+                    terminal,
+                    last_action,
+                    transition_report,
+                ) = resolve_runtime_transition(
+                    obs,
+                    last_action,
+                    required_capability="supported_loaded_interaction",
+                    runtime_label=f"{phase}->{next_runtime_label}",
+                    observation_prefix=(
+                        f"transition_{stage_index:02d}_{phase}_to_"
+                        f"{next_runtime_label}"
+                    ),
+                )
+                episode_trace["stages"][-1][
+                    "next_runtime_transition"
+                ] = transition_report
+                _write_trace(trace_path, episode_trace)
             if task_completed_by_scheduler:
                 print(
                     f"[scheduler] physical task declared complete after {phase}; "
@@ -8616,6 +12333,24 @@ def main() -> int:
                 break
             if terminal:
                 break
+
+        if not args_cli.disable_adaptive_ik and not terminal:
+            (
+                obs,
+                terminal,
+                last_action,
+                release_transition_report,
+            ) = resolve_runtime_transition(
+                obs,
+                last_action,
+                required_capability="released_interaction",
+                runtime_label="task_motion->retreat",
+                observation_prefix="transition_release_to_retreat",
+            )
+            episode_trace["release_transition_admission"] = (
+                release_transition_report
+            )
+            _write_trace(trace_path, episode_trace)
 
         if args_cli.disable_release_retreat:
             retreat_report = {

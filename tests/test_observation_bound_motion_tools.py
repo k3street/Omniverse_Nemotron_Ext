@@ -39,6 +39,10 @@ def _registry() -> MotionExecutorRegistry:
                     },
                 },
             },
+            capability_tags=(
+                "spatial.pose_target",
+                "motion.observation_bound",
+            ),
         )
     )
     return registry
@@ -52,6 +56,17 @@ def _call(name: str, observation_id: str, **extra):
         **extra,
     }
     return {"function": {"name": name, "arguments": arguments}}
+
+
+def test_motion_registry_advertises_task_neutral_capability_tags():
+    advertisement = _registry().advertisement()
+
+    assert advertisement[0]["tool_family"] == "motion"
+    assert advertisement[0]["capability_tags"] == [
+        "spatial.pose_target",
+        "motion.observation_bound",
+    ]
+    assert "invocation_schema" not in advertisement[0]
 
 
 def _gate(observation_id: str = "obs-7") -> ObservationBoundMotionGate:

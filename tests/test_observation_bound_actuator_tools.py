@@ -46,6 +46,11 @@ def _registry() -> ActuatorExecutorRegistry:
                     }
                 },
             },
+            capability_tags=(
+                "entity_attachment.acquire",
+                "entity_attachment.release",
+                "actuation.observation_bound",
+            ),
         )
     )
     return registry
@@ -63,6 +68,20 @@ def _call(name: str, observation_id: str, **extra):
             },
         }
     }
+
+
+def test_actuator_registry_advertises_task_neutral_capability_tags():
+    advertisement = _registry().advertisement()
+
+    assert advertisement[0]["tool_family"] == "actuator"
+    assert advertisement[0]["capability_tags"] == [
+        "entity_attachment.acquire",
+        "entity_attachment.release",
+        "actuation.observation_bound",
+    ]
+    assert advertisement[0]["invocation_schema"] == advertisement[0][
+        "command_schema"
+    ]
 
 
 def _gate(observation_id: str = "actuator-7") -> ObservationBoundActuatorGate:
@@ -407,4 +426,4 @@ def test_runner_expires_carried_object_latches_after_disengagement():
     assert "latched_rgbd_axis_references = {}" in helper
     assert '"reason": "actuator_disengaged"' in helper
     assert '"carry_latch_expiration"' in helper
-    assert source.count("reconcile_carry_latch_after_actuation(") == 6
+    assert source.count("reconcile_carry_latch_after_actuation(") == 7

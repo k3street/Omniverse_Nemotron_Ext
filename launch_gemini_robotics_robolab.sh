@@ -24,6 +24,7 @@ cd "$ROOT"
 viewer_args=(--viz kit)
 artifact_dir="$ROOT/artifacts/gemini_robotics_er2_robolab"
 expect_artifact_dir=0
+shadow_plan_only=0
 for arg in "$@"; do
     if [[ "$expect_artifact_dir" == 1 ]]; then
         artifact_dir="$arg"
@@ -31,6 +32,9 @@ for arg in "$@"; do
         continue
     fi
     case "$arg" in
+        --shadow-plan-only|--guarded-world-effect-execution)
+            shadow_plan_only=1
+            ;;
         --viz|--viz=*|--visualizer|--visualizer=*|--headless)
             viewer_args=()
             ;;
@@ -51,12 +55,13 @@ set -e
 
 # Critique only after Isaac Sim exits.  The ephemeral local Cosmos server is
 # then stopped again, so it cannot contend with the next simulator run.
-if [[ "${ROBOT_SEQUENCE_CRITIC:-1}" != 0 && -f "$artifact_dir/sequence_trace.json" \
+if [[ "$shadow_plan_only" == 0 && "${ROBOT_SEQUENCE_CRITIC:-1}" != 0 \
+      && -f "$artifact_dir/sequence_trace.json" \
       && "$artifact_dir/sequence_trace.json" -nt "$critic_marker" ]]; then
     if ! "$ROOT/scripts/run_local_sequence_critic.sh" "$artifact_dir"; then
         echo "[passive-critic] unavailable; simulator result remains status $sim_status" >&2
     fi
-elif [[ "${ROBOT_SEQUENCE_CRITIC:-1}" != 0 ]]; then
+elif [[ "$shadow_plan_only" == 0 && "${ROBOT_SEQUENCE_CRITIC:-1}" != 0 ]]; then
     echo "[passive-critic] skipped: this simulator invocation produced no fresh trace" >&2
 fi
 rm -f "$critic_marker"

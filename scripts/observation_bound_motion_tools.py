@@ -32,6 +32,7 @@ SCHEDULER_CONTROL_TOOL_NAMES = frozenset(
 FEASIBILITY_STATUSES = frozenset({"feasible", "infeasible", "unknown"})
 _TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _OPERATION_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
+_CAPABILITY_TAG = re.compile(r"^[a-z][a-z0-9_.:-]{0,127}$")
 
 
 class MotionToolValidationError(ValueError):
@@ -492,6 +493,8 @@ class MotionExecutorSpec:
     tool_name: str
     description: str
     configuration_schema: Mapping[str, Any]
+    capability_tags: tuple[str, ...] = ()
+    invocation_schema: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _required_text(self.executor_id, "executor_id")
@@ -508,6 +511,41 @@ class MotionExecutorSpec:
                 "configuration_schema must describe an object"
             )
         _copy_json(schema, "configuration_schema")
+        if self.invocation_schema is not None:
+            if (
+                not isinstance(self.invocation_schema, Mapping)
+                or self.invocation_schema.get("type") != "object"
+            ):
+                raise MotionToolValidationError(
+                    "invocation_schema must describe an object when supplied"
+                )
+            _copy_json(self.invocation_schema, "invocation_schema")
+        if len(set(self.capability_tags)) != len(self.capability_tags):
+            raise MotionToolValidationError(
+                "capability_tags must not contain duplicates"
+            )
+        for index, tag in enumerate(self.capability_tags):
+            if not isinstance(tag, str) or not _CAPABILITY_TAG.fullmatch(tag):
+                raise MotionToolValidationError(
+                    f"capability_tags[{index}] has an invalid format"
+                )
+
+    def advertisement(self) -> dict[str, Any]:
+        """Describe runtime semantics without creating control authority."""
+        advertisement = {
+            "executor_id": self.executor_id,
+            "tool_name": self.tool_name,
+            "tool_family": "motion",
+            "capability_tags": list(self.capability_tags),
+            "configuration_schema": _copy_json(
+                self.configuration_schema, "configuration_schema"
+            ),
+        }
+        if self.invocation_schema is not None:
+            advertisement["invocation_schema"] = _copy_json(
+                self.invocation_schema, "invocation_schema"
+            )
+        return advertisement
 
     def tool_schema(self, observation_id: str) -> dict[str, Any]:
         properties = _common_properties(observation_id)
@@ -606,6 +644,9 @@ class MotionExecutorRegistry:
 
     def specs(self) -> tuple[MotionExecutorSpec, ...]:
         return tuple(self._by_tool_name[name] for name in sorted(self._by_tool_name))
+
+    def advertisement(self) -> tuple[dict[str, Any], ...]:
+        return tuple(spec.advertisement() for spec in self.specs())
 
 
 def _common_properties(observation_id: str) -> dict[str, Any]:
@@ -1099,6 +1140,7 @@ class ActuatorExecutorSpec:
     description: str
     command_schema: Mapping[str, Any]
     configuration_schema: Mapping[str, Any]
+    capability_tags: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _required_text(self.executor_id, "executor_id")
@@ -1116,6 +1158,31 @@ class ActuatorExecutorSpec:
             if not isinstance(schema, Mapping) or schema.get("type") != "object":
                 raise MotionToolValidationError(f"{path} must describe an object")
             _copy_json(schema, path)
+        if len(set(self.capability_tags)) != len(self.capability_tags):
+            raise MotionToolValidationError(
+                "capability_tags must not contain duplicates"
+            )
+        for index, tag in enumerate(self.capability_tags):
+            if not isinstance(tag, str) or not _CAPABILITY_TAG.fullmatch(tag):
+                raise MotionToolValidationError(
+                    f"capability_tags[{index}] has an invalid format"
+                )
+
+    def advertisement(self) -> dict[str, Any]:
+        """Describe runtime semantics without selecting an embodiment."""
+        return {
+            "executor_id": self.executor_id,
+            "tool_name": self.tool_name,
+            "tool_family": "actuator",
+            "capability_tags": list(self.capability_tags),
+            "command_schema": _copy_json(self.command_schema, "command_schema"),
+            "invocation_schema": _copy_json(
+                self.command_schema, "command_schema"
+            ),
+            "configuration_schema": _copy_json(
+                self.configuration_schema, "configuration_schema"
+            ),
+        }
 
     @staticmethod
     def _validate_object(
@@ -1217,6 +1284,9 @@ class ActuatorExecutorRegistry:
 
     def specs(self) -> tuple[ActuatorExecutorSpec, ...]:
         return tuple(self._by_tool_name[name] for name in sorted(self._by_tool_name))
+
+    def advertisement(self) -> tuple[dict[str, Any], ...]:
+        return tuple(spec.advertisement() for spec in self.specs())
 
 
 def actuator_tool_schemas(
@@ -1696,6 +1766,116 @@ def recovery_motion_handoff_from_report(
     }
 
 
+def runtime_transition_motion_handoff(
+    motion_report: Mapping[str, Any],
+    *,
+    admission_before: Mapping[str, Any],
+    admission_after: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Expose an ineffective transition motion to the next model call.
+
+    A target can be inside the executor's pose tolerance and therefore report
+    convergence without changing any capability evidence.  At a pending
+    runtime transition that is a no-op, not progress.  Convert it to the same
+    compact stalled-target contract used by physical motion invalidations so
+    the next proposal must be materially different.
+    """
+    for value, path in (
+        (motion_report, "motion_report"),
+        (admission_before, "admission_before"),
+        (admission_after, "admission_after"),
+    ):
+        if not isinstance(value, Mapping):
+            raise MotionToolValidationError(f"{path} must be an object")
+
+    measured_handoff = recovery_motion_handoff_from_report(motion_report)
+    if measured_handoff is not None:
+        return measured_handoff
+    if admission_after.get("admitted") is True:
+        return None
+    missing_before = admission_before.get("missing_evidence")
+    missing_after = admission_after.get("missing_evidence")
+    if (
+        not isinstance(missing_before, Sequence)
+        or isinstance(missing_before, (str, bytes))
+        or not isinstance(missing_after, Sequence)
+        or isinstance(missing_after, (str, bytes))
+        or list(missing_before) != list(missing_after)
+    ):
+        return None
+
+    eef_start = _finite_vector(
+        motion_report.get("eef_start_xyz"),
+        "motion_report.eef_start_xyz",
+    )
+    eef_final = _finite_vector(
+        motion_report.get("eef_final_xyz"),
+        "motion_report.eef_final_xyz",
+    )
+    executor_config = motion_report.get("executor_config")
+    if not isinstance(executor_config, Mapping):
+        raise MotionToolValidationError(
+            "motion_report.executor_config must be an object"
+        )
+    position_tolerance = executor_config.get("position_tolerance_m")
+    orientation_tolerance = executor_config.get("orientation_tolerance_deg")
+    for value, path in (
+        (position_tolerance, "motion_report.executor_config.position_tolerance_m"),
+        (
+            orientation_tolerance,
+            "motion_report.executor_config.orientation_tolerance_deg",
+        ),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) < 0.0
+        ):
+            raise MotionToolValidationError(
+                f"{path} must be a finite non-negative number"
+            )
+    measured_displacement = math.sqrt(
+        sum(
+            (final_component - start_component) ** 2
+            for start_component, final_component in zip(eef_start, eef_final)
+        )
+    )
+    if measured_displacement > float(position_tolerance):
+        return None
+
+    return {
+        "phase": _copy_json(motion_report.get("phase")),
+        "attempted_target_xyz_m": _copy_json(
+            motion_report.get("target_xyz")
+        ),
+        "attempted_target_quaternion_wxyz": _copy_json(
+            motion_report.get("target_quaternion_wxyz")
+        ),
+        "eef_start_xyz_m": list(eef_start),
+        "eef_final_xyz_m": list(eef_final),
+        "target_error_before_m": _copy_json(
+            motion_report.get("target_error_before_m")
+        ),
+        "target_error_after_m": _copy_json(
+            motion_report.get("target_error_after_m")
+        ),
+        "orientation_error_after_deg": _copy_json(
+            motion_report.get("orientation_error_after_deg")
+        ),
+        "position_tolerance_m": float(position_tolerance),
+        "orientation_tolerance_deg": float(orientation_tolerance),
+        "stopped_reason": (
+            "runtime_capability_unchanged_after_converged_noop"
+        ),
+        "lease_invalidation_reason": (
+            "lease_invalidated:motion_progress_stalled"
+        ),
+        "measured_eef_displacement_m": measured_displacement,
+        "missing_capability_evidence": list(missing_after),
+    }
+
+
 def retained_contact_supports_loaded_actuator(
     contact_observation: Mapping[str, Any] | None,
     *,
@@ -1766,6 +1946,69 @@ def retained_contact_supports_loaded_actuator(
         float(cosine) <= float(maximum_pairwise_force_direction_cosine)
         and float(ratio) >= float(minimum_force_magnitude_ratio)
     )
+
+
+def runtime_transition_admission(
+    required_capability: str,
+    *,
+    actuator_engaged: bool,
+    retained_contact_observed: bool,
+    interaction_candidate_observed: bool,
+    interaction_confirmed_observed: bool,
+    actuator_disengaged_observed: bool,
+) -> dict[str, Any]:
+    """Admit a runtime transition from measured capability evidence.
+
+    The scheduler supplies the next operation while this gate prevents a
+    legacy phase scaffold from becoming control authority.  Requirements are
+    capability predicates rather than task, object, phase, or embodiment
+    names, so another runtime can publish the same evidence through different
+    adapters.
+    """
+    required_capability = _required_text(
+        required_capability, "required_capability"
+    )
+    evidence = {
+        "actuator_engaged": actuator_engaged,
+        "retained_contact_observed": retained_contact_observed,
+        "interaction_candidate_observed": interaction_candidate_observed,
+        "interaction_confirmed_observed": interaction_confirmed_observed,
+        "actuator_disengaged_observed": actuator_disengaged_observed,
+    }
+    for name, value in evidence.items():
+        if not isinstance(value, bool):
+            raise MotionToolValidationError(f"{name} must be boolean")
+
+    if required_capability == "supported_loaded_interaction":
+        requirements = {
+            "actuator_engaged": actuator_engaged,
+            "retained_contact_observed": retained_contact_observed,
+            "interaction_geometry_observed": bool(
+                interaction_candidate_observed
+                or interaction_confirmed_observed
+            ),
+        }
+    elif required_capability == "released_interaction":
+        requirements = {
+            "actuator_command_disengaged": not actuator_engaged,
+            "actuator_disengaged_observed": actuator_disengaged_observed,
+            "loaded_contact_absent": not retained_contact_observed,
+        }
+    else:
+        raise MotionToolValidationError(
+            "required_capability must be supported_loaded_interaction or "
+            "released_interaction"
+        )
+
+    missing = [name for name, satisfied in requirements.items() if not satisfied]
+    return {
+        "required_capability": required_capability,
+        "admitted": not missing,
+        "missing_evidence": missing,
+        "requirements": requirements,
+        "evidence": evidence,
+        "authority": "fresh_runtime_capability_evidence",
+    }
 
 
 def actuator_command_outcome_invalidation_reason(

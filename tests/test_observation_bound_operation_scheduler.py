@@ -25,6 +25,8 @@ from observation_bound_motion_tools import (  # noqa: E402
     operation_scheduler_tool_schemas,
     recovery_motion_handoff_from_report,
     retained_contact_supports_loaded_actuator,
+    runtime_transition_admission,
+    runtime_transition_motion_handoff,
     stalled_motion_checkpoint_yields_to_scheduler,
 )
 
@@ -206,6 +208,123 @@ def test_loaded_contact_quality_preserves_single_channel_actuator_contact():
             },
         }
     )
+
+
+def test_loaded_motion_transition_requires_command_contact_and_geometry():
+    missing_contact = runtime_transition_admission(
+        "supported_loaded_interaction",
+        actuator_engaged=True,
+        retained_contact_observed=False,
+        interaction_candidate_observed=True,
+        interaction_confirmed_observed=False,
+        actuator_disengaged_observed=False,
+    )
+    assert missing_contact["admitted"] is False
+    assert missing_contact["missing_evidence"] == [
+        "retained_contact_observed"
+    ]
+
+    admitted = runtime_transition_admission(
+        "supported_loaded_interaction",
+        actuator_engaged=True,
+        retained_contact_observed=True,
+        interaction_candidate_observed=True,
+        interaction_confirmed_observed=False,
+        actuator_disengaged_observed=False,
+    )
+    assert admitted["admitted"] is True
+    assert admitted["authority"] == "fresh_runtime_capability_evidence"
+
+
+def test_release_transition_requires_observed_disengagement_and_no_load():
+    commanded_open_but_not_observed = runtime_transition_admission(
+        "released_interaction",
+        actuator_engaged=False,
+        retained_contact_observed=True,
+        interaction_candidate_observed=True,
+        interaction_confirmed_observed=True,
+        actuator_disengaged_observed=False,
+    )
+    assert commanded_open_but_not_observed["admitted"] is False
+    assert set(commanded_open_but_not_observed["missing_evidence"]) == {
+        "actuator_disengaged_observed",
+        "loaded_contact_absent",
+    }
+
+    admitted = runtime_transition_admission(
+        "released_interaction",
+        actuator_engaged=False,
+        retained_contact_observed=False,
+        interaction_candidate_observed=False,
+        interaction_confirmed_observed=False,
+        actuator_disengaged_observed=True,
+    )
+    assert admitted["admitted"] is True
+
+
+def test_converged_noop_with_unchanged_capability_is_a_stalled_handoff():
+    handoff = runtime_transition_motion_handoff(
+        {
+            "phase": "runtime-transition",
+            "target_xyz": [0.0, 0.0, 0.005],
+            "target_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+            "eef_start_xyz": [0.0, 0.0, 0.0],
+            "eef_final_xyz": [0.0, 0.0, 0.0],
+            "target_error_before_m": 0.005,
+            "target_error_after_m": 0.005,
+            "orientation_error_after_deg": 0.0,
+            "executor_config": {
+                "position_tolerance_m": 0.01,
+                "orientation_tolerance_deg": 4.0,
+            },
+            "recovery_request": None,
+        },
+        admission_before={
+            "admitted": False,
+            "missing_evidence": ["retained_contact_observed"],
+        },
+        admission_after={
+            "admitted": False,
+            "missing_evidence": ["retained_contact_observed"],
+        },
+    )
+    assert handoff is not None
+    assert handoff["stopped_reason"] == (
+        "runtime_capability_unchanged_after_converged_noop"
+    )
+    assert handoff["lease_invalidation_reason"] == (
+        "lease_invalidated:motion_progress_stalled"
+    )
+    assert handoff["measured_eef_displacement_m"] == pytest.approx(0.0)
+
+
+def test_transition_motion_that_changes_pose_is_not_labeled_noop():
+    handoff = runtime_transition_motion_handoff(
+        {
+            "phase": "runtime-transition",
+            "target_xyz": [0.0, 0.0, 0.05],
+            "target_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+            "eef_start_xyz": [0.0, 0.0, 0.0],
+            "eef_final_xyz": [0.0, 0.0, 0.03],
+            "target_error_before_m": 0.05,
+            "target_error_after_m": 0.02,
+            "orientation_error_after_deg": 0.0,
+            "executor_config": {
+                "position_tolerance_m": 0.01,
+                "orientation_tolerance_deg": 4.0,
+            },
+            "recovery_request": None,
+        },
+        admission_before={
+            "admitted": False,
+            "missing_evidence": ["retained_contact_observed"],
+        },
+        admission_after={
+            "admitted": False,
+            "missing_evidence": ["retained_contact_observed"],
+        },
+    )
+    assert handoff is None
 
 
 def _candidates() -> tuple[OperationCandidate, ...]:
@@ -617,9 +736,7 @@ def test_runner_preserves_loaded_actuator_but_readmits_it_after_contact_loss():
     handler_start = source.index("def operation_scheduler_handler(")
     handler_end = source.index("def actuator_transition_handler(", handler_start)
     handler = source[handler_start:handler_end]
-    predicate = handler.index(
-        'schedule_state.get("object_target_contact_proxy", False)'
-    )
+    predicate = handler.index('schedule_state.get("goal_relation", {})')
     touch = handler.index(
         "touch_observed = bool(", predicate
     )
@@ -952,3 +1069,59 @@ def test_failed_measured_placement_routes_through_multi_operation_recovery():
         place_gate:scheduler
     ]
     assert "Model-governed placement did not reach measured release" not in source
+
+
+def test_runtime_transition_gate_owns_loaded_motion_phase_advancement():
+    source = (SCRIPTS / "run_gemini_robotics_robolab.py").read_text()
+    stage_loop = source.index("for stage_index, (")
+    boundary = source.index("next_runtime_label = (", stage_loop)
+    loaded_requirement = source.index(
+        'required_capability="supported_loaded_interaction"', boundary
+    )
+    task_completion = source.index("if task_completed_by_scheduler:", boundary)
+    assert boundary < loaded_requirement < task_completion
+    boundary_source = source[boundary:task_completion]
+    assert 'next_runtime_label == "lift"' in boundary_source
+    assert "and not task_completed_by_scheduler" in boundary_source
+    assert "resolve_runtime_transition(" in boundary_source
+    assert 'episode_trace["stages"][-1][' in boundary_source
+
+
+def test_goal_relation_exposes_release_and_retreat_requires_observed_open():
+    source = (SCRIPTS / "run_gemini_robotics_robolab.py").read_text()
+    scheduler = source.index("def operation_scheduler_handler(")
+    resolver = source.index(
+        'required_capability="released_interaction"', scheduler
+    )
+    retreat = source.index("_retreat_after_release(", resolver)
+    assert resolver < retreat
+    scheduler_source = source[scheduler:source.index(
+        "def actuator_transition_handler(", scheduler
+    )]
+    assert 'schedule_state.get("goal_relation", {})' in scheduler_source
+    assert "goal_relation_observed" in scheduler_source
+    retreat_definition = source.index("def _retreat_after_release(")
+    retreat_source = source[retreat_definition:source.index("def main()", retreat_definition)]
+    assert "separately executed and observed" in retreat_source
+    assert "actuator disengagement" in retreat_source
+    assert "command[0, 7] = 0.0" not in retreat_source
+
+
+def test_runtime_transition_rejects_repeated_stalled_motion_targets():
+    source = (SCRIPTS / "run_gemini_robotics_robolab.py").read_text()
+    resolver = source.index("def resolve_runtime_transition(")
+    resolver_end = source.index(
+        'episode_trace["recoveries"] = []', resolver
+    )
+    resolver_source = source[resolver:resolver_end]
+    initialization = resolver_source.index(
+        "previous_transition_motion_outcome: dict[str, Any] | None = None"
+    )
+    context = resolver_source.index(
+        '"previous_recovery_motion_outcome": (', initialization
+    )
+    execution = resolver_source.index("_move_eef_to_target(", context)
+    update = resolver_source.index(
+        "previous_transition_motion_outcome = (", execution
+    )
+    assert initialization < context < execution < update
