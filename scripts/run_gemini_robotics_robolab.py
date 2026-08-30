@@ -421,6 +421,17 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--world-effect-occlusion-grace-observations",
+    type=int,
+    default=3,
+    help=(
+        "Maximum consecutive RGB-D misses for an entity identity without "
+        "independent runtime-tracker presence. Persisted identities expose no "
+        "cached geometry; active operation targets still invalidate on the "
+        "first visibility loss."
+    ),
+)
+parser.add_argument(
     "--world-effect-dispatch-evidence-max-age-s",
     type=float,
     default=0.75,
@@ -635,6 +646,9 @@ from world_effect_closed_loop import (  # noqa: E402
     WorldEffectSequenceBudget,
     assess_world_effect_progress,
 )
+from world_scene_inventory_memory import (  # noqa: E402
+    TemporalSceneInventoryMemory,
+)
 from world_scope_membership_audit import (  # noqa: E402
     WorldScopeMembershipAuditGate,
     assess_world_goal_graph_membership_audit,
@@ -836,6 +850,21 @@ def _tracked_entity_positions_m(
         if position.shape == (3,) and bool(torch.isfinite(position).all()):
             positions[entity_id] = [float(value) for value in position.tolist()]
     return positions
+
+
+def _temporal_inventory_tracked_presence_ids(
+    env: Any,
+    memory: TemporalSceneInventoryMemory,
+) -> tuple[str, ...]:
+    """Expose fresh task-neutral runtime-tracker identity evidence."""
+    return tuple(
+        sorted(
+            _tracked_entity_positions_m(
+                env,
+                memory.known_entity_ids,
+            )
+        )
+    )
 
 
 def _movable_object_position(env: Any) -> torch.Tensor:
@@ -3454,13 +3483,30 @@ def _guarded_dispatch_invalidation_events(
     state: Mapping[str, Any],
     baseline_tracked_positions_m: Mapping[str, Sequence[float]],
     current_tracked_positions_m: Mapping[str, Sequence[float]],
+    scene_inventory_memory: TemporalSceneInventoryMemory | None = None,
+    current_tracked_presence_entity_ids: Iterable[str] = (),
 ) -> tuple[DispatchInvalidationEvent, ...]:
     """Evaluate the issued condition set from fresh simulator/RGB-D evidence."""
     current_geometry = _runtime_geometry_by_id(state)
     baseline_geometry = {
         item.entity_id: item.geometry for item in lease_candidate.geometry_bindings
     }
-    current_inventory = semantic_scene_inventory_from_state(state)
+    raw_current_inventory = semantic_scene_inventory_from_state(state)
+    temporal_update = (
+        None
+        if scene_inventory_memory is None
+        else scene_inventory_memory.update(
+            raw_current_inventory,
+            independently_present_entity_ids=(
+                current_tracked_presence_entity_ids
+            ),
+        )
+    )
+    current_inventory = (
+        raw_current_inventory
+        if temporal_update is None
+        else temporal_update.inventory
+    )
     current_membership_ids = {
         str(item["entity_id"])
         for item in current_inventory.get("entities", [])
@@ -3490,6 +3536,11 @@ def _guarded_dispatch_invalidation_events(
                     {
                         "expected_entity_ids": sorted(baseline_membership_ids),
                         "observed_entity_ids": sorted(current_membership_ids),
+                        "temporal_scene_evidence": (
+                            None
+                            if temporal_update is None
+                            else temporal_update.to_dict()
+                        ),
                     },
                     "task membership changed",
                 )
@@ -4006,6 +4057,7 @@ def _dispatch_guarded_world_effect_continuation(
     maximum_permit_lifetime_s: float,
     artifact_dir: Path,
     operation_index: int,
+    scene_inventory_memory: TemporalSceneInventoryMemory,
 ) -> tuple[dict[str, Any], bool, dict[str, Any]]:
     """Dispatch one continuation bundle through a fresh single-use permit."""
     runtime_lease = bundle["runtime_lease"]
@@ -4047,6 +4099,13 @@ def _dispatch_guarded_world_effect_continuation(
         state=fresh_state,
         baseline_tracked_positions_m=tracked_baseline,
         current_tracked_positions_m=fresh_tracked,
+        scene_inventory_memory=scene_inventory_memory,
+        current_tracked_presence_entity_ids=(
+            _temporal_inventory_tracked_presence_ids(
+                env,
+                scene_inventory_memory,
+            )
+        ),
     )
     fresh_evidence = build_fresh_dispatch_evidence(
         runtime_lease=runtime_lease,
@@ -4213,6 +4272,13 @@ def _dispatch_guarded_world_effect_continuation(
                     state=monitor_state,
                     baseline_tracked_positions_m=tracked_baseline,
                     current_tracked_positions_m=current_tracked,
+                    scene_inventory_memory=scene_inventory_memory,
+                    current_tracked_presence_entity_ids=(
+                        _temporal_inventory_tracked_presence_ids(
+                            env,
+                            scene_inventory_memory,
+                        )
+                    ),
                 )
                 if not events:
                     return None
@@ -4260,6 +4326,13 @@ def _dispatch_guarded_world_effect_continuation(
                 state=post_state,
                 baseline_tracked_positions_m=tracked_baseline,
                 current_tracked_positions_m=post_tracked,
+                scene_inventory_memory=scene_inventory_memory,
+                current_tracked_presence_entity_ids=(
+                    _temporal_inventory_tracked_presence_ids(
+                        env,
+                        scene_inventory_memory,
+                    )
+                ),
             )
             if post_events and active_lease.active:
                 event = post_events[0]
@@ -4356,6 +4429,13 @@ def _dispatch_guarded_world_effect_continuation(
                 state=post_state,
                 baseline_tracked_positions_m=tracked_baseline,
                 current_tracked_positions_m=post_tracked,
+                scene_inventory_memory=scene_inventory_memory,
+                current_tracked_presence_entity_ids=(
+                    _temporal_inventory_tracked_presence_ids(
+                        env,
+                        scene_inventory_memory,
+                    )
+                ),
             )
             if post_events and active_lease.active:
                 event = post_events[0]
@@ -6078,6 +6158,10 @@ def main() -> int:
     world_effect_sequence_budget = WorldEffectSequenceBudget(
         args_cli.world_effect_max_operations
     )
+    if args_cli.world_effect_occlusion_grace_observations < 0:
+        raise ValueError(
+            "world-effect-occlusion-grace-observations must be non-negative"
+        )
     if args_cli.world_effect_dispatch_evidence_max_age_s <= 0:
         raise ValueError(
             "world-effect-dispatch-evidence-max-age-s must be positive"
@@ -6854,6 +6938,20 @@ def main() -> int:
             "execution_authority": False,
             "authority_scope": [],
         },
+        "temporal_scene_inventory": {
+            "status": (
+                "pending"
+                if args_cli.guarded_world_effect_execution
+                else "disabled"
+            ),
+            "maximum_missed_observations": (
+                args_cli.world_effect_occlusion_grace_observations
+            ),
+            "active_target_visibility_uses_raw_rgbd": True,
+            "stale_geometry_exposed": False,
+            "task_authority": False,
+            "execution_authority": False,
+        },
         "motion_tool_protocol": {
             "observation_bound": True,
             "lease_model_observation_mode": (
@@ -7129,6 +7227,22 @@ def main() -> int:
         semantic_scene_inventory = semantic_scene_inventory_from_state(
             preflight_state
         )
+        scene_inventory_memory = TemporalSceneInventoryMemory(
+            semantic_scene_inventory,
+            maximum_missed_observations=(
+                args_cli.world_effect_occlusion_grace_observations
+            ),
+        )
+        episode_trace["temporal_scene_inventory"] = {
+            "status": (
+                "active"
+                if args_cli.guarded_world_effect_execution
+                else "available_not_used"
+            ),
+            **scene_inventory_memory.to_dict(),
+            "active_target_visibility_uses_raw_rgbd": True,
+            "progress_updates": [],
+        }
         preflight_entity_ids = {
             str(item["entity_id"])
             for item in semantic_scene_inventory.get("entities", [])
@@ -8849,6 +8963,13 @@ def main() -> int:
                         baseline_tracked_positions_m
                     ),
                     current_tracked_positions_m=fresh_tracked_positions_m,
+                    scene_inventory_memory=scene_inventory_memory,
+                    current_tracked_presence_entity_ids=(
+                        _temporal_inventory_tracked_presence_ids(
+                            env,
+                            scene_inventory_memory,
+                        )
+                    ),
                 )
                 fresh_evidence = build_fresh_dispatch_evidence(
                     runtime_lease=runtime_lease,
@@ -9031,6 +9152,13 @@ def main() -> int:
                             current_tracked_positions_m=(
                                 monitor_tracked_positions_m
                             ),
+                            scene_inventory_memory=scene_inventory_memory,
+                            current_tracked_presence_entity_ids=(
+                                _temporal_inventory_tracked_presence_ids(
+                                    env,
+                                    scene_inventory_memory,
+                                )
+                            ),
                         )
                         if not events:
                             return None
@@ -9097,6 +9225,13 @@ def main() -> int:
                             baseline_tracked_positions_m
                         ),
                         current_tracked_positions_m=post_tracked_positions_m,
+                        scene_inventory_memory=scene_inventory_memory,
+                        current_tracked_presence_entity_ids=(
+                            _temporal_inventory_tracked_presence_ids(
+                                env,
+                                scene_inventory_memory,
+                            )
+                        ),
                     )
                     if post_events and active_lease.active:
                         event = post_events[0]
@@ -9273,9 +9408,27 @@ def main() -> int:
                             env, continuation_state
                         )
                     )
-                    continuation_inventory = semantic_scene_inventory_from_state(
-                        continuation_state
+                    raw_continuation_inventory = (
+                        semantic_scene_inventory_from_state(
+                            continuation_state
+                        )
                     )
+                    temporal_progress_update = scene_inventory_memory.update(
+                        raw_continuation_inventory,
+                        independently_present_entity_ids=(
+                            _temporal_inventory_tracked_presence_ids(
+                                env,
+                                scene_inventory_memory,
+                            )
+                        ),
+                    )
+                    continuation_inventory = temporal_progress_update.inventory
+                    episode_trace["temporal_scene_inventory"][
+                        "latest_update"
+                    ] = temporal_progress_update.to_dict()
+                    episode_trace["temporal_scene_inventory"][
+                        "progress_updates"
+                    ].append(temporal_progress_update.to_dict())
                     continuation_frame = _single_exterior_frame(obs)
                     progress = assess_world_effect_progress(
                         graph=goal_graph,
@@ -9403,6 +9556,7 @@ def main() -> int:
                             ),
                             artifact_dir=args_cli.artifact_dir,
                             operation_index=next_operation_index,
+                            scene_inventory_memory=scene_inventory_memory,
                         )
                     )
                     operation_record["selected_goal_id"] = selected_goal_id

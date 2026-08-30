@@ -399,6 +399,20 @@ def _rgbd_inside_evaluator(
             reason="predicate_entity_absent",
             evidence={"predicate": predicate.to_dict()},
         )
+    subject_status = subject.get("observation_status")
+    reference_status = reference.get("observation_status")
+    if subject_status != "visible_rgbd" or reference_status != "visible_rgbd":
+        return WorldPredicateEvaluation(
+            evaluator_id=evaluator_id,
+            status="unknown",
+            reason="predicate_geometry_not_fresh_visible",
+            evidence={
+                "predicate": predicate.to_dict(),
+                "subject_observation_status": subject_status,
+                "reference_observation_status": reference_status,
+                "stale_geometry_accepted": False,
+            },
+        )
     subject_geometry = subject.get("geometry")
     reference_geometry = reference.get("geometry")
     if not isinstance(subject_geometry, Mapping) or not isinstance(

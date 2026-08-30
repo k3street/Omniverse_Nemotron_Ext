@@ -233,6 +233,59 @@ def test_lease_invalidates_on_added_removed_or_visibility_changed_entity():
     )
 
 
+def test_tracker_confirmed_temporary_occlusion_preserves_membership_only():
+    baseline = inventory()
+    lease = SceneMembershipLease.issue(graph(), baseline)
+    occluded = deepcopy(baseline)
+    red_block = next(
+        item for item in occluded["entities"] if item["entity_id"] == "red_block"
+    )
+    red_block["observation_status"] = "temporarily_occluded_rgbd"
+    red_block["geometry"] = {}
+    red_block["temporal_presence_evidence"] = {
+        "schema_version": "temporal-scene-inventory.v1",
+        "fresh_rgbd_geometry_available": False,
+        "missed_observations": 1,
+        "maximum_missed_observations": 3,
+        "independently_present": True,
+        "presence_source": "runtime_entity_pose_tracker",
+        "cached_geometry_exposed": False,
+        "completion_evidence": False,
+        "execution_authority": False,
+    }
+
+    result = lease.assess(occluded)
+
+    assert result.valid
+    assert result.reasons == ()
+    assert result.observation_status_changes == ()
+    assert result.transient_occlusion_status_changes == (
+        {
+            "entity_id": "red_block",
+            "before": "visible_rgbd",
+            "after": "temporarily_occluded_rgbd",
+        },
+    )
+    assert result.to_dict()["membership_preserved_by_temporal_evidence"]
+
+
+def test_unverified_temporary_occlusion_status_cannot_preserve_membership():
+    baseline = inventory()
+    lease = SceneMembershipLease.issue(graph(), baseline)
+    spoofed = deepcopy(baseline)
+    red_block = next(
+        item for item in spoofed["entities"] if item["entity_id"] == "red_block"
+    )
+    red_block["observation_status"] = "temporarily_occluded_rgbd"
+    red_block["geometry"] = {}
+
+    result = lease.assess(spoofed)
+
+    assert not result.valid
+    assert result.reasons == ("scene_entity_observation_status_changed",)
+    assert result.transient_occlusion_status_changes == ()
+
+
 def test_every_completed_goal_expires_lease_and_requires_fresh_graph():
     lease = SceneMembershipLease.issue(graph(), inventory())
 

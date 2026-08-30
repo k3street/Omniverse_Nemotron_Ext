@@ -58,6 +58,39 @@ def _inventory_statuses(inventory: Mapping[str, Any]) -> dict[str, str]:
     return result
 
 
+def _verified_temporal_occlusion(entity: Mapping[str, Any]) -> bool:
+    """Accept only bounded, non-geometric runtime occlusion evidence."""
+    if entity.get("observation_status") != "temporarily_occluded_rgbd":
+        return False
+    geometry = entity.get("geometry")
+    evidence = entity.get("temporal_presence_evidence")
+    if not isinstance(geometry, Mapping) or geometry:
+        return False
+    if not isinstance(evidence, Mapping):
+        return False
+    missed = evidence.get("missed_observations")
+    maximum = evidence.get("maximum_missed_observations")
+    independently_present = evidence.get("independently_present")
+    if (
+        isinstance(missed, bool)
+        or not isinstance(missed, int)
+        or missed < 1
+        or isinstance(maximum, bool)
+        or not isinstance(maximum, int)
+        or maximum < 0
+        or not isinstance(independently_present, bool)
+    ):
+        return False
+    return bool(
+        evidence.get("schema_version") == "temporal-scene-inventory.v1"
+        and evidence.get("fresh_rgbd_geometry_available") is False
+        and evidence.get("cached_geometry_exposed") is False
+        and evidence.get("completion_evidence") is False
+        and evidence.get("execution_authority") is False
+        and (independently_present or missed <= maximum)
+    )
+
+
 def scene_membership_fingerprint(inventory: Mapping[str, Any]) -> str:
     """Hash membership and visibility state, deliberately excluding live pose."""
     statuses = _inventory_statuses(inventory)
@@ -237,6 +270,7 @@ class SceneMembershipLeaseAssessment:
     added_entity_ids: tuple[str, ...]
     removed_entity_ids: tuple[str, ...]
     observation_status_changes: tuple[Mapping[str, str], ...]
+    transient_occlusion_status_changes: tuple[Mapping[str, str], ...]
     completed_goal_id: str | None
     task_completion_requested: bool
 
@@ -251,6 +285,16 @@ class SceneMembershipLeaseAssessment:
             "observation_status_changes": [
                 dict(item) for item in self.observation_status_changes
             ],
+            "transient_occlusion_status_changes": [
+                dict(item) for item in self.transient_occlusion_status_changes
+            ],
+            "temporarily_occluded_entity_ids": [
+                item["entity_id"]
+                for item in self.transient_occlusion_status_changes
+            ],
+            "membership_preserved_by_temporal_evidence": bool(
+                self.transient_occlusion_status_changes
+            ),
             "completed_goal_id": self.completed_goal_id,
             "task_completion_requested": self.task_completion_requested,
         }
@@ -300,11 +344,17 @@ class SceneMembershipLease:
         task_completion_requested: bool = False,
     ) -> SceneMembershipLeaseAssessment:
         current_statuses = _inventory_statuses(current_inventory)
+        current_entities = {
+            str(item["entity_id"]): item
+            for item in current_inventory.get("entities", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("entity_id"), str)
+        }
         baseline_ids = set(self.entity_statuses)
         current_ids = set(current_statuses)
         added = tuple(sorted(current_ids - baseline_ids))
         removed = tuple(sorted(baseline_ids - current_ids))
-        status_changes = tuple(
+        all_status_changes = tuple(
             {
                 "entity_id": entity_id,
                 "before": self.entity_statuses[entity_id],
@@ -312,6 +362,20 @@ class SceneMembershipLease:
             }
             for entity_id in sorted(baseline_ids & current_ids)
             if self.entity_statuses[entity_id] != current_statuses[entity_id]
+        )
+        transient_occlusion_status_changes = tuple(
+            item
+            for item in all_status_changes
+            if _verified_temporal_occlusion(
+                current_entities.get(item["entity_id"], {})
+            )
+        )
+        status_changes = tuple(
+            item
+            for item in all_status_changes
+            if not _verified_temporal_occlusion(
+                current_entities.get(item["entity_id"], {})
+            )
         )
         reasons: list[str] = []
         if added:
@@ -338,6 +402,9 @@ class SceneMembershipLease:
             added_entity_ids=added,
             removed_entity_ids=removed,
             observation_status_changes=status_changes,
+            transient_occlusion_status_changes=(
+                transient_occlusion_status_changes
+            ),
             completed_goal_id=completed_goal_id,
             task_completion_requested=task_completion_requested,
         )

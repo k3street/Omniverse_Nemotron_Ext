@@ -198,6 +198,24 @@ def test_missing_visible_geometry_is_unknown_not_false_completion():
     assert result.reason == "predicate_geometry_unavailable"
 
 
+def test_temporarily_occluded_geometry_cannot_prove_a_predicate():
+    scene = inventory(block_inside=True)
+    red_block = next(
+        item for item in scene["entities"] if item["entity_id"] == "red_block"
+    )
+    red_block["observation_status"] = "temporarily_occluded_rgbd"
+    relation = WorldPredicate.from_mapping(
+        predicate("red_block", "inside", "==", True, "grey_bin"),
+        "predicate",
+    )
+
+    result = rgbd_world_predicate_evaluator_registry().evaluate(relation, scene)
+
+    assert result.status == "unknown"
+    assert result.reason == "predicate_geometry_not_fresh_visible"
+    assert result.evidence["stale_geometry_accepted"] is False
+
+
 def test_graph_admission_fails_closed_on_table_clean_but_admits_inside_relation():
     registry = rgbd_world_predicate_evaluator_registry()
 

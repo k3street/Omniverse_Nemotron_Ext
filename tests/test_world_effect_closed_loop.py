@@ -13,6 +13,7 @@ from scripts.world_goal_graph_membership import SceneMembershipLease
 from scripts.world_predicate_evaluator_registry import (
     rgbd_world_predicate_evaluator_registry,
 )
+from scripts.world_scene_inventory_memory import TemporalSceneInventoryMemory
 from tests.test_world_goal_activation import graph, inventory
 
 
@@ -77,6 +78,37 @@ def test_membership_change_forces_fresh_graph_before_another_operation():
     assert result.membership_assessment.reasons == ("scene_entity_added",)
 
 
+def test_unrelated_tracker_confirmed_occlusion_does_not_abort_selected_goal():
+    baseline = inventory()
+    changed = deepcopy(baseline)
+    changed["entities"] = [
+        item
+        for item in changed["entities"]
+        if item["entity_id"] != "green_block"
+    ]
+    memory = TemporalSceneInventoryMemory(
+        baseline,
+        maximum_missed_observations=0,
+    )
+    fused = memory.update(
+        changed,
+        independently_present_entity_ids=("green_block",),
+    )
+
+    result = assess(fused.inventory, operation_index=2)
+
+    assert result.status == "continue_selected_goal"
+    assert result.selected_goal_satisfied is False
+    assert result.membership_assessment.valid
+    assert result.membership_assessment.transient_occlusion_status_changes == (
+        {
+            "entity_id": "green_block",
+            "before": "visible_rgbd",
+            "after": "temporarily_occluded_rgbd",
+        },
+    )
+
+
 def test_lost_goal_geometry_requires_observation_instead_of_motion():
     changed = deepcopy(inventory())
     red = next(item for item in changed["entities"] if item["entity_id"] == "red_block")
@@ -135,3 +167,22 @@ def test_runner_contract_exposes_a_bounded_sequence_not_one_open_loop_call():
     assert "Every operation receives a fresh-evidence, single-use permit" in source
     assert 'default=120.0' in source
     assert "wall-clock deadman" in source
+    assert '"--world-effect-occlusion-grace-observations"' in source
+    assert "TemporalSceneInventoryMemory(" in source
+    assert "raw_continuation_inventory" in source
+    assert "temporal_progress_update.inventory" in source
+    assert "active_target_visibility_uses_raw_rgbd" in source
+    assert source.count("scene_inventory_memory=scene_inventory_memory") >= 7
+    invalidation = source.index("def _guarded_dispatch_invalidation_events(")
+    raw_geometry = source.index(
+        "current_geometry = _runtime_geometry_by_id(state)", invalidation
+    )
+    temporal_identity = source.index("temporal_update = (", raw_geometry)
+    target_visibility = source.index(
+        'elif condition_id == "scene.target_visibility_lost":',
+        temporal_identity,
+    )
+    raw_target_gate = source.index(
+        "targets - set(current_geometry)", target_visibility
+    )
+    assert raw_geometry < temporal_identity < target_visibility < raw_target_gate
