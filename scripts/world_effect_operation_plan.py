@@ -794,17 +794,27 @@ def build_world_effect_operation_prompt(
     inventory: Mapping[str, Any],
     instance: PlanningWorldEffectProviderInstance,
     candidate_set: WorldEffectOperationCandidateSet,
+    execution_context: Mapping[str, Any] | None = None,
 ) -> str:
-    """Ask for the first provider operation as a non-executable semantic outcome."""
+    """Ask for one provider operation as a non-executable semantic outcome."""
     instruction = _text(instruction, "instruction")
-    return f"""Propose the first semantic operation for a planning-only world-effect
-provider instance using the attached fresh observation.
+    context = (
+        {"status": "not_supplied"}
+        if execution_context is None
+        else _json_copy(execution_context, "execution_context")
+    )
+    return f"""Propose the first semantic operation, or the next continuation
+operation, for a planning-only world-effect provider instance using the attached
+fresh observation.
 
 Human instruction:
 {instruction}
 
 Fresh semantic scene inventory:
 {json.dumps(_json_copy(inventory, "inventory"), indent=2)}
+
+Fresh execution context after the previous operation:
+{json.dumps(context, indent=2)}
 
 Planning-only provider instance:
 {json.dumps(instance.to_dict(), indent=2)}
@@ -817,7 +827,11 @@ operation_candidate_id/requirement_id/tool_id triple. Select its semantic
 purpose, only related target entities, a desired observable outcome, and the
 evidence condition at which the bounded operation must stop and return a fresh
 observation. Use observe_again when current evidence is insufficient or blocked
-when no candidate can advance the selected goal.
+when no candidate can advance the selected goal. Treat the fresh execution
+context as authoritative: do not repeat a completed precondition; request
+attachment when interaction alignment is ready but the subject is not retained;
+and request transport or release only when fresh contact and actuator state
+support it. Never assume an earlier operation succeeded.
 
 This proposal does not call the named tool. Declarative factory specifications
 are instantiated, but no handler is bound and dispatch is disabled. Do not

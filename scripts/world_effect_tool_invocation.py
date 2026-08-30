@@ -304,6 +304,8 @@ class ShadowToolInvocationCandidate:
     invalidation_condition_ids: tuple[str, ...]
     current_controlled_position_m: tuple[float, float, float]
     current_controlled_quaternion_wxyz: tuple[float, float, float, float]
+    current_interaction_position_m: tuple[float, float, float] | None
+    current_interaction_offsets_from_anchors: tuple[Mapping[str, Any], ...]
     interaction_origin_offset_local_m: tuple[float, float, float] | None
     interaction_alignment_axis_local: tuple[float, float, float] | None
     interaction_alignment_relation: str
@@ -356,6 +358,15 @@ class ShadowToolInvocationCandidate:
                     self.current_controlled_quaternion_wxyz
                 ),
             },
+            "current_interaction_position_m": (
+                None
+                if self.current_interaction_position_m is None
+                else list(self.current_interaction_position_m)
+            ),
+            "current_interaction_offsets_from_anchors": [
+                _json_copy(item, "current_interaction_offset")
+                for item in self.current_interaction_offsets_from_anchors
+            ],
             "interaction_frame": {
                 "origin_offset_local_m": (
                     None
@@ -664,6 +675,38 @@ def build_shadow_tool_invocation_candidates(
         raise WorldEffectToolInvocationError(
             "orientation invocation lacks observed axes or interaction alignment axis"
         )
+    current_interaction_position: tuple[float, ...] | None = None
+    current_interaction_offsets: tuple[Mapping[str, Any], ...] = ()
+    if origin_offset is not None:
+        rotated_current_origin = _rotate_wxyz(
+            current_quaternion,
+            origin_offset,
+        )
+        current_interaction_position = tuple(
+            position + component
+            for position, component in zip(
+                current_position,
+                rotated_current_origin,
+            )
+        )
+        current_interaction_offsets = tuple(
+            {
+                "anchor_id": anchor.anchor_id,
+                "entity_id": anchor.entity_id,
+                "current_interaction_offset_from_anchor_m": [
+                    current - target
+                    for current, target in zip(
+                        current_interaction_position,
+                        anchor.position_m,
+                    )
+                ],
+                "current_interaction_distance_from_anchor_m": _distance(
+                    current_interaction_position,
+                    anchor.position_m,
+                ),
+            }
+            for anchor in position_anchors
+        )
     model_argument_schema = _json_copy(
         invocation_schema, "model_argument_schema"
     )
@@ -692,6 +735,8 @@ def build_shadow_tool_invocation_candidates(
         "model_argument_schema": model_argument_schema,
         "materialized_argument_fields": list(materialized_argument_fields),
         "position_anchors": [item.to_dict() for item in position_anchors],
+        "current_interaction_position_m": current_interaction_position,
+        "current_interaction_offsets_from_anchors": current_interaction_offsets,
         "orientation_axes": [item.to_dict() for item in orientation_axes],
     }
     candidate = ShadowToolInvocationCandidate(
@@ -712,6 +757,8 @@ def build_shadow_tool_invocation_candidates(
         invalidation_condition_ids=invalidation_ids,
         current_controlled_position_m=current_position,  # type: ignore[arg-type]
         current_controlled_quaternion_wxyz=current_quaternion,  # type: ignore[arg-type]
+        current_interaction_position_m=current_interaction_position,  # type: ignore[arg-type]
+        current_interaction_offsets_from_anchors=current_interaction_offsets,
         interaction_origin_offset_local_m=origin_offset,  # type: ignore[arg-type]
         interaction_alignment_axis_local=alignment_axis,  # type: ignore[arg-type]
         interaction_alignment_relation=alignment_relation,
@@ -1076,6 +1123,21 @@ class ShadowToolInvocationGate:
             displacement = _distance(
                 target_position, candidate.current_controlled_position_m
             )
+            position_tolerance = candidate.tool_configuration.get(
+                "position_tolerance_m"
+            )
+            if (
+                candidate.tool_family == "motion"
+                and isinstance(position_tolerance, (int, float))
+                and not isinstance(position_tolerance, bool)
+                and math.isfinite(float(position_tolerance))
+                and displacement <= float(position_tolerance)
+            ):
+                raise WorldEffectToolInvocationError(
+                    "materialized motion target is already within the configured "
+                    "position tolerance; choose a meaningfully different "
+                    "interaction offset or a non-motion operation"
+                )
             maximum_displacement = float(
                 constraints.get("maximum_displacement_m", math.inf)
             )
@@ -1199,9 +1261,15 @@ def build_shadow_tool_invocation_prompt(
     *,
     instruction: str,
     candidate_set: ShadowToolInvocationCandidateSet,
+    rejection_context: Mapping[str, Any] | None = None,
 ) -> str:
     """Request one typed invocation while preserving the no-dispatch boundary."""
     instruction = _text(instruction, "instruction")
+    previous_rejection = (
+        {"status": "none"}
+        if rejection_context is None
+        else _json_copy(rejection_context, "rejection_context")
+    )
     return f"""Propose one typed, RGB-D-grounded invocation for the selected
 runtime tool and shadow execution lease.
 
@@ -1210,6 +1278,9 @@ Human instruction:
 
 Fresh invocation candidate:
 {json.dumps(candidate_set.to_dict(), indent=2)}
+
+Previous proposal rejection for this same fresh observation:
+{json.dumps(previous_rejection, indent=2)}
 
 Choose propose_invocation only for the exact candidate, lease, and tool. Preserve
 every lease invalidation id exactly. Fill invocation_arguments using only the
@@ -1227,6 +1298,19 @@ target_position_m so that:
 The offset must also remain inside the selected anchor's scene-derived
 offset_min_m/offset_max_m envelope. This prevents a nominally grounded pose from
 placing the interaction point laterally outside the observed target.
+
+The candidate explicitly reports current_interaction_offsets_from_anchors.
+These are the current interaction-frame offsets, not suggested targets. Change
+the selected offset when the operation asks to lower, raise, or otherwise move
+the interaction frame. Never repeat the current offset while claiming a
+different observable outcome. In particular, an offset above a top-center
+anchor is clearance of the interaction point itself; it is not the controlled
+frame's gripper-base-to-contact distance, because the deterministic gate already
+accounts for interaction_origin_offset_local_m.
+If a previous proposal was rejected as already within the configured position
+tolerance, do not resubmit that no-op target. Change the interaction offset to
+realize the selected observable outcome, or return blocked/observe_again so the
+provider can choose a different advertised operation.
 
 For an orientation-grounded invocation, select an observed orientation axis.
 The target quaternion must rotate the advertised local interaction alignment

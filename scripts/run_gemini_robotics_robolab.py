@@ -395,18 +395,29 @@ parser.add_argument(
 parser.add_argument(
     "--world-effect-runtime-lease-duration-s",
     type=float,
-    default=5.0,
+    default=120.0,
     help=(
-        "Runtime-owned lifetime for one issued exact-invocation lease. The "
-        "lease remains non-dispatching until a later dispatch permit boundary."
+        "Runtime-owned wall-clock deadman for one issued exact-invocation "
+        "lease. Sensor invalidations remain active throughout; this window "
+        "must cover one bounded rendered IK operation."
     ),
 )
 parser.add_argument(
     "--guarded-world-effect-execution",
     action="store_true",
     help=(
-        "Execute exactly one validated world-effect invocation through a fresh-"
-        "evidence, single-use permit, then stop with a replan-ready observation."
+        "Execute a bounded sequence of validated world-effect invocations. "
+        "Every operation receives a fresh-evidence, single-use permit and is "
+        "followed by world-goal re-evaluation before any replan."
+    ),
+)
+parser.add_argument(
+    "--world-effect-max-operations",
+    type=int,
+    default=8,
+    help=(
+        "Runtime-owned maximum number of single-use guarded operations in one "
+        "world-effect sequence. Model output cannot enlarge this bound."
     ),
 )
 parser.add_argument(
@@ -605,6 +616,7 @@ from world_effect_execution_lease import (  # noqa: E402
 from world_effect_tool_invocation import (  # noqa: E402
     RUNTIME_TOOL_OBSERVATION_SCHEMA_VERSION,
     ShadowToolInvocationGate,
+    WorldEffectToolInvocationError,
     build_shadow_tool_invocation_candidates,
     build_shadow_tool_invocation_prompt,
 )
@@ -617,6 +629,11 @@ from world_effect_guarded_dispatch import (  # noqa: E402
     GuardedWorldEffectDispatcher,
     RuntimeWorldEffectHandlerRegistry,
     build_fresh_dispatch_evidence,
+    interaction_obstacle_geometry,
+)
+from world_effect_closed_loop import (  # noqa: E402
+    WorldEffectSequenceBudget,
+    assess_world_effect_progress,
 )
 from world_scope_membership_audit import (  # noqa: E402
     WorldScopeMembershipAuditGate,
@@ -3403,6 +3420,29 @@ def _axis_set_error_deg(
     return min(errors) if errors else None
 
 
+def _interaction_target_entity_id(
+    invocation_candidate: Any,
+    invocation_decision: Any,
+) -> str | None:
+    """Resolve the fresh RGB-D anchor entity intentionally being contacted."""
+    selected_anchor_id = invocation_decision.position_anchor_id
+    if selected_anchor_id is None:
+        return None
+    selected_anchor = next(
+        (
+            item
+            for item in invocation_candidate.position_anchors
+            if item.anchor_id == selected_anchor_id
+        ),
+        None,
+    )
+    if selected_anchor is None:
+        raise RuntimeError(
+            "issued invocation position anchor is absent from its candidate"
+        )
+    return selected_anchor.entity_id
+
+
 def _guarded_dispatch_invalidation_events(
     *,
     runtime_lease: Any,
@@ -3580,8 +3620,17 @@ def _guarded_dispatch_invalidation_events(
             if isinstance(current_position, (list, tuple)) and isinstance(
                 target_position, (list, tuple)
             ):
+                obstacle_geometry = interaction_obstacle_geometry(
+                    current_geometry,
+                    interaction_target_entity_id=(
+                        _interaction_target_entity_id(
+                            invocation_candidate,
+                            invocation_decision,
+                        )
+                    ),
+                )
                 clearance, nearest_id = _interaction_path_clearance_m(
-                    current_position, target_position, current_geometry
+                    current_position, target_position, obstacle_geometry
                 )
                 limit = float(config.get("minimum_observed_clearance_m", 0.0))
                 if clearance < limit:
@@ -3601,6 +3650,806 @@ def _guarded_dispatch_invalidation_events(
             if not isinstance(contact, Mapping) or not contact.get("touch"):
                 emit(binding, {"contact": contact}, "required contact was lost")
     return tuple(invalidations)
+
+
+def _plan_guarded_world_effect_continuation(
+    *,
+    coach: Any,
+    instruction: str,
+    frame: np.ndarray,
+    graph: WorldGoalGraph,
+    membership_lease: SceneMembershipLease,
+    inventory: Mapping[str, Any],
+    predicate_registry: Any,
+    capability_registry: Any,
+    capability_advertisement: Mapping[str, Any],
+    provider_registry: Any,
+    runtime_effect_tools: Sequence[RuntimeToolCapability],
+    trackable_object_ids: Sequence[str],
+    runtime_state: Mapping[str, Any],
+    maximum_duration_s: float,
+    operation_index: int,
+) -> dict[str, Any]:
+    """Plan and issue one fresh continuation lease without dispatching it.
+
+    This is intentionally a full replan. Every model response is constrained by
+    a candidate set derived from the current inventory, and the returned lease
+    still needs a fresh-evidence, single-use dispatch permit.
+    """
+    activation_candidates = build_goal_activation_candidates(
+        graph,
+        membership_lease,
+        predicate_registry,
+        capability_registry,
+        inventory,
+    )
+    inventory_digest = hashlib.sha256(
+        json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()[:16]
+    graph_digest = hashlib.sha256(
+        json.dumps(
+            graph.to_dict(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    activation_observation_id = (
+        f"goal-activation-continuation:{operation_index}:"
+        f"{inventory_digest}:{graph_digest}"
+    )
+    activation_payload, activation_latency, activation_image_digest = coach.reason(
+        build_world_goal_activation_prompt(
+            instruction=instruction,
+            observation_id=activation_observation_id,
+            graph=graph,
+            membership_lease=membership_lease,
+            inventory=inventory,
+            capability_advertisement=capability_advertisement,
+            candidate_set=activation_candidates,
+        ),
+        frame,
+    )
+    activation_decision = WorldGoalActivationGate(
+        activation_observation_id,
+        activation_candidates,
+    ).dispatch(activation_payload)
+    trace: dict[str, Any] = {
+        "operation_index": operation_index,
+        "goal_activation": {
+            "observation_id": activation_observation_id,
+            "candidate_set": activation_candidates.to_dict(),
+            "decision": activation_decision.to_dict(),
+            "latency_s": activation_latency,
+            "image_digest": activation_image_digest,
+        },
+        "motion_authority": False,
+        "execution_authority": False,
+        "authority_scope": [],
+    }
+    if activation_decision.decision != "select_goal":
+        return {
+            "status": "goal_not_selected",
+            "trace": trace,
+            "activation_decision": activation_decision,
+        }
+
+    provider_assessment = provider_registry.assess(
+        activation_decision.capability_id,
+        runtime_effect_tools,
+    )
+    session_candidates = build_world_effect_session_candidates(
+        graph,
+        membership_lease,
+        activation_candidates,
+        activation_decision,
+        provider_assessment,
+    )
+    session_payload, session_latency, session_image_digest = coach.reason(
+        build_world_effect_session_prompt(
+            instruction=instruction,
+            graph=graph,
+            membership_lease=membership_lease,
+            activation_decision=activation_decision,
+            candidate_set=session_candidates,
+        ),
+        frame,
+    )
+    session_decision = WorldEffectSessionGate(session_candidates).dispatch(
+        session_payload
+    )
+    trace["effect_session"] = {
+        "provider_assessment": provider_assessment.to_dict(),
+        "candidate_set": session_candidates.to_dict(),
+        "decision": session_decision.to_dict(),
+        "latency_s": session_latency,
+        "image_digest": session_image_digest,
+    }
+    if session_decision.decision != "select_provider":
+        return {
+            "status": "provider_not_selected",
+            "trace": trace,
+            "activation_decision": activation_decision,
+        }
+
+    factory_catalog = PlanningToolFactoryCatalog()
+    factory_catalog.register(
+        PlanningToolFactory(
+            factory_tool_id="factory.spatial_pose_target",
+            tool_family="motion",
+            capability_tags=SPATIAL_MOTION_CAPABILITY_TAGS,
+            activator=lambda: _local_dls_executor_registry(
+                trackable_object_ids
+            ).advertisement(),
+        )
+    )
+    factory_catalog.register(
+        PlanningToolFactory(
+            factory_tool_id="factory.reversible_entity_attachment",
+            tool_family="actuator",
+            capability_tags=REVERSIBLE_ATTACHMENT_CAPABILITY_TAGS,
+            activator=lambda: _local_binary_actuator_registry().advertisement(),
+        )
+    )
+    provider_instance = build_planning_world_effect_provider_instance(
+        session_candidates,
+        session_decision,
+        runtime_effect_tools,
+        factory_catalog,
+    )
+    operation_candidates = build_world_effect_operation_candidates(
+        provider_instance,
+        inventory,
+    )
+    execution_context = {
+        "operation_index": operation_index,
+        "controlled_frame": {
+            "position_m": runtime_state.get("eef_gripper_base_xyz"),
+            "quaternion_wxyz": runtime_state.get(
+                "eef_gripper_base_quaternion_wxyz"
+            ),
+        },
+        "interaction_frame": runtime_state.get("actuator_contact_geometry"),
+        "current_contact": runtime_state.get("current_contact"),
+        "gripper_closed_fraction": runtime_state.get(
+            "gripper_closed_fraction"
+        ),
+        "fresh_rgbd_geometry": runtime_state.get("rgbd_scene_geometry"),
+    }
+    operation_payload, operation_latency, operation_image_digest = coach.reason(
+        build_world_effect_operation_prompt(
+            instruction=instruction,
+            inventory=inventory,
+            instance=provider_instance,
+            candidate_set=operation_candidates,
+            execution_context=execution_context,
+        ),
+        frame,
+    )
+    operation_decision = WorldEffectOperationGate(operation_candidates).dispatch(
+        operation_payload
+    )
+    trace["operation_plan"] = {
+        "planning_provider_instance": provider_instance.to_dict(),
+        "candidate_set": operation_candidates.to_dict(),
+        "decision": operation_decision.to_dict(),
+        "execution_context": execution_context,
+        "latency_s": operation_latency,
+        "image_digest": operation_image_digest,
+    }
+    if operation_decision.decision != "propose_operation":
+        return {
+            "status": "operation_not_proposed",
+            "trace": trace,
+            "activation_decision": activation_decision,
+        }
+
+    lease_candidates = build_shadow_execution_lease_candidates(
+        provider_instance,
+        operation_candidates,
+        operation_decision,
+        inventory,
+    )
+    lease_payload, lease_latency, lease_image_digest = coach.reason(
+        build_shadow_execution_lease_prompt(
+            instruction=instruction,
+            candidate_set=lease_candidates,
+        ),
+        frame,
+    )
+    lease_decision = ShadowExecutionLeaseGate(lease_candidates).dispatch(
+        lease_payload
+    )
+    trace["execution_lease"] = {
+        "candidate_set": lease_candidates.to_dict(),
+        "decision": lease_decision.to_dict(),
+        "latency_s": lease_latency,
+        "image_digest": lease_image_digest,
+    }
+    if lease_decision.decision != "propose_lease":
+        return {
+            "status": "lease_not_proposed",
+            "trace": trace,
+            "activation_decision": activation_decision,
+        }
+
+    interaction_geometry = runtime_state.get("actuator_contact_geometry", {})
+    if not isinstance(interaction_geometry, Mapping):
+        raise ValueError("runtime interaction geometry must be an object")
+    runtime_observation = {
+        "schema_version": RUNTIME_TOOL_OBSERVATION_SCHEMA_VERSION,
+        "source": "fresh_continuation_controlled_and_interaction_frames",
+        "coordinate_frame": inventory.get("frame", "unknown"),
+        "controlled_frame": {
+            "position_m": runtime_state["eef_gripper_base_xyz"],
+            "quaternion_wxyz": runtime_state[
+                "eef_gripper_base_quaternion_wxyz"
+            ],
+        },
+        "interaction_frame": {
+            "origin_offset_local_m": interaction_geometry.get(
+                "contact_center_local_m"
+            ),
+            "alignment_axis_local": interaction_geometry.get(
+                "closing_axis_local"
+            ),
+            "alignment_relation": "surface_tangent",
+        },
+    }
+    invocation_candidates = build_shadow_tool_invocation_candidates(
+        provider_instance,
+        lease_candidates,
+        lease_decision,
+        runtime_observation,
+    )
+    invocation_attempts: list[dict[str, Any]] = []
+    invocation_decision = None
+    invocation_latency = None
+    invocation_image_digest = None
+    rejection_context: Mapping[str, Any] | None = None
+    for invocation_attempt in range(1, 3):
+        invocation_payload, invocation_latency, invocation_image_digest = (
+            coach.reason(
+                build_shadow_tool_invocation_prompt(
+                    instruction=instruction,
+                    candidate_set=invocation_candidates,
+                    rejection_context=rejection_context,
+                ),
+                frame,
+            )
+        )
+        try:
+            invocation_decision = ShadowToolInvocationGate(
+                invocation_candidates
+            ).dispatch(invocation_payload)
+            invocation_attempts.append(
+                {
+                    "attempt": invocation_attempt,
+                    "status": "valid",
+                    "decision": invocation_decision.to_dict(),
+                    "latency_s": invocation_latency,
+                    "image_digest": invocation_image_digest,
+                }
+            )
+            break
+        except WorldEffectToolInvocationError as invocation_error:
+            rejection_context = {
+                "attempt": invocation_attempt,
+                "error_type": type(invocation_error).__name__,
+                "error": str(invocation_error),
+                "requirements": {
+                    "same_fresh_candidate_set": True,
+                    "do_not_repeat_rejected_arguments": True,
+                    "execution_authority": False,
+                },
+            }
+            invocation_attempts.append(
+                {
+                    "attempt": invocation_attempt,
+                    "status": "rejected",
+                    "proposal": invocation_payload,
+                    "rejection": dict(rejection_context),
+                    "latency_s": invocation_latency,
+                    "image_digest": invocation_image_digest,
+                }
+            )
+            if invocation_attempt >= 2:
+                raise
+    if invocation_decision is None:
+        raise RuntimeError("continuation invocation produced no decision")
+    trace["tool_invocation"] = {
+        "runtime_observation": runtime_observation,
+        "candidate_set": invocation_candidates.to_dict(),
+        "decision": invocation_decision.to_dict(),
+        "attempts": invocation_attempts,
+        "latency_s": invocation_latency,
+        "image_digest": invocation_image_digest,
+    }
+    if invocation_decision.decision != "propose_invocation":
+        return {
+            "status": "invocation_not_proposed",
+            "trace": trace,
+            "activation_decision": activation_decision,
+        }
+
+    runtime_lease = issue_world_effect_runtime_lease(
+        lease_candidates=lease_candidates,
+        lease_decision=lease_decision,
+        invocation_candidates=invocation_candidates,
+        invocation_decision=invocation_decision,
+        maximum_duration_s=maximum_duration_s,
+    )
+    trace["runtime_lease"] = runtime_lease.to_dict()
+    return {
+        "status": "runtime_lease_issued",
+        "trace": trace,
+        "runtime_lease": runtime_lease,
+        "lease_candidates": lease_candidates,
+        "lease_decision": lease_decision,
+        "invocation_candidates": invocation_candidates,
+        "invocation_decision": invocation_decision,
+        "planning_provider": provider_instance,
+        "activation_decision": activation_decision,
+    }
+
+
+def _dispatch_guarded_world_effect_continuation(
+    *,
+    env: Any,
+    obs: dict[str, Any],
+    initial_object_z: float,
+    bundle: Mapping[str, Any],
+    baseline_inventory: Mapping[str, Any],
+    baseline_tracked_positions_m: Mapping[str, Sequence[float]],
+    motion_registry: MotionExecutorRegistry,
+    actuator_registry: ActuatorExecutorRegistry,
+    maximum_evidence_age_s: float,
+    maximum_permit_lifetime_s: float,
+    artifact_dir: Path,
+    operation_index: int,
+) -> tuple[dict[str, Any], bool, dict[str, Any]]:
+    """Dispatch one continuation bundle through a fresh single-use permit."""
+    runtime_lease = bundle["runtime_lease"]
+    lease_candidates = bundle["lease_candidates"]
+    lease_decision = bundle["lease_decision"]
+    invocation_candidates = bundle["invocation_candidates"]
+    invocation_decision = bundle["invocation_decision"]
+    planning_provider = bundle["planning_provider"]
+    lease_candidate = next(
+        item
+        for item in lease_candidates.candidates
+        if item.candidate_id == lease_decision.candidate_id
+    )
+    invocation_candidate = next(
+        item
+        for item in invocation_candidates.candidates
+        if item.candidate_id == invocation_decision.candidate_id
+    )
+    baseline_membership_ids = {
+        str(item["entity_id"])
+        for item in baseline_inventory.get("entities", [])
+        if isinstance(item, Mapping) and isinstance(item.get("entity_id"), str)
+    }
+    target_ids = lease_candidate.operation_target_entity_ids
+    tracked_baseline = {
+        entity_id: baseline_tracked_positions_m[entity_id]
+        for entity_id in target_ids
+        if entity_id in baseline_tracked_positions_m
+    }
+    fresh_state = _state(env, initial_object_z)
+    fresh_tracked = _tracked_entity_positions_m(env, target_ids)
+    fresh_events = _guarded_dispatch_invalidation_events(
+        runtime_lease=runtime_lease,
+        lease_candidate=lease_candidate,
+        invocation_candidate=invocation_candidate,
+        invocation_decision=invocation_decision,
+        baseline_membership_ids=baseline_membership_ids,
+        current_provider_instance_id=planning_provider.instance_id,
+        state=fresh_state,
+        baseline_tracked_positions_m=tracked_baseline,
+        current_tracked_positions_m=fresh_tracked,
+    )
+    fresh_evidence = build_fresh_dispatch_evidence(
+        runtime_lease=runtime_lease,
+        source="live_simulator_continuation_rgbd_state",
+        observation={
+            "controlled_frame": {
+                "position_m": fresh_state["eef_gripper_base_xyz"],
+                "quaternion_wxyz": fresh_state[
+                    "eef_gripper_base_quaternion_wxyz"
+                ],
+            },
+            "interaction_frame": fresh_state.get("actuator_contact_geometry"),
+            "rgbd_scene_geometry": fresh_state.get("rgbd_scene_geometry"),
+            "tracked_entity_positions_m": fresh_tracked,
+            "current_contact": fresh_state.get("current_contact"),
+            "gripper_closed_fraction": fresh_state.get(
+                "gripper_closed_fraction"
+            ),
+        },
+        invalidation_events=fresh_events,
+    )
+    handler_registry = RuntimeWorldEffectHandlerRegistry()
+    monitored_events: list[dict[str, Any]] = []
+    issued_geometry_by_id = {
+        item.entity_id: item.geometry for item in lease_candidate.geometry_bindings
+    }
+    obstacle_geometry_by_id = interaction_obstacle_geometry(
+        issued_geometry_by_id,
+        interaction_target_entity_id=_interaction_target_entity_id(
+            invocation_candidate,
+            invocation_decision,
+        ),
+    )
+
+    if lease_candidate.tool_family == "motion":
+        runtime_spec = next(
+            (
+                item
+                for item in motion_registry.specs()
+                if item.executor_id == runtime_lease.lease.tool_id
+            ),
+            None,
+        )
+        if runtime_spec is None:
+            raise RuntimeError("issued continuation tool has no motion executor")
+        selected_orientation_axis = next(
+            (
+                item
+                for item in invocation_candidate.orientation_axes
+                if item.alignment_id
+                == invocation_decision.orientation_alignment_id
+            ),
+            None,
+        )
+        rgbd_axis_references = (
+            {
+                selected_orientation_axis.entity_id: np.asarray(
+                    selected_orientation_axis.axis_robot_root,
+                    dtype=np.float64,
+                )
+            }
+            if selected_orientation_axis is not None
+            else {}
+        )
+
+        def handler(
+            invocation_arguments: Mapping[str, Any],
+            tool_configuration: Mapping[str, Any],
+            active_lease: Any,
+        ) -> Mapping[str, Any]:
+            target_position = torch.tensor(
+                invocation_arguments["target_position_m"], dtype=torch.float32
+            )
+            target_quaternion = torch.tensor(
+                invocation_arguments["target_quaternion_wxyz"],
+                dtype=torch.float32,
+            )
+            initial_action = _current_robot_joint_action(
+                env,
+                gripper_closed_fraction=float(
+                    fresh_state["gripper_closed_fraction"]
+                ),
+            )
+
+            def observe_clearance() -> tuple[float, str]:
+                interaction = _actuator_contact_geometry(env, _eef_position(env))
+                current_position = interaction.get("contact_center_xyz_m")
+                target_interaction_position = (
+                    invocation_decision.grounding_assessment.get(
+                        "realized_interaction_position_m"
+                    )
+                )
+                if not isinstance(current_position, (list, tuple)) or not isinstance(
+                    target_interaction_position, (list, tuple)
+                ):
+                    raise RuntimeError(
+                        "continuation clearance observer lacks an interaction frame"
+                    )
+                clearance, _ = _interaction_path_clearance_m(
+                    current_position,
+                    target_interaction_position,
+                    obstacle_geometry_by_id,
+                )
+                if not math.isfinite(clearance):
+                    raise RuntimeError(
+                        "continuation clearance observer found no finite clearance"
+                    )
+                return clearance, "sim6.live_continuation_interaction_frame"
+
+            def observe_orientation(
+                entity_id: str, reference_axis: np.ndarray
+            ) -> tuple[float, str, Mapping[str, Any]]:
+                geometry = _rgbd_scene_geometry_observation(env)
+                current = next(
+                    (
+                        item
+                        for item in geometry.get("geometries", [])
+                        if isinstance(item, Mapping)
+                        and item.get("runtime_id") == entity_id
+                    ),
+                    None,
+                )
+                if not isinstance(current, Mapping):
+                    raise ValueError(
+                        f"RGB-D continuation target {entity_id!r} is not visible"
+                    )
+                error_deg = _axis_set_error_deg(
+                    reference_axis,
+                    current.get("oriented_footprint_axes_base"),
+                )
+                if error_deg is None:
+                    raise ValueError("RGB-D continuation axis set is unavailable")
+                return (
+                    error_deg,
+                    "rgbd.oriented_footprint_axis_set_robot_root",
+                    {
+                        "entity_id": entity_id,
+                        "reference_axis_robot_root": reference_axis.tolist(),
+                        "observed_axes_robot_root": current.get(
+                            "oriented_footprint_axes_base"
+                        ),
+                        "orientation_error_deg": error_deg,
+                    },
+                )
+
+            def monitor() -> dict[str, Any] | None:
+                if not active_lease.active:
+                    event = {
+                        "condition_id": "runtime.maximum_duration_elapsed",
+                        "reason": "issued runtime lease is no longer active",
+                        "lease_state": active_lease.state,
+                    }
+                    monitored_events.append(event)
+                    return {**event, "converged": False}
+                monitor_state = _state(env, initial_object_z)
+                current_tracked = _tracked_entity_positions_m(env, target_ids)
+                events = _guarded_dispatch_invalidation_events(
+                    runtime_lease=active_lease,
+                    lease_candidate=lease_candidate,
+                    invocation_candidate=invocation_candidate,
+                    invocation_decision=invocation_decision,
+                    baseline_membership_ids=baseline_membership_ids,
+                    current_provider_instance_id=planning_provider.instance_id,
+                    state=monitor_state,
+                    baseline_tracked_positions_m=tracked_baseline,
+                    current_tracked_positions_m=current_tracked,
+                )
+                if not events:
+                    return None
+                event = events[0]
+                active_lease.observe_invalidation(
+                    event.condition_id, event.evidence
+                )
+                serialized = event.to_dict()
+                monitored_events.append(serialized)
+                return {**serialized, "lease_state": active_lease.state, "converged": False}
+
+            (
+                next_obs,
+                terminal,
+                final_action,
+                motion_report,
+            ) = _move_eef_to_target(
+                env,
+                obs,
+                initial_action,
+                target_position,
+                target_quaternion,
+                phase=f"world_effect:{lease_candidate.purpose}",
+                gripper_closed=bool(
+                    float(initial_action[0, 7].detach().cpu()) > 0.5
+                ),
+                initial_object_z=initial_object_z,
+                executor_config=dict(tool_configuration),
+                tracked_position_references_m=tracked_baseline,
+                rgbd_axis_references=rgbd_axis_references,
+                tracked_orientation_observer=observe_orientation,
+                observed_clearance_observer=observe_clearance,
+                checkpoint_callback=None,
+                early_stop_callback=monitor,
+            )
+            post_state = _state(env, initial_object_z)
+            post_tracked = _tracked_entity_positions_m(env, target_ids)
+            post_events = _guarded_dispatch_invalidation_events(
+                runtime_lease=active_lease,
+                lease_candidate=lease_candidate,
+                invocation_candidate=invocation_candidate,
+                invocation_decision=invocation_decision,
+                baseline_membership_ids=baseline_membership_ids,
+                current_provider_instance_id=planning_provider.instance_id,
+                state=post_state,
+                baseline_tracked_positions_m=tracked_baseline,
+                current_tracked_positions_m=post_tracked,
+            )
+            if post_events and active_lease.active:
+                event = post_events[0]
+                active_lease.observe_invalidation(
+                    event.condition_id, event.evidence
+                )
+                monitored_events.append(event.to_dict())
+            if not motion_report.get("converged") and active_lease.active:
+                active_lease.revoke(
+                    reason="dispatch.motion_not_converged",
+                    evidence={
+                        "target_error_after_m": motion_report.get(
+                            "target_error_after_m"
+                        ),
+                        "orientation_error_after_deg": motion_report.get(
+                            "orientation_error_after_deg"
+                        ),
+                        "terminal": terminal,
+                    },
+                )
+            handler_result_box["_obs"] = next_obs
+            return {
+                "executor_id": runtime_spec.executor_id,
+                "executor_tool_name": runtime_spec.tool_name,
+                "tool_family": "motion",
+                "execution_report": motion_report,
+                "motion_report": motion_report,
+                "monitored_invalidation_events": monitored_events,
+                "terminal": terminal,
+                "final_action": final_action.detach().cpu().tolist(),
+                "post_dispatch_observation": {
+                    "eef_gripper_base_xyz": post_state[
+                        "eef_gripper_base_xyz"
+                    ],
+                    "eef_gripper_base_quaternion_wxyz": post_state[
+                        "eef_gripper_base_quaternion_wxyz"
+                    ],
+                    "rgbd_scene_geometry": post_state.get(
+                        "rgbd_scene_geometry"
+                    ),
+                    "tracked_entity_positions_m": post_tracked,
+                    "current_contact": post_state.get("current_contact"),
+                },
+                "requires_model_replan": True,
+            }
+
+    elif lease_candidate.tool_family == "actuator":
+        runtime_spec = next(
+            (
+                item
+                for item in actuator_registry.specs()
+                if item.executor_id == runtime_lease.lease.tool_id
+            ),
+            None,
+        )
+        if runtime_spec is None:
+            raise RuntimeError("issued continuation tool has no actuator executor")
+
+        def handler(
+            invocation_arguments: Mapping[str, Any],
+            tool_configuration: Mapping[str, Any],
+            active_lease: Any,
+        ) -> Mapping[str, Any]:
+            command = runtime_spec.validate_command(invocation_arguments)
+            configuration = runtime_spec.validate_configuration(tool_configuration)
+            initial_action = _current_robot_joint_action(
+                env,
+                gripper_closed_fraction=float(
+                    fresh_state["gripper_closed_fraction"]
+                ),
+            )
+            next_obs, terminal, final_action, actuator_report = (
+                _execute_binary_actuator_tool(
+                    env,
+                    obs,
+                    initial_action,
+                    {
+                        "executor_id": runtime_spec.executor_id,
+                        "command": command,
+                        "executor_config": configuration,
+                    },
+                    initial_object_z=initial_object_z,
+                )
+            )
+            post_state = _state(env, initial_object_z)
+            post_tracked = _tracked_entity_positions_m(env, target_ids)
+            post_events = _guarded_dispatch_invalidation_events(
+                runtime_lease=active_lease,
+                lease_candidate=lease_candidate,
+                invocation_candidate=invocation_candidate,
+                invocation_decision=invocation_decision,
+                baseline_membership_ids=baseline_membership_ids,
+                current_provider_instance_id=planning_provider.instance_id,
+                state=post_state,
+                baseline_tracked_positions_m=tracked_baseline,
+                current_tracked_positions_m=post_tracked,
+            )
+            if post_events and active_lease.active:
+                event = post_events[0]
+                active_lease.observe_invalidation(
+                    event.condition_id, event.evidence
+                )
+                monitored_events.append(event.to_dict())
+            if terminal and active_lease.active:
+                active_lease.revoke(
+                    reason="dispatch.environment_terminal",
+                    evidence={"terminal": True},
+                )
+            handler_result_box["_obs"] = next_obs
+            return {
+                "executor_id": runtime_spec.executor_id,
+                "executor_tool_name": runtime_spec.tool_name,
+                "tool_family": "actuator",
+                "execution_report": actuator_report,
+                "actuator_report": actuator_report,
+                "monitored_invalidation_events": monitored_events,
+                "terminal": terminal,
+                "final_action": final_action.detach().cpu().tolist(),
+                "post_dispatch_observation": {
+                    "eef_gripper_base_xyz": post_state[
+                        "eef_gripper_base_xyz"
+                    ],
+                    "eef_gripper_base_quaternion_wxyz": post_state[
+                        "eef_gripper_base_quaternion_wxyz"
+                    ],
+                    "rgbd_scene_geometry": post_state.get(
+                        "rgbd_scene_geometry"
+                    ),
+                    "tracked_entity_positions_m": post_tracked,
+                    "current_contact": post_state.get("current_contact"),
+                    "gripper_closed_fraction": post_state.get(
+                        "gripper_closed_fraction"
+                    ),
+                },
+                "requires_model_replan": True,
+            }
+
+    else:
+        raise RuntimeError(
+            f"unsupported continuation tool family {lease_candidate.tool_family!r}"
+        )
+
+    handler_result_box: dict[str, Any] = {}
+
+    def capture_handler(
+        invocation_arguments: Mapping[str, Any],
+        tool_configuration: Mapping[str, Any],
+        active_lease: Any,
+    ) -> Mapping[str, Any]:
+        result = handler(
+            invocation_arguments,
+            tool_configuration,
+            active_lease,
+        )
+        handler_result_box.update(result)
+        return result
+
+    handler_registry.register(runtime_lease.lease.tool_id, capture_handler)
+    dispatcher = GuardedWorldEffectDispatcher(
+        runtime_lease=runtime_lease,
+        handlers=handler_registry,
+        maximum_evidence_age_s=maximum_evidence_age_s,
+        maximum_permit_lifetime_s=maximum_permit_lifetime_s,
+    )
+    permit = dispatcher.mint_permit(fresh_evidence)
+    dispatch_outcome = dispatcher.dispatch(permit)
+    next_obs = handler_result_box.pop("_obs", obs)
+    post_frame = _single_exterior_frame(next_obs)
+    cv2.imwrite(
+        str(artifact_dir / f"{operation_index:02d}_guarded_post_dispatch.jpg"),
+        cv2.cvtColor(post_frame, cv2.COLOR_RGB2BGR),
+    )
+    result = dispatch_outcome.to_dict()
+    handler_result = result["handler_result"]
+    terminal = bool(handler_result.get("terminal"))
+    return next_obs, terminal, {
+        "operation_index": operation_index,
+        "tool_family": lease_candidate.tool_family,
+        "tool_id": runtime_lease.lease.tool_id,
+        "purpose": lease_candidate.purpose,
+        "fresh_evidence": fresh_evidence.to_dict(),
+        "permit": permit.to_dict(),
+        "outcome": result,
+        "runtime_lease_after": runtime_lease.to_dict(),
+        "requires_model_replan": True,
+        "dispatch_enabled": False,
+        "motion_authority": False,
+        "execution_authority": False,
+        "authority_scope": [],
+    }
 
 
 def _write_trace(path: Path, trace: dict[str, Any]) -> None:
@@ -5226,6 +6075,9 @@ def main() -> int:
         )
     if args_cli.world_effect_runtime_lease_duration_s <= 0:
         raise ValueError("world-effect-runtime-lease-duration-s must be positive")
+    world_effect_sequence_budget = WorldEffectSequenceBudget(
+        args_cli.world_effect_max_operations
+    )
     if args_cli.world_effect_dispatch_evidence_max_age_s <= 0:
         raise ValueError(
             "world-effect-dispatch-evidence-max-age-s must be positive"
@@ -5435,7 +6287,8 @@ def main() -> int:
     print(
         "Execution boundary: "
         + (
-            "GUARDED WORLD-EFFECT EXECUTION; one exact invocation"
+            "GUARDED WORLD-EFFECT EXECUTION; bounded fresh-replan sequence "
+            f"(max {args_cli.world_effect_max_operations} single-use invocations)"
             if args_cli.guarded_world_effect_execution
             else (
                 "SHADOW PLAN ONLY; legacy demonstration/providers/motion disabled"
@@ -5979,6 +6832,23 @@ def main() -> int:
             "handler_bound": False,
             "tool_called": False,
             "requires_model_replan": False,
+            "dispatch_enabled": False,
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+        },
+        "world_effect_sequence": {
+            "status": (
+                "pending"
+                if args_cli.guarded_world_effect_execution
+                else "disabled"
+            ),
+            "budget": world_effect_sequence_budget.to_dict(),
+            "operations": [],
+            "progress_observations": [],
+            "completed_operation_count": 0,
+            "stop_reason": None,
+            "task_completion_claimed": False,
             "dispatch_enabled": False,
             "motion_authority": False,
             "execution_authority": False,
@@ -7899,6 +8769,7 @@ def main() -> int:
                     "invocation_decision": issued_invocation_decision,
                     "planning_provider": issued_planning_provider_instance,
                     "motion_registry": motion_executor_registry,
+                    "actuator_registry": actuator_executor_registry,
                 }
                 missing_handoff = sorted(
                     name for name, value in required_handoff.items() if value is None
@@ -7921,6 +8792,7 @@ def main() -> int:
                 assert invocation_decision is not None
                 assert planning_provider_instance is not None
                 assert motion_executor_registry is not None
+                assert actuator_executor_registry is not None
 
                 lease_candidate = next(
                     item
@@ -8025,6 +8897,15 @@ def main() -> int:
                     item.entity_id: item.geometry
                     for item in lease_candidate.geometry_bindings
                 }
+                obstacle_geometry_by_id = interaction_obstacle_geometry(
+                    issued_geometry_by_id,
+                    interaction_target_entity_id=(
+                        _interaction_target_entity_id(
+                            invocation_candidate,
+                            invocation_decision,
+                        )
+                    ),
+                )
                 handler_registry = RuntimeWorldEffectHandlerRegistry()
                 monitored_events: list[dict[str, Any]] = []
 
@@ -8070,7 +8951,7 @@ def main() -> int:
                         clearance, _ = _interaction_path_clearance_m(
                             current_position,
                             target_interaction_position,
-                            issued_geometry_by_id,
+                            obstacle_geometry_by_id,
                         )
                         if not math.isfinite(clearance):
                             raise RuntimeError(
@@ -8351,23 +9232,258 @@ def main() -> int:
                         "motion_report": motion_report,
                     }
                 )
-                episode_trace["status"] = "guarded_first_operation_complete"
+                sequence_trace = episode_trace["world_effect_sequence"]
+                sequence_trace["status"] = "running"
+                sequence_trace["operations"].append(
+                    {
+                        "operation_index": 1,
+                        "planning_source": "initial_world_effect_pipeline",
+                        "selected_goal_id": goal_activation_decision.goal_id,
+                        "tool_family": lease_candidate.tool_family,
+                        "tool_id": runtime_lease.lease.tool_id,
+                        "purpose": lease_candidate.purpose,
+                        "dispatch": episode_trace[
+                            "world_effect_guarded_dispatch"
+                        ],
+                    }
+                )
+                sequence_trace["completed_operation_count"] = 1
+                _write_trace(trace_path, episode_trace)
+                print(
+                    "[world-effect-guarded-dispatch] OPERATION_COMPLETE "
+                    "index=1 "
+                    f"converged={bool(motion_report.get('converged'))} "
+                    f"lease={runtime_lease.state} "
+                    f"iterations={len(motion_report.get('iterations', []))} "
+                    "replan=true authority=none",
+                    flush=True,
+                )
+
+                selected_goal_id = goal_activation_decision.goal_id
+                if selected_goal_id is None:
+                    raise RuntimeError(
+                        "guarded dispatch lacks the selected world goal id"
+                    )
+                current_operation_index = 1
+                sequence_stop_reason: str | None = None
+                while True:
+                    continuation_state = _state(env, initial_object_z)
+                    continuation_state["entity_physical_evidence"] = (
+                        _runtime_scene_entity_physical_evidence(
+                            env, continuation_state
+                        )
+                    )
+                    continuation_inventory = semantic_scene_inventory_from_state(
+                        continuation_state
+                    )
+                    continuation_frame = _single_exterior_frame(obs)
+                    progress = assess_world_effect_progress(
+                        graph=goal_graph,
+                        membership_lease=goal_graph_membership_lease,
+                        selected_goal_id=selected_goal_id,
+                        predicate_registry=world_predicate_evaluator_registry,
+                        capability_registry=world_capability_registry,
+                        inventory=continuation_inventory,
+                        operation_index=current_operation_index,
+                    )
+                    sequence_trace["progress_observations"].append(
+                        progress.to_dict()
+                    )
+                    _write_trace(trace_path, episode_trace)
+                    print(
+                        "[world-effect-progress] FRESH "
+                        f"after={current_operation_index} "
+                        f"goal={selected_goal_id} status={progress.status} "
+                        f"satisfied={progress.selected_goal_satisfied} "
+                        "authority=none",
+                        flush=True,
+                    )
+                    if not progress.may_plan_another_operation:
+                        sequence_stop_reason = progress.status
+                        break
+                    next_operation_index = current_operation_index + 1
+                    if not world_effect_sequence_budget.allows(
+                        next_operation_index
+                    ):
+                        sequence_stop_reason = "operation_budget_exhausted"
+                        break
+                    continuation_entity_ids = {
+                        str(item["entity_id"])
+                        for item in continuation_inventory.get("entities", [])
+                        if isinstance(item, Mapping)
+                        and isinstance(item.get("entity_id"), str)
+                    }
+                    continuation_tracked_positions = (
+                        _tracked_entity_positions_m(
+                            env, continuation_entity_ids
+                        )
+                    )
+                    continuation_bundle = (
+                        _plan_guarded_world_effect_continuation(
+                            coach=coach,
+                            instruction=args_cli.instruction,
+                            frame=continuation_frame,
+                            graph=goal_graph,
+                            membership_lease=goal_graph_membership_lease,
+                            inventory=continuation_inventory,
+                            predicate_registry=(
+                                world_predicate_evaluator_registry
+                            ),
+                            capability_registry=world_capability_registry,
+                            capability_advertisement=(
+                                world_capability_advertisement
+                            ),
+                            provider_registry=(
+                                world_effect_provider_registry
+                            ),
+                            runtime_effect_tools=runtime_effect_tools,
+                            trackable_object_ids=trackable_object_ids,
+                            runtime_state=continuation_state,
+                            maximum_duration_s=(
+                                args_cli.world_effect_runtime_lease_duration_s
+                            ),
+                            operation_index=next_operation_index,
+                        )
+                    )
+                    operation_record: dict[str, Any] = {
+                        "operation_index": next_operation_index,
+                        "planning_source": (
+                            "fresh_post_effect_model_replan"
+                        ),
+                        "planning": continuation_bundle["trace"],
+                        "planning_status": continuation_bundle["status"],
+                    }
+                    sequence_trace["operations"].append(operation_record)
+                    _write_trace(trace_path, episode_trace)
+                    if (
+                        continuation_bundle["status"]
+                        != "runtime_lease_issued"
+                    ):
+                        sequence_stop_reason = str(
+                            continuation_bundle["status"]
+                        )
+                        print(
+                            "[world-effect-continuation] NOT_ADMITTED "
+                            f"index={next_operation_index} "
+                            f"status={sequence_stop_reason} authority=none",
+                            flush=True,
+                        )
+                        break
+                    selected_goal_id = (
+                        continuation_bundle["activation_decision"].goal_id
+                    )
+                    if selected_goal_id is None:
+                        raise RuntimeError(
+                            "continuation lease lacks a selected world goal"
+                        )
+                    print(
+                        "[world-effect-continuation] LEASE_ISSUED "
+                        f"index={next_operation_index} "
+                        f"goal={selected_goal_id} "
+                        "authority=single_use_pending_fresh_evidence",
+                        flush=True,
+                    )
+                    obs, continuation_terminal, continuation_dispatch = (
+                        _dispatch_guarded_world_effect_continuation(
+                            env=env,
+                            obs=obs,
+                            initial_object_z=initial_object_z,
+                            bundle=continuation_bundle,
+                            baseline_inventory=continuation_inventory,
+                            baseline_tracked_positions_m=(
+                                continuation_tracked_positions
+                            ),
+                            motion_registry=motion_executor_registry,
+                            actuator_registry=actuator_executor_registry,
+                            maximum_evidence_age_s=(
+                                args_cli.world_effect_dispatch_evidence_max_age_s
+                            ),
+                            maximum_permit_lifetime_s=(
+                                args_cli.world_effect_dispatch_permit_lifetime_s
+                            ),
+                            artifact_dir=args_cli.artifact_dir,
+                            operation_index=next_operation_index,
+                        )
+                    )
+                    operation_record["selected_goal_id"] = selected_goal_id
+                    operation_record["dispatch"] = continuation_dispatch
+                    operation_record["tool_family"] = continuation_dispatch[
+                        "tool_family"
+                    ]
+                    operation_record["tool_id"] = continuation_dispatch[
+                        "tool_id"
+                    ]
+                    operation_record["purpose"] = continuation_dispatch[
+                        "purpose"
+                    ]
+                    sequence_trace["completed_operation_count"] = (
+                        next_operation_index
+                    )
+                    dispatch_handler_result = continuation_dispatch["outcome"][
+                        "handler_result"
+                    ]
+                    execution_report = dispatch_handler_result.get(
+                        "execution_report", {}
+                    )
+                    episode_trace["stages"].append(
+                        {
+                            "phase": (
+                                "world_effect:"
+                                f"{continuation_dispatch['purpose']}"
+                            ),
+                            "source": (
+                                "guarded_world_effect_continuation"
+                            ),
+                            "tool_id": continuation_dispatch["tool_id"],
+                            "tool_family": continuation_dispatch[
+                                "tool_family"
+                            ],
+                            "permit_id": continuation_dispatch["permit"][
+                                "permit_id"
+                            ],
+                            "execution_report": execution_report,
+                        }
+                    )
+                    current_operation_index = next_operation_index
+                    _write_trace(trace_path, episode_trace)
+                    print(
+                        "[world-effect-continuation] OPERATION_COMPLETE "
+                        f"index={current_operation_index} "
+                        f"family={continuation_dispatch['tool_family']} "
+                        f"lease={continuation_dispatch['runtime_lease_after']['state']} "
+                        "replan=true authority=none",
+                        flush=True,
+                    )
+                    if continuation_terminal:
+                        sequence_stop_reason = "environment_terminal"
+                        break
+
+                sequence_trace["status"] = "stopped"
+                sequence_trace["stop_reason"] = sequence_stop_reason
+                sequence_trace["task_completion_claimed"] = False
+                episode_trace["status"] = "guarded_world_effect_sequence_stopped"
                 episode_trace["guarded_world_effect_result"] = {
                     "complete": True,
                     "dispatch_performed": True,
-                    "motion_converged": bool(motion_report.get("converged")),
-                    "final_lease_state": runtime_lease.state,
+                    "operation_count": sequence_trace[
+                        "completed_operation_count"
+                    ],
+                    "sequence_stop_reason": sequence_stop_reason,
+                    "selected_goal_completed": (
+                        sequence_stop_reason == "selected_goal_completed"
+                    ),
+                    "task_completion_claimed": False,
+                    "fresh_complete_graph_required": True,
                     "requires_model_replan": True,
                     "motion_stage_count": len(episode_trace["stages"]),
                     "demonstration_loaded": False,
                 }
                 _write_trace(trace_path, episode_trace)
                 print(
-                    "[world-effect-guarded-dispatch] COMPLETE "
-                    f"converged={bool(motion_report.get('converged'))} "
-                    f"lease={runtime_lease.state} "
-                    f"iterations={len(motion_report.get('iterations', []))} "
-                    "replan=true authority=none",
+                    "[world-effect-sequence] STOPPED "
+                    f"operations={sequence_trace['completed_operation_count']} "
+                    f"reason={sequence_stop_reason} "
+                    "task_complete=false authority=none",
                     flush=True,
                 )
                 print(f"Trace: {trace_path}", flush=True)

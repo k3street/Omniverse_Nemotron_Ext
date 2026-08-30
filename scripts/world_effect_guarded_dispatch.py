@@ -216,6 +216,37 @@ def assess_fused_target_geometry(
     }
 
 
+def interaction_obstacle_geometry(
+    geometries: Mapping[str, Mapping[str, Any]],
+    *,
+    interaction_target_entity_id: str | None,
+) -> dict[str, Mapping[str, Any]]:
+    """Return collision geometry without the entity intentionally approached.
+
+    A path-clearance lease must not classify its selected contact target as an
+    obstacle: clearance is expected to converge to zero at contact. Every other
+    observed entity remains in the obstacle set, including receptacles and
+    nearby task objects.
+    """
+    if not isinstance(geometries, Mapping):
+        raise WorldEffectGuardedDispatchError("geometries must be an object")
+    if interaction_target_entity_id is not None:
+        _identifier(
+            interaction_target_entity_id,
+            "interaction_target_entity_id",
+        )
+    result: dict[str, Mapping[str, Any]] = {}
+    for entity_id, geometry in geometries.items():
+        _identifier(entity_id, "geometry entity_id")
+        if not isinstance(geometry, Mapping):
+            raise WorldEffectGuardedDispatchError(
+                f"geometry for {entity_id!r} must be an object"
+            )
+        if entity_id != interaction_target_entity_id:
+            result[entity_id] = geometry
+    return result
+
+
 @dataclass(frozen=True)
 class DispatchInvalidationEvent:
     condition_id: str

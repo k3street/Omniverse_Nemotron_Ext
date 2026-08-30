@@ -9,6 +9,7 @@ from scripts.world_effect_guarded_dispatch import (
     RuntimeWorldEffectHandlerRegistry,
     WorldEffectGuardedDispatchError,
     build_fresh_dispatch_evidence,
+    interaction_obstacle_geometry,
 )
 from tests.test_world_effect_runtime_lease import FakeClock, issued_fixture
 
@@ -90,6 +91,23 @@ def test_fused_geometry_invalidates_real_translation_or_visible_shape_change():
     assert translated["invalidated"]
     assert reshaped["extent_change_exceeded"]
     assert reshaped["invalidated"]
+
+
+def test_path_obstacles_exclude_only_the_selected_interaction_target():
+    geometries = {
+        "red_block": {"visible_aabb_min_base_m": [0.0, 0.0, 0.0]},
+        "grey_bin": {"visible_aabb_min_base_m": [0.2, 0.0, 0.0]},
+        "nearby_block": {"visible_aabb_min_base_m": [0.1, 0.0, 0.0]},
+    }
+
+    obstacles = interaction_obstacle_geometry(
+        geometries,
+        interaction_target_entity_id="red_block",
+    )
+
+    assert set(obstacles) == {"grey_bin", "nearby_block"}
+    assert obstacles["grey_bin"] is geometries["grey_bin"]
+    assert "red_block" in geometries
 
 
 def test_fresh_evidence_mints_exact_permit_and_dispatches_once():

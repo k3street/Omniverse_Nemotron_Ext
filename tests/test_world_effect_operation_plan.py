@@ -312,6 +312,26 @@ def test_operation_prompt_requests_outcomes_without_dispatch_details():
     assert '"execution_authority": false' in lowered
 
 
+def test_operation_prompt_includes_fresh_post_effect_context_without_authority():
+    _, _, instance = planning_instance()
+    candidates = build_world_effect_operation_candidates(instance, inventory())
+    prompt = build_world_effect_operation_prompt(
+        instruction="Clean the table",
+        inventory=inventory(),
+        instance=instance,
+        candidate_set=candidates,
+        execution_context={
+            "gripper_closed_fraction": 1.0,
+            "current_contact": {"touch": True, "net_force_n": 2.5},
+        },
+    )
+
+    assert '"gripper_closed_fraction": 1.0' in prompt
+    assert '"touch": true' in prompt
+    assert "do not repeat a completed precondition" in prompt.lower()
+    assert "does not call the named tool" in prompt.lower()
+
+
 def test_runner_wires_operation_plan_after_session_and_before_hard_boundary():
     source = (
         Path(__file__).parents[1]

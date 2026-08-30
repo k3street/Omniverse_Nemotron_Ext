@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -291,10 +292,46 @@ def test_candidate_uses_runtime_schema_frame_transform_and_rgbd_axes():
     assert top_anchor.offset_min_m == pytest.approx((-0.02, -0.02, 0.0))
     assert top_anchor.offset_max_m == pytest.approx((0.02, 0.02, 0.35))
     serialized = candidates.to_dict()
+    current_offsets = serialized["candidates"][0][
+        "current_interaction_offsets_from_anchors"
+    ]
+    assert {item["anchor_id"] for item in current_offsets} == {
+        "red_block.center",
+        "red_block.visible_aabb_top_center",
+    }
+    assert serialized["candidates"][0]["current_interaction_position_m"] is not None
     assert not serialized["execution_lease_issued"]
     assert not serialized["tool_called"]
     assert not serialized["handler_bound"]
     assert not serialized["dispatch_enabled"]
+
+
+def test_motion_invocation_rejects_a_materialized_target_already_within_tolerance():
+    instance, lease_candidates, lease_decision, runtime_observation, candidates = (
+        fixture()
+    )
+    first = ShadowToolInvocationGate(candidates).dispatch(proposal(candidates))
+    at_target = deepcopy(runtime_observation)
+    at_target["controlled_frame"] = {
+        "position_m": first.invocation_arguments["target_position_m"],
+        "quaternion_wxyz": first.invocation_arguments[
+            "target_quaternion_wxyz"
+        ],
+    }
+    fresh_candidates = build_shadow_tool_invocation_candidates(
+        instance,
+        lease_candidates,
+        lease_decision,
+        at_target,
+    )
+
+    with pytest.raises(
+        WorldEffectToolInvocationError,
+        match="already within the configured position tolerance",
+    ):
+        ShadowToolInvocationGate(fresh_candidates).dispatch(
+            proposal(fresh_candidates)
+        )
 
 
 def test_runner_motion_factory_advertises_absolute_pose_invocation_schema():
@@ -401,6 +438,9 @@ def test_prompt_is_explicitly_typed_grounded_and_non_dispatching():
     prompt = build_shadow_tool_invocation_prompt(
         instruction="Clean the table",
         candidate_set=candidates,
+        rejection_context={
+            "error": "materialized motion target is already within tolerance"
+        },
     )
     lowered = prompt.lower()
 
@@ -409,6 +449,12 @@ def test_prompt_is_explicitly_typed_grounded_and_non_dispatching():
     assert "materialized_argument_fields" in lowered
     assert "gate materializes the controlled" in lowered
     assert "controlled target + rotated local interaction origin offset" in lowered
+    assert "current_interaction_offsets_from_anchors" in lowered
+    assert "never repeat the current offset" in lowered
+    assert "gripper-base-to-contact distance" in lowered
+    assert "previous proposal rejection" in lowered
+    assert "already within tolerance" in lowered
+    assert "do not resubmit that no-op target" in lowered
     assert "target quaternion must rotate" in lowered
     assert "lease remains\nunissued" in lowered
     assert "no handler is bound and no tool or simulator action is called" in lowered
