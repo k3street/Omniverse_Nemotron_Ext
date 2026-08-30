@@ -8,9 +8,13 @@ camera-to-robot-base transform.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Iterable, Sequence
+import re
+from typing import Iterable, Mapping, Sequence
 
 import numpy as np
+
+
+_SCENE_ASSET_IN_LABEL = re.compile(r"/scene/([^/'\"}, ]+)")
 
 
 def transform_matrix_from_pose_xyzw(
@@ -39,6 +43,151 @@ def transform_matrix_from_pose_xyzw(
     transform[:3, :3] = rotation
     transform[:3, 3] = translation
     return transform
+
+
+def oriented_footprint_geometry(
+    points_base: np.ndarray,
+) -> dict[str, object]:
+    """Fit a support-plane oriented box to an RGB-D object point cloud.
+
+    The result describes geometry rather than prescribing a grasp.  Two
+    sign-invariant horizontal axes and their spans let a governor compare a
+    parallel-jaw closing direction with visible opposing object faces.
+    """
+    import cv2
+
+    points = np.asarray(points_base, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] != 3 or len(points) < 4:
+        raise ValueError("points_base must have shape (N, 3) with N >= 4")
+    if not np.isfinite(points).all():
+        raise ValueError("points_base must be finite")
+    rectangle = cv2.minAreaRect(points[:, :2].astype(np.float32))
+    corners = cv2.boxPoints(rectangle).astype(np.float64)
+    edges = (corners[1] - corners[0], corners[2] - corners[1])
+    axes: list[list[float]] = []
+    extents: list[float] = []
+    for edge in edges:
+        extent = float(np.linalg.norm(edge))
+        if extent <= 1.0e-9:
+            raise ValueError("object footprint has a degenerate oriented box")
+        axes.append([float(edge[0] / extent), float(edge[1] / extent), 0.0])
+        extents.append(extent)
+    order = np.argsort(np.asarray(extents))[::-1]
+    return {
+        "oriented_footprint_axes_base": [axes[int(index)] for index in order],
+        "oriented_footprint_extents_m": [
+            extents[int(index)] for index in order
+        ],
+        "support_plane_normal_base": [0.0, 0.0, 1.0],
+    }
+
+
+def pregrasp_axis_alignment_observation(
+    *,
+    scene_geometry: Mapping[str, object],
+    actuator_geometry: Mapping[str, object],
+    object_runtime_id: str,
+    maximum_error_deg: float,
+) -> dict[str, object]:
+    """Compare a measured jaw axis with an RGB-D oriented object footprint."""
+    if not isinstance(object_runtime_id, str) or not object_runtime_id:
+        raise ValueError("object_runtime_id must be non-empty")
+    if (
+        isinstance(maximum_error_deg, bool)
+        or not isinstance(maximum_error_deg, (int, float))
+        or not np.isfinite(float(maximum_error_deg))
+        or not 0.0 < float(maximum_error_deg) <= 90.0
+    ):
+        raise ValueError("maximum_error_deg must be within (0, 90]")
+    geometries = scene_geometry.get("geometries")
+    closing_axis = actuator_geometry.get("closing_axis_robot_root")
+    if not isinstance(geometries, Sequence) or closing_axis is None:
+        return {
+            "available": False,
+            "source": "rgbd_oriented_footprint_plus_runtime_contact_geometry",
+            "error": "scene geometry or actuator closing axis is unavailable",
+        }
+    geometry = next(
+        (
+            item
+            for item in geometries
+            if isinstance(item, Mapping)
+            and item.get("runtime_id") == object_runtime_id
+        ),
+        None,
+    )
+    if geometry is None:
+        return {
+            "available": False,
+            "source": "rgbd_oriented_footprint_plus_runtime_contact_geometry",
+            "object_runtime_id": object_runtime_id,
+            "error": "movable object is absent from fresh RGB-D geometry",
+        }
+    axes = geometry.get("oriented_footprint_axes_base")
+    if not isinstance(axes, Sequence) or len(axes) != 2:
+        return {
+            "available": False,
+            "source": "rgbd_oriented_footprint_plus_runtime_contact_geometry",
+            "object_runtime_id": object_runtime_id,
+            "error": "oriented object footprint is unavailable",
+        }
+    jaw = np.asarray(closing_axis, dtype=np.float64)
+    if jaw.shape != (3,) or not np.isfinite(jaw).all():
+        raise ValueError("actuator closing axis must be a finite 3-vector")
+    jaw[2] = 0.0
+    jaw_norm = float(np.linalg.norm(jaw))
+    if jaw_norm <= 1.0e-9:
+        return {
+            "available": False,
+            "source": "rgbd_oriented_footprint_plus_runtime_contact_geometry",
+            "object_runtime_id": object_runtime_id,
+            "error": "actuator closing axis has no support-plane component",
+        }
+    jaw /= jaw_norm
+    comparisons: list[dict[str, object]] = []
+    jaw_yaw_deg = float(np.rad2deg(np.arctan2(jaw[1], jaw[0])))
+    for index, raw_axis in enumerate(axes):
+        axis = np.asarray(raw_axis, dtype=np.float64)
+        if axis.shape != (3,) or not np.isfinite(axis).all():
+            raise ValueError("object footprint axes must be finite 3-vectors")
+        axis[2] = 0.0
+        norm = float(np.linalg.norm(axis))
+        if norm <= 1.0e-9:
+            raise ValueError("object footprint axes must be non-zero")
+        axis /= norm
+        cosine = abs(float(np.dot(jaw, axis)))
+        error_deg = float(
+            np.rad2deg(np.arccos(np.clip(cosine, 0.0, 1.0)))
+        )
+        axis_yaw_deg = float(np.rad2deg(np.arctan2(axis[1], axis[0])))
+        yaw_correction_deg = (
+            (axis_yaw_deg - jaw_yaw_deg + 90.0) % 180.0
+        ) - 90.0
+        comparisons.append(
+            {
+                "object_axis_index": index,
+                "object_axis_base": axis.tolist(),
+                "axis_error_deg": error_deg,
+                "candidate_yaw_correction_deg": yaw_correction_deg,
+            }
+        )
+    best = min(comparisons, key=lambda item: float(item["axis_error_deg"]))
+    minimum_error_deg = float(best["axis_error_deg"])
+    return {
+        "available": True,
+        "source": "rgbd_oriented_footprint_plus_runtime_contact_geometry",
+        "frame": "robot_root_support_plane",
+        "object_runtime_id": object_runtime_id,
+        "jaw_closing_axis_base": jaw.tolist(),
+        "object_footprint_extents_m": geometry.get(
+            "oriented_footprint_extents_m"
+        ),
+        "axis_comparisons": comparisons,
+        "best_object_axis_index": best["object_axis_index"],
+        "minimum_axis_error_deg": minimum_error_deg,
+        "maximum_axis_error_deg": float(maximum_error_deg),
+        "aligned": minimum_error_deg <= float(maximum_error_deg),
+    }
 
 
 def bounding_box_mask(
@@ -175,6 +324,88 @@ def backproject_depth(
         homogeneous = np.column_stack((points, np.ones(len(points))))
         points = (homogeneous @ transform.T)[:, :3]
     return points.astype(np.float32)
+
+
+def summarize_labeled_scene_geometry(
+    *,
+    depth_m: np.ndarray,
+    instance_ids: np.ndarray,
+    id_to_labels: Mapping[object, object],
+    intrinsics: np.ndarray,
+    camera_to_base: np.ndarray,
+    stride: int = 8,
+    minimum_points: int = 20,
+) -> dict[str, object]:
+    """Summarize rendered scene assets as visible base-frame 3D geometry.
+
+    Renderer label strings are reduced to the direct child below ``/scene``;
+    no task object names or simulator asset catalogue are encoded here. The
+    quantile AABB and PCA axes use only synchronized depth and instance IDs, so
+    the same summary can be produced by a real RGB-D segmentation adapter.
+    """
+    depth = np.asarray(depth_m).squeeze()
+    ids = np.asarray(instance_ids).squeeze()
+    matrix = np.asarray(intrinsics, dtype=np.float64)
+    transform = np.asarray(camera_to_base, dtype=np.float64)
+    if depth.ndim != 2 or ids.shape != depth.shape:
+        raise ValueError("depth and instance IDs must be matching HxW arrays")
+    if matrix.shape != (3, 3) or transform.shape != (4, 4):
+        raise ValueError("intrinsics and camera_to_base shapes are invalid")
+    if stride <= 0 or minimum_points < 3:
+        raise ValueError("stride and minimum_points are invalid")
+
+    asset_instance_ids: dict[str, set[int]] = {}
+    for raw_id, raw_label in id_to_labels.items():
+        match = _SCENE_ASSET_IN_LABEL.search(str(raw_label))
+        if match is None:
+            continue
+        try:
+            instance_id = int(raw_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid renderer instance ID {raw_id!r}") from exc
+        asset_instance_ids.setdefault(match.group(1), set()).add(instance_id)
+
+    geometries: list[dict[str, object]] = []
+    for runtime_id, matched_ids in sorted(asset_instance_ids.items()):
+        mask = np.isin(ids, np.fromiter(matched_ids, dtype=ids.dtype))
+        points = backproject_depth(
+            depth,
+            matrix,
+            mask=mask,
+            camera_to_base=transform,
+            stride=stride,
+        ).astype(np.float64, copy=False)
+        if len(points) < minimum_points:
+            continue
+        center = np.median(points, axis=0)
+        lower = np.quantile(points, 0.02, axis=0)
+        upper = np.quantile(points, 0.98, axis=0)
+        centered = points - center
+        covariance = centered.T @ centered / float(len(centered))
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        order = np.argsort(eigenvalues)[::-1]
+        eigenvalues = np.maximum(eigenvalues[order], 0.0)
+        eigenvectors = eigenvectors[:, order]
+        footprint = oriented_footprint_geometry(points)
+        geometries.append(
+            {
+                "runtime_id": runtime_id,
+                "point_count": int(len(points)),
+                "center_base_m": center.tolist(),
+                "visible_aabb_min_base_m": lower.tolist(),
+                "visible_aabb_max_base_m": upper.tolist(),
+                "visible_extent_base_m": (upper - lower).tolist(),
+                "principal_axes_base": eigenvectors.T.tolist(),
+                "principal_spreads_m": np.sqrt(eigenvalues).tolist(),
+                **footprint,
+            }
+        )
+    return {
+        "available": bool(geometries),
+        "source": "synchronized_rgbd_instance_geometry",
+        "frame": "robot_root",
+        "geometries": geometries,
+    }
 
 
 @dataclass(frozen=True)

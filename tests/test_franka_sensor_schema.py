@@ -22,6 +22,7 @@ from scripts.franka_sensor_schema import (
 from scripts.robolab_contact_telemetry import (
     GRIPPER_CONTACT_PRIM_PATH,
     GRIPPER_CONTACT_SENSOR_NAME,
+    contact_body_force_observation,
     install_sim6_gripper_contact_sensor,
 )
 from scripts.patch_droid_external_torque import patch_checkout
@@ -142,6 +143,51 @@ def test_two_finger_touch_does_not_disappear_when_opposing_forces_cancel():
         frame.values[SIGNAL_SLICES["gripper_contact_force"]], np.zeros(3)
     )
     assert frame.values[SIGNAL_SLICES["gripper_touch"]][0] == 1.0
+
+
+def test_contact_body_observation_preserves_named_opposing_forces():
+    sensor = SimpleNamespace(
+        body_names=["left_finger", "right_finger"],
+        data=SimpleNamespace(
+            net_forces_w=np.array(
+                [[[2.0, 0.0, 0.0], [-2.0, 0.0, 0.0]]], dtype=np.float32
+            )
+        ),
+    )
+
+    class Scene:
+        sensors = {GRIPPER_CONTACT_SENSOR_NAME: sensor}
+
+    observation = contact_body_force_observation(
+        SimpleNamespace(scene=Scene())
+    )
+    assert observation["available"] is True
+    assert observation["active_body_count"] == 2
+    assert [item["body"] for item in observation["channels"]] == [
+        "left_finger",
+        "right_finger",
+    ]
+    assert observation["channels"][0]["force_xyz_n"] == [2.0, 0.0, 0.0]
+    assert observation["channels"][1]["force_xyz_n"] == [-2.0, 0.0, 0.0]
+    assert observation["pairwise_force_direction_cosine"] == pytest.approx(-1.0)
+    assert observation["force_magnitude_ratio_min_over_max"] == pytest.approx(1.0)
+    assert "opposing" in observation["metric_semantics"][
+        "pairwise_force_direction_cosine"
+    ]
+
+
+def test_contact_body_observation_fails_closed_without_sensor():
+    class Scene:
+        sensors = {}
+
+    observation = contact_body_force_observation(
+        SimpleNamespace(scene=Scene())
+    )
+    assert observation == {
+        "available": False,
+        "frame": "world",
+        "channels": [],
+    }
 
 
 def test_contact_summary_requires_coverage_and_a_real_touch():

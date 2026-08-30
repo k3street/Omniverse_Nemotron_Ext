@@ -29,6 +29,7 @@ ACTUATOR_CONTROL_TOOL_NAMES = frozenset(
 SCHEDULER_CONTROL_TOOL_NAMES = frozenset(
     {"observe_again", "complete_task", "abort_task"}
 )
+FEASIBILITY_STATUSES = frozenset({"feasible", "infeasible", "unknown"})
 _TOOL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _OPERATION_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 
@@ -57,6 +58,374 @@ def _finite_vector(value: Any, path: str) -> tuple[float, float, float]:
             raise MotionToolValidationError(f"{path}[{index}] must be finite")
         result.append(component)
     return result[0], result[1], result[2]
+
+
+def _finite_quaternion(
+    value: Any, path: str
+) -> tuple[float, float, float, float]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise MotionToolValidationError(f"{path} must be a WXYZ array")
+    if len(value) != 4:
+        raise MotionToolValidationError(
+            f"{path} must contain exactly four numbers"
+        )
+    result: list[float] = []
+    for index, component in enumerate(value):
+        if isinstance(component, bool) or not isinstance(component, (int, float)):
+            raise MotionToolValidationError(f"{path}[{index}] must be a number")
+        component = float(component)
+        if not math.isfinite(component):
+            raise MotionToolValidationError(f"{path}[{index}] must be finite")
+        result.append(component)
+    norm = math.sqrt(sum(component * component for component in result))
+    if norm <= 1.0e-9:
+        raise MotionToolValidationError(f"{path} must have non-zero magnitude")
+    return tuple(component / norm for component in result)  # type: ignore[return-value]
+
+
+def _quaternion_multiply_wxyz(
+    left: Sequence[float], right: Sequence[float]
+) -> tuple[float, float, float, float]:
+    lw, lx, ly, lz = left
+    rw, rx, ry, rz = right
+    return _finite_quaternion(
+        (
+            lw * rw - lx * rx - ly * ry - lz * rz,
+            lw * rx + lx * rw + ly * rz - lz * ry,
+            lw * ry - lx * rz + ly * rw + lz * rx,
+            lw * rz + lx * ry - ly * rx + lz * rw,
+        ),
+        "target_after_quaternion_wxyz",
+    )
+
+
+def _axis_angle_degrees_quaternion_wxyz(
+    rotation_delta_axis_angle_deg: Sequence[float],
+) -> tuple[float, float, float, float]:
+    angle_deg = math.sqrt(
+        sum(component * component for component in rotation_delta_axis_angle_deg)
+    )
+    if angle_deg <= 1.0e-12:
+        return 1.0, 0.0, 0.0, 0.0
+    axis = tuple(component / angle_deg for component in rotation_delta_axis_angle_deg)
+    half_angle = math.radians(angle_deg) * 0.5
+    scale = math.sin(half_angle)
+    return math.cos(half_angle), *(component * scale for component in axis)
+
+
+def compare_grasp_pose_to_failed_attempts(
+    *,
+    failed_attempts: Sequence[Mapping[str, Any]],
+    current_eef_xyz_m: Sequence[float],
+    current_object_xyz_m: Sequence[float],
+    current_eef_quaternion_wxyz: Sequence[float],
+) -> list[dict[str, Any]]:
+    """Report object-relative pose deltas from failed grasp attempts.
+
+    This intentionally encodes no retry threshold. It exposes measured
+    translation and shortest-path quaternion deltas so a selected governor can
+    reason about pose novelty without inferring it from a large raw payload.
+    """
+    if not isinstance(failed_attempts, Sequence) or isinstance(
+        failed_attempts, (str, bytes)
+    ):
+        raise MotionToolValidationError("failed_attempts must be an array")
+    current_eef = _finite_vector(current_eef_xyz_m, "current_eef_xyz_m")
+    current_object = _finite_vector(
+        current_object_xyz_m, "current_object_xyz_m"
+    )
+    current_quaternion = _finite_quaternion(
+        current_eef_quaternion_wxyz,
+        "current_eef_quaternion_wxyz",
+    )
+    current_relative = tuple(
+        eef_component - object_component
+        for eef_component, object_component in zip(current_eef, current_object)
+    )
+    comparisons: list[dict[str, Any]] = []
+    for index, attempt in enumerate(failed_attempts):
+        if not isinstance(attempt, Mapping):
+            raise MotionToolValidationError(
+                f"failed_attempts[{index}] must be an object"
+            )
+        attempt_relative = _finite_vector(
+            attempt.get("eef_minus_object_m"),
+            f"failed_attempts[{index}].eef_minus_object_m",
+        )
+        attempt_quaternion = _finite_quaternion(
+            attempt.get("eef_quaternion_wxyz"),
+            f"failed_attempts[{index}].eef_quaternion_wxyz",
+        )
+        translation_delta = math.sqrt(
+            sum(
+                (current_component - attempt_component) ** 2
+                for current_component, attempt_component in zip(
+                    current_relative, attempt_relative
+                )
+            )
+        )
+        quaternion_dot = abs(
+            sum(
+                current_component * attempt_component
+                for current_component, attempt_component in zip(
+                    current_quaternion, attempt_quaternion
+                )
+            )
+        )
+        orientation_delta_deg = math.degrees(
+            2.0 * math.acos(min(1.0, max(-1.0, quaternion_dot)))
+        )
+        comparisons.append(
+            {
+                "attempt_id": attempt.get("attempt_id", index + 1),
+                "comparison_frame": "object_relative_end_effector_pose",
+                "translation_delta_m": translation_delta,
+                "orientation_delta_deg": orientation_delta_deg,
+            }
+        )
+    return comparisons
+
+
+def failed_grasp_pose_lease_released(
+    *,
+    pose_comparisons: Sequence[Mapping[str, Any]],
+    minimum_translation_delta_m: float = 0.015,
+    minimum_orientation_delta_deg: float = 10.0,
+) -> bool:
+    """Return whether a new engagement pose differs from every failed pose.
+
+    The thresholds are runtime configuration, not task or embodiment knowledge.
+    Translation and orientation are alternative ways to establish a materially
+    new object-relative grasp pose. An empty failure history imposes no lease.
+    """
+    if not isinstance(pose_comparisons, Sequence) or isinstance(
+        pose_comparisons, (str, bytes)
+    ):
+        raise MotionToolValidationError("pose_comparisons must be an array")
+    for name, value in (
+        ("minimum_translation_delta_m", minimum_translation_delta_m),
+        ("minimum_orientation_delta_deg", minimum_orientation_delta_deg),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise MotionToolValidationError(f"{name} must be finite and positive")
+        if not math.isfinite(float(value)) or float(value) <= 0.0:
+            raise MotionToolValidationError(f"{name} must be finite and positive")
+
+    for index, comparison in enumerate(pose_comparisons):
+        if not isinstance(comparison, Mapping):
+            raise MotionToolValidationError(
+                f"pose_comparisons[{index}] must be an object"
+            )
+        deltas: dict[str, float] = {}
+        for name in ("translation_delta_m", "orientation_delta_deg"):
+            value = comparison.get(name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise MotionToolValidationError(
+                    f"pose_comparisons[{index}].{name} must be finite"
+                )
+            value = float(value)
+            if not math.isfinite(value) or value < 0.0:
+                raise MotionToolValidationError(
+                    f"pose_comparisons[{index}].{name} must be finite and non-negative"
+                )
+            deltas[name] = value
+        if (
+            deltas["translation_delta_m"] < minimum_translation_delta_m
+            and deltas["orientation_delta_deg"] < minimum_orientation_delta_deg
+        ):
+            return False
+    return True
+
+
+def compare_target_to_stalled_recovery(
+    *,
+    previous_recovery_outcome: Mapping[str, Any] | None,
+    proposed_target_xyz_m: Sequence[float],
+    proposed_target_quaternion_wxyz: Sequence[float],
+) -> dict[str, Any] | None:
+    """Compare a proposed target with the last physically stalled target.
+
+    The prior executor's model-selected pose tolerances define whether the new
+    proposal is materially distinct. This keeps the check task-, object-, and
+    embodiment-neutral while preventing an executor from physically retrying a
+    target that its own measured outcome already invalidated.
+    """
+    if not isinstance(previous_recovery_outcome, Mapping):
+        return None
+    invalidation = previous_recovery_outcome.get("lease_invalidation_reason")
+    if not isinstance(invalidation, str) or "motion_progress_stalled" not in {
+        item.strip()
+        for item in invalidation.removeprefix("lease_invalidated:").split(",")
+    }:
+        return None
+
+    previous_target = _finite_vector(
+        previous_recovery_outcome.get("attempted_target_xyz_m"),
+        "previous_recovery_outcome.attempted_target_xyz_m",
+    )
+    previous_quaternion = _finite_quaternion(
+        previous_recovery_outcome.get("attempted_target_quaternion_wxyz"),
+        "previous_recovery_outcome.attempted_target_quaternion_wxyz",
+    )
+    proposed_target = _finite_vector(
+        proposed_target_xyz_m,
+        "proposed_target_xyz_m",
+    )
+    proposed_quaternion = _finite_quaternion(
+        proposed_target_quaternion_wxyz,
+        "proposed_target_quaternion_wxyz",
+    )
+    position_tolerance = previous_recovery_outcome.get("position_tolerance_m")
+    orientation_tolerance = previous_recovery_outcome.get(
+        "orientation_tolerance_deg"
+    )
+    for value, path in (
+        (position_tolerance, "previous_recovery_outcome.position_tolerance_m"),
+        (
+            orientation_tolerance,
+            "previous_recovery_outcome.orientation_tolerance_deg",
+        ),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) < 0.0
+        ):
+            raise MotionToolValidationError(
+                f"{path} must be a finite non-negative number"
+            )
+
+    translation_delta = math.sqrt(
+        sum(
+            (proposed_component - previous_component) ** 2
+            for proposed_component, previous_component in zip(
+                proposed_target, previous_target
+            )
+        )
+    )
+    quaternion_dot = abs(
+        sum(
+            proposed_component * previous_component
+            for proposed_component, previous_component in zip(
+                proposed_quaternion, previous_quaternion
+            )
+        )
+    )
+    orientation_delta = math.degrees(
+        2.0 * math.acos(min(1.0, max(-1.0, quaternion_dot)))
+    )
+    return {
+        "comparison_frame": "world_space_motion_target",
+        "translation_delta_m": translation_delta,
+        "orientation_delta_deg": orientation_delta,
+        "previous_position_tolerance_m": float(position_tolerance),
+        "previous_orientation_tolerance_deg": float(orientation_tolerance),
+        "effectively_identical": bool(
+            translation_delta <= float(position_tolerance)
+            and orientation_delta <= float(orientation_tolerance)
+        ),
+    }
+
+
+def opposing_contact_force_capacity(
+    *,
+    joint_effort_limit: float,
+    contact_point_linear_jacobian_columns: Sequence[Sequence[float]],
+    closing_axis: Sequence[float],
+    effective_dynamic_friction: float | None = None,
+    gravity_m_s2: float | None = None,
+) -> dict[str, Any]:
+    """Derive a two-contact clamp capacity from live simulator mechanics.
+
+    For equal opposing normal forces ``F`` at two contact points, virtual work
+    gives ``tau = (J0 dot n + J1 dot -n) F``.  The active joint effort limit
+    therefore bounds the per-contact normal force without embedding a gripper
+    model, transmission ratio, task, or object identity.
+    """
+    if (
+        isinstance(joint_effort_limit, bool)
+        or not isinstance(joint_effort_limit, (int, float))
+        or not math.isfinite(float(joint_effort_limit))
+        or float(joint_effort_limit) <= 0.0
+    ):
+        raise MotionToolValidationError(
+            "joint_effort_limit must be a finite positive number"
+        )
+    if not isinstance(contact_point_linear_jacobian_columns, Sequence) or len(
+        contact_point_linear_jacobian_columns
+    ) != 2:
+        raise MotionToolValidationError(
+            "exactly two contact-point Jacobian columns are required"
+        )
+    jacobians = [
+        _finite_vector(value, f"contact_point_linear_jacobian_columns[{index}]")
+        for index, value in enumerate(contact_point_linear_jacobian_columns)
+    ]
+    axis = _finite_vector(closing_axis, "closing_axis")
+    axis_norm = math.sqrt(sum(component * component for component in axis))
+    if axis_norm <= 1.0e-9:
+        raise MotionToolValidationError("closing_axis must have non-zero magnitude")
+    axis = tuple(component / axis_norm for component in axis)
+    generalized_effort_per_unit_force = abs(
+        sum(jacobians[0][index] * axis[index] for index in range(3))
+        - sum(jacobians[1][index] * axis[index] for index in range(3))
+    )
+    if generalized_effort_per_unit_force <= 1.0e-9:
+        raise MotionToolValidationError(
+            "contact Jacobian does not expose closing-axis mechanical advantage"
+        )
+    per_contact_normal_force = (
+        float(joint_effort_limit) / generalized_effort_per_unit_force
+    )
+    total_normal_force = 2.0 * per_contact_normal_force
+    result: dict[str, Any] = {
+        "source": "live_contact_point_jacobian_virtual_work",
+        "joint_effort_limit": float(joint_effort_limit),
+        "generalized_effort_per_unit_contact_force_m": (
+            generalized_effort_per_unit_force
+        ),
+        "normal_force_per_contact_n": per_contact_normal_force,
+        "total_opposing_normal_force_n": total_normal_force,
+        "assumptions": [
+            "two_equal_opposing_contact_forces",
+            "continuous_joint_effort_available",
+            "contact_at_runtime_published_body_geometry_centers",
+        ],
+    }
+    if effective_dynamic_friction is not None:
+        if (
+            isinstance(effective_dynamic_friction, bool)
+            or not isinstance(effective_dynamic_friction, (int, float))
+            or not math.isfinite(float(effective_dynamic_friction))
+            or float(effective_dynamic_friction) < 0.0
+        ):
+            raise MotionToolValidationError(
+                "effective_dynamic_friction must be finite and non-negative"
+            )
+        friction_load = total_normal_force * float(effective_dynamic_friction)
+        result.update(
+            {
+                "effective_dynamic_friction": float(
+                    effective_dynamic_friction
+                ),
+                "friction_supported_tangential_load_n": friction_load,
+            }
+        )
+        if gravity_m_s2 is not None:
+            if (
+                isinstance(gravity_m_s2, bool)
+                or not isinstance(gravity_m_s2, (int, float))
+                or not math.isfinite(float(gravity_m_s2))
+                or float(gravity_m_s2) <= 0.0
+            ):
+                raise MotionToolValidationError(
+                    "gravity_m_s2 must be a finite positive number"
+                )
+            result["physics_derived_payload_capacity_kg"] = (
+                friction_load / float(gravity_m_s2)
+            )
+    return result
 
 
 def _copy_json(value: Any, path: str = "value") -> Any:
@@ -154,6 +523,17 @@ class MotionExecutorSpec:
                         "in meters in the frame supplied by the runtime."
                     ),
                 },
+                "rotation_delta_axis_angle_deg": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "description": (
+                        "Optional world-frame axis-angle correction of the current "
+                        "target orientation. Vector direction is the rotation axis "
+                        "and vector magnitude is degrees."
+                    ),
+                },
                 "executor_config": _copy_json(
                     self.configuration_schema, "configuration_schema"
                 ),
@@ -248,6 +628,228 @@ def _common_properties(observation_id: str) -> dict[str, Any]:
     }
 
 
+def task_feasibility_tool_schema(observation_id: str) -> list[dict[str, Any]]:
+    """Advertise the mandatory task-neutral pre-motion feasibility tool."""
+    observation_id = _required_text(observation_id, "observation_id")
+    status = {
+        "type": "string",
+        "enum": sorted(FEASIBILITY_STATUSES),
+    }
+    properties = _common_properties(observation_id)
+    properties.update(
+        {
+            "movable_object_visible": {"type": "boolean"},
+            "target_receptacle_visible": {"type": "boolean"},
+            "reachability": dict(status),
+            "grasp_feasibility": dict(status),
+            "payload_feasibility": dict(status),
+            "task_feasibility": dict(status),
+            "motion_authorized": {
+                "type": "boolean",
+                "description": (
+                    "True only when every required feasibility category is "
+                    "feasible from current evidence."
+                ),
+            },
+            "blocking_reasons": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+            },
+            "required_runtime_evidence": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+            },
+            "recommended_operations": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+            },
+        }
+    )
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "assess_task_feasibility",
+                "description": (
+                    "Assess physical reachability, grasp compatibility, payload "
+                    "support, and whole-task feasibility before any movement."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": properties,
+                    "required": [
+                        "observation_id",
+                        "confidence",
+                        "reason",
+                        "movable_object_visible",
+                        "target_receptacle_visible",
+                        "reachability",
+                        "grasp_feasibility",
+                        "payload_feasibility",
+                        "task_feasibility",
+                        "motion_authorized",
+                        "blocking_reasons",
+                        "required_runtime_evidence",
+                        "recommended_operations",
+                    ],
+                },
+            },
+        }
+    ]
+
+
+@dataclass(frozen=True)
+class TaskFeasibilityOutcome:
+    observation_id: str
+    confidence: float
+    reason: str
+    movable_object_visible: bool
+    target_receptacle_visible: bool
+    reachability: str
+    grasp_feasibility: str
+    payload_feasibility: str
+    task_feasibility: str
+    motion_authorized: bool
+    blocking_reasons: tuple[str, ...]
+    required_runtime_evidence: tuple[str, ...]
+    recommended_operations: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tool_name": "assess_task_feasibility",
+            "observation_id": self.observation_id,
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "movable_object_visible": self.movable_object_visible,
+            "target_receptacle_visible": self.target_receptacle_visible,
+            "reachability": self.reachability,
+            "grasp_feasibility": self.grasp_feasibility,
+            "payload_feasibility": self.payload_feasibility,
+            "task_feasibility": self.task_feasibility,
+            "motion_authorized": self.motion_authorized,
+            "blocking_reasons": list(self.blocking_reasons),
+            "required_runtime_evidence": list(self.required_runtime_evidence),
+            "recommended_operations": list(self.recommended_operations),
+        }
+
+
+class ObservationBoundTaskFeasibilityGate:
+    """Consume one fail-closed feasibility assessment for one observation."""
+
+    def __init__(self, *, observation_id: str):
+        self.observation_id = _required_text(observation_id, "observation_id")
+        self._consumed = False
+
+    def dispatch(self, call: Mapping[str, Any]) -> TaskFeasibilityOutcome:
+        if self._consumed:
+            raise MotionToolValidationError(
+                "this observation has already authorized one feasibility call"
+            )
+        self._consumed = True
+        name, arguments = _tool_name_and_arguments(call)
+        if name != "assess_task_feasibility":
+            raise MotionToolValidationError(
+                f"unregistered feasibility tool {name!r}"
+            )
+        required = {
+            "observation_id",
+            "confidence",
+            "reason",
+            "movable_object_visible",
+            "target_receptacle_visible",
+            "reachability",
+            "grasp_feasibility",
+            "payload_feasibility",
+            "task_feasibility",
+            "motion_authorized",
+            "blocking_reasons",
+            "required_runtime_evidence",
+            "recommended_operations",
+        }
+        unknown = set(arguments) - required
+        missing = required - set(arguments)
+        if unknown:
+            raise MotionToolValidationError(
+                f"feasibility tool contains unknown fields: {sorted(unknown)}"
+            )
+        if missing:
+            raise MotionToolValidationError(
+                f"feasibility tool is missing fields: {sorted(missing)}"
+            )
+        if arguments["observation_id"] != self.observation_id:
+            raise MotionToolValidationError(
+                "feasibility tool call uses a stale observation"
+            )
+        confidence = arguments["confidence"]
+        if isinstance(confidence, bool) or not isinstance(
+            confidence, (int, float)
+        ):
+            raise MotionToolValidationError("confidence must be a number in [0, 1]")
+        confidence = float(confidence)
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            raise MotionToolValidationError("confidence must be a number in [0, 1]")
+
+        booleans: dict[str, bool] = {}
+        for field in (
+            "movable_object_visible",
+            "target_receptacle_visible",
+            "motion_authorized",
+        ):
+            value = arguments[field]
+            if not isinstance(value, bool):
+                raise MotionToolValidationError(f"{field} must be a boolean")
+            booleans[field] = value
+        statuses: dict[str, str] = {}
+        for field in (
+            "reachability",
+            "grasp_feasibility",
+            "payload_feasibility",
+            "task_feasibility",
+        ):
+            value = arguments[field]
+            if value not in FEASIBILITY_STATUSES:
+                raise MotionToolValidationError(
+                    f"{field} must be one of {sorted(FEASIBILITY_STATUSES)}"
+                )
+            statuses[field] = str(value)
+
+        def text_array(field: str) -> tuple[str, ...]:
+            value = arguments[field]
+            if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+                raise MotionToolValidationError(f"{field} must be an array")
+            return tuple(
+                _required_text(item, f"{field}[{index}]")
+                for index, item in enumerate(value)
+            )
+
+        admitted = bool(
+            booleans["movable_object_visible"]
+            and booleans["target_receptacle_visible"]
+            and all(value == "feasible" for value in statuses.values())
+        )
+        if booleans["motion_authorized"] != admitted:
+            raise MotionToolValidationError(
+                "motion_authorized must be true exactly when both scene roles "
+                "are visible and every feasibility category is feasible"
+            )
+        return TaskFeasibilityOutcome(
+            observation_id=self.observation_id,
+            confidence=confidence,
+            reason=" ".join(_required_text(arguments["reason"], "reason").split()),
+            movable_object_visible=booleans["movable_object_visible"],
+            target_receptacle_visible=booleans["target_receptacle_visible"],
+            reachability=statuses["reachability"],
+            grasp_feasibility=statuses["grasp_feasibility"],
+            payload_feasibility=statuses["payload_feasibility"],
+            task_feasibility=statuses["task_feasibility"],
+            motion_authorized=admitted,
+            blocking_reasons=text_array("blocking_reasons"),
+            required_runtime_evidence=text_array("required_runtime_evidence"),
+            recommended_operations=text_array("recommended_operations"),
+        )
+
+
 def motion_tool_schemas(
     observation_id: str, registry: MotionExecutorRegistry
 ) -> list[dict[str, Any]]:
@@ -315,6 +917,9 @@ class MotionToolOutcome:
     target_before_m: tuple[float, float, float]
     target_after_m: tuple[float, float, float]
     requested_translation_delta_m: tuple[float, float, float]
+    target_before_quaternion_wxyz: tuple[float, float, float, float]
+    target_after_quaternion_wxyz: tuple[float, float, float, float]
+    requested_rotation_delta_axis_angle_deg: tuple[float, float, float]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -330,6 +935,15 @@ class MotionToolOutcome:
             "requested_translation_delta_m": list(
                 self.requested_translation_delta_m
             ),
+            "target_before_quaternion_wxyz": list(
+                self.target_before_quaternion_wxyz
+            ),
+            "target_after_quaternion_wxyz": list(
+                self.target_after_quaternion_wxyz
+            ),
+            "requested_rotation_delta_axis_angle_deg": list(
+                self.requested_rotation_delta_axis_angle_deg
+            ),
         }
 
 
@@ -343,15 +957,31 @@ class ObservationBoundMotionGate:
         current_target_m: Sequence[float],
         maximum_correction_m: float,
         registry: MotionExecutorRegistry,
+        current_target_quaternion_wxyz: Sequence[float] = (1.0, 0.0, 0.0, 0.0),
+        maximum_rotation_correction_deg: float = 45.0,
     ):
         self.observation_id = _required_text(observation_id, "observation_id")
         maximum_correction_m = float(maximum_correction_m)
         if not math.isfinite(maximum_correction_m) or maximum_correction_m <= 0.0:
             raise MotionToolValidationError("maximum_correction_m must be positive")
+        maximum_rotation_correction_deg = float(maximum_rotation_correction_deg)
+        if (
+            not math.isfinite(maximum_rotation_correction_deg)
+            or maximum_rotation_correction_deg <= 0.0
+            or maximum_rotation_correction_deg > 180.0
+        ):
+            raise MotionToolValidationError(
+                "maximum_rotation_correction_deg must be within (0, 180]"
+            )
         if not isinstance(registry, MotionExecutorRegistry):
             raise MotionToolValidationError("registry must be a MotionExecutorRegistry")
         self.current_target_m = _finite_vector(current_target_m, "current_target_m")
+        self.current_target_quaternion_wxyz = _finite_quaternion(
+            current_target_quaternion_wxyz,
+            "current_target_quaternion_wxyz",
+        )
         self.maximum_correction_m = maximum_correction_m
+        self.maximum_rotation_correction_deg = maximum_rotation_correction_deg
         self.registry = registry
         self._consumed = False
 
@@ -367,7 +997,13 @@ class ObservationBoundMotionGate:
             raise MotionToolValidationError(f"unregistered motion tool {name!r}")
         allowed = {"observation_id", "confidence", "reason"}
         if spec is not None:
-            allowed.update({"translation_delta_m", "executor_config"})
+            allowed.update(
+                {
+                    "translation_delta_m",
+                    "rotation_delta_axis_angle_deg",
+                    "executor_config",
+                }
+            )
         unknown = set(arguments) - allowed
         missing = {"observation_id", "confidence", "reason"} - set(arguments)
         if unknown:
@@ -389,6 +1025,7 @@ class ObservationBoundMotionGate:
         reason = _required_text(arguments["reason"], "reason")
 
         delta = (0.0, 0.0, 0.0)
+        rotation_delta = (0.0, 0.0, 0.0)
         executor_id: str | None = None
         executor_config: Mapping[str, Any] = {}
         if spec is not None:
@@ -409,10 +1046,32 @@ class ObservationBoundMotionGate:
                         f"requested correction {magnitude:.4f} m exceeds the "
                         f"{self.maximum_correction_m:.4f} m safety limit"
                     )
+            if "rotation_delta_axis_angle_deg" in arguments:
+                rotation_delta = _finite_vector(
+                    arguments["rotation_delta_axis_angle_deg"],
+                    "rotation_delta_axis_angle_deg",
+                )
+                rotation_magnitude = math.sqrt(
+                    sum(component * component for component in rotation_delta)
+                )
+                if (
+                    rotation_magnitude
+                    > self.maximum_rotation_correction_deg + 1.0e-9
+                ):
+                    raise MotionToolValidationError(
+                        f"requested rotation correction {rotation_magnitude:.2f} "
+                        f"degrees exceeds the "
+                        f"{self.maximum_rotation_correction_deg:.2f} degree "
+                        "safety limit"
+                    )
         else:
             action = "hold" if name == "hold_motion" else "abort"
         target_after = tuple(
             before + change for before, change in zip(self.current_target_m, delta)
+        )
+        target_after_quaternion = _quaternion_multiply_wxyz(
+            _axis_angle_degrees_quaternion_wxyz(rotation_delta),
+            self.current_target_quaternion_wxyz,
         )
         return MotionToolOutcome(
             tool_name=name,
@@ -425,6 +1084,9 @@ class ObservationBoundMotionGate:
             target_before_m=self.current_target_m,
             target_after_m=target_after,
             requested_translation_delta_m=delta,
+            target_before_quaternion_wxyz=self.current_target_quaternion_wxyz,
+            target_after_quaternion_wxyz=target_after_quaternion,
+            requested_rotation_delta_axis_angle_deg=rotation_delta,
         )
 
 
@@ -931,6 +1593,262 @@ def motion_report_yields_to_scheduler(motion_report: Mapping[str, Any]) -> bool:
         return False
     tool = decision.get("motion_tool")
     return isinstance(tool, Mapping) and tool.get("action") == "hold"
+
+
+def motion_checkpoint_scheduler_handoff_reason(
+    checkpoint: Mapping[str, Any],
+) -> str | None:
+    """Return a local kinematic invalidation needing fresh scheduling.
+
+    A stall or divergence is not evidence that the current operation should
+    remain motion. Yielding lets the observation-bound scheduler choose from
+    every currently admissible runtime operation, including actuator evaluation.
+    """
+    if not isinstance(checkpoint, Mapping):
+        return None
+    reason = checkpoint.get("reason")
+    if not isinstance(reason, str):
+        return None
+    prefix = "lease_invalidated:"
+    if not reason.startswith(prefix):
+        return None
+    invalidations = {
+        item.strip() for item in reason[len(prefix) :].split(",") if item.strip()
+    }
+    for invalidation in (
+        "motion_execution_diverged",
+        "motion_orientation_diverged",
+        "motion_progress_stalled",
+    ):
+        if invalidation in invalidations:
+            return invalidation
+    return None
+
+
+def stalled_motion_checkpoint_yields_to_scheduler(
+    checkpoint: Mapping[str, Any],
+) -> bool:
+    """Return whether local kinematic evidence needs fresh scheduling."""
+    return motion_checkpoint_scheduler_handoff_reason(checkpoint) is not None
+
+
+def recovery_motion_handoff_from_report(
+    motion_report: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Compact a stopped motion report for the next model-bound recovery.
+
+    Iteration histories can be large, but the next fresh-observation decision
+    needs the attempted target, measured residual, and local stop evidence to
+    avoid proposing effectively identical invalidated geometry.
+    """
+    if not isinstance(motion_report, Mapping):
+        return None
+    recovery = motion_report.get("recovery_request")
+    if not isinstance(recovery, Mapping):
+        return None
+    iterations = motion_report.get("iterations")
+    last_iteration = (
+        iterations[-1]
+        if isinstance(iterations, Sequence)
+        and not isinstance(iterations, (str, bytes))
+        and iterations
+        and isinstance(iterations[-1], Mapping)
+        else {}
+    )
+    executor_config = motion_report.get("executor_config")
+    if not isinstance(executor_config, Mapping):
+        executor_config = {}
+    return {
+        "phase": _copy_json(motion_report.get("phase")),
+        "attempted_target_xyz_m": _copy_json(
+            motion_report.get("target_xyz")
+        ),
+        "attempted_target_quaternion_wxyz": _copy_json(
+            motion_report.get("target_quaternion_wxyz")
+        ),
+        "eef_start_xyz_m": _copy_json(motion_report.get("eef_start_xyz")),
+        "eef_final_xyz_m": _copy_json(motion_report.get("eef_final_xyz")),
+        "target_error_before_m": _copy_json(
+            motion_report.get("target_error_before_m")
+        ),
+        "target_error_after_m": _copy_json(
+            motion_report.get("target_error_after_m")
+        ),
+        "orientation_error_after_deg": _copy_json(
+            motion_report.get("orientation_error_after_deg")
+        ),
+        "position_tolerance_m": _copy_json(
+            executor_config.get("position_tolerance_m")
+        ),
+        "orientation_tolerance_deg": _copy_json(
+            executor_config.get("orientation_tolerance_deg")
+        ),
+        "stopped_reason": _copy_json(recovery.get("reason")),
+        "lease_invalidation_reason": _copy_json(
+            recovery.get("lease_invalidation_reason")
+        ),
+        "last_measured_progress_m": _copy_json(
+            last_iteration.get("measured_target_progress_m")
+        ),
+        "last_stalled_observation_count": _copy_json(
+            last_iteration.get("stalled_observation_count")
+        ),
+    }
+
+
+def retained_contact_supports_loaded_actuator(
+    contact_observation: Mapping[str, Any] | None,
+    *,
+    maximum_pairwise_force_direction_cosine: float = 0.25,
+    minimum_force_magnitude_ratio: float = 0.15,
+) -> bool:
+    """Return whether measured contact supports preserving a loaded actuator.
+
+    A single-channel actuator may retain its load from one measured contact.
+    When a runtime exposes multiple contact channels, at least two must be
+    active and their forces must be sufficiently opposed and balanced.  The
+    rule consumes runtime sensor topology rather than an embodiment name.
+    """
+    for name, value in (
+        (
+            "maximum_pairwise_force_direction_cosine",
+            maximum_pairwise_force_direction_cosine,
+        ),
+        ("minimum_force_magnitude_ratio", minimum_force_magnitude_ratio),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise MotionToolValidationError(f"{name} must be finite")
+        if not math.isfinite(float(value)):
+            raise MotionToolValidationError(f"{name} must be finite")
+    if not -1.0 <= float(maximum_pairwise_force_direction_cosine) <= 1.0:
+        raise MotionToolValidationError(
+            "maximum_pairwise_force_direction_cosine must be in [-1, 1]"
+        )
+    if not 0.0 <= float(minimum_force_magnitude_ratio) <= 1.0:
+        raise MotionToolValidationError(
+            "minimum_force_magnitude_ratio must be in [0, 1]"
+        )
+    if not isinstance(contact_observation, Mapping):
+        return False
+    if not bool(contact_observation.get("available")) or not bool(
+        contact_observation.get("touch")
+    ):
+        return False
+    bodies = contact_observation.get("contact_bodies")
+    if not isinstance(bodies, Mapping) or not bool(bodies.get("available")):
+        # Preserve compatibility with actuators whose sensor does not expose
+        # per-contact-body channels.
+        return True
+    channels = bodies.get("channels")
+    if not isinstance(channels, Sequence) or isinstance(channels, (str, bytes)):
+        return False
+    if len(channels) <= 1:
+        return True
+    active_body_count = bodies.get("active_body_count")
+    if isinstance(active_body_count, bool) or not isinstance(
+        active_body_count, (int, float)
+    ):
+        return False
+    if int(active_body_count) < 2:
+        return False
+    cosine = bodies.get("pairwise_force_direction_cosine")
+    ratio = bodies.get("force_magnitude_ratio_min_over_max")
+    if (
+        isinstance(cosine, bool)
+        or not isinstance(cosine, (int, float))
+        or isinstance(ratio, bool)
+        or not isinstance(ratio, (int, float))
+    ):
+        return False
+    if not math.isfinite(float(cosine)) or not math.isfinite(float(ratio)):
+        return False
+    return (
+        float(cosine) <= float(maximum_pairwise_force_direction_cosine)
+        and float(ratio) >= float(minimum_force_magnitude_ratio)
+    )
+
+
+def actuator_command_outcome_invalidation_reason(
+    *,
+    requested_state: str,
+    actuator_position_changed: bool,
+    loaded_contact_supported: bool,
+) -> str | None:
+    """Describe a measured actuator command failure that requires re-observation."""
+    if requested_state not in {"engage", "disengage", "maintain"}:
+        raise MotionToolValidationError(
+            "requested_state must be engage, disengage, or maintain"
+        )
+    for name, value in (
+        ("actuator_position_changed", actuator_position_changed),
+        ("loaded_contact_supported", loaded_contact_supported),
+    ):
+        if not isinstance(value, bool):
+            raise MotionToolValidationError(f"{name} must be boolean")
+    if (
+        requested_state == "engage"
+        and not actuator_position_changed
+        and not loaded_contact_supported
+    ):
+        return "engagement_produced_no_motion_or_supported_loaded_contact"
+    return None
+
+
+def actuator_transition_is_admissible(
+    *,
+    actuator_engaged: bool,
+    goal_contact_observed: bool,
+    retained_contact_observed: bool,
+    measured_actuator_outcome_invalidated: bool = False,
+    failed_grasp_pose_lease_released: bool = True,
+    interaction_distance_m: float,
+    maximum_interaction_distance_m: float = 0.02,
+) -> bool:
+    """Admit actuator evaluation only when fresh physical preconditions allow it.
+
+    The rule is task-neutral: an engaged actuator stays loaded while contact is
+    retained away from the goal, but may transition at the goal, after contact
+    loss, or after a measured outcome invalidates the retained contact as an
+    effective actuation. A disengaged actuator is offered only at retained touch
+    or inside the runtime interaction envelope; otherwise motion must establish
+    proximity.
+    """
+    for name, value in (
+        ("actuator_engaged", actuator_engaged),
+        ("goal_contact_observed", goal_contact_observed),
+        ("retained_contact_observed", retained_contact_observed),
+        (
+            "measured_actuator_outcome_invalidated",
+            measured_actuator_outcome_invalidated,
+        ),
+        ("failed_grasp_pose_lease_released", failed_grasp_pose_lease_released),
+    ):
+        if not isinstance(value, bool):
+            raise MotionToolValidationError(f"{name} must be boolean")
+    for name, value in (
+        ("interaction_distance_m", interaction_distance_m),
+        ("maximum_interaction_distance_m", maximum_interaction_distance_m),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise MotionToolValidationError(f"{name} must be finite")
+        if not math.isfinite(float(value)):
+            raise MotionToolValidationError(f"{name} must be finite")
+    if interaction_distance_m < 0 or maximum_interaction_distance_m <= 0:
+        raise MotionToolValidationError(
+            "interaction distance must be non-negative and its maximum positive"
+        )
+    if actuator_engaged:
+        return (
+            goal_contact_observed
+            or not retained_contact_observed
+            or measured_actuator_outcome_invalidated
+        )
+    if not failed_grasp_pose_lease_released:
+        return False
+    return (
+        retained_contact_observed
+        or interaction_distance_m <= maximum_interaction_distance_m
+    )
 
 
 @dataclass(frozen=True)

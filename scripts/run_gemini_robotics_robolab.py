@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Visible Gemini Robotics ER 2 coach test on RoboLab BananaOnPlateTask.
+"""Visible Gemini Robotics ER 2 coach test on a RoboLab manipulation scene.
 
-The model is the stage-level embodied-reasoning coach. A proven demonstration
-seeds the downward grasp orientation, then bounded local Jacobian IK targets
-the live banana and plate poses. A fresh camera/state observation is sent after
-every semantic phase instead of calling the model every simulator step.
+The model is the stage-level embodied-reasoning coach. A semantic scene-role
+binding selects the live movable object and target receptacle while registered
+runtime tools execute model-issued bounded motion and actuator operations.
 """
 from __future__ import annotations
 
@@ -20,7 +19,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import cv2  # Must precede Isaac Lab imports.
 import h5py
@@ -36,13 +35,34 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 load_dotenv(REPO_ROOT / ".env")
 
+from manipulation_scene_roles import ManipulationSceneRoles
+
 parser = argparse.ArgumentParser(
     description="Run all visible Gemini Robotics ER 2 tests on RoboLab's current DROID robot."
 )
 parser.add_argument("--task", default="BananaOnPlateTask")
 parser.add_argument(
+    "--movable-object-asset",
+    default="banana",
+    help="Scene asset bound to the semantic movable_object role.",
+)
+parser.add_argument(
+    "--movable-object-label",
+    help="Optional model-facing label; defaults to a humanized scene asset name.",
+)
+parser.add_argument(
+    "--target-receptacle-asset",
+    default="plate_large",
+    help="Scene asset bound to the semantic target_receptacle role.",
+)
+parser.add_argument(
+    "--target-receptacle-label",
+    default="white plate",
+    help="Model-facing label for the target receptacle.",
+)
+parser.add_argument(
     "--instruction",
-    default="Pick up the yellow banana and put it on the white plate",
+    default=None,
     help=(
         "Natural-language instruction supplied to the model at every fresh "
         "observation-bound motion decision."
@@ -95,9 +115,64 @@ parser.add_argument(
         "Safety envelope for one model-issued XYZ target correction in meters."
     ),
 )
+parser.add_argument(
+    "--maximum-model-rotation-correction-deg",
+    type=float,
+    default=45.0,
+    help=(
+        "Safety envelope for one model-issued world-frame axis-angle target "
+        "orientation correction in degrees."
+    ),
+)
+parser.add_argument(
+    "--maximum-pregrasp-axis-error-deg",
+    type=float,
+    default=12.0,
+    help=(
+        "Maximum measured support-plane angle between the parallel-jaw "
+        "closing axis and an RGB-D oriented object-box axis before engage is "
+        "advertised."
+    ),
+)
 parser.add_argument("--maximum-grasp-drift", type=float, default=0.025)
 parser.add_argument("--minimum-transport-lift", type=float, default=0.030)
 parser.add_argument("--max-transport-recoveries", type=int, default=8)
+parser.add_argument(
+    "--max-lift-recovery-operations",
+    type=int,
+    default=32,
+    help=(
+        "Maximum fresh scheduler operations available to complete full "
+        "move/actuate/lift recovery cycles."
+    ),
+)
+parser.add_argument(
+    "--max-failed-grasp-attempts",
+    type=int,
+    default=8,
+    help=(
+        "Maximum physically tested grasp poses whose measured lift outcome "
+        "may fail before the episode is rejected."
+    ),
+)
+parser.add_argument(
+    "--failed-grasp-retry-minimum-translation",
+    type=float,
+    default=0.015,
+    help=(
+        "Minimum object-relative end-effector translation in meters which "
+        "releases the failed-grasp retry lease."
+    ),
+)
+parser.add_argument(
+    "--failed-grasp-retry-minimum-orientation-deg",
+    type=float,
+    default=10.0,
+    help=(
+        "Minimum end-effector orientation change in degrees which releases "
+        "the failed-grasp retry lease."
+    ),
+)
 parser.add_argument("--recovery-hold-steps", type=int, default=24)
 parser.add_argument("--recovery-stability-drift", type=float, default=0.008)
 parser.add_argument("--recovery-set-down-clearance", type=float, default=0.006)
@@ -146,12 +221,14 @@ parser.add_argument("--approach-clearance", type=float, default=0.10)
 parser.add_argument("--lift-clearance", type=float, default=0.14)
 parser.add_argument("--plate-hover-height", type=float, default=0.27)
 parser.add_argument(
+    "--movable-object-offset",
     "--banana-offset",
+    dest="movable_object_offset",
     nargs=2,
     type=float,
     default=(0.0, 0.0),
     metavar=("DX", "DY"),
-    help="Relocate the banana in robot-root XY meters after reset.",
+    help="Relocate the selected movable object in robot-root XY meters after reset.",
 )
 parser.add_argument(
     "--plate-offset",
@@ -162,10 +239,12 @@ parser.add_argument(
     help="Relocate the plate in robot-root XY meters after reset.",
 )
 parser.add_argument(
+    "--movable-object-yaw-deg",
     "--banana-yaw-deg",
+    dest="movable_object_yaw_deg",
     type=float,
     default=0.0,
-    help="Rotate the banana around world Z after reset and rotate the grasp with it.",
+    help="Rotate the selected movable object around world Z after reset.",
 )
 parser.add_argument(
     "--randomize-background",
@@ -247,6 +326,15 @@ parser.add_argument(
 parser.add_argument("--minimum-contact-coverage", type=float, default=0.95)
 parser.add_argument("--minimum-touch-samples", type=int, default=1)
 parser.add_argument(
+    "--maximum-actuator-interaction-distance",
+    type=float,
+    default=0.02,
+    help=(
+        "Runtime-configurable fingertip/object proximity for advertising an "
+        "actuator transition when retained touch is unavailable."
+    ),
+)
+parser.add_argument(
     "--actuator-feedback-position-change",
     type=float,
     default=0.05,
@@ -276,12 +364,24 @@ parser.add_argument(
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli, _ = parser.parse_known_args()
+SCENE_ROLES = ManipulationSceneRoles.create(
+    movable_object_asset=args_cli.movable_object_asset,
+    movable_object_label=args_cli.movable_object_label,
+    target_receptacle_asset=args_cli.target_receptacle_asset,
+    target_receptacle_label=args_cli.target_receptacle_label,
+)
+args_cli.instruction = args_cli.instruction or SCENE_ROLES.default_instruction()
 args_cli.enable_cameras = True
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 
 import robolab.constants  # noqa: E402
+import omni.usd  # noqa: E402
+from pxr import Gf, Usd, UsdGeom  # noqa: E402
+from isaaclab.utils.math import (  # noqa: E402
+    convert_camera_frame_orientation_convention,
+)
 from robolab.core.environments.runtime import create_env, end_episode  # noqa: E402
 from robolab.core.environments.config import parse_env_cfg  # noqa: E402
 from robolab.core.observations.observation_utils import unpack_image_obs  # noqa: E402
@@ -296,6 +396,7 @@ from adaptive_pick_place import (  # noqa: E402
     derive_object_relative_grasp,
     derive_manipulation_feedback,
     live_phase_target,
+    pregrasp_evidence_ready,
     quaternion_error_axis_angle_wxyz,
     quaternion_multiply_wxyz,
     yaw_quaternion_wxyz,
@@ -317,6 +418,7 @@ from franka_sensor_schema import (  # noqa: E402
 )
 from gemini_episode_dataset import GeminiEpisodeDatasetRecorder  # noqa: E402
 from robolab_contact_telemetry import (  # noqa: E402
+    contact_body_force_observation,
     contact_sensor_runtime_info,
     install_sim6_gripper_contact_sensor,
 )
@@ -331,18 +433,34 @@ from observation_bound_motion_tools import (  # noqa: E402
     ObservationBoundActuatorGate,
     ObservationBoundMotionGate,
     ObservationBoundOperationGate,
+    ObservationBoundTaskFeasibilityGate,
     OperationCandidate,
     assess_actuator_feedback_event,
+    actuator_command_outcome_invalidation_reason,
     actuator_tool_schemas,
+    compare_grasp_pose_to_failed_attempts,
+    compare_target_to_stalled_recovery,
+    failed_grasp_pose_lease_released,
     motion_report_yields_to_scheduler,
+    motion_checkpoint_scheduler_handoff_reason,
+    recovery_motion_handoff_from_report,
     motion_lease_source_errors,
     motion_tool_schemas,
+    opposing_contact_force_capacity,
     operation_scheduler_tool_schemas,
+    actuator_transition_is_admissible,
+    retained_contact_supports_loaded_actuator,
+    task_feasibility_tool_schema,
 )
 from rgbd_object_axis_tracking import (  # noqa: E402
     estimate_masked_object_axis,
     instance_mask_for_prim_label,
     sign_invariant_axis_error_deg,
+)
+from rgbd_collision_safety import (  # noqa: E402
+    pregrasp_axis_alignment_observation,
+    summarize_labeled_scene_geometry,
+    transform_matrix_from_pose_xyzw,
 )
 from sensor_invalidation_registry import (  # noqa: E402
     PredicateResult,
@@ -379,22 +497,24 @@ GEMINI_URL = (
     f"{MODEL_ID}:generateContent"
 )
 
-# Calibrated base-link grasp transform transferred from RoboLab's successful
-# demonstration. ER 2 is the semantic/visual coach; local IK retargets this
-# transform to live object poses while preserving the proven orientation.
-BANANA_GRASP_OFFSET = torch.tensor([-0.010, -0.023, 0.147], dtype=torch.float32)
-BANANA_GRASP_QUAT = torch.tensor([0.555, 0.385, 0.616, -0.406], dtype=torch.float32)
-BANANA_GRASP_QUAT /= torch.linalg.norm(BANANA_GRASP_QUAT)
 GRIPPER_BASE_TO_FINGERTIP_M = 0.149
+DEFAULT_OBJECT_GRASP_OFFSET = torch.tensor(
+    [0.0, 0.0, GRIPPER_BASE_TO_FINGERTIP_M], dtype=torch.float32
+)
+DEFAULT_DOWNWARD_GRASP_QUAT = torch.tensor(
+    [0.555, 0.385, 0.616, -0.406], dtype=torch.float32
+)
+DEFAULT_DOWNWARD_GRASP_QUAT /= torch.linalg.norm(DEFAULT_DOWNWARD_GRASP_QUAT)
 TOTAL_TESTS = 10
 VALID_CRITIC_PHASES = {
-    "global", "approach_banana", "descend", "grasp", "lift", "above_plate",
+    "global", "approach_object", "descend", "grasp", "lift", "above_plate",
     "place", "release"
 }
 ACTIVE_EPISODE_RECORDER: GeminiEpisodeDatasetRecorder | None = None
 ACTIVE_SENSOR_MONITOR: SensorCaptureBuffer | None = None
 ACTIVE_SENSOR_SAMPLE_INDEX = 0
 ACTIVE_ROS2_SENSOR_INGRESS: ROS2SensorIngress | None = None
+ACTUATOR_CONTACT_LOCAL_GEOMETRY: dict[str, Any] | None = None
 
 
 def _json_from_text(text: str) -> dict[str, Any]:
@@ -537,6 +657,14 @@ def _local_position(env: Any, asset_name: str) -> torch.Tensor:
     ).detach().cpu().clone()
 
 
+def _movable_object_position(env: Any) -> torch.Tensor:
+    return _local_position(env, SCENE_ROLES.movable_object_asset)
+
+
+def _target_receptacle_position(env: Any) -> torch.Tensor:
+    return _local_position(env, SCENE_ROLES.target_receptacle_asset)
+
+
 def _xyzw_to_wxyz(quaternion: torch.Tensor) -> torch.Tensor:
     return torch.cat((quaternion[-1:], quaternion[:3]))
 
@@ -550,6 +678,10 @@ def _local_quaternion(env: Any, asset_name: str) -> torch.Tensor:
     quaternion = env.scene[asset_name].data.root_quat_w
     quaternion = getattr(quaternion, "torch", quaternion)[0].detach().cpu().clone()
     return _xyzw_to_wxyz(quaternion)
+
+
+def _movable_object_quaternion(env: Any) -> torch.Tensor:
+    return _local_quaternion(env, SCENE_ROLES.movable_object_asset)
 
 
 def _eef_position(env: Any) -> torch.Tensor:
@@ -634,6 +766,7 @@ def _current_contact_observation(env: Any) -> dict[str, Any]:
             "net_force_n": (
                 float(np.linalg.vector_norm(force)) if force_valid else None
             ),
+            "contact_bodies": contact_body_force_observation(env),
         }
     except Exception as error:
         return {
@@ -641,6 +774,11 @@ def _current_contact_observation(env: Any) -> dict[str, Any]:
             "touch": None,
             "net_force_xyz_n": None,
             "net_force_n": None,
+            "contact_bodies": {
+                "available": False,
+                "frame": "world",
+                "channels": [],
+            },
             "error": f"{type(error).__name__}: {error}",
         }
 
@@ -794,9 +932,288 @@ def _rgbd_object_axis_observation(
     return result
 
 
-def _state(env: Any, initial_banana_z: float) -> dict[str, Any]:
-    banana = _local_position(env, "banana")
-    plate = _local_position(env, "plate_large")
+def _rgbd_scene_geometry_observation(env: Any) -> dict[str, Any]:
+    """Fuse current simulator RGB-D/instance data into robot-root geometry."""
+    sensor = env.scene.sensors["over_shoulder_left_camera"]
+    depth_value = sensor.data.output.get("depth")
+    instance_value = sensor.data.output.get("instance_id_segmentation_fast")
+    info = (sensor.data.info or {}).get("instance_id_segmentation_fast")
+    id_to_labels = None if info is None else info.get("idToLabels")
+    if depth_value is None or instance_value is None or not isinstance(
+        id_to_labels, Mapping
+    ):
+        raise ValueError("RGB-D depth or instance labels are unavailable")
+
+    def _tensor_numpy(value: Any) -> np.ndarray:
+        value = getattr(value, "torch", value)
+        if isinstance(value, torch.Tensor):
+            value = value[0].detach().cpu().numpy()
+        return np.asarray(value).squeeze()
+
+    camera_position_data_w = _tensor_numpy(sensor.data.pos_w)
+    camera_quaternion_data_xyzw = _tensor_numpy(sensor.data.quat_w_ros)
+    robot = env.scene["robot"]
+    robot_position_w = _tensor_numpy(robot.data.root_pos_w)
+    robot_quaternion_xyzw = _tensor_numpy(robot.data.root_quat_w)
+    robot_to_world = transform_matrix_from_pose_xyzw(
+        robot_position_w,
+        robot_quaternion_xyzw,
+    )
+    intrinsics = _tensor_numpy(sensor.data.intrinsic_matrices)
+    candidates: dict[str, tuple[np.ndarray, np.ndarray]] = {
+        "camera_data_ros_xyzw": (
+            camera_position_data_w,
+            camera_quaternion_data_xyzw,
+        ),
+        "camera_data_ros_wxyz_reordered_to_xyzw": (
+            camera_position_data_w,
+            camera_quaternion_data_xyzw[[1, 2, 3, 0]],
+        ),
+    }
+    stage = omni.usd.get_context().get_stage()
+    camera_prim = (
+        stage.GetPrimAtPath("/World/envs/env_0/over_shoulder_left_camera")
+        if stage is not None
+        else None
+    )
+    if camera_prim is not None and camera_prim.IsValid():
+        camera_to_world_usd = UsdGeom.XformCache(
+            Usd.TimeCode.Default()
+        ).GetLocalToWorldTransform(camera_prim)
+        camera_position_usd_w = np.asarray(
+            camera_to_world_usd.ExtractTranslation(), dtype=np.float64
+        )
+        camera_quaternion_gl = camera_to_world_usd.ExtractRotationQuat()
+        camera_quaternion_gl_xyzw = np.asarray(
+            [
+                *camera_quaternion_gl.GetImaginary(),
+                camera_quaternion_gl.GetReal(),
+            ],
+            dtype=np.float64,
+        )
+        camera_quaternion_usd_ros_xyzw = (
+            convert_camera_frame_orientation_convention(
+                torch.tensor(
+                    camera_quaternion_gl_xyzw[None], dtype=torch.float32
+                ),
+                origin="opengl",
+                target="ros",
+            )[0]
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        candidates["usd_xform_opengl_to_ros_xyzw"] = (
+            camera_position_usd_w,
+            camera_quaternion_usd_ros_xyzw,
+        )
+    scored: list[
+        tuple[float, str, dict[str, Any], np.ndarray, np.ndarray]
+    ] = []
+    for convention, (camera_position_w, quaternion_xyzw) in candidates.items():
+        camera_to_world = transform_matrix_from_pose_xyzw(
+            camera_position_w,
+            quaternion_xyzw,
+        )
+        camera_to_robot = np.linalg.inv(robot_to_world) @ camera_to_world
+        summary = summarize_labeled_scene_geometry(
+            depth_m=_tensor_numpy(depth_value),
+            instance_ids=_tensor_numpy(instance_value),
+            id_to_labels=id_to_labels,
+            intrinsics=intrinsics,
+            camera_to_base=camera_to_robot,
+        )
+        role_residuals: list[dict[str, Any]] = []
+        for asset_name in (
+            SCENE_ROLES.movable_object_asset,
+            SCENE_ROLES.target_receptacle_asset,
+        ):
+            geometry = next(
+                (
+                    item
+                    for item in summary["geometries"]
+                    if item["runtime_id"] == asset_name
+                ),
+                None,
+            )
+            if geometry is None:
+                continue
+            expected = _local_position(env, asset_name).numpy()
+            observed = np.asarray(geometry["center_base_m"], dtype=np.float64)
+            extent = np.asarray(
+                geometry["visible_extent_base_m"], dtype=np.float64
+            )
+            residual_m = float(np.linalg.norm(observed - expected))
+            normalized = residual_m / max(0.05, 0.5 * float(np.linalg.norm(extent)))
+            role_residuals.append(
+                {
+                    "runtime_id": asset_name,
+                    "root_to_visible_center_residual_m": residual_m,
+                    "extent_normalized_residual": normalized,
+                }
+            )
+        score = (
+            float(np.mean([item["extent_normalized_residual"] for item in role_residuals]))
+            if role_residuals
+            else float("inf")
+        )
+        summary["semantic_role_calibration"] = role_residuals
+        scored.append(
+            (score, convention, summary, camera_position_w, quaternion_xyzw)
+        )
+    score, convention, summary, camera_position_w, quaternion_xyzw = min(
+        scored, key=lambda item: item[0]
+    )
+    summary["camera_pose_robot_root"] = {
+        "position_m": (
+            np.linalg.inv(robot_to_world)
+            @ np.array([*camera_position_w.tolist(), 1.0])
+        )[:3].tolist(),
+        "quaternion_order_interpretation": convention,
+        "camera_data_raw_quaternion": camera_quaternion_data_xyzw.tolist(),
+        "selected_quaternion_xyzw": quaternion_xyzw.tolist(),
+    }
+    summary["calibration_score"] = score
+    role_calibration_valid = bool(
+        summary["semantic_role_calibration"]
+        and all(
+            item["extent_normalized_residual"] <= 1.5
+            for item in summary["semantic_role_calibration"]
+        )
+    )
+    summary["calibration_valid"] = bool(
+        np.isfinite(score) and score <= 1.5 and role_calibration_valid
+    )
+    if not summary["calibration_valid"]:
+        summary["available"] = False
+        summary["error"] = (
+            "RGB-D/base-frame calibration failed semantic-role residual checks"
+        )
+    return summary
+
+
+def _rotate_vector_wxyz(
+    quaternion_wxyz: torch.Tensor, vector: torch.Tensor
+) -> torch.Tensor:
+    quaternion = quaternion_wxyz / torch.linalg.vector_norm(quaternion_wxyz)
+    xyz = quaternion[1:]
+    twice_cross = 2.0 * torch.linalg.cross(xyz, vector)
+    return vector + quaternion[0] * twice_cross + torch.linalg.cross(xyz, twice_cross)
+
+
+def _contact_geometry_local_from_usd(
+    contact_body_names: Sequence[str],
+) -> dict[str, Any] | None:
+    """Resolve configured contact-shape centers in the controlled-frame basis."""
+    global ACTUATOR_CONTACT_LOCAL_GEOMETRY
+    if ACTUATOR_CONTACT_LOCAL_GEOMETRY is not None:
+        return ACTUATOR_CONTACT_LOCAL_GEOMETRY
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        return None
+    robot_prim = stage.GetPrimAtPath("/World/envs/env_0/robot")
+    if not robot_prim.IsValid():
+        return None
+    contact_prims: dict[str, Usd.Prim] = {}
+    controlled_frame_prim: Usd.Prim | None = None
+    contact_names = set(contact_body_names)
+    for prim in Usd.PrimRange(robot_prim):
+        if prim.GetName() in contact_names:
+            contact_prims.setdefault(prim.GetName(), prim)
+        if (
+            prim.GetName() == "base_link"
+            and "Robotiq_2F_85" in str(prim.GetPath())
+        ):
+            controlled_frame_prim = prim
+    if controlled_frame_prim is None or len(contact_prims) < 2:
+        return None
+    xform_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
+    base_to_world = xform_cache.GetLocalToWorldTransform(controlled_frame_prim)
+    world_to_base = base_to_world.GetInverse()
+    bbox_cache = UsdGeom.BBoxCache(
+        Usd.TimeCode.Default(),
+        [UsdGeom.Tokens.default_, UsdGeom.Tokens.render],
+    )
+    centers_local: dict[str, list[float]] = {}
+    for body_name in contact_body_names:
+        prim = contact_prims.get(body_name)
+        if prim is None:
+            continue
+        world_range = bbox_cache.ComputeWorldBound(prim).ComputeAlignedRange()
+        center_world = world_range.GetMidpoint()
+        center_local = world_to_base.Transform(center_world)
+        centers_local[body_name] = [float(value) for value in center_local]
+    if len(centers_local) < 2:
+        return None
+    ordered = [
+        torch.tensor(centers_local[name], dtype=torch.float32)
+        for name in contact_body_names
+        if name in centers_local
+    ]
+    stacked = torch.stack(ordered)
+    center_local = torch.mean(stacked, dim=0)
+    separation_local = ordered[1] - ordered[0]
+    span = float(torch.linalg.vector_norm(separation_local))
+    if span <= 1.0e-6:
+        return None
+    ACTUATOR_CONTACT_LOCAL_GEOMETRY = {
+        "contact_body_centers_local_m": centers_local,
+        "contact_center_local_m": center_local.tolist(),
+        "closing_axis_local": (separation_local / span).tolist(),
+        "contact_body_geometry_center_span_m": span,
+    }
+    return ACTUATOR_CONTACT_LOCAL_GEOMETRY
+
+
+def _actuator_contact_geometry(env: Any, eef: torch.Tensor) -> dict[str, Any]:
+    """Describe the configured contact bodies without a model-side embodiment."""
+    runtime_info = contact_sensor_runtime_info(env)
+    contact_body_names = list(runtime_info.get("body_names") or [])
+    local_geometry = _contact_geometry_local_from_usd(contact_body_names)
+    if local_geometry is None:
+        return {
+            "available": False,
+            "source": "configured_contact_prim_bounds",
+            "frame": "robot_root",
+        }
+    eef_quaternion = _eef_quaternion(env)
+    contact_center_offset = _rotate_vector_wxyz(
+        eef_quaternion,
+        torch.tensor(local_geometry["contact_center_local_m"]),
+    )
+    contact_center = eef + contact_center_offset
+    closing_axis = _rotate_vector_wxyz(
+        eef_quaternion,
+        torch.tensor(local_geometry["closing_axis_local"]),
+    )
+    body_centers_root: dict[str, list[float]] = {}
+    for body_name, local_center in local_geometry[
+        "contact_body_centers_local_m"
+    ].items():
+        body_centers_root[body_name] = (
+            eef
+            + _rotate_vector_wxyz(
+                eef_quaternion,
+                torch.tensor(local_center, dtype=torch.float32),
+            )
+        ).tolist()
+    result: dict[str, Any] = {
+        "available": True,
+        "source": "configured_contact_prim_bounds_plus_live_controlled_frame",
+        "frame": "robot_root",
+        "controlled_frame_xyz_m": eef.tolist(),
+        "contact_center_xyz_m": contact_center.tolist(),
+        "controlled_frame_to_contact_center_m": contact_center_offset.tolist(),
+        "contact_body_geometry_centers_xyz_m": body_centers_root,
+        "closing_axis_robot_root": closing_axis.tolist(),
+        **local_geometry,
+    }
+    return result
+
+
+def _state(env: Any, initial_object_z: float) -> dict[str, Any]:
+    movable_object = _movable_object_position(env)
+    target_receptacle = _target_receptacle_position(env)
     eef = _eef_position(env)
     fingertip = eef + torch.tensor([0.0, 0.0, -GRIPPER_BASE_TO_FINGERTIP_M])
     robot = env.scene["robot"]
@@ -805,58 +1222,489 @@ def _state(env: Any, initial_banana_z: float) -> dict[str, Any]:
     joint_pos = getattr(joint_pos, "torch", joint_pos)
     finger_joint_rad = float(joint_pos[0, finger_index].detach().cpu())
     closed_fraction = max(0.0, min(1.0, finger_joint_rad / (np.pi / 4)))
-    fingertip_distance = float(torch.linalg.vector_norm(fingertip - banana))
-    banana_lift = float(banana[2]) - initial_banana_z
-    plate_xy_error = float(torch.linalg.vector_norm(plate[:2] - banana[:2]))
-    height_above_plate = float(banana[2] - plate[2])
+    fingertip_distance = float(torch.linalg.vector_norm(fingertip - movable_object))
+    object_lift = float(movable_object[2]) - initial_object_z
+    target_xy_error = float(
+        torch.linalg.vector_norm(target_receptacle[:2] - movable_object[:2])
+    )
+    height_above_target = float(movable_object[2] - target_receptacle[2])
     feedback = derive_manipulation_feedback(
         gripper_closed_fraction=closed_fraction,
         fingertip_object_distance_m=fingertip_distance,
-        object_lift_m=banana_lift,
-        object_target_xy_error_m=plate_xy_error,
-        object_height_above_target_m=height_above_plate,
+        object_lift_m=object_lift,
+        object_target_xy_error_m=target_xy_error,
+        object_height_above_target_m=height_above_target,
         contact_height_m=args_cli.plate_contact_height,
     )
+    try:
+        rgbd_scene_geometry = _rgbd_scene_geometry_observation(env)
+    except (KeyError, ValueError, np.linalg.LinAlgError) as exc:
+        rgbd_scene_geometry = {
+            "available": False,
+            "source": "synchronized_rgbd_instance_geometry",
+            "frame": "robot_root",
+            "error": str(exc),
+            "geometries": [],
+        }
+    actuator_contact_geometry = _actuator_contact_geometry(env, eef)
+    try:
+        pregrasp_axis_alignment = pregrasp_axis_alignment_observation(
+            scene_geometry=rgbd_scene_geometry,
+            actuator_geometry=actuator_contact_geometry,
+            object_runtime_id=SCENE_ROLES.movable_object_asset,
+            maximum_error_deg=args_cli.maximum_pregrasp_axis_error_deg,
+        )
+    except (TypeError, ValueError) as exc:
+        pregrasp_axis_alignment = {
+            "available": False,
+            "source": (
+                "rgbd_oriented_footprint_plus_runtime_contact_geometry"
+            ),
+            "object_runtime_id": SCENE_ROLES.movable_object_asset,
+            "error": str(exc),
+        }
     return {
-        "banana_xyz": banana.tolist(),
-        "banana_quaternion_wxyz": _local_quaternion(env, "banana").tolist(),
-        "plate_xyz": plate.tolist(),
+        "scene_roles": SCENE_ROLES.to_dict(),
+        "movable_object_xyz": movable_object.tolist(),
+        "movable_object_quaternion_wxyz": _movable_object_quaternion(env).tolist(),
+        "target_receptacle_xyz": target_receptacle.tolist(),
         "eef_gripper_base_xyz": eef.tolist(),
         "eef_gripper_base_quaternion_wxyz": _eef_quaternion(env).tolist(),
         "gripper_fingertip_center_xyz": fingertip.tolist(),
         "gripper_base_to_fingertip_m": GRIPPER_BASE_TO_FINGERTIP_M,
-        "fingertip_banana_distance_m": fingertip_distance,
+        "fingertip_object_distance_m": fingertip_distance,
+        "actuator_contact_geometry": actuator_contact_geometry,
+        "rgbd_scene_geometry": rgbd_scene_geometry,
+        "pregrasp_axis_alignment": pregrasp_axis_alignment,
         "finger_joint_rad": finger_joint_rad,
         "gripper_closed_fraction": closed_fraction,
         "current_contact": _current_contact_observation(env),
-        "banana_lift_m": banana_lift,
-        "banana_plate_xy_error_m": plate_xy_error,
-        "banana_height_above_plate_m": height_above_plate,
+        "object_lift_m": object_lift,
+        "object_target_xy_error_m": target_xy_error,
+        "object_height_above_target_m": height_above_target,
         "gripper_closure_obstructed": feedback["gripper_closure_obstructed"],
         "grasp_candidate": feedback["grasp_candidate"],
         "grasp_confirmed": feedback["grasp_confirmed"],
-        "banana_plate_contact_proxy": feedback["object_target_contact_proxy"],
+        "object_target_contact_proxy": feedback["object_target_contact_proxy"],
     }
 
 
-def _scene_prompt(state: dict[str, Any], critic_context: str) -> str:
-    return f"""You are Gemini Robotics ER 2 supervising a Franka robot with a Robotiq gripper.
-Task: Pick up the yellow banana and put it on the white plate.
+def _runtime_task_capability_evidence(
+    env: Any,
+    state: dict[str, Any],
+    motion_registry: MotionExecutorRegistry,
+    actuator_registry: ActuatorExecutorRegistry,
+) -> dict[str, Any]:
+    """Publish task-neutral physical evidence from active runtime adapters."""
+
+    def torch_view(value: Any) -> torch.Tensor:
+        value = getattr(value, "torch", value)
+        if not isinstance(value, torch.Tensor):
+            value = torch.as_tensor(value)
+        return value.detach().cpu()
+
+    def subtree_material_evidence(prim_path: str) -> dict[str, Any]:
+        stage = omni.usd.get_context().get_stage()
+        root = stage.GetPrimAtPath(prim_path) if stage is not None else None
+        if root is None or not root.IsValid():
+            return {
+                "available": False,
+                "source": "active_usd_physics_materials",
+            }
+        static_values: list[float] = []
+        dynamic_values: list[float] = []
+        combine_modes: set[str] = set()
+        for prim in Usd.PrimRange(root):
+            static_value = prim.GetAttribute("physics:staticFriction").Get()
+            dynamic_value = prim.GetAttribute("physics:dynamicFriction").Get()
+            combine_mode = prim.GetAttribute(
+                "physxMaterial:frictionCombineMode"
+            ).Get()
+            if isinstance(static_value, (int, float)) and math.isfinite(
+                float(static_value)
+            ):
+                static_values.append(float(static_value))
+            if isinstance(dynamic_value, (int, float)) and math.isfinite(
+                float(dynamic_value)
+            ):
+                dynamic_values.append(float(dynamic_value))
+            if isinstance(combine_mode, str) and combine_mode:
+                combine_modes.add(combine_mode)
+        return {
+            "available": bool(static_values or dynamic_values),
+            "source": "active_usd_physics_materials",
+            "minimum_static_friction": (
+                min(static_values) if static_values else None
+            ),
+            "minimum_dynamic_friction": (
+                min(dynamic_values) if dynamic_values else None
+            ),
+            "combine_modes": sorted(combine_modes),
+        }
+
+    def live_opposing_force_capability(
+        *,
+        actuator_geometry: Mapping[str, Any],
+        joint_effort_limit: float,
+        dynamic_friction: float | None,
+        gravity_m_s2: float | None,
+    ) -> dict[str, Any]:
+        try:
+            contact_centers = actuator_geometry.get(
+                "contact_body_geometry_centers_xyz_m"
+            )
+            closing_axis = actuator_geometry.get("closing_axis_robot_root")
+            if not isinstance(contact_centers, Mapping) or len(contact_centers) != 2:
+                raise MotionToolValidationError(
+                    "two runtime contact-body geometry centers are required"
+                )
+            robot = env.scene["robot"]
+            finger_joint_index = robot.data.joint_names.index("finger_joint")
+            jacobian = torch_view(robot.data.body_link_jacobian_w)[0]
+            body_positions_w = torch_view(robot.data.body_pos_w)[0]
+            root_position_w = torch_view(robot.data.root_pos_w)[0]
+            root_quaternion_xyzw = torch_view(robot.data.root_quat_w)[0]
+            root_quaternion_wxyz = _xyzw_to_wxyz(root_quaternion_xyzw)
+            jacobian_joint_index = finger_joint_index + robot.num_base_dofs
+            point_jacobians: list[list[float]] = []
+            for body_name, center_root in contact_centers.items():
+                body_index = robot.data.body_names.index(body_name)
+                jacobian_body_index = (
+                    body_index - 1 if robot.is_fixed_base else body_index
+                )
+                body_jacobian_column = jacobian[
+                    jacobian_body_index, :, jacobian_joint_index
+                ]
+                point_root = torch.tensor(center_root, dtype=torch.float32)
+                point_w = root_position_w + _rotate_vector_wxyz(
+                    root_quaternion_wxyz, point_root
+                )
+                radius_w = point_w - body_positions_w[body_index]
+                point_linear_jacobian = (
+                    body_jacobian_column[:3]
+                    + torch.cross(
+                        body_jacobian_column[3:], radius_w, dim=0
+                    )
+                )
+                point_jacobians.append(point_linear_jacobian.tolist())
+            axis_root = torch.tensor(closing_axis, dtype=torch.float32)
+            axis_w = _rotate_vector_wxyz(root_quaternion_wxyz, axis_root)
+            result = opposing_contact_force_capacity(
+                joint_effort_limit=joint_effort_limit,
+                contact_point_linear_jacobian_columns=point_jacobians,
+                closing_axis=axis_w.tolist(),
+                effective_dynamic_friction=dynamic_friction,
+                gravity_m_s2=gravity_m_s2,
+            )
+            result["available"] = True
+            result["friction_source"] = (
+                "conservative_minimum_of_active_contact_materials"
+                if dynamic_friction is not None
+                else None
+            )
+            return result
+        except (
+            AttributeError,
+            IndexError,
+            KeyError,
+            MotionToolValidationError,
+            TypeError,
+            ValueError,
+        ) as error:
+            return {
+                "available": False,
+                "source": "live_contact_point_jacobian_virtual_work",
+                "error": str(error),
+            }
+
+    movable_asset = env.scene[SCENE_ROLES.movable_object_asset]
+    try:
+        body_mass = torch_view(movable_asset.data.body_mass)
+        object_mass_kg = float(torch.sum(body_mass[0]))
+    except (AttributeError, IndexError, TypeError, ValueError):
+        object_mass_kg = None
+    gravity = getattr(getattr(env.sim, "cfg", None), "gravity", None)
+    if (
+        isinstance(gravity, Sequence)
+        and not isinstance(gravity, (str, bytes))
+        and len(gravity) == 3
+    ):
+        gravity_magnitude = float(np.linalg.norm(np.asarray(gravity, dtype=float)))
+    else:
+        gravity_magnitude = None
+    object_weight_n = (
+        object_mass_kg * gravity_magnitude
+        if object_mass_kg is not None and gravity_magnitude is not None
+        else None
+    )
+    actuator_material = subtree_material_evidence(
+        "/World/envs/env_0/robot"
+    )
+    object_material = subtree_material_evidence(
+        f"/World/envs/env_0/scene/{SCENE_ROLES.movable_object_asset}"
+    )
+    dynamic_friction_values = [
+        float(value)
+        for value in (
+            actuator_material.get("minimum_dynamic_friction"),
+            object_material.get("minimum_dynamic_friction"),
+        )
+        if isinstance(value, (int, float)) and math.isfinite(float(value))
+    ]
+    effective_dynamic_friction = (
+        min(dynamic_friction_values) if dynamic_friction_values else None
+    )
+
+    geometries = state.get("rgbd_scene_geometry", {}).get("geometries", [])
+
+    def visible_geometry(runtime_id: str) -> dict[str, Any] | None:
+        return next(
+            (
+                dict(item)
+                for item in geometries
+                if isinstance(item, Mapping)
+                and item.get("runtime_id") == runtime_id
+            ),
+            None,
+        )
+
+    robot = env.scene["robot"]
+    finger_index = robot.data.joint_names.index("finger_joint")
+    joint_pos = torch_view(robot.data.joint_pos)[0]
+    joint_limits = torch_view(robot.data.soft_joint_pos_limits)[0]
+    effort_limits = torch_view(robot.data.joint_effort_limits)[0]
+    motion_joint_margins: list[float] = []
+    for index in range(len(joint_pos)):
+        if index == finger_index:
+            continue
+        lower = float(joint_limits[index, 0])
+        upper = float(joint_limits[index, 1])
+        width = upper - lower
+        if not math.isfinite(width) or width <= 0.0:
+            continue
+        position = float(joint_pos[index])
+        motion_joint_margins.append(
+            max(0.0, min(position - lower, upper - position) / width)
+        )
+    actuator_geometry = state.get("actuator_contact_geometry", {})
+    force_capability = live_opposing_force_capability(
+        actuator_geometry=actuator_geometry,
+        joint_effort_limit=float(effort_limits[finger_index]),
+        dynamic_friction=effective_dynamic_friction,
+        gravity_m_s2=gravity_magnitude,
+    )
+    eef_xyz = np.asarray(state["eef_gripper_base_xyz"], dtype=np.float64)
+    object_xyz = np.asarray(state["movable_object_xyz"], dtype=np.float64)
+    target_xyz = np.asarray(state["target_receptacle_xyz"], dtype=np.float64)
+    return {
+        "source": "active_simulator_and_runtime_capability_adapters",
+        "identity_fields_in_contract": False,
+        "motion": {
+            "registered_executors": [
+                {
+                    "executor_id": spec.executor_id,
+                    "configuration_schema": spec.configuration_schema,
+                }
+                for spec in motion_registry.specs()
+            ],
+            "controlled_dof_count": len(motion_joint_margins),
+            "minimum_normalized_joint_limit_margin": (
+                min(motion_joint_margins) if motion_joint_margins else None
+            ),
+            "current_eef_base_radius_m": float(np.linalg.norm(eef_xyz)),
+            "movable_object_base_radius_m": float(np.linalg.norm(object_xyz)),
+            "target_receptacle_base_radius_m": float(np.linalg.norm(target_xyz)),
+            "eef_to_movable_object_root_m": float(
+                np.linalg.norm(eef_xyz - object_xyz)
+            ),
+            "eef_to_target_receptacle_root_m": float(
+                np.linalg.norm(eef_xyz - target_xyz)
+            ),
+            "rated_workspace_envelope": None,
+            "rated_workspace_envelope_status": "not_published_by_active_adapter",
+        },
+        "actuator": {
+            "registered_executors": [
+                {
+                    "executor_id": spec.executor_id,
+                    "command_schema": spec.command_schema,
+                    "configuration_schema": spec.configuration_schema,
+                }
+                for spec in actuator_registry.specs()
+            ],
+            "contact_body_count": len(
+                actuator_geometry.get("contact_body_geometry_centers_xyz_m", {})
+            ),
+            "open_contact_body_center_span_m": actuator_geometry.get(
+                "contact_body_geometry_center_span_m"
+            ),
+            "closing_axis_robot_root": actuator_geometry.get(
+                "closing_axis_robot_root"
+            ),
+            "controlled_joint_position_limits": (
+                joint_limits[finger_index].tolist()
+            ),
+            "sim_joint_effort_limit": float(effort_limits[finger_index]),
+            "sim_joint_effort_unit": "rotary_joint_torque_n_m",
+            "command_retention": "position_target_held_each_environment_step",
+            "contact_material": actuator_material,
+            "continuous_opposing_force_capability": force_capability,
+            "continuous_normal_force_capacity_n": force_capability.get(
+                "total_opposing_normal_force_n"
+            ),
+            "continuous_normal_force_capacity_status": (
+                "derived_from_live_contact_jacobians"
+                if force_capability.get("available")
+                else "not_published_by_active_adapter"
+            ),
+            "rated_payload_limit_kg": None,
+            "rated_payload_limit_status": "not_published_by_active_adapter",
+            "physics_derived_payload_capacity_kg": force_capability.get(
+                "physics_derived_payload_capacity_kg"
+            ),
+        },
+        "movable_object": {
+            "mass_kg": object_mass_kg,
+            "gravity_m_s2": gravity_magnitude,
+            "weight_n": object_weight_n,
+            "contact_material": object_material,
+            "visible_rgbd_geometry": visible_geometry(
+                SCENE_ROLES.movable_object_asset
+            ),
+        },
+        "target_receptacle": {
+            "visible_rgbd_geometry": visible_geometry(
+                SCENE_ROLES.target_receptacle_asset
+            )
+        },
+        "evidence_limitations": [
+            *(["rated_workspace_envelope"]),
+            *(
+                []
+                if force_capability.get("available")
+                else ["continuous_normal_force_capacity_n"]
+            ),
+            "rated_payload_limit_kg",
+        ],
+    }
+
+
+def _scene_prompt(
+    state: dict[str, Any],
+    capability_evidence: dict[str, Any],
+    observation_id: str,
+    critic_context: str,
+) -> str:
+    return f"""You are a visual physical-feasibility governor.
+Human instruction: {args_cli.instruction}
+Semantic scene roles:
+{json.dumps(SCENE_ROLES.to_dict(), indent=2)}
 
 Fresh simulator state in robot-root coordinates (meters):
 {json.dumps(state, indent=2)}
 
-Inspect the attached current multi-camera image. Return ONLY JSON:
-{{
-  "scene_ok": true,
-  "banana_visible": true,
-  "plate_visible": true,
-  "recommended_sequence": ["approach_banana", "descend", "grasp", "lift", "above_plate", "lower_to_plate", "release", "retreat"],
-  "assessment": "brief visual assessment"
-}}
-Do not output joint angles. Bounded local IK targets the current object poses.
+Runtime-published physical capability evidence:
+{json.dumps(capability_evidence, indent=2)}
+
+Fresh observation token: {observation_id}
+
+Before any motion, answer four independent physical questions through exactly
+one assess_task_feasibility tool call: can the interaction and destination be
+reached, can the active actuator form the required grasp geometry, can it
+sustain the object's load continuously, and can the whole instruction be
+completed under the observed constraints? Object visibility or arm reach alone
+does not prove grasp or payload feasibility. Compare the visible object extents
+and axes with the actuator contact span and closing axis. Distinguish a held
+position command and joint effort limit from a measured/rated continuous normal
+grip-force capacity. Do not convert torque to fingertip force without a
+published transmission model. A capacity derived by the runtime from live
+contact-point Jacobians and virtual work is admissible simulator evidence; cite
+its assumptions and compare its friction-supported load with object weight.
+The lack of a manufacturer-rated payload is still a limitation but does not by
+itself invalidate a fully available simulator-derived capacity. Other missing
+essential evidence remains unknown; do not guess it or mark an unknown category
+feasible. motion_authorized may be true only when
+both scene roles are visible and all four feasibility categories are feasible.
+List missing measurements in required_runtime_evidence and physical blockers in
+blocking_reasons. recommended_operations describes a capability-level plan, not
+a fixed phase schedule or joint command.
+
+Inspect the attached current multi-camera RGB-D image and issue only the native
+tool call. Do not output joint commands or an embodiment-specific plan.
 
 {critic_context}"""
+
+
+def _choose_observation_bound_task_feasibility(
+    provider: GeminiProvider,
+    *,
+    frame: np.ndarray,
+    state: dict[str, Any],
+    capability_evidence: dict[str, Any],
+    critic_context: str,
+) -> tuple[dict[str, Any], float, str]:
+    """Ask the model one fail-closed, fresh-observation feasibility question."""
+    encoded, digest = _encode_frame(frame)
+    observation_id = f"task-feasibility:{digest}"
+    gate = ObservationBoundTaskFeasibilityGate(observation_id=observation_id)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a physical task-feasibility governor. Respond with "
+                "exactly one runtime-advertised native tool call."
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{encoded}",
+                        "detail": "high",
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": _scene_prompt(
+                        state,
+                        capability_evidence,
+                        observation_id,
+                        critic_context,
+                    ),
+                },
+            ],
+        },
+    ]
+    started = time.perf_counter()
+    response = asyncio.run(
+        asyncio.wait_for(
+            provider.complete(
+                messages,
+                {
+                    "tools": task_feasibility_tool_schema(observation_id),
+                    "tool_choice": "required",
+                },
+            ),
+            timeout=args_cli.timeout,
+        )
+    )
+    latency = time.perf_counter() - started
+    tool_calls = response.tool_calls or []
+    if len(tool_calls) != 1:
+        raise RuntimeError(
+            "task feasibility model must issue exactly one native tool call; "
+            f"received {len(tool_calls)}"
+        )
+    outcome = gate.dispatch(tool_calls[0])
+    result = outcome.to_dict()
+    result["scene_ok"] = bool(
+        outcome.movable_object_visible and outcome.target_receptacle_visible
+    )
+    result["assessment"] = outcome.reason
+    result["recommended_sequence"] = list(outcome.recommended_operations)
+    return result, latency, digest
 
 
 def _stage_prompt(
@@ -881,7 +1729,8 @@ def _stage_prompt(
         )
     )
     return f"""You are Gemini Robotics ER 2 acting as a closed-loop robot coach.
-Task: Pick up the yellow banana and put it on the white plate.
+Human instruction: {args_cli.instruction}
+Semantic scene roles: {json.dumps(SCENE_ROLES.to_dict())}
 Current phase: {phase}
 This is a FRESH observation captured after the previous phase completed.
 
@@ -893,20 +1742,34 @@ Object-relative target quaternion (wxyz): {nominal_quaternion_wxyz.tolist()}
 Current orientation error: {orientation_error_degrees:.2f} degrees
 Requested gripper state: {"closed" if gripper_closed else "open"}
 
-Important tool geometry: eef_gripper_base_xyz is the Robotiq mounting flange,
-not the jaws. For this fixed downward grasp orientation, the provided
-gripper_fingertip_center_xyz is 0.149 m lower and is the point that must align
-with the banana. Do not reject a grasp because the mounting flange is above it.
+Capability-reported tool geometry distinguishes eef_gripper_base_xyz from
+gripper_fingertip_center_xyz and gives their measured offset. Judge interaction
+at the reported contact geometry, not from mounting-base height, and do not
+assume the initial orientation is the only valid grasp orientation.
+The actuator_contact_geometry is measured from the runtime-configured contact
+bodies. Compare its closing_axis_robot_root with rgbd_scene_geometry object axes
+and extents when choosing a new grasp orientation. RGB-D scene geometry is
+visible-surface evidence in robot-root coordinates; keep the actuator geometry
+outside non-task scene surfaces while allowing only the contact needed by the
+human instruction.
 The measured gripper_closed_fraction is authoritative: values near 1.0 mean
 fully closed and values near 0.0 mean fully open. After the grasp phase, the
 close command has already been issued; a fraction around 0.10-0.50 can mean the
-banana is physically blocking further finger travel and is positive contact
-evidence, not an open-gripper command. At phase "lift", execute the lift test
-when the fingers visibly surround the banana; the next observation verifies
-whether the grasp is physically attached.
-The fused grasp_candidate field means closure was obstructed near the banana;
-grasp_confirmed means the banana measurably followed the lift. If
-banana_plate_contact_proxy is true, the object has reached the plate envelope:
+the movable object is physically blocking further finger travel and is positive contact
+evidence, not an open-gripper command. It is not sufficient proof of retention.
+When current_contact.contact_bodies is available for a multi-contact clamp,
+compare the named per-body force directions: opposing multi-body contact can
+support a pinch, while one active body or predominantly same-direction pressure
+can indicate surface contact. At phase "lift", execute the lift test only when
+the image, actuator position, and per-body contact evidence together support
+retention. Explicitly use pairwise_force_direction_cosine and
+force_magnitude_ratio_min_over_max in the assessment when they are available;
+positive cosine is same-direction pressure, not an opposing pinch. Otherwise
+retry so the fresh motion tool can alter position and/or
+orientation before another engagement.
+The fused grasp_candidate field means closure was obstructed near the movable object;
+grasp_confirmed means the movable object measurably followed the lift. If
+object_target_contact_proxy is true, the object has reached the target envelope:
 do not request more lowering, and execute release when XY placement is valid.
 
 Inspect the attached current multi-camera image. The calibrated executor will
@@ -914,7 +1777,7 @@ move toward this live-pose Cartesian target with bounded local Jacobian IK; you
 are not controlling individual joints or individual simulator frames.
 
 For phase "grasp", set grasp_ready=true only when the image and measured distance
-support closing around the banana.
+support closing around the movable object.
 
 {critic_context}
 
@@ -933,7 +1796,8 @@ def _motion_checkpoint_prompt(
     checkpoint: dict[str, Any],
 ) -> str:
     return f"""You are Gemini Robotics ER 2 supervising a robot during motion.
-Task: Pick up the yellow banana and put it on the white plate.
+Human instruction: {args_cli.instruction}
+Semantic scene roles: {json.dumps(SCENE_ROLES.to_dict())}
 Current phase: {phase}
 
 This is a FRESH mid-motion observation, not a phase-boundary image.
@@ -950,11 +1814,17 @@ slip, dropped object, unexpected contact, or an obstructed route. Return ONLY:
   "confidence": 0.0,
   "assessment": "brief fresh visual/state reasoning"
 }}
+When current_contact.contact_bodies is available, use its named per-body force
+directions to distinguish opposing retained contact from one-body or
+same-direction surface pressure. Aggregate touch alone does not prove that an
+object is retained. Use pairwise_force_direction_cosine and
+force_magnitude_ratio_min_over_max when available; positive cosine means the
+forces are same-direction rather than opposing.
 When RGB-D safety is enabled, the attached image is RGB on the left and a
 near-to-far TURBO depth visualization on the right; numeric depth summaries
 are included above. Use execute only when it is safe to continue the current
-bounded motion. Use complete when the image and state show that the banana is
-already on the plate and no more grasp/transport motion is needed."""
+bounded motion. Use complete when the image and state show that the movable object is
+already on the target receptacle and no more grasp/transport motion is needed."""
 
 
 def _local_dls_executor_registry(
@@ -1366,14 +2236,37 @@ RGB-D summary:
 
 The image contains RGB on the left and depth on the right when depth is
 available. Select a registered executor tool to continue or correct the current
-world-space target. Select hold_motion when a new observation is required before
-movement, or abort_motion when movement is unsafe. Executor settings are
+world-space pose target. A correction may change XYZ and/or orientation;
+rotation_delta_axis_angle_deg is a world-frame axis-angle vector whose direction
+is the rotation axis and whose magnitude is degrees. Select hold_motion when a
+new observation is required before movement, or abort_motion when movement is
+unsafe. Executor settings are
 optional and must stay inside their advertised schema. Ground any target
 correction and configuration change in current evidence. Measured contact and
 touch in observed world state are current physical evidence; interpret them
 together with the requested actuator state instead of requiring an unloaded
-actuator to reach its full travel. Configure a sufficiently long
+actuator to reach its full travel. When current_contact.contact_bodies is
+available for a multi-contact clamp, compare the named per-body force
+directions: opposing contact can support retention, while one active body or
+predominantly same-direction pressure can indicate surface contact. Aggregate
+touch alone does not prove a secure grasp. Use the reported
+pairwise_force_direction_cosine and force_magnitude_ratio_min_over_max instead
+of estimating them from raw vectors; positive cosine is same-direction
+pressure. Configure a sufficiently long
 maximum_iterations horizon for the target. When the observed state indicates
+that a new interaction pose is needed, compare actuator_contact_geometry's
+closing_axis_robot_root and contact-body span with the visible object axes and
+extents in rgbd_scene_geometry. Change orientation as well as translation when
+the current closing direction cannot produce opposing contact. Keep the swept
+actuator geometry outside visible non-task scene surfaces; visible RGB-D geometry
+is sensor evidence, not an object-specific grasp prescription. When the observed
+state indicates
+that pregrasp_axis_alignment is available but aligned=false, use one of its
+candidate_yaw_correction_deg values as the evidence for a world-Z axis-angle
+rotation correction. The local scheduler will continue withholding engagement
+until a fresh RGB-D observation measures the jaw axis within the configured
+tolerance; a translation-only correction cannot satisfy that angular gate.
+When the observed state indicates
 that an object is being carried, advertise only the invariants needed for this
 motion through require_contact, minimum_contact_force_n,
 maximum_tracked_pose_error_m, and minimum_observed_clearance_m. These are lease
@@ -1395,6 +2288,22 @@ unstable, detached, or cannot be established from current evidence, hold for a
 fresh operation decision instead of blindly continuing. When
 previous_motion_tool_outcome is present, correct that rejected proposal while
 preserving the local safety bounds.
+
+When a grasp attempt produced contact but the object did not follow the lift,
+do not assume that contact proved a secure grasp. Compare the fresh RGB-D image,
+contact-force direction, physical actuator position, and failed-attempt evidence.
+Use a bounded translation and/or rotation to choose a materially different
+grasp pose before requesting another clamp engagement when the previous geometry
+was ineffective. This rule is geometry- and outcome-based; it does not encode an
+object-specific grasp.
+
+When previous_recovery_motion_outcome is present, its attempted target and
+measured residual are physical execution evidence. If its lease invalidation
+contains motion_progress_stalled, do not repeat an effectively identical target:
+change the translation and/or orientation enough to create a materially distinct
+approach supported by the fresh RGB-D/state evidence. A target below or through
+an observed support surface is not a valid recovery. Abort when no bounded safe
+alternative exists.
 
 When scheduler_decision explicitly dispatches continue.runtime_motion after a
 previous hold, the fresh operation decision has already resolved whether to
@@ -1464,10 +2373,18 @@ def _choose_observation_bound_motion_tool(
         registry,
         source_context,
     )
+    current_target_quaternion = motion_context.get(
+        "current_target_quaternion_wxyz",
+        state.get("eef_gripper_base_quaternion_wxyz"),
+    )
     gate = ObservationBoundMotionGate(
         observation_id=observation_id,
         current_target_m=current_target.tolist(),
+        current_target_quaternion_wxyz=current_target_quaternion,
         maximum_correction_m=args_cli.maximum_model_target_correction,
+        maximum_rotation_correction_deg=(
+            args_cli.maximum_model_rotation_correction_deg
+        ),
         registry=observation_registry,
     )
     messages = [
@@ -1539,6 +2456,7 @@ def _choose_observation_bound_motion_tool(
                     "model_text": str(response.text or "")[:500],
                 },
                 "target_xyz_m": current_target.tolist(),
+                "target_quaternion_wxyz": list(current_target_quaternion),
                 "executor_id": None,
                 "executor_config": {},
             },
@@ -1563,6 +2481,7 @@ def _choose_observation_bound_motion_tool(
                     "error": str(error),
                 },
                 "target_xyz_m": current_target.tolist(),
+                "target_quaternion_wxyz": list(current_target_quaternion),
                 "executor_id": None,
                 "executor_config": {},
             },
@@ -1616,6 +2535,7 @@ def _choose_observation_bound_motion_tool(
                     "assessment": f"Motion tool rejected by safety gate: {error}",
                     "motion_tool": rejected_tool,
                     "target_xyz_m": current_target.tolist(),
+                    "target_quaternion_wxyz": list(current_target_quaternion),
                     "executor_id": None,
                     "executor_config": {},
                 },
@@ -1633,6 +2553,9 @@ def _choose_observation_bound_motion_tool(
         "assessment": outcome.reason,
         "motion_tool": outcome.to_dict(),
         "target_xyz_m": list(outcome.target_after_m),
+        "target_quaternion_wxyz": list(
+            outcome.target_after_quaternion_wxyz
+        ),
         "executor_id": outcome.executor_id,
         "executor_config": dict(outcome.executor_config),
     }
@@ -1674,8 +2597,34 @@ operation scheduler can choose another capability. Select abort_actuation only
 when no safe recovery can continue the overall instruction. Measured touch and
 force are physical evidence: incomplete travel with touch can indicate an
 object is obstructing closure, while disengagement should remove retained
-contact. Executor settings are optional and must remain inside their advertised
-schema. Do not emit prose or JSON outside the single native tool call.
+contact. If actuator context contains failed_grasp_attempts and the fresh pose
+still matches an ineffective contact pose, do not engage the clamp again; hold
+that repeated engagement so the operation scheduler can select a pose
+correction. This restriction applies only to engagement. Never use failed-grasp
+history to block disengaging a closed, empty gripper: disengagement is the
+recoverable reset that permits a new pose and grasp attempt. The actuator
+context may include failed_grasp_pose_comparisons with measured object-relative
+translation_delta_m and orientation_delta_deg. Use those explicit deltas when
+deciding whether a pose changed; do not describe a pose as unchanged without
+reconciling both measurements in the tool-call reason. The governor, not this
+runtime, decides whether the measured change is sufficient. The scheduler
+dispatch supplies the fresh reason this actuator capability was selected; use
+it as context while independently validating the transition against the fresh
+observation. If trigger_event.actuator_outcome_invalidated is true, the previous
+requested actuator state produced neither measured actuator displacement nor
+sensor-supported loaded contact. Do not issue that same requested state again.
+If its commanded state is engaged, disengage it to permit a pose correction;
+otherwise hold so the operation scheduler can select motion. This is a measured
+outcome rule, not an object-specific grasp prescription. When fresh
+contact_bodies are available for a multi-contact clamp,
+use the named per-body forces to distinguish an opposing multi-body pinch from
+same-direction surface pressure; aggregate force or touch alone does not prove
+object retention. Use pairwise_force_direction_cosine and
+force_magnitude_ratio_min_over_max when present; positive cosine is
+same-direction pressure rather than an opposing pinch. Executor settings are
+optional and must remain inside their
+advertised schema. Do not emit prose or JSON outside the single native tool
+call.
 
 {critic_context}"""
 
@@ -1873,6 +2822,30 @@ Dispatch continue.runtime_motion only when current actuator commands should be
 preserved while the runtime proposes the next movement. Use observe_again when
 the evidence is insufficient, complete_task only when the physical instruction
 is already achieved, or abort_task when neither advertised operation is safe.
+When trigger_event contains failed_grasp_attempts, compare the current pose and
+contact evidence with those attempts. If the actuator is still engaged after a
+measured outcome invalidated that contact as an effective grasp, dispatch the
+actuator capability to disengage it before pose correction. Once disengaged, do
+not dispatch another clamp engagement from an unchanged ineffective grasp pose;
+dispatch motion so the model can choose a different evidence-grounded position
+and/or orientation. A later clamp engagement is appropriate only after the fresh
+state shows that the grasp pose has materially changed or the prior failure
+evidence has otherwise been resolved.
+When failed_grasp_pose_comparisons are present, use their measured
+object-relative translation_delta_m and orientation_delta_deg rather than
+guessing pose similarity from raw coordinates. Reconcile both values in the
+scheduler-tool reason; the selected governor decides whether the change is
+sufficient for another physical attempt.
+When current actuator state is disengaged and pregrasp_axis_alignment_ready is
+false, actuation has intentionally not been advertised. Dispatch motion so the
+motion governor can rotate the wrist using the fresh pregrasp_axis_alignment
+axis comparisons. Do not describe another descent or translation-only move as
+fixing a measured angular error.
+When trigger_event says actuator_outcome_invalidated, the previous actuator
+command produced neither measured actuator motion nor sensor-supported loaded
+contact. Do not treat the commanded state as a physical grasp and do not repeat
+the ineffective command; select the actuator capability for a different command
+or motion so the model can correct the pose.
 Do not infer a transition from a prerecorded action or phase schedule. Do not
 emit prose or JSON outside the single native tool call.
 
@@ -2082,7 +3055,7 @@ def _execute_binary_actuator_tool(
     last_action: torch.Tensor,
     decision: dict[str, Any],
     *,
-    initial_banana_z: float,
+    initial_object_z: float,
 ) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
     """Adapt one admitted runtime actuator call to RoboLab's binary action."""
     if decision.get("executor_id") != "binary_end_effector_clamp":
@@ -2100,7 +3073,7 @@ def _execute_binary_actuator_tool(
         else False if requested_state == "disengage" else engaged_before
     )
     settle_steps = int(decision.get("executor_config", {}).get("settle_steps", 35))
-    state_before = _state(env, initial_banana_z)
+    state_before = _state(env, initial_object_z)
     obs, terminal = _hold_joint_action(
         env,
         obs,
@@ -2109,7 +3082,7 @@ def _execute_binary_actuator_tool(
         gripper_closed=engaged_after,
     )
     command[0, 7] = 1.0 if engaged_after else 0.0
-    state_after = _state(env, initial_banana_z)
+    state_after = _state(env, initial_object_z)
     return (
         obs,
         terminal,
@@ -2155,7 +3128,25 @@ def _actuator_feedback_event_from_execution(
         touch_after=bool(after["current_contact"]["touch"]),
         policy=policy,
     )
-    return event.to_dict()
+    result = event.to_dict()
+    loaded_contact_supported = retained_contact_supports_loaded_actuator(
+        after["current_contact"]
+    )
+    invalidation_reason = actuator_command_outcome_invalidation_reason(
+        requested_state=str(execution["requested_state"]),
+        actuator_position_changed=bool(event.actuator_position_changed),
+        loaded_contact_supported=loaded_contact_supported,
+    )
+    result.update(
+        {
+            "loaded_contact_supported_after": loaded_contact_supported,
+            "actuator_outcome_invalidated": invalidation_reason is not None,
+            "actuator_outcome_invalidation_reason": invalidation_reason,
+        }
+    )
+    if invalidation_reason is not None:
+        result["triggered"] = True
+    return result
 
 
 def _move_eef_to_target(
@@ -2167,7 +3158,7 @@ def _move_eef_to_target(
     phase: str,
     *,
     gripper_closed: bool,
-    initial_banana_z: float,
+    initial_object_z: float,
     executor_config: dict[str, Any] | None = None,
     carry_reference_offset: torch.Tensor | None = None,
     rgbd_axis_references: dict[str, np.ndarray] | None = None,
@@ -2302,7 +3293,7 @@ def _move_eef_to_target(
         checkpoint_reason: str | None = None
         tracked_pose_error_m = None
         if carry_reference_offset is not None:
-            tracked_object = _local_position(env, "banana")
+            tracked_object = _movable_object_position(env)
             tracked_pose_error_m = float(
                 torch.linalg.vector_norm(
                     (eef_after - tracked_object) - carry_reference_offset
@@ -2311,8 +3302,8 @@ def _move_eef_to_target(
         observed_clearance_m = None
         if lease_conditions.minimum_observed_clearance_m is not None:
             observed_clearance_m = float(
-                _local_position(env, "banana")[2]
-                - _local_position(env, "plate_large")[2]
+                _movable_object_position(env)[2]
+                - _target_receptacle_position(env)[2]
             )
         current_contact = _current_contact_observation(env)
         observed_at_s = time.monotonic()
@@ -2480,9 +3471,14 @@ def _move_eef_to_target(
             "rgbd_tracked_axis": rgbd_axis_observation,
             "rgbd_tracking_error": rgbd_axis_error_message,
         }
-        if not lease_assessment.valid:
+        local_invalidation_reasons = list(lease_assessment.invalidation_reasons)
+        if error_after > previous_error + 0.008:
+            local_invalidation_reasons.append("motion_execution_diverged")
+        if orientation_error_after > previous_orientation_error + np.deg2rad(8.0):
+            local_invalidation_reasons.append("motion_orientation_diverged")
+        if local_invalidation_reasons:
             checkpoint_reason = "lease_invalidated:" + ",".join(
-                lease_assessment.invalidation_reasons
+                dict.fromkeys(local_invalidation_reasons)
             )
         if early_stop_callback is not None:
             early_stop = early_stop_callback()
@@ -2527,6 +3523,7 @@ def _move_eef_to_target(
                     ),
                 },
                 "current_target_xyz_m": target_cpu.tolist(),
+                "current_target_quaternion_wxyz": target_quat_cpu.tolist(),
                 "executor_id": "bounded_dls_ik",
                 "executor_config": dict(effective_config),
             }
@@ -2557,13 +3554,66 @@ def _move_eef_to_target(
                     raise RuntimeError(
                         f"Model returned an invalid world target: {updated_target}"
                     )
-                target_changed = not bool(torch.allclose(updated_target, target_cpu))
-                if target_changed:
+                translation_target_changed = not bool(
+                    torch.allclose(updated_target, target_cpu)
+                )
+                if translation_target_changed:
                     record["target_before_model_correction_m"] = target_cpu.tolist()
                     target_cpu = updated_target
                     record["target_after_model_correction_m"] = target_cpu.tolist()
                     error_after = float(torch.linalg.vector_norm(target_cpu - eef_after))
                     record["target_error_after_model_correction_m"] = error_after
+                updated_target_quaternion = torch.tensor(
+                    checkpoint_decision.get(
+                        "target_quaternion_wxyz", target_quat_cpu.tolist()
+                    ),
+                    dtype=torch.float32,
+                )
+                if updated_target_quaternion.shape != (4,) or not bool(
+                    torch.isfinite(updated_target_quaternion).all()
+                ):
+                    raise RuntimeError(
+                        "Model returned an invalid world orientation target: "
+                        f"{updated_target_quaternion}"
+                    )
+                quaternion_norm = torch.linalg.vector_norm(
+                    updated_target_quaternion
+                )
+                if float(quaternion_norm) <= 1.0e-9:
+                    raise RuntimeError(
+                        "Model returned a zero-magnitude world orientation target"
+                    )
+                updated_target_quaternion = (
+                    updated_target_quaternion / quaternion_norm
+                )
+                orientation_target_changed = not bool(
+                    torch.allclose(
+                        updated_target_quaternion,
+                        target_quat_cpu,
+                        atol=1.0e-6,
+                    )
+                )
+                if orientation_target_changed:
+                    record["target_quaternion_before_model_correction_wxyz"] = (
+                        target_quat_cpu.tolist()
+                    )
+                    target_quat_cpu = updated_target_quaternion
+                    record["target_quaternion_after_model_correction_wxyz"] = (
+                        target_quat_cpu.tolist()
+                    )
+                    orientation_error_after = float(
+                        torch.linalg.vector_norm(
+                            quaternion_error_axis_angle_wxyz(
+                                target_quat_cpu, _eef_quaternion(env)
+                            )
+                        )
+                    )
+                    record[
+                        "orientation_error_after_model_correction_deg"
+                    ] = float(np.rad2deg(orientation_error_after))
+                target_changed = (
+                    translation_target_changed or orientation_target_changed
+                )
                 updated_config = checkpoint_decision.get("executor_config") or {}
                 if updated_config:
                     effective_config.update(updated_config)
@@ -2635,17 +3685,6 @@ def _move_eef_to_target(
             break
         if terminal:
             break
-        if not target_changed and error_after > previous_error + 0.008:
-            raise RuntimeError(
-                f"Adaptive IK diverged in {phase}: "
-                f"target error {previous_error:.4f}→{error_after:.4f} m"
-            )
-        if orientation_error_after > previous_orientation_error + np.deg2rad(8.0):
-            raise RuntimeError(
-                f"Adaptive rotational IK diverged in {phase}: orientation error "
-                f"{np.rad2deg(previous_orientation_error):.1f}→"
-                f"{np.rad2deg(orientation_error_after):.1f} degrees"
-            )
         previous_error = error_after
         previous_orientation_error = orientation_error_after
 
@@ -2729,7 +3768,7 @@ def _recover_transport_grasp(
     obs: dict[str, Any],
     last_action: torch.Tensor,
     *,
-    initial_banana_z: float,
+    initial_object_z: float,
     grasp_offset_object: torch.Tensor,
     object_to_grasp_quat: torch.Tensor,
     checkpoint_callback: Callable[
@@ -2749,8 +3788,8 @@ def _recover_transport_grasp(
     terminal = False
     segments: list[dict[str, Any]] = []
     eef_before = _eef_position(env)
-    banana_before = _local_position(env, "banana")
-    offset_before = eef_before - banana_before
+    object_before = _movable_object_position(env)
+    offset_before = eef_before - object_before
 
     obs, terminal = _hold_joint_action(
         env,
@@ -2762,13 +3801,13 @@ def _recover_transport_grasp(
     if terminal:
         raise RuntimeError("Environment terminated during recovery stability hold")
     eef_after_hold = _eef_position(env)
-    banana_after_hold = _local_position(env, "banana")
-    offset_after = eef_after_hold - banana_after_hold
+    object_after_hold = _movable_object_position(env)
+    offset_after = eef_after_hold - object_after_hold
     hold_assessment = assess_recovery_hold(
         offset_before=offset_before.numpy(),
         offset_after=offset_after.numpy(),
-        object_z_after=float(banana_after_hold[2]),
-        object_initial_z=initial_banana_z,
+        object_z_after=float(object_after_hold[2]),
+        object_initial_z=initial_object_z,
         maximum_hold_drift_m=args_cli.recovery_stability_drift,
         minimum_carried_lift_m=args_cli.minimum_transport_lift,
     )
@@ -2865,7 +3904,7 @@ def _recover_transport_grasp(
             quaternion,
             name,
             gripper_closed=closed,
-            initial_banana_z=initial_banana_z,
+            initial_object_z=initial_object_z,
             checkpoint_callback=None,
             early_stop_callback=early_stop_callback,
         )
@@ -2880,22 +3919,22 @@ def _recover_transport_grasp(
     # before opening. If it has already dropped, opening immediately avoids a
     # blind descent toward an uncertain object pose.
     if hold_assessment.object_lift_m >= args_cli.minimum_transport_lift:
-        carry_offset = _eef_position(env) - _local_position(env, "banana")
+        carry_offset = _eef_position(env) - _movable_object_position(env)
         set_down = _eef_position(env)
         set_down[2] = (
-            initial_banana_z
+            initial_object_z
             + max(float(carry_offset[2]), GRIPPER_BASE_TO_FINGERTIP_M)
             + args_cli.recovery_set_down_clearance
         )
         set_down[2] = min(float(_eef_position(env)[2]), float(set_down[2]))
 
         support_monitor = SupportContactMonitor(
-            object_initial_z=initial_banana_z,
+            object_initial_z=initial_object_z,
             set_down_clearance_m=args_cli.recovery_set_down_clearance,
         )
 
         def object_support_contact() -> dict[str, Any] | None:
-            banana = _local_position(env, "banana")
+            banana = _movable_object_position(env)
             eef = _eef_position(env)
             return support_monitor.update(
                 object_z=float(banana[2]),
@@ -2918,7 +3957,7 @@ def _recover_transport_grasp(
     command[0, 7] = 0.0
     if terminal:
         raise RuntimeError("Environment terminated while opening for recovery")
-    release_state = _state(env, initial_banana_z)
+    release_state = _state(env, initial_object_z)
     report["state_after_recovery_release"] = release_state
 
     retreat_target = _eef_position(env) + torch.tensor(
@@ -2939,7 +3978,7 @@ def _recover_transport_grasp(
     # Release-to-support motion is expected and may be large. Measure actual
     # stability across a second settled hold instead of comparing against the
     # pre-retreat release pose.
-    settle_reference = _local_position(env, "banana")
+    settle_reference = _movable_object_position(env)
     settle_verification_steps = max(8, args_cli.recovery_hold_steps // 2)
     obs, terminal = _hold_joint_action(
         env,
@@ -2951,8 +3990,8 @@ def _recover_transport_grasp(
     if terminal:
         raise RuntimeError("Environment terminated during recovery settle verification")
 
-    banana = _local_position(env, "banana")
-    plate = _local_position(env, "plate_large")
+    banana = _movable_object_position(env)
+    plate = _target_receptacle_position(env)
     settled_displacement = float(
         torch.linalg.vector_norm(banana - settle_reference)
     )
@@ -2962,14 +4001,14 @@ def _recover_transport_grasp(
         maximum_contact_height_m=max(args_cli.plate_contact_height, 0.100),
         settled_displacement_m=settled_displacement,
     )
-    banana_quaternion = _local_quaternion(env, "banana")
+    object_quaternion = _movable_object_quaternion(env)
     support_aligned_quaternion = torch.as_tensor(
-        support_aligned_object_quaternion_wxyz(banana_quaternion.numpy()),
+        support_aligned_object_quaternion_wxyz(object_quaternion.numpy()),
         dtype=torch.float32,
     )
     report["settled_object_pose"] = {
         "xyz": banana.tolist(),
-        "quaternion_wxyz": banana_quaternion.tolist(),
+        "quaternion_wxyz": object_quaternion.tolist(),
         "support_aligned_quaternion_wxyz": support_aligned_quaternion.tolist(),
         "displacement_during_stability_hold_m": settled_displacement,
         "stability_verification_steps": settle_verification_steps,
@@ -2987,7 +4026,7 @@ def _recover_transport_grasp(
                 "safe": True,
                 "reasons": [],
                 "grasp_translation_drift_m": None,
-                "object_lift_m": float(banana[2]) - initial_banana_z,
+                "object_lift_m": float(banana[2]) - initial_object_z,
                 "rgbd_clearance_m": None,
             },
         },
@@ -3025,10 +4064,10 @@ def _recover_transport_grasp(
         closed=False,
     )
     # Re-read the object after approach in case it rolled while settling.
-    banana = _local_position(env, "banana")
+    banana = _movable_object_position(env)
     support_aligned_quaternion = torch.as_tensor(
         support_aligned_object_quaternion_wxyz(
-            _local_quaternion(env, "banana").numpy()
+            _movable_object_quaternion(env).numpy()
         ),
         dtype=torch.float32,
     )
@@ -3060,7 +4099,7 @@ def _recover_transport_grasp(
                 "safe": True,
                 "reasons": [],
                 "grasp_translation_drift_m": None,
-                "object_lift_m": float(banana[2]) - initial_banana_z,
+                "object_lift_m": float(banana[2]) - initial_object_z,
                 "rgbd_clearance_m": None,
             },
         },
@@ -3092,13 +4131,13 @@ def _recover_transport_grasp(
         _eef_quaternion(env),
         closed=True,
     )
-    banana_regrasped = _local_position(env, "banana")
-    lift = float(banana_regrasped[2]) - initial_banana_z
+    object_regrasped = _movable_object_position(env)
+    lift = float(object_regrasped[2]) - initial_object_z
     if lift < max(0.05, args_cli.minimum_transport_lift):
         raise RuntimeError(
             f"Recovery regrasp failed physical lift verification: {lift:.4f} m"
         )
-    new_offset = _eef_position(env) - banana_regrasped
+    new_offset = _eef_position(env) - object_regrasped
     new_quaternion = _eef_quaternion(env)
     decision = checkpoint_callback(
         obs,
@@ -3133,9 +4172,9 @@ def _residual_center_over_plate(
     env: Any,
     obs: dict[str, Any],
     last_action: torch.Tensor,
-    initial_banana_z: float,
+    initial_object_z: float,
 ) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
-    """Move the grasped banana toward plate center with bounded local DLS IK."""
+    """Move the grasped object toward target center with bounded local DLS IK."""
     robot = env.scene["robot"]
     arm_joint_ids = [robot.data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)]
     body_idx = robot.data.body_names.index("base_link")
@@ -3146,21 +4185,21 @@ def _residual_center_over_plate(
     iterations: list[dict[str, Any]] = []
     contact_detected = False
     support_contact_event: dict[str, Any] | None = None
-    banana_start = _local_position(env, "banana")
-    plate_start = _local_position(env, "plate_large")
-    error_start = float(torch.linalg.vector_norm(plate_start[:2] - banana_start[:2]))
-    height_start = float(banana_start[2] - plate_start[2])
+    object_start = _movable_object_position(env)
+    plate_start = _target_receptacle_position(env)
+    error_start = float(torch.linalg.vector_norm(plate_start[:2] - object_start[:2]))
+    height_start = float(object_start[2] - plate_start[2])
     previous_error = error_start
     previous_height_error = abs(args_cli.release_height - height_start)
     support_monitor = SupportContactMonitor(
-        object_initial_z=initial_banana_z,
+        object_initial_z=initial_object_z,
         set_down_clearance_m=args_cli.recovery_set_down_clearance,
         require_eef_stall=False,
     )
 
     for iteration in range(args_cli.center_max_iterations):
-        banana = _local_position(env, "banana")
-        plate = _local_position(env, "plate_large")
+        banana = _movable_object_position(env)
+        plate = _target_receptacle_position(env)
         error_xy = (plate[:2] - banana[:2]).to(env.device)
         error_norm = float(torch.linalg.vector_norm(error_xy))
         height_above_plate = float(banana[2] - plate[2])
@@ -3182,10 +4221,10 @@ def _residual_center_over_plate(
                 flush=True,
             )
             break
-        if iteration == 0 and float(banana[2]) - initial_banana_z < 0.05:
-            raise RuntimeError("Residual centering refused: banana is no longer securely lifted")
+        if iteration == 0 and float(banana[2]) - initial_object_z < 0.05:
+            raise RuntimeError("Residual centering refused: object is no longer securely lifted")
         if height_above_plate < 0.015:
-            raise RuntimeError("Residual centering refused: banana is already at plate contact height")
+            raise RuntimeError("Residual centering refused: object is already at target contact height")
 
         # Center laterally at the safe hover height before lowering. Combining
         # a near-contact XY sweep with a downward command can lever the banana
@@ -3203,7 +4242,7 @@ def _residual_center_over_plate(
             )
         desired_twist_w = torch.zeros(6, dtype=torch.float32, device=env.device)
         # The task/robot roots share world orientation in this fixed-base scene,
-        # so the measured plate-minus-banana vector is already on Jacobian axes.
+        # so the measured target-minus-object vector is already on Jacobian axes.
         desired_twist_w[:2] = xy_step
         desired_twist_w[2] = z_step
         jacobian_w = robot.data.body_link_jacobian_w.torch[
@@ -3231,15 +4270,15 @@ def _residual_center_over_plate(
             args_cli.center_settle_steps,
             gripper_closed=True,
         )
-        banana_after = _local_position(env, "banana")
-        plate_after = _local_position(env, "plate_large")
-        error_after = float(torch.linalg.vector_norm(plate_after[:2] - banana_after[:2]))
-        lifted_after = float(banana_after[2]) - initial_banana_z
-        height_after = float(banana_after[2] - plate_after[2])
+        object_after = _movable_object_position(env)
+        plate_after = _target_receptacle_position(env)
+        error_after = float(torch.linalg.vector_norm(plate_after[:2] - object_after[:2]))
+        lifted_after = float(object_after[2]) - initial_object_z
+        height_after = float(object_after[2] - plate_after[2])
         height_error_after = abs(args_cli.release_height - height_after)
         if correction_mode == "z" and error_after <= args_cli.center_tolerance:
             support_contact_event = support_monitor.update(
-                object_z=float(banana_after[2]),
+                object_z=float(object_after[2]),
                 eef_z=float(_eef_position(env)[2]),
                 target_eef_z=eef_z_before + height_error,
                 target_tolerance_m=args_cli.release_height_tolerance,
@@ -3258,8 +4297,8 @@ def _residual_center_over_plate(
             "max_abs_joint_step_rad": float(torch.max(torch.abs(delta_joint))),
             "xy_error_after_m": error_after,
             "height_above_plate_after_m": height_after,
-            "banana_lift_after_m": lifted_after,
-            "banana_plate_contact_proxy": contact_after,
+            "object_lift_after_m": lifted_after,
+            "object_target_contact_proxy": contact_after,
             "support_contact_event": support_contact_event,
             "terminal": terminal,
         }
@@ -3291,11 +4330,11 @@ def _residual_center_over_plate(
             )
             break
         if height_after < 0.015:
-            raise RuntimeError("Residual centering pushed the banana below safe plate clearance")
+            raise RuntimeError("Residual centering pushed the object below safe target clearance")
         if lifted_after < 0.010:
             raise RuntimeError(
                 "Residual centering detected grasp loss before release: "
-                f"banana lift fell to {lifted_after:.4f} m"
+                f"object lift fell to {lifted_after:.4f} m"
             )
         # Fail closed if a commanded correction materially moves away from the
         # plate. Tiny contact-induced fluctuations are allowed.
@@ -3311,10 +4350,10 @@ def _residual_center_over_plate(
         previous_error = error_after
         previous_height_error = height_error_after
 
-    banana_final = _local_position(env, "banana")
-    plate_final = _local_position(env, "plate_large")
-    error_final = float(torch.linalg.vector_norm(plate_final[:2] - banana_final[:2]))
-    height_final = float(banana_final[2] - plate_final[2])
+    object_final = _movable_object_position(env)
+    plate_final = _target_receptacle_position(env)
+    error_final = float(torch.linalg.vector_norm(plate_final[:2] - object_final[:2]))
+    height_final = float(object_final[2] - plate_final[2])
     report = {
         "enabled": True,
         "xy_error_before_m": error_start,
@@ -3325,7 +4364,7 @@ def _residual_center_over_plate(
         "target_release_height_m": args_cli.release_height,
         "release_height_tolerance_m": args_cli.release_height_tolerance,
         "plate_contact_height_m": args_cli.plate_contact_height,
-        "banana_plate_contact_proxy": contact_detected,
+        "object_target_contact_proxy": contact_detected,
         "support_contact_event": support_contact_event,
         "converged": (
             contact_detected
@@ -3345,7 +4384,7 @@ def _retreat_after_release(
     obs: dict[str, Any],
     last_action: torch.Tensor,
 ) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
-    """Raise the open gripper and verify that the released banana stays behind."""
+    """Raise the open gripper and verify that the released object stays behind."""
     robot = env.scene["robot"]
     arm_joint_ids = [robot.data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)]
     body_idx = robot.data.body_names.index("base_link")
@@ -3356,8 +4395,8 @@ def _retreat_after_release(
     terminal = False
     iterations: list[dict[str, Any]] = []
     eef_start = _eef_position(env)
-    banana_start = _local_position(env, "banana")
-    start_separation = float(torch.linalg.vector_norm(eef_start - banana_start))
+    object_start = _movable_object_position(env)
+    start_separation = float(torch.linalg.vector_norm(eef_start - object_start))
     target_z = float(eef_start[2]) + args_cli.retreat_distance
     previous_remaining = args_cli.retreat_distance
 
@@ -3433,26 +4472,26 @@ def _retreat_after_release(
     )
     terminal = terminal or settle_terminal
     eef_final = _eef_position(env)
-    banana_final = _local_position(env, "banana")
-    plate_final = _local_position(env, "plate_large")
-    final_separation = float(torch.linalg.vector_norm(eef_final - banana_final))
+    object_final = _movable_object_position(env)
+    plate_final = _target_receptacle_position(env)
+    final_separation = float(torch.linalg.vector_norm(eef_final - object_final))
     retreat_z = float(eef_final[2] - eef_start[2])
-    banana_motion = float(torch.linalg.vector_norm(banana_final - banana_start))
-    banana_plate_xy_error = float(
-        torch.linalg.vector_norm(banana_final[:2] - plate_final[:2])
+    object_motion = float(torch.linalg.vector_norm(object_final - object_start))
+    object_target_xy_error = float(
+        torch.linalg.vector_norm(object_final[:2] - plate_final[:2])
     )
-    banana_height_above_plate = float(banana_final[2] - plate_final[2])
+    object_height_above_target = float(object_final[2] - plate_final[2])
     on_plate = (
-        banana_plate_xy_error <= 0.12
-        and 0.0 <= banana_height_above_plate <= 0.20
+        object_target_xy_error <= 0.12
+        and 0.0 <= object_height_above_target <= 0.20
     )
-    state_final = _state(env, float(banana_start[2]))
+    state_final = _state(env, float(object_start[2]))
     gripper_open = state_final["gripper_closed_fraction"] <= 0.10
     detachment = assess_release_detachment(
         controlled_start_xyz=eef_start.numpy(),
         controlled_final_xyz=eef_final.numpy(),
-        subject_start_xyz=banana_start.numpy(),
-        subject_final_xyz=banana_final.numpy(),
+        subject_start_xyz=object_start.numpy(),
+        subject_final_xyz=object_final.numpy(),
         released=gripper_open,
         goal_relation_holds=on_plate,
         terminal=terminal,
@@ -3465,14 +4504,14 @@ def _retreat_after_release(
         "eef_start_xyz": eef_start.tolist(),
         "eef_final_xyz": eef_final.tolist(),
         "eef_retreat_z_m": retreat_z,
-        "banana_start_xyz": banana_start.tolist(),
-        "banana_final_xyz": banana_final.tolist(),
-        "banana_motion_during_retreat_m": banana_motion,
-        "banana_plate_xy_error_after_m": banana_plate_xy_error,
-        "banana_height_above_plate_after_m": banana_height_above_plate,
-        "banana_remained_on_plate": on_plate,
-        "eef_banana_separation_before_m": start_separation,
-        "eef_banana_separation_after_m": final_separation,
+        "object_start_xyz": object_start.tolist(),
+        "object_final_xyz": object_final.tolist(),
+        "object_motion_during_retreat_m": object_motion,
+        "object_target_xy_error_after_m": object_target_xy_error,
+        "object_height_above_target_after_m": object_height_above_target,
+        "object_remained_on_target": on_plate,
+        "eef_object_separation_before_m": start_separation,
+        "eef_object_separation_after_m": final_separation,
         "gripper_closed_fraction_after": state_final["gripper_closed_fraction"],
         "detachment_evidence": detachment,
         "converged": converged,
@@ -3504,6 +4543,12 @@ def main() -> int:
             ),
             "maximum_grasp_drift": args_cli.maximum_grasp_drift,
             "minimum_transport_lift": args_cli.minimum_transport_lift,
+            "max_lift_recovery_operations": (
+                args_cli.max_lift_recovery_operations
+            ),
+            "max_failed_grasp_attempts": (
+                args_cli.max_failed_grasp_attempts
+            ),
             "recovery_hold_steps": args_cli.recovery_hold_steps,
             "recovery_stability_drift": args_cli.recovery_stability_drift,
             "recovery_set_down_clearance": args_cli.recovery_set_down_clearance,
@@ -3519,9 +4564,9 @@ def main() -> int:
         if args_cli.max_transport_recoveries < 0:
             raise ValueError("max-transport-recoveries must be non-negative")
     relocation_values = (
-        *args_cli.banana_offset,
+        *args_cli.movable_object_offset,
         *args_cli.plate_offset,
-        args_cli.banana_yaw_deg,
+        args_cli.movable_object_yaw_deg,
         *(tuple() if args_cli.light_intensity is None else (args_cli.light_intensity,)),
     )
     if not all(np.isfinite(value) for value in relocation_values):
@@ -3564,6 +4609,24 @@ def main() -> int:
         raise ValueError("minimum-contact-coverage must be in [0, 1]")
     if args_cli.minimum_touch_samples < 1:
         raise ValueError("minimum-touch-samples must be positive")
+    if args_cli.maximum_actuator_interaction_distance <= 0:
+        raise ValueError("maximum-actuator-interaction-distance must be positive")
+    if args_cli.failed_grasp_retry_minimum_translation <= 0:
+        raise ValueError(
+            "failed-grasp-retry-minimum-translation must be positive"
+        )
+    if args_cli.failed_grasp_retry_minimum_orientation_deg <= 0:
+        raise ValueError(
+            "failed-grasp-retry-minimum-orientation-deg must be positive"
+        )
+    if not 0.0 < args_cli.maximum_model_rotation_correction_deg <= 180.0:
+        raise ValueError(
+            "maximum-model-rotation-correction-deg must be within (0, 180]"
+        )
+    if not 0.0 < args_cli.maximum_pregrasp_axis_error_deg <= 90.0:
+        raise ValueError(
+            "maximum-pregrasp-axis-error-deg must be within (0, 90]"
+        )
     actuator_feedback_policy = ActuatorFeedbackEventPolicy(
         minimum_position_change=args_cli.actuator_feedback_position_change,
         minimum_force_change_n=args_cli.actuator_feedback_force_change,
@@ -3584,7 +4647,7 @@ def main() -> int:
         np.max(np.abs(np.diff(recorded_actions, axis=0)), axis=1) > 1.0e-5
     ) + 1
     boundaries = np.concatenate(([0], change_points, [len(recorded_actions)]))
-    phase_names = ["approach_banana", "descend", "grasp", "lift", "above_plate"]
+    phase_names = ["approach_object", "descend", "grasp", "lift", "above_plate"]
     if len(boundaries) - 1 != len(phase_names):
         raise RuntimeError(
             f"Expected {len(phase_names)} semantic trajectory segments, got {len(boundaries) - 1}"
@@ -3613,6 +4676,13 @@ def main() -> int:
     print("VISIBLE TEST SUITE: Gemini Robotics ER 2 + RoboLab DROID/Franka")
     print(f"Model: {MODEL_ID}")
     print(f"Task:  {args_cli.task}")
+    print(
+        "Scene roles: "
+        f"movable_object={SCENE_ROLES.movable_object_asset!r} "
+        f"({SCENE_ROLES.movable_object_label}), "
+        f"target_receptacle={SCENE_ROLES.target_receptacle_asset!r} "
+        f"({SCENE_ROLES.target_receptacle_label})"
+    )
     print(f"GUI:   {'off (headless)' if args_cli.headless else 'on'}")
     print(
         "World-intent shadow: "
@@ -3630,7 +4700,9 @@ def main() -> int:
     )
     print(
         "Motion executor: runtime-registered bounded DLS IK; model-configurable "
-        f"with target correction≤{args_cli.maximum_model_target_correction:.3f}m"
+        f"with target correction≤{args_cli.maximum_model_target_correction:.3f}m "
+        "and rotation correction≤"
+        f"{args_cli.maximum_model_rotation_correction_deg:.1f}deg"
     )
     print(
         "Actuator executor: runtime-registered binary clamp; model-selectable "
@@ -3655,9 +4727,9 @@ def main() -> int:
                 f"on (tolerance={args_cli.adaptive_tolerance:.3f}m, "
                 f"step≤{args_cli.adaptive_max_step:.3f}m, "
                 f"iterations≤{args_cli.adaptive_max_iterations}, "
-                f"banana_offset={list(args_cli.banana_offset)}, "
-                f"plate_offset={list(args_cli.plate_offset)}, "
-                f"banana_yaw={args_cli.banana_yaw_deg:.1f}deg)"
+                f"object_offset={list(args_cli.movable_object_offset)}, "
+                f"target_offset={list(args_cli.plate_offset)}, "
+                f"object_yaw={args_cli.movable_object_yaw_deg:.1f}deg)"
             )
         )
     )
@@ -3772,32 +4844,38 @@ def main() -> int:
     env_cfg.actions = DroidJointPositionActionCfg()
     env_cfg.terminations = None
     env_cfg.subtasks = None
+    # The environment task supplies the scene template only. The model-facing
+    # goal comes from the current human instruction and semantic scene roles.
+    env_cfg.instruction = args_cli.instruction
     # RoboLab's EE-state recorder still consumes the removed Sim 5 tensor API
     # and is not needed for this live control/visualization test.
     env_cfg.recorders = None
     env, _ = create_env(env_cfg, use_fabric=True, policy="gemini-er2")
     obs, _ = env.reset()
+    SCENE_ROLES.validate_scene(env.scene)
     ACTIVE_SENSOR_MONITOR = SensorCaptureBuffer()
     ACTIVE_SENSOR_SAMPLE_INDEX = 0
     contact_sensor_info = contact_sensor_runtime_info(env)
     print(f"[contact-sensor] {contact_sensor_info}", flush=True)
-    baseline_banana_xyz = _local_position(env, "banana")
-    baseline_banana_quat = _local_quaternion(env, "banana")
+    baseline_movable_object_xyz = _movable_object_position(env)
+    baseline_object_quat = _movable_object_quaternion(env)
     grasp_offset_object, object_to_grasp_quat = derive_object_relative_grasp(
-        baseline_banana_xyz,
-        baseline_banana_quat,
-        baseline_banana_xyz + BANANA_GRASP_OFFSET,
-        BANANA_GRASP_QUAT,
+        baseline_movable_object_xyz,
+        baseline_object_quat,
+        baseline_movable_object_xyz + DEFAULT_OBJECT_GRASP_OFFSET,
+        DEFAULT_DOWNWARD_GRASP_QUAT,
     )
     # Do not restore Sim 5 rigid-body snapshots into Sim 6. Their contact state
     # can begin interpenetrating and eject task objects on the first step.
     _transform_asset_pose(
         env,
-        "banana",
-        tuple(args_cli.banana_offset),
-        yaw_degrees=args_cli.banana_yaw_deg,
+        SCENE_ROLES.movable_object_asset,
+        tuple(args_cli.movable_object_offset),
+        yaw_degrees=args_cli.movable_object_yaw_deg,
     )
-    _transform_asset_pose(env, "plate_large", tuple(args_cli.plate_offset))
+    _transform_asset_pose(
+        env, SCENE_ROLES.target_receptacle_asset, tuple(args_cli.plate_offset)
+    )
     _set_sim6_camera_views(env)
     env.sim.render()
     obs = env.observation_manager.compute()
@@ -3810,8 +4888,8 @@ def main() -> int:
     )
     motion_executor_registry = _local_dls_executor_registry(trackable_object_ids)
     actuator_executor_registry = _local_binary_actuator_registry()
-    initial_banana = _local_position(env, "banana")
-    initial_banana_z = float(initial_banana[2])
+    initial_object = _movable_object_position(env)
+    initial_object_z = float(initial_object[2])
     initial_eef = _eef_position(env)
     robot_root_w = env.scene["robot"].data.root_pos_w
     robot_root_w = getattr(robot_root_w, "torch", robot_root_w)[0].detach().cpu()
@@ -3830,8 +4908,10 @@ def main() -> int:
     model_calls = 0
     terminal = False
     episode_trace: dict[str, Any] = {
-        "schema_version": 2,
+        "schema_version": 4,
         "task": args_cli.task,
+        "instruction": args_cli.instruction,
+        "scene_roles": SCENE_ROLES.to_dict(),
         "coach_model": MODEL_ID,
         "critic_memory_applied": critic_memory,
         "sim_version": sim_version,
@@ -3842,10 +4922,10 @@ def main() -> int:
             else "live_pose_bounded_dls_ik"
         ),
         "requested_relocation_xy_m": {
-            "banana": list(args_cli.banana_offset),
-            "plate": list(args_cli.plate_offset),
+            "movable_object": list(args_cli.movable_object_offset),
+            "target_receptacle": list(args_cli.plate_offset),
         },
-        "requested_banana_yaw_deg": args_cli.banana_yaw_deg,
+        "requested_movable_object_yaw_deg": args_cli.movable_object_yaw_deg,
         "appearance": {
             "randomized_background": args_cli.randomize_background,
             "appearance_seed": args_cli.appearance_seed,
@@ -3875,6 +4955,9 @@ def main() -> int:
             "rejected_tool_replan_limit": args_cli.motion_checkpoint_replans,
             "preserves_local_correction_limit_m": (
                 args_cli.maximum_model_target_correction
+            ),
+            "preserves_local_rotation_limit_deg": (
+                args_cli.maximum_model_rotation_correction_deg
             ),
             "stable_grasp_clearance_recovery_is_model_selected": True,
         },
@@ -3913,6 +4996,9 @@ def main() -> int:
             "rgbd_tracked_axis_adapter_implemented": True,
             "maximum_target_correction_m": (
                 args_cli.maximum_model_target_correction
+            ),
+            "maximum_rotation_correction_deg": (
+                args_cli.maximum_model_rotation_correction_deg
             ),
             "registered_executors": [
                 {
@@ -3961,11 +5047,38 @@ def main() -> int:
                 "set_down_reacquire_regrasp",
             ],
         },
+        "measured_lift_outcome_recovery": {
+            "maximum_operations": args_cli.max_lift_recovery_operations,
+            "maximum_failed_grasp_attempts": (
+                args_cli.max_failed_grasp_attempts
+            ),
+            "budget_unit": "fresh_runtime_operation",
+            "failure_budget_unit": "physically_tested_grasp_pose",
+            "failed_grasp_retry_lease": {
+                "minimum_object_relative_translation_delta_m": (
+                    args_cli.failed_grasp_retry_minimum_translation
+                ),
+                "minimum_orientation_delta_deg": (
+                    args_cli.failed_grasp_retry_minimum_orientation_deg
+                ),
+            },
+        },
         "object_relative_grasp": {
             "offset_object_m": grasp_offset_object.tolist(),
             "quaternion_object_to_grasp_wxyz": object_to_grasp_quat.tolist(),
         },
-        "initial_state": _state(env, initial_banana_z),
+        "pregrasp_axis_alignment": {
+            "source": (
+                "rgbd_oriented_footprint_plus_runtime_contact_geometry"
+            ),
+            "maximum_axis_error_deg": (
+                args_cli.maximum_pregrasp_axis_error_deg
+            ),
+            "admission_semantics": (
+                "actuation_withheld_until_fresh_alignment_observation"
+            ),
+        },
+        "initial_state": _state(env, initial_object_z),
         "stages": [],
         "status": "running",
     }
@@ -3982,14 +5095,19 @@ def main() -> int:
         episode_recorder = GeminiEpisodeDatasetRecorder(
             output_dir=training_episode_dir,
             episode_index=episode_index,
+            movable_object_asset=SCENE_ROLES.movable_object_asset,
+            target_receptacle_asset=SCENE_ROLES.target_receptacle_asset,
             metadata={
                 "task": args_cli.task,
                 "instruction": args_cli.instruction,
+                "scene_roles": SCENE_ROLES.to_dict(),
                 "coach_model": MODEL_ID,
                 "sim_version": sim_version,
-                "banana_offset_xy_m": list(args_cli.banana_offset),
-                "plate_offset_xy_m": list(args_cli.plate_offset),
-                "banana_yaw_deg": args_cli.banana_yaw_deg,
+                "movable_object_offset_xy_m": list(
+                    args_cli.movable_object_offset
+                ),
+                "target_receptacle_offset_xy_m": list(args_cli.plate_offset),
+                "movable_object_yaw_deg": args_cli.movable_object_yaw_deg,
                 "appearance": episode_trace["appearance"],
                 "object_relative_grasp": episode_trace["object_relative_grasp"],
             },
@@ -4089,25 +5207,64 @@ def main() -> int:
                 )
             _write_trace(trace_path, episode_trace)
 
-        scene, latency, digest = coach.reason(
-            _scene_prompt(
-                _state(env, initial_banana_z),
-                _critic_context(critic_memory, "global"),
-            ),
-            frame,
+        preflight_state = _state(env, initial_object_z)
+        preflight_frame, preflight_depth_summary = _rgbd_checkpoint_frame(
+            env, frame
+        )
+        capability_evidence = _runtime_task_capability_evidence(
+            env,
+            preflight_state,
+            motion_executor_registry,
+            actuator_executor_registry,
+        )
+        scene, latency, digest = _choose_observation_bound_task_feasibility(
+            motion_tool_provider,
+            frame=preflight_frame,
+            state=preflight_state,
+            capability_evidence=capability_evidence,
+            critic_context=_critic_context(critic_memory, "global"),
         )
         model_calls += 1
         digests.append(digest)
         tests["model"] = True
-        _test_line(2, "ER 2 API + JSON", True, f"{latency:.2f}s image={digest}")
-        scene_ok = bool(scene.get("scene_ok")) and bool(scene.get("banana_visible")) and bool(
-            scene.get("plate_visible")
+        _test_line(
+            2,
+            "ER 2 API + feasibility tool",
+            True,
+            f"{latency:.2f}s image={digest}",
+        )
+        scene_ok = bool(scene.get("scene_ok")) and bool(
+            scene.get("movable_object_visible")
+        ) and bool(
+            scene.get("target_receptacle_visible")
         )
         tests["scene"] = scene_ok
         _test_line(3, "visual scene grounding", scene_ok, str(scene.get("assessment", "")))
         episode_trace["scene_decision"] = scene
+        episode_trace["task_feasibility_preflight"] = {
+            "observation_bound": True,
+            "motion_authority": bool(scene.get("motion_authorized")),
+            "capability_evidence": capability_evidence,
+            "rgbd_summary": preflight_depth_summary,
+            "decision": scene,
+        }
         episode_trace["motion_checkpoints"] = []
         _write_trace(trace_path, episode_trace)
+        print(
+            "[feasibility preflight] "
+            f"reachability={scene.get('reachability')} "
+            f"grasp={scene.get('grasp_feasibility')} "
+            f"payload={scene.get('payload_feasibility')} "
+            f"task={scene.get('task_feasibility')} "
+            f"motion_authorized={scene.get('motion_authorized')}",
+            flush=True,
+        )
+        if not bool(scene.get("motion_authorized")):
+            raise RuntimeError(
+                "Task feasibility preflight withheld motion authority: "
+                f"blocking={scene.get('blocking_reasons')} "
+                f"required_evidence={scene.get('required_runtime_evidence')}"
+            )
 
         def motion_checkpoint_handler(
             checkpoint_obs: dict[str, Any], checkpoint: dict[str, Any]
@@ -4123,7 +5280,7 @@ def main() -> int:
             max_attempts = max(1, int(args_cli.motion_checkpoint_replans))
             decision: dict[str, Any] = {}
             for attempt in range(max_attempts):
-                checkpoint_state = _state(env, initial_banana_z)
+                checkpoint_state = _state(env, initial_object_z)
                 checkpoint_frame = _single_exterior_frame(checkpoint_obs)
                 checkpoint_frame, depth_summary = _rgbd_checkpoint_frame(
                     env, checkpoint_frame
@@ -4145,6 +5302,66 @@ def main() -> int:
                     "current_target_xyz_m",
                     checkpoint_state["eef_gripper_base_xyz"],
                 )
+                motion_context.setdefault(
+                    "current_target_quaternion_wxyz",
+                    checkpoint_state["eef_gripper_base_quaternion_wxyz"],
+                )
+                scheduler_handoff_reason = (
+                    motion_checkpoint_scheduler_handoff_reason(checkpoint)
+                )
+                if scheduler_handoff_reason is not None:
+                    observation_id = f"checkpoint-{checkpoint_index}"
+                    digest = hashlib.sha256(checkpoint_frame.tobytes()).hexdigest()[
+                        :12
+                    ]
+                    decision = {
+                        "decision": "retry",
+                        "grasp_ready": False,
+                        "confidence": 1.0,
+                        "assessment": (
+                            "Local kinematic evidence invalidated the current "
+                            "motion; yield immediately to the fresh operation "
+                            "scheduler so it can choose motion, actuator "
+                            "evaluation, completion, or abort."
+                        ),
+                        "motion_tool": {
+                            "tool_name": "local_scheduler_handoff",
+                            "observation_id": observation_id,
+                            "action": "hold",
+                            "confidence": 1.0,
+                            "reason": scheduler_handoff_reason,
+                            "status": "scheduler_handoff",
+                        },
+                        "target_xyz_m": motion_context["current_target_xyz_m"],
+                        "target_quaternion_wxyz": motion_context[
+                            "current_target_quaternion_wxyz"
+                        ],
+                        "executor_id": motion_context.get(
+                            "executor_id", "bounded_dls_ik"
+                        ),
+                        "executor_config": dict(
+                            motion_context.get("executor_config") or {}
+                        ),
+                        "scheduler_handoff_reason": scheduler_handoff_reason,
+                    }
+                    event = {
+                        **motion_context,
+                        "frame": frame_name,
+                        "state": checkpoint_state,
+                        "local_scheduler_handoff": decision,
+                        "coach_latency_s": 0.0,
+                        "image_digest": digest,
+                    }
+                    episode_trace["motion_checkpoints"].append(event)
+                    _write_trace(trace_path, episode_trace)
+                    print(
+                        f"[motion handoff] phase={checkpoint['phase']} "
+                        f"iteration={checkpoint['iteration']} "
+                        f"reason={scheduler_handoff_reason} → fresh operation "
+                        "scheduler",
+                        flush=True,
+                    )
+                    return decision
                 current_target = torch.tensor(
                     motion_context["current_target_xyz_m"], dtype=torch.float32
                 )
@@ -4201,6 +5418,39 @@ def main() -> int:
                         "Motion tool rejected by scheduler-motion contract: "
                         f"{semantic_error}"
                     )
+                previous_recovery_outcome = motion_context.get(
+                    "previous_recovery_motion_outcome"
+                )
+                stalled_target_comparison = None
+                if tool.get("action") == "execute":
+                    stalled_target_comparison = compare_target_to_stalled_recovery(
+                        previous_recovery_outcome=previous_recovery_outcome,
+                        proposed_target_xyz_m=decision["target_xyz_m"],
+                        proposed_target_quaternion_wxyz=decision[
+                            "target_quaternion_wxyz"
+                        ],
+                    )
+                if stalled_target_comparison is not None:
+                    decision["stalled_target_comparison"] = (
+                        stalled_target_comparison
+                    )
+                    tool["stalled_target_comparison"] = (
+                        stalled_target_comparison
+                    )
+                    if stalled_target_comparison["effectively_identical"]:
+                        semantic_error = (
+                            "proposed target repeats a physically stalled "
+                            "target within the previous executor's configured "
+                            "position and orientation tolerances; use the "
+                            "measured target deltas to propose a materially "
+                            "different safe movement or abort"
+                        )
+                        tool["status"] = "rejected"
+                        tool["error"] = semantic_error
+                        decision["assessment"] = (
+                            "Motion tool rejected by measured stalled-target "
+                            f"evidence: {semantic_error}"
+                        )
                 print(
                     f"[ER2 checkpoint] phase={checkpoint['phase']} "
                     f"iteration={checkpoint['iteration']} reason={checkpoint['reason']} "
@@ -4238,7 +5488,7 @@ def main() -> int:
             terminal = False
             digest = ""
             for attempt in range(2):
-                schedule_state = _state(env, initial_banana_z)
+                schedule_state = _state(env, initial_object_z)
                 schedule_frame = _single_exterior_frame(schedule_obs)
                 schedule_frame, depth_summary = _rgbd_checkpoint_frame(
                     env, schedule_frame
@@ -4260,21 +5510,86 @@ def main() -> int:
                 # again after contact loss so the model can recover instead of
                 # being forced into an impossible motion-only branch.
                 goal_contact_observed = bool(
-                    schedule_state.get("banana_plate_contact_proxy", False)
+                    schedule_state.get("object_target_contact_proxy", False)
                 )
                 current_contact = schedule_state.get("current_contact")
-                retained_contact_observed = bool(
+                touch_observed = bool(
                     isinstance(current_contact, dict)
                     and current_contact.get("available")
                     and current_contact.get("touch")
                 )
+                retained_contact_observed = (
+                    retained_contact_supports_loaded_actuator(current_contact)
+                )
                 actuator_recovery_observed = bool(
                     current_engaged and not retained_contact_observed
                 )
-                actuator_transition_available = bool(
-                    not current_engaged
-                    or goal_contact_observed
-                    or actuator_recovery_observed
+                measured_actuator_outcome_invalidated = bool(
+                    current_engaged
+                    and isinstance(trigger_event, dict)
+                    and trigger_event.get("actuator_outcome_invalidated") is True
+                )
+                interaction_distance_m = float(
+                    schedule_state["fingertip_object_distance_m"]
+                )
+                maximum_interaction_distance_m = (
+                    args_cli.maximum_actuator_interaction_distance
+                )
+                failed_grasp_pose_comparisons = (
+                    compare_grasp_pose_to_failed_attempts(
+                        failed_attempts=failed_grasp_attempts,
+                        current_eef_xyz_m=schedule_state[
+                            "eef_gripper_base_xyz"
+                        ],
+                        current_object_xyz_m=schedule_state[
+                            "movable_object_xyz"
+                        ],
+                        current_eef_quaternion_wxyz=schedule_state[
+                            "eef_gripper_base_quaternion_wxyz"
+                        ],
+                    )
+                )
+                grasp_pose_lease_released = failed_grasp_pose_lease_released(
+                    pose_comparisons=failed_grasp_pose_comparisons,
+                    minimum_translation_delta_m=(
+                        args_cli.failed_grasp_retry_minimum_translation
+                    ),
+                    minimum_orientation_delta_deg=(
+                        args_cli.failed_grasp_retry_minimum_orientation_deg
+                    ),
+                )
+                pregrasp_axis_alignment = schedule_state.get(
+                    "pregrasp_axis_alignment", {}
+                )
+                pregrasp_axis_alignment_ready = bool(
+                    current_engaged
+                    or (
+                        isinstance(pregrasp_axis_alignment, Mapping)
+                        and pregrasp_axis_alignment.get("available") is True
+                        and pregrasp_axis_alignment.get("aligned") is True
+                    )
+                )
+                actuator_transition_available = (
+                    pregrasp_axis_alignment_ready
+                    and actuator_transition_is_admissible(
+                        actuator_engaged=current_engaged,
+                        goal_contact_observed=goal_contact_observed,
+                        retained_contact_observed=(
+                            retained_contact_observed
+                            if current_engaged
+                            else touch_observed
+                        ),
+                        measured_actuator_outcome_invalidated=(
+                            measured_actuator_outcome_invalidated
+                        ),
+                        failed_grasp_pose_lease_released=(
+                            grasp_pose_lease_released
+                        ),
+                        interaction_distance_m=interaction_distance_m,
+                        maximum_interaction_distance_m=(
+                            maximum_interaction_distance_m
+                        ),
+                    )
                 )
                 candidates = _post_motion_operation_candidates(
                     actuator_transition_available=(
@@ -4301,7 +5616,34 @@ def main() -> int:
                             "retained_contact_observed": (
                                 retained_contact_observed
                             ),
+                            "touch_observed": touch_observed,
+                            "loaded_contact_quality_source": (
+                                "runtime_contact_channel_force_geometry"
+                            ),
                             "contact_loss_recovery": actuator_recovery_observed,
+                            "measured_outcome_recovery": (
+                                measured_actuator_outcome_invalidated
+                            ),
+                            "interaction_distance_m": interaction_distance_m,
+                            "maximum_interaction_distance_m": (
+                                maximum_interaction_distance_m
+                            ),
+                            "failed_grasp_pose_lease_released": (
+                                grasp_pose_lease_released
+                            ),
+                            "failed_grasp_pose_comparisons": (
+                                failed_grasp_pose_comparisons
+                            ),
+                            "failed_grasp_retry_minimum_translation_m": (
+                                args_cli.failed_grasp_retry_minimum_translation
+                            ),
+                            "failed_grasp_retry_minimum_orientation_deg": (
+                                args_cli.failed_grasp_retry_minimum_orientation_deg
+                            ),
+                            "pregrasp_axis_alignment_ready": (
+                                pregrasp_axis_alignment_ready
+                            ),
+                            "pregrasp_axis_alignment": pregrasp_axis_alignment,
                         },
                         "previous_operation_outcome": previous_outcome,
                         "trigger_event": trigger_event,
@@ -4382,15 +5724,18 @@ def main() -> int:
             *,
             phase_label: str,
             observation_prefix: str,
+            trigger_event: dict[str, Any] | None = None,
+            scheduler_dispatch: dict[str, Any] | None = None,
+            yield_on_hold: bool = False,
         ) -> tuple[dict[str, Any], bool, dict[str, Any], float, str]:
-            """Obtain one admitted actuator call, with one fail-closed retry."""
+            """Obtain an actuator call, optionally yielding holds to scheduling."""
             nonlocal model_calls
             previous_outcome: dict[str, Any] | None = None
             total_latency = 0.0
             terminal = False
             digest = ""
             for attempt in range(2):
-                transition_state = _state(env, initial_banana_z)
+                transition_state = _state(env, initial_object_z)
                 transition_frame = _single_exterior_frame(transition_obs)
                 transition_frame, depth_summary = _rgbd_checkpoint_frame(
                     env, transition_frame
@@ -4422,6 +5767,11 @@ def main() -> int:
                                 "engaged" if current_engaged else "disengaged"
                             ),
                             "transition_opportunity": True,
+                            "trigger_event": trigger_event,
+                            "scheduler_dispatch": scheduler_dispatch,
+                            "failed_grasp_attempts": (
+                                list(failed_grasp_attempts)
+                            ),
                             "previous_tool_outcome": previous_outcome,
                             "executor_candidates": [
                                 spec.executor_id
@@ -4486,6 +5836,20 @@ def main() -> int:
                         f"Actuator governor aborted during {phase_label}: {decision}"
                     )
                 previous_outcome = decision.get("actuator_tool")
+                if yield_on_hold:
+                    transition_obs, terminal = _hold_joint_action(
+                        env,
+                        transition_obs,
+                        current_action,
+                        args_cli.retry_steps,
+                        gripper_closed=None,
+                    )
+                    if terminal:
+                        raise RuntimeError(
+                            "Environment terminated during actuator scheduler "
+                            "handoff hold"
+                        )
+                    return transition_obs, terminal, decision, total_latency, digest
                 if attempt == 0:
                     transition_obs, terminal = _hold_joint_action(
                         env,
@@ -4528,7 +5892,7 @@ def main() -> int:
                 )
             )
         # The source episode reached RoboLab's success predicate while carrying
-        # the banana above the plate. Open the gripper visibly to finish the task.
+        # the object above its target. Open the gripper visibly to finish the task.
         stages.append(
             (
                 "release",
@@ -4538,12 +5902,223 @@ def main() -> int:
             )
         )
 
-        pregrasp_passed = False
         latched_carry_offset: torch.Tensor | None = None
         latched_carry_quaternion: torch.Tensor | None = None
         latched_rgbd_axis_references: dict[str, np.ndarray] = {}
         transport_recovery_count = 0
         placement_completed_during_recovery = False
+        grasp_attempt_counter = 0
+        latest_grasp_attempt: dict[str, Any] | None = None
+        failed_grasp_attempts: list[dict[str, Any]] = []
+
+        def reconcile_carry_latch_after_actuation(
+            execution: dict[str, Any], *, source: str
+        ) -> dict[str, Any] | None:
+            """Expire carried-object state after an observed disengagement."""
+            nonlocal latched_carry_offset
+            nonlocal latched_carry_quaternion
+            nonlocal latched_rgbd_axis_references
+            if bool(execution.get("engaged_after")):
+                return None
+            if (
+                latched_carry_offset is None
+                and latched_carry_quaternion is None
+                and not latched_rgbd_axis_references
+            ):
+                return None
+            expiration = {
+                "source": source,
+                "reason": "actuator_disengaged",
+                "requested_state": execution.get("requested_state"),
+                "retained_contact_after": retained_contact_supports_loaded_actuator(
+                    execution.get("state_after", {}).get("current_contact")
+                ),
+                "expired_rgbd_object_ids": sorted(
+                    latched_rgbd_axis_references
+                ),
+            }
+            latched_carry_offset = None
+            latched_carry_quaternion = None
+            latched_rgbd_axis_references = {}
+            execution["carry_latch_expiration"] = expiration
+            episode_trace.setdefault("carry_latch_expirations", []).append(
+                expiration
+            )
+            print(
+                "[carry latch] expired after actuator disengagement "
+                f"source={source}",
+                flush=True,
+            )
+            return expiration
+
+        def capture_grasp_attempt(source: str) -> dict[str, Any]:
+            """Capture task-neutral pose/contact evidence at clamp engagement."""
+            nonlocal grasp_attempt_counter, latest_grasp_attempt
+            grasp_attempt_counter += 1
+            attempt_state = _state(env, initial_object_z)
+            eef_xyz = np.asarray(
+                attempt_state["eef_gripper_base_xyz"], dtype=np.float64
+            )
+            object_xyz = np.asarray(
+                attempt_state["movable_object_xyz"], dtype=np.float64
+            )
+            contact = attempt_state.get("current_contact")
+            latest_grasp_attempt = {
+                "attempt_id": grasp_attempt_counter,
+                "source": source,
+                "eef_minus_object_m": (eef_xyz - object_xyz).tolist(),
+                "eef_quaternion_wxyz": list(
+                    attempt_state["eef_gripper_base_quaternion_wxyz"]
+                ),
+                "physical_gripper_closed_fraction": float(
+                    attempt_state["gripper_closed_fraction"]
+                ),
+                "touch": bool(
+                    isinstance(contact, dict) and contact.get("touch")
+                ),
+                "net_force_xyz_n": (
+                    list(contact.get("net_force_xyz_n", []))
+                    if isinstance(contact, dict)
+                    else []
+                ),
+                "contact_bodies": (
+                    contact.get("contact_bodies")
+                    if isinstance(contact, dict)
+                    else None
+                ),
+            }
+            return latest_grasp_attempt
+
+        def record_unsupported_grasp_attempt(
+            execution: dict[str, Any],
+            feedback_event: dict[str, Any],
+            *,
+            source: str,
+        ) -> dict[str, Any] | None:
+            """Lease a measured failed engagement pose against exact retries."""
+            if execution.get("failed_grasp_attempt_id") is not None:
+                return None
+            if execution.get("requested_state") != "engage":
+                return None
+            if feedback_event.get("loaded_contact_supported_after") is True:
+                return None
+            attempt = capture_grasp_attempt(source)
+            failure = {
+                **attempt,
+                "outcome": "engagement_lacked_supported_loaded_contact",
+                "actuator_outcome_invalidation_reason": feedback_event.get(
+                    "actuator_outcome_invalidation_reason"
+                ),
+                "fresh_failure_state": {
+                    "gripper_closed_fraction": execution["state_after"][
+                        "gripper_closed_fraction"
+                    ],
+                    "touch": execution["state_after"]["current_contact"].get(
+                        "touch"
+                    ),
+                    "loaded_contact_supported": False,
+                },
+            }
+            failed_grasp_attempts.append(failure)
+            execution["failed_grasp_attempt_id"] = attempt["attempt_id"]
+            print(
+                "[failed-grasp lease] remembered unsupported engagement "
+                f"attempt={attempt['attempt_id']} source={source}; a materially "
+                "different object-relative position or wrist orientation is "
+                "required before another engagement",
+                flush=True,
+            )
+            return failure
+
+        def admit_pregrasp_transition(
+            actuator_tool_decision: dict[str, Any],
+            *,
+            current_target: torch.Tensor,
+        ) -> None:
+            """Evaluate fresh pre-grasp evidence at every actual close edge."""
+            requested_state = actuator_tool_decision.get("command", {}).get(
+                "state"
+            )
+            currently_engaged = bool(
+                float(last_action[0, 7].detach().cpu()) > 0.5
+            )
+            if (
+                requested_state != "engage"
+                or currently_engaged
+            ):
+                return
+
+            pregrasp_state = _state(env, initial_object_z)
+            unique_images = len(set(digests))
+            eef_motion = float(
+                torch.linalg.norm(
+                    _eef_position(env) - torch.tensor(eef_trace[0])
+                )
+            )
+            feedback_ok = unique_images >= 2 and eef_motion >= 0.02
+            tests["feedback"] = feedback_ok
+            _test_line(
+                4,
+                "fresh observation before actuator transition",
+                feedback_ok,
+                f"unique_images={unique_images}/{len(digests)} "
+                f"eef_motion={eef_motion:.3f}m",
+            )
+
+            base_distance = float(
+                torch.linalg.norm(_eef_position(env) - current_target)
+            )
+            fingertip_distance = float(
+                pregrasp_state["fingertip_object_distance_m"]
+            )
+            pregrasp_contact = pregrasp_state.get("current_contact", {})
+            retained_touch = bool(
+                isinstance(pregrasp_contact, dict)
+                and pregrasp_contact.get("touch") is True
+            )
+            confidence = float(actuator_tool_decision.get("confidence", 0.0))
+            jaw_alignment = pregrasp_state.get(
+                "pregrasp_axis_alignment", {}
+            )
+            jaw_axis_aligned = bool(
+                isinstance(jaw_alignment, Mapping)
+                and jaw_alignment.get("available") is True
+                and jaw_alignment.get("aligned") is True
+            )
+            pregrasp_passed = pregrasp_evidence_ready(
+                model_ready=(
+                    actuator_tool_decision.get("decision") == "execute"
+                ),
+                confidence=confidence,
+                base_target_distance_m=base_distance,
+                fingertip_object_distance_m=fingertip_distance,
+                actuator_engaged=False,
+                touch_observed=retained_touch,
+                jaw_axis_aligned=jaw_axis_aligned,
+            )
+            tests["pregrasp"] = pregrasp_passed
+            _test_line(
+                5,
+                "fresh visual pre-grasp gate",
+                pregrasp_passed,
+                f"ready="
+                f"{actuator_tool_decision.get('decision') == 'execute'} "
+                f"confidence={confidence:.2f} "
+                f"base_target={base_distance:.3f}m "
+                f"fingertip_object={fingertip_distance:.3f}m "
+                f"engaged={currently_engaged} "
+                f"touch={retained_touch} "
+                f"jaw_axis_aligned={jaw_axis_aligned} "
+                f"axis_error_deg="
+                f"{jaw_alignment.get('minimum_axis_error_deg')} "
+                f"candidate_yaw_corrections_deg="
+                f"{[item.get('candidate_yaw_correction_deg') for item in jaw_alignment.get('axis_comparisons', [])]}",
+            )
+            if not pregrasp_passed:
+                raise RuntimeError(
+                    "Visual/metric pre-grasp gate rejected gripper closure"
+                )
+
         episode_trace["recoveries"] = []
         last_action = torch.zeros((1, 8), dtype=torch.float32, device=env.device)
         last_action[0, :7] = torch.as_tensor(
@@ -4566,7 +6141,7 @@ def main() -> int:
             scheduler_decision: dict[str, Any] | None = None
             scheduler_latency = 0.0
             scheduler_digest: str | None = None
-            current = _state(env, initial_banana_z)
+            current = _state(env, initial_object_z)
             if (
                 not args_cli.disable_adaptive_ik
                 and phase == "place"
@@ -4584,25 +6159,25 @@ def main() -> int:
                 )
                 target_source = "current_observation_model_seed"
             elif not args_cli.disable_adaptive_ik and phase != "release":
-                banana_xyz = torch.tensor(current["banana_xyz"], dtype=torch.float32)
+                movable_object_xyz = torch.tensor(current["movable_object_xyz"], dtype=torch.float32)
                 if phase in {"lift", "above_plate"} and latched_carry_offset is not None:
-                    grasp_xyz = banana_xyz + latched_carry_offset
+                    grasp_xyz = movable_object_xyz + latched_carry_offset
                     assert latched_carry_quaternion is not None
                     nominal_quaternion = latched_carry_quaternion
                 else:
                     grasp_xyz, nominal_quaternion = apply_object_relative_grasp(
-                        banana_xyz,
+                        movable_object_xyz,
                         torch.tensor(
-                            current["banana_quaternion_wxyz"], dtype=torch.float32
+                            current["movable_object_quaternion_wxyz"], dtype=torch.float32
                         ),
                         grasp_offset_object,
                         object_to_grasp_quat,
                     )
                 nominal = live_phase_target(
                     phase,
-                    banana_xyz,
-                    torch.tensor(current["plate_xyz"], dtype=torch.float32),
-                    grasp_xyz - banana_xyz,
+                    movable_object_xyz,
+                    torch.tensor(current["target_receptacle_xyz"], dtype=torch.float32),
+                    grasp_xyz - movable_object_xyz,
                     eef_xyz=torch.tensor(
                         current["eef_gripper_base_xyz"], dtype=torch.float32
                     ),
@@ -4622,6 +6197,18 @@ def main() -> int:
                     recorded_actions[action_index, 3:7].copy()
                 )
                 target_source = "recorded_demonstration"
+            orientation_target_source = target_source
+            if (
+                not actuator_engaged_at_stage_start
+                and phase != "release"
+            ):
+                nominal_quaternion = torch.tensor(
+                    current["eef_gripper_base_quaternion_wxyz"],
+                    dtype=torch.float32,
+                )
+                orientation_target_source = (
+                    "fresh_measured_disengaged_wrist_pose"
+                )
             frame = _single_exterior_frame(obs)
             stage_depth_summary = None
             if not args_cli.disable_adaptive_ik and phase != "release":
@@ -4710,6 +6297,10 @@ def main() -> int:
                     critic_context=_critic_context(critic_memory, phase),
                 )
                 nominal = torch.tensor(decision["target_xyz_m"], dtype=torch.float32)
+                nominal_quaternion = torch.tensor(
+                    decision["target_quaternion_wxyz"], dtype=torch.float32
+                )
+                orientation_target_source = "model_motion_tool"
                 selected_executor_config = dict(decision["executor_config"])
                 target_source = "model_motion_tool"
                 episode_trace["motion_tool_protocol"]["calls"].append(
@@ -4775,10 +6366,10 @@ def main() -> int:
                         args_cli.retry_steps,
                         gripper_closed=None,
                     )
-                    current = _state(env, initial_banana_z)
+                    current = _state(env, initial_object_z)
                     if not args_cli.disable_adaptive_ik:
-                        banana_xyz = torch.tensor(
-                            current["banana_xyz"], dtype=torch.float32
+                        movable_object_xyz = torch.tensor(
+                            current["movable_object_xyz"], dtype=torch.float32
                         )
                         if phase == "place":
                             nominal = torch.tensor(
@@ -4799,14 +6390,14 @@ def main() -> int:
                             phase in {"lift", "above_plate"}
                             and latched_carry_offset is not None
                         ):
-                            grasp_xyz = banana_xyz + latched_carry_offset
+                            grasp_xyz = movable_object_xyz + latched_carry_offset
                             assert latched_carry_quaternion is not None
                             nominal_quaternion = latched_carry_quaternion
                         else:
                             grasp_xyz, nominal_quaternion = apply_object_relative_grasp(
-                                banana_xyz,
+                                movable_object_xyz,
                                 torch.tensor(
-                                    current["banana_quaternion_wxyz"], dtype=torch.float32
+                                    current["movable_object_quaternion_wxyz"], dtype=torch.float32
                                 ),
                                 grasp_offset_object,
                                 object_to_grasp_quat,
@@ -4814,11 +6405,11 @@ def main() -> int:
                         if phase != "place":
                             nominal = live_phase_target(
                                 phase,
-                                banana_xyz,
+                                movable_object_xyz,
                                 torch.tensor(
-                                    current["plate_xyz"], dtype=torch.float32
+                                    current["target_receptacle_xyz"], dtype=torch.float32
                                 ),
-                                grasp_xyz - banana_xyz,
+                                grasp_xyz - movable_object_xyz,
                                 eef_xyz=torch.tensor(
                                     current["eef_gripper_base_xyz"],
                                     dtype=torch.float32,
@@ -4826,6 +6417,21 @@ def main() -> int:
                                 approach_clearance=args_cli.approach_clearance,
                                 lift_clearance=args_cli.lift_clearance,
                                 plate_hover_height=args_cli.plate_hover_height,
+                            )
+                        if (
+                            not bool(
+                                float(last_action[0, 7].detach().cpu()) > 0.5
+                            )
+                            and phase != "release"
+                        ):
+                            nominal_quaternion = torch.tensor(
+                                current[
+                                    "eef_gripper_base_quaternion_wxyz"
+                                ],
+                                dtype=torch.float32,
+                            )
+                            orientation_target_source = (
+                                "fresh_measured_disengaged_wrist_pose"
                             )
                     frame = _single_exterior_frame(obs)
                     retry_depth_summary = None
@@ -4899,6 +6505,10 @@ def main() -> int:
                     nominal = torch.tensor(
                         decision["target_xyz_m"], dtype=torch.float32
                     )
+                    nominal_quaternion = torch.tensor(
+                        decision["target_quaternion_wxyz"], dtype=torch.float32
+                    )
+                    orientation_target_source = "model_motion_tool"
                     selected_executor_config = dict(decision["executor_config"])
                     episode_trace["motion_tool_protocol"]["calls"].append(
                         decision["motion_tool"]
@@ -4917,53 +6527,30 @@ def main() -> int:
                     and isinstance(decision.get("motion_tool"), dict)
                     and decision["motion_tool"].get("status") == "rejected"
                 ):
-                    decision = motion_checkpoint_handler(
-                        obs,
-                        {
-                            "reason": "phase_boundary_motion_tool_rejected",
-                            "phase": phase,
-                            "iteration": 0,
-                            "current_target_xyz_m": nominal.tolist(),
-                            "current_target_quaternion_wxyz": (
-                                nominal_quaternion.tolist()
+                    rejected_boundary_decision = decision
+                    rejected_boundary_tool = dict(decision["motion_tool"])
+                    decision = {
+                        "decision": "retry",
+                        "grasp_ready": False,
+                        "confidence": float(
+                            rejected_boundary_decision.get("confidence", 0.0)
+                        ),
+                        "assessment": (
+                            "The phase-boundary motion proposal was rejected by "
+                            "the observation-bound safety gate; return to the "
+                            "fresh operation scheduler before any movement."
+                        ),
+                        "motion_tool": {
+                            **rejected_boundary_tool,
+                            "proposed_action": rejected_boundary_tool.get(
+                                "action"
                             ),
-                            "previous_motion_tool_outcome": decision[
-                                "motion_tool"
-                            ],
-                            "lease_condition_sources": {
-                                "contact": "sim6.gripper_contact_sensor",
-                                "tracked_pose": (
-                                    "sim6.privileged_relative_pose_adapter"
-                                    if latched_carry_offset is not None
-                                    else None
-                                ),
-                                "tracked_orientation": (
-                                    {
-                                        object_id: (
-                                            "rgbd.instance_depth_major_axis"
-                                        )
-                                        for object_id in (
-                                            latched_rgbd_axis_references
-                                        )
-                                    }
-                                    if latched_rgbd_axis_references
-                                    else {}
-                                ),
-                                "observed_clearance": (
-                                    "sim6.privileged_object_to_support_height_adapter"
-                                    if phase in {"above_plate", "place"}
-                                    else None
-                                ),
-                            },
+                            "action": "hold",
+                            "handoff_reason": (
+                                "phase_boundary_motion_tool_rejected"
+                            ),
                         },
-                    )
-                    nominal = torch.tensor(
-                        decision["target_xyz_m"], dtype=torch.float32
-                    )
-                    selected_executor_config = dict(
-                        decision.get("executor_config") or {}
-                    )
-                    confidence = float(decision.get("confidence", 0.0))
+                    }
                 if (
                     decision.get("decision") == "retry"
                     and isinstance(decision.get("motion_tool"), dict)
@@ -5000,9 +6587,22 @@ def main() -> int:
                     scheduler_decision = boundary_schedule
                     scheduler_latency += boundary_scheduler_latency
                     scheduler_digest = boundary_scheduler_digest
-                    if boundary_schedule.get("decision") == "complete":
-                        task_completed_by_scheduler = True
-                    elif boundary_schedule.get("operation_kind") == "actuation":
+                    maximum_boundary_operations = max(
+                        3, 2 * int(args_cli.motion_checkpoint_replans) + 1
+                    )
+                    for boundary_operation_index in range(
+                        maximum_boundary_operations
+                    ):
+                        if boundary_schedule.get("decision") == "complete":
+                            task_completed_by_scheduler = True
+                            break
+                        if boundary_schedule.get("operation_kind") == "motion":
+                            break
+                        if boundary_schedule.get("operation_kind") != "actuation":
+                            raise RuntimeError(
+                                "Boundary scheduler returned unsupported "
+                                f"operation: {boundary_schedule}"
+                            )
                         (
                             obs,
                             terminal,
@@ -5014,28 +6614,103 @@ def main() -> int:
                             last_action,
                             phase_label=f"{phase}:boundary_hold",
                             observation_prefix=(
-                                f"actuator_boundary_hold_{stage_index:02d}_{phase}"
+                                f"actuator_boundary_hold_{stage_index:02d}_"
+                                f"{phase}_{boundary_operation_index + 1}"
                             ),
+                            scheduler_dispatch=boundary_schedule,
+                            yield_on_hold=True,
                         )
+                        actuator_decision = boundary_actuator_decision
+                        actuator_latency += boundary_actuator_latency
+                        actuator_digest = boundary_actuator_digest
+                        if boundary_actuator_decision.get("decision") == "execute":
+                            admit_pregrasp_transition(
+                                boundary_actuator_decision,
+                                current_target=nominal,
+                            )
+                            (
+                                obs,
+                                terminal,
+                                last_action,
+                                boundary_actuator_execution,
+                            ) = _execute_binary_actuator_tool(
+                                env,
+                                obs,
+                                last_action,
+                                boundary_actuator_decision,
+                                initial_object_z=initial_object_z,
+                            )
+                            reconcile_carry_latch_after_actuation(
+                                boundary_actuator_execution,
+                                source=f"{phase}:boundary_hold",
+                            )
+                            boundary_feedback_event = (
+                                _actuator_feedback_event_from_execution(
+                                    boundary_actuator_execution,
+                                    actuator_feedback_policy,
+                                )
+                            )
+                            boundary_actuator_execution["feedback_event"] = (
+                                boundary_feedback_event
+                            )
+                            record_unsupported_grasp_attempt(
+                                boundary_actuator_execution,
+                                boundary_feedback_event,
+                                source=f"{phase}:boundary_hold",
+                            )
+                            episode_trace["actuator_tool_protocol"]["calls"][-1][
+                                "execution"
+                            ] = boundary_actuator_execution
+                            actuator_execution = boundary_actuator_execution
+                            boundary_trigger_event = {
+                                "type": (
+                                    "phase_boundary_actuator_transition_completed"
+                                ),
+                                "phase_label": phase,
+                                **boundary_feedback_event,
+                            }
+                        else:
+                            episode_trace["actuator_tool_protocol"]["calls"][-1][
+                                "scheduler_handoff"
+                            ] = True
+                            boundary_trigger_event = {
+                                "type": "actuator_governor_yielded_to_scheduler",
+                                "phase_label": phase,
+                                "actuator_governor_decision": (
+                                    boundary_actuator_decision
+                                ),
+                            }
                         (
                             obs,
                             terminal,
-                            last_action,
-                            boundary_actuator_execution,
-                        ) = _execute_binary_actuator_tool(
-                            env,
+                            boundary_schedule,
+                            boundary_post_scheduler_latency,
+                            boundary_post_scheduler_digest,
+                        ) = operation_scheduler_handler(
                             obs,
                             last_action,
-                            boundary_actuator_decision,
-                            initial_banana_z=initial_banana_z,
+                            phase_label=f"{phase}:boundary_actuation_completed",
+                            observation_prefix=(
+                                f"scheduler_boundary_actuation_"
+                                f"{stage_index:02d}_{phase}_"
+                                f"{boundary_operation_index + 1}"
+                            ),
+                            motion_report={
+                                "converged": False,
+                                "yielded_to_scheduler": True,
+                                "recovery_request": boundary_trigger_event,
+                            },
+                            trigger_event=boundary_trigger_event,
                         )
-                        episode_trace["actuator_tool_protocol"]["calls"][-1][
-                            "execution"
-                        ] = boundary_actuator_execution
-                        actuator_decision = boundary_actuator_decision
-                        actuator_execution = boundary_actuator_execution
-                        actuator_latency += boundary_actuator_latency
-                        actuator_digest = boundary_actuator_digest
+                        scheduler_decision = boundary_schedule
+                        scheduler_latency += boundary_post_scheduler_latency
+                        scheduler_digest = boundary_post_scheduler_digest
+                    else:
+                        raise RuntimeError(
+                            "Boundary operation handoff budget exhausted "
+                            "without selecting motion or completion: "
+                            f"{maximum_boundary_operations} operations"
+                        )
                     if not task_completed_by_scheduler:
                         decision = motion_checkpoint_handler(
                             obs,
@@ -5083,7 +6758,10 @@ def main() -> int:
                         nominal = torch.tensor(
                             decision["target_xyz_m"], dtype=torch.float32
                         )
-                        nominal_quaternion = _eef_quaternion(env)
+                        nominal_quaternion = torch.tensor(
+                            decision["target_quaternion_wxyz"],
+                            dtype=torch.float32,
+                        )
                         selected_executor_config = dict(
                             decision.get("executor_config") or {}
                         )
@@ -5093,46 +6771,6 @@ def main() -> int:
                 ):
                     raise RuntimeError(f"ER 2 stopped at phase {phase}: {decision}")
 
-            if phase == "grasp":
-                unique_images = len(set(digests))
-                eef_motion = float(
-                    torch.linalg.norm(
-                        torch.tensor(eef_trace[-1]) - torch.tensor(eef_trace[0])
-                    )
-                )
-                feedback_ok = unique_images >= 2 and eef_motion >= 0.02
-                tests["feedback"] = feedback_ok
-                _test_line(
-                    4,
-                    "fresh observation after phases",
-                    feedback_ok,
-                    f"unique_images={unique_images}/{len(digests)} eef_motion={eef_motion:.3f}m",
-                )
-                base_distance = float(torch.linalg.norm(_eef_position(env) - nominal))
-                fingertip_distance = float(
-                    torch.linalg.norm(
-                        _eef_position(env)
-                        + torch.tensor([0.0, 0.0, -GRIPPER_BASE_TO_FINGERTIP_M])
-                        - _local_position(env, "banana")
-                    )
-                )
-                pregrasp_passed = (
-                    bool(decision.get("grasp_ready"))
-                    and confidence >= 0.5
-                    and base_distance <= 0.08
-                    and fingertip_distance <= 0.05
-                )
-                tests["pregrasp"] = pregrasp_passed
-                _test_line(
-                    5,
-                    "fresh visual pre-grasp gate",
-                    pregrasp_passed,
-                    f"ready={decision.get('grasp_ready')} confidence={confidence:.2f} "
-                    f"base_target={base_distance:.3f}m fingertip_banana={fingertip_distance:.3f}m",
-                )
-                if not pregrasp_passed:
-                    raise RuntimeError("Visual/metric pre-grasp gate rejected gripper closure")
-
             visualize_axes(
                 nominal + env.scene.env_origins[0].detach().cpu(),
                 nominal_quaternion,
@@ -5141,6 +6779,7 @@ def main() -> int:
             )
             print(
                 f"[executor] {phase}: source={target_source} "
+                f"orientation_source={orientation_target_source} "
                 f"target={nominal.tolist()} actuator_current="
                 f"{'engaged' if bool(float(last_action[0, 7].detach().cpu()) > 0.5) else 'disengaged'}",
                 flush=True,
@@ -5155,7 +6794,7 @@ def main() -> int:
                 }
             elif not args_cli.disable_adaptive_ik:
                 seed_steps = 0
-                if phase == "approach_banana":
+                if phase == "approach_object":
                     # Establish the demonstrated downward grasp orientation at
                     # a safe hover height before translating to a moved banana.
                     obs, terminal, last_action = _run_joint_segment(
@@ -5176,7 +6815,7 @@ def main() -> int:
                         gripper_closed=bool(
                             float(last_action[0, 7].detach().cpu()) > 0.5
                         ),
-                        initial_banana_z=initial_banana_z,
+                        initial_object_z=initial_object_z,
                         executor_config=selected_executor_config,
                         carry_reference_offset=latched_carry_offset,
                         rgbd_axis_references=latched_rgbd_axis_references,
@@ -5188,12 +6827,12 @@ def main() -> int:
                     if motion_report_yields_to_scheduler(attempt_report):
                         attempt_report["yielded_to_scheduler"] = True
                         attempt_report["yield_reason"] = (
-                            "model_hold_requires_fresh_operation_selection"
+                            "local_motion_invalidation_requires_fresh_"
+                            "operation_selection"
                         )
                         attempt_report["recovery_requested"] = False
-                        attempt_report["converged"] = True
                         print(
-                            f"[executor handoff] {phase}: model hold yielded "
+                            f"[executor handoff] {phase}: local invalidation yielded "
                             "to the fresh operation scheduler",
                             flush=True,
                         )
@@ -5225,7 +6864,7 @@ def main() -> int:
                         env,
                         obs,
                         last_action,
-                        initial_banana_z=initial_banana_z,
+                        initial_object_z=initial_object_z,
                         grasp_offset_object=grasp_offset_object,
                         object_to_grasp_quat=object_to_grasp_quat,
                         checkpoint_callback=motion_checkpoint_handler,
@@ -5251,17 +6890,17 @@ def main() -> int:
                         f"{recovery_report.get('outcome')}; resuming above_plate",
                         flush=True,
                     )
-                    resumed_state = _state(env, initial_banana_z)
-                    banana_xyz = torch.tensor(
-                        resumed_state["banana_xyz"], dtype=torch.float32
+                    resumed_state = _state(env, initial_object_z)
+                    movable_object_xyz = torch.tensor(
+                        resumed_state["movable_object_xyz"], dtype=torch.float32
                     )
-                    plate_xyz = torch.tensor(
-                        resumed_state["plate_xyz"], dtype=torch.float32
+                    target_receptacle_xyz = torch.tensor(
+                        resumed_state["target_receptacle_xyz"], dtype=torch.float32
                     )
                     nominal = live_phase_target(
                         "above_plate",
-                        banana_xyz,
-                        plate_xyz,
+                        movable_object_xyz,
+                        target_receptacle_xyz,
                         latched_carry_offset,
                         eef_xyz=torch.tensor(
                             resumed_state["eef_gripper_base_xyz"],
@@ -5315,7 +6954,9 @@ def main() -> int:
                         "converged": motion_attempts[-1]["converged"],
                     }
                 motion_report["demonstration_orientation_seed_steps"] = seed_steps
-                if not bool(motion_report["converged"]):
+                if not bool(motion_report["converged"]) and not bool(
+                    motion_report.get("yielded_to_scheduler")
+                ):
                     raise RuntimeError(
                         f"Adaptive IK did not reach the live {phase} target: "
                         f"error={motion_report['target_error_after_m']:.4f} m"
@@ -5373,23 +7014,416 @@ def main() -> int:
                         f"Scheduler returned unsupported operation during {phase}: "
                         f"{scheduler_decision}"
                     )
+                # A motion lease that yielded on measured invalidation has not
+                # completed its runtime operation.  If the fresh scheduler asks
+                # for more motion, dispatch that request now instead of silently
+                # advancing the legacy phase scaffold.  Each dispatched motion
+                # is followed by another fresh observation and scheduler call;
+                # phase advancement is admitted only once the scheduler selects
+                # a different operation or declares physical completion.
+                scheduler_motion_handoffs: list[dict[str, Any]] = []
+                if (
+                    scheduler_decision.get("operation_kind") == "motion"
+                    and motion_report_yields_to_scheduler(motion_report)
+                ):
+                    previous_handoff_report = motion_report
+                    maximum_handoffs = max(
+                        1, int(args_cli.motion_checkpoint_replans)
+                    )
+                    for handoff_index in range(maximum_handoffs):
+                        handoff_decision = motion_checkpoint_handler(
+                            obs,
+                            {
+                                "reason": "scheduler_requested_runtime_motion",
+                                "phase": f"{phase}:scheduler_handoff",
+                                "iteration": handoff_index + 1,
+                                "current_target_xyz_m": (
+                                    _eef_position(env).tolist()
+                                ),
+                                "current_target_quaternion_wxyz": (
+                                    _eef_quaternion(env).tolist()
+                                ),
+                                "scheduler_decision": scheduler_decision,
+                                "previous_recovery_motion_outcome": (
+                                    recovery_motion_handoff_from_report(
+                                        previous_handoff_report
+                                    )
+                                ),
+                                "lease_condition_sources": {
+                                    "contact": "sim6.gripper_contact_sensor",
+                                    "tracked_pose": (
+                                        "sim6.privileged_relative_pose_adapter"
+                                        if latched_carry_offset is not None
+                                        else None
+                                    ),
+                                    "tracked_orientation": (
+                                        {
+                                            object_id: (
+                                                "rgbd.instance_depth_major_axis"
+                                            )
+                                            for object_id in (
+                                                latched_rgbd_axis_references
+                                            )
+                                        }
+                                        if latched_rgbd_axis_references
+                                        else {}
+                                    ),
+                                    "observed_clearance": None,
+                                },
+                            },
+                        )
+                        if handoff_decision.get("decision") != "execute":
+                            raise RuntimeError(
+                                "Scheduler-dispatched runtime motion was not "
+                                f"admitted by the motion governor: {handoff_decision}"
+                            )
+                        handoff_target = torch.tensor(
+                            handoff_decision["target_xyz_m"],
+                            dtype=torch.float32,
+                        )
+                        handoff_quaternion = torch.tensor(
+                            handoff_decision["target_quaternion_wxyz"],
+                            dtype=torch.float32,
+                        )
+                        # This scheduler-issued target supersedes the stale
+                        # phase seed for all downstream convergence and
+                        # pre-grasp admission measurements.
+                        nominal = handoff_target
+                        nominal_quaternion = handoff_quaternion
+                        selected_executor_config = dict(
+                            handoff_decision.get("executor_config") or {}
+                        )
+                        (
+                            obs,
+                            terminal,
+                            last_action,
+                            handoff_report,
+                        ) = _move_eef_to_target(
+                            env,
+                            obs,
+                            last_action,
+                            handoff_target,
+                            handoff_quaternion,
+                            f"{phase}:scheduler_handoff",
+                            gripper_closed=bool(
+                                float(last_action[0, 7].detach().cpu()) > 0.5
+                            ),
+                            initial_object_z=initial_object_z,
+                            executor_config=selected_executor_config,
+                            carry_reference_offset=latched_carry_offset,
+                            rgbd_axis_references=latched_rgbd_axis_references,
+                            checkpoint_callback=motion_checkpoint_handler,
+                        )
+                        if terminal:
+                            raise RuntimeError(
+                                "Environment terminated during scheduler-dispatched "
+                                "runtime motion"
+                            )
+                        if not bool(handoff_report.get("converged")) and not (
+                            motion_report_yields_to_scheduler(handoff_report)
+                        ):
+                            raise RuntimeError(
+                                "Scheduler-dispatched runtime motion neither "
+                                f"converged nor yielded safely: {handoff_report}"
+                            )
+                        scheduler_motion_handoffs.append(
+                            {
+                                "index": handoff_index + 1,
+                                "motion_decision": handoff_decision,
+                                "motion_report": handoff_report,
+                            }
+                        )
+                        previous_handoff_report = handoff_report
+                        (
+                            obs,
+                            terminal,
+                            scheduler_decision,
+                            handoff_scheduler_latency,
+                            handoff_scheduler_digest,
+                        ) = operation_scheduler_handler(
+                            obs,
+                            last_action,
+                            phase_label=f"{phase}:scheduler_handoff",
+                            observation_prefix=(
+                                f"scheduler_handoff_{stage_index:02d}_{phase}_"
+                                f"{handoff_index + 1}"
+                            ),
+                            motion_report=handoff_report,
+                            trigger_event={
+                                "type": "scheduler_motion_handoff_completed",
+                                "phase_label": phase,
+                                "handoff_index": handoff_index + 1,
+                            },
+                        )
+                        scheduler_latency += handoff_scheduler_latency
+                        scheduler_digest = handoff_scheduler_digest
+                        if scheduler_decision.get("decision") == "complete":
+                            task_completed_by_scheduler = True
+                            motion_report[
+                                "scheduler_declared_task_complete"
+                            ] = True
+                            break
+                        if scheduler_decision.get("operation_kind") != "motion":
+                            break
+                    if (
+                        not task_completed_by_scheduler
+                        and scheduler_decision.get("operation_kind") == "motion"
+                    ):
+                        raise RuntimeError(
+                            "Scheduler motion handoff budget exhausted without "
+                            "selecting a different runtime operation: "
+                            f"{len(scheduler_motion_handoffs)}/{maximum_handoffs}"
+                        )
+                    motion_report["scheduler_motion_handoffs"] = (
+                        scheduler_motion_handoffs
+                    )
             if (
                 scheduler_decision is not None
                 and scheduler_decision.get("operation_kind") == "actuation"
             ):
-                (
-                    obs,
-                    terminal,
+                # A model-issued actuator hold is a request for a different
+                # operation from a fresh observation, not an actuator error.
+                # Keep this phase boundary active until the scheduler either
+                # supplies corrective motion followed by an admitted actuator
+                # transition, or proves that the physical task is complete.
+                stage_actuator_handoffs: list[dict[str, Any]] = []
+                stage_operation = scheduler_decision
+                stage_trigger_event: dict[str, Any] | None = None
+                stage_operation_report = motion_report
+                maximum_stage_operations = max(
+                    3, 2 * int(args_cli.motion_checkpoint_replans) + 1
+                )
+                for operation_index in range(maximum_stage_operations):
+                    operation_kind = stage_operation.get("operation_kind")
+                    if operation_kind == "actuation":
+                        (
+                            obs,
+                            terminal,
+                            stage_actuator_decision,
+                            stage_actuator_latency,
+                            stage_actuator_digest,
+                        ) = actuator_transition_handler(
+                            obs,
+                            last_action,
+                            phase_label=phase,
+                            observation_prefix=(
+                                f"actuator_stage_{stage_index:02d}_{phase}_"
+                                f"{operation_index + 1}"
+                            ),
+                            trigger_event=stage_trigger_event,
+                            scheduler_dispatch=stage_operation,
+                            yield_on_hold=True,
+                        )
+                        actuator_decision = stage_actuator_decision
+                        actuator_latency += stage_actuator_latency
+                        actuator_digest = stage_actuator_digest
+                        if stage_actuator_decision.get("decision") == "execute":
+                            break
+                        episode_trace["actuator_tool_protocol"]["calls"][-1][
+                            "scheduler_handoff"
+                        ] = True
+                        stage_trigger_event = {
+                            "type": "actuator_governor_yielded_to_scheduler",
+                            "triggered": True,
+                            "phase_label": phase,
+                            "actuator_governor_decision": (
+                                stage_actuator_decision
+                            ),
+                        }
+                        stage_operation_report = {
+                            "converged": False,
+                            "yielded_to_scheduler": True,
+                            "recovery_request": stage_trigger_event,
+                        }
+                    elif operation_kind == "motion":
+                        stage_motion_decision = motion_checkpoint_handler(
+                            obs,
+                            {
+                                "reason": (
+                                    "scheduler_requested_motion_after_"
+                                    "actuator_hold"
+                                ),
+                                "phase": f"{phase}:actuator_hold_motion",
+                                "iteration": operation_index + 1,
+                                "current_target_xyz_m": (
+                                    _eef_position(env).tolist()
+                                ),
+                                "current_target_quaternion_wxyz": (
+                                    _eef_quaternion(env).tolist()
+                                ),
+                                "previous_motion_tool_outcome": (
+                                    actuator_decision.get("actuator_tool")
+                                    if isinstance(actuator_decision, dict)
+                                    else None
+                                ),
+                                "scheduler_decision": stage_operation,
+                                "lease_condition_sources": {
+                                    "contact": "sim6.gripper_contact_sensor",
+                                    "tracked_pose": (
+                                        "sim6.privileged_relative_pose_adapter"
+                                        if latched_carry_offset is not None
+                                        else None
+                                    ),
+                                    "tracked_orientation": (
+                                        {
+                                            object_id: (
+                                                "rgbd.instance_depth_major_axis"
+                                            )
+                                            for object_id in (
+                                                latched_rgbd_axis_references
+                                            )
+                                        }
+                                        if latched_rgbd_axis_references
+                                        else {}
+                                    ),
+                                    "observed_clearance": None,
+                                },
+                            },
+                        )
+                        if stage_motion_decision.get("decision") != "execute":
+                            stage_operation_report = {
+                                "converged": False,
+                                "yielded_to_scheduler": True,
+                                "recovery_request": {
+                                    "reason": (
+                                        "motion_governor_withheld_"
+                                        "actuator_hold_correction"
+                                    ),
+                                    "motion_decision": stage_motion_decision,
+                                },
+                            }
+                            stage_trigger_event = {
+                                "type": "motion_governor_yielded_to_scheduler",
+                                "triggered": True,
+                                "phase_label": phase,
+                                "motion_governor_decision": (
+                                    stage_motion_decision
+                                ),
+                            }
+                        else:
+                            nominal = torch.tensor(
+                                stage_motion_decision["target_xyz_m"],
+                                dtype=torch.float32,
+                            )
+                            nominal_quaternion = torch.tensor(
+                                stage_motion_decision[
+                                    "target_quaternion_wxyz"
+                                ],
+                                dtype=torch.float32,
+                            )
+                            (
+                                obs,
+                                terminal,
+                                last_action,
+                                stage_motion_report,
+                            ) = _move_eef_to_target(
+                                env,
+                                obs,
+                                last_action,
+                                nominal,
+                                nominal_quaternion,
+                                f"{phase}:actuator_hold_motion",
+                                gripper_closed=bool(
+                                    float(
+                                        last_action[0, 7].detach().cpu()
+                                    )
+                                    > 0.5
+                                ),
+                                initial_object_z=initial_object_z,
+                                executor_config=dict(
+                                    stage_motion_decision.get(
+                                        "executor_config"
+                                    )
+                                    or {}
+                                ),
+                                carry_reference_offset=(
+                                    latched_carry_offset
+                                ),
+                                rgbd_axis_references=(
+                                    latched_rgbd_axis_references
+                                ),
+                                checkpoint_callback=(
+                                    motion_checkpoint_handler
+                                ),
+                            )
+                            if terminal:
+                                raise RuntimeError(
+                                    "Environment terminated during actuator-"
+                                    "hold corrective motion"
+                                )
+                            stage_actuator_handoffs.append(
+                                {
+                                    "index": len(stage_actuator_handoffs) + 1,
+                                    "scheduler_decision": stage_operation,
+                                    "motion_decision": stage_motion_decision,
+                                    "motion_report": stage_motion_report,
+                                }
+                            )
+                            stage_operation_report = stage_motion_report
+                            stage_trigger_event = {
+                                "type": (
+                                    "actuator_hold_scheduler_motion_completed"
+                                ),
+                                "triggered": True,
+                                "phase_label": phase,
+                                "motion_outcome": (
+                                    recovery_motion_handoff_from_report(
+                                        stage_motion_report
+                                    )
+                                ),
+                            }
+                    else:
+                        raise RuntimeError(
+                            "Actuator-hold scheduler returned unsupported "
+                            f"operation: {stage_operation}"
+                        )
+
+                    (
+                        obs,
+                        terminal,
+                        stage_operation,
+                        stage_scheduler_latency,
+                        stage_scheduler_digest,
+                    ) = operation_scheduler_handler(
+                        obs,
+                        last_action,
+                        phase_label=f"{phase}:actuator_hold_handoff",
+                        observation_prefix=(
+                            f"scheduler_actuator_hold_{stage_index:02d}_"
+                            f"{phase}_{operation_index + 1}"
+                        ),
+                        motion_report=stage_operation_report,
+                        trigger_event=stage_trigger_event,
+                    )
+                    scheduler_decision = stage_operation
+                    scheduler_latency += stage_scheduler_latency
+                    scheduler_digest = stage_scheduler_digest
+                    if stage_operation.get("decision") == "complete":
+                        task_completed_by_scheduler = True
+                        motion_report["scheduler_declared_task_complete"] = True
+                        break
+                else:
+                    raise RuntimeError(
+                        "Actuator-hold scheduler handoff budget exhausted "
+                        "without an admitted transition: "
+                        f"{maximum_stage_operations} operations"
+                    )
+                motion_report["actuator_hold_scheduler_handoffs"] = (
+                    stage_actuator_handoffs
+                )
+                if task_completed_by_scheduler:
+                    break
+                if (
+                    actuator_decision is None
+                    or actuator_decision.get("decision") != "execute"
+                ):
+                    raise RuntimeError(
+                        "Actuator-hold handoff ended without an admitted "
+                        f"actuator transition: {actuator_decision}"
+                    )
+                admit_pregrasp_transition(
                     actuator_decision,
-                    actuator_latency,
-                    actuator_digest,
-                ) = actuator_transition_handler(
-                    obs,
-                    last_action,
-                    phase_label=phase,
-                    observation_prefix=(
-                        f"actuator_stage_{stage_index:02d}_{phase}"
-                    ),
+                    current_target=nominal,
                 )
                 obs, terminal, last_action, actuator_execution = (
                     _execute_binary_actuator_tool(
@@ -5397,8 +7431,12 @@ def main() -> int:
                         obs,
                         last_action,
                         actuator_decision,
-                        initial_banana_z=initial_banana_z,
+                        initial_object_z=initial_object_z,
                     )
+                )
+                reconcile_carry_latch_after_actuation(
+                    actuator_execution,
+                    source=phase,
                 )
                 episode_trace["actuator_tool_protocol"]["calls"][-1][
                     "execution"
@@ -5418,26 +7456,43 @@ def main() -> int:
                     )
                 post_feedback_decisions: list[dict[str, Any]] = []
                 post_feedback_executions: list[dict[str, Any]] = []
+                post_feedback_motion_handoffs: list[dict[str, Any]] = []
                 current_actuator_execution = actuator_execution
+                pending_scheduler_trigger_event: dict[str, Any] | None = None
                 for feedback_index in range(3):
-                    feedback_event = _actuator_feedback_event_from_execution(
-                        current_actuator_execution,
-                        actuator_feedback_policy,
-                    )
-                    current_actuator_execution["feedback_event"] = feedback_event
-                    _write_trace(trace_path, episode_trace)
-                    print(
-                        f"[post-actuation event] phase={phase} "
-                        f"triggered={feedback_event['triggered']} "
-                        f"position_delta="
-                        f"{feedback_event['actuator_position_change']:.3f} "
-                        f"force_delta="
-                        f"{feedback_event['tactile_force_change_n']:.3f}N "
-                        f"touch_changed={feedback_event['touch_changed']}",
-                        flush=True,
-                    )
-                    if not feedback_event["triggered"]:
-                        break
+                    if pending_scheduler_trigger_event is None:
+                        feedback_event = _actuator_feedback_event_from_execution(
+                            current_actuator_execution,
+                            actuator_feedback_policy,
+                        )
+                        current_actuator_execution["feedback_event"] = feedback_event
+                        record_unsupported_grasp_attempt(
+                            current_actuator_execution,
+                            feedback_event,
+                            source=f"{phase}:post_actuation",
+                        )
+                        _write_trace(trace_path, episode_trace)
+                        print(
+                            f"[post-actuation event] phase={phase} "
+                            f"triggered={feedback_event['triggered']} "
+                            f"position_delta="
+                            f"{feedback_event['actuator_position_change']:.3f} "
+                            f"force_delta="
+                            f"{feedback_event['tactile_force_change_n']:.3f}N "
+                            f"touch_changed={feedback_event['touch_changed']} "
+                            f"outcome_invalidated="
+                            f"{feedback_event['actuator_outcome_invalidated']}",
+                            flush=True,
+                        )
+                        if not feedback_event["triggered"]:
+                            break
+                        feedback_trigger_event = {
+                            "type": "actuator_physical_outcome_observed",
+                            **feedback_event,
+                        }
+                    else:
+                        feedback_trigger_event = pending_scheduler_trigger_event
+                        pending_scheduler_trigger_event = None
                     (
                         obs,
                         terminal,
@@ -5453,10 +7508,7 @@ def main() -> int:
                             f"{feedback_index + 1}"
                         ),
                         motion_report=motion_report,
-                        trigger_event={
-                            "type": "actuator_and_tactile_state_changed",
-                            **feedback_event,
-                        },
+                        trigger_event=feedback_trigger_event,
                     )
                     post_feedback_decisions.append(post_feedback_decision)
                     scheduler_latency += post_feedback_latency
@@ -5466,7 +7518,94 @@ def main() -> int:
                         motion_report["scheduler_declared_task_complete"] = True
                         break
                     if post_feedback_decision.get("operation_kind") == "motion":
-                        break
+                        post_feedback_motion_decision = motion_checkpoint_handler(
+                            obs,
+                            {
+                                "reason": (
+                                    "scheduler_requested_runtime_motion_after_"
+                                    "actuation"
+                                ),
+                                "phase": f"{phase}:post_actuation_motion",
+                                "iteration": feedback_index + 1,
+                                "current_target_xyz_m": (
+                                    _eef_position(env).tolist()
+                                ),
+                                "current_target_quaternion_wxyz": (
+                                    _eef_quaternion(env).tolist()
+                                ),
+                                "scheduler_decision": post_feedback_decision,
+                                "actuator_feedback_event": (
+                                    feedback_trigger_event
+                                ),
+                                "lease_condition_sources": {
+                                    "contact": "sim6.gripper_contact_sensor",
+                                    "tracked_pose": None,
+                                    "tracked_orientation": {},
+                                    "observed_clearance": None,
+                                },
+                            },
+                        )
+                        if post_feedback_motion_decision.get("decision") != "execute":
+                            raise RuntimeError(
+                                "Scheduler-dispatched post-actuation motion was "
+                                "not admitted by the motion governor: "
+                                f"{post_feedback_motion_decision}"
+                            )
+                        (
+                            obs,
+                            terminal,
+                            last_action,
+                            post_feedback_motion_report,
+                        ) = _move_eef_to_target(
+                            env,
+                            obs,
+                            last_action,
+                            torch.tensor(
+                                post_feedback_motion_decision["target_xyz_m"],
+                                dtype=torch.float32,
+                            ),
+                            torch.tensor(
+                                post_feedback_motion_decision[
+                                    "target_quaternion_wxyz"
+                                ],
+                                dtype=torch.float32,
+                            ),
+                            f"{phase}:post_actuation_motion",
+                            gripper_closed=bool(
+                                float(last_action[0, 7].detach().cpu()) > 0.5
+                            ),
+                            initial_object_z=initial_object_z,
+                            executor_config=dict(
+                                post_feedback_motion_decision.get(
+                                    "executor_config"
+                                )
+                                or {}
+                            ),
+                            carry_reference_offset=None,
+                            rgbd_axis_references={},
+                            checkpoint_callback=motion_checkpoint_handler,
+                        )
+                        if terminal:
+                            raise RuntimeError(
+                                "Environment terminated during scheduler-"
+                                "dispatched post-actuation motion"
+                            )
+                        post_feedback_motion_handoffs.append(
+                            {
+                                "scheduler_decision": post_feedback_decision,
+                                "motion_decision": post_feedback_motion_decision,
+                                "motion_report": post_feedback_motion_report,
+                            }
+                        )
+                        pending_scheduler_trigger_event = {
+                            "type": "post_actuation_scheduler_motion_completed",
+                            "triggered": True,
+                            "phase_label": phase,
+                            "motion_outcome": recovery_motion_handoff_from_report(
+                                post_feedback_motion_report
+                            ),
+                        }
+                        continue
                     if post_feedback_decision.get("operation_kind") != "actuation":
                         raise RuntimeError(
                             "Post-actuation scheduler returned unsupported "
@@ -5486,8 +7625,24 @@ def main() -> int:
                             f"actuator_post_feedback_{stage_index:02d}_{phase}_"
                             f"{feedback_index + 1}"
                         ),
+                        trigger_event=feedback_trigger_event,
+                        scheduler_dispatch=post_feedback_decision,
+                        yield_on_hold=True,
                     )
                     actuator_latency += repeated_actuator_latency
+                    if repeated_actuator_decision.get("decision") != "execute":
+                        episode_trace["actuator_tool_protocol"]["calls"][-1][
+                            "scheduler_handoff"
+                        ] = True
+                        pending_scheduler_trigger_event = {
+                            "type": "actuator_governor_yielded_to_scheduler",
+                            "triggered": True,
+                            "phase_label": phase,
+                            "actuator_governor_decision": (
+                                repeated_actuator_decision
+                            ),
+                        }
+                        continue
                     (
                         obs,
                         terminal,
@@ -5498,7 +7653,11 @@ def main() -> int:
                         obs,
                         last_action,
                         repeated_actuator_decision,
-                        initial_banana_z=initial_banana_z,
+                        initial_object_z=initial_object_z,
+                    )
+                    reconcile_carry_latch_after_actuation(
+                        repeated_execution,
+                        source=f"{phase}:post_actuation",
                     )
                     episode_trace["actuator_tool_protocol"]["calls"][-1][
                         "execution"
@@ -5510,14 +7669,30 @@ def main() -> int:
                             "Environment terminated during post-feedback actuation"
                         )
                 else:
-                    raise RuntimeError(
-                        "Post-actuation feedback reschedule budget exhausted"
+                    motion_report["post_actuation_feedback_budget_yield"] = {
+                        "reason": (
+                            "bounded_post_actuation_operations_completed"
+                        ),
+                        "operation_count": len(post_feedback_decisions),
+                        "next_step": (
+                            "return_current_observation_to_runtime_phase_loop"
+                        ),
+                        "task_success_assumed": False,
+                    }
+                    print(
+                        "[post-actuation handoff] bounded operation budget "
+                        "completed; returning current observation to the fresh "
+                        "runtime phase loop",
+                        flush=True,
                     )
                 actuator_execution["post_feedback_scheduler_decisions"] = (
                     post_feedback_decisions
                 )
                 actuator_execution["post_feedback_executions"] = (
                     post_feedback_executions
+                )
+                actuator_execution["post_feedback_motion_handoffs"] = (
+                    post_feedback_motion_handoffs
                 )
                 motion_report["post_actuation_scheduler_decisions"] = (
                     post_feedback_decisions
@@ -5527,10 +7702,13 @@ def main() -> int:
                     not actuator_engaged_before_transition
                     and bool(float(last_action[0, 7].detach().cpu()) > 0.5)
                 ):
+                    motion_report["grasp_attempt"] = capture_grasp_attempt(
+                        f"stage:{phase}"
+                    )
                     # Preserve the fresh measured carry transform after the
                     # admitted actuator command, not before contact.
                     latched_carry_offset = (
-                        _eef_position(env) - _local_position(env, "banana")
+                        _eef_position(env) - _movable_object_position(env)
                     )
                     latched_carry_quaternion = _eef_quaternion(env)
                     motion_report["latched_carry_offset_m"] = (
@@ -5568,10 +7746,10 @@ def main() -> int:
             eef = _eef_position(env)
             eef_trace.append(eef.tolist())
             pos_error = float(torch.linalg.norm(eef - nominal))
-            banana_now = _local_position(env, "banana")
+            object_now = _movable_object_position(env)
             print(
                 f"[feedback] {phase}: eef={eef.tolist()} error={pos_error:.4f}m "
-                f"banana={banana_now.tolist()} terminal={terminal}",
+                f"object={object_now.tolist()} terminal={terminal}",
                 flush=True,
             )
             phase_contact_summary = _active_contact_summary()
@@ -5594,6 +7772,7 @@ def main() -> int:
                 "nominal_target_xyz": nominal.tolist(),
                 "nominal_target_quaternion_wxyz": nominal_quaternion.tolist(),
                 "target_source": target_source,
+                "orientation_target_source": orientation_target_source,
                 "demonstrated_steps": end - start,
                 "motion_report": motion_report,
                 "recorded_actuator_hint_used": bool(
@@ -5613,7 +7792,7 @@ def main() -> int:
                 "actuator_execution": actuator_execution,
                 "eef_after_xyz": eef.tolist(),
                 "eef_target_error_m": pos_error,
-                "banana_after_xyz": banana_now.tolist(),
+                "object_after_xyz": object_now.tolist(),
                 "terminal": terminal,
                 "contact_telemetry_after": phase_contact_summary,
             })
@@ -5621,19 +7800,19 @@ def main() -> int:
 
             if phase == "above_plate" and not terminal:
                 if placement_completed_during_recovery:
-                    completed_state = _state(env, initial_banana_z)
+                    completed_state = _state(env, initial_object_z)
                     centering_report = {
                         "enabled": False,
                         "converged": True,
                         "reason": "goal_completed_during_transport_recovery",
-                        "banana_plate_contact_proxy": completed_state[
-                            "banana_plate_contact_proxy"
+                        "object_target_contact_proxy": completed_state[
+                            "object_target_contact_proxy"
                         ],
                         "xy_error_after_m": completed_state[
-                            "banana_plate_xy_error_m"
+                            "object_target_xy_error_m"
                         ],
                         "height_above_plate_after_m": completed_state[
-                            "banana_height_above_plate_m"
+                            "object_height_above_target_m"
                         ],
                         "iterations": [],
                     }
@@ -5665,14 +7844,14 @@ def main() -> int:
                 _write_trace(trace_path, episode_trace)
 
             if phase == "place" and not terminal:
-                placement_state = _state(env, initial_banana_z)
+                placement_state = _state(env, initial_object_z)
                 centered = bool(
-                    placement_state["banana_plate_contact_proxy"]
+                    placement_state["object_target_contact_proxy"]
                     or (
-                        placement_state["banana_plate_xy_error_m"]
+                        placement_state["object_target_xy_error_m"]
                         <= args_cli.center_tolerance
                         and abs(
-                            placement_state["banana_height_above_plate_m"]
+                            placement_state["object_height_above_target_m"]
                             - args_cli.release_height
                         )
                         <= args_cli.release_height_tolerance
@@ -5689,13 +7868,13 @@ def main() -> int:
                         ),
                         "observed_values": {
                             "target_contact": placement_state[
-                                "banana_plate_contact_proxy"
+                                "object_target_contact_proxy"
                             ],
                             "target_xy_error_m": placement_state[
-                                "banana_plate_xy_error_m"
+                                "object_target_xy_error_m"
                             ],
                             "height_above_target_m": placement_state[
-                                "banana_height_above_plate_m"
+                                "object_height_above_target_m"
                             ],
                         },
                         "admission_values": {
@@ -5712,9 +7891,9 @@ def main() -> int:
                     print(
                         "[outcome recovery] measured placement is outside the "
                         f"release envelope (xy="
-                        f"{placement_state['banana_plate_xy_error_m']:.3f}m, "
+                        f"{placement_state['object_target_xy_error_m']:.3f}m, "
                         f"height="
-                        f"{placement_state['banana_height_above_plate_m']:.3f}m); "
+                        f"{placement_state['object_height_above_target_m']:.3f}m); "
                         f"requesting fresh operation {recovery_index + 1}/"
                         f"{args_cli.max_transport_recoveries}",
                         flush=True,
@@ -5781,7 +7960,11 @@ def main() -> int:
                             obs,
                             last_action,
                             recovery_actuator_decision,
-                            initial_banana_z=initial_banana_z,
+                            initial_object_z=initial_object_z,
+                        )
+                        reconcile_carry_latch_after_actuation(
+                            recovery_actuator_execution,
+                            source="place:measured_outcome_not_met",
                         )
                         episode_trace["actuator_tool_protocol"]["calls"][-1][
                             "execution"
@@ -5808,7 +7991,7 @@ def main() -> int:
                         ):
                             latched_carry_offset = (
                                 _eef_position(env)
-                                - _local_position(env, "banana")
+                                - _movable_object_position(env)
                             )
                             latched_carry_quaternion = _eef_quaternion(env)
                             latched_rgbd_axis_references = {}
@@ -5904,6 +8087,12 @@ def main() -> int:
                             recovery_motion_decision["target_xyz_m"],
                             dtype=torch.float32,
                         )
+                        recovery_target_quaternion = torch.tensor(
+                            recovery_motion_decision[
+                                "target_quaternion_wxyz"
+                            ],
+                            dtype=torch.float32,
+                        )
                         (
                             obs,
                             terminal,
@@ -5914,12 +8103,12 @@ def main() -> int:
                             obs,
                             last_action,
                             recovery_target,
-                            _eef_quaternion(env),
+                            recovery_target_quaternion,
                             "place:outcome_recovery",
                             gripper_closed=bool(
                                 float(last_action[0, 7].detach().cpu()) > 0.5
                             ),
-                            initial_banana_z=initial_banana_z,
+                            initial_object_z=initial_object_z,
                             executor_config=dict(
                                 recovery_motion_decision.get(
                                     "executor_config"
@@ -5942,18 +8131,18 @@ def main() -> int:
                             "Placement outcome scheduler returned unsupported "
                             f"operation: {recovery_schedule}"
                         )
-                    placement_state = _state(env, initial_banana_z)
+                    placement_state = _state(env, initial_object_z)
                     recovery_event["state_after"] = placement_state
                     placement_outcome_recoveries.append(recovery_event)
                     episode_trace["recoveries"].append(recovery_event)
                     centered = bool(
-                        placement_state["banana_plate_contact_proxy"]
+                        placement_state["object_target_contact_proxy"]
                         or (
-                            placement_state["banana_plate_xy_error_m"]
+                            placement_state["object_target_xy_error_m"]
                             <= args_cli.center_tolerance
                             and abs(
                                 placement_state[
-                                    "banana_height_above_plate_m"
+                                    "object_height_above_target_m"
                                 ]
                                 - args_cli.release_height
                             )
@@ -5966,14 +8155,14 @@ def main() -> int:
                     "controller": "observation_bound_model_motion_tool",
                     "legacy_local_xy_z_controller_used": False,
                     "converged": centered,
-                    "banana_plate_contact_proxy": placement_state[
-                        "banana_plate_contact_proxy"
+                    "object_target_contact_proxy": placement_state[
+                        "object_target_contact_proxy"
                     ],
                     "xy_error_after_m": placement_state[
-                        "banana_plate_xy_error_m"
+                        "object_target_xy_error_m"
                     ],
                     "height_above_plate_after_m": placement_state[
-                        "banana_height_above_plate_m"
+                        "object_height_above_target_m"
                     ],
                     "motion_report": motion_report,
                     "measured_outcome_recoveries": (
@@ -5986,8 +8175,8 @@ def main() -> int:
                 episode_trace["stages"][-1]["eef_after_xyz"] = (
                     _eef_position(env).tolist()
                 )
-                episode_trace["stages"][-1]["banana_after_xyz"] = (
-                    _local_position(env, "banana").tolist()
+                episode_trace["stages"][-1]["object_after_xyz"] = (
+                    _movable_object_position(env).tolist()
                 )
                 episode_trace["residual_centering"] = centering_report
                 tests["centering"] = centered
@@ -5995,9 +8184,9 @@ def main() -> int:
                     7,
                     "model-governed plate placement",
                     centered,
-                    f"xy_error={placement_state['banana_plate_xy_error_m']:.3f}m "
-                    f"height={placement_state['banana_height_above_plate_m']:.3f}m "
-                    f"contact={placement_state['banana_plate_contact_proxy']}",
+                    f"xy_error={placement_state['object_target_xy_error_m']:.3f}m "
+                    f"height={placement_state['object_height_above_target_m']:.3f}m "
+                    f"contact={placement_state['object_target_contact_proxy']}",
                 )
                 _write_trace(trace_path, episode_trace)
                 if not centered:
@@ -6008,16 +8197,79 @@ def main() -> int:
 
             if phase == "lift":
                 lift_outcome_recoveries: list[dict[str, Any]] = []
+                previous_lift_recovery_motion_outcome = (
+                    recovery_motion_handoff_from_report(motion_report)
+                )
                 lifted = (
-                    float(banana_now[2]) - initial_banana_z
+                    float(object_now[2]) - initial_object_z
                     >= args_cli.minimum_transport_lift
                 )
-                for recovery_index in range(args_cli.max_transport_recoveries):
+                for recovery_index in range(
+                    args_cli.max_lift_recovery_operations
+                ):
                     if lifted or terminal:
                         break
-                    recovery_state_before = _state(env, initial_banana_z)
+                    recovery_state_before = _state(env, initial_object_z)
                     observed_lift_m = float(
-                        recovery_state_before["banana_lift_m"]
+                        recovery_state_before["object_lift_m"]
+                    )
+                    if (
+                        latest_grasp_attempt is not None
+                        and not any(
+                            item["attempt_id"]
+                            == latest_grasp_attempt["attempt_id"]
+                            for item in failed_grasp_attempts
+                        )
+                    ):
+                        failed_grasp_attempts.append(
+                            {
+                                **latest_grasp_attempt,
+                                "outcome": "object_did_not_follow_lift",
+                                "observed_object_lift_m": observed_lift_m,
+                                "fresh_failure_state": {
+                                    "gripper_closed_fraction": (
+                                        recovery_state_before[
+                                            "gripper_closed_fraction"
+                                        ]
+                                    ),
+                                    "touch": recovery_state_before[
+                                        "current_contact"
+                                    ].get("touch"),
+                                    "fingertip_object_distance_m": (
+                                        recovery_state_before[
+                                            "fingertip_object_distance_m"
+                                        ]
+                                    ),
+                                },
+                            }
+                        )
+                    if (
+                        len(failed_grasp_attempts)
+                        >= args_cli.max_failed_grasp_attempts
+                    ):
+                        print(
+                            "[outcome recovery] failed-grasp budget exhausted "
+                            f"after {len(failed_grasp_attempts)} physically "
+                            "tested poses",
+                            flush=True,
+                        )
+                        break
+                    actuator_command_engaged = bool(
+                        float(last_action[0, 7].detach().cpu()) > 0.5
+                    )
+                    failed_grasp_pose_comparisons = (
+                        compare_grasp_pose_to_failed_attempts(
+                            failed_attempts=failed_grasp_attempts,
+                            current_eef_xyz_m=recovery_state_before[
+                                "eef_gripper_base_xyz"
+                            ],
+                            current_object_xyz_m=recovery_state_before[
+                                "movable_object_xyz"
+                            ],
+                            current_eef_quaternion_wxyz=recovery_state_before[
+                                "eef_gripper_base_quaternion_wxyz"
+                            ],
+                        )
                     )
                     trigger_event = {
                         "type": "measured_stage_outcome_not_met",
@@ -6025,13 +8277,29 @@ def main() -> int:
                         "observed_value_m": observed_lift_m,
                         "minimum_value_m": args_cli.minimum_transport_lift,
                         "instruction": args_cli.instruction,
+                        "failed_grasp_attempts": list(failed_grasp_attempts),
+                        "failed_grasp_pose_comparisons": (
+                            failed_grasp_pose_comparisons
+                        ),
+                        "actuator_outcome_invalidated": bool(
+                            failed_grasp_attempts
+                            and actuator_command_engaged
+                        ),
+                        "prior_failed_actuator_outcome_observed": bool(
+                            failed_grasp_attempts
+                        ),
+                        "previous_recovery_motion_outcome": (
+                            previous_lift_recovery_motion_outcome
+                        ),
                     }
                     print(
                         "[outcome recovery] measured object lift "
                         f"{observed_lift_m:.3f}m is below "
                         f"{args_cli.minimum_transport_lift:.3f}m; requesting "
                         f"fresh operation {recovery_index + 1}/"
-                        f"{args_cli.max_transport_recoveries}",
+                        f"{args_cli.max_lift_recovery_operations} "
+                        f"(failed grasps={len(failed_grasp_attempts)}/"
+                        f"{args_cli.max_failed_grasp_attempts})",
                         flush=True,
                     )
                     (
@@ -6085,32 +8353,93 @@ def main() -> int:
                                 f"actuator_outcome_{stage_index:02d}_lift_"
                                 f"{recovery_index + 1}"
                             ),
+                            trigger_event=trigger_event,
+                            scheduler_dispatch=recovery_schedule,
+                            yield_on_hold=True,
                         )
-                        (
-                            obs,
-                            terminal,
-                            last_action,
-                            recovery_actuator_execution,
-                        ) = _execute_binary_actuator_tool(
-                            env,
-                            obs,
-                            last_action,
-                            recovery_actuator_decision,
-                            initial_banana_z=initial_banana_z,
-                        )
-                        episode_trace["actuator_tool_protocol"]["calls"][-1][
-                            "execution"
-                        ] = recovery_actuator_execution
                         actuator_latency += recovery_actuator_latency
                         actuator_digest = recovery_actuator_digest
                         actuator_decision = recovery_actuator_decision
-                        actuator_execution = recovery_actuator_execution
                         recovery_event["actuator_decision"] = (
                             recovery_actuator_decision
                         )
-                        recovery_event["actuator_execution"] = (
-                            recovery_actuator_execution
-                        )
+                        if recovery_actuator_decision.get("decision") != "execute":
+                            recovery_event["yielded_to_scheduler"] = True
+                            episode_trace["actuator_tool_protocol"]["calls"][-1][
+                                "scheduler_handoff"
+                            ] = True
+                        else:
+                            (
+                                obs,
+                                terminal,
+                                last_action,
+                                recovery_actuator_execution,
+                            ) = _execute_binary_actuator_tool(
+                                env,
+                                obs,
+                                last_action,
+                                recovery_actuator_decision,
+                                initial_object_z=initial_object_z,
+                            )
+                            reconcile_carry_latch_after_actuation(
+                                recovery_actuator_execution,
+                                source="lift:measured_outcome_not_met",
+                            )
+                            episode_trace["actuator_tool_protocol"]["calls"][-1][
+                                "execution"
+                            ] = recovery_actuator_execution
+                            actuator_execution = recovery_actuator_execution
+                            recovery_event["actuator_execution"] = (
+                                recovery_actuator_execution
+                            )
+                            if (
+                                recovery_actuator_execution.get(
+                                    "requested_state"
+                                )
+                                == "engage"
+                            ):
+                                recovery_event["grasp_attempt"] = (
+                                    capture_grasp_attempt(
+                                        "lift:measured_outcome_recovery"
+                                    )
+                                )
+                                latched_carry_offset = (
+                                    _eef_position(env)
+                                    - _movable_object_position(env)
+                                )
+                                latched_carry_quaternion = _eef_quaternion(env)
+                                latched_rgbd_axis_references = {}
+                                for object_id in trackable_object_ids:
+                                    try:
+                                        axis_observation = (
+                                            _rgbd_object_axis_observation(
+                                                env,
+                                                prim_label_fragment=(
+                                                    f"/scene/{object_id}"
+                                                ),
+                                            )
+                                        )
+                                        latched_rgbd_axis_references[object_id] = (
+                                            np.asarray(
+                                                axis_observation[
+                                                    "major_axis_camera"
+                                                ],
+                                                dtype=np.float64,
+                                            )
+                                        )
+                                    except ValueError:
+                                        continue
+                                recovery_event["carry_latched_after_actuation"] = {
+                                    "eef_minus_object_m": (
+                                        latched_carry_offset.tolist()
+                                    ),
+                                    "eef_quaternion_wxyz": (
+                                        latched_carry_quaternion.tolist()
+                                    ),
+                                    "tracked_rgbd_objects": sorted(
+                                        latched_rgbd_axis_references
+                                    ),
+                                }
                     elif recovery_schedule.get("operation_kind") == "motion":
                         recovery_contact = recovery_state_before.get(
                             "current_contact", {}
@@ -6135,6 +8464,9 @@ def main() -> int:
                                 ),
                                 "scheduler_decision": recovery_schedule,
                                 "measured_outcome": trigger_event,
+                                "previous_recovery_motion_outcome": (
+                                    previous_lift_recovery_motion_outcome
+                                ),
                                 "lease_condition_sources": {
                                     "contact": "sim6.gripper_contact_sensor",
                                     "tracked_pose": (
@@ -6171,6 +8503,12 @@ def main() -> int:
                             recovery_motion_decision["target_xyz_m"],
                             dtype=torch.float32,
                         )
+                        recovery_target_quaternion = torch.tensor(
+                            recovery_motion_decision[
+                                "target_quaternion_wxyz"
+                            ],
+                            dtype=torch.float32,
+                        )
                         (
                             obs,
                             terminal,
@@ -6181,12 +8519,12 @@ def main() -> int:
                             obs,
                             last_action,
                             recovery_target,
-                            _eef_quaternion(env),
+                            recovery_target_quaternion,
                             "lift:outcome_recovery",
                             gripper_closed=bool(
                                 float(last_action[0, 7].detach().cpu()) > 0.5
                             ),
-                            initial_banana_z=initial_banana_z,
+                            initial_object_z=initial_object_z,
                             executor_config=dict(
                                 recovery_motion_decision.get(
                                     "executor_config"
@@ -6204,48 +8542,68 @@ def main() -> int:
                             checkpoint_callback=motion_checkpoint_handler,
                         )
                         recovery_event["motion_report"] = recovery_motion_report
+                        previous_lift_recovery_motion_outcome = (
+                            recovery_motion_handoff_from_report(
+                                recovery_motion_report
+                            )
+                        )
                     else:
                         raise RuntimeError(
                             "Outcome recovery scheduler returned unsupported "
                             f"operation: {recovery_schedule}"
                         )
-                    recovery_state_after = _state(env, initial_banana_z)
+                    recovery_state_after = _state(env, initial_object_z)
                     recovery_event["state_after"] = recovery_state_after
                     lift_outcome_recoveries.append(recovery_event)
                     episode_trace["recoveries"].append(recovery_event)
                     lifted = bool(
-                        recovery_state_after["banana_lift_m"]
+                        recovery_state_after["object_lift_m"]
                         >= args_cli.minimum_transport_lift
                     )
                     _write_trace(trace_path, episode_trace)
 
-                banana_now = _local_position(env, "banana")
+                object_now = _movable_object_position(env)
                 eef = _eef_position(env)
                 tests["lift"] = lifted
+                episode_trace["measured_lift_outcome_recovery"].update(
+                    {
+                        "operation_count": len(lift_outcome_recoveries),
+                        "failed_grasp_attempt_count": len(
+                            failed_grasp_attempts
+                        ),
+                        "failed_grasp_attempts": failed_grasp_attempts,
+                        "outcome_satisfied": lifted,
+                    }
+                )
                 _test_line(
                     6,
-                    "physical banana lift",
+                    "physical object lift",
                     lifted,
-                    f"delta_z={float(banana_now[2]) - initial_banana_z:.3f}m "
-                    f"recoveries={len(lift_outcome_recoveries)}",
+                    f"delta_z={float(object_now[2]) - initial_object_z:.3f}m "
+                    f"operations={len(lift_outcome_recoveries)} "
+                    f"failed_grasps={len(failed_grasp_attempts)}",
                 )
                 episode_trace["stages"][-1]["measured_outcome_recoveries"] = (
                     lift_outcome_recoveries
                 )
                 episode_trace["stages"][-1]["eef_after_xyz"] = eef.tolist()
-                episode_trace["stages"][-1]["banana_after_xyz"] = (
-                    banana_now.tolist()
+                episode_trace["stages"][-1]["object_after_xyz"] = (
+                    object_now.tolist()
                 )
                 if not lifted:
                     _write_trace(trace_path, episode_trace)
                     raise RuntimeError(
                         "Measured lift recovery budget exhausted without "
-                        "satisfying the runtime outcome predicate"
+                        "satisfying the runtime outcome predicate: "
+                        f"operations={len(lift_outcome_recoveries)}/"
+                        f"{args_cli.max_lift_recovery_operations}, "
+                        f"failed_grasps={len(failed_grasp_attempts)}/"
+                        f"{args_cli.max_failed_grasp_attempts}"
                     )
-                latched_carry_offset = _eef_position(env) - banana_now
+                latched_carry_offset = _eef_position(env) - object_now
                 latched_carry_quaternion = _eef_quaternion(env)
                 episode_trace["post_lift_carry_latch"] = {
-                    "eef_minus_banana_m": latched_carry_offset.tolist(),
+                    "eef_minus_object_m": latched_carry_offset.tolist(),
                     "eef_quaternion_wxyz": latched_carry_quaternion.tolist(),
                 }
                 _write_trace(trace_path, episode_trace)
@@ -6282,25 +8640,25 @@ def main() -> int:
                 "open-gripper retreat and detachment",
                 detached,
                 f"eef_up={retreat_report['eef_retreat_z_m']:.3f}m "
-                f"banana_motion={retreat_report['banana_motion_during_retreat_m']:.3f}m "
-                f"plate_xy={retreat_report['banana_plate_xy_error_after_m']:.3f}m "
-                f"separation={retreat_report['eef_banana_separation_before_m']:.3f}→"
-                f"{retreat_report['eef_banana_separation_after_m']:.3f}m",
+                f"object_motion={retreat_report['object_motion_during_retreat_m']:.3f}m "
+                f"plate_xy={retreat_report['object_target_xy_error_after_m']:.3f}m "
+                f"separation={retreat_report['eef_object_separation_before_m']:.3f}→"
+                f"{retreat_report['eef_object_separation_after_m']:.3f}m",
             )
             if not detached:
                 raise RuntimeError("Open-gripper retreat did not prove clean object detachment")
         episode_trace["release_retreat"] = retreat_report
         _write_trace(trace_path, episode_trace)
 
-        banana_final = _local_position(env, "banana")
-        plate_final = _local_position(env, "plate_large")
+        object_final = _movable_object_position(env)
+        plate_final = _target_receptacle_position(env)
         final_frame = _single_exterior_frame(obs)
         cv2.imwrite(
             str(args_cli.artifact_dir / "99_final.jpg"),
             cv2.cvtColor(final_frame, cv2.COLOR_RGB2BGR),
         )
-        xy_error = float(torch.linalg.norm(banana_final[:2] - plate_final[:2]))
-        height_above_plate = float(banana_final[2] - plate_final[2])
+        xy_error = float(torch.linalg.norm(object_final[:2] - plate_final[:2]))
+        height_above_plate = float(object_final[2] - plate_final[2])
         contact_summary = _active_contact_summary()
         contact_passed = (
             True if args_cli.disable_contact_telemetry else bool(contact_summary["passed"])
@@ -6320,16 +8678,16 @@ def main() -> int:
         tests["success"] = success
         _test_line(
             10,
-            "banana-on-plate geometric outcome",
+            "object-on-target geometric outcome",
             success,
             f"xy_error={xy_error:.3f}m height_above_plate={height_above_plate:.3f}m",
         )
         episode_trace["final"] = {
             "frame": "99_final.jpg",
-            "banana_xyz": banana_final.tolist(),
-            "plate_xyz": plate_final.tolist(),
-            "banana_plate_xy_error_m": xy_error,
-            "banana_height_above_plate_m": height_above_plate,
+            "movable_object_xyz": object_final.tolist(),
+            "target_receptacle_xyz": plate_final.tolist(),
+            "object_target_xy_error_m": xy_error,
+            "object_height_above_target_m": height_above_plate,
             "tests": tests,
             "contact_telemetry": contact_summary,
             "all_tests_passed": all(tests.values()),

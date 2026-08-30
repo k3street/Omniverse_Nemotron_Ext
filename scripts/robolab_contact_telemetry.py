@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+import numpy as np
+
 
 GRIPPER_CONTACT_SENSOR_NAME = "gripper__all_contacts"
 GRIPPER_CONTACT_PRIM_PATH = (
@@ -65,4 +67,89 @@ def contact_sensor_runtime_info(env: Any) -> dict[str, Any]:
         "body_names": body_names,
         "body_count": int(getattr(sensor, "num_sensors", len(body_names))),
         "filtered": bool(getattr(sensor.cfg, "filter_prim_paths_expr", [])),
+    }
+
+
+def contact_body_force_observation(
+    env: Any,
+    *,
+    touch_threshold_n: float = 0.1,
+) -> dict[str, Any]:
+    """Expose each sensed contact body's fresh world-frame force.
+
+    Aggregate clamp force can be nearly zero for a valid opposing pinch and can
+    look large for an ineffective same-direction surface contact.  Keeping the
+    runtime sensor's own body names makes this observation capability-driven
+    rather than tied to a particular gripper or task object.
+    """
+    sensors = getattr(env.scene, "sensors", {})
+    sensor = (
+        sensors.get(GRIPPER_CONTACT_SENSOR_NAME)
+        if hasattr(sensors, "get")
+        else None
+    )
+    raw = getattr(getattr(sensor, "data", None), "net_forces_w", None)
+    if sensor is None or raw is None:
+        return {"available": False, "frame": "world", "channels": []}
+    value = getattr(raw, "torch", raw)
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    array = np.asarray(value, dtype=np.float32)
+    if array.ndim == 3:
+        array = array[0]
+    if array.ndim != 2 or array.shape[1] != 3 or not np.isfinite(array).all():
+        return {
+            "available": False,
+            "frame": "world",
+            "channels": [],
+            "error": f"unexpected net_forces_w shape {array.shape}",
+        }
+    names = list(getattr(sensor, "body_names", []))
+    channels = []
+    for index, force in enumerate(array):
+        force_norm = float(np.linalg.vector_norm(force))
+        channels.append(
+            {
+                "body": (
+                    str(names[index])
+                    if index < len(names)
+                    else f"contact_body_{index}"
+                ),
+                "force_xyz_n": force.tolist(),
+                "force_n": force_norm,
+                "touch": force_norm >= touch_threshold_n,
+            }
+        )
+    pairwise_cosine = None
+    magnitude_ratio = None
+    active = [item for item in channels if item["touch"]]
+    if len(active) == 2:
+        first = np.asarray(active[0]["force_xyz_n"], dtype=np.float64)
+        second = np.asarray(active[1]["force_xyz_n"], dtype=np.float64)
+        first_norm = float(active[0]["force_n"])
+        second_norm = float(active[1]["force_n"])
+        denominator = first_norm * second_norm
+        if denominator > 0.0:
+            pairwise_cosine = float(np.dot(first, second) / denominator)
+            magnitude_ratio = min(first_norm, second_norm) / max(
+                first_norm, second_norm
+            )
+    return {
+        "available": True,
+        "frame": "world",
+        "touch_threshold_n": float(touch_threshold_n),
+        "active_body_count": sum(bool(item["touch"]) for item in channels),
+        "pairwise_force_direction_cosine": pairwise_cosine,
+        "force_magnitude_ratio_min_over_max": magnitude_ratio,
+        "metric_semantics": {
+            "pairwise_force_direction_cosine": (
+                "-1 means opposing, 0 orthogonal, +1 same-direction"
+            ),
+            "force_magnitude_ratio_min_over_max": (
+                "0 means highly imbalanced, 1 balanced"
+            ),
+        },
+        "channels": channels,
     }

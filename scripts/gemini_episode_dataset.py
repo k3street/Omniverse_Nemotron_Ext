@@ -44,6 +44,8 @@ class GeminiEpisodeDatasetRecorder:
     metadata: dict[str, Any]
     video_writer_factory: Callable[[str, int], Any]
     unpack_images: Callable[..., dict[str, np.ndarray]]
+    movable_object_asset: str = "banana"
+    target_receptacle_asset: str = "plate_large"
     fps: int = 15
     video_scale: float = 0.5
     require_contact_telemetry: bool = False
@@ -53,8 +55,8 @@ class GeminiEpisodeDatasetRecorder:
     _joints: list[np.ndarray] = field(default_factory=list, init=False)
     _eef_positions: list[np.ndarray] = field(default_factory=list, init=False)
     _eef_quaternions: list[np.ndarray] = field(default_factory=list, init=False)
-    _banana_poses: list[np.ndarray] = field(default_factory=list, init=False)
-    _plate_poses: list[np.ndarray] = field(default_factory=list, init=False)
+    _movable_object_poses: list[np.ndarray] = field(default_factory=list, init=False)
+    _target_receptacle_poses: list[np.ndarray] = field(default_factory=list, init=False)
     _sensors: SensorCaptureBuffer = field(default_factory=SensorCaptureBuffer, init=False)
     _video: Any = field(default=None, init=False)
     _partial_video_path: Path = field(init=False)
@@ -66,6 +68,10 @@ class GeminiEpisodeDatasetRecorder:
             raise ValueError("episode_index must be non-negative")
         if self.fps <= 0 or self.video_scale <= 0:
             raise ValueError("fps and video_scale must be positive")
+        if not self.movable_object_asset or not self.target_receptacle_asset:
+            raise ValueError("scene-role asset names must be non-empty")
+        if self.movable_object_asset == self.target_receptacle_asset:
+            raise ValueError("movable object and target receptacle must differ")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         stem = f"episode_{self.episode_index:06d}_policy"
         self._partial_video_path = self.output_dir / f"{stem}.partial.mp4"
@@ -122,13 +128,17 @@ class GeminiEpisodeDatasetRecorder:
             raise RuntimeError("cannot append to a closed episode recorder")
         robot = env.scene["robot"]
         joints = self._tensor_numpy(robot.data.joint_pos)[0]
-        banana = env.scene["banana"].data.root_pose_w
-        plate = env.scene["plate_large"].data.root_pose_w
-        banana = self._tensor_numpy(banana)[0].astype(np.float32, copy=True)
-        plate = self._tensor_numpy(plate)[0].astype(np.float32, copy=True)
+        movable_object = env.scene[self.movable_object_asset].data.root_pose_w
+        target_receptacle = env.scene[self.target_receptacle_asset].data.root_pose_w
+        movable_object = self._tensor_numpy(movable_object)[0].astype(
+            np.float32, copy=True
+        )
+        target_receptacle = self._tensor_numpy(target_receptacle)[0].astype(
+            np.float32, copy=True
+        )
         # Isaac Sim 6 tensors are xyzw; the RoboLab/GR00T bridge records wxyz.
-        banana[3:7] = self._xyzw_to_wxyz(banana[3:7])
-        plate[3:7] = self._xyzw_to_wxyz(plate[3:7])
+        movable_object[3:7] = self._xyzw_to_wxyz(movable_object[3:7])
+        target_receptacle[3:7] = self._xyzw_to_wxyz(target_receptacle[3:7])
         self._actions.append(
             self._tensor_numpy(action)[0].astype(np.float32, copy=True)
         )
@@ -137,8 +147,8 @@ class GeminiEpisodeDatasetRecorder:
         self._eef_quaternions.append(
             np.asarray(eef_quaternion_wxyz, dtype=np.float32).copy()
         )
-        self._banana_poses.append(banana)
-        self._plate_poses.append(plate)
+        self._movable_object_poses.append(movable_object)
+        self._target_receptacle_poses.append(target_receptacle)
         if sensor_frame is None:
             try:
                 sensor_frame = sensor_frame_from_isaac_env(env)
@@ -190,8 +200,10 @@ class GeminiEpisodeDatasetRecorder:
             demo = target.create_group("data/demo_0")
             demo.attrs["success"] = True
             demo.attrs["num_samples"] = self.sample_count
-            demo.attrs["source_policy"] = "gemini_robotics_er2_supervised_local_se3_ik"
+            demo.attrs["source_policy"] = "gemini_robotics_er2_model_governed_runtime_tools"
             demo.attrs["quaternion_convention"] = "wxyz"
+            demo.attrs["movable_object_asset"] = self.movable_object_asset
+            demo.attrs["target_receptacle_asset"] = self.target_receptacle_asset
             demo.attrs["episode_metadata_json"] = json.dumps(self.metadata, sort_keys=True)
             demo.create_dataset("actions", data=np.stack(self._actions), compression="gzip")
             states = demo.create_group("states")
@@ -200,11 +212,15 @@ class GeminiEpisodeDatasetRecorder:
                 "joint_position", data=np.stack(self._joints), compression="gzip"
             )
             rigid_objects = states.create_group("rigid_object")
-            rigid_objects.create_group("banana").create_dataset(
-                "root_pose", data=np.stack(self._banana_poses), compression="gzip"
+            rigid_objects.create_group(self.movable_object_asset).create_dataset(
+                "root_pose",
+                data=np.stack(self._movable_object_poses),
+                compression="gzip",
             )
-            rigid_objects.create_group("plate_large").create_dataset(
-                "root_pose", data=np.stack(self._plate_poses), compression="gzip"
+            rigid_objects.create_group(self.target_receptacle_asset).create_dataset(
+                "root_pose",
+                data=np.stack(self._target_receptacle_poses),
+                compression="gzip",
             )
             ee_pose = demo.create_group("ee_pose")
             ee_pose.create_dataset(
@@ -226,7 +242,11 @@ class GeminiEpisodeDatasetRecorder:
         row = {
             "episode_index": self.episode_index,
             "status": "success",
-            "source_policy": "gemini_robotics_er2_supervised_local_se3_ik",
+            "source_policy": "gemini_robotics_er2_model_governed_runtime_tools",
+            "scene_roles": {
+                "movable_object": self.movable_object_asset,
+                "target_receptacle": self.target_receptacle_asset,
+            },
             "hdf5": self.hdf5_path.name,
             "video": self.video_path.name,
             "trace": str(trace_path),

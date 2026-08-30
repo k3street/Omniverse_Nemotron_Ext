@@ -11,6 +11,7 @@ from scripts.observation_bound_motion_tools import (
     MotionToolValidationError,
     ObservationBoundActuatorGate,
     assess_actuator_feedback_event,
+    actuator_command_outcome_invalidation_reason,
     actuator_tool_schemas,
     motion_report_yields_to_actuator,
 )
@@ -236,6 +237,33 @@ def test_tactile_change_without_position_change_does_not_trigger():
     assert not event.triggered
 
 
+def test_ineffective_engagement_invalidates_command_outcome():
+    assert actuator_command_outcome_invalidation_reason(
+        requested_state="engage",
+        actuator_position_changed=False,
+        loaded_contact_supported=False,
+    ) == "engagement_produced_no_motion_or_supported_loaded_contact"
+
+
+@pytest.mark.parametrize(
+    ("requested_state", "position_changed", "contact_supported"),
+    [
+        ("engage", True, False),
+        ("engage", False, True),
+        ("disengage", False, False),
+        ("maintain", False, False),
+    ],
+)
+def test_effective_or_nonengagement_command_is_not_invalidated(
+    requested_state, position_changed, contact_supported
+):
+    assert actuator_command_outcome_invalidation_reason(
+        requested_state=requested_state,
+        actuator_position_changed=position_changed,
+        loaded_contact_supported=contact_supported,
+    ) is None
+
+
 def test_force_delta_can_trigger_tactile_change_without_touch_transition():
     event = _feedback_event(touch_before=True, touch_after=True)
     assert not event.touch_changed
@@ -256,6 +284,65 @@ def test_runner_requires_fresh_confirmation_for_terminal_actuator_abort():
     prompt = source[prompt_start:prompt_end]
     assert "abort_actuation is a terminal task abort" in prompt
     assert "select hold_actuation" in prompt
+    assert "This restriction applies only to engagement" in prompt
+    assert "Never use failed-grasp" in prompt
+    assert "dispatch supplies the fresh reason" in prompt
+    assert "named per-body forces" in prompt
+    assert "aggregate force or touch alone does not prove" in prompt
+    assert "pairwise_force_direction_cosine" in prompt
+    assert "force_magnitude_ratio_min_over_max" in prompt
+    assert "trigger_event.actuator_outcome_invalidated" in prompt
+    assert "Do not issue that same requested state again" in prompt
+    assert "disengage it to permit a pose correction" in prompt
+    assert "failed_grasp_pose_comparisons" in prompt
+    assert "translation_delta_m and orientation_delta_deg" in prompt
+
+    scheduler_prompt_start = source.index("def _operation_scheduler_prompt(")
+    scheduler_prompt_end = source.index(
+        "def _choose_observation_bound_operation(", scheduler_prompt_start
+    )
+    scheduler_prompt = source[scheduler_prompt_start:scheduler_prompt_end]
+    assert "actuator_outcome_invalidated" in scheduler_prompt
+    assert "do not repeat" in scheduler_prompt
+    assert "failed_grasp_pose_comparisons" in scheduler_prompt
+
+    feedback_start = source.index("def _actuator_feedback_event_from_execution(")
+    feedback_end = source.index("def _move_eef_to_target(", feedback_start)
+    feedback = source[feedback_start:feedback_end]
+    assert "retained_contact_supports_loaded_actuator(" in feedback
+    assert "actuator_command_outcome_invalidation_reason(" in feedback
+    assert 'result["triggered"] = True' in feedback
+
+    post_feedback = source.index("feedback_trigger_event = {")
+    assert '"type": "actuator_physical_outcome_observed"' in source[
+        post_feedback : post_feedback + 300
+    ]
+    repeated_actuator = source.index(
+        "repeated_actuator_decision,", post_feedback
+    )
+    repeated_call_end = source.index(
+        ")\n                    actuator_latency", repeated_actuator
+    )
+    repeated_call = source[repeated_actuator:repeated_call_end]
+    assert "trigger_event=feedback_trigger_event" in repeated_call
+    assert "scheduler_dispatch=post_feedback_decision" in repeated_call
+    assert "yield_on_hold=True" in repeated_call
+
+    post_feedback_loop = source[post_feedback:repeated_call_end + 8000]
+    assert "pending_scheduler_trigger_event" in post_feedback_loop
+    assert '"type": "actuator_governor_yielded_to_scheduler"' in (
+        post_feedback_loop
+    )
+    assert "post_feedback_motion_decision = motion_checkpoint_handler(" in (
+        post_feedback_loop
+    )
+    assert 'f"{phase}:post_actuation_motion"' in post_feedback_loop
+    assert "post_feedback_motion_handoffs" in post_feedback_loop
+    assert "post_actuation_feedback_budget_yield" in post_feedback_loop
+    assert '"task_success_assumed": False' in post_feedback_loop
+    assert "Post-actuation feedback reschedule budget exhausted" not in (
+        post_feedback_loop
+    )
 
     handler_start = source.index("def actuator_transition_handler(")
     handler_end = source.index("stages = []", handler_start)
@@ -266,6 +353,28 @@ def test_runner_requires_fresh_confirmation_for_terminal_actuator_abort():
     terminal_abort = handler.index("Actuator governor aborted", hold)
     assert abort < confirmation < hold < terminal_abort
     assert '"status": "confirmation_required"' in handler[confirmation:hold]
+    assert "yield_on_hold: bool = False" in handler
+    assert "scheduler_dispatch: dict[str, Any] | None = None" in handler
+    assert '"scheduler_dispatch": scheduler_dispatch' in handler
+    assert "if yield_on_hold:" in handler
+    yield_branch = handler.index("if yield_on_hold:")
+    yield_return = handler.index("return transition_obs", yield_branch)
+    assert "_hold_joint_action(" in handler[yield_branch:yield_return]
+
+    lift_recovery_start = source.index(
+        'phase_label="lift:measured_outcome_not_met"', handler_end
+    )
+    lift_recovery = source[lift_recovery_start : lift_recovery_start + 4000]
+    assert "yield_on_hold=True" in lift_recovery
+    assert "scheduler_dispatch=recovery_schedule" in lift_recovery
+    assert 'recovery_event["yielded_to_scheduler"] = True' in lift_recovery
+    assert '"scheduler_handoff"' in lift_recovery
+
+    boundary = source.index(
+        'phase_label=f"{phase}:boundary_hold"', handler_end
+    )
+    boundary_call = source[boundary : boundary + 3000]
+    assert "scheduler_dispatch=boundary_schedule" in boundary_call
 
 
 def test_feedback_event_policy_is_explicit():
@@ -281,3 +390,21 @@ def test_feedback_event_policy_is_explicit():
             touch_after=True,
             policy=None,
         )
+
+
+def test_runner_expires_carried_object_latches_after_disengagement():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    helper_start = source.index("def reconcile_carry_latch_after_actuation(")
+    helper_end = source.index("def capture_grasp_attempt(", helper_start)
+    helper = source[helper_start:helper_end]
+    assert 'execution.get("engaged_after")' in helper
+    assert "latched_carry_offset = None" in helper
+    assert "latched_carry_quaternion = None" in helper
+    assert "latched_rgbd_axis_references = {}" in helper
+    assert '"reason": "actuator_disengaged"' in helper
+    assert '"carry_latch_expiration"' in helper
+    assert source.count("reconcile_carry_latch_after_actuation(") == 6

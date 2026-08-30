@@ -41,7 +41,7 @@ def plan_variations(
     attempts: int,
     *,
     seed: int,
-    banana_xy: float,
+    object_xy: float,
     plate_xy: float,
     yaw_degrees: float,
     light_min: float,
@@ -50,7 +50,7 @@ def plan_variations(
 ) -> list[dict[str, Any]]:
     if attempts <= 0:
         raise ValueError("attempts must be positive")
-    if min(banana_xy, plate_xy, yaw_degrees) < 0:
+    if min(object_xy, plate_xy, yaw_degrees) < 0:
         raise ValueError("pose ranges must be non-negative")
     if light_min <= 0 or light_max < light_min:
         raise ValueError("light range must be positive and ordered")
@@ -64,15 +64,17 @@ def plan_variations(
             {
                 "attempt": attempt,
                 "episode_index": start_index + attempt,
-                "banana_offset_xy_m": [
-                    _range(sample[0], -banana_xy, banana_xy),
-                    _range(sample[1], -banana_xy, banana_xy),
+                "movable_object_offset_xy_m": [
+                    _range(sample[0], -object_xy, object_xy),
+                    _range(sample[1], -object_xy, object_xy),
                 ],
                 "plate_offset_xy_m": [
                     _range(sample[2], -plate_xy, plate_xy),
                     _range(sample[3], -plate_xy, plate_xy),
                 ],
-                "banana_yaw_deg": _range(sample[4], -yaw_degrees, yaw_degrees),
+                "movable_object_yaw_deg": _range(
+                    sample[4], -yaw_degrees, yaw_degrees
+                ),
                 "sphere_light_intensity": math.exp(light_log),
                 "appearance_seed": seed * 100_000 + attempt,
             }
@@ -87,15 +89,20 @@ def command_for_variation(
     artifact_dir: Path,
     headless: bool,
     randomize_background: bool,
+    movable_object_asset: str = "banana",
+    movable_object_label: str | None = None,
+    instruction: str | None = None,
 ) -> list[str]:
     command = [
         str(LAUNCHER),
-        "--banana-offset",
-        *(f"{value:.8f}" for value in variation["banana_offset_xy_m"]),
+        "--movable-object-asset",
+        movable_object_asset,
+        "--movable-object-offset",
+        *(f"{value:.8f}" for value in variation["movable_object_offset_xy_m"]),
         "--plate-offset",
         *(f"{value:.8f}" for value in variation["plate_offset_xy_m"]),
-        "--banana-yaw-deg",
-        f"{variation['banana_yaw_deg']:.8f}",
+        "--movable-object-yaw-deg",
+        f"{variation['movable_object_yaw_deg']:.8f}",
         "--light-intensity",
         f"{variation['sphere_light_intensity']:.8f}",
         "--appearance-seed",
@@ -111,6 +118,10 @@ def command_for_variation(
         "--linger-steps",
         "0",
     ]
+    if movable_object_label:
+        command.extend(("--movable-object-label", movable_object_label))
+    if instruction:
+        command.extend(("--instruction", instruction))
     if headless:
         command.append("--headless")
     if randomize_background:
@@ -149,9 +160,30 @@ def main() -> int:
     parser.add_argument(
         "--output", type=Path, default=REPO_ROOT / "artifacts/gemini_groot_campaign"
     )
-    parser.add_argument("--banana-xy-range", type=float, default=0.06)
+    parser.add_argument(
+        "--object-xy-range",
+        "--banana-xy-range",
+        dest="object_xy_range",
+        type=float,
+        default=0.06,
+    )
     parser.add_argument("--plate-xy-range", type=float, default=0.05)
-    parser.add_argument("--banana-yaw-range-deg", type=float, default=90.0)
+    parser.add_argument(
+        "--object-yaw-range-deg",
+        "--banana-yaw-range-deg",
+        dest="object_yaw_range_deg",
+        type=float,
+        default=90.0,
+    )
+    parser.add_argument("--movable-object-asset", default="banana")
+    parser.add_argument("--movable-object-label")
+    parser.add_argument(
+        "--instruction",
+        help=(
+            "Natural-language task and grasp guidance forwarded unchanged to "
+            "every fresh observation-bound model decision."
+        ),
+    )
     parser.add_argument("--light-min", type=float, default=1800.0)
     parser.add_argument("--light-max", type=float, default=8500.0)
     parser.add_argument("--visible-first", action="store_true")
@@ -170,16 +202,24 @@ def main() -> int:
     variations = plan_variations(
         attempts,
         seed=args.seed,
-        banana_xy=args.banana_xy_range,
+        object_xy=args.object_xy_range,
         plate_xy=args.plate_xy_range,
-        yaw_degrees=args.banana_yaw_range_deg,
+        yaw_degrees=args.object_yaw_range_deg,
         light_min=args.light_min,
         light_max=args.light_max,
         start_index=args.start_index,
     )
     plan = {
-        "schema_version": 3,
+        "schema_version": 4,
+        "scene_roles": {
+            "movable_object": {
+                "asset": args.movable_object_asset,
+                "label": args.movable_object_label,
+            },
+            "target_receptacle": {"asset": "plate_large", "label": "white plate"},
+        },
         "teacher": "gemini-robotics-er-2-preview semantic supervision",
+        "instruction": args.instruction,
         "executor": (
             "runtime-registered, model-configurable bounded motion and actuator tools"
         ),
@@ -192,14 +232,14 @@ def main() -> int:
         "target_successes": args.target_successes,
         "maximum_attempts": attempts,
         "implemented_variations": [
-            "banana_xy",
-            "banana_yaw",
+            "movable_object_identity",
+            "movable_object_xy",
+            "movable_object_yaw",
             "plate_xy",
             "sphere_light_intensity",
             "HDRI_background",
         ],
         "not_yet_implemented": [
-            "object_identity",
             "receptacle_identity",
             "table_material",
             "receptacle_material",
@@ -240,6 +280,9 @@ def main() -> int:
             artifact_dir=artifact_dir,
             headless=not (args.visible_first and variation["attempt"] == 0),
             randomize_background=not args.fixed_background,
+            movable_object_asset=args.movable_object_asset,
+            movable_object_label=args.movable_object_label,
+            instruction=args.instruction,
         )
         if args.dry_run:
             results.append({**variation, "status": "planned", "command": command})

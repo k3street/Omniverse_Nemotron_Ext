@@ -44,12 +44,24 @@ def fake_env():
             root_pose_w=np.array([[0.4, 0.1, 0.02, 0.0, 0.0, 0.0, 1.0]], dtype=np.float32)
         )
     )
+    bagel = SimpleNamespace(
+        data=SimpleNamespace(
+            root_pose_w=np.array([[0.3, -0.1, 0.02, 0.0, 0.0, 0.0, 1.0]], dtype=np.float32)
+        )
+    )
     plate = SimpleNamespace(
         data=SimpleNamespace(
             root_pose_w=np.array([[0.6, 0.2, 0.0, 0.0, 0.0, 0.0, 1.0]], dtype=np.float32)
         )
     )
-    return SimpleNamespace(scene={"robot": robot, "banana": banana, "plate_large": plate})
+    return SimpleNamespace(
+        scene={
+            "robot": robot,
+            "banana": banana,
+            "bagel_06": bagel,
+            "plate_large": plate,
+        }
+    )
 
 
 def append_samples(recorder, count=41, sensor_frame=None):
@@ -96,6 +108,30 @@ def test_successful_gemini_completion_publishes_convertible_pair(tmp_path):
     assert provenance["source_policy"].startswith("gemini_robotics")
     assert provenance["quaternion_convention"] == "wxyz"
     assert provenance["collection"]["banana_yaw_deg"] == 45.0
+
+
+def test_recorder_publishes_selected_object_identity_instead_of_banana(tmp_path):
+    recorder = GeminiEpisodeDatasetRecorder(
+        output_dir=tmp_path,
+        episode_index=8,
+        metadata={"instruction": "Put the bagel on the plate"},
+        video_writer_factory=FakeVideoWriter,
+        unpack_images=fake_unpack,
+        movable_object_asset="bagel_06",
+        target_receptacle_asset="plate_large",
+    )
+    append_samples(recorder)
+    row = recorder.publish_success(trace_path=tmp_path / "trace.json")
+
+    assert row["scene_roles"] == {
+        "movable_object": "bagel_06",
+        "target_receptacle": "plate_large",
+    }
+    with h5py.File(tmp_path / "run_8.hdf5", "r") as source:
+        demo = source["data/demo_0"]
+        assert demo.attrs["movable_object_asset"] == "bagel_06"
+        assert "states/rigid_object/bagel_06/root_pose" in demo
+        assert "states/rigid_object/banana/root_pose" not in demo
 
 
 def test_failed_completion_discards_partial_and_never_creates_hdf5(tmp_path):

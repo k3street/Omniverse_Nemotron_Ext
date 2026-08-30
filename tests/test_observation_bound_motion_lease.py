@@ -252,6 +252,58 @@ def test_runner_stalled_kinematic_feedback_invalidates_motion_lease():
     assert '"motion_progress_stalled"' in source
 
 
+def test_runner_rejects_executor_tolerance_equivalent_stalled_target():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    handler_start = source.index("def motion_checkpoint_handler(")
+    handler_end = source.index("def operation_scheduler_handler(", handler_start)
+    handler = source[handler_start:handler_end]
+    assert "compare_target_to_stalled_recovery(" in handler
+    assert 'stalled_target_comparison["effectively_identical"]' in handler
+    assert "previous executor's configured" in handler
+    assert 'tool["status"] = "rejected"' in handler
+
+
+def test_runner_routes_measured_ik_divergence_to_scheduler_not_terminal_error():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    executor_start = source.index("def _move_eef_to_target(")
+    executor_end = source.index("def _recover_transport_grasp(", executor_start)
+    executor = source[executor_start:executor_end]
+    assert 'local_invalidation_reasons.append("motion_execution_diverged")' in executor
+    assert 'local_invalidation_reasons.append("motion_orientation_diverged")' in executor
+    assert "Adaptive IK diverged" not in executor
+    assert "Adaptive rotational IK diverged" not in executor
+
+    handler_start = source.index("def motion_checkpoint_handler(")
+    handler_end = source.index("def operation_scheduler_handler(", handler_start)
+    handler = source[handler_start:handler_end]
+    assert "motion_checkpoint_scheduler_handoff_reason(checkpoint)" in handler
+
+
+def test_runner_stalled_motion_yields_before_motion_only_replan():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    handler_start = source.index("def motion_checkpoint_handler(")
+    handler_end = source.index("def operation_scheduler_handler(", handler_start)
+    handler = source[handler_start:handler_end]
+    handoff = handler.index("motion_checkpoint_scheduler_handoff_reason(")
+    scheduler_status = handler.index('"status": "scheduler_handoff"', handoff)
+    motion_only_replan = handler.index(
+        "_choose_observation_bound_motion_tool(", scheduler_status
+    )
+    assert handoff < scheduler_status < motion_only_replan
+
+
 def test_runner_replans_rejected_checkpoint_tools_before_stopping():
     source = (
         Path(__file__).resolve().parents[1]
@@ -283,6 +335,33 @@ def test_motion_governor_prompt_treats_invalidation_as_recovery_checkpoint():
     assert "remains stably grasped" in prompt
     assert "restore safe clearance" in prompt
     assert "previous_motion_tool_outcome" in prompt
+    assert "actuator_contact_geometry" in prompt
+    assert "rgbd_scene_geometry" in prompt
+    assert "closing_axis_robot_root" in prompt
+
+
+def test_runner_geometry_adapters_fail_closed_and_use_contact_prim_bounds():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    rgbd_start = source.index("def _rgbd_scene_geometry_observation(")
+    rgbd_end = source.index("def _rotate_vector_wxyz(", rgbd_start)
+    rgbd_adapter = source[rgbd_start:rgbd_end]
+    assert '"camera_data_ros_xyzw"' in rgbd_adapter
+    assert '"camera_data_ros_wxyz_reordered_to_xyzw"' in rgbd_adapter
+    assert '"usd_xform_opengl_to_ros_xyzw"' in rgbd_adapter
+    assert "convert_camera_frame_orientation_convention(" in rgbd_adapter
+    assert 'summary["calibration_valid"]' in rgbd_adapter
+    assert 'summary["available"] = False' in rgbd_adapter
+
+    contact_start = source.index("def _contact_geometry_local_from_usd(")
+    contact_end = source.index("def _actuator_contact_geometry(", contact_start)
+    contact_adapter = source[contact_start:contact_end]
+    assert "UsdGeom.BBoxCache(" in contact_adapter
+    assert "world_to_base.Transform(center_world)" in contact_adapter
+    assert '"closing_axis_local"' in contact_adapter
 
 
 def test_scheduler_selected_motion_rejects_repeated_passive_hold():
@@ -332,7 +411,7 @@ def test_placement_is_a_model_issued_motion_stage_not_legacy_xy_z_control():
     assert '"legacy_local_xy_z_controller_used": False' in source
 
 
-def test_rejected_phase_boundary_tool_uses_checkpoint_replan_loop():
+def test_rejected_phase_boundary_tool_returns_to_operation_scheduler():
     source = (
         Path(__file__).resolve().parents[1]
         / "scripts"
@@ -341,11 +420,13 @@ def test_rejected_phase_boundary_tool_uses_checkpoint_replan_loop():
     rejection = source.index(
         'decision["motion_tool"].get("status") == "rejected"'
     )
-    replan = source.index("decision = motion_checkpoint_handler(", rejection)
-    terminal_check = source.index(
-        'if decision.get("decision") != "execute"', replan
-    )
-    assert rejection < replan < terminal_check
-    assert '"reason": "phase_boundary_motion_tool_rejected"' in source[
-        replan:terminal_check
+    handoff = source.index('"handoff_reason": (', rejection)
+    scheduler = source.index("operation_scheduler_handler(", handoff)
+    replan = source.index("decision = motion_checkpoint_handler(", scheduler)
+    assert rejection < handoff < scheduler < replan
+    assert "decision = motion_checkpoint_handler(" not in source[
+        rejection:scheduler
+    ]
+    assert '"phase_boundary_motion_tool_rejected"' in source[
+        handoff:scheduler
     ]

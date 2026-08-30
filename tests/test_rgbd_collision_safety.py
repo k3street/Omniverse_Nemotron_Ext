@@ -9,7 +9,10 @@ from scripts.rgbd_collision_safety import (
     depth_gate_detection_mask,
     draw_collision_overlay,
     fuse_detection_with_depth,
+    oriented_footprint_geometry,
+    pregrasp_axis_alignment_observation,
     predict_detection_collisions,
+    summarize_labeled_scene_geometry,
     swept_capsule_clearance,
     transform_matrix_from_pose_xyzw,
 )
@@ -157,3 +160,96 @@ def test_optical_camera_pose_transform_uses_xyzw_convention():
     )
     point = np.array([1.0, 0.0, 0.0, 1.0])
     assert np.allclose(transform @ point, [1.0, 3.0, 3.0, 1.0])
+
+
+def test_oriented_footprint_reports_rotated_object_axes():
+    yaw = np.deg2rad(28.0)
+    rotation = np.array(
+        [[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]]
+    )
+    xy = np.array(
+        [
+            [-0.04, -0.02],
+            [0.04, -0.02],
+            [0.04, 0.02],
+            [-0.04, 0.02],
+        ]
+    ) @ rotation.T
+    footprint = oriented_footprint_geometry(
+        np.column_stack((xy, np.full(4, 0.03)))
+    )
+    major = np.asarray(footprint["oriented_footprint_axes_base"][0])
+    expected = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+    assert abs(float(np.dot(major, expected))) == pytest.approx(1.0, abs=1e-5)
+    assert footprint["oriented_footprint_extents_m"] == pytest.approx(
+        [0.08, 0.04], abs=1e-5
+    )
+
+
+def test_pregrasp_alignment_exposes_correction_and_admission():
+    scene = {
+        "geometries": [
+            {
+                "runtime_id": "object",
+                "oriented_footprint_axes_base": [
+                    [np.sqrt(0.5), np.sqrt(0.5), 0.0],
+                    [-np.sqrt(0.5), np.sqrt(0.5), 0.0],
+                ],
+                "oriented_footprint_extents_m": [0.08, 0.04],
+            }
+        ]
+    }
+    misaligned = pregrasp_axis_alignment_observation(
+        scene_geometry=scene,
+        actuator_geometry={"closing_axis_robot_root": [1.0, 0.0, 0.0]},
+        object_runtime_id="object",
+        maximum_error_deg=12.0,
+    )
+    assert misaligned["available"] is True
+    assert misaligned["aligned"] is False
+    assert misaligned["minimum_axis_error_deg"] == pytest.approx(45.0)
+    assert abs(
+        misaligned["axis_comparisons"][0]["candidate_yaw_correction_deg"]
+    ) == pytest.approx(45.0)
+
+    aligned = pregrasp_axis_alignment_observation(
+        scene_geometry=scene,
+        actuator_geometry={
+            "closing_axis_robot_root": [np.sqrt(0.5), np.sqrt(0.5), 0.0]
+        },
+        object_runtime_id="object",
+        maximum_error_deg=12.0,
+    )
+    assert aligned["aligned"] is True
+    assert aligned["minimum_axis_error_deg"] == pytest.approx(0.0)
+
+
+def test_instance_geometry_groups_scene_assets_and_reports_base_frame_axes():
+    depth = np.full((16, 16), 1.0, dtype=np.float32)
+    instance_ids = np.zeros((16, 16), dtype=np.int32)
+    instance_ids[:, :8] = 11
+    instance_ids[:, 8:] = 12
+    summary = summarize_labeled_scene_geometry(
+        depth_m=depth,
+        instance_ids=instance_ids,
+        id_to_labels={
+            "11": "/World/envs/env_0/scene/object/mesh",
+            "12": {"class": "/World/envs/env_0/scene/support/mesh"},
+            "13": "/World/envs/env_0/robot/link",
+        },
+        intrinsics=np.array(
+            [[40.0, 0.0, 7.5], [0.0, 40.0, 7.5], [0.0, 0.0, 1.0]]
+        ),
+        camera_to_base=np.eye(4),
+        stride=2,
+        minimum_points=8,
+    )
+    assert summary["available"] is True
+    geometries = summary["geometries"]
+    assert [item["runtime_id"] for item in geometries] == ["object", "support"]
+    assert all(item["point_count"] == 32 for item in geometries)
+    assert all(len(item["principal_axes_base"]) == 3 for item in geometries)
+    assert all(
+        len(item["oriented_footprint_axes_base"]) == 2 for item in geometries
+    )
+    assert all(item["visible_aabb_min_base_m"][2] == 1.0 for item in geometries)

@@ -5,6 +5,7 @@ import torch
 
 
 ADAPTIVE_PHASES = {
+    "approach_object",
     "approach_banana",
     "descend",
     "grasp",
@@ -159,6 +160,38 @@ def derive_manipulation_feedback(
     }
 
 
+def pregrasp_evidence_ready(
+    *,
+    model_ready: bool,
+    confidence: float,
+    base_target_distance_m: float,
+    fingertip_object_distance_m: float,
+    actuator_engaged: bool,
+    touch_observed: bool,
+    jaw_axis_aligned: bool = True,
+    minimum_confidence: float = 0.5,
+    maximum_base_target_distance_m: float = 0.08,
+    maximum_fingertip_object_distance_m: float = 0.05,
+) -> bool:
+    """Fuse pose evidence with fresh contact when closure already occurred.
+
+    A model may legitimately advance its next motion target toward lift after a
+    scheduler closes the gripper during descent. In that state, comparing the
+    current base pose to the new lift target is stale; retained touch is the
+    authoritative grasp-readiness evidence.
+    """
+    if not model_ready or confidence < minimum_confidence:
+        return False
+    if fingertip_object_distance_m > maximum_fingertip_object_distance_m:
+        return False
+    if actuator_engaged:
+        return touch_observed
+    return (
+        jaw_axis_aligned
+        and base_target_distance_m <= maximum_base_target_distance_m
+    )
+
+
 def apply_lift_test_contract(
     phase: str,
     decision: dict[str, object],
@@ -187,7 +220,7 @@ def apply_lift_test_contract(
         assessment = str(normalized.get("assessment", "")).strip()
         normalized["assessment"] = (
             "Contact-blocked closure meets the local lift-test threshold; "
-            "executing one bounded lift so measured banana height can verify attachment. "
+            "executing one bounded lift so measured object height can verify attachment. "
             + assessment
         ).strip()
     return normalized
@@ -195,8 +228,8 @@ def apply_lift_test_contract(
 
 def live_phase_target(
     phase: str,
-    banana_xyz: torch.Tensor,
-    plate_xyz: torch.Tensor,
+    object_xyz: torch.Tensor,
+    target_xyz: torch.Tensor,
     grasp_offset: torch.Tensor,
     *,
     eef_xyz: torch.Tensor | None = None,
@@ -211,8 +244,8 @@ def live_phase_target(
     downward grasp orientation while its local Jacobian controller translates.
     """
     vectors = {
-        "banana_xyz": banana_xyz,
-        "plate_xyz": plate_xyz,
+        "object_xyz": object_xyz,
+        "target_xyz": target_xyz,
         "grasp_offset": grasp_offset,
     }
     if eef_xyz is not None:
@@ -233,8 +266,8 @@ def live_phase_target(
     if phase not in ADAPTIVE_PHASES:
         raise ValueError(f"unsupported adaptive phase: {phase}")
 
-    grasp_target = banana_xyz + grasp_offset
-    if phase == "approach_banana":
+    grasp_target = object_xyz + grasp_offset
+    if phase in {"approach_object", "approach_banana"}:
         return grasp_target + grasp_target.new_tensor([0.0, 0.0, approach_clearance])
     if phase in {"descend", "grasp"}:
         return grasp_target
@@ -243,9 +276,9 @@ def live_phase_target(
     if eef_xyz is None:
         raise ValueError("eef_xyz is required for above_plate carry-offset compensation")
     # Preserve the measured grasp transform: translating the EEF by the
-    # plate-minus-banana XY residual places the carried object over the plate,
-    # even when the banana is held off-center or rotates during pickup.
+    # target-minus-object XY residual places the carried object over the target,
+    # even when it is held off-center or rotates during pickup.
     target = eef_xyz.clone()
-    target[:2] += plate_xyz[:2] - banana_xyz[:2]
-    target[2] = plate_xyz[2] + plate_hover_height
+    target[:2] += target_xyz[:2] - object_xyz[:2]
+    target[2] = target_xyz[2] + plate_hover_height
     return target

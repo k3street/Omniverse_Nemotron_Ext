@@ -13,7 +13,7 @@ def test_campaign_plan_is_reproducible_bounded_and_diverse():
     first = plan_variations(
         12,
         seed=4,
-        banana_xy=0.06,
+        object_xy=0.06,
         plate_xy=0.05,
         yaw_degrees=90.0,
         light_min=1800.0,
@@ -22,15 +22,19 @@ def test_campaign_plan_is_reproducible_bounded_and_diverse():
     second = plan_variations(
         12,
         seed=4,
-        banana_xy=0.06,
+        object_xy=0.06,
         plate_xy=0.05,
         yaw_degrees=90.0,
         light_min=1800.0,
         light_max=8500.0,
     )
     assert first == second
-    assert len({round(item["banana_yaw_deg"], 4) for item in first}) == 12
-    assert all(abs(value) <= 0.06 for item in first for value in item["banana_offset_xy_m"])
+    assert len({round(item["movable_object_yaw_deg"], 4) for item in first}) == 12
+    assert all(
+        abs(value) <= 0.06
+        for item in first
+        for value in item["movable_object_offset_xy_m"]
+    )
     assert all(abs(value) <= 0.05 for item in first for value in item["plate_offset_xy_m"])
     assert all(1800.0 <= item["sphere_light_intensity"] <= 8500.0 for item in first)
 
@@ -39,7 +43,7 @@ def test_campaign_command_points_at_success_gated_training_output():
     variation = plan_variations(
         1,
         seed=1,
-        banana_xy=0.02,
+        object_xy=0.02,
         plate_xy=0.02,
         yaw_degrees=30.0,
         light_min=2000.0,
@@ -52,10 +56,18 @@ def test_campaign_command_points_at_success_gated_training_output():
         artifact_dir=Path("/tmp/attempt"),
         headless=True,
         randomize_background=True,
+        movable_object_asset="bagel_06",
+        movable_object_label="bagel",
+        instruction="Use the observed object axis to align the gripper.",
     )
     assert "--training-episode-dir" in command
     assert command[command.index("--episode-index") + 1] == "9"
-    assert "--banana-yaw-deg" in command
+    assert "--movable-object-yaw-deg" in command
+    assert command[command.index("--movable-object-asset") + 1] == "bagel_06"
+    assert command[command.index("--movable-object-label") + 1] == "bagel"
+    assert command[command.index("--instruction") + 1] == (
+        "Use the observed object axis to align the gripper."
+    )
     assert "--light-intensity" in command
     assert "--randomize-background" in command
     assert "--headless" in command

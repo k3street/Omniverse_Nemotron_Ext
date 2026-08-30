@@ -7,6 +7,7 @@ from scripts.adaptive_pick_place import (
     derive_object_relative_grasp,
     derive_manipulation_feedback,
     live_phase_target,
+    pregrasp_evidence_ready,
     quaternion_error_axis_angle_wxyz,
     quaternion_multiply_wxyz,
     rotate_vector_wxyz,
@@ -45,6 +46,15 @@ def test_banana_relocation_moves_approach_and_grasp_targets_equally():
             target(phase, banana + relocation, plate) - target(phase, banana, plate),
             relocation,
         )
+
+
+def test_generic_approach_phase_matches_legacy_alias():
+    movable_object = torch.tensor([0.32, -0.06, 0.02])
+    target_receptacle = torch.tensor([0.58, 0.20, 0.0])
+    assert torch.allclose(
+        target("approach_object", movable_object, target_receptacle),
+        target("approach_banana", movable_object, target_receptacle),
+    )
 
 
 def test_plate_relocation_moves_transport_target_but_not_grasp_target():
@@ -138,6 +148,57 @@ def test_manipulation_feedback_distinguishes_candidate_confirmed_and_contact():
     )
     assert placed["grasp_confirmed"] is True
     assert placed["object_target_contact_proxy"] is True
+
+
+def test_pregrasp_uses_retained_touch_after_scheduler_already_closed_gripper():
+    assert pregrasp_evidence_ready(
+        model_ready=True,
+        confidence=0.9,
+        base_target_distance_m=0.094,
+        fingertip_object_distance_m=0.008,
+        actuator_engaged=True,
+        touch_observed=True,
+    )
+    assert not pregrasp_evidence_ready(
+        model_ready=True,
+        confidence=0.9,
+        base_target_distance_m=0.010,
+        fingertip_object_distance_m=0.008,
+        actuator_engaged=True,
+        touch_observed=False,
+    )
+
+
+def test_pregrasp_requires_pose_alignment_before_gripper_engagement():
+    assert not pregrasp_evidence_ready(
+        model_ready=True,
+        confidence=0.9,
+        base_target_distance_m=0.094,
+        fingertip_object_distance_m=0.008,
+        actuator_engaged=False,
+        touch_observed=False,
+    )
+
+
+def test_pregrasp_requires_fresh_jaw_axis_alignment_before_engagement():
+    assert not pregrasp_evidence_ready(
+        model_ready=True,
+        confidence=0.9,
+        base_target_distance_m=0.01,
+        fingertip_object_distance_m=0.008,
+        actuator_engaged=False,
+        touch_observed=False,
+        jaw_axis_aligned=False,
+    )
+    assert pregrasp_evidence_ready(
+        model_ready=True,
+        confidence=0.9,
+        base_target_distance_m=0.01,
+        fingertip_object_distance_m=0.008,
+        actuator_engaged=False,
+        touch_observed=False,
+        jaw_axis_aligned=True,
+    )
 
 
 def test_object_relative_grasp_rotates_position_and_orientation_with_banana():
