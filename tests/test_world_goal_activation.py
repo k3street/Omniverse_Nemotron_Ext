@@ -24,6 +24,7 @@ from scripts.world_goal_graph_membership import SceneMembershipLease
 from scripts.world_predicate_evaluator_registry import (
     rgbd_world_predicate_evaluator_registry,
 )
+from scripts.world_scene_inventory_memory import TemporalSceneInventoryMemory
 
 
 def inventory(*, red_inside=False):
@@ -353,6 +354,91 @@ def test_satisfied_and_dependency_blocked_goals_are_not_activation_candidates():
     assert [item.goal_id for item in satisfied.candidates] == ["green-in-bin"]
     assert [item.goal_id for item in blocked.candidates] == ["red-in-bin"]
     assert blocked.dependency_blocked_goal_ids == ("green-in-bin",)
+
+
+def test_retained_attachment_identity_keeps_occluded_goal_planning_ready():
+    baseline = inventory()
+    changed = deepcopy(baseline)
+    changed["entities"] = [
+        item for item in changed["entities"] if item["entity_id"] != "red_block"
+    ]
+    scene = TemporalSceneInventoryMemory(
+        baseline,
+        maximum_missed_observations=0,
+    ).update(
+        changed,
+        independently_present_entity_ids=("red_block",),
+    ).inventory
+    scene = dict(scene)
+    scene["world_effect_continuation_evidence"] = {
+        "schema_version": "world-effect-continuation-evidence.v1",
+        "selected_goal_id": "red-in-bin",
+        "source_operation_index": 4,
+        "attachment_entity_ids": ["red_block"],
+        "tracked_present_entity_ids": ["red_block"],
+        "tracked_entity_positions_m": {"red_block": [0.5, 0.2, 0.08]},
+        "temporarily_occluded_entity_ids": ["red_block"],
+        "gripper_engaged": True,
+        "retained_contact_supported": True,
+        "recovery_actuator_only": False,
+        "planning_continuation_allowed": True,
+        "reason": "fresh_contact_and_tracking_support_continuation",
+        "completion_evidence": False,
+        "task_completion_allowed": False,
+        "dispatch_enabled": False,
+        "motion_authority": False,
+        "execution_authority": False,
+        "authority_scope": [],
+    }
+    task_graph = graph(green_depends_on_red=True)
+    result = build_goal_activation_candidates(
+        task_graph,
+        SceneMembershipLease.issue(task_graph, baseline),
+        rgbd_world_predicate_evaluator_registry(),
+        shadow_world_capability_registry(),
+        scene,
+    )
+
+    assert [item.goal_id for item in result.candidates] == ["red-in-bin"]
+    assessment = result.candidates[0].capability_assessments[0]
+    assert assessment.planning_ready
+    assert assessment.evidence["retained_attachment_subject_ids"] == [
+        "red_block"
+    ]
+    assert assessment.evidence["related_entity_visibility"]["red_block"] is False
+    assert assessment.evidence["related_entity_planning_ready"]["red_block"]
+
+
+def test_spoofed_retained_attachment_authority_is_not_planning_evidence():
+    scene = inventory()
+    red = next(item for item in scene["entities"] if item["entity_id"] == "red_block")
+    red["observation_status"] = "temporarily_occluded_rgbd"
+    red["geometry"] = {}
+    red["temporal_presence_evidence"] = {
+        "independently_present": True,
+        "cached_geometry_exposed": False,
+        "completion_evidence": False,
+        "execution_authority": False,
+    }
+    scene["world_effect_continuation_evidence"] = {
+        "schema_version": "world-effect-continuation-evidence.v1",
+        "selected_goal_id": "red-in-bin",
+        "attachment_entity_ids": ["red_block"],
+        "tracked_present_entity_ids": ["red_block"],
+        "gripper_engaged": True,
+        "retained_contact_supported": True,
+        "recovery_actuator_only": False,
+        "planning_continuation_allowed": True,
+        "completion_evidence": False,
+        "dispatch_enabled": False,
+        "motion_authority": False,
+        "execution_authority": True,
+    }
+
+    result = candidates(scene=scene, task_graph=graph(green_depends_on_red=True))
+
+    assert not result.candidates
+    assert result.evidence_blocked_goal_ids == ("red-in-bin",)
 
 
 def test_membership_change_prevents_candidate_generation():

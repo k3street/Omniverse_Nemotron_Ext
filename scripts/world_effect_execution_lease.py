@@ -311,6 +311,19 @@ def _target_geometry_shift_limit_m(
     for binding in geometry_bindings:
         if binding.entity_id not in target_ids:
             continue
+        tracker_uncertainty = binding.geometry.get(
+            "tracker_position_uncertainty_m"
+        )
+        if (
+            binding.geometry.get("geometry_source")
+            == "runtime_tracked_retained_attachment"
+            and isinstance(tracker_uncertainty, (int, float))
+            and not isinstance(tracker_uncertainty, bool)
+            and math.isfinite(float(tracker_uncertainty))
+            and float(tracker_uncertainty) > 0.0
+        ):
+            dimensions.append(float(tracker_uncertainty))
+            continue
         extent = binding.geometry.get("visible_extent_base_m")
         if isinstance(extent, (list, tuple)) and len(extent) == 3:
             dimensions.extend(
@@ -347,6 +360,81 @@ def _target_geometry_shift_limit_m(
             "operation target geometry lacks a measurable visible extent"
         )
     return max(0.001, min(0.50, min(dimensions)))
+
+
+def _retained_attachment_tracker_geometry(
+    inventory: Mapping[str, Any],
+    entity: Mapping[str, Any],
+    entity_id: str,
+) -> Mapping[str, Any] | None:
+    """Return a fresh position-only binding for an attached occluded entity.
+
+    This deliberately exposes no cached visual shape. It only lets a new model
+    round bind the exact attached identity to the independently tracked center;
+    it cannot prove goal completion or grant dispatch authority.
+    """
+    evidence = inventory.get("world_effect_continuation_evidence")
+    if not isinstance(evidence, Mapping):
+        return None
+    retained_mode = bool(
+        evidence.get("retained_contact_supported") is True
+        and evidence.get("recovery_actuator_only") is False
+    )
+    recovery_mode = bool(
+        evidence.get("retained_contact_supported") is False
+        and evidence.get("recovery_actuator_only") is True
+    )
+    if not bool(
+        evidence.get("schema_version")
+        == "world-effect-continuation-evidence.v1"
+        and evidence.get("planning_continuation_allowed") is True
+        and evidence.get("gripper_engaged") is True
+        and (retained_mode or recovery_mode)
+        and evidence.get("completion_evidence") is False
+        and evidence.get("task_completion_allowed") is False
+        and evidence.get("dispatch_enabled") is False
+        and evidence.get("motion_authority") is False
+        and evidence.get("execution_authority") is False
+        and evidence.get("authority_scope") == []
+    ):
+        return None
+    attachment_ids = evidence.get("attachment_entity_ids")
+    tracked_ids = evidence.get("tracked_present_entity_ids")
+    tracked_positions = evidence.get("tracked_entity_positions_m")
+    temporal = entity.get("temporal_presence_evidence")
+    geometry = entity.get("geometry")
+    if not bool(
+        isinstance(attachment_ids, list)
+        and entity_id in attachment_ids
+        and isinstance(tracked_ids, list)
+        and entity_id in tracked_ids
+        and isinstance(tracked_positions, Mapping)
+        and entity.get("observation_status")
+        == "temporarily_occluded_rgbd"
+        and isinstance(geometry, Mapping)
+        and not geometry
+        and isinstance(temporal, Mapping)
+        and temporal.get("independently_present") is True
+        and temporal.get("cached_geometry_exposed") is False
+        and temporal.get("completion_evidence") is False
+        and temporal.get("execution_authority") is False
+    ):
+        return None
+    raw_position = tracked_positions.get(entity_id)
+    if not isinstance(raw_position, (list, tuple)) or len(raw_position) != 3:
+        return None
+    position = tuple(float(value) for value in raw_position)
+    if not all(math.isfinite(value) for value in position):
+        return None
+    return {
+        "center_base_m": list(position),
+        "geometry_source": "runtime_tracked_retained_attachment",
+        "tracker_position_uncertainty_m": 0.01,
+        "visible_geometry_available": False,
+        "cached_geometry_exposed": False,
+        "completion_evidence": False,
+        "execution_authority": False,
+    }
 
 
 def _invalidation_candidates(
@@ -565,6 +653,12 @@ def build_shadow_execution_lease_candidates(
             continue
         geometry = entity.get("geometry")
         status = entity.get("observation_status")
+        if not isinstance(geometry, Mapping) or not geometry:
+            geometry = _retained_attachment_tracker_geometry(
+                inventory,
+                entity,
+                entity_id,
+            )
         if not isinstance(geometry, Mapping) or not geometry:
             if entity_id in target_ids:
                 raise WorldEffectExecutionLeaseError(
@@ -1154,6 +1248,14 @@ tool_configuration.require_contact is true; omit it when require_contact is
 false or absent.
 Each invalidation selection must use the exact target list required by its
 entity_scope and parameters matching its parameter_schema.
+
+A geometry binding whose geometry_source is
+runtime_tracked_retained_attachment contains only a fresh tracked center for an
+exact, contact-supported attached entity. It exposes no visual shape and cannot
+prove completion. For loaded motion, use require_contact=true and prefer a
+fresh visible destination/support binding as the invocation anchor. Do not use a
+tracked-pose drift threshold to reject the intended motion of the carried
+entity.
 
 The lease is event-or-completion based: it can cover many local runtime steps,
 but fresh evidence ends it immediately when a selected condition fires. This is

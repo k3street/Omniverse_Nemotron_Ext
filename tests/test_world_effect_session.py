@@ -300,26 +300,32 @@ def test_runner_wires_session_after_activation_and_before_shadow_boundary():
     session_candidates_call = source.index(
         "build_world_effect_session_candidates(", activation_gate
     )
-    session_prompt = source.index(
-        "build_world_effect_session_prompt(", session_candidates_call
+    session_reasoner = source.index(
+        "_reason_world_effect_session_with_correction(",
+        session_candidates_call,
     )
-    session_gate = source.index("WorldEffectSessionGate(", session_prompt)
     session_trace = source.index(
-        'episode_trace["world_effect_session_shadow"]', session_gate
+        'episode_trace["world_effect_session_shadow"]', session_reasoner
     )
     hard_boundary = source.index("if args_cli.shadow_plan_only:", session_trace)
+    helper = source.index("def _reason_world_effect_session_with_correction(")
+    session_prompt = source.index("build_world_effect_session_prompt(", helper)
+    session_gate = source.index("WorldEffectSessionGate(", session_prompt)
 
     assert (
         activation_gate
         < session_candidates_call
-        < session_prompt
-        < session_gate
+        < session_reasoner
         < session_trace
         < hard_boundary
     )
+    assert helper < session_prompt < session_gate < session_candidates_call
     block = source[session_candidates_call:hard_boundary]
     assert '"provider_instantiated": False' in block
     assert '"motion_authority": False' in block
     assert '"execution_authority": False' in block
+    assert '"attempts": effect_session_attempts' in block
+    assert "for attempt in range(1, 3):" in source[helper:session_candidates_call]
+    assert "Deterministic schema correction" in source[helper:session_candidates_call]
     assert "_execute_adaptive_stage(" not in block
     assert "actuator_transition_handler(" not in block

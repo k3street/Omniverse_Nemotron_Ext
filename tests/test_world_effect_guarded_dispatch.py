@@ -213,6 +213,8 @@ def test_runner_guarded_mode_orders_permit_handler_dispatch_and_fresh_outcome():
     assert "tracked_orientation_observer=(" in source
     assert "rgbd.oriented_footprint_axis_set_robot_root" in source
     assert "observed_clearance_observer=(" in source
+    assert "sim6.live_interaction_frame_plus_fresh_full_scene_rgbd" in source
+    assert "_runtime_geometry_by_id(_state(env, initial_object_z))" in source
     assert "build_fresh_dispatch_evidence(" in source
     assert "GuardedWorldEffectDispatcher(" in source
     assert "RuntimeWorldEffectHandlerRegistry(" in source

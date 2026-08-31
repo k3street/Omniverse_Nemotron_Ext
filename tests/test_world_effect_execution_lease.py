@@ -49,7 +49,7 @@ def inventory():
     }
 
 
-def operation_fixture(*, tool_id="spatial_motion"):
+def operation_fixture(*, tool_id="spatial_motion", scene=None):
     configuration_schema = {
         "type": "object",
         "additionalProperties": False,
@@ -157,7 +157,7 @@ def operation_fixture(*, tool_id="spatial_motion"):
         instance,
         candidate_set,
         decision,
-        inventory(),
+        inventory() if scene is None else scene,
     )
     return instance, candidate_set, decision, lease_candidates
 
@@ -274,6 +274,62 @@ def test_gate_validates_configuration_and_issues_no_execution_lease():
     assert not serialized["dispatch_enabled"]
     assert not serialized["motion_authority"]
     assert not serialized["execution_authority"]
+
+
+def test_occluded_retained_target_binds_only_fresh_tracked_center():
+    scene = inventory()
+    red = next(item for item in scene["entities"] if item["entity_id"] == "red_block")
+    red["observation_status"] = "temporarily_occluded_rgbd"
+    red["geometry"] = {}
+    red["temporal_presence_evidence"] = {
+        "independently_present": True,
+        "cached_geometry_exposed": False,
+        "completion_evidence": False,
+        "execution_authority": False,
+    }
+    scene["world_effect_continuation_evidence"] = {
+        "schema_version": "world-effect-continuation-evidence.v1",
+        "attachment_entity_ids": ["red_block"],
+        "tracked_present_entity_ids": ["red_block"],
+        "tracked_entity_positions_m": {"red_block": [0.52, 0.21, 0.10]},
+        "gripper_engaged": True,
+        "retained_contact_supported": True,
+        "recovery_actuator_only": False,
+        "planning_continuation_allowed": True,
+        "completion_evidence": False,
+        "task_completion_allowed": False,
+        "dispatch_enabled": False,
+        "motion_authority": False,
+        "execution_authority": False,
+        "authority_scope": [],
+    }
+
+    _, _, _, candidate_set = operation_fixture(scene=scene)
+    binding = next(
+        item
+        for item in candidate_set.candidates[0].geometry_bindings
+        if item.entity_id == "red_block"
+    )
+
+    assert binding.observation_status == "temporarily_occluded_rgbd"
+    assert binding.geometry["center_base_m"] == [0.52, 0.21, 0.10]
+    assert binding.geometry["geometry_source"] == (
+        "runtime_tracked_retained_attachment"
+    )
+    assert binding.geometry["visible_geometry_available"] is False
+    assert "visible_extent_base_m" not in binding.geometry
+    assert "visible_aabb_min_base_m" not in binding.geometry
+    assert binding.geometry["completion_evidence"] is False
+
+
+def test_occluded_target_without_valid_attachment_evidence_still_fails_closed():
+    scene = inventory()
+    red = next(item for item in scene["entities"] if item["entity_id"] == "red_block")
+    red["observation_status"] = "temporarily_occluded_rgbd"
+    red["geometry"] = {}
+
+    with pytest.raises(WorldEffectExecutionLeaseError, match="lacks fresh geometry"):
+        operation_fixture(scene=scene)
 
 
 def test_gate_rejects_stale_invented_unbound_and_unsafe_proposals():

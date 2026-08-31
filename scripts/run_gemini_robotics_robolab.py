@@ -607,6 +607,7 @@ from world_effect_provider_registry import (  # noqa: E402
     default_world_effect_provider_registry,
 )
 from world_effect_session import (  # noqa: E402
+    WorldEffectSessionError,
     WorldEffectSessionGate,
     build_world_effect_session_candidates,
     build_world_effect_session_prompt,
@@ -644,6 +645,7 @@ from world_effect_guarded_dispatch import (  # noqa: E402
 )
 from world_effect_closed_loop import (  # noqa: E402
     WorldEffectSequenceBudget,
+    assess_retained_attachment_continuation,
     assess_world_effect_progress,
 )
 from world_scene_inventory_memory import (  # noqa: E402
@@ -3485,6 +3487,8 @@ def _guarded_dispatch_invalidation_events(
     current_tracked_positions_m: Mapping[str, Sequence[float]],
     scene_inventory_memory: TemporalSceneInventoryMemory | None = None,
     current_tracked_presence_entity_ids: Iterable[str] = (),
+    retained_attachment_entity_ids: Iterable[str] = (),
+    attachment_recovery_entity_ids: Iterable[str] = (),
 ) -> tuple[DispatchInvalidationEvent, ...]:
     """Evaluate the issued condition set from fresh simulator/RGB-D evidence."""
     current_geometry = _runtime_geometry_by_id(state)
@@ -3512,6 +3516,29 @@ def _guarded_dispatch_invalidation_events(
         for item in current_inventory.get("entities", [])
         if isinstance(item, Mapping) and isinstance(item.get("entity_id"), str)
     }
+    tracked_presence_ids = set(current_tracked_presence_entity_ids)
+    retained_ids = set(retained_attachment_entity_ids)
+    recovery_ids = set(attachment_recovery_entity_ids)
+    retained_contact_supported = retained_contact_supports_loaded_actuator(
+        state.get("current_contact")
+    )
+
+    def retained_attachment_is_fresh(entity_id: str) -> bool:
+        return bool(
+            entity_id in retained_ids
+            and entity_id in tracked_presence_ids
+            and entity_id in current_tracked_positions_m
+            and retained_contact_supported
+        )
+
+    def attachment_recovery_is_fresh(entity_id: str) -> bool:
+        return bool(
+            lease_candidate.tool_family == "actuator"
+            and entity_id in recovery_ids
+            and entity_id in tracked_presence_ids
+            and entity_id in current_tracked_positions_m
+        )
+
     config = runtime_lease.lease.tool_configuration
     invalidations: list[DispatchInvalidationEvent] = []
 
@@ -3557,7 +3584,12 @@ def _guarded_dispatch_invalidation_events(
                     "world-effect provider instance changed",
                 )
         elif condition_id == "scene.target_visibility_lost":
-            missing = sorted(targets - set(current_geometry))
+            missing = sorted(
+                entity_id
+                for entity_id in targets - set(current_geometry)
+                if not retained_attachment_is_fresh(entity_id)
+                and not attachment_recovery_is_fresh(entity_id)
+            )
             if missing:
                 emit(binding, {"missing_entity_ids": missing}, "RGB-D target lost")
         elif condition_id == "scene.target_geometry_drift":
@@ -3594,6 +3626,10 @@ def _guarded_dispatch_invalidation_events(
         elif condition_id == "scene.tracked_pose_error_exceeded":
             center_limit = float(config["maximum_tracked_pose_error_m"])
             for entity_id in sorted(targets):
+                if retained_attachment_is_fresh(
+                    entity_id
+                ) or attachment_recovery_is_fresh(entity_id):
+                    continue
                 baseline_position = baseline_tracked_positions_m.get(entity_id)
                 current_position = current_tracked_positions_m.get(entity_id)
                 if baseline_position is None or current_position is None:
@@ -3680,6 +3716,11 @@ def _guarded_dispatch_invalidation_events(
                         )
                     ),
                 )
+                obstacle_geometry = {
+                    entity_id: geometry
+                    for entity_id, geometry in obstacle_geometry.items()
+                    if not retained_attachment_is_fresh(entity_id)
+                }
                 clearance, nearest_id = _interaction_path_clearance_m(
                     current_position, target_position, obstacle_geometry
                 )
@@ -3698,9 +3739,72 @@ def _guarded_dispatch_invalidation_events(
             "require_contact"
         ):
             contact = state.get("current_contact", {})
-            if not isinstance(contact, Mapping) or not contact.get("touch"):
+            if not retained_contact_supports_loaded_actuator(contact):
                 emit(binding, {"contact": contact}, "required contact was lost")
     return tuple(invalidations)
+
+
+def _reason_world_effect_session_with_correction(
+    *,
+    coach: Any,
+    instruction: str,
+    graph: WorldGoalGraph,
+    membership_lease: SceneMembershipLease,
+    activation_decision: Any,
+    candidate_set: Any,
+    frame: np.ndarray,
+) -> tuple[Any, float, str, list[dict[str, Any]]]:
+    """Retry one schema-rejected provider selection on identical evidence."""
+    base_prompt = build_world_effect_session_prompt(
+        instruction=instruction,
+        graph=graph,
+        membership_lease=membership_lease,
+        activation_decision=activation_decision,
+        candidate_set=candidate_set,
+    )
+    correction = ""
+    attempts: list[dict[str, Any]] = []
+    total_latency = 0.0
+    for attempt in range(1, 3):
+        payload, latency, image_digest = coach.reason(
+            base_prompt + correction,
+            frame,
+        )
+        total_latency += latency
+        try:
+            decision = WorldEffectSessionGate(candidate_set).dispatch(payload)
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "valid",
+                    "decision": decision.to_dict(),
+                    "latency_s": latency,
+                    "image_digest": image_digest,
+                }
+            )
+            return decision, total_latency, image_digest, attempts
+        except WorldEffectSessionError as error:
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "rejected",
+                    "proposal": payload,
+                    "error": str(error),
+                    "latency_s": latency,
+                    "image_digest": image_digest,
+                }
+            )
+            if attempt >= 2:
+                raise
+            correction = f"""
+
+Deterministic schema correction for the same observation:
+The previous response was rejected: {error}
+Return the same evidence-grounded provider decision again, but remove every
+field not present in the supplied response schema and include every required
+field. Do not change the observation, candidate, provider, or semantics.
+"""
+    raise RuntimeError("effect-session correction produced no decision")
 
 
 def _plan_guarded_world_effect_continuation(
@@ -3795,18 +3899,19 @@ def _plan_guarded_world_effect_continuation(
         activation_decision,
         provider_assessment,
     )
-    session_payload, session_latency, session_image_digest = coach.reason(
-        build_world_effect_session_prompt(
-            instruction=instruction,
-            graph=graph,
-            membership_lease=membership_lease,
-            activation_decision=activation_decision,
-            candidate_set=session_candidates,
-        ),
-        frame,
-    )
-    session_decision = WorldEffectSessionGate(session_candidates).dispatch(
-        session_payload
+    (
+        session_decision,
+        session_latency,
+        session_image_digest,
+        session_attempts,
+    ) = _reason_world_effect_session_with_correction(
+        coach=coach,
+        instruction=instruction,
+        graph=graph,
+        membership_lease=membership_lease,
+        activation_decision=activation_decision,
+        candidate_set=session_candidates,
+        frame=frame,
     )
     trace["effect_session"] = {
         "provider_assessment": provider_assessment.to_dict(),
@@ -3814,6 +3919,7 @@ def _plan_guarded_world_effect_continuation(
         "decision": session_decision.to_dict(),
         "latency_s": session_latency,
         "image_digest": session_image_digest,
+        "attempts": session_attempts,
     }
     if session_decision.decision != "select_provider":
         return {
@@ -4058,6 +4164,9 @@ def _dispatch_guarded_world_effect_continuation(
     artifact_dir: Path,
     operation_index: int,
     scene_inventory_memory: TemporalSceneInventoryMemory,
+    preserve_actuator_engagement: bool,
+    retained_attachment_entity_ids: Sequence[str],
+    attachment_recovery_entity_ids: Sequence[str],
 ) -> tuple[dict[str, Any], bool, dict[str, Any]]:
     """Dispatch one continuation bundle through a fresh single-use permit."""
     runtime_lease = bundle["runtime_lease"]
@@ -4106,6 +4215,8 @@ def _dispatch_guarded_world_effect_continuation(
                 scene_inventory_memory,
             )
         ),
+        retained_attachment_entity_ids=retained_attachment_entity_ids,
+        attachment_recovery_entity_ids=attachment_recovery_entity_ids,
     )
     fresh_evidence = build_fresh_dispatch_evidence(
         runtime_lease=runtime_lease,
@@ -4129,17 +4240,6 @@ def _dispatch_guarded_world_effect_continuation(
     )
     handler_registry = RuntimeWorldEffectHandlerRegistry()
     monitored_events: list[dict[str, Any]] = []
-    issued_geometry_by_id = {
-        item.entity_id: item.geometry for item in lease_candidate.geometry_bindings
-    }
-    obstacle_geometry_by_id = interaction_obstacle_geometry(
-        issued_geometry_by_id,
-        interaction_target_entity_id=_interaction_target_entity_id(
-            invocation_candidate,
-            invocation_decision,
-        ),
-    )
-
     if lease_candidate.tool_family == "motion":
         runtime_spec = next(
             (
@@ -4185,8 +4285,10 @@ def _dispatch_guarded_world_effect_continuation(
             )
             initial_action = _current_robot_joint_action(
                 env,
-                gripper_closed_fraction=float(
-                    fresh_state["gripper_closed_fraction"]
+                gripper_closed_fraction=(
+                    1.0
+                    if preserve_actuator_engagement
+                    else float(fresh_state["gripper_closed_fraction"])
                 ),
             )
 
@@ -4204,10 +4306,24 @@ def _dispatch_guarded_world_effect_continuation(
                     raise RuntimeError(
                         "continuation clearance observer lacks an interaction frame"
                     )
+                fresh_obstacles = interaction_obstacle_geometry(
+                    _runtime_geometry_by_id(_state(env, initial_object_z)),
+                    interaction_target_entity_id=(
+                        _interaction_target_entity_id(
+                            invocation_candidate,
+                            invocation_decision,
+                        )
+                    ),
+                )
+                fresh_obstacles = {
+                    entity_id: geometry
+                    for entity_id, geometry in fresh_obstacles.items()
+                    if entity_id not in set(retained_attachment_entity_ids)
+                }
                 clearance, _ = _interaction_path_clearance_m(
                     current_position,
                     target_interaction_position,
-                    obstacle_geometry_by_id,
+                    fresh_obstacles,
                 )
                 if not math.isfinite(clearance):
                     raise RuntimeError(
@@ -4279,6 +4395,12 @@ def _dispatch_guarded_world_effect_continuation(
                             scene_inventory_memory,
                         )
                     ),
+                    retained_attachment_entity_ids=(
+                        retained_attachment_entity_ids
+                    ),
+                    attachment_recovery_entity_ids=(
+                        attachment_recovery_entity_ids
+                    ),
                 )
                 if not events:
                     return None
@@ -4332,6 +4454,12 @@ def _dispatch_guarded_world_effect_continuation(
                         env,
                         scene_inventory_memory,
                     )
+                ),
+                retained_attachment_entity_ids=(
+                    retained_attachment_entity_ids
+                ),
+                attachment_recovery_entity_ids=(
+                    attachment_recovery_entity_ids
                 ),
             )
             if post_events and active_lease.active:
@@ -4436,6 +4564,12 @@ def _dispatch_guarded_world_effect_continuation(
                         scene_inventory_memory,
                     )
                 ),
+                retained_attachment_entity_ids=(
+                    retained_attachment_entity_ids
+                ),
+                attachment_recovery_entity_ids=(
+                    attachment_recovery_entity_ids
+                ),
             )
             if post_events and active_lease.active:
                 event = post_events[0]
@@ -4520,6 +4654,9 @@ def _dispatch_guarded_world_effect_continuation(
         "tool_family": lease_candidate.tool_family,
         "tool_id": runtime_lease.lease.tool_id,
         "purpose": lease_candidate.purpose,
+        "target_entity_ids": list(
+            lease_candidate.operation_target_entity_ids
+        ),
         "fresh_evidence": fresh_evidence.to_dict(),
         "permit": permit.to_dict(),
         "outcome": result,
@@ -6930,6 +7067,7 @@ def main() -> int:
             "budget": world_effect_sequence_budget.to_dict(),
             "operations": [],
             "progress_observations": [],
+            "continuation_evidence": [],
             "completed_operation_count": 0,
             "stop_reason": None,
             "task_completion_claimed": False,
@@ -7975,26 +8113,23 @@ def main() -> int:
                                     )
                                 )
                                 (
-                                    effect_session_payload,
+                                    effect_session_decision,
                                     effect_session_latency,
                                     effect_session_image_digest,
-                                ) = coach.reason(
-                                    build_world_effect_session_prompt(
-                                        instruction=args_cli.instruction,
-                                        graph=goal_graph,
-                                        membership_lease=(
-                                            goal_graph_membership_lease
-                                        ),
-                                        activation_decision=(
-                                            goal_activation_decision
-                                        ),
-                                        candidate_set=effect_session_candidates,
+                                    effect_session_attempts,
+                                ) = _reason_world_effect_session_with_correction(
+                                    coach=coach,
+                                    instruction=args_cli.instruction,
+                                    graph=goal_graph,
+                                    membership_lease=(
+                                        goal_graph_membership_lease
                                     ),
-                                    frame,
+                                    activation_decision=(
+                                        goal_activation_decision
+                                    ),
+                                    candidate_set=effect_session_candidates,
+                                    frame=frame,
                                 )
-                                effect_session_decision = WorldEffectSessionGate(
-                                    effect_session_candidates
-                                ).dispatch(effect_session_payload)
                                 episode_trace["world_effect_session_shadow"] = {
                                     "status": "valid",
                                     "provider_assessment": (
@@ -8006,6 +8141,7 @@ def main() -> int:
                                     "decision": effect_session_decision.to_dict(),
                                     "latency_s": effect_session_latency,
                                     "image_digest": effect_session_image_digest,
+                                    "attempts": effect_session_attempts,
                                     "provider_instantiated": False,
                                     "motion_authority": False,
                                     "execution_authority": False,
@@ -9014,19 +9150,6 @@ def main() -> int:
                     if selected_orientation_axis is not None
                     else {}
                 )
-                issued_geometry_by_id = {
-                    item.entity_id: item.geometry
-                    for item in lease_candidate.geometry_bindings
-                }
-                obstacle_geometry_by_id = interaction_obstacle_geometry(
-                    issued_geometry_by_id,
-                    interaction_target_entity_id=(
-                        _interaction_target_entity_id(
-                            invocation_candidate,
-                            invocation_decision,
-                        )
-                    ),
-                )
                 handler_registry = RuntimeWorldEffectHandlerRegistry()
                 monitored_events: list[dict[str, Any]] = []
 
@@ -9069,10 +9192,21 @@ def main() -> int:
                             raise RuntimeError(
                                 "guarded clearance observer lacks a live interaction frame"
                             )
+                        fresh_obstacles = interaction_obstacle_geometry(
+                            _runtime_geometry_by_id(
+                                _state(env, initial_object_z)
+                            ),
+                            interaction_target_entity_id=(
+                                _interaction_target_entity_id(
+                                    invocation_candidate,
+                                    invocation_decision,
+                                )
+                            ),
+                        )
                         clearance, _ = _interaction_path_clearance_m(
                             current_position,
                             target_interaction_position,
-                            obstacle_geometry_by_id,
+                            fresh_obstacles,
                         )
                         if not math.isfinite(clearance):
                             raise RuntimeError(
@@ -9080,7 +9214,7 @@ def main() -> int:
                             )
                         return (
                             clearance,
-                            "sim6.live_interaction_frame_plus_issued_rgbd_geometry",
+                            "sim6.live_interaction_frame_plus_fresh_full_scene_rgbd",
                         )
 
                     def observe_guarded_orientation(
@@ -9401,6 +9535,9 @@ def main() -> int:
                     )
                 current_operation_index = 1
                 sequence_stop_reason: str | None = None
+                active_attachment_entity_ids: tuple[str, ...] = ()
+                active_attachment_source_operation_index = 1
+                active_attachment_gripper_engaged = False
                 while True:
                     continuation_state = _state(env, initial_object_z)
                     continuation_state["entity_physical_evidence"] = (
@@ -9423,12 +9560,50 @@ def main() -> int:
                         ),
                     )
                     continuation_inventory = temporal_progress_update.inventory
+                    attachment_tracked_positions = (
+                        _tracked_entity_positions_m(
+                            env,
+                            active_attachment_entity_ids,
+                        )
+                    )
+                    attachment_continuation_evidence = (
+                        assess_retained_attachment_continuation(
+                            selected_goal_id=selected_goal_id,
+                            source_operation_index=(
+                                active_attachment_source_operation_index
+                            ),
+                            attachment_entity_ids=(
+                                active_attachment_entity_ids
+                            ),
+                            inventory=continuation_inventory,
+                            tracked_entity_positions_m=(
+                                attachment_tracked_positions
+                            ),
+                            gripper_engaged=(
+                                active_attachment_gripper_engaged
+                            ),
+                            retained_contact_supported=(
+                                retained_contact_supports_loaded_actuator(
+                                    continuation_state.get(
+                                        "current_contact"
+                                    )
+                                )
+                            ),
+                        )
+                    )
+                    continuation_inventory = dict(continuation_inventory)
+                    continuation_inventory[
+                        "world_effect_continuation_evidence"
+                    ] = attachment_continuation_evidence.to_dict()
                     episode_trace["temporal_scene_inventory"][
                         "latest_update"
                     ] = temporal_progress_update.to_dict()
                     episode_trace["temporal_scene_inventory"][
                         "progress_updates"
                     ].append(temporal_progress_update.to_dict())
+                    sequence_trace["continuation_evidence"].append(
+                        attachment_continuation_evidence.to_dict()
+                    )
                     continuation_frame = _single_exterior_frame(obs)
                     progress = assess_world_effect_progress(
                         graph=goal_graph,
@@ -9557,6 +9732,22 @@ def main() -> int:
                             artifact_dir=args_cli.artifact_dir,
                             operation_index=next_operation_index,
                             scene_inventory_memory=scene_inventory_memory,
+                            preserve_actuator_engagement=(
+                                attachment_continuation_evidence
+                                .retained_contact_supported
+                            ),
+                            retained_attachment_entity_ids=(
+                                active_attachment_entity_ids
+                                if attachment_continuation_evidence
+                                .retained_contact_supported
+                                else ()
+                            ),
+                            attachment_recovery_entity_ids=(
+                                active_attachment_entity_ids
+                                if attachment_continuation_evidence
+                                .recovery_actuator_only
+                                else ()
+                            ),
                         )
                     )
                     operation_record["selected_goal_id"] = selected_goal_id
@@ -9576,6 +9767,53 @@ def main() -> int:
                     dispatch_handler_result = continuation_dispatch["outcome"][
                         "handler_result"
                     ]
+                    if continuation_dispatch["tool_family"] == "actuator":
+                        actuator_report = dispatch_handler_result.get(
+                            "actuator_report", {}
+                        )
+                        requested_state = actuator_report.get(
+                            "requested_state"
+                        )
+                        state_after = actuator_report.get("state_after", {})
+                        actuator_target_entity_ids = tuple(
+                            sorted(
+                                continuation_dispatch[
+                                    "target_entity_ids"
+                                ]
+                            )
+                        )
+                        retained_contact = bool(
+                            len(actuator_target_entity_ids) == 1
+                            and retained_contact_supports_loaded_actuator(
+                                state_after.get("current_contact")
+                                if isinstance(state_after, Mapping)
+                                else None
+                            )
+                        )
+                        if requested_state == "disengage":
+                            active_attachment_entity_ids = ()
+                            active_attachment_gripper_engaged = False
+                        elif bool(actuator_report.get("engaged_after")):
+                            active_attachment_entity_ids = (
+                                actuator_target_entity_ids
+                            )
+                            active_attachment_source_operation_index = (
+                                next_operation_index
+                            )
+                            active_attachment_gripper_engaged = bool(
+                                active_attachment_entity_ids
+                            )
+                        operation_record["attachment_state_after"] = {
+                            "entity_ids": list(
+                                active_attachment_entity_ids
+                            ),
+                            "gripper_engaged": (
+                                active_attachment_gripper_engaged
+                            ),
+                            "retained_contact_supported": retained_contact,
+                            "completion_evidence": False,
+                            "execution_authority": False,
+                        }
                     execution_report = dispatch_handler_result.get(
                         "execution_report", {}
                     )

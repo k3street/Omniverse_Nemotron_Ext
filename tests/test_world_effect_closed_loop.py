@@ -6,6 +6,7 @@ import pytest
 from scripts.world_effect_closed_loop import (
     WorldEffectClosedLoopError,
     WorldEffectSequenceBudget,
+    assess_retained_attachment_continuation,
     assess_world_effect_progress,
 )
 from scripts.world_goal_activation import shadow_world_capability_registry
@@ -120,6 +121,121 @@ def test_lost_goal_geometry_requires_observation_instead_of_motion():
     assert not result.may_plan_another_operation
 
 
+def test_contact_and_tracker_supported_grasp_occlusion_replans_without_completion():
+    baseline = inventory()
+    changed = deepcopy(baseline)
+    changed["entities"] = [
+        item for item in changed["entities"] if item["entity_id"] != "red_block"
+    ]
+    fused = TemporalSceneInventoryMemory(
+        baseline,
+        maximum_missed_observations=0,
+    ).update(
+        changed,
+        independently_present_entity_ids=("red_block",),
+    ).inventory
+    evidence = assess_retained_attachment_continuation(
+        selected_goal_id="red-in-bin",
+        source_operation_index=4,
+        attachment_entity_ids=("red_block",),
+        inventory=fused,
+        tracked_entity_positions_m={"red_block": (0.51, 0.21, 0.08)},
+        gripper_engaged=True,
+        retained_contact_supported=True,
+    )
+    fused = dict(fused)
+    fused["world_effect_continuation_evidence"] = evidence.to_dict()
+
+    result = assess(fused, operation_index=4)
+
+    assert evidence.planning_continuation_allowed
+    assert result.status == "continue_selected_goal"
+    assert result.reason == (
+        "selected_goal_continuable_with_unknown_completion_evidence"
+    )
+    assert result.selected_goal_satisfied is None
+    assert result.may_plan_another_operation
+    assert [
+        item.goal_id for item in result.continuation_candidates.candidates
+    ] == ["red-in-bin"]
+    serialized = evidence.to_dict()
+    assert not serialized["completion_evidence"]
+    assert not serialized["execution_authority"]
+
+
+@pytest.mark.parametrize(
+    ("tracked_positions", "gripper_engaged", "retained_contact", "reason"),
+    [
+        ({}, True, True, "attachment_entity_not_tracker_confirmed"),
+        ({"red_block": (0.5, 0.2, 0.08)}, False, True, "actuator_not_engaged"),
+    ],
+)
+def test_attachment_continuation_fails_closed_without_each_fresh_signal(
+    tracked_positions,
+    gripper_engaged,
+    retained_contact,
+    reason,
+):
+    baseline = inventory()
+    changed = deepcopy(baseline)
+    changed["entities"] = [
+        item for item in changed["entities"] if item["entity_id"] != "red_block"
+    ]
+    fused = TemporalSceneInventoryMemory(
+        baseline,
+        maximum_missed_observations=0,
+    ).update(
+        changed,
+        independently_present_entity_ids=("red_block",),
+    ).inventory
+
+    evidence = assess_retained_attachment_continuation(
+        selected_goal_id="red-in-bin",
+        source_operation_index=4,
+        attachment_entity_ids=("red_block",),
+        inventory=fused,
+        tracked_entity_positions_m=tracked_positions,
+        gripper_engaged=gripper_engaged,
+        retained_contact_supported=retained_contact,
+    )
+
+    assert not evidence.planning_continuation_allowed
+    assert evidence.reason == reason
+
+
+def test_unretained_engaged_attempt_allows_only_a_fresh_recovery_plan():
+    baseline = inventory()
+    changed = deepcopy(baseline)
+    changed["entities"] = [
+        item for item in changed["entities"] if item["entity_id"] != "red_block"
+    ]
+    fused = TemporalSceneInventoryMemory(
+        baseline,
+        maximum_missed_observations=0,
+    ).update(
+        changed,
+        independently_present_entity_ids=("red_block",),
+    ).inventory
+
+    evidence = assess_retained_attachment_continuation(
+        selected_goal_id="red-in-bin",
+        source_operation_index=3,
+        attachment_entity_ids=("red_block",),
+        inventory=fused,
+        tracked_entity_positions_m={"red_block": (0.5, 0.2, 0.08)},
+        gripper_engaged=True,
+        retained_contact_supported=False,
+    )
+
+    assert evidence.planning_continuation_allowed
+    assert evidence.recovery_actuator_only
+    assert evidence.reason == (
+        "engaged_attachment_not_retained_requires_actuator_recovery"
+    )
+    assert not evidence.retained_contact_supported
+    assert not evidence.to_dict()["motion_authority"]
+
+
 def test_sequence_budget_is_runtime_owned_and_bounded():
     budget = WorldEffectSequenceBudget(maximum_operations=4)
 
@@ -172,6 +288,9 @@ def test_runner_contract_exposes_a_bounded_sequence_not_one_open_loop_call():
     assert "raw_continuation_inventory" in source
     assert "temporal_progress_update.inventory" in source
     assert "active_target_visibility_uses_raw_rgbd" in source
+    assert "retained_attachment_is_fresh" in source
+    assert "preserve_actuator_engagement" in source
+    assert "assess_retained_attachment_continuation" in source
     assert source.count("scene_inventory_memory=scene_inventory_memory") >= 7
     invalidation = source.index("def _guarded_dispatch_invalidation_events(")
     raw_geometry = source.index(

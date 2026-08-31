@@ -509,6 +509,76 @@ class WorldEffectOperationCandidateSet:
         }
 
 
+def _attachment_recovery_requires_actuator_only(
+    instance: PlanningWorldEffectProviderInstance,
+    inventory: Mapping[str, Any],
+) -> bool:
+    """Validate the planning-only sensor handoff for a failed attachment."""
+    evidence = inventory.get("world_effect_continuation_evidence")
+    if not isinstance(evidence, Mapping):
+        return False
+    if not bool(
+        evidence.get("schema_version")
+        == "world-effect-continuation-evidence.v1"
+        and evidence.get("selected_goal_id") == instance.goal_id
+        and evidence.get("planning_continuation_allowed") is True
+        and evidence.get("recovery_actuator_only") is True
+        and evidence.get("retained_contact_supported") is False
+        and evidence.get("gripper_engaged") is True
+        and evidence.get("completion_evidence") is False
+        and evidence.get("task_completion_allowed") is False
+        and evidence.get("dispatch_enabled") is False
+        and evidence.get("motion_authority") is False
+        and evidence.get("execution_authority") is False
+        and evidence.get("authority_scope") == []
+    ):
+        return False
+    attachment_ids = evidence.get("attachment_entity_ids")
+    tracked_ids = evidence.get("tracked_present_entity_ids")
+    tracked_positions = evidence.get("tracked_entity_positions_m")
+    if not (
+        isinstance(attachment_ids, list)
+        and isinstance(tracked_ids, list)
+        and isinstance(tracked_positions, Mapping)
+    ):
+        return False
+    subject_ids = {
+        str(item.get("subject_id"))
+        for item in instance.desired_state
+        if isinstance(item, Mapping)
+        and isinstance(item.get("subject_id"), str)
+    }
+    if not subject_ids or not subject_ids.issubset(
+        set(attachment_ids) & set(tracked_ids) & set(tracked_positions)
+    ):
+        return False
+    entities = {
+        str(item.get("entity_id")): item
+        for item in inventory.get("entities", [])
+        if isinstance(item, Mapping)
+        and isinstance(item.get("entity_id"), str)
+    }
+    for entity_id in subject_ids:
+        entity = entities.get(entity_id, {})
+        if entity.get("observation_status") == "visible_rgbd":
+            continue
+        temporal = entity.get("temporal_presence_evidence")
+        geometry = entity.get("geometry")
+        if not bool(
+            entity.get("observation_status")
+            == "temporarily_occluded_rgbd"
+            and isinstance(geometry, Mapping)
+            and not geometry
+            and isinstance(temporal, Mapping)
+            and temporal.get("independently_present") is True
+            and temporal.get("cached_geometry_exposed") is False
+            and temporal.get("completion_evidence") is False
+            and temporal.get("execution_authority") is False
+        ):
+            return False
+    return True
+
+
 def build_world_effect_operation_candidates(
     instance: PlanningWorldEffectProviderInstance,
     inventory: Mapping[str, Any],
@@ -537,8 +607,13 @@ def build_world_effect_operation_candidates(
             "provider instance references entities absent from fresh inventory"
         )
     candidates: list[WorldEffectOperationCandidate] = []
+    recovery_actuator_only = (
+        _attachment_recovery_requires_actuator_only(instance, inventory)
+    )
     if instance.planning_ready:
         for activation in instance.tool_activations:
+            if recovery_actuator_only and activation.tool_family != "actuator":
+                continue
             candidate_seed = (
                 f"{instance.instance_id}:{activation.requirement_id}:"
                 f"{activation.activated_tool_id}"
@@ -831,7 +906,14 @@ when no candidate can advance the selected goal. Treat the fresh execution
 context as authoritative: do not repeat a completed precondition; request
 attachment when interaction alignment is ready but the subject is not retained;
 and request transport or release only when fresh contact and actuator state
-support it. Never assume an earlier operation succeeded.
+support it. When the context reports an exactly identified retained subject as
+temporarily occluded, that is planning evidence for continued attachment, not
+goal-completion evidence. For loaded transport, preserve that attachment and
+prefer a fresh visible destination or support entity as the motion anchor.
+When continuation evidence says recovery_actuator_only, the engaged attachment
+has not achieved retained contact. Use the sole advertised reversible actuator
+to disengage before any later corrective motion; never transport it.
+Never assume an earlier operation succeeded.
 
 This proposal does not call the named tool. Declarative factory specifications
 are instantiated, but no handler is bound and dispatch is disabled. Do not

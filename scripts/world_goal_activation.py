@@ -699,6 +699,74 @@ def _inventory_by_id(inventory: Mapping[str, Any]) -> dict[str, Mapping[str, Any
     return result
 
 
+def _retained_attachment_subject_ids(
+    goal: WorldGoalNode,
+    inventory: Mapping[str, Any],
+) -> frozenset[str]:
+    """Validate planning-only continuation evidence for occluded subjects."""
+    evidence = inventory.get("world_effect_continuation_evidence")
+    if not isinstance(evidence, Mapping):
+        return frozenset()
+    retained_mode = bool(
+        evidence.get("retained_contact_supported") is True
+        and evidence.get("recovery_actuator_only") is False
+    )
+    recovery_mode = bool(
+        evidence.get("retained_contact_supported") is False
+        and evidence.get("recovery_actuator_only") is True
+    )
+    if not bool(
+        evidence.get("schema_version")
+        == "world-effect-continuation-evidence.v1"
+        and evidence.get("selected_goal_id") == goal.goal_id
+        and evidence.get("planning_continuation_allowed") is True
+        and evidence.get("gripper_engaged") is True
+        and (retained_mode or recovery_mode)
+        and evidence.get("completion_evidence") is False
+        and evidence.get("task_completion_allowed") is False
+        and evidence.get("dispatch_enabled") is False
+        and evidence.get("motion_authority") is False
+        and evidence.get("execution_authority") is False
+        and evidence.get("authority_scope") == []
+    ):
+        return frozenset()
+    raw_attachment_ids = evidence.get("attachment_entity_ids")
+    raw_tracked_ids = evidence.get("tracked_present_entity_ids")
+    if not isinstance(raw_attachment_ids, list) or not isinstance(
+        raw_tracked_ids, list
+    ):
+        return frozenset()
+    attachment_ids = {
+        item for item in raw_attachment_ids if isinstance(item, str) and item
+    }
+    tracked_ids = {
+        item for item in raw_tracked_ids if isinstance(item, str) and item
+    }
+    subject_ids = {item.subject_id for item in goal.desired_state}
+    if not subject_ids or not subject_ids.issubset(attachment_ids & tracked_ids):
+        return frozenset()
+    entities = _inventory_by_id(inventory)
+    for subject_id in subject_ids:
+        entity = entities.get(subject_id, {})
+        status = entity.get("observation_status")
+        if status == "visible_rgbd":
+            continue
+        temporal = entity.get("temporal_presence_evidence")
+        geometry = entity.get("geometry")
+        if not bool(
+            status == "temporarily_occluded_rgbd"
+            and isinstance(geometry, Mapping)
+            and not geometry
+            and isinstance(temporal, Mapping)
+            and temporal.get("independently_present") is True
+            and temporal.get("cached_geometry_exposed") is False
+            and temporal.get("completion_evidence") is False
+            and temporal.get("execution_authority") is False
+        ):
+            return frozenset()
+    return frozenset(subject_ids)
+
+
 def _inside_capability_assessor(
     goal: WorldGoalNode,
     inventory: Mapping[str, Any],
@@ -713,6 +781,10 @@ def _inside_capability_assessor(
         if item.reference_id is not None
     }
     related_ids = subject_ids | reference_ids
+    retained_attachment_subject_ids = _retained_attachment_subject_ids(
+        goal,
+        inventory,
+    )
     visible = {
         entity_id: bool(
             entity_id in entities
@@ -722,7 +794,19 @@ def _inside_capability_assessor(
         )
         for entity_id in sorted(related_ids)
     }
-    planning_ready = bool(visible and all(visible.values()))
+    planning_entity_ready = {
+        entity_id: bool(
+            visible[entity_id]
+            or (
+                entity_id in subject_ids
+                and entity_id in retained_attachment_subject_ids
+            )
+        )
+        for entity_id in sorted(related_ids)
+    }
+    planning_ready = bool(
+        planning_entity_ready and all(planning_entity_ready.values())
+    )
     missing = [
         entity_id.replace("-", "_") + ".visible_geometry"
         for entity_id, available in visible.items()
@@ -834,6 +918,10 @@ def _inside_capability_assessor(
         missing_evidence=tuple(missing),
         evidence={
             "related_entity_visibility": visible,
+            "related_entity_planning_ready": planning_entity_ready,
+            "retained_attachment_subject_ids": sorted(
+                retained_attachment_subject_ids
+            ),
             "subject_physical_evidence": subject_physical_evidence,
             "destination_capacity_estimates": capacity_estimates,
             "runtime_effect_provider_assessment": provider_evidence,

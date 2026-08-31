@@ -49,6 +49,9 @@ except ImportError:  # Script execution adds this directory directly to sys.path
 
 WORLD_EFFECT_PROGRESS_SCHEMA_VERSION = "world-effect-progress.v1"
 WORLD_EFFECT_SEQUENCE_SCHEMA_VERSION = "world-effect-sequence.v1"
+WORLD_EFFECT_CONTINUATION_EVIDENCE_SCHEMA_VERSION = (
+    "world-effect-continuation-evidence.v1"
+)
 WORLD_EFFECT_PROGRESS_STATUSES = frozenset(
     {
         "continue_selected_goal",
@@ -63,6 +66,183 @@ _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$")
 
 class WorldEffectClosedLoopError(ValueError):
     """Raised when sequence evidence violates the closed-loop contract."""
+
+
+@dataclass(frozen=True)
+class RetainedAttachmentContinuationEvidence:
+    """Fresh non-visual evidence that an occluded subject remains manipulable."""
+
+    selected_goal_id: str
+    source_operation_index: int
+    attachment_entity_ids: tuple[str, ...]
+    tracked_present_entity_ids: tuple[str, ...]
+    tracked_entity_positions_m: Mapping[str, tuple[float, float, float]]
+    temporarily_occluded_entity_ids: tuple[str, ...]
+    gripper_engaged: bool
+    retained_contact_supported: bool
+    recovery_actuator_only: bool
+    planning_continuation_allowed: bool
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": (
+                WORLD_EFFECT_CONTINUATION_EVIDENCE_SCHEMA_VERSION
+            ),
+            "selected_goal_id": self.selected_goal_id,
+            "source_operation_index": self.source_operation_index,
+            "attachment_entity_ids": list(self.attachment_entity_ids),
+            "tracked_present_entity_ids": list(
+                self.tracked_present_entity_ids
+            ),
+            "tracked_entity_positions_m": {
+                entity_id: list(position)
+                for entity_id, position in sorted(
+                    self.tracked_entity_positions_m.items()
+                )
+            },
+            "temporarily_occluded_entity_ids": list(
+                self.temporarily_occluded_entity_ids
+            ),
+            "gripper_engaged": self.gripper_engaged,
+            "retained_contact_supported": self.retained_contact_supported,
+            "recovery_actuator_only": self.recovery_actuator_only,
+            "planning_continuation_allowed": (
+                self.planning_continuation_allowed
+            ),
+            "reason": self.reason,
+            "completion_evidence": False,
+            "task_completion_allowed": False,
+            "dispatch_enabled": False,
+            "motion_authority": False,
+            "execution_authority": False,
+            "authority_scope": [],
+        }
+
+
+def assess_retained_attachment_continuation(
+    *,
+    selected_goal_id: str,
+    source_operation_index: int,
+    attachment_entity_ids: Sequence[str],
+    inventory: Mapping[str, Any],
+    tracked_entity_positions_m: Mapping[str, Sequence[float]],
+    gripper_engaged: bool,
+    retained_contact_supported: bool,
+) -> RetainedAttachmentContinuationEvidence:
+    """Admit planning, never completion, across expected grasp occlusion.
+
+    The exact entity ids come from the consumed actuator lease. Fresh retained
+    contact and independent tracker presence must agree. Temporarily occluded
+    identities must expose no geometry and must carry tracker-confirmed temporal
+    evidence. This consumes the old authority and only permits another model
+    planning round.
+    """
+    selected_goal_id = _identifier(selected_goal_id, "selected_goal_id")
+    if (
+        isinstance(source_operation_index, bool)
+        or not isinstance(source_operation_index, int)
+        or source_operation_index < 1
+    ):
+        raise WorldEffectClosedLoopError(
+            "source_operation_index must be a positive integer"
+        )
+    entity_ids = tuple(
+        sorted(
+            {
+                _identifier(entity_id, "attachment_entity_id")
+                for entity_id in attachment_entity_ids
+            }
+        )
+    )
+    if not isinstance(gripper_engaged, bool) or not isinstance(
+        retained_contact_supported, bool
+    ):
+        raise WorldEffectClosedLoopError(
+            "attachment continuation sensor flags must be boolean"
+        )
+    raw_entities = inventory.get("entities") if isinstance(inventory, Mapping) else None
+    if not isinstance(raw_entities, list):
+        raise WorldEffectClosedLoopError("inventory.entities must be an array")
+    entities = {
+        str(item["entity_id"]): item
+        for item in raw_entities
+        if isinstance(item, Mapping)
+        and isinstance(item.get("entity_id"), str)
+    }
+    tracked_positions: dict[str, tuple[float, float, float]] = {}
+    for entity_id in entity_ids:
+        raw_position = tracked_entity_positions_m.get(entity_id)
+        if not isinstance(raw_position, (list, tuple)) or len(raw_position) != 3:
+            continue
+        position = tuple(float(value) for value in raw_position)
+        if all(math.isfinite(value) for value in position):
+            tracked_positions[entity_id] = position  # type: ignore[assignment]
+    tracked_ids = tuple(sorted(tracked_positions))
+    occluded_ids: list[str] = []
+    identity_evidence_valid = True
+    for entity_id in entity_ids:
+        entity = entities.get(entity_id)
+        if not isinstance(entity, Mapping):
+            identity_evidence_valid = False
+            continue
+        status = entity.get("observation_status")
+        if status == "visible_rgbd":
+            continue
+        temporal = entity.get("temporal_presence_evidence")
+        geometry = entity.get("geometry")
+        verified_occlusion = bool(
+            status == "temporarily_occluded_rgbd"
+            and isinstance(geometry, Mapping)
+            and not geometry
+            and isinstance(temporal, Mapping)
+            and temporal.get("independently_present") is True
+            and temporal.get("cached_geometry_exposed") is False
+            and temporal.get("completion_evidence") is False
+            and temporal.get("execution_authority") is False
+        )
+        if not verified_occlusion:
+            identity_evidence_valid = False
+        else:
+            occluded_ids.append(entity_id)
+    recovery_actuator_only = bool(
+        entity_ids
+        and gripper_engaged
+        and not retained_contact_supported
+        and set(tracked_ids) == set(entity_ids)
+        and identity_evidence_valid
+    )
+    allowed = bool(
+        entity_ids
+        and gripper_engaged
+        and set(tracked_ids) == set(entity_ids)
+        and identity_evidence_valid
+    )
+    if not entity_ids:
+        reason = "no_attachment_entities"
+    elif not gripper_engaged:
+        reason = "actuator_not_engaged"
+    elif set(tracked_ids) != set(entity_ids):
+        reason = "attachment_entity_not_tracker_confirmed"
+    elif not identity_evidence_valid:
+        reason = "attachment_identity_evidence_invalid"
+    elif recovery_actuator_only:
+        reason = "engaged_attachment_not_retained_requires_actuator_recovery"
+    else:
+        reason = "fresh_contact_and_tracking_support_continuation"
+    return RetainedAttachmentContinuationEvidence(
+        selected_goal_id=selected_goal_id,
+        source_operation_index=source_operation_index,
+        attachment_entity_ids=entity_ids,
+        tracked_present_entity_ids=tracked_ids,
+        tracked_entity_positions_m=tracked_positions,
+        temporarily_occluded_entity_ids=tuple(sorted(occluded_ids)),
+        gripper_engaged=gripper_engaged,
+        retained_contact_supported=retained_contact_supported,
+        recovery_actuator_only=recovery_actuator_only,
+        planning_continuation_allowed=allowed,
+        reason=reason,
+    )
 
 
 def _identifier(value: Any, path: str) -> str:
@@ -294,9 +474,13 @@ def assess_world_effect_progress(
         completed_goal_ids=completed_goal_ids,
     )
     candidate_ids = {item.goal_id for item in continuation.candidates}
-    if selected_goal_id in candidate_ids and satisfied is False:
+    if selected_goal_id in candidate_ids and satisfied is not True:
         status = "continue_selected_goal"
-        reason = "selected_goal_remains_unsatisfied"
+        reason = (
+            "selected_goal_remains_unsatisfied"
+            if satisfied is False
+            else "selected_goal_continuable_with_unknown_completion_evidence"
+        )
     elif satisfied is None:
         status = "observe_again"
         reason = "selected_goal_evidence_unknown"

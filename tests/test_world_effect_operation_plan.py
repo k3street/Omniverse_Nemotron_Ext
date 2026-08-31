@@ -253,6 +253,64 @@ def test_first_operation_candidates_are_goal_and_observation_bound():
     assert all(not item.to_dict()["dispatch_enabled"] for item in candidates.candidates)
 
 
+def test_continuation_prompt_treats_retained_occlusion_as_planning_only():
+    _, _, instance = planning_instance()
+    candidate_set = build_world_effect_operation_candidates(instance, inventory())
+    prompt = build_world_effect_operation_prompt(
+        instruction="Clean the table",
+        inventory=inventory(),
+        instance=instance,
+        candidate_set=candidate_set,
+        execution_context={
+            "retained_attachment": {
+                "entity_ids": ["red_block"],
+                "temporarily_occluded": True,
+            }
+        },
+    )
+
+    assert "planning evidence for continued attachment" in prompt
+    assert "not\ngoal-completion evidence" in prompt
+    assert "visible destination or support entity" in prompt
+
+
+def test_unretained_engaged_attempt_advertises_only_actuator_recovery():
+    _, _, instance = planning_instance()
+    scene = inventory()
+    scene["world_effect_continuation_evidence"] = {
+        "schema_version": "world-effect-continuation-evidence.v1",
+        "selected_goal_id": "red-in-bin",
+        "attachment_entity_ids": ["red_block"],
+        "tracked_present_entity_ids": ["red_block"],
+        "tracked_entity_positions_m": {"red_block": [0.5, 0.2, 0.05]},
+        "planning_continuation_allowed": True,
+        "gripper_engaged": True,
+        "retained_contact_supported": False,
+        "recovery_actuator_only": True,
+        "completion_evidence": False,
+        "task_completion_allowed": False,
+        "dispatch_enabled": False,
+        "motion_authority": False,
+        "execution_authority": False,
+        "authority_scope": [],
+    }
+
+    candidate_set = build_world_effect_operation_candidates(instance, scene)
+    prompt = build_world_effect_operation_prompt(
+        instruction="Clean the table",
+        inventory=scene,
+        instance=instance,
+        candidate_set=candidate_set,
+        execution_context={"current_contact": {"touch": True}},
+    )
+
+    assert [item.tool_family for item in candidate_set.candidates] == [
+        "actuator"
+    ]
+    assert "Use the sole advertised reversible actuator" in prompt
+    assert "never transport it" in prompt
+
+
 def test_operation_gate_accepts_only_fresh_exact_semantic_proposal():
     _, _, instance = planning_instance()
     candidates = build_world_effect_operation_candidates(instance, inventory())
