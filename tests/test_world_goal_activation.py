@@ -356,6 +356,22 @@ def test_satisfied_and_dependency_blocked_goals_are_not_activation_candidates():
     assert blocked.dependency_blocked_goal_ids == ("green-in-bin",)
 
 
+def test_satisfied_goal_remains_selectable_until_its_subject_is_released():
+    scene = inventory(red_inside=True)
+    scene["world_effect_continuation_evidence"] = {
+        "selected_goal_id": "red-in-bin",
+        "attachment_entity_ids": ["red_block"],
+        "gripper_engaged": True,
+        "task_completion_allowed": False,
+    }
+
+    result = candidates(scene=scene)
+
+    assert result.completion_blocked_goal_ids == ("red-in-bin",)
+    assert "red-in-bin" not in result.satisfied_goal_ids
+    assert "red-in-bin" in {item.goal_id for item in result.candidates}
+
+
 def test_retained_attachment_identity_keeps_occluded_goal_planning_ready():
     baseline = inventory()
     changed = deepcopy(baseline)

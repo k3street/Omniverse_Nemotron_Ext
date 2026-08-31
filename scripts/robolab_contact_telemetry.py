@@ -124,6 +124,7 @@ def contact_body_force_observation(
         )
     pairwise_cosine = None
     magnitude_ratio = None
+    retained_force_n = 0.0
     active = [item for item in channels if item["touch"]]
     if len(active) == 2:
         first = np.asarray(active[0]["force_xyz_n"], dtype=np.float64)
@@ -136,14 +137,21 @@ def contact_body_force_observation(
             magnitude_ratio = min(first_norm, second_norm) / max(
                 first_norm, second_norm
             )
+            if pairwise_cosine < 0.0:
+                retained_force_n = min(first_norm, second_norm)
     return {
         "available": True,
         "frame": "world",
         "touch_threshold_n": float(touch_threshold_n),
         "active_body_count": sum(bool(item["touch"]) for item in channels),
+        "retained_force_n": retained_force_n,
         "pairwise_force_direction_cosine": pairwise_cosine,
         "force_magnitude_ratio_min_over_max": magnitude_ratio,
         "metric_semantics": {
+            "retained_force_n": (
+                "weakest active contact-body force for an opposing two-body "
+                "clamp; zero when opposing retention is not observed"
+            ),
             "pairwise_force_direction_cosine": (
                 "-1 means opposing, 0 orthogonal, +1 same-direction"
             ),

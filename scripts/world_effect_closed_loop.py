@@ -20,6 +20,7 @@ try:
         GoalActivationCandidateSet,
         WorldCapabilityRegistry,
         build_goal_activation_candidates,
+        retained_attachment_completion_blockers,
     )
     from .world_goal_graph_contract import WorldGoalGraph
     from .world_goal_graph_membership import (
@@ -35,6 +36,7 @@ except ImportError:  # Script execution adds this directory directly to sys.path
         GoalActivationCandidateSet,
         WorldCapabilityRegistry,
         build_goal_activation_candidates,
+        retained_attachment_completion_blockers,
     )
     from world_goal_graph_contract import WorldGoalGraph  # type: ignore[no-redef]
     from world_goal_graph_membership import (  # type: ignore[no-redef]
@@ -333,6 +335,7 @@ class WorldEffectProgressAssessment:
     selected_goal_satisfied: bool | None
     selected_goal_evaluations: tuple[WorldPredicateEvaluation, ...]
     continuation_candidates: GoalActivationCandidateSet | None
+    completion_blocking_attachment_entity_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _identifier(self.observation_id, "observation_id")
@@ -377,6 +380,9 @@ class WorldEffectProgressAssessment:
                 None
                 if self.continuation_candidates is None
                 else self.continuation_candidates.to_dict()
+            ),
+            "completion_blocking_attachment_entity_ids": list(
+                self.completion_blocking_attachment_entity_ids
             ),
             "may_plan_another_operation": self.may_plan_another_operation,
             "requires_fresh_graph": self.requires_fresh_graph,
@@ -424,6 +430,12 @@ def assess_world_effect_progress(
         tuple(item.satisfied for item in evaluations),
     )
     baseline_membership = membership_lease.assess(inventory)
+    attachment_completion_blockers = retained_attachment_completion_blockers(
+        graph, inventory
+    )
+    selected_attachment_blockers = attachment_completion_blockers.get(
+        selected_goal_id, ()
+    )
     observation_id = "world-effect-progress:" + _digest(
         {
             "graph": graph.to_dict(),
@@ -446,6 +458,39 @@ def assess_world_effect_progress(
             selected_goal_satisfied=satisfied,
             selected_goal_evaluations=evaluations,
             continuation_candidates=None,
+        )
+
+    if satisfied is True and selected_attachment_blockers:
+        continuation = build_goal_activation_candidates(
+            graph,
+            membership_lease,
+            predicate_registry,
+            capability_registry,
+            inventory,
+            completed_goal_ids=completed_goal_ids,
+        )
+        candidate_ids = {item.goal_id for item in continuation.candidates}
+        return WorldEffectProgressAssessment(
+            observation_id=observation_id,
+            operation_index=operation_index,
+            selected_goal_id=selected_goal_id,
+            status=(
+                "continue_selected_goal"
+                if selected_goal_id in candidate_ids
+                else "blocked"
+            ),
+            reason=(
+                "fresh_predicates_satisfied_attachment_release_required"
+                if selected_goal_id in candidate_ids
+                else "attachment_release_not_planning_ready"
+            ),
+            membership_assessment=baseline_membership,
+            selected_goal_satisfied=True,
+            selected_goal_evaluations=evaluations,
+            continuation_candidates=continuation,
+            completion_blocking_attachment_entity_ids=(
+                selected_attachment_blockers
+            ),
         )
 
     if satisfied is True:

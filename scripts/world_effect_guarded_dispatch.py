@@ -31,6 +31,7 @@ WORLD_EFFECT_DISPATCH_EVIDENCE_SCHEMA_VERSION = "world-effect-dispatch-evidence.
 WORLD_EFFECT_DISPATCH_PERMIT_SCHEMA_VERSION = "world-effect-dispatch-permit.v1"
 WORLD_EFFECT_DISPATCH_OUTCOME_SCHEMA_VERSION = "world-effect-dispatch-outcome.v1"
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$")
+_MAX_RELIABLE_EXTENT_CENTROID_RESIDUAL_FRACTION = 0.10
 WorldEffectHandler = Callable[
     [Mapping[str, Any], Mapping[str, Any], RevocableWorldEffectRuntimeLease],
     Mapping[str, Any],
@@ -197,6 +198,35 @@ def assess_fused_target_geometry(
             abs(current - baseline) / max(abs(baseline), 1.0e-6)
             for baseline, current in zip(baseline_extent, current_extent)
         )
+    extent_reference_m = (
+        min(value for value in baseline_extent if value > 0.0)
+        if baseline_extent is not None
+        else None
+    )
+    extent_centroid_residual_fraction = (
+        rgbd_center_residual / extent_reference_m
+        if extent_reference_m is not None
+        else None
+    )
+    # A visible AABB is not a stable shape measurement when the segmented
+    # surface centroid has shifted materially relative to an independently
+    # tracked object center.  That combination is characteristic of partial
+    # visibility (for example, an approaching tool occluding one face).  Keep
+    # reporting the raw extent change, but only let it revoke the lease when
+    # this RGB-D measurement is internally consistent.  Translation and the
+    # separate RGB-D orientation/contact predicates remain independently live.
+    extent_measurement_reliable = bool(
+        not tracker_available
+        or (
+            extent_centroid_residual_fraction is not None
+            and extent_centroid_residual_fraction
+            <= _MAX_RELIABLE_EXTENT_CENTROID_RESIDUAL_FRACTION
+        )
+    )
+    extent_change_exceeded = extent_fraction > extent_limit
+    extent_change_invalidating = bool(
+        extent_change_exceeded and extent_measurement_reliable
+    )
     return {
         "center_translation_source": (
             "tracked_entity_pose" if tracker_available else "rgbd_visible_centroid"
@@ -208,10 +238,19 @@ def assess_fused_target_geometry(
         "maximum_center_shift_m": center_limit,
         "extent_change_fraction": extent_fraction,
         "maximum_extent_change_fraction": extent_limit,
+        "extent_reference_m": extent_reference_m,
+        "extent_centroid_residual_fraction": (
+            extent_centroid_residual_fraction
+        ),
+        "maximum_reliable_extent_centroid_residual_fraction": (
+            _MAX_RELIABLE_EXTENT_CENTROID_RESIDUAL_FRACTION
+        ),
+        "extent_measurement_reliable": extent_measurement_reliable,
         "center_shift_exceeded": center_shift > center_limit,
-        "extent_change_exceeded": extent_fraction > extent_limit,
+        "extent_change_exceeded": extent_change_exceeded,
+        "extent_change_invalidating": extent_change_invalidating,
         "invalidated": (
-            center_shift > center_limit or extent_fraction > extent_limit
+            center_shift > center_limit or extent_change_invalidating
         ),
     }
 
@@ -267,6 +306,85 @@ class DispatchInvalidationEvent:
             "evidence": _json_copy(self.evidence, "evidence"),
             "reason": self.reason,
         }
+
+
+def classify_expected_post_release_geometry_change(
+    event: DispatchInvalidationEvent,
+    *,
+    invocation_arguments: Mapping[str, Any],
+    actuator_report: Mapping[str, Any],
+    target_entity_ids: Sequence[str],
+) -> dict[str, Any] | None:
+    """Recognize target settling caused by a physically confirmed release.
+
+    Geometry drift remains authority-bearing before dispatch and for every
+    operation except a completed disengagement.  After disengagement, movement
+    of the released entity is the commanded effect rather than evidence that
+    the already-used actuator permit was unsafe.  The exception fails closed:
+    it requires opposing retained contact before the command, an observed open
+    gripper with no retained contact afterward, and an event for the exact
+    released target.
+    """
+    if event.condition_id != "scene.target_geometry_drift":
+        return None
+    if invocation_arguments.get("state") != "disengage":
+        return None
+    if actuator_report.get("requested_state") != "disengage":
+        return None
+    if actuator_report.get("engaged_after") is not False:
+        return None
+
+    entity_id = event.evidence.get("entity_id")
+    released_entity_ids = {
+        _identifier(item, "target_entity_ids[]") for item in target_entity_ids
+    }
+    if not isinstance(entity_id, str) or entity_id not in released_entity_ids:
+        return None
+
+    state_before = actuator_report.get("state_before")
+    state_after = actuator_report.get("state_after")
+    if not isinstance(state_before, Mapping) or not isinstance(
+        state_after, Mapping
+    ):
+        return None
+    contact_before = state_before.get("current_contact")
+    contact_after = state_after.get("current_contact")
+    if not isinstance(contact_before, Mapping) or not isinstance(
+        contact_after, Mapping
+    ):
+        return None
+
+    retained_before = contact_before.get("retained_force_n")
+    retained_after = contact_after.get("retained_force_n")
+    open_fraction = state_after.get("gripper_closed_fraction")
+    numeric_values = (retained_before, retained_after, open_fraction)
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        for value in numeric_values
+    ):
+        return None
+    if (
+        not bool(contact_before.get("touch"))
+        or float(retained_before) <= 0.0
+        or bool(contact_after.get("touch"))
+        or float(retained_after) > 0.0
+        or float(open_fraction) > 0.10
+    ):
+        return None
+
+    return {
+        "classification": "expected_post_effect_observation",
+        "reason": "released_entity_settled_after_confirmed_disengagement",
+        "condition_id": event.condition_id,
+        "entity_id": entity_id,
+        "pre_release_retained_force_n": float(retained_before),
+        "post_release_retained_force_n": float(retained_after),
+        "post_release_gripper_closed_fraction": float(open_fraction),
+        "lease_revocation_authority": False,
+        "execution_authority": False,
+    }
 
 
 @dataclass(frozen=True)

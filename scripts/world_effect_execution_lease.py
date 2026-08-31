@@ -7,7 +7,7 @@ trajectory, actuator command, or other dispatch argument.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import math
@@ -203,6 +203,8 @@ class ShadowExecutionLeaseCandidate:
     tool_configuration_schema: Mapping[str, Any]
     geometry_bindings: tuple[GeometryEvidenceBinding, ...]
     invalidation_candidates: tuple[LeaseInvalidationCandidate, ...]
+    semantic_effect_id: str | None = None
+    required_invocation_arguments: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for path, value in (
@@ -269,6 +271,11 @@ class ShadowExecutionLeaseCandidate:
             "invalidation_candidates": [
                 item.to_dict() for item in self.invalidation_candidates
             ],
+            "semantic_effect_id": self.semantic_effect_id,
+            "required_invocation_arguments": _json_copy(
+                self.required_invocation_arguments,
+                "required_invocation_arguments",
+            ),
             "mandatory_condition_ids": list(self.mandatory_condition_ids()),
             "observation_policy": "event_or_completion",
             "configuration_only": True,
@@ -437,6 +444,93 @@ def _retained_attachment_tracker_geometry(
     }
 
 
+def _finite_vector3(value: Any) -> tuple[float, float, float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return None
+    if any(
+        isinstance(item, bool)
+        or not isinstance(item, (int, float))
+        or not math.isfinite(float(item))
+        for item in value
+    ):
+        return None
+    return tuple(float(item) for item in value)
+
+
+def _point_aabb_clearance_m(
+    point: Sequence[float],
+    lower: Sequence[float],
+    upper: Sequence[float],
+) -> float:
+    squared = 0.0
+    for value, minimum, maximum in zip(point, lower, upper):
+        outside = max(float(minimum) - float(value), float(value) - float(maximum), 0.0)
+        squared += outside * outside
+    return math.sqrt(squared)
+
+
+def _corrective_terminal_path_clearance_m(
+    execution_context: Mapping[str, Any],
+) -> tuple[float, str | None] | None:
+    """Measure the advertised corrective terminal path against fresh RGB-D AABBs."""
+    alignment = execution_context.get("two_pad_grasp_alignment")
+    contract = (
+        alignment.get("corrective_motion_grounding_contract")
+        if isinstance(alignment, Mapping)
+        else None
+    )
+    if not isinstance(contract, Mapping):
+        return None
+    target_entity_id = contract.get("entity_id")
+    if not isinstance(target_entity_id, str) or not target_entity_id:
+        return None
+    interaction = execution_context.get("interaction_frame")
+    current = (
+        _finite_vector3(interaction.get("contact_center_xyz_m"))
+        if isinstance(interaction, Mapping)
+        else None
+    )
+    rgbd = execution_context.get("fresh_rgbd_geometry")
+    raw_geometries = (
+        rgbd.get("geometries") if isinstance(rgbd, Mapping) else None
+    )
+    if current is None or not isinstance(raw_geometries, list):
+        return None
+    target = None
+    obstacles: list[tuple[str, tuple[float, float, float], tuple[float, float, float]]] = []
+    for geometry in raw_geometries:
+        if not isinstance(geometry, Mapping):
+            continue
+        entity_id = geometry.get("runtime_id")
+        if not isinstance(entity_id, str):
+            continue
+        if entity_id == target_entity_id:
+            target = _finite_vector3(geometry.get("center_base_m"))
+            continue
+        lower = _finite_vector3(geometry.get("visible_aabb_min_base_m"))
+        upper = _finite_vector3(geometry.get("visible_aabb_max_base_m"))
+        if lower is not None and upper is not None:
+            obstacles.append((entity_id, lower, upper))
+    if target is None or not obstacles:
+        return None
+    minimum = math.inf
+    nearest_id: str | None = None
+    for index in range(17):
+        alpha = index / 16.0
+        sample = tuple(
+            (1.0 - alpha) * start + alpha * end
+            for start, end in zip(current, target)
+        )
+        for entity_id, lower, upper in obstacles:
+            clearance = _point_aabb_clearance_m(sample, lower, upper)
+            if clearance < minimum:
+                minimum = clearance
+                nearest_id = entity_id
+    if not math.isfinite(minimum):
+        return None
+    return minimum, nearest_id
+
+
 def _invalidation_candidates(
     configuration_schema: Mapping[str, Any],
     geometry_bindings: Sequence[GeometryEvidenceBinding],
@@ -539,7 +633,7 @@ def _invalidation_candidates(
         "scene.tracked_pose_error_exceeded",
         "scene.tracked_entity_pose",
         "Stop when tracked target pose error exceeds the configured maximum.",
-        ("maximum_tracked_pose_error_m",),
+        ("maximum_tracked_pose_error_m", "tracked_object_id"),
     )
     add_linked(
         "scene.tracked_orientation_error_exceeded",
@@ -576,6 +670,7 @@ def build_shadow_execution_lease_candidates(
     operation_candidates: WorldEffectOperationCandidateSet,
     operation_decision: WorldEffectOperationDecision,
     inventory: Mapping[str, Any],
+    execution_context: Mapping[str, Any] | None = None,
 ) -> ShadowExecutionLeaseCandidateSet:
     """Bind one semantic operation to fresh geometry and a tool config schema."""
     if operation_decision.decision != "propose_operation":
@@ -621,6 +716,135 @@ def build_shadow_execution_lease_candidates(
             "selected tool configuration_schema must describe an object"
         )
     configuration_schema = _json_copy(raw_schema, "configuration_schema")
+    if execution_context is not None:
+        properties = configuration_schema.get("properties", {})
+        if not isinstance(properties, dict):
+            raise WorldEffectExecutionLeaseError(
+                "selected tool configuration_schema properties must be an object"
+            )
+        force_schema = properties.get("minimum_contact_force_n")
+        if isinstance(force_schema, dict):
+            current_contact = execution_context.get("current_contact")
+            contact_bodies = (
+                current_contact.get("contact_bodies")
+                if isinstance(current_contact, Mapping)
+                else None
+            )
+            retained_force = (
+                contact_bodies.get("retained_force_n")
+                if isinstance(contact_bodies, Mapping)
+                else None
+            )
+            touch_threshold = (
+                contact_bodies.get("touch_threshold_n")
+                if isinstance(contact_bodies, Mapping)
+                else None
+            )
+            valid_force_evidence = all(
+                not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(float(value))
+                for value in (retained_force, touch_threshold)
+            )
+            if (
+                not valid_force_evidence
+                or float(retained_force) <= float(touch_threshold)
+            ):
+                properties.pop("minimum_contact_force_n", None)
+            else:
+                threshold = float(touch_threshold)
+                supported_maximum = max(
+                    threshold,
+                    float(retained_force) - threshold,
+                )
+                force_schema["minimum"] = threshold
+                force_schema["maximum"] = supported_maximum
+                force_schema["description"] = (
+                    "Minimum retained-contact force for this lease. Bounds are "
+                    "grounded in fresh opposing contact-body evidence; retained "
+                    "force is the weakest active opposing contact, with one "
+                    "sensor touch threshold of headroom."
+                )
+        clearance_schema = properties.get("minimum_observed_clearance_m")
+        corrective_clearance = _corrective_terminal_path_clearance_m(
+            execution_context
+        )
+        if isinstance(clearance_schema, dict) and corrective_clearance is not None:
+            measured_clearance, nearest_entity_id = corrective_clearance
+            advertised_maximum = clearance_schema.get("maximum", math.inf)
+            if (
+                isinstance(advertised_maximum, bool)
+                or not isinstance(advertised_maximum, (int, float))
+                or not math.isfinite(float(advertised_maximum))
+            ):
+                advertised_maximum = measured_clearance
+            clearance_schema["maximum"] = min(
+                float(advertised_maximum), measured_clearance
+            )
+            clearance_schema["description"] = (
+                "Minimum interaction-point path clearance for this corrective "
+                "lease. The maximum is grounded in the fresh RGB-D route to "
+                "the required terminal interaction relation; nearest observed "
+                f"entity: {nearest_entity_id or 'unknown'}."
+            )
+        orientation_schema = properties.get(
+            "maximum_tracked_orientation_error_deg"
+        )
+        tracked_object_schema = properties.get("tracked_object_id")
+        orientation_observability = execution_context.get(
+            "rgbd_orientation_observability"
+        )
+        if (
+            isinstance(orientation_schema, dict)
+            and isinstance(tracked_object_schema, dict)
+            and isinstance(orientation_observability, Mapping)
+        ):
+            orientation_scope = set(operation_decision.target_entity_ids)
+            continuation = inventory.get(
+                "world_effect_continuation_evidence"
+            )
+            attachment_ids = (
+                continuation.get("attachment_entity_ids")
+                if isinstance(continuation, Mapping)
+                and continuation.get("retained_contact_supported") is True
+                else None
+            )
+            if isinstance(attachment_ids, list) and attachment_ids:
+                orientation_scope = {
+                    str(entity_id)
+                    for entity_id in attachment_ids
+                    if isinstance(entity_id, str) and entity_id
+                }
+            observable_ids = sorted(
+                entity_id
+                for entity_id in orientation_scope
+                if isinstance(
+                    orientation_observability.get(entity_id), Mapping
+                )
+                and orientation_observability[entity_id].get("observable")
+                is True
+            )
+            if observable_ids:
+                tracked_object_schema["enum"] = observable_ids
+                tracked_object_schema["description"] = (
+                    "Fresh operation target with a major-axis yaw that was "
+                    "observable in the unobstructed RGB-D preflight reference."
+                )
+            else:
+                properties.pop(
+                    "maximum_tracked_orientation_error_deg", None
+                )
+                tracked_ids = sorted(orientation_scope)
+                if tracked_ids and (
+                    "maximum_tracked_pose_error_m" in properties
+                ):
+                    tracked_object_schema["enum"] = tracked_ids
+                    tracked_object_schema["description"] = (
+                        "Fresh operation target for translation tracking; "
+                        "RGB-D major-axis yaw is not observable for this target."
+                    )
+                else:
+                    properties.pop("tracked_object_id", None)
 
     raw_entities = inventory.get("entities") if isinstance(inventory, Mapping) else None
     if not isinstance(raw_entities, list):
@@ -710,6 +934,8 @@ def build_shadow_execution_lease_candidates(
         tool_configuration_schema=configuration_schema,
         geometry_bindings=tuple(bindings),
         invalidation_candidates=invalidations,
+        semantic_effect_id=selected.semantic_effect_id,
+        required_invocation_arguments=selected.required_invocation_arguments,
     )
     inventory_digest = "inventory:" + _digest(inventory)
     observation_id = "execution-lease-observation:" + _digest(
@@ -1224,9 +1450,15 @@ def build_shadow_execution_lease_prompt(
     *,
     instruction: str,
     candidate_set: ShadowExecutionLeaseCandidateSet,
+    rejection_context: Mapping[str, Any] | None = None,
 ) -> str:
     """Ask for tool configuration and invalidations, never a dispatch call."""
     instruction = _text(instruction, "instruction")
+    previous_rejection = (
+        {"status": "none"}
+        if rejection_context is None
+        else _json_copy(rejection_context, "rejection_context")
+    )
     return f"""Propose a fresh, geometry-grounded shadow execution lease for the
 validated semantic operation.
 
@@ -1235,6 +1467,9 @@ Human instruction:
 
 Exact runtime lease candidate:
 {json.dumps(candidate_set.to_dict(), indent=2)}
+
+Previous proposal rejection for this same fresh observation:
+{json.dumps(previous_rejection, indent=2)}
 
 Choose propose_lease only for the exact advertised candidate, provider instance,
 operation candidate, and tool. Include every operation target in
@@ -1245,9 +1480,15 @@ those fields are supplied. Conversely, configured tracking, clearance, contact,
 or progress thresholds require their corresponding invalidation condition.
 The contact.required_contact_lost condition is valid only when
 tool_configuration.require_contact is true; omit it when require_contact is
-false or absent.
+false or absent. minimum_contact_force_n is advertised only when fresh contact
+evidence measures an opposing retained-contact force. Its bounds are the
+executor's current evidence contract, not a force value to estimate from the
+image; choose a threshold inside those advertised bounds with room for sensor
+variation.
 Each invalidation selection must use the exact target list required by its
 entity_scope and parameters matching its parameter_schema.
+If a previous proposal was rejected, correct only the reported contract error
+against this identical candidate set; do not switch identifiers or evidence.
 
 A geometry binding whose geometry_source is
 runtime_tracked_retained_attachment contains only a fresh tracked center for an

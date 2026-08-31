@@ -14,6 +14,7 @@ from scripts.rgbd_collision_safety import (
     predict_detection_collisions,
     summarize_labeled_scene_geometry,
     swept_capsule_clearance,
+    two_pad_grasp_alignment_observation,
     transform_matrix_from_pose_xyzw,
 )
 
@@ -224,6 +225,81 @@ def test_pregrasp_alignment_exposes_correction_and_admission():
     assert aligned["minimum_axis_error_deg"] == pytest.approx(0.0)
 
 
+def test_two_pad_alignment_reports_center_correction_and_aperture_admission():
+    scene = {
+        "geometries": [
+            {
+                "runtime_id": "object",
+                "center_base_m": [0.50, 0.23, 0.08],
+                "visible_extent_base_m": [0.04, 0.04, 0.04],
+            }
+        ]
+    }
+    actuator = {
+        "grasp_corridor": {
+            "center_robot_root_m": [0.50, 0.20, 0.08],
+            "closing_axis_robot_root": [0.0, 1.0, 0.0],
+            "configured_open_aperture_m": 0.085,
+            "transverse_axes_robot_root": [
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+            "transverse_axis_ranges_from_center_m": [
+                [-0.03, 0.03],
+                [-0.03, 0.03],
+            ],
+        }
+    }
+    alignment = two_pad_grasp_alignment_observation(
+        scene_geometry=scene,
+        actuator_geometry=actuator,
+        object_runtime_id="object",
+    )
+
+    assert alignment["available"] is True
+    assert alignment["required_contact_center_translation_robot_root_m"] == (
+        pytest.approx([0.0, 0.03, 0.0])
+    )
+    assert alignment["object_center_axial_offset_m"] == pytest.approx(0.03)
+    assert alignment["visible_object_span_along_closing_axis_m"] == (
+        pytest.approx(0.04)
+    )
+    assert alignment["aperture_clearance_m"] == pytest.approx(0.045)
+    assert alignment["object_fits_configured_aperture"] is True
+    assert alignment["object_fully_between_open_pad_planes"] is False
+    assert alignment["object_center_inside_transverse_pad_bounds"] is True
+
+    scene["geometries"][0]["center_base_m"] = [0.50, 0.20, 0.12]
+    too_high = two_pad_grasp_alignment_observation(
+        scene_geometry=scene,
+        actuator_geometry=actuator,
+        object_runtime_id="object",
+    )
+    assert too_high["object_fully_between_open_pad_planes"] is True
+    assert too_high["object_center_inside_transverse_pad_bounds"] is False
+    assert too_high["object_center_inside_full_grasp_corridor"] is False
+    assert too_high["corrective_motion_grounding_contract"] == {
+        "relation_id": "interaction_origin_coincident_with_entity_center",
+        "entity_id": "object",
+        "required_terminal_position_anchor_id": "object.center",
+        "required_terminal_interaction_offset_from_anchor_m": [0.0, 0.0, 0.0],
+        "applies_when": "object_center_inside_full_grasp_corridor_false",
+        "source": "fresh_rgbd_plus_runtime_interaction_geometry",
+        "motion_authority": False,
+        "execution_authority": False,
+    }
+
+    scene["geometries"][0]["center_base_m"] = [0.50, 0.20, 0.08]
+    centered = two_pad_grasp_alignment_observation(
+        scene_geometry=scene,
+        actuator_geometry=actuator,
+        object_runtime_id="object",
+    )
+    assert centered["object_fully_between_open_pad_planes"] is True
+    assert centered["object_center_inside_full_grasp_corridor"] is True
+    assert centered["pad_plane_margin_m"] == pytest.approx(0.0225)
+
+
 def test_instance_geometry_groups_scene_assets_and_reports_base_frame_axes():
     depth = np.full((16, 16), 1.0, dtype=np.float32)
     instance_ids = np.zeros((16, 16), dtype=np.int32)
@@ -253,3 +329,26 @@ def test_instance_geometry_groups_scene_assets_and_reports_base_frame_axes():
         len(item["oriented_footprint_axes_base"]) == 2 for item in geometries
     )
     assert all(item["visible_aabb_min_base_m"][2] == 1.0 for item in geometries)
+
+
+def test_denser_stride_retains_partially_visible_instance_geometry():
+    depth = np.full((40, 40), 1.0, dtype=np.float32)
+    instance_ids = np.zeros((40, 40), dtype=np.int32)
+    instance_ids[:20, :20] = 7
+    common = {
+        "depth_m": depth,
+        "instance_ids": instance_ids,
+        "id_to_labels": {"7": "/World/envs/env_0/scene/target/mesh"},
+        "intrinsics": np.array(
+            [[40.0, 0.0, 19.5], [0.0, 40.0, 19.5], [0.0, 0.0, 1.0]]
+        ),
+        "camera_to_base": np.eye(4),
+        "minimum_points": 20,
+    }
+
+    sparse = summarize_labeled_scene_geometry(**common, stride=8)
+    dense = summarize_labeled_scene_geometry(**common, stride=4)
+
+    assert sparse["geometries"] == []
+    assert dense["geometries"][0]["runtime_id"] == "target"
+    assert dense["geometries"][0]["point_count"] == 25

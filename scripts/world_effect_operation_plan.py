@@ -8,7 +8,7 @@ authorized here.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import math
@@ -365,62 +365,90 @@ def build_planning_world_effect_provider_instance(
     blockers: list[str] = []
     for binding in selected.requirement_bindings:
         requirement_id = _identifier(binding.get("requirement_id"), "requirement_id")
-        source_tool_id = _identifier(binding.get("tool_id"), "source_tool_id")
         raw_required_tags = binding.get("required_capability_tags")
         if not isinstance(raw_required_tags, list):
             raise WorldEffectOperationPlanError(
                 "requirement required_capability_tags must be an array"
             )
         required_tags = {str(item) for item in raw_required_tags}
-        activation_status = binding.get("activation_status")
-        if activation_status == "active":
-            runtime_tool = runtime_by_id.get(source_tool_id)
-            if runtime_tool is None:
-                blockers.append(f"{requirement_id}.active_tool_missing")
-                continue
-            activations.append(
-                _activation_from_advertisement(
-                    requirement_id=requirement_id,
-                    source_tool_id=source_tool_id,
-                    advertisement=runtime_tool.to_dict(),
-                    factory_instantiated=False,
-                    required_tags=required_tags,
-                )
+        compatible_tools = binding.get("compatible_tools")
+        if compatible_tools is None:
+            compatible_tools = (
+                {
+                    "tool_id": binding.get("tool_id"),
+                    "activation_status": binding.get("activation_status"),
+                },
             )
-            continue
-        if activation_status != "factory_available":
-            blockers.append(f"{requirement_id}.unsupported_activation_status")
-            continue
-        factory = factory_catalog.resolve(source_tool_id)
-        if factory is None:
-            blockers.append(f"{requirement_id}.factory_not_registered")
-            continue
-        if not required_tags.issubset(factory.capability_tags):
-            blockers.append(f"{requirement_id}.factory_capability_mismatch")
-            continue
-        advertisements = factory.activator()
-        if isinstance(advertisements, (str, bytes)) or not isinstance(
-            advertisements, Sequence
+        if isinstance(compatible_tools, (str, bytes)) or not isinstance(
+            compatible_tools, Sequence
         ):
             raise WorldEffectOperationPlanError(
-                "factory activator must return an array of advertisements"
+                "requirement compatible_tools must be an array"
             )
-        matched = 0
-        for advertisement in advertisements:
-            try:
-                activation = _activation_from_advertisement(
-                    requirement_id=requirement_id,
-                    source_tool_id=source_tool_id,
-                    advertisement=advertisement,
-                    factory_instantiated=True,
-                    required_tags=required_tags,
+        requirement_activation_count = 0
+        requirement_errors: list[str] = []
+        for compatible_tool in compatible_tools:
+            if not isinstance(compatible_tool, Mapping):
+                raise WorldEffectOperationPlanError(
+                    "requirement compatible_tools entries must be objects"
                 )
-            except WorldEffectOperationPlanError:
+            source_tool_id = _identifier(
+                compatible_tool.get("tool_id"), "source_tool_id"
+            )
+            activation_status = compatible_tool.get("activation_status")
+            if activation_status == "active":
+                runtime_tool = runtime_by_id.get(source_tool_id)
+                if runtime_tool is None:
+                    requirement_errors.append("active_tool_missing")
+                    continue
+                activations.append(
+                    _activation_from_advertisement(
+                        requirement_id=requirement_id,
+                        source_tool_id=source_tool_id,
+                        advertisement=runtime_tool.to_dict(),
+                        factory_instantiated=False,
+                        required_tags=required_tags,
+                    )
+                )
+                requirement_activation_count += 1
                 continue
-            activations.append(activation)
-            matched += 1
-        if not matched:
-            blockers.append(f"{requirement_id}.factory_produced_no_matching_tool")
+            if activation_status != "factory_available":
+                requirement_errors.append("unsupported_activation_status")
+                continue
+            factory = factory_catalog.resolve(source_tool_id)
+            if factory is None:
+                requirement_errors.append("factory_not_registered")
+                continue
+            if not required_tags.issubset(factory.capability_tags):
+                requirement_errors.append("factory_capability_mismatch")
+                continue
+            advertisements = factory.activator()
+            if isinstance(advertisements, (str, bytes)) or not isinstance(
+                advertisements, Sequence
+            ):
+                raise WorldEffectOperationPlanError(
+                    "factory activator must return an array of advertisements"
+                )
+            for advertisement in advertisements:
+                try:
+                    activation = _activation_from_advertisement(
+                        requirement_id=requirement_id,
+                        source_tool_id=source_tool_id,
+                        advertisement=advertisement,
+                        factory_instantiated=True,
+                        required_tags=required_tags,
+                    )
+                except WorldEffectOperationPlanError:
+                    continue
+                activations.append(activation)
+                requirement_activation_count += 1
+        if not requirement_activation_count:
+            suffix = (
+                sorted(set(requirement_errors))[0]
+                if requirement_errors
+                else "no_matching_tool"
+            )
+            blockers.append(f"{requirement_id}.{suffix}")
     activated_requirements = {item.requirement_id for item in activations}
     expected_requirements = {
         str(item["requirement_id"]) for item in selected.requirement_bindings
@@ -474,6 +502,8 @@ class WorldEffectOperationCandidate:
     tool_id: str
     tool_family: str
     capability_tags: tuple[str, ...]
+    semantic_effect_id: str | None = None
+    required_invocation_arguments: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -483,6 +513,11 @@ class WorldEffectOperationCandidate:
             "tool_id": self.tool_id,
             "tool_family": self.tool_family,
             "capability_tags": list(self.capability_tags),
+            "semantic_effect_id": self.semantic_effect_id,
+            "required_invocation_arguments": _json_copy(
+                self.required_invocation_arguments,
+                "required_invocation_arguments",
+            ),
             "dispatch_enabled": False,
             "motion_authority": False,
             "execution_authority": False,
@@ -583,7 +618,7 @@ def build_world_effect_operation_candidates(
     instance: PlanningWorldEffectProviderInstance,
     inventory: Mapping[str, Any],
 ) -> WorldEffectOperationCandidateSet:
-    """Expose one semantic candidate per planning-only activated tool spec."""
+    """Expose planning-only candidates, including bound actuator effects."""
     raw_entities = inventory.get("entities") if isinstance(inventory, Mapping) else None
     if not isinstance(raw_entities, list):
         raise WorldEffectOperationPlanError("inventory entities must be an array")
@@ -614,23 +649,51 @@ def build_world_effect_operation_candidates(
         for activation in instance.tool_activations:
             if recovery_actuator_only and activation.tool_family != "actuator":
                 continue
-            candidate_seed = (
-                f"{instance.instance_id}:{activation.requirement_id}:"
-                f"{activation.activated_tool_id}"
+            raw_bindings = activation.tool_advertisement.get(
+                "semantic_command_bindings"
             )
-            candidate_id = "effect-operation:" + hashlib.sha256(
-                candidate_seed.encode("utf-8")
-            ).hexdigest()[:16]
-            candidates.append(
-                WorldEffectOperationCandidate(
-                    operation_candidate_id=candidate_id,
-                    provider_instance_id=instance.instance_id,
-                    requirement_id=activation.requirement_id,
-                    tool_id=activation.activated_tool_id,
-                    tool_family=activation.tool_family,
-                    capability_tags=activation.capability_tags,
+            bindings = raw_bindings if isinstance(raw_bindings, Mapping) else {}
+            effect_variants: list[tuple[str | None, Mapping[str, Any]]] = []
+            if bindings:
+                effect_ids = sorted(
+                    effect_id
+                    for effect_id in bindings
+                    if isinstance(effect_id, str)
+                    and (
+                        not recovery_actuator_only
+                        or effect_id.endswith(".release")
+                    )
                 )
-            )
+                for effect_id in effect_ids:
+                    required_arguments = bindings[effect_id]
+                    if isinstance(required_arguments, Mapping):
+                        effect_variants.append((effect_id, required_arguments))
+            elif not recovery_actuator_only:
+                effect_variants.append((None, {}))
+
+            for semantic_effect_id, required_invocation_arguments in effect_variants:
+                candidate_seed = (
+                    f"{instance.instance_id}:{activation.requirement_id}:"
+                    f"{activation.activated_tool_id}:{semantic_effect_id}:"
+                    f"{json.dumps(required_invocation_arguments, sort_keys=True)}"
+                )
+                candidate_id = "effect-operation:" + hashlib.sha256(
+                    candidate_seed.encode("utf-8")
+                ).hexdigest()[:16]
+                candidates.append(
+                    WorldEffectOperationCandidate(
+                        operation_candidate_id=candidate_id,
+                        provider_instance_id=instance.instance_id,
+                        requirement_id=activation.requirement_id,
+                        tool_id=activation.activated_tool_id,
+                        tool_family=activation.tool_family,
+                        capability_tags=activation.capability_tags,
+                        semantic_effect_id=semantic_effect_id,
+                        required_invocation_arguments=(
+                            required_invocation_arguments
+                        ),
+                    )
+                )
     observation_seed = json.dumps(
         {
             "provider_instance": instance.to_dict(),
@@ -906,10 +969,38 @@ when no candidate can advance the selected goal. Treat the fresh execution
 context as authoritative: do not repeat a completed precondition; request
 attachment when interaction alignment is ready but the subject is not retained;
 and request transport or release only when fresh contact and actuator state
-support it. When the context reports an exactly identified retained subject as
+support it. Compare the current state with recent_operation_history when it is
+present. A converged operation completed its requested outcome even when the
+overall world goal remains unsatisfied. Repeating the same tool family and
+purpose without a new measured relation, contact state, or failure response is
+not progress; select another advertised operation that the current evidence
+supports, or observe again. When recent_operation_history reports
+planning_status=operation_replan_required with an invocation_rejection, the
+exact previous semantic operation could not be materialized from the same fresh
+evidence; choose a different advertised operation rather than repeating it. Do
+not require touch before every attachment
+attempt: contact may be created by the advertised actuator transition when the
+fresh interaction geometry shows the subject is aligned with its interaction
+surfaces. When fresh two_pad_grasp_alignment is available, select attachment
+acquisition only when the object fits the configured-open aperture and is fully
+between both advertised pad planes, with its center inside both transverse
+pad-face bounds. Otherwise select corrective motion whose
+observable outcome makes the object center coincide with the grasp-corridor
+center; do not treat a top-center clearance pose as grasp-ready. These are
+runtime-advertised tool and RGB-D relations, not an inferred embodiment or a
+task-specific grasp profile. When the alignment observation includes a
+corrective_motion_grounding_contract, the selected corrective motion must end
+at its required terminal object anchor and offset. Intermediate waypoint
+anchors may provide clearance, but the destination or an obstacle cannot be the
+terminal anchor for an unestablished interaction relation. When the context reports an exactly identified retained subject as
 temporarily occluded, that is planning evidence for continued attachment, not
 goal-completion evidence. For loaded transport, preserve that attachment and
 prefer a fresh visible destination or support entity as the motion anchor.
+When an advertised motion candidate includes spatial.ordered_waypoints, choose
+it when the semantic outcome needs intermediate clearance or alignment that one
+direct pose cannot express. Include every related entity whose fresh geometry is
+needed to ground the ordered checkpoints, such as both a retained source entity
+and a visible destination; do not invent controller phases or fixed waypoints.
 When continuation evidence says recovery_actuator_only, the engaged attachment
 has not achieved retained contact. Use the sole advertised reversible actuator
 to disengage before any later corrective motion; never transport it.
@@ -922,3 +1013,195 @@ motor commands. Return exactly one JSON object matching this schema, with no
 Markdown:
 {json.dumps(world_effect_operation_json_schema(candidate_set), indent=2, sort_keys=True)}
 """
+
+
+def summarize_world_effect_operation_history(
+    operations: Sequence[Mapping[str, Any]],
+    *,
+    maximum_entries: int = 4,
+) -> dict[str, Any]:
+    """Return compact measured outcomes for the next model planning call.
+
+    The summary preserves semantic selections and sensor-backed results without
+    turning prior operations into a fixed controller phase.
+    """
+    if isinstance(maximum_entries, bool) or not isinstance(maximum_entries, int):
+        raise WorldEffectOperationPlanError("maximum_entries must be an integer")
+    if maximum_entries <= 0:
+        raise WorldEffectOperationPlanError("maximum_entries must be positive")
+
+    entries: list[dict[str, Any]] = []
+    for raw_operation in list(operations)[-maximum_entries:]:
+        if not isinstance(raw_operation, Mapping):
+            raise WorldEffectOperationPlanError(
+                "operation history entries must be objects"
+            )
+        dispatch = raw_operation.get("dispatch")
+        dispatch = dispatch if isinstance(dispatch, Mapping) else {}
+        outcome = dispatch.get("outcome")
+        outcome = outcome if isinstance(outcome, Mapping) else {}
+        handler_result = outcome.get("handler_result")
+        handler_result = (
+            handler_result if isinstance(handler_result, Mapping) else {}
+        )
+        motion_report = handler_result.get("execution_report")
+        if not isinstance(motion_report, Mapping):
+            motion_report = handler_result.get("motion_report")
+        motion_report = (
+            motion_report if isinstance(motion_report, Mapping) else {}
+        )
+        actuator_report = handler_result.get("actuator_report")
+        actuator_report = (
+            actuator_report if isinstance(actuator_report, Mapping) else {}
+        )
+
+        planning = raw_operation.get("planning")
+        planning = planning if isinstance(planning, Mapping) else {}
+        operation_plan = planning.get("operation_plan")
+        operation_plan = (
+            operation_plan if isinstance(operation_plan, Mapping) else {}
+        )
+        planning_decision = operation_plan.get("decision")
+        planning_decision = (
+            planning_decision if isinstance(planning_decision, Mapping) else {}
+        )
+        raw_candidate_set = operation_plan.get("candidate_set")
+        raw_candidates = (
+            raw_candidate_set.get("candidates", [])
+            if isinstance(raw_candidate_set, Mapping)
+            else []
+        )
+        selected_candidate: Mapping[str, Any] = {}
+        selected_candidate_id = planning_decision.get("operation_candidate_id")
+        for raw_candidate in raw_candidates:
+            if (
+                isinstance(raw_candidate, Mapping)
+                and raw_candidate.get("operation_candidate_id")
+                == selected_candidate_id
+            ):
+                selected_candidate = raw_candidate
+                break
+
+        target_entity_ids = raw_operation.get("target_entity_ids")
+        if not isinstance(target_entity_ids, (list, tuple)):
+            target_entity_ids = planning_decision.get("target_entity_ids")
+        tool_invocation = planning.get("tool_invocation")
+        tool_invocation = (
+            tool_invocation if isinstance(tool_invocation, Mapping) else {}
+        )
+        invocation_attempts = tool_invocation.get("attempts")
+        invocation_attempts = (
+            invocation_attempts if isinstance(invocation_attempts, list) else []
+        )
+        last_rejection: Mapping[str, Any] = {}
+        for invocation_attempt in reversed(invocation_attempts):
+            if (
+                isinstance(invocation_attempt, Mapping)
+                and invocation_attempt.get("status") == "rejected"
+            ):
+                raw_rejection = invocation_attempt.get("rejection")
+                if isinstance(raw_rejection, Mapping):
+                    last_rejection = raw_rejection
+                break
+        entry: dict[str, Any] = {
+            "operation_index": raw_operation.get("operation_index"),
+            "planning_status": raw_operation.get("planning_status"),
+            "tool_family": (
+                raw_operation.get("tool_family")
+                or selected_candidate.get("tool_family")
+            ),
+            "tool_id": (
+                raw_operation.get("tool_id") or planning_decision.get("tool_id")
+            ),
+            "purpose": (
+                raw_operation.get("purpose") or planning_decision.get("purpose")
+            ),
+            "target_entity_ids": list(
+                target_entity_ids
+                if isinstance(target_entity_ids, (list, tuple))
+                else []
+            ),
+            "desired_outcome": planning_decision.get("desired_outcome"),
+            "stop_condition": planning_decision.get("stop_condition"),
+            "result": {
+                "final_lease_state": outcome.get("final_lease_state"),
+            },
+        }
+        result = entry["result"]
+        if last_rejection:
+            result["invocation_rejection"] = {
+                "error_type": last_rejection.get("error_type"),
+                "error": last_rejection.get("error"),
+                "attempts_exhausted": True,
+            }
+        if motion_report:
+            early_stop = motion_report.get("early_stop")
+            early_stop = early_stop if isinstance(early_stop, Mapping) else {}
+            grounding = motion_report.get("grounding")
+            grounding = grounding if isinstance(grounding, Mapping) else {}
+            result.update(
+                {
+                    "converged": motion_report.get("converged"),
+                    "completed_checkpoint_count": motion_report.get(
+                        "completed_checkpoint_count", 1
+                    ),
+                    "checkpoint_count": motion_report.get("checkpoint_count", 1),
+                    "target_error_after_m": motion_report.get(
+                        "target_error_after_m"
+                    ),
+                    "early_stop_condition_id": early_stop.get("condition_id"),
+                    "position_anchor_id": grounding.get("position_anchor_id"),
+                    "interaction_offset_from_anchor_m": grounding.get(
+                        "interaction_offset_from_anchor_m"
+                    ),
+                }
+            )
+        if actuator_report:
+            state_after = actuator_report.get("state_after")
+            state_after = state_after if isinstance(state_after, Mapping) else {}
+            contact = state_after.get("current_contact")
+            contact = contact if isinstance(contact, Mapping) else {}
+            contact_bodies = contact.get("contact_bodies")
+            contact_bodies = (
+                contact_bodies if isinstance(contact_bodies, Mapping) else {}
+            )
+            result.update(
+                {
+                    "requested_state": actuator_report.get("requested_state"),
+                    "engaged_before": actuator_report.get("engaged_before"),
+                    "engaged_after": actuator_report.get("engaged_after"),
+                    "touch_after": contact.get("touch"),
+                    "contact_force_after_n": contact.get("net_force_n"),
+                    "active_contact_body_count_after": contact_bodies.get(
+                        "active_body_count"
+                    ),
+                }
+            )
+        entries.append(_json_copy(entry, "operation_history_entry"))
+
+    consecutive_same_semantic_selection_count = 0
+    if entries:
+        latest = entries[-1]
+        latest_key = (
+            latest.get("tool_family"),
+            latest.get("purpose"),
+            tuple(latest.get("target_entity_ids", [])),
+        )
+        for entry in reversed(entries):
+            entry_key = (
+                entry.get("tool_family"),
+                entry.get("purpose"),
+                tuple(entry.get("target_entity_ids", [])),
+            )
+            if entry_key != latest_key:
+                break
+            consecutive_same_semantic_selection_count += 1
+
+    return {
+        "entries": entries,
+        "consecutive_same_semantic_selection_count": (
+            consecutive_same_semantic_selection_count
+        ),
+        "planning_authority": False,
+        "execution_authority": False,
+    }

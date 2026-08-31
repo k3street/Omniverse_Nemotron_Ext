@@ -62,6 +62,44 @@ def test_fresh_predicate_completion_expires_the_graph_membership_lease():
     assert result.continuation_candidates is None
 
 
+def test_satisfied_placement_requires_release_of_attached_goal_subject():
+    scene = inventory(red_inside=True)
+    scene["world_effect_continuation_evidence"] = {
+        "selected_goal_id": "red-in-bin",
+        "attachment_entity_ids": ["red_block"],
+        "gripper_engaged": True,
+        "task_completion_allowed": False,
+    }
+
+    result = assess(scene, operation_index=4)
+
+    assert result.status == "continue_selected_goal"
+    assert result.selected_goal_satisfied is True
+    assert result.completion_blocking_attachment_entity_ids == ("red_block",)
+    assert result.reason == (
+        "fresh_predicates_satisfied_attachment_release_required"
+    )
+    assert result.continuation_candidates is not None
+    assert "red-in-bin" in {
+        item.goal_id for item in result.continuation_candidates.candidates
+    }
+
+
+def test_unrelated_attachment_does_not_block_selected_goal_completion():
+    scene = inventory(red_inside=True)
+    scene["world_effect_continuation_evidence"] = {
+        "selected_goal_id": "red-in-bin",
+        "attachment_entity_ids": ["green_block"],
+        "gripper_engaged": True,
+        "task_completion_allowed": False,
+    }
+
+    result = assess(scene, operation_index=4)
+
+    assert result.status == "selected_goal_completed"
+    assert result.completion_blocking_attachment_entity_ids == ()
+
+
 def test_membership_change_forces_fresh_graph_before_another_operation():
     changed = deepcopy(inventory())
     changed["entities"].append(
@@ -270,8 +308,15 @@ def test_runner_reobserves_then_replans_motion_or_actuator_with_single_use_lease
     assert 'lease_candidate.tool_family == "actuator"' in source
     assert "dispatcher.mint_permit(fresh_evidence)" in source
     assert "dispatcher.dispatch(permit)" in source
+    assert "summarize_world_effect_operation_history(" in source
+    assert '"recent_operation_history": dict(recent_operation_history)' in source
     assert "for invocation_attempt in range(1, 3):" in source
     assert "do_not_repeat_rejected_arguments" in source
+    assert '"status": "operation_replan_required"' in source
+    assert '"error_type": "invocation_not_proposed"' in source
+    assert '== "operation_replan_required"' in source
+    assert "operation_replan_attempts < 2" in source
+    assert "REPLAN_OPERATION" in source
     assert '"task_completion_claimed": False' in source
 
 
@@ -291,6 +336,8 @@ def test_runner_contract_exposes_a_bounded_sequence_not_one_open_loop_call():
     assert "retained_attachment_is_fresh" in source
     assert "preserve_actuator_engagement" in source
     assert "assess_retained_attachment_continuation" in source
+    assert source.count("_rgbd_axis_references_for_motion_lease(") >= 3
+    assert 'tool_configuration.get("tracked_object_id")' in source
     assert source.count("scene_inventory_memory=scene_inventory_memory") >= 7
     invalidation = source.index("def _guarded_dispatch_invalidation_events(")
     raw_geometry = source.index(
@@ -305,3 +352,13 @@ def test_runner_contract_exposes_a_bounded_sequence_not_one_open_loop_call():
         "targets - set(current_geometry)", target_visibility
     )
     assert raw_geometry < temporal_identity < target_visibility < raw_target_gate
+    target_drift = source.index(
+        'elif condition_id == "scene.target_geometry_drift":', raw_target_gate
+    )
+    intended_attachment_skip = source.index(
+        "if retained_attachment_is_fresh(", target_drift
+    )
+    baseline_geometry = source.index(
+        "baseline = baseline_geometry.get(entity_id)", target_drift
+    )
+    assert target_drift < intended_attachment_skip < baseline_geometry

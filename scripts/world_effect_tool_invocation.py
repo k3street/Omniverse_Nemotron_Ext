@@ -15,12 +15,18 @@ import re
 from typing import Any, Mapping, Sequence
 
 try:
+    from .observation_bound_motion_tools import (
+        retained_contact_supports_loaded_actuator,
+    )
     from .world_effect_execution_lease import (
         ShadowExecutionLeaseCandidateSet,
         ShadowExecutionLeaseDecision,
     )
     from .world_effect_operation_plan import PlanningWorldEffectProviderInstance
 except ImportError:  # Script execution adds this directory directly to sys.path.
+    from observation_bound_motion_tools import (  # type: ignore[no-redef]
+        retained_contact_supports_loaded_actuator,
+    )
     from world_effect_execution_lease import (  # type: ignore[no-redef]
         ShadowExecutionLeaseCandidateSet,
         ShadowExecutionLeaseDecision,
@@ -295,6 +301,8 @@ class ShadowToolInvocationCandidate:
     tool_id: str
     tool_family: str
     purpose: str
+    semantic_effect_id: str | None
+    required_invocation_arguments: Mapping[str, Any]
     coordinate_frame: str
     invocation_schema: Mapping[str, Any]
     model_argument_schema: Mapping[str, Any]
@@ -309,20 +317,39 @@ class ShadowToolInvocationCandidate:
     interaction_origin_offset_local_m: tuple[float, float, float] | None
     interaction_alignment_axis_local: tuple[float, float, float] | None
     interaction_alignment_relation: str
+    interaction_grasp_geometry: Mapping[str, Any]
+    two_pad_grasp_alignment: Mapping[str, Any]
+    retained_contact_supported: bool
     position_anchors: tuple[PositionGroundingAnchor, ...]
     orientation_axes: tuple[OrientationGroundingAxis, ...]
 
     @property
     def position_grounding_required(self) -> bool:
         properties = self.invocation_schema.get("properties", {})
-        return isinstance(properties, Mapping) and "target_position_m" in properties
+        return bool(
+            isinstance(properties, Mapping)
+            and (
+                "target_position_m" in properties
+                or self.ordered_waypoint_grounding_required
+            )
+        )
 
     @property
     def orientation_grounding_required(self) -> bool:
         properties = self.invocation_schema.get("properties", {})
         return (
             isinstance(properties, Mapping)
-            and "target_quaternion_wxyz" in properties
+            and (
+                "target_quaternion_wxyz" in properties
+                or self.ordered_waypoint_grounding_required
+            )
+        )
+
+    @property
+    def ordered_waypoint_grounding_required(self) -> bool:
+        return (
+            self.invocation_constraints.get("grounding_mode")
+            == "ordered_waypoint_path"
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -335,6 +362,11 @@ class ShadowToolInvocationCandidate:
             "tool_id": self.tool_id,
             "tool_family": self.tool_family,
             "purpose": self.purpose,
+            "semantic_effect_id": self.semantic_effect_id,
+            "required_invocation_arguments": _json_copy(
+                self.required_invocation_arguments,
+                "required_invocation_arguments",
+            ),
             "coordinate_frame": self.coordinate_frame,
             "invocation_schema": _json_copy(
                 self.invocation_schema, "invocation_schema"
@@ -379,11 +411,23 @@ class ShadowToolInvocationCandidate:
                     else list(self.interaction_alignment_axis_local)
                 ),
                 "alignment_relation": self.interaction_alignment_relation,
+                "grasp_geometry": _json_copy(
+                    self.interaction_grasp_geometry,
+                    "interaction_grasp_geometry",
+                ),
+                "two_pad_grasp_alignment": _json_copy(
+                    self.two_pad_grasp_alignment,
+                    "two_pad_grasp_alignment",
+                ),
+                "retained_contact_supported": self.retained_contact_supported,
             },
             "position_anchors": [item.to_dict() for item in self.position_anchors],
             "orientation_axes": [item.to_dict() for item in self.orientation_axes],
             "position_grounding_required": self.position_grounding_required,
             "orientation_grounding_required": self.orientation_grounding_required,
+            "ordered_waypoint_grounding_required": (
+                self.ordered_waypoint_grounding_required
+            ),
             "execution_lease_issued": False,
             "handler_bound": False,
             "dispatch_enabled": False,
@@ -434,7 +478,7 @@ def _position_anchors(binding: Any) -> list[PositionGroundingAnchor]:
                 geometry_digest=binding.geometry_digest,
                 position_m=_vector(center, 3, "geometry.center_base_m"),
                 source_field="center_base_m",
-                offset_min_m=(-half_extent[0], -half_extent[1], half_extent[2]),
+                offset_min_m=(-half_extent[0], -half_extent[1], -half_extent[2]),
                 offset_max_m=(half_extent[0], half_extent[1], 0.35),
             )
         )
@@ -644,6 +688,33 @@ def build_shadow_tool_invocation_candidates(
         raise WorldEffectToolInvocationError(
             "unsupported interaction alignment relation"
         )
+    raw_grasp_geometry = interaction.get("grasp_geometry", {})
+    if not isinstance(raw_grasp_geometry, Mapping):
+        raise WorldEffectToolInvocationError(
+            "interaction_frame.grasp_geometry must be an object"
+        )
+    grasp_geometry = _json_copy(
+        raw_grasp_geometry, "interaction_frame.grasp_geometry"
+    )
+    raw_grasp_alignment = interaction.get("two_pad_grasp_alignment", {})
+    if not isinstance(raw_grasp_alignment, Mapping):
+        raise WorldEffectToolInvocationError(
+            "interaction_frame.two_pad_grasp_alignment must be an object"
+        )
+    grasp_alignment = _json_copy(
+        raw_grasp_alignment,
+        "interaction_frame.two_pad_grasp_alignment",
+    )
+    raw_current_contact = runtime_observation.get("current_contact")
+    if raw_current_contact is not None and not isinstance(
+        raw_current_contact, Mapping
+    ):
+        raise WorldEffectToolInvocationError(
+            "runtime_observation.current_contact must be an object"
+        )
+    retained_contact_supported = retained_contact_supports_loaded_actuator(
+        raw_current_contact
+    )
     lease_grounding_ids = set(lease_decision.grounding_entity_ids)
     bindings = tuple(
         item
@@ -663,9 +734,33 @@ def build_shadow_tool_invocation_candidates(
         for axis in _orientation_axes(binding, alignment_relation)
     )
     properties = invocation_schema.get("properties", {})
-    requires_position = isinstance(properties, Mapping) and "target_position_m" in properties
+    ordered_waypoint_grounding = (
+        constraints.get("grounding_mode") == "ordered_waypoint_path"
+    )
+    ordered_waypoint_schema = (
+        properties.get("ordered_waypoints")
+        if isinstance(properties, Mapping)
+        else None
+    )
+    if ordered_waypoint_grounding and not isinstance(
+        ordered_waypoint_schema, Mapping
+    ):
+        raise WorldEffectToolInvocationError(
+            "ordered waypoint grounding requires an ordered_waypoints schema"
+        )
+    requires_position = bool(
+        isinstance(properties, Mapping)
+        and (
+            "target_position_m" in properties
+            or ordered_waypoint_grounding
+        )
+    )
     requires_orientation = (
-        isinstance(properties, Mapping) and "target_quaternion_wxyz" in properties
+        isinstance(properties, Mapping)
+        and (
+            "target_quaternion_wxyz" in properties
+            or ordered_waypoint_grounding
+        )
     )
     if requires_position and (not position_anchors or origin_offset is None):
         raise WorldEffectToolInvocationError(
@@ -710,8 +805,92 @@ def build_shadow_tool_invocation_candidates(
     model_argument_schema = _json_copy(
         invocation_schema, "model_argument_schema"
     )
+    required_invocation_arguments = _json_copy(
+        selected_lease.required_invocation_arguments,
+        "required_invocation_arguments",
+    )
+    model_properties = model_argument_schema.get("properties")
+    if required_invocation_arguments and not isinstance(model_properties, dict):
+        raise WorldEffectToolInvocationError(
+            "semantic invocation binding requires object properties"
+        )
+    for field_name, expected_value in required_invocation_arguments.items():
+        field_schema = model_properties.get(field_name)
+        if not isinstance(field_schema, dict):
+            raise WorldEffectToolInvocationError(
+                "semantic invocation binding references an unadvertised field"
+            )
+        if field_schema.get("type") == "string":
+            field_schema["enum"] = [expected_value]
     materialized_argument_fields: tuple[str, ...] = ()
-    if requires_position:
+    if ordered_waypoint_grounding:
+        model_properties = model_argument_schema.get("properties")
+        waypoint_schema = (
+            model_properties.get("ordered_waypoints")
+            if isinstance(model_properties, dict)
+            else None
+        )
+        waypoint_items = (
+            waypoint_schema.get("items")
+            if isinstance(waypoint_schema, dict)
+            else None
+        )
+        waypoint_properties = (
+            waypoint_items.get("properties")
+            if isinstance(waypoint_items, dict)
+            else None
+        )
+        waypoint_required = (
+            waypoint_items.get("required")
+            if isinstance(waypoint_items, dict)
+            else None
+        )
+        if not isinstance(waypoint_properties, dict) or not isinstance(
+            waypoint_required, list
+        ):
+            raise WorldEffectToolInvocationError(
+                "ordered waypoint schema items require mutable properties/required"
+            )
+        if "target_position_m" not in waypoint_properties:
+            raise WorldEffectToolInvocationError(
+                "ordered waypoint schema must contain target_position_m"
+            )
+        if "target_quaternion_wxyz" not in waypoint_properties:
+            raise WorldEffectToolInvocationError(
+                "ordered waypoint schema must contain target_quaternion_wxyz"
+            )
+        waypoint_properties.pop("target_position_m")
+        waypoint_properties.update(
+            {
+                "position_anchor_id": {
+                    "type": "string",
+                    "enum": sorted(anchor.anchor_id for anchor in position_anchors),
+                },
+                "interaction_offset_from_anchor_m": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 3,
+                    "maxItems": 3,
+                },
+                "orientation_alignment_id": {
+                    "type": "string",
+                    "enum": sorted(
+                        axis.alignment_id for axis in orientation_axes
+                    ),
+                },
+            }
+        )
+        waypoint_items["required"] = [
+            field for field in waypoint_required if field != "target_position_m"
+        ] + [
+            "position_anchor_id",
+            "interaction_offset_from_anchor_m",
+            "orientation_alignment_id",
+        ]
+        materialized_argument_fields = (
+            "ordered_waypoints[].target_position_m",
+        )
+    elif requires_position:
         model_properties = model_argument_schema.get("properties")
         model_required = model_argument_schema.get("required")
         if not isinstance(model_properties, dict) or not isinstance(
@@ -748,6 +927,8 @@ def build_shadow_tool_invocation_candidates(
         tool_id=selected_lease.tool_id,
         tool_family=selected_lease.tool_family,
         purpose=selected_lease.purpose,
+        semantic_effect_id=selected_lease.semantic_effect_id,
+        required_invocation_arguments=required_invocation_arguments,
         coordinate_frame=coordinate_frame,
         invocation_schema=invocation_schema,
         model_argument_schema=model_argument_schema,
@@ -762,6 +943,9 @@ def build_shadow_tool_invocation_candidates(
         interaction_origin_offset_local_m=origin_offset,  # type: ignore[arg-type]
         interaction_alignment_axis_local=alignment_axis,  # type: ignore[arg-type]
         interaction_alignment_relation=alignment_relation,
+        interaction_grasp_geometry=grasp_geometry,
+        two_pad_grasp_alignment=grasp_alignment,
+        retained_contact_supported=retained_contact_supported,
         position_anchors=position_anchors,
         orientation_axes=orientation_axes,
     )
@@ -828,6 +1012,243 @@ class ShadowToolInvocationDecision:
             "motion_authority": False,
             "execution_authority": False,
         }
+
+
+def _materialize_ordered_waypoint_path(
+    candidate: ShadowToolInvocationCandidate,
+    arguments: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Ground every model-proposed checkpoint against advertised geometry."""
+    raw_waypoints = arguments.get("ordered_waypoints")
+    if not isinstance(raw_waypoints, list):
+        raise WorldEffectToolInvocationError(
+            "invocation_arguments.ordered_waypoints must be an array"
+        )
+    if candidate.interaction_origin_offset_local_m is None:
+        raise WorldEffectToolInvocationError(
+            "interaction origin offset is unavailable"
+        )
+    if candidate.interaction_alignment_axis_local is None:
+        raise WorldEffectToolInvocationError(
+            "interaction alignment axis is unavailable"
+        )
+    constraints = candidate.invocation_constraints
+    maximum_offset = float(constraints.get("maximum_grounding_offset_m", 0.35))
+    maximum_alignment_error = float(
+        constraints.get("maximum_alignment_error_deg", 15.0)
+    )
+    maximum_segment_displacement = float(
+        constraints.get(
+            "maximum_segment_displacement_m",
+            constraints.get("maximum_displacement_m", math.inf),
+        )
+    )
+    maximum_path_length = float(
+        constraints.get("maximum_path_length_m", math.inf)
+    )
+    workspace_min = constraints.get("workspace_min_m")
+    workspace_max = constraints.get("workspace_max_m")
+    lower = (
+        _vector(workspace_min, 3, "workspace_min_m")
+        if workspace_min is not None
+        else None
+    )
+    upper = (
+        _vector(workspace_max, 3, "workspace_max_m")
+        if workspace_max is not None
+        else None
+    )
+    if (lower is None) != (upper is None):
+        raise WorldEffectToolInvocationError(
+            "workspace bounds must provide both minimum and maximum"
+        )
+    position_tolerance = candidate.tool_configuration.get("position_tolerance_m")
+    minimum_segment_displacement = (
+        float(position_tolerance)
+        if isinstance(position_tolerance, (int, float))
+        and not isinstance(position_tolerance, bool)
+        and math.isfinite(float(position_tolerance))
+        else 0.0
+    )
+    previous_position: Sequence[float] = candidate.current_controlled_position_m
+    path_length = 0.0
+    materialized_waypoints: list[dict[str, Any]] = []
+    assessments: list[dict[str, Any]] = []
+    for index, raw_waypoint in enumerate(raw_waypoints):
+        if not isinstance(raw_waypoint, Mapping):
+            raise WorldEffectToolInvocationError(
+                f"invocation_arguments.ordered_waypoints[{index}] must be an object"
+            )
+        waypoint = dict(raw_waypoint)
+        anchor_id = _identifier(
+            waypoint.pop("position_anchor_id", None),
+            f"invocation_arguments.ordered_waypoints[{index}].position_anchor_id",
+        )
+        anchor = next(
+            (
+                item
+                for item in candidate.position_anchors
+                if item.anchor_id == anchor_id
+            ),
+            None,
+        )
+        if anchor is None:
+            raise WorldEffectToolInvocationError(
+                f"ordered waypoint {index} position anchor was not advertised"
+            )
+        offset = _vector(
+            waypoint.pop("interaction_offset_from_anchor_m", None),
+            3,
+            (
+                "invocation_arguments.ordered_waypoints"
+                f"[{index}].interaction_offset_from_anchor_m"
+            ),
+        )
+        if _distance(offset, (0.0, 0.0, 0.0)) > maximum_offset:
+            raise WorldEffectToolInvocationError(
+                f"ordered waypoint {index} exceeds runtime grounding limit"
+            )
+        if any(
+            value < minimum or value > maximum
+            for value, minimum, maximum in zip(
+                offset, anchor.offset_min_m, anchor.offset_max_m
+            )
+        ):
+            raise WorldEffectToolInvocationError(
+                f"ordered waypoint {index} exceeds its RGB-D anchor envelope"
+            )
+        alignment_id = _identifier(
+            waypoint.pop("orientation_alignment_id", None),
+            (
+                "invocation_arguments.ordered_waypoints"
+                f"[{index}].orientation_alignment_id"
+            ),
+        )
+        axis = next(
+            (
+                item
+                for item in candidate.orientation_axes
+                if item.alignment_id == alignment_id
+            ),
+            None,
+        )
+        if axis is None:
+            raise WorldEffectToolInvocationError(
+                f"ordered waypoint {index} orientation axis was not advertised"
+            )
+        raw_quaternion = _vector(
+            waypoint.get("target_quaternion_wxyz"),
+            4,
+            (
+                "invocation_arguments.ordered_waypoints"
+                f"[{index}].target_quaternion_wxyz"
+            ),
+        )
+        quaternion_norm = math.sqrt(
+            sum(value * value for value in raw_quaternion)
+        )
+        if abs(quaternion_norm - 1.0) > 0.01:
+            raise WorldEffectToolInvocationError(
+                f"ordered waypoint {index} target quaternion is not normalized"
+            )
+        quaternion = _normalize(
+            raw_quaternion, f"ordered waypoint {index} target quaternion"
+        )
+        realized_axis = _normalize(
+            _rotate_wxyz(
+                quaternion,
+                candidate.interaction_alignment_axis_local,
+            ),
+            f"ordered waypoint {index} realized interaction alignment axis",
+        )
+        dot = sum(
+            left * right
+            for left, right in zip(realized_axis, axis.axis_robot_root)
+        )
+        if axis.bidirectional:
+            dot = abs(dot)
+        alignment_error_deg = math.degrees(
+            math.acos(min(1.0, max(-1.0, dot)))
+        )
+        if alignment_error_deg > maximum_alignment_error:
+            raise WorldEffectToolInvocationError(
+                f"ordered waypoint {index} exceeds observed-axis alignment limit"
+            )
+        rotated_origin_offset = _rotate_wxyz(
+            quaternion,
+            candidate.interaction_origin_offset_local_m,
+        )
+        realized_interaction_position = tuple(
+            position + component
+            for position, component in zip(anchor.position_m, offset)
+        )
+        target_position = tuple(
+            position - component
+            for position, component in zip(
+                realized_interaction_position, rotated_origin_offset
+            )
+        )
+        if lower is not None and upper is not None and any(
+            value < minimum or value > maximum
+            for value, minimum, maximum in zip(target_position, lower, upper)
+        ):
+            raise WorldEffectToolInvocationError(
+                f"ordered waypoint {index} is outside runtime workspace bounds"
+            )
+        segment_displacement = _distance(target_position, previous_position)
+        if segment_displacement <= minimum_segment_displacement:
+            raise WorldEffectToolInvocationError(
+                f"ordered waypoint {index} is already within the configured "
+                "position tolerance"
+            )
+        if segment_displacement > maximum_segment_displacement:
+            raise WorldEffectToolInvocationError(
+                f"ordered waypoint {index} exceeds runtime segment displacement bound"
+            )
+        path_length += segment_displacement
+        if path_length > maximum_path_length:
+            raise WorldEffectToolInvocationError(
+                "ordered waypoint path exceeds runtime path-length bound"
+            )
+        materialized_waypoints.append(
+            {
+                "target_position_m": list(target_position),
+                "target_quaternion_wxyz": list(quaternion),
+            }
+        )
+        assessments.append(
+            {
+                "waypoint_index": index,
+                "position_anchor_id": anchor_id,
+                "anchor_entity_id": anchor.entity_id,
+                "geometry_digest": anchor.geometry_digest,
+                "anchor_position_m": list(anchor.position_m),
+                "interaction_offset_from_anchor_m": list(offset),
+                "realized_interaction_position_m": list(
+                    realized_interaction_position
+                ),
+                "controlled_target_position_m": list(target_position),
+                "segment_displacement_m": segment_displacement,
+                "orientation_alignment_id": alignment_id,
+                "orientation_entity_id": axis.entity_id,
+                "realized_interaction_axis_robot_root": list(realized_axis),
+                "observed_alignment_axis_robot_root": list(axis.axis_robot_root),
+                "alignment_error_deg": alignment_error_deg,
+            }
+        )
+        previous_position = target_position
+    materialized_arguments = dict(arguments)
+    materialized_arguments["ordered_waypoints"] = materialized_waypoints
+    return materialized_arguments, {
+        "coordinate_frame": candidate.coordinate_frame,
+        "lease_invalidations_preserved": True,
+        "grounding_mode": "ordered_waypoint_path",
+        "ordered_waypoint_count": len(materialized_waypoints),
+        "ordered_waypoint_path_length_m": path_length,
+        "maximum_path_length_m": maximum_path_length,
+        "maximum_segment_displacement_m": maximum_segment_displacement,
+        "ordered_waypoints": assessments,
+    }
 
 
 class ShadowToolInvocationGate:
@@ -932,8 +1353,44 @@ class ShadowToolInvocationGate:
         tool_id = _identifier(payload["tool_id"], "tool_id")
         if lease_id != candidate.lease_id or tool_id != candidate.tool_id:
             raise WorldEffectToolInvocationError(
-                "invocation lease/tool pair was not advertised"
+                "invocation lease/tool pair was not advertised; selected "
+                f"candidate requires lease_id={candidate.lease_id!r} and "
+                f"tool_id={candidate.tool_id!r}, got lease_id={lease_id!r} "
+                f"and tool_id={tool_id!r}"
             )
+        if (
+            candidate.semantic_effect_id == "entity_attachment.acquire"
+            and candidate.interaction_grasp_geometry
+        ):
+            grasp_alignment = candidate.two_pad_grasp_alignment
+            if grasp_alignment.get("available") is not True:
+                raise WorldEffectToolInvocationError(
+                    "selected acquire effect requires a fresh two-pad grasp "
+                    "alignment observation"
+                )
+            if grasp_alignment.get("object_fits_configured_aperture") is not True:
+                raise WorldEffectToolInvocationError(
+                    "selected acquire effect requires an object that fits the "
+                    "advertised configured-open aperture"
+                )
+            if (
+                grasp_alignment.get("object_fully_between_open_pad_planes")
+                is not True
+            ):
+                raise WorldEffectToolInvocationError(
+                    "selected acquire effect requires the object fully inside "
+                    "the advertised two-pad grasp corridor"
+                )
+            if (
+                grasp_alignment.get(
+                    "object_center_inside_transverse_pad_bounds"
+                )
+                is not True
+            ):
+                raise WorldEffectToolInvocationError(
+                    "selected acquire effect requires the object center inside "
+                    "the advertised transverse pad-face bounds"
+                )
         acknowledgements = tuple(
             _identifier(item, f"acknowledged_invalidation_condition_ids[{index}]")
             for index, item in enumerate(raw_acknowledgements)
@@ -952,6 +1409,81 @@ class ShadowToolInvocationGate:
             "invocation_arguments",
         )
         arguments = dict(model_arguments)
+        for field_name, expected_value in (
+            candidate.required_invocation_arguments.items()
+        ):
+            if arguments.get(field_name) != expected_value:
+                raise WorldEffectToolInvocationError(
+                    "invocation arguments contradict the selected semantic effect"
+                )
+        grasp_alignment = candidate.two_pad_grasp_alignment
+        corrective_contract = grasp_alignment.get(
+            "corrective_motion_grounding_contract"
+        )
+        if (
+            candidate.tool_family == "motion"
+            and not candidate.retained_contact_supported
+            and grasp_alignment.get("available") is True
+            and grasp_alignment.get(
+                "object_center_inside_full_grasp_corridor"
+            )
+            is False
+            and isinstance(corrective_contract, Mapping)
+        ):
+            required_anchor_id = _identifier(
+                corrective_contract.get(
+                    "required_terminal_position_anchor_id"
+                ),
+                (
+                    "corrective_motion_grounding_contract."
+                    "required_terminal_position_anchor_id"
+                ),
+            )
+            required_offset = _vector(
+                corrective_contract.get(
+                    "required_terminal_interaction_offset_from_anchor_m"
+                ),
+                3,
+                (
+                    "corrective_motion_grounding_contract."
+                    "required_terminal_interaction_offset_from_anchor_m"
+                ),
+            )
+            if candidate.ordered_waypoint_grounding_required:
+                raw_waypoints = model_arguments.get("ordered_waypoints")
+                if not isinstance(raw_waypoints, list) or not raw_waypoints:
+                    raise WorldEffectToolInvocationError(
+                        "corrective motion requires a terminal grounded waypoint"
+                    )
+                terminal_waypoint = raw_waypoints[-1]
+                if not isinstance(terminal_waypoint, Mapping):
+                    raise WorldEffectToolInvocationError(
+                        "corrective motion terminal waypoint must be an object"
+                    )
+                terminal_anchor_id = terminal_waypoint.get(
+                    "position_anchor_id"
+                )
+                terminal_offset = terminal_waypoint.get(
+                    "interaction_offset_from_anchor_m"
+                )
+            else:
+                terminal_anchor_id = payload["position_anchor_id"]
+                terminal_offset = raw_offset
+            if terminal_anchor_id != required_anchor_id:
+                raise WorldEffectToolInvocationError(
+                    "corrective motion terminal anchor contradicts the "
+                    "advertised interaction-grounding contract"
+                )
+            normalized_terminal_offset = _vector(
+                terminal_offset,
+                3,
+                "corrective_motion_terminal_offset",
+            )
+            if normalized_terminal_offset != required_offset:
+                raise WorldEffectToolInvocationError(
+                    "corrective motion terminal offset contradicts the "
+                    "advertised interaction-grounding contract"
+                )
         assessment: dict[str, Any] = {
             "coordinate_frame": candidate.coordinate_frame,
             "lease_invalidations_preserved": True,
@@ -959,6 +1491,38 @@ class ShadowToolInvocationGate:
         position_anchor_id = payload["position_anchor_id"]
         orientation_alignment_id = payload["orientation_alignment_id"]
         offset: tuple[float, ...] = ()
+
+        if candidate.ordered_waypoint_grounding_required:
+            if position_anchor_id is not None or raw_offset:
+                raise WorldEffectToolInvocationError(
+                    "ordered waypoint invocation requires null top-level position grounding"
+                )
+            if orientation_alignment_id is not None:
+                raise WorldEffectToolInvocationError(
+                    "ordered waypoint invocation requires null top-level orientation grounding"
+                )
+            arguments, assessment = _materialize_ordered_waypoint_path(
+                candidate,
+                arguments,
+            )
+            arguments = validate_materialized_invocation_arguments(
+                candidate, arguments
+            )
+            return ShadowToolInvocationDecision(
+                observation_id=observation_id,
+                decision=decision,
+                candidate_id=candidate_id,
+                lease_id=lease_id,
+                tool_id=tool_id,
+                position_anchor_id=None,
+                interaction_offset_from_anchor_m=(),
+                orientation_alignment_id=None,
+                invocation_arguments=arguments,
+                acknowledged_invalidation_condition_ids=acknowledgements,
+                grounding_assessment=assessment,
+                confidence=_confidence(payload["confidence"]),
+                reason=_text(payload["reason"], "reason"),
+            )
 
         quaternion: tuple[float, ...] | None = None
         if candidate.orientation_grounding_required:
@@ -1190,6 +1754,13 @@ class ShadowToolInvocationGate:
 def shadow_tool_invocation_json_schema(
     candidate_set: ShadowToolInvocationCandidateSet,
 ) -> dict[str, Any]:
+    ordered_waypoint_only = bool(
+        candidate_set.candidates
+        and all(
+            item.ordered_waypoint_grounding_required
+            for item in candidate_set.candidates
+        )
+    )
     candidate_ids = [item.candidate_id for item in candidate_set.candidates]
     tool_ids = sorted({item.tool_id for item in candidate_set.candidates})
     position_ids = sorted(
@@ -1233,17 +1804,21 @@ def shadow_tool_invocation_json_schema(
             "tool_id": {"type": ["string", "null"], "enum": [None, *tool_ids]},
             "position_anchor_id": {
                 "type": ["string", "null"],
-                "enum": [None, *position_ids],
+                "enum": [None] if ordered_waypoint_only else [None, *position_ids],
             },
             "interaction_offset_from_anchor_m": {
                 "type": "array",
                 "items": {"type": "number"},
                 "minItems": 0,
-                "maxItems": 3,
+                "maxItems": 0 if ordered_waypoint_only else 3,
             },
             "orientation_alignment_id": {
                 "type": ["string", "null"],
-                "enum": [None, *orientation_ids],
+                "enum": (
+                    [None]
+                    if ordered_waypoint_only
+                    else [None, *orientation_ids]
+                ),
             },
             "invocation_arguments": {"type": "object"},
             "acknowledged_invalidation_condition_ids": {
@@ -1270,6 +1845,14 @@ def build_shadow_tool_invocation_prompt(
         if rejection_context is None
         else _json_copy(rejection_context, "rejection_context")
     )
+    exact_proposal_identities = [
+        {
+            "candidate_id": item.candidate_id,
+            "lease_id": item.lease_id,
+            "tool_id": item.tool_id,
+        }
+        for item in candidate_set.candidates
+    ]
     return f"""Propose one typed, RGB-D-grounded invocation for the selected
 runtime tool and shadow execution lease.
 
@@ -1282,11 +1865,54 @@ Fresh invocation candidate:
 Previous proposal rejection for this same fresh observation:
 {json.dumps(previous_rejection, indent=2)}
 
+Exact proposal identity triples (copy all three strings from one row verbatim;
+candidate_id determines its lease_id and tool_id):
+{json.dumps(exact_proposal_identities, indent=2)}
+
 Choose propose_invocation only for the exact candidate, lease, and tool. Preserve
 every lease invalidation id exactly. Fill invocation_arguments using only the
 model_argument_schema and respect x-runtime-constraints. Omit every field in
 materialized_argument_fields; the deterministic gate derives those fields from
 the selected evidence and validates the completed value against invocation_schema.
+When semantic_effect_id and required_invocation_arguments are present, they are
+the runtime tool's declarative binding for the already selected semantic effect.
+For propose_invocation, copy those required arguments exactly; selecting a
+contradictory actuator state is rejected before a runtime lease can be issued.
+The semantic effect was already selected from fresh scene and sensor evidence by
+the operation planner and accepted by the execution-lease planner. This stage
+translates that selected effect into the advertised typed command; it must not
+veto the effect merely because it prefers a different next action from the
+image. Use blocked only when the exact bound command itself cannot satisfy the
+advertised runtime contract or current evidence, not to replace the selected
+semantic operation. Visual proximity or apparent enclosure alone is not proof
+of a retained attachment.
+When interaction_frame advertises grasp_geometry, treat it as observed tool
+geometry rather than an embodiment-specific instruction. For an acquire effect,
+the fresh two_pad_grasp_alignment must report that the visible object fits, is
+fully between the open pad planes, and has its center inside both transverse
+pad-face bounds. Otherwise return observe_again so the
+operation planner can select corrective motion; the deterministic gate rejects
+premature acquisition. For corrective pregrasp motion, make the object center
+coincident with the advertised grasp-corridor center using the object center
+anchor and its measured required_contact_center_translation_robot_root_m. A
+top-center clearance pose is not a centered two-pad grasp pose.
+When two_pad_grasp_alignment advertises a
+corrective_motion_grounding_contract and reports that the object center remains
+outside the full interaction corridor, every motion proposal must terminate at
+the exact required terminal anchor and interaction offset. Ordered paths may use
+other evidence-grounded intermediate anchors for clearance, but may not finish
+at a destination or obstacle while claiming to establish the interaction
+relation. This is a runtime-derived spatial relation, not a fixed pose.
+When interaction_frame.retained_contact_supported is true, opposing tactile
+evidence has already established the attachment and the pregrasp corrective
+terminal contract is inactive. Use fresh destination geometry and the retained-
+contact lease for transport; contact or orientation invalidation still stops
+genuine attachment loss or slip.
+For blocked or observe_again, do not copy them: set candidate_id, lease_id,
+tool_id, position_anchor_id, and orientation_alignment_id to null; set
+interaction_offset_from_anchor_m and acknowledged_invalidation_condition_ids to
+empty arrays; and set invocation_arguments and grounding_assessment to empty
+objects. A non-executing decision must never carry a latent command.
 
 For a position-grounded invocation, select position_anchor_id and
 interaction_offset_from_anchor_m to describe the desired interaction-frame
@@ -1318,6 +1944,18 @@ axis parallel to that observed axis within the runtime limit and honor the
 advertised interaction alignment_relation. Axes are
 bidirectional, so either sign is equivalent. Use the geometry and tool frames;
 do not infer a body part, embodiment, controller, or task phase.
+
+When ordered_waypoint_grounding_required is true, keep every top-level position
+and orientation grounding field empty. Fill ordered_waypoints in
+invocation_arguments instead. Each checkpoint independently selects an
+advertised RGB-D position anchor, an in-envelope interaction offset, an observed
+orientation axis, and a normalized target quaternion. Choose the fewest ordered
+checkpoints that realize the requested observable outcome while respecting the
+advertised segment and total path bounds. For loaded transport this can express
+a raised free-space checkpoint followed by destination alignment and lowering;
+those outcomes are model-selected, not implicit controller phases. The runtime
+materializes every controlled-frame target and executes the accepted sequence
+under one revocable observation-bound lease.
 
 This proposal validates a typed invocation only. The referenced lease remains
 unissued; no handler is bound and no tool or simulator action is called. Use

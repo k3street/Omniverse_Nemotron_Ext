@@ -323,6 +323,7 @@ class GoalActivationCandidateSet:
     dependency_blocked_goal_ids: tuple[str, ...]
     evidence_blocked_goal_ids: tuple[str, ...]
     evidence_blockers: tuple[GoalActivationBlocker, ...]
+    completion_blocked_goal_ids: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -337,6 +338,9 @@ class GoalActivationCandidateSet:
             "evidence_blockers": [
                 item.to_dict() for item in self.evidence_blockers
             ],
+            "completion_blocked_goal_ids": list(
+                self.completion_blocked_goal_ids
+            ),
             "execution_authority": False,
         }
 
@@ -360,6 +364,52 @@ def _goal_satisfaction(
             False if all(value is False for value in values) else None
         )
     return satisfied, evaluations
+
+
+def retained_attachment_completion_blockers(
+    graph: WorldGoalGraph,
+    inventory: Mapping[str, Any],
+) -> dict[str, tuple[str, ...]]:
+    """Map goals whose subject is still owned by an active attachment.
+
+    A world predicate such as ``inside`` may become geometrically true while a
+    transport provider still retains the subject.  Runtime-owned continuation
+    evidence is explicitly non-completion evidence, so the relation may remain
+    selectable for the provider's release/finalization operation without
+    changing the predicate's measured truth value.
+    """
+    evidence = inventory.get("world_effect_continuation_evidence")
+    if evidence is None:
+        return {}
+    if not isinstance(evidence, Mapping):
+        raise WorldGoalActivationError(
+            "world_effect_continuation_evidence must be an object"
+        )
+    if evidence.get("gripper_engaged") is not True:
+        return {}
+    if evidence.get("task_completion_allowed") is not False:
+        return {}
+    goal_id = evidence.get("selected_goal_id")
+    if not isinstance(goal_id, str):
+        raise WorldGoalActivationError(
+            "retained attachment evidence requires selected_goal_id"
+        )
+    goal = next((item for item in graph.goals if item.goal_id == goal_id), None)
+    if goal is None:
+        raise WorldGoalActivationError(
+            "retained attachment evidence selected_goal_id is absent from graph"
+        )
+    raw_entity_ids = evidence.get("attachment_entity_ids")
+    if not isinstance(raw_entity_ids, list):
+        raise WorldGoalActivationError(
+            "retained attachment evidence attachment_entity_ids must be an array"
+        )
+    attachment_entity_ids = {
+        _identifier(item, "attachment_entity_ids[]") for item in raw_entity_ids
+    }
+    subject_ids = {predicate.subject_id for predicate in goal.desired_state}
+    blockers = tuple(sorted(attachment_entity_ids & subject_ids))
+    return {goal_id: blockers} if blockers else {}
 
 
 def build_goal_activation_candidates(
@@ -393,9 +443,14 @@ def build_goal_activation_candidates(
         goal.goal_id: _goal_satisfaction(goal, predicate_registry, inventory)
         for goal in graph.goals
     }
+    completion_blockers = retained_attachment_completion_blockers(
+        graph, inventory
+    )
+    completion_blocked_ids = set(completion_blockers)
     satisfied_ids = {
         goal_id for goal_id, (value, _) in satisfaction.items() if value is True
     } | completed
+    satisfied_ids -= completion_blocked_ids
     candidates: list[GoalActivationCandidate] = []
     dependency_blocked: list[str] = []
     evidence_blocked: list[str] = []
@@ -474,6 +529,7 @@ def build_goal_activation_candidates(
         evidence_blockers=tuple(
             sorted(evidence_blockers, key=lambda item: item.goal_id)
         ),
+        completion_blocked_goal_ids=tuple(sorted(completion_blocked_ids)),
     )
 
 

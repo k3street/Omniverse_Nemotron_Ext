@@ -190,6 +190,201 @@ def pregrasp_axis_alignment_observation(
     }
 
 
+def two_pad_grasp_alignment_observation(
+    *,
+    scene_geometry: Mapping[str, object],
+    actuator_geometry: Mapping[str, object],
+    object_runtime_id: str,
+) -> dict[str, object]:
+    """Relate fresh object geometry to an advertised two-pad corridor.
+
+    This is observation geometry, not a grasp prescription.  It reports the
+    measured correction that would make the visible object center coincide
+    with the center of the configured open contact-pad corridor and whether
+    the object's visible AABB can fit fully between the two inward pad planes.
+    """
+    if not isinstance(object_runtime_id, str) or not object_runtime_id:
+        raise ValueError("object_runtime_id must be non-empty")
+    geometries = scene_geometry.get("geometries")
+    corridor = actuator_geometry.get("grasp_corridor")
+    if not isinstance(geometries, Sequence) or not isinstance(
+        corridor, Mapping
+    ):
+        return {
+            "available": False,
+            "source": "fresh_rgbd_geometry_plus_runtime_two_pad_corridor",
+            "object_runtime_id": object_runtime_id,
+            "error": "scene geometry or two-pad corridor is unavailable",
+        }
+    geometry = next(
+        (
+            item
+            for item in geometries
+            if isinstance(item, Mapping)
+            and item.get("runtime_id") == object_runtime_id
+        ),
+        None,
+    )
+    if geometry is None:
+        return {
+            "available": False,
+            "source": "fresh_rgbd_geometry_plus_runtime_two_pad_corridor",
+            "object_runtime_id": object_runtime_id,
+            "error": "movable object is absent from fresh RGB-D geometry",
+        }
+
+    object_center = np.asarray(geometry.get("center_base_m"), dtype=np.float64)
+    object_extent = np.asarray(
+        geometry.get("visible_extent_base_m"), dtype=np.float64
+    )
+    corridor_center = np.asarray(
+        corridor.get("center_robot_root_m"), dtype=np.float64
+    )
+    closing_axis = np.asarray(
+        corridor.get("closing_axis_robot_root"), dtype=np.float64
+    )
+    aperture = corridor.get("configured_open_aperture_m")
+    raw_transverse_axes = corridor.get("transverse_axes_robot_root")
+    raw_transverse_ranges = corridor.get(
+        "transverse_axis_ranges_from_center_m"
+    )
+    if (
+        not isinstance(raw_transverse_axes, Sequence)
+        or isinstance(raw_transverse_axes, (str, bytes))
+        or len(raw_transverse_axes) != 2
+        or not isinstance(raw_transverse_ranges, Sequence)
+        or isinstance(raw_transverse_ranges, (str, bytes))
+        or len(raw_transverse_ranges) != 2
+    ):
+        return {
+            "available": False,
+            "source": "fresh_rgbd_geometry_plus_runtime_two_pad_corridor",
+            "object_runtime_id": object_runtime_id,
+            "error": "two-pad transverse corridor bounds are unavailable",
+        }
+    vectors = (object_center, object_extent, corridor_center, closing_axis)
+    if any(item.shape != (3,) or not np.isfinite(item).all() for item in vectors):
+        raise ValueError("object and corridor geometry must be finite 3-vectors")
+    if (
+        isinstance(aperture, bool)
+        or not isinstance(aperture, (int, float))
+        or not np.isfinite(float(aperture))
+        or float(aperture) <= 0.0
+    ):
+        raise ValueError("configured open aperture must be a positive number")
+    if np.any(object_extent < 0.0):
+        raise ValueError("visible object extent must be non-negative")
+    axis_norm = float(np.linalg.norm(closing_axis))
+    if axis_norm <= 1.0e-9:
+        raise ValueError("corridor closing axis must be non-zero")
+    closing_axis /= axis_norm
+
+    correction = object_center - corridor_center
+    axial_offset = float(np.dot(correction, closing_axis))
+    transverse_offset = correction - axial_offset * closing_axis
+    object_span = float(np.dot(np.abs(closing_axis), object_extent))
+    aperture = float(aperture)
+    aperture_clearance = aperture - object_span
+    pad_plane_margin = 0.5 * aperture - (
+        abs(axial_offset) + 0.5 * object_span
+    )
+    transverse_assessments: list[dict[str, object]] = []
+    for index, (raw_axis, raw_range) in enumerate(
+        zip(raw_transverse_axes, raw_transverse_ranges)
+    ):
+        axis = np.asarray(raw_axis, dtype=np.float64)
+        axis_range = np.asarray(raw_range, dtype=np.float64)
+        if (
+            axis.shape != (3,)
+            or axis_range.shape != (2,)
+            or not np.isfinite(axis).all()
+            or not np.isfinite(axis_range).all()
+            or axis_range[1] <= axis_range[0]
+        ):
+            raise ValueError(
+                "transverse corridor axes and ranges must be finite and bounded"
+            )
+        norm = float(np.linalg.norm(axis))
+        if norm <= 1.0e-9:
+            raise ValueError("transverse corridor axes must be non-zero")
+        axis /= norm
+        center_offset = float(np.dot(correction, axis))
+        center_margin = min(
+            center_offset - float(axis_range[0]),
+            float(axis_range[1]) - center_offset,
+        )
+        transverse_assessments.append(
+            {
+                "axis_index": index,
+                "axis_robot_root": axis.tolist(),
+                "pad_face_range_from_corridor_center_m": axis_range.tolist(),
+                "object_center_offset_m": center_offset,
+                "object_center_margin_m": center_margin,
+                "object_center_inside_pad_face_bounds": center_margin >= 0.0,
+            }
+        )
+    center_inside_transverse_bounds = all(
+        item["object_center_inside_pad_face_bounds"] is True
+        for item in transverse_assessments
+    )
+    return {
+        "available": True,
+        "source": "fresh_rgbd_geometry_plus_runtime_two_pad_corridor",
+        "frame": "robot_root",
+        "object_runtime_id": object_runtime_id,
+        "object_center_robot_root_m": object_center.tolist(),
+        "grasp_corridor_center_robot_root_m": corridor_center.tolist(),
+        "closing_axis_robot_root": closing_axis.tolist(),
+        "required_contact_center_translation_robot_root_m": correction.tolist(),
+        "object_center_axial_offset_m": axial_offset,
+        "object_center_transverse_offset_robot_root_m": (
+            transverse_offset.tolist()
+        ),
+        "object_center_transverse_error_m": float(
+            np.linalg.norm(transverse_offset)
+        ),
+        "visible_object_span_along_closing_axis_m": object_span,
+        "configured_open_aperture_m": aperture,
+        "aperture_clearance_m": aperture_clearance,
+        "pad_plane_margin_m": pad_plane_margin,
+        "object_fits_configured_aperture": aperture_clearance >= 0.0,
+        "object_fully_between_open_pad_planes": pad_plane_margin >= 0.0,
+        "transverse_pad_face_assessments": transverse_assessments,
+        "object_center_inside_transverse_pad_bounds": (
+            center_inside_transverse_bounds
+        ),
+        "object_center_inside_full_grasp_corridor": bool(
+            pad_plane_margin >= 0.0 and center_inside_transverse_bounds
+        ),
+        "corrective_motion_grounding_contract": {
+            "relation_id": (
+                "interaction_origin_coincident_with_entity_center"
+            ),
+            "entity_id": object_runtime_id,
+            "required_terminal_position_anchor_id": (
+                f"{object_runtime_id}.center"
+            ),
+            "required_terminal_interaction_offset_from_anchor_m": [
+                0.0,
+                0.0,
+                0.0,
+            ],
+            "applies_when": (
+                "object_center_inside_full_grasp_corridor_false"
+            ),
+            "source": "fresh_rgbd_plus_runtime_interaction_geometry",
+            "motion_authority": False,
+            "execution_authority": False,
+        },
+        "desired_center_relation": (
+            "object_center_coincident_with_grasp_corridor_center"
+        ),
+        "observation_only": True,
+        "motion_authority": False,
+        "execution_authority": False,
+    }
+
+
 def bounding_box_mask(
     image_shape: tuple[int, int],
     xyxy: tuple[float, float, float, float],

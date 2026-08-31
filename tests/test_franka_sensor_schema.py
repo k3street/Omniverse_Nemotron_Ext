@@ -169,10 +169,14 @@ def test_contact_body_observation_preserves_named_opposing_forces():
     ]
     assert observation["channels"][0]["force_xyz_n"] == [2.0, 0.0, 0.0]
     assert observation["channels"][1]["force_xyz_n"] == [-2.0, 0.0, 0.0]
+    assert observation["retained_force_n"] == pytest.approx(2.0)
     assert observation["pairwise_force_direction_cosine"] == pytest.approx(-1.0)
     assert observation["force_magnitude_ratio_min_over_max"] == pytest.approx(1.0)
     assert "opposing" in observation["metric_semantics"][
         "pairwise_force_direction_cosine"
+    ]
+    assert "weakest active" in observation["metric_semantics"][
+        "retained_force_n"
     ]
 
 

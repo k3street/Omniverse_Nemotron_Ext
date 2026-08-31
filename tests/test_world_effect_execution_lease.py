@@ -49,7 +49,7 @@ def inventory():
     }
 
 
-def operation_fixture(*, tool_id="spatial_motion", scene=None):
+def operation_fixture(*, tool_id="spatial_motion", scene=None, execution_context=None):
     configuration_schema = {
         "type": "object",
         "additionalProperties": False,
@@ -74,7 +74,26 @@ def operation_fixture(*, tool_id="spatial_motion", scene=None):
                 "minimum": 0.001,
                 "maximum": 0.30,
             },
+            "maximum_tracked_orientation_error_deg": {
+                "type": "number",
+                "minimum": 1.0,
+                "maximum": 90.0,
+            },
+            "tracked_object_id": {
+                "type": "string",
+                "enum": ["red_block", "grey_bin"],
+            },
             "require_contact": {"type": "boolean"},
+            "minimum_contact_force_n": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 100.0,
+            },
+            "minimum_observed_clearance_m": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 0.5,
+            },
         },
     }
     instance = PlanningWorldEffectProviderInstance(
@@ -158,6 +177,7 @@ def operation_fixture(*, tool_id="spatial_motion", scene=None):
         candidate_set,
         decision,
         inventory() if scene is None else scene,
+        execution_context=execution_context,
     )
     return instance, candidate_set, decision, lease_candidates
 
@@ -260,6 +280,80 @@ def test_runtime_tool_schema_can_change_without_changing_lease_contract():
     assert candidate.tool_configuration_schema["properties"]["position_tolerance_m"]
 
 
+def test_contact_force_threshold_is_bounded_by_fresh_retention_evidence():
+    context = {
+        "current_contact": {
+            "touch": True,
+            "contact_bodies": {
+                "available": True,
+                "touch_threshold_n": 0.1,
+                "retained_force_n": 2.0,
+            },
+        }
+    }
+    _, _, _, candidate_set = operation_fixture(execution_context=context)
+
+    force_schema = candidate_set.candidates[0].tool_configuration_schema[
+        "properties"
+    ]["minimum_contact_force_n"]
+    assert force_schema["minimum"] == pytest.approx(0.1)
+    assert force_schema["maximum"] == pytest.approx(1.9)
+    assert "fresh opposing contact-body evidence" in force_schema["description"]
+
+
+def test_contact_force_threshold_is_not_advertised_without_retention_evidence():
+    _, _, _, candidate_set = operation_fixture(execution_context={
+        "current_contact": {
+            "touch": False,
+            "contact_bodies": {
+                "available": True,
+                "touch_threshold_n": 0.1,
+                "retained_force_n": 0.0,
+            },
+        }
+    })
+
+    assert "minimum_contact_force_n" not in candidate_set.candidates[
+        0
+    ].tool_configuration_schema["properties"]
+
+
+def test_corrective_clearance_ceiling_is_grounded_in_fresh_rgbd_path():
+    context = {
+        "interaction_frame": {"contact_center_xyz_m": [0.5, 0.2, 0.3]},
+        "two_pad_grasp_alignment": {
+            "corrective_motion_grounding_contract": {
+                "entity_id": "red_block",
+                "required_terminal_position_anchor_id": "red_block.center",
+            }
+        },
+        "current_contact": {},
+        "fresh_rgbd_geometry": {
+            "geometries": [
+                {
+                    "runtime_id": "red_block",
+                    "center_base_m": [0.5, 0.2, 0.04],
+                    "visible_aabb_min_base_m": [0.48, 0.18, 0.02],
+                    "visible_aabb_max_base_m": [0.52, 0.22, 0.06],
+                },
+                {
+                    "runtime_id": "table",
+                    "center_base_m": [0.5, 0.2, -0.01],
+                    "visible_aabb_min_base_m": [0.0, -0.5, -0.02],
+                    "visible_aabb_max_base_m": [1.0, 0.5, 0.0],
+                },
+            ]
+        },
+    }
+    _, _, _, candidate_set = operation_fixture(execution_context=context)
+
+    clearance_schema = candidate_set.candidates[0].tool_configuration_schema[
+        "properties"
+    ]["minimum_observed_clearance_m"]
+    assert clearance_schema["maximum"] == pytest.approx(0.04)
+    assert "nearest observed entity: table" in clearance_schema["description"]
+
+
 def test_gate_validates_configuration_and_issues_no_execution_lease():
     _, _, _, candidate_set = operation_fixture()
     accepted = ShadowExecutionLeaseGate(candidate_set).dispatch(proposal(candidate_set))
@@ -274,6 +368,49 @@ def test_gate_validates_configuration_and_issues_no_execution_lease():
     assert not serialized["dispatch_enabled"]
     assert not serialized["motion_authority"]
     assert not serialized["execution_authority"]
+
+
+def test_orientation_lease_is_advertised_only_for_preflight_observable_target():
+    unobservable_context = {
+        "rgbd_orientation_observability": {
+            "red_block": {
+                "observable": False,
+                "reason": "footprint_axis_ambiguous",
+            }
+        }
+    }
+    _, _, _, unobservable = operation_fixture(
+        execution_context=unobservable_context
+    )
+    unobservable_candidate = unobservable.candidates[0]
+    unobservable_properties = unobservable_candidate.tool_configuration_schema[
+        "properties"
+    ]
+
+    assert "maximum_tracked_orientation_error_deg" not in unobservable_properties
+    assert unobservable_properties["tracked_object_id"]["enum"] == ["red_block"]
+    assert "scene.tracked_orientation_error_exceeded" not in {
+        item.condition_id
+        for item in unobservable_candidate.invalidation_candidates
+    }
+
+    observable_context = {
+        "rgbd_orientation_observability": {
+            "red_block": {
+                "observable": True,
+                "reason": "major_axis_observable",
+            }
+        }
+    }
+    _, _, _, observable = operation_fixture(
+        execution_context=observable_context
+    )
+    observable_properties = observable.candidates[0].tool_configuration_schema[
+        "properties"
+    ]
+
+    assert observable_properties["tracked_object_id"]["enum"] == ["red_block"]
+    assert "maximum_tracked_orientation_error_deg" in observable_properties
 
 
 def test_occluded_retained_target_binds_only_fresh_tracked_center():
@@ -369,6 +506,7 @@ def test_configured_sensor_threshold_requires_matching_invalidation():
     configuration = {
         "position_tolerance_m": 0.02,
         "maximum_tracked_pose_error_m": 0.04,
+        "tracked_object_id": "red_block",
     }
 
     with pytest.raises(WorldEffectExecutionLeaseError, match="requires invalidation"):
@@ -393,6 +531,10 @@ def test_prompt_exposes_configuration_but_forbids_dispatch_arguments():
     prompt = build_shadow_execution_lease_prompt(
         instruction="Clean the table",
         candidate_set=candidate_set,
+        rejection_context={
+            "error": "lease provider/operation/tool triple was not advertised",
+            "requirements": {"same_fresh_candidate_set": True},
+        },
     )
     lowered = prompt.lower()
 
@@ -403,6 +545,10 @@ def test_prompt_exposes_configuration_but_forbids_dispatch_arguments():
     assert "does not issue a lease, bind a\nhandler, call a tool, or dispatch" in lowered
     assert "do not provide a target pose, pose\ndelta, trajectory" in lowered
     assert "omit it when require_contact is\nfalse or absent" in lowered
+    assert "fresh contact\nevidence measures an opposing retained-contact force" in lowered
+    assert "previous proposal rejection" in lowered
+    assert "same_fresh_candidate_set" in prompt
+    assert "do not switch identifiers or evidence" in lowered
     assert '"execution_authority": false' in lowered
 
 
@@ -416,23 +562,32 @@ def test_runner_wires_lease_after_operation_and_before_shadow_boundary():
     lease_candidates = source.index(
         "build_shadow_execution_lease_candidates(", operation_gate
     )
-    lease_prompt = source.index(
-        "build_shadow_execution_lease_prompt(", lease_candidates
+    lease_reasoner = source.index(
+        "_reason_world_effect_execution_lease_with_correction(",
+        lease_candidates,
     )
-    lease_gate = source.index("ShadowExecutionLeaseGate(", lease_prompt)
     lease_trace = source.index(
-        'episode_trace["world_effect_execution_lease_shadow"]', lease_gate
+        'episode_trace["world_effect_execution_lease_shadow"]', lease_reasoner
     )
     hard_boundary = source.index("if args_cli.shadow_plan_only:", lease_trace)
 
     assert (
         operation_gate
         < lease_candidates
-        < lease_prompt
-        < lease_gate
+        < lease_reasoner
         < lease_trace
         < hard_boundary
     )
+    helper_start = source.index(
+        "def _reason_world_effect_execution_lease_with_correction("
+    )
+    helper_end = source.index(
+        "def _plan_guarded_world_effect_continuation(", helper_start
+    )
+    helper = source[helper_start:helper_end]
+    assert "for attempt in range(1, 3):" in helper
+    assert "build_shadow_execution_lease_prompt(" in helper
+    assert "ShadowExecutionLeaseGate(candidate_set).dispatch(payload)" in helper
     block = source[lease_candidates:hard_boundary]
     assert '"execution_lease_issued": False' in block
     assert '"handler_bound": False' in block

@@ -336,6 +336,13 @@ class WorldEffectProviderRegistry:
                         "required_capability_tags": list(
                             requirement.required_capability_tags
                         ),
+                        "compatible_tools": [
+                            {
+                                "tool_id": tool.tool_id,
+                                "activation_status": tool.activation_status,
+                            }
+                            for tool in matches
+                        ],
                     }
                 )
             compatible = not missing

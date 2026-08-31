@@ -90,6 +90,34 @@ def test_active_runtime_tools_form_an_active_binding_without_naming_mechanism():
     )
 
 
+def test_all_compatible_runtime_motion_tools_remain_available_to_planning():
+    assessment = default_world_effect_provider_registry().assess(
+        "world_relation.realize_inside",
+        [
+            rgbd_tool(),
+            motion_tool(active=True, tool_id="bounded_dls_ik"),
+            motion_tool(active=True, tool_id="bounded_dls_waypoint_path"),
+            attachment_tool(active=True),
+        ],
+    )
+    binding = assessment.preferred_binding()
+    assert binding is not None
+    motion_binding = next(
+        item
+        for item in binding.requirement_bindings
+        if item["requirement_id"] == "observation_bound_spatial_motion"
+    )
+
+    assert motion_binding["tool_id"] == "bounded_dls_ik"
+    assert motion_binding["compatible_tools"] == [
+        {"tool_id": "bounded_dls_ik", "activation_status": "active"},
+        {
+            "tool_id": "bounded_dls_waypoint_path",
+            "activation_status": "active",
+        },
+    ]
+
+
 def test_missing_semantic_tool_requirement_fails_closed():
     assessment = default_world_effect_provider_registry().assess(
         "world_relation.realize_inside",

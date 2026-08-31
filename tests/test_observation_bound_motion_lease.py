@@ -252,6 +252,17 @@ def test_runner_stalled_kinematic_feedback_invalidates_motion_lease():
     assert '"motion_progress_stalled"' in source
 
 
+def test_guarded_executor_fails_closed_without_mid_motion_coach():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    assert "elif checkpoint_reason is not None:" in source
+    assert '"reason": "local_lease_invalidated"' in source
+    assert '"lease_invalidation_reason": checkpoint_reason' in source
+
+
 def test_runner_rejects_executor_tolerance_equivalent_stalled_target():
     source = (
         Path(__file__).resolve().parents[1]
@@ -360,8 +371,12 @@ def test_runner_geometry_adapters_fail_closed_and_use_contact_prim_bounds():
     contact_end = source.index("def _actuator_contact_geometry(", contact_start)
     contact_adapter = source[contact_start:contact_end]
     assert "UsdGeom.BBoxCache(" in contact_adapter
-    assert "world_to_base.Transform(center_world)" in contact_adapter
+    assert "world_to_base.Transform(corner_world)" in contact_adapter
     assert '"closing_axis_local"' in contact_adapter
+    assert '"contact_pad_centers_local_m"' in contact_adapter
+    assert '"configured_open_aperture_m"' in contact_adapter
+    assert '"grasp_corridor_local"' in contact_adapter
+    assert '"transverse_axis_ranges_from_center_m"' in contact_adapter
 
 
 def test_scheduler_selected_motion_rejects_repeated_passive_hold():

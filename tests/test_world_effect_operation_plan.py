@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from scripts.world_effect_operation_plan import (
     build_planning_world_effect_provider_instance,
     build_world_effect_operation_candidates,
     build_world_effect_operation_prompt,
+    summarize_world_effect_operation_history,
 )
 from scripts.world_effect_provider_registry import RuntimeToolCapability
 from scripts.world_effect_session import (
@@ -183,12 +185,22 @@ def catalog(*, motion_id="spatial_motion", actuator_id="reversible_attachment"):
                     "command_schema": {
                         "type": "object",
                         "additionalProperties": False,
-                        "properties": {},
+                        "properties": {
+                            "state": {
+                                "type": "string",
+                                "enum": ["engage", "disengage"],
+                            }
+                        },
+                        "required": ["state"],
                     },
                     "configuration_schema": {
                         "type": "object",
                         "additionalProperties": False,
                         "properties": {},
+                    },
+                    "semantic_command_bindings": {
+                        "entity_attachment.acquire": {"state": "engage"},
+                        "entity_attachment.release": {"state": "disengage"},
                     },
                 },
             ),
@@ -243,14 +255,78 @@ def test_runtime_factory_outputs_change_without_changing_goal_contract():
     }
 
 
+def test_planning_provider_activates_all_compatible_motion_alternatives():
+    candidate_set, decision = session()
+    candidate = candidate_set.candidates[0]
+    bindings = []
+    for binding in candidate.requirement_bindings:
+        if binding["requirement_id"] != "observation_bound_spatial_motion":
+            bindings.append(binding)
+            continue
+        bindings.append(
+            {
+                **binding,
+                "tool_id": "bounded_dls_ik",
+                "activation_status": "active",
+                "compatible_tools": [
+                    {
+                        "tool_id": "bounded_dls_ik",
+                        "activation_status": "active",
+                    },
+                    {
+                        "tool_id": "bounded_dls_waypoint_path",
+                        "activation_status": "active",
+                    },
+                ],
+            }
+        )
+    candidate = replace(candidate, requirement_bindings=tuple(bindings))
+    candidate_set = replace(candidate_set, candidates=(candidate,))
+    active_motion_tools = [
+        RuntimeToolCapability(
+            tool_id=tool_id,
+            tool_family="motion",
+            capability_tags=MOTION_TAGS,
+            activation_status="active",
+            source="active_test_registry",
+        )
+        for tool_id in ("bounded_dls_ik", "bounded_dls_waypoint_path")
+    ]
+    tools = [runtime_tools()[0], *active_motion_tools, runtime_tools()[2]]
+
+    instance = build_planning_world_effect_provider_instance(
+        candidate_set,
+        decision,
+        tools,
+        catalog(),
+    )
+
+    assert {
+        item.activated_tool_id
+        for item in instance.tool_activations
+        if item.requirement_id == "observation_bound_spatial_motion"
+    } == {"bounded_dls_ik", "bounded_dls_waypoint_path"}
+
+
 def test_first_operation_candidates_are_goal_and_observation_bound():
     _, _, instance = planning_instance()
     candidates = build_world_effect_operation_candidates(instance, inventory())
 
-    assert len(candidates.candidates) == 3
+    assert len(candidates.candidates) == 4
     assert candidates.provider_instance_id == instance.instance_id
     assert candidates.related_entity_ids == ("grey_bin", "red_block")
     assert all(not item.to_dict()["dispatch_enabled"] for item in candidates.candidates)
+
+    actuator_candidates = [
+        item for item in candidates.candidates if item.tool_family == "actuator"
+    ]
+    assert {
+        item.semantic_effect_id: item.required_invocation_arguments
+        for item in actuator_candidates
+    } == {
+        "entity_attachment.acquire": {"state": "engage"},
+        "entity_attachment.release": {"state": "disengage"},
+    }
 
 
 def test_continuation_prompt_treats_retained_occlusion_as_planning_only():
@@ -272,6 +348,8 @@ def test_continuation_prompt_treats_retained_occlusion_as_planning_only():
     assert "planning evidence for continued attachment" in prompt
     assert "not\ngoal-completion evidence" in prompt
     assert "visible destination or support entity" in prompt
+    assert "spatial.ordered_waypoints" in prompt
+    assert "both a retained source entity\nand a visible destination" in prompt
 
 
 def test_unretained_engaged_attempt_advertises_only_actuator_recovery():
@@ -307,6 +385,12 @@ def test_unretained_engaged_attempt_advertises_only_actuator_recovery():
     assert [item.tool_family for item in candidate_set.candidates] == [
         "actuator"
     ]
+    assert candidate_set.candidates[0].semantic_effect_id == (
+        "entity_attachment.release"
+    )
+    assert candidate_set.candidates[0].required_invocation_arguments == {
+        "state": "disengage"
+    }
     assert "Use the sole advertised reversible actuator" in prompt
     assert "never transport it" in prompt
 
@@ -381,13 +465,156 @@ def test_operation_prompt_includes_fresh_post_effect_context_without_authority()
         execution_context={
             "gripper_closed_fraction": 1.0,
             "current_contact": {"touch": True, "net_force_n": 2.5},
+            "recent_operation_history": {
+                "entries": [
+                    {
+                        "operation_index": 2,
+                        "tool_family": "motion",
+                        "purpose": "establish_precondition",
+                        "result": {"converged": True},
+                    }
+                ],
+                "consecutive_same_semantic_selection_count": 1,
+            },
         },
     )
 
     assert '"gripper_closed_fraction": 1.0' in prompt
     assert '"touch": true' in prompt
+    assert '"consecutive_same_semantic_selection_count": 1' in prompt
     assert "do not repeat a completed precondition" in prompt.lower()
+    assert "contact may be created by the advertised actuator" in prompt.lower()
+    assert "fully\nbetween both advertised pad planes" in prompt
+    assert "inside both transverse\npad-face bounds" in prompt
+    assert "corrective_motion_grounding_contract" in prompt
+    assert "destination or an obstacle cannot be the\nterminal anchor" in prompt
+    assert "grasp-corridor\ncenter" in prompt
     assert "does not call the named tool" in prompt.lower()
+
+
+def test_operation_history_summarizes_motion_and_actuator_feedback():
+    history = summarize_world_effect_operation_history(
+        [
+            {
+                "operation_index": 2,
+                "tool_family": "motion",
+                "tool_id": "bounded_motion",
+                "purpose": "establish_precondition",
+                "target_entity_ids": ["red_block"],
+                "dispatch": {
+                    "outcome": {
+                        "final_lease_state": "consumed",
+                        "handler_result": {
+                            "execution_report": {
+                                "converged": True,
+                                "target_error_after_m": 0.004,
+                                "grounding": {
+                                    "position_anchor_id": "red_block.center",
+                                    "interaction_offset_from_anchor_m": [0, 0, 0.03],
+                                },
+                            }
+                        },
+                    }
+                },
+            },
+            {
+                "operation_index": 3,
+                "tool_family": "actuator",
+                "tool_id": "reversible_attachment",
+                "purpose": "realize_effect",
+                "target_entity_ids": ["red_block"],
+                "dispatch": {
+                    "outcome": {
+                        "final_lease_state": "consumed",
+                        "handler_result": {
+                            "actuator_report": {
+                                "requested_state": "engage",
+                                "engaged_before": False,
+                                "engaged_after": True,
+                                "state_after": {
+                                    "current_contact": {
+                                        "touch": True,
+                                        "net_force_n": 1.2,
+                                        "contact_bodies": {"active_body_count": 2},
+                                    }
+                                },
+                            }
+                        },
+                    }
+                },
+            },
+        ]
+    )
+
+    assert len(history["entries"]) == 2
+    assert history["entries"][0]["result"]["converged"] is True
+    assert history["entries"][0]["result"]["position_anchor_id"] == (
+        "red_block.center"
+    )
+    assert history["entries"][1]["result"]["requested_state"] == "engage"
+    assert history["entries"][1]["result"]["active_contact_body_count_after"] == 2
+    assert history["consecutive_same_semantic_selection_count"] == 1
+    assert history["execution_authority"] is False
+
+
+def test_operation_history_exposes_unmaterializable_operation_for_replan():
+    history = summarize_world_effect_operation_history(
+        [
+            {
+                "operation_index": 3,
+                "planning_status": "operation_replan_required",
+                "planning": {
+                    "operation_plan": {
+                        "candidate_set": {
+                            "candidates": [
+                                {
+                                    "operation_candidate_id": "motion-noop",
+                                    "tool_family": "motion",
+                                }
+                            ]
+                        },
+                        "decision": {
+                            "operation_candidate_id": "motion-noop",
+                            "tool_id": "bounded_dls_ik",
+                            "purpose": "establish_precondition",
+                            "target_entity_ids": ["red_block"],
+                            "desired_outcome": "already reached pose",
+                        },
+                    },
+                    "tool_invocation": {
+                        "attempts": [
+                            {
+                                "status": "rejected",
+                                "rejection": {
+                                    "error_type": "WorldEffectToolInvocationError",
+                                    "error": "materialized motion target is already within tolerance",
+                                },
+                            }
+                        ]
+                    },
+                },
+            }
+        ]
+    )
+
+    entry = history["entries"][0]
+    assert entry["planning_status"] == "operation_replan_required"
+    assert entry["tool_family"] == "motion"
+    assert entry["purpose"] == "establish_precondition"
+    assert entry["target_entity_ids"] == ["red_block"]
+    assert entry["result"]["invocation_rejection"]["attempts_exhausted"] is True
+
+    _, _, instance = planning_instance()
+    prompt = build_world_effect_operation_prompt(
+        instruction="Move the red block",
+        inventory=inventory(),
+        instance=instance,
+        candidate_set=build_world_effect_operation_candidates(
+            instance, inventory()
+        ),
+        execution_context={"recent_operation_history": history},
+    )
+    assert "choose a different advertised operation" in prompt
 
 
 def test_runner_wires_operation_plan_after_session_and_before_hard_boundary():

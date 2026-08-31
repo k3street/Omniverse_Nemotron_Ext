@@ -22,6 +22,7 @@ from scripts.world_effect_tool_invocation import (
     WorldEffectToolInvocationError,
     build_shadow_tool_invocation_candidates,
     build_shadow_tool_invocation_prompt,
+    shadow_tool_invocation_json_schema,
 )
 
 
@@ -53,8 +54,77 @@ INVOCATION_SCHEMA = {
     },
 }
 
+ORDERED_WAYPOINT_INVOCATION_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "ordered_waypoints": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 4,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "target_position_m": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 3,
+                        "maxItems": 3,
+                    },
+                    "target_quaternion_wxyz": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 4,
+                        "maxItems": 4,
+                    },
+                },
+                "required": ["target_position_m", "target_quaternion_wxyz"],
+            },
+        },
+    },
+    "required": ["ordered_waypoints"],
+    "x-runtime-constraints": {
+        "grounding_mode": "ordered_waypoint_path",
+        "coordinate_frame": "robot_root",
+        "workspace_min_m": [-0.75, -0.75, 0.02],
+        "workspace_max_m": [0.90, 0.90, 1.40],
+        "maximum_segment_displacement_m": 0.50,
+        "maximum_path_length_m": 1.0,
+        "maximum_grounding_offset_m": 0.35,
+        "maximum_alignment_error_deg": 15.0,
+    },
+}
 
-def fixture(*, tool_id="spatial_motion"):
+
+def fixture(
+    *,
+    tool_id="spatial_motion",
+    invocation_schema=INVOCATION_SCHEMA,
+    tool_family="motion",
+    semantic_effect_id=None,
+    required_invocation_arguments=None,
+    grasp_corridor_aligned=True,
+    retained_contact=False,
+):
+    capability_tags = (
+        (
+            "spatial.pose_target",
+            "motion.observation_bound",
+            "motion.invalidation_feedback",
+        )
+        if tool_family == "motion"
+        else (
+            "entity_attachment.acquire",
+            "entity_attachment.release",
+            "actuation.observation_bound",
+        )
+    )
+    requirement_id = (
+        "observation_bound_spatial_motion"
+        if tool_family == "motion"
+        else "reversible_entity_attachment"
+    )
     geometry = GeometryEvidenceBinding(
         entity_id="red_block",
         observation_status="visible_rgbd",
@@ -114,9 +184,9 @@ def fixture(*, tool_id="spatial_motion"):
         membership_lease_id="membership:test",
         operation_observation_id="effect-operation-observation:test",
         operation_candidate_id="effect-operation:test",
-        requirement_id="observation_bound_spatial_motion",
+        requirement_id=requirement_id,
         tool_id=tool_id,
-        tool_family="motion",
+        tool_family=tool_family,
         purpose="establish_precondition",
         operation_target_entity_ids=("red_block",),
         desired_outcome="Interaction geometry is ready.",
@@ -130,6 +200,8 @@ def fixture(*, tool_id="spatial_motion"):
         },
         geometry_bindings=(geometry,),
         invalidation_candidates=invalidation_specs,
+        semantic_effect_id=semantic_effect_id,
+        required_invocation_arguments=(required_invocation_arguments or {}),
     )
     lease_candidates = ShadowExecutionLeaseCandidateSet(
         observation_id="execution-lease-observation:test",
@@ -181,26 +253,18 @@ def fixture(*, tool_id="spatial_motion"):
         ),
         tool_activations=(
             PlanningToolActivation(
-                requirement_id="observation_bound_spatial_motion",
+                requirement_id=requirement_id,
                 source_tool_id="factory.spatial",
                 activated_tool_id=tool_id,
-                tool_family="motion",
-                capability_tags=(
-                    "spatial.pose_target",
-                    "motion.observation_bound",
-                    "motion.invalidation_feedback",
-                ),
+                tool_family=tool_family,
+                capability_tags=capability_tags,
                 tool_advertisement={
                     "executor_id": tool_id,
                     "tool_name": "execute_spatial_motion",
-                    "tool_family": "motion",
-                    "capability_tags": [
-                        "spatial.pose_target",
-                        "motion.observation_bound",
-                        "motion.invalidation_feedback",
-                    ],
+                    "tool_family": tool_family,
+                    "capability_tags": list(capability_tags),
                     "configuration_schema": lease_candidate.tool_configuration_schema,
-                    "invocation_schema": INVOCATION_SCHEMA,
+                    "invocation_schema": invocation_schema,
                 },
                 factory_instantiated=True,
             ),
@@ -219,7 +283,79 @@ def fixture(*, tool_id="spatial_motion"):
             "origin_offset_local_m": [0.12, 0.0, 0.0],
             "alignment_axis_local": [0.0, -1.0, 0.0],
             "alignment_relation": "surface_tangent",
+            "grasp_geometry": {
+                "center_local_m": [0.12, 0.0, 0.0],
+                "closing_axis_local": [0.0, -1.0, 0.0],
+                "configured_open_aperture_m": 0.085,
+                "transverse_axes_local": [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+                "transverse_axis_ranges_from_center_m": [
+                    [-0.03, 0.03],
+                    [-0.03, 0.03],
+                ],
+                "geometry_state": "configured_open_envelope",
+            },
+            "two_pad_grasp_alignment": {
+                "available": True,
+                "object_fits_configured_aperture": True,
+                "object_fully_between_open_pad_planes": True,
+                "object_center_inside_transverse_pad_bounds": True,
+                "object_center_inside_full_grasp_corridor": grasp_corridor_aligned,
+                "corrective_motion_grounding_contract": {
+                    "relation_id": (
+                        "interaction_origin_coincident_with_entity_center"
+                    ),
+                    "entity_id": "red_block",
+                    "required_terminal_position_anchor_id": (
+                        "red_block.center"
+                    ),
+                    "required_terminal_interaction_offset_from_anchor_m": [
+                        0.0,
+                        0.0,
+                        0.0,
+                    ],
+                    "applies_when": (
+                        "object_center_inside_full_grasp_corridor_false"
+                    ),
+                },
+                "required_contact_center_translation_robot_root_m": [
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+            },
         },
+        "current_contact": (
+            {
+                "available": True,
+                "touch": True,
+                "contact_bodies": {
+                    "available": True,
+                    "active_body_count": 2,
+                    "pairwise_force_direction_cosine": -0.95,
+                    "force_magnitude_ratio_min_over_max": 0.9,
+                    "channels": [
+                        {"body": "left", "touch": True},
+                        {"body": "right", "touch": True},
+                    ],
+                },
+            }
+            if retained_contact
+            else {
+                "available": True,
+                "touch": False,
+                "contact_bodies": {
+                    "available": True,
+                    "active_body_count": 0,
+                    "channels": [
+                        {"body": "left", "touch": False},
+                        {"body": "right", "touch": False},
+                    ],
+                },
+            }
+        ),
     }
     invocation_candidates = build_shadow_tool_invocation_candidates(
         instance,
@@ -263,6 +399,60 @@ def proposal(candidate_set, **overrides):
     return payload
 
 
+def waypoint_proposal(candidate_set, **overrides):
+    candidate = candidate_set.candidates[0]
+    payload = {
+        "schema_version": WORLD_EFFECT_TOOL_INVOCATION_SCHEMA_VERSION,
+        "observation_id": candidate_set.observation_id,
+        "decision": "propose_invocation",
+        "candidate_id": candidate.candidate_id,
+        "lease_id": candidate.lease_id,
+        "tool_id": candidate.tool_id,
+        "position_anchor_id": None,
+        "interaction_offset_from_anchor_m": [],
+        "orientation_alignment_id": None,
+        "invocation_arguments": {
+            "ordered_waypoints": [
+                {
+                    "position_anchor_id": (
+                        "red_block.visible_aabb_top_center"
+                    ),
+                    "interaction_offset_from_anchor_m": [0.0, 0.0, 0.20],
+                    "orientation_alignment_id": (
+                        "red_block.oriented_footprint_axes_base.0"
+                    ),
+                    "target_quaternion_wxyz": [
+                        0.70710678,
+                        0.0,
+                        0.70710678,
+                        0.0,
+                    ],
+                },
+                {
+                    "position_anchor_id": "red_block.center",
+                    "interaction_offset_from_anchor_m": [0.0, 0.0, 0.10],
+                    "orientation_alignment_id": (
+                        "red_block.oriented_footprint_axes_base.0"
+                    ),
+                    "target_quaternion_wxyz": [
+                        0.70710678,
+                        0.0,
+                        0.70710678,
+                        0.0,
+                    ],
+                },
+            ],
+        },
+        "acknowledged_invalidation_condition_ids": list(
+            candidate.invalidation_condition_ids
+        ),
+        "confidence": 0.92,
+        "reason": "The ordered path raises and then lowers the interaction frame.",
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_candidate_uses_runtime_schema_frame_transform_and_rgbd_axes():
     _, _, lease, _, candidates = fixture()
     candidate = candidates.candidates[0]
@@ -291,6 +481,15 @@ def test_candidate_uses_runtime_schema_frame_transform_and_rgbd_axes():
     )
     assert top_anchor.offset_min_m == pytest.approx((-0.02, -0.02, 0.0))
     assert top_anchor.offset_max_m == pytest.approx((0.02, 0.02, 0.35))
+    center_anchor = next(
+        item
+        for item in candidate.position_anchors
+        if item.anchor_id == "red_block.center"
+    )
+    assert center_anchor.offset_min_m == pytest.approx(
+        (-0.02, -0.02, -0.02)
+    )
+    assert center_anchor.offset_max_m == pytest.approx((0.02, 0.02, 0.35))
     serialized = candidates.to_dict()
     current_offsets = serialized["candidates"][0][
         "current_interaction_offsets_from_anchors"
@@ -300,10 +499,246 @@ def test_candidate_uses_runtime_schema_frame_transform_and_rgbd_axes():
         "red_block.visible_aabb_top_center",
     }
     assert serialized["candidates"][0]["current_interaction_position_m"] is not None
+    assert serialized["candidates"][0]["interaction_frame"][
+        "grasp_geometry"
+    ]["configured_open_aperture_m"] == pytest.approx(0.085)
+    assert serialized["candidates"][0]["interaction_frame"][
+        "two_pad_grasp_alignment"
+    ]["object_fully_between_open_pad_planes"] is True
     assert not serialized["execution_lease_issued"]
     assert not serialized["tool_called"]
     assert not serialized["handler_bound"]
     assert not serialized["dispatch_enabled"]
+
+
+def test_actuator_semantic_effect_binding_rejects_contradictory_command():
+    actuator_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "state": {
+                "type": "string",
+                "enum": ["engage", "disengage", "maintain"],
+            }
+        },
+        "required": ["state"],
+    }
+    *_, candidates = fixture(
+        tool_id="binary_clamp",
+        invocation_schema=actuator_schema,
+        tool_family="actuator",
+        semantic_effect_id="entity_attachment.release",
+        required_invocation_arguments={"state": "disengage"},
+    )
+    candidate = candidates.candidates[0]
+    assert candidate.semantic_effect_id == "entity_attachment.release"
+    assert candidate.model_argument_schema["properties"]["state"]["enum"] == [
+        "disengage"
+    ]
+    payload = {
+        "schema_version": WORLD_EFFECT_TOOL_INVOCATION_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_invocation",
+        "candidate_id": candidate.candidate_id,
+        "lease_id": candidate.lease_id,
+        "tool_id": candidate.tool_id,
+        "position_anchor_id": None,
+        "interaction_offset_from_anchor_m": [],
+        "orientation_alignment_id": None,
+        "invocation_arguments": {"state": "engage"},
+        "acknowledged_invalidation_condition_ids": list(
+            candidate.invalidation_condition_ids
+        ),
+        "confidence": 0.95,
+        "reason": "Attempt a contradictory transition.",
+    }
+
+    with pytest.raises(WorldEffectToolInvocationError, match="not an allowed value"):
+        ShadowToolInvocationGate(candidates).dispatch(payload)
+
+    payload["invocation_arguments"] = {"state": "disengage"}
+    accepted = ShadowToolInvocationGate(candidates).dispatch(payload)
+    assert accepted.invocation_arguments == {"state": "disengage"}
+
+    prompt = build_shadow_tool_invocation_prompt(
+        instruction="Recover the interaction.",
+        candidate_set=candidates,
+    )
+    assert '"semantic_effect_id": "entity_attachment.release"' in prompt
+    assert '"state": "disengage"' in prompt
+    assert "contradictory actuator state" in prompt
+    assert "must not\nveto the effect" in prompt
+    assert "apparent enclosure alone is not proof" in prompt
+    assert "For blocked or observe_again, do not copy them" in prompt
+    assert "A non-executing decision must never carry a latent command" in prompt
+
+
+def test_acquire_fails_closed_outside_advertised_two_pad_corridor():
+    actuator_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "state": {
+                "type": "string",
+                "enum": ["engage", "disengage", "maintain"],
+            }
+        },
+        "required": ["state"],
+    }
+    instance, lease_candidates, lease_decision, observation, _ = fixture(
+        tool_id="binary_clamp",
+        invocation_schema=actuator_schema,
+        tool_family="actuator",
+        semantic_effect_id="entity_attachment.acquire",
+        required_invocation_arguments={"state": "engage"},
+    )
+    observation = deepcopy(observation)
+    observation["interaction_frame"]["two_pad_grasp_alignment"][
+        "object_fully_between_open_pad_planes"
+    ] = False
+    candidates = build_shadow_tool_invocation_candidates(
+        instance,
+        lease_candidates,
+        lease_decision,
+        observation,
+    )
+    candidate = candidates.candidates[0]
+    payload = {
+        "schema_version": WORLD_EFFECT_TOOL_INVOCATION_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_invocation",
+        "candidate_id": candidate.candidate_id,
+        "lease_id": candidate.lease_id,
+        "tool_id": candidate.tool_id,
+        "position_anchor_id": None,
+        "interaction_offset_from_anchor_m": [],
+        "orientation_alignment_id": None,
+        "invocation_arguments": {"state": "engage"},
+        "acknowledged_invalidation_condition_ids": list(
+            candidate.invalidation_condition_ids
+        ),
+        "confidence": 0.95,
+        "reason": "Acquire before the object is between both pads.",
+    }
+
+    with pytest.raises(
+        WorldEffectToolInvocationError,
+        match="fully inside the advertised two-pad grasp corridor",
+    ):
+        ShadowToolInvocationGate(candidates).dispatch(payload)
+
+    observation["interaction_frame"]["two_pad_grasp_alignment"][
+        "object_fully_between_open_pad_planes"
+    ] = True
+    observation["interaction_frame"]["two_pad_grasp_alignment"][
+        "object_center_inside_transverse_pad_bounds"
+    ] = False
+    transversely_misaligned = build_shadow_tool_invocation_candidates(
+        instance,
+        lease_candidates,
+        lease_decision,
+        observation,
+    )
+    payload["observation_id"] = transversely_misaligned.observation_id
+    payload["candidate_id"] = transversely_misaligned.candidates[0].candidate_id
+    with pytest.raises(
+        WorldEffectToolInvocationError,
+        match="inside the advertised transverse pad-face bounds",
+    ):
+        ShadowToolInvocationGate(transversely_misaligned).dispatch(payload)
+
+    observation["interaction_frame"]["two_pad_grasp_alignment"][
+        "object_center_inside_transverse_pad_bounds"
+    ] = True
+    centered = build_shadow_tool_invocation_candidates(
+        instance,
+        lease_candidates,
+        lease_decision,
+        observation,
+    )
+    payload["observation_id"] = centered.observation_id
+    payload["candidate_id"] = centered.candidates[0].candidate_id
+    accepted = ShadowToolInvocationGate(centered).dispatch(payload)
+    assert accepted.invocation_arguments == {"state": "engage"}
+
+
+def test_corrective_motion_must_terminate_on_advertised_interaction_relation():
+    instance, lease_candidates, lease_decision, observation, _ = fixture()
+    observation = deepcopy(observation)
+    observation["interaction_frame"]["two_pad_grasp_alignment"][
+        "object_center_inside_full_grasp_corridor"
+    ] = False
+    candidates = build_shadow_tool_invocation_candidates(
+        instance,
+        lease_candidates,
+        lease_decision,
+        observation,
+    )
+
+    with pytest.raises(
+        WorldEffectToolInvocationError,
+        match="terminal anchor contradicts",
+    ):
+        ShadowToolInvocationGate(candidates).dispatch(proposal(candidates))
+
+    centered = proposal(
+        candidates,
+        position_anchor_id="red_block.center",
+        interaction_offset_from_anchor_m=[0.0, 0.0, 0.0],
+    )
+    decision = ShadowToolInvocationGate(candidates).dispatch(centered)
+    assert decision.position_anchor_id == "red_block.center"
+    assert decision.interaction_offset_from_anchor_m == (0.0, 0.0, 0.0)
+
+
+def test_retained_tactile_attachment_disables_pregrasp_terminal_correction():
+    *_, candidates = fixture(
+        grasp_corridor_aligned=False,
+        retained_contact=True,
+    )
+    candidate = candidates.candidates[0]
+
+    assert candidate.retained_contact_supported is True
+    transported = ShadowToolInvocationGate(candidates).dispatch(
+        proposal(candidates)
+    )
+    assert transported.position_anchor_id == "red_block.visible_aabb_top_center"
+    assert transported.interaction_offset_from_anchor_m == (0.0, 0.0, 0.05)
+
+
+def test_corrective_waypoint_path_may_use_clearance_but_must_finish_centered():
+    instance, lease_candidates, lease_decision, observation, _ = fixture(
+        tool_id="bounded_dls_waypoint_path",
+        invocation_schema=ORDERED_WAYPOINT_INVOCATION_SCHEMA,
+    )
+    observation = deepcopy(observation)
+    observation["interaction_frame"]["two_pad_grasp_alignment"][
+        "object_center_inside_full_grasp_corridor"
+    ] = False
+    candidates = build_shadow_tool_invocation_candidates(
+        instance,
+        lease_candidates,
+        lease_decision,
+        observation,
+    )
+    invalid = waypoint_proposal(candidates)
+    with pytest.raises(
+        WorldEffectToolInvocationError,
+        match="terminal offset contradicts",
+    ):
+        ShadowToolInvocationGate(candidates).dispatch(invalid)
+
+    valid = waypoint_proposal(candidates)
+    valid["invocation_arguments"]["ordered_waypoints"][-1].update(
+        {
+            "position_anchor_id": "red_block.center",
+            "interaction_offset_from_anchor_m": [0.0, 0.0, 0.0],
+        }
+    )
+    accepted = ShadowToolInvocationGate(candidates).dispatch(valid)
+    assert accepted.grounding_assessment["ordered_waypoints"][-1][
+        "position_anchor_id"
+    ] == "red_block.center"
 
 
 def test_motion_invocation_rejects_a_materialized_target_already_within_tolerance():
@@ -349,6 +784,85 @@ def test_runner_motion_factory_advertises_absolute_pose_invocation_schema():
     assert '"target_quaternion_wxyz"' in registry
     assert '"x-runtime-constraints"' in registry
     assert '"maximum_alignment_error_deg"' in registry
+    assert 'executor_id="bounded_dls_waypoint_path"' in registry
+    assert '"ordered_waypoints"' in registry
+    assert '"grounding_mode": "ordered_waypoint_path"' in registry
+    assert source.count("for invocation_attempt in range") == 2
+
+
+def test_ordered_waypoint_candidate_exposes_model_grounding_not_runtime_positions():
+    *_, candidates = fixture(
+        tool_id="bounded_dls_waypoint_path",
+        invocation_schema=ORDERED_WAYPOINT_INVOCATION_SCHEMA,
+    )
+    candidate = candidates.candidates[0]
+    item_schema = candidate.model_argument_schema["properties"][
+        "ordered_waypoints"
+    ]["items"]
+
+    assert candidate.ordered_waypoint_grounding_required
+    assert candidate.materialized_argument_fields == (
+        "ordered_waypoints[].target_position_m",
+    )
+    assert "target_position_m" not in item_schema["properties"]
+    assert set(item_schema["properties"]["position_anchor_id"]["enum"]) == {
+        "red_block.center",
+        "red_block.visible_aabb_top_center",
+    }
+    assert (
+        "red_block.oriented_footprint_axes_base.0"
+        in item_schema["properties"]["orientation_alignment_id"]["enum"]
+    )
+    response_schema = shadow_tool_invocation_json_schema(candidates)
+    response_properties = response_schema["properties"]
+    assert response_properties["position_anchor_id"]["enum"] == [None]
+    assert response_properties["interaction_offset_from_anchor_m"][
+        "maxItems"
+    ] == 0
+    assert response_properties["orientation_alignment_id"]["enum"] == [None]
+
+
+def test_gate_materializes_every_ordered_waypoint_under_one_invocation():
+    *_, candidates = fixture(
+        tool_id="bounded_dls_waypoint_path",
+        invocation_schema=ORDERED_WAYPOINT_INVOCATION_SCHEMA,
+    )
+    decision = ShadowToolInvocationGate(candidates).dispatch(
+        waypoint_proposal(candidates)
+    )
+
+    assert decision.position_anchor_id is None
+    assert decision.orientation_alignment_id is None
+    assert decision.invocation_arguments["ordered_waypoints"][0][
+        "target_position_m"
+    ] == pytest.approx([0.50, 0.20, 0.38])
+    assert decision.invocation_arguments["ordered_waypoints"][1][
+        "target_position_m"
+    ] == pytest.approx([0.50, 0.20, 0.26])
+    assert decision.grounding_assessment["ordered_waypoint_count"] == 2
+    assert len(decision.grounding_assessment["ordered_waypoints"]) == 2
+    assert decision.to_dict()["invocation_validated"]
+    assert not decision.to_dict()["execution_lease_issued"]
+
+
+def test_gate_rejects_invalid_ordered_waypoint_envelope_and_noop_segment():
+    *_, candidates = fixture(
+        tool_id="bounded_dls_waypoint_path",
+        invocation_schema=ORDERED_WAYPOINT_INVOCATION_SCHEMA,
+    )
+    outside = waypoint_proposal(candidates)
+    outside["invocation_arguments"]["ordered_waypoints"][0][
+        "interaction_offset_from_anchor_m"
+    ] = [0.03, 0.0, 0.20]
+    with pytest.raises(WorldEffectToolInvocationError, match="anchor envelope"):
+        ShadowToolInvocationGate(candidates).dispatch(outside)
+
+    duplicate = waypoint_proposal(candidates)
+    duplicate["invocation_arguments"]["ordered_waypoints"][1] = deepcopy(
+        duplicate["invocation_arguments"]["ordered_waypoints"][0]
+    )
+    with pytest.raises(WorldEffectToolInvocationError, match="position tolerance"):
+        ShadowToolInvocationGate(candidates).dispatch(duplicate)
 
 
 def test_gate_accepts_exact_grounded_pose_and_recomputes_alignment():
@@ -378,10 +892,30 @@ def test_gate_rejects_stale_unadvertised_and_unacknowledged_invocations():
     with pytest.raises(WorldEffectToolInvocationError, match="not advertised"):
         gate.dispatch(proposal(candidates, candidate_id="invented:invocation"))
 
+    with pytest.raises(
+        WorldEffectToolInvocationError,
+        match="selected candidate requires lease_id='shadow-execution-lease:test'",
+    ):
+        gate.dispatch(proposal(candidates, lease_id="execution-lease:test"))
+
     with pytest.raises(WorldEffectToolInvocationError, match="acknowledge every"):
         gate.dispatch(
             proposal(candidates, acknowledged_invalidation_condition_ids=[])
         )
+
+
+def test_prompt_surfaces_exact_candidate_lease_tool_identity_triple():
+    *_, candidates = fixture(tool_id="bounded_dls_waypoint_path")
+
+    prompt = build_shadow_tool_invocation_prompt(
+        instruction="Move the red block.",
+        candidate_set=candidates,
+    )
+
+    assert "Exact proposal identity triples" in prompt
+    assert f'"candidate_id": "{candidates.candidates[0].candidate_id}"' in prompt
+    assert f'"lease_id": "{candidates.candidates[0].lease_id}"' in prompt
+    assert '"tool_id": "bounded_dls_waypoint_path"' in prompt
 
 
 def test_gate_rejects_model_materialized_field_and_wrong_orientation_axis():
@@ -456,6 +990,9 @@ def test_prompt_is_explicitly_typed_grounded_and_non_dispatching():
     assert "already within tolerance" in lowered
     assert "do not resubmit that no-op target" in lowered
     assert "target quaternion must rotate" in lowered
+    assert "object center\ncoincident with the advertised grasp-corridor center" in lowered
+    assert "rejects\npremature acquisition" in lowered
+    assert "opposing tactile\nevidence has already established the attachment" in lowered
     assert "lease remains\nunissued" in lowered
     assert "no handler is bound and no tool or simulator action is called" in lowered
     assert '"execution_authority": false' in lowered
@@ -497,3 +1034,29 @@ def test_runner_wires_invocation_after_lease_and_before_shadow_boundary():
     assert '"execution_authority": False' in block
     assert "_execute_adaptive_stage(" not in block
     assert "actuator_transition_handler(" not in block
+
+
+def test_runner_replans_a_nonexecuting_initial_invocation_before_handoff():
+    source = (
+        Path(__file__).parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    replan_flag = source.index(
+        "initial_world_effect_replan_required = True"
+    )
+    replan_branch = source.index(
+        "if initial_world_effect_replan_required:", replan_flag
+    )
+    continuation_planner = source.index(
+        "_plan_guarded_world_effect_continuation(", replan_branch
+    )
+    required_handoff = source.index(
+        "required_handoff = {", continuation_planner
+    )
+
+    assert replan_flag < replan_branch < continuation_planner < required_handoff
+    branch = source[replan_branch:required_handoff]
+    assert '"world_effect_initial_replans"' in branch
+    assert '== "runtime_lease_issued"' in branch
+    assert "issued_runtime_lease = bootstrap_bundle" in branch

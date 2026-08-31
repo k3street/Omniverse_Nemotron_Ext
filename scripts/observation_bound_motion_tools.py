@@ -15,7 +15,7 @@ embodiment, or executor implementation.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 import re
@@ -1141,6 +1141,9 @@ class ActuatorExecutorSpec:
     command_schema: Mapping[str, Any]
     configuration_schema: Mapping[str, Any]
     capability_tags: tuple[str, ...] = ()
+    semantic_command_bindings: Mapping[str, Mapping[str, Any]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         _required_text(self.executor_id, "executor_id")
@@ -1167,6 +1170,21 @@ class ActuatorExecutorSpec:
                 raise MotionToolValidationError(
                     f"capability_tags[{index}] has an invalid format"
                 )
+        if not isinstance(self.semantic_command_bindings, Mapping):
+            raise MotionToolValidationError(
+                "semantic_command_bindings must be an object"
+            )
+        for effect_id, command in self.semantic_command_bindings.items():
+            if effect_id not in self.capability_tags:
+                raise MotionToolValidationError(
+                    "semantic command binding must name an advertised capability tag"
+                )
+            self._validate_object(
+                command,
+                self.command_schema,
+                f"semantic_command_bindings.{effect_id}",
+                optional=False,
+            )
 
     def advertisement(self) -> dict[str, Any]:
         """Describe runtime semantics without selecting an embodiment."""
@@ -1181,6 +1199,10 @@ class ActuatorExecutorSpec:
             ),
             "configuration_schema": _copy_json(
                 self.configuration_schema, "configuration_schema"
+            ),
+            "semantic_command_bindings": _copy_json(
+                self.semantic_command_bindings,
+                "semantic_command_bindings",
             ),
         }
 
