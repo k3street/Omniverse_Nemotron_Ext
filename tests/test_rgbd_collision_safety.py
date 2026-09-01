@@ -283,6 +283,7 @@ def test_two_pad_alignment_reports_center_correction_and_aperture_admission():
         "entity_id": "object",
         "required_terminal_position_anchor_id": "object.center",
         "required_terminal_interaction_offset_from_anchor_m": [0.0, 0.0, 0.0],
+        "maximum_terminal_position_error_m": 0.005,
         "applies_when": "object_center_inside_full_grasp_corridor_false",
         "source": "fresh_rgbd_plus_runtime_interaction_geometry",
         "motion_authority": False,
@@ -298,6 +299,57 @@ def test_two_pad_alignment_reports_center_correction_and_aperture_admission():
     assert centered["object_fully_between_open_pad_planes"] is True
     assert centered["object_center_inside_full_grasp_corridor"] is True
     assert centered["pad_plane_margin_m"] == pytest.approx(0.0225)
+
+
+def test_two_pad_alignment_keeps_pad_geometry_above_object_support_bound():
+    scene = {
+        "geometries": [
+            {
+                "runtime_id": "cube",
+                "center_base_m": [0.414, 0.075, 0.027],
+                "visible_extent_base_m": [0.044, 0.044, 0.044],
+                "visible_aabb_min_base_m": [0.392, 0.053, 0.005],
+                "visible_aabb_max_base_m": [0.436, 0.097, 0.049],
+                "support_plane_normal_base": [0.0, 0.0, 1.0],
+            }
+        ]
+    }
+    actuator = {
+        "grasp_corridor": {
+            "center_robot_root_m": [0.36, 0.0, 0.35],
+            "closing_axis_robot_root": [0.0, -1.0, 0.0],
+            "configured_open_aperture_m": 0.083,
+            "transverse_axes_robot_root": [
+                [0.0, 0.0, -1.0],
+                [1.0, 0.0, 0.0],
+            ],
+            "transverse_axis_ranges_from_center_m": [
+                [-0.0285, 0.0285],
+                [-0.0135, 0.0135],
+            ],
+        }
+    }
+
+    alignment = two_pad_grasp_alignment_observation(
+        scene_geometry=scene,
+        actuator_geometry=actuator,
+        object_runtime_id="cube",
+    )
+
+    support = alignment["support_clearance_alignment"]
+    assert support["available"] is True
+    assert support["minimum_clearance_support_m"] == pytest.approx(0.0335)
+    assert support["desired_interaction_support_m"] == pytest.approx(0.049)
+    assert support["terminal_interaction_offset_m"] == pytest.approx(
+        [0.0, 0.0, 0.022]
+    )
+    contract = alignment["corrective_motion_grounding_contract"]
+    assert contract["relation_id"] == (
+        "interaction_origin_support_clearance_aligned_with_entity"
+    )
+    assert contract["required_terminal_interaction_offset_from_anchor_m"] == (
+        pytest.approx([0.0, 0.0, 0.022])
+    )
 
 
 def test_instance_geometry_groups_scene_assets_and_reports_base_frame_axes():

@@ -345,6 +345,137 @@ class GoalActivationCandidateSet:
         }
 
 
+def compact_goal_activation_revision_evidence(
+    candidate_set: GoalActivationCandidateSet,
+) -> dict[str, Any]:
+    """Summarize activation evidence at the model revision boundary.
+
+    Full capability assessments contain runtime tool advertisements and their
+    schemas.  Those details are useful in the audit trace, but are both too
+    deeply nested and irrelevant when asking the reasoning model to restructure
+    a goal graph.  Keep only the evidence needed to preserve outcomes and
+    separate an aggregate goal around the exact planning blocker.
+    """
+    if not isinstance(candidate_set, GoalActivationCandidateSet):
+        raise WorldGoalActivationError(
+            "revision evidence requires GoalActivationCandidateSet"
+        )
+
+    def compact_capability(
+        assessment: WorldCapabilityAssessment,
+    ) -> dict[str, Any]:
+        evidence = assessment.evidence
+        raw_provider = evidence.get("runtime_effect_provider_assessment")
+        provider_summary: dict[str, Any] | None = None
+        if isinstance(raw_provider, Mapping):
+            binding_summaries: list[dict[str, Any]] = []
+            raw_bindings = raw_provider.get("bindings")
+            if isinstance(raw_bindings, Sequence) and not isinstance(
+                raw_bindings, (str, bytes)
+            ):
+                for raw_binding in raw_bindings:
+                    if not isinstance(raw_binding, Mapping):
+                        continue
+                    raw_missing = raw_binding.get("missing_requirement_ids", ())
+                    missing_requirement_ids = (
+                        [
+                            item
+                            for item in raw_missing
+                            if isinstance(item, str)
+                        ]
+                        if isinstance(raw_missing, Sequence)
+                        and not isinstance(raw_missing, (str, bytes))
+                        else []
+                    )
+                    binding_summaries.append(
+                        {
+                            "provider_id": raw_binding.get("provider_id"),
+                            "compatible": raw_binding.get("compatible"),
+                            "active": raw_binding.get("active"),
+                            "missing_requirement_ids": missing_requirement_ids,
+                        }
+                    )
+            provider_summary = {
+                "world_capability_id": raw_provider.get("world_capability_id"),
+                "binding_ready": raw_provider.get("binding_ready"),
+                "active_binding_ready": raw_provider.get(
+                    "active_binding_ready"
+                ),
+                "preferred_provider_id": raw_provider.get(
+                    "preferred_provider_id"
+                ),
+                "bindings": binding_summaries,
+            }
+
+        raw_planning_blockers = evidence.get("planning_blockers", ())
+        planning_blockers = (
+            [item for item in raw_planning_blockers if isinstance(item, str)]
+            if isinstance(raw_planning_blockers, Sequence)
+            and not isinstance(raw_planning_blockers, (str, bytes))
+            else []
+        )
+        return {
+            "capability_id": assessment.capability_id,
+            "planning_ready": assessment.planning_ready,
+            "execution_ready": assessment.execution_ready,
+            "missing_evidence": list(assessment.missing_evidence),
+            "planning_blockers": planning_blockers,
+            "runtime_effect_provider": provider_summary,
+        }
+
+    return {
+        "schema_version": "world-goal-activation-revision-evidence.v1",
+        "graph_id": candidate_set.graph_id,
+        "membership_lease_id": candidate_set.membership_lease_id,
+        "candidates": [
+            {
+                "goal_id": item.goal_id,
+                "desired_state": [
+                    _json_copy(predicate, "candidate desired_state")
+                    for predicate in item.desired_state
+                ],
+                "dependency_goal_ids": list(item.dependency_goal_ids),
+                "planning_capability_ids": list(item.planning_capability_ids()),
+            }
+            for item in candidate_set.candidates
+        ],
+        "satisfied_goal_ids": list(candidate_set.satisfied_goal_ids),
+        "dependency_blocked_goal_ids": list(
+            candidate_set.dependency_blocked_goal_ids
+        ),
+        "evidence_blocked_goal_ids": list(candidate_set.evidence_blocked_goal_ids),
+        "evidence_blockers": [
+            {
+                "goal_id": blocker.goal_id,
+                "reason_codes": list(blocker.reason_codes),
+                "desired_state": [
+                    _json_copy(
+                        item.get("predicate", {}),
+                        "blocker desired_state predicate",
+                    )
+                    for item in blocker.desired_state_evaluations
+                ],
+                "valid_while": [
+                    _json_copy(
+                        item.get("predicate", {}),
+                        "blocker valid_while predicate",
+                    )
+                    for item in blocker.valid_while_evaluations
+                ],
+                "capability_assessments": [
+                    compact_capability(item)
+                    for item in blocker.capability_assessments
+                ],
+            }
+            for blocker in candidate_set.evidence_blockers
+        ],
+        "completion_blocked_goal_ids": list(
+            candidate_set.completion_blocked_goal_ids
+        ),
+        "execution_authority": False,
+    }
+
+
 def _goal_satisfaction(
     goal: WorldGoalNode,
     predicate_registry: WorldPredicateEvaluatorRegistry,

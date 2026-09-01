@@ -327,6 +327,117 @@ def two_pad_grasp_alignment_observation(
         item["object_center_inside_pad_face_bounds"] is True
         for item in transverse_assessments
     )
+    minimum_transverse_half_span = min(
+        min(abs(float(value)) for value in raw_range)
+        for raw_range in raw_transverse_ranges
+    )
+    maximum_terminal_position_error_m = min(
+        0.005,
+        max(0.001, 0.25 * minimum_transverse_half_span),
+    )
+    terminal_interaction_offset = np.zeros(3, dtype=np.float64)
+    support_clearance_alignment: dict[str, object] = {
+        "available": False,
+        "reason": "support bounds or compatible pad-height axis unavailable",
+    }
+    raw_support_normal = geometry.get("support_plane_normal_base")
+    raw_aabb_min = geometry.get("visible_aabb_min_base_m")
+    raw_aabb_max = geometry.get("visible_aabb_max_base_m")
+    if (
+        raw_support_normal is not None
+        and raw_aabb_min is not None
+        and raw_aabb_max is not None
+    ):
+        support_normal = np.asarray(raw_support_normal, dtype=np.float64)
+        aabb_min = np.asarray(raw_aabb_min, dtype=np.float64)
+        aabb_max = np.asarray(raw_aabb_max, dtype=np.float64)
+        if any(
+            value.shape != (3,) or not np.isfinite(value).all()
+            for value in (support_normal, aabb_min, aabb_max)
+        ):
+            raise ValueError("support normal and visible AABB must be finite 3-vectors")
+        support_norm = float(np.linalg.norm(support_normal))
+        if support_norm <= 1.0e-9:
+            raise ValueError("support plane normal must be non-zero")
+        support_normal /= support_norm
+        normalized_transverse_axes: list[np.ndarray] = []
+        normalized_transverse_ranges: list[np.ndarray] = []
+        for raw_axis, raw_range in zip(
+            raw_transverse_axes, raw_transverse_ranges
+        ):
+            axis = np.asarray(raw_axis, dtype=np.float64)
+            axis /= float(np.linalg.norm(axis))
+            normalized_transverse_axes.append(axis)
+            normalized_transverse_ranges.append(
+                np.asarray(raw_range, dtype=np.float64)
+            )
+        support_axis_index = int(
+            np.argmax(
+                [
+                    abs(float(np.dot(support_normal, axis)))
+                    for axis in normalized_transverse_axes
+                ]
+            )
+        )
+        support_axis = normalized_transverse_axes[support_axis_index]
+        support_axis_alignment = float(
+            np.dot(support_normal, support_axis)
+        )
+        closing_support_alignment = abs(
+            float(np.dot(support_normal, closing_axis))
+        )
+        if (
+            abs(support_axis_alignment) >= 0.9
+            and closing_support_alignment <= 0.25
+        ):
+            support_range = normalized_transverse_ranges[support_axis_index]
+            pad_support_values = support_axis_alignment * support_range
+            pad_low_from_center = float(np.min(pad_support_values))
+            object_support_min = float(
+                np.dot(
+                    support_normal,
+                    np.where(support_normal >= 0.0, aabb_min, aabb_max),
+                )
+            )
+            object_support_max = float(
+                np.dot(
+                    support_normal,
+                    np.where(support_normal >= 0.0, aabb_max, aabb_min),
+                )
+            )
+            object_center_support = float(
+                np.dot(support_normal, object_center)
+            )
+            minimum_clearance_support = (
+                object_support_min - pad_low_from_center
+            )
+            desired_interaction_support = max(
+                minimum_clearance_support,
+                object_support_max,
+            )
+            support_offset = desired_interaction_support - object_center_support
+            terminal_interaction_offset = support_offset * support_normal
+            support_clearance_alignment = {
+                "available": True,
+                "source": "rgbd_object_support_bound_plus_contact_pad_extent",
+                "support_plane_normal_base": support_normal.tolist(),
+                "pad_height_axis_index": support_axis_index,
+                "pad_low_from_interaction_center_m": pad_low_from_center,
+                "object_support_min_m": object_support_min,
+                "object_support_max_m": object_support_max,
+                "minimum_clearance_support_m": minimum_clearance_support,
+                "object_center_support_m": object_center_support,
+                "desired_interaction_support_m": desired_interaction_support,
+                "terminal_interaction_offset_m": (
+                    terminal_interaction_offset.tolist()
+                ),
+                "preserves_object_support_clearance": True,
+            }
+    relation_id = (
+        "interaction_origin_support_clearance_aligned_with_entity"
+        if bool(support_clearance_alignment.get("available"))
+        else "interaction_origin_coincident_with_entity_center"
+    )
     return {
         "available": True,
         "source": "fresh_rgbd_geometry_plus_runtime_two_pad_corridor",
@@ -356,19 +467,19 @@ def two_pad_grasp_alignment_observation(
         "object_center_inside_full_grasp_corridor": bool(
             pad_plane_margin >= 0.0 and center_inside_transverse_bounds
         ),
+        "support_clearance_alignment": support_clearance_alignment,
         "corrective_motion_grounding_contract": {
-            "relation_id": (
-                "interaction_origin_coincident_with_entity_center"
-            ),
+            "relation_id": relation_id,
             "entity_id": object_runtime_id,
             "required_terminal_position_anchor_id": (
                 f"{object_runtime_id}.center"
             ),
-            "required_terminal_interaction_offset_from_anchor_m": [
-                0.0,
-                0.0,
-                0.0,
-            ],
+            "required_terminal_interaction_offset_from_anchor_m": (
+                terminal_interaction_offset.tolist()
+            ),
+            "maximum_terminal_position_error_m": (
+                maximum_terminal_position_error_m
+            ),
             "applies_when": (
                 "object_center_inside_full_grasp_corridor_false"
             ),

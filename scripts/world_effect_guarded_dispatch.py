@@ -7,7 +7,8 @@ lease before handler resolution, and the lease is consumed after one call.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 import hashlib
 import json
 import math
@@ -36,6 +37,115 @@ WorldEffectHandler = Callable[
     [Mapping[str, Any], Mapping[str, Any], RevocableWorldEffectRuntimeLease],
     Mapping[str, Any],
 ]
+
+
+@dataclass
+class TemporalShapeDriftConfirmation:
+    """Confirm RGB-D extent-only drift across a bounded observation window.
+
+    Independently tracked translation remains an immediate invalidation.  The
+    temporal gate applies only when that tracker says the entity center is
+    stable and the sole invalidating signal is a reliable visible-extent
+    change.  This filters one-frame segmentation/visibility noise without
+    weakening fail-closed behavior when no independent tracker is available.
+    """
+
+    required_observations: int = 2
+    observation_window: int = 3
+    _history: dict[str, deque[bool]] = field(default_factory=dict, init=False)
+    _observation_counts: dict[str, int] = field(default_factory=dict, init=False)
+    _latest_assessments: dict[str, dict[str, Any]] = field(
+        default_factory=dict, init=False
+    )
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("required_observations", self.required_observations),
+            ("observation_window", self.observation_window),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise WorldEffectGuardedDispatchError(
+                    f"{name} must be a positive integer"
+                )
+        if self.required_observations > self.observation_window:
+            raise WorldEffectGuardedDispatchError(
+                "required_observations cannot exceed observation_window"
+            )
+
+    def assess(
+        self,
+        entity_id: str,
+        assessment: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Apply temporal evidence to one fused geometry assessment."""
+        entity_id = _identifier(entity_id, "entity_id")
+        result = _json_copy(assessment, "assessment")
+        tracker_available = (
+            result.get("center_translation_source") == "tracked_entity_pose"
+        )
+        tracked_center_stable = bool(
+            tracker_available
+            and not result.get("center_shift_exceeded")
+            and isinstance(result.get("tracked_center_shift_m"), (int, float))
+        )
+        extent_only_candidate = bool(
+            tracked_center_stable
+            and result.get("extent_change_invalidating")
+            and not result.get("center_shift_exceeded")
+        )
+        history = self._history.setdefault(
+            entity_id, deque(maxlen=self.observation_window)
+        )
+        history.append(extent_only_candidate)
+        self._observation_counts[entity_id] = (
+            self._observation_counts.get(entity_id, 0) + 1
+        )
+        positive_count = sum(history)
+        confirmed = bool(
+            extent_only_candidate
+            and positive_count >= self.required_observations
+        )
+
+        # Any fused invalidation that is not the tracked-stable, extent-only
+        # case remains immediate.  In particular, missing independent tracking
+        # never gains temporal grace.
+        raw_invalidated = bool(result.get("invalidated"))
+        immediate_invalidation = bool(raw_invalidated and not extent_only_candidate)
+        result["invalidated"] = bool(immediate_invalidation or confirmed)
+        result["temporal_shape_drift_confirmation"] = {
+            "eligible": extent_only_candidate,
+            "history": list(history),
+            "positive_observations": positive_count,
+            "required_observations": self.required_observations,
+            "observation_window": self.observation_window,
+            "confirmed": confirmed,
+            "decision": (
+                "confirmed_invalidation"
+                if confirmed
+                else (
+                    "pending_confirmation"
+                    if extent_only_candidate
+                    else "not_applicable"
+                )
+            ),
+        }
+        self._latest_assessments[entity_id] = result
+        return result
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "required_observations": self.required_observations,
+            "observation_window": self.observation_window,
+            "entities": {
+                entity_id: {
+                    "history": list(history),
+                    "positive_observations": sum(history),
+                    "total_observations": self._observation_counts.get(entity_id, 0),
+                    "latest_assessment": self._latest_assessments.get(entity_id),
+                }
+                for entity_id, history in sorted(self._history.items())
+            },
+        }
 
 
 class WorldEffectGuardedDispatchError(RuntimeError):

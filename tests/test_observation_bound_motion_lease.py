@@ -138,9 +138,24 @@ def test_runner_executor_advertises_configurable_lease_conditions():
         '"maximum_tracked_orientation_error_deg"',
         '"minimum_observed_clearance_m"',
         '"minimum_progress_m"',
+        '"minimum_orientation_progress_deg"',
         '"maximum_stalled_observations"',
     ):
         assert field in source
+
+
+def test_runner_stall_detection_accepts_translation_or_orientation_progress():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    start = source.index("orientation_progress_deg = float(")
+    stall_logic = source[start : start + 900]
+    assert "translation_progressed =" in stall_logic
+    assert "orientation_progressed =" in stall_logic
+    assert "if not translation_progressed and not orientation_progressed:" in stall_logic
+    assert 'record["measured_orientation_progress_deg"]' in source
 
 
 def test_lease_source_admission_rejects_only_requested_unavailable_sources():
@@ -366,6 +381,12 @@ def test_runner_geometry_adapters_fail_closed_and_use_contact_prim_bounds():
     assert "convert_camera_frame_orientation_convention(" in rgbd_adapter
     assert 'summary["calibration_valid"]' in rgbd_adapter
     assert 'summary["available"] = False' in rgbd_adapter
+    assert "RGBD_CAMERA_QUATERNION_CONVENTION" in rgbd_adapter
+    assert "cached_convention in candidates" in rgbd_adapter
+    assert '"quaternion_convention_cache_hit"' in rgbd_adapter
+    assert '"quaternion_convention_candidates_evaluated"' in rgbd_adapter
+    assert "depth_m = _tensor_numpy(depth_value)" in rgbd_adapter
+    assert "instance_ids = _tensor_numpy(instance_value)" in rgbd_adapter
 
     contact_start = source.index("def _contact_geometry_local_from_usd(")
     contact_end = source.index("def _actuator_contact_geometry(", contact_start)

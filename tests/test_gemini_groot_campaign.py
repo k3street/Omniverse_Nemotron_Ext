@@ -6,6 +6,7 @@ from scripts.run_gemini_groot_campaign import (
     command_for_variation,
     contact_admission_for_episode,
     plan_variations,
+    world_effect_acceptance_for_attempt,
 )
 
 
@@ -59,8 +60,11 @@ def test_campaign_command_points_at_success_gated_training_output():
         movable_object_asset="bagel_06",
         movable_object_label="bagel",
         instruction="Use the observed object axis to align the gripper.",
+        task="BlocksInBinTask",
     )
     assert "--training-episode-dir" in command
+    assert "--guarded-world-effect-execution" in command
+    assert command[command.index("--task") + 1] == "BlocksInBinTask"
     assert command[command.index("--episode-index") + 1] == "9"
     assert "--movable-object-yaw-deg" in command
     assert command[command.index("--movable-object-asset") + 1] == "bagel_06"
@@ -70,9 +74,31 @@ def test_campaign_command_points_at_success_gated_training_output():
     )
     assert "--light-intensity" in command
     assert "--randomize-background" in command
-    assert "--headless" in command
+    assert command[command.index("--viz") + 1] == "none"
     assert "--no-periodic-motion-observations" in command
     assert "--no-ros2-sensor-ingress" in command
+
+
+def test_campaign_can_rotate_across_scene_role_assets():
+    variations = plan_variations(
+        4,
+        seed=0,
+        object_xy=0.01,
+        plate_xy=0.01,
+        yaw_degrees=10.0,
+        light_min=2000.0,
+        light_max=3000.0,
+        movable_object_assets=("red_block", "blue_block"),
+        target_receptacle_assets=("grey_bin",),
+    )
+
+    assert {item["movable_object_asset"] for item in variations} == {
+        "red_block",
+        "blue_block",
+    }
+    assert {item["target_receptacle_asset"] for item in variations} == {
+        "grey_bin"
+    }
 
 
 def test_campaign_counts_only_manifest_rows_with_passing_contact_gate(tmp_path):
@@ -92,3 +118,11 @@ def test_campaign_counts_only_manifest_rows_with_passing_contact_gate(tmp_path):
     assert contact_admission_for_episode(tmp_path, 3)["passed"] is False
     assert contact_admission_for_episode(tmp_path, 4)["touch_samples"] == 12
     assert contact_admission_for_episode(tmp_path, 5) is None
+
+
+def test_campaign_reads_world_effect_acceptance(tmp_path):
+    assert world_effect_acceptance_for_attempt(tmp_path) is None
+    (tmp_path / "episode_acceptance.json").write_text(
+        json.dumps({"accepted": True, "rejection_reasons": []})
+    )
+    assert world_effect_acceptance_for_attempt(tmp_path)["accepted"] is True

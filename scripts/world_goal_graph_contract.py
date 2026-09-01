@@ -571,6 +571,13 @@ def semantic_scene_inventory_from_state(state: Mapping[str, Any]) -> dict[str, A
         raise WorldIntentValidationError(
             "state.rgbd_scene_geometry.geometries must be an array"
         )
+    raw_tracked_positions = state.get("tracked_entity_positions_m", {})
+    if raw_tracked_positions is None:
+        raw_tracked_positions = {}
+    if not isinstance(raw_tracked_positions, Mapping):
+        raise WorldIntentValidationError(
+            "state.tracked_entity_positions_m must be an object"
+        )
     entities: dict[str, dict[str, Any]] = {
         "observed_scene": {
             "entity_id": "observed_scene",
@@ -597,6 +604,31 @@ def semantic_scene_inventory_from_state(state: Mapping[str, Any]) -> dict[str, A
             for key in _GEOMETRY_KEYS
             if key in raw
         }
+        tracked_position = raw_tracked_positions.get(entity_id)
+        if tracked_position is not None:
+            if (
+                not isinstance(tracked_position, (list, tuple))
+                or len(tracked_position) != 3
+                or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value))
+                    for value in tracked_position
+                )
+            ):
+                raise WorldIntentValidationError(
+                    "state.tracked_entity_positions_m."
+                    f"{entity_id} must be a finite 3-vector"
+                )
+            visible_center = geometry.get("center_base_m")
+            if visible_center is not None:
+                geometry["rgbd_visible_center_base_m"] = visible_center
+            geometry["center_base_m"] = [
+                float(value) for value in tracked_position
+            ]
+            geometry["center_source"] = (
+                "runtime_tracker_plus_rgbd_center_calibration"
+            )
         entities[entity_id] = {
             "entity_id": entity_id,
             "label": entity_id.replace("_", " "),
@@ -817,7 +849,24 @@ def build_world_goal_graph_prompt(
             _json_copy(revision_context, "revision_context"),
             indent=2,
         )
-        revision_instructions = f"""
+        if revision_context.get("trigger") == "selected_goal_completed":
+            revision_instructions = f"""
+This is a required fresh-graph boundary after one selected goal completed.
+The previous graph, completed goal, fresh evaluation, and unresolved outcomes
+are:
+{revision_json}
+
+Return a complete replacement graph, not a patch, and use a fresh graph_id.
+Preserve every unresolved outcome and the exact task-membership coverage. The
+completed goal may remain as an already-satisfied outcome or be represented by
+fresh scene evidence, but it must not cause any other member outcome to
+disappear. Select status=complete only when the fresh observation supports the
+entire human instruction and no unresolved outcome remains. Otherwise return a
+ready graph exposing the next independently achievable outcomes. This graph has
+no execution authority.
+"""
+        else:
+            revision_instructions = f"""
 This is a bounded revision because the previous graph failed the supplied
 evidence gate. The previous graph and exact runtime blocker evidence or
 scope-audit evidence are:

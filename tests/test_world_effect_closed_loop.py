@@ -287,7 +287,7 @@ def test_sequence_budget_is_runtime_owned_and_bounded():
         budget.allows(True)
 
 
-def test_runner_reobserves_then_replans_motion_or_actuator_with_single_use_leases():
+def test_runner_reobserves_then_dequeues_until_sensor_invalidates_composition():
     source = Path("scripts/run_gemini_robotics_robolab.py").read_text()
 
     progress = source.index("progress = assess_world_effect_progress(")
@@ -297,27 +297,48 @@ def test_runner_reobserves_then_replans_motion_or_actuator_with_single_use_lease
     budget_gate = source.index(
         "world_effect_sequence_budget.allows(", progress_gate
     )
-    replan = source.index(
-        "_plan_guarded_world_effect_continuation(", budget_gate
+    dequeue = source.index(
+        "active_composed_tool_call = composed_tool_queue.pop(0)", budget_gate
     )
+    materialize = source.index(
+        "_materialize_guarded_composed_step(", dequeue
+    )
+    replan = source.index("_reason_composed_tool_sequence(", materialize)
     dispatch = source.index(
         "_dispatch_guarded_world_effect_continuation(", replan
     )
-    assert progress < progress_gate < budget_gate < replan < dispatch
+    assert (
+        progress
+        < progress_gate
+        < budget_gate
+        < dequeue
+        < materialize
+        < replan
+        < dispatch
+    )
     assert 'lease_candidate.tool_family == "motion"' in source
     assert 'lease_candidate.tool_family == "actuator"' in source
     assert "dispatcher.mint_permit(fresh_evidence)" in source
     assert "dispatcher.dispatch(permit)" in source
     assert "summarize_world_effect_operation_history(" in source
     assert '"recent_operation_history": dict(recent_operation_history)' in source
-    assert "for invocation_attempt in range(1, 3):" in source
-    assert "do_not_repeat_rejected_arguments" in source
+    assert '"retained_contact_supported": (' in source
+    assert "retained_contact_supports_loaded_actuator(" in source
+    assert '"model_calls_for_step_materialization": 0' in source
+    assert '"fresh_geometry_drift_tightening"' in source
+    assert "parameters[\"maximum_center_shift_m\"] = min(" in source
+    assert '"queued_one_call_composition"' in source
+    assert '"fresh_sensor_or_execution_invalidation"' in source
+    assert "composed_tool_queue.clear()" in source
     assert '"status": "operation_replan_required"' in source
-    assert '"error_type": "invocation_not_proposed"' in source
     assert '== "operation_replan_required"' in source
     assert "operation_replan_attempts < 2" in source
     assert "REPLAN_OPERATION" in source
-    assert '"task_completion_claimed": False' in source
+    assert "_refresh_guarded_world_effect_goal_after_completion(" in source
+    assert '"goal_transitions": []' in source
+    assert 'sequence_stop_reason = "task_completed"' in source
+    assert '"task_completion_claimed": (' in source
+    assert "task_completed_by_scheduler" in source
 
 
 def test_runner_contract_exposes_a_bounded_sequence_not_one_open_loop_call():
@@ -326,8 +347,73 @@ def test_runner_contract_exposes_a_bounded_sequence_not_one_open_loop_call():
     assert '"--world-effect-max-operations"' in source
     assert "WorldEffectSequenceBudget(" in source
     assert "Every operation receives a fresh-evidence, single-use permit" in source
-    assert 'default=120.0' in source
+    assert 'default=600.0' in source
     assert "wall-clock deadman" in source
+
+
+def test_composed_execution_retargets_grasp_evidence_to_selected_goal_subject():
+    source = Path("scripts/run_gemini_robotics_robolab.py").read_text()
+    helper = source.index("def _runtime_state_for_planning_provider(")
+    subject = source.index('item.get("subject_id")', helper)
+    alignment = source.index("two_pad_grasp_alignment_observation(", subject)
+    reasoner = source.index("def _reason_composed_tool_sequence(")
+    reasoner_retarget = source.index(
+        "runtime_state = _runtime_state_for_planning_provider(", reasoner
+    )
+    materializer = source.index("def _materialize_guarded_composed_step(")
+    materializer_retarget = source.index(
+        "runtime_state = _runtime_state_for_planning_provider(", materializer
+    )
+
+    assert helper < subject < alignment
+    assert reasoner < reasoner_retarget
+    assert materializer < materializer_retarget
+
+
+def test_runner_refreshes_graph_provider_and_queue_across_collective_goals():
+    source = Path("scripts/run_gemini_robotics_robolab.py").read_text()
+    helper = source.index(
+        "def _refresh_guarded_world_effect_goal_after_completion("
+    )
+    prior_evaluation = source.index(
+        "prior_candidates = build_goal_activation_candidates(", helper
+    )
+    fresh_graph = source.index("build_world_goal_graph_prompt(", prior_evaluation)
+    revision_gate = source.index(
+        "validate_world_goal_graph_revision(", fresh_graph
+    )
+    fresh_lease = source.index("SceneMembershipLease.issue(", revision_gate)
+    completion_gate = source.index('if graph.status == "complete":', fresh_lease)
+    next_activation = source.index(
+        "build_world_goal_activation_prompt(", completion_gate
+    )
+    provider_rebind = source.index(
+        "build_planning_world_effect_provider_instance(", next_activation
+    )
+    assert (
+        helper
+        < prior_evaluation
+        < fresh_graph
+        < revision_gate
+        < fresh_lease
+        < completion_gate
+        < next_activation
+        < provider_rebind
+    )
+    loop_completion = source.index(
+        'if progress.status != "selected_goal_completed":'
+    )
+    queue_clear = source.index("composed_tool_queue.clear()", loop_completion)
+    refresh = source.index(
+        "_refresh_guarded_world_effect_goal_after_completion(", queue_clear
+    )
+    task_complete = source.index(
+        'sequence_stop_reason = "task_completed"', refresh
+    )
+    next_goal = source.index(
+        '"[world-goal-transition] NEXT_GOAL', task_complete
+    )
+    assert loop_completion < queue_clear < refresh < task_complete < next_goal
     assert '"--world-effect-occlusion-grace-observations"' in source
     assert "TemporalSceneInventoryMemory(" in source
     assert "raw_continuation_inventory" in source

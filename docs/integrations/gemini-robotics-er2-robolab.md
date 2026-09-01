@@ -1,8 +1,34 @@
 # Gemini Robotics ER 2 with adaptive RoboLab IK
 
 This workflow uses `gemini-robotics-er-2-preview` as a visual semantic coach.
-Gemini approves, retries, or aborts each task phase from a fresh camera and
-state observation. Physics and joint control remain local.
+For guarded world-effect execution, one Gemini action-planning call composes the
+longest currently supportable queue of advertised runtime tool calls. Physics,
+joint control, fresh RGB-D/contact checks, and just-in-time typed admission stay
+local. The unexecuted queue suffix is discarded and Gemini is called again only
+when sensor/execution evidence invalidates it, an unexpected situation appears,
+the queue exhausts before the selected goal, or the goal changes.
+
+Collective instructions use the same path across multiple goals. After one
+selected outcome is observed complete, the runtime discards its remaining
+queue, expires the old scene-membership lease, requests a fresh complete goal
+graph from the current RGB-D scene, preserves every unresolved member outcome,
+activates the next goal, and rebinds a provider. The task ends only when a fresh
+graph declares the whole instruction complete, exposes no remaining candidates
+or blockers, and passes a task-completion membership lease. For example:
+
+```bash
+./launch_gemini_robotics_robolab.sh \
+  --guarded-world-effect-execution \
+  --world-effect-max-operations 64 \
+  --task BlocksInBinTask \
+  --movable-object-asset rubiks_cube \
+  --target-receptacle-asset grey_bin \
+  --instruction 'Clean the table by putting all movable items in the grey bin'
+```
+
+The role-bound Rubik's cube seeds the first provider context; it does not limit
+the collective goal graph to one object. Runtime tools remain generic and each
+new object is selected from the fresh scene graph.
 
 The default executor seeds the proven downward gripper orientation with the
 safe approach segment from a successful demonstration. It then computes
@@ -99,11 +125,13 @@ pose.
 
 `sequence_trace.json` is audit evidence, not a demonstration. The live runner
 has a separate Sim 6 transition recorder that captures the executed actions,
-joint state, EEF pose, banana/plate poses, available force/contact channels,
-and paired exterior/wrist camera video. It publishes `run_N.hdf5` and
-`episode_N_policy.mp4` only when all Gemini supervision gates and physical
-lift/place/detachment checks pass. A failed, aborted, or interrupted run leaves
-no training episode.
+joint state, EEF pose, role-bound movable-object/receptacle poses, available
+force/contact channels, and paired exterior/wrist camera video. In guarded
+world-effect mode, it publishes `run_N.hdf5` and `episode_N_policy.mp4` only
+when the final observed goal predicates pass, any acquired attachment is
+released with contact cleared, every lease is consumed or has an explained
+revocation, and the sensor/action/model trace is complete. A failed, aborted,
+or interrupted run leaves no training episode.
 
 Successful pairs are written to
 `artifacts/gemini_robotics_er2_robolab/training_episodes/` by default. Choose a
@@ -116,10 +144,10 @@ different shard and explicit index with:
 ```
 
 The recorded provenance is
-`gemini_robotics_er2_supervised_local_se3_ik`: Gemini is the visual/semantic
-teacher, while the low-level trajectory comes from the local feedback
-controller. This is policy-distillation data; it is not mislabeled as direct
-Gemini motor output.
+`gemini_robotics_er2_model_governed_runtime_tools`: Gemini selects fresh
+world-effect operations while the registered, model-configured feedback tools
+execute their bounded trajectories. This is policy-distillation data; it is
+not mislabeled as direct Gemini motor output.
 
 ## Campaign collection for GR00T
 
@@ -143,11 +171,26 @@ python3 scripts/run_gemini_groot_campaign.py \
   --output artifacts/gemini_groot_campaign
 ```
 
-The current campaign makes real simulator changes to banana XY/yaw, plate XY,
-sphere-light intensity, and HDRI background. The plan explicitly reports that
-object identity, receptacle identity, and table/receptacle material are not yet
-implemented; those require per-task grasp profiles and verified USD material
-bindings before they can be counted as dataset diversity.
+The campaign uses the same guarded, model-planned execution path as the live
+run; it does not replay the legacy task routine. It makes real simulator
+changes to role-bound object XY/yaw, receptacle XY, sphere-light intensity, and
+HDRI background. It can also rotate through rigid objects and receptacles that
+already exist in the selected scene:
+
+```bash
+python3 scripts/run_gemini_groot_campaign.py \
+  --target-successes 20 \
+  --task BlocksInBinTask \
+  --movable-object-assets red_block blue_block green_block yellow_block \
+  --target-receptacle-assets grey_bin \
+  --output artifacts/rigid_block_groot_campaign
+```
+
+Scene-role labels are derived from asset names unless explicitly supplied, so
+the planning and execution contracts do not encode object names, robot joints,
+grasp profiles, or a task routine. Table and receptacle material mutation are
+still reported as unimplemented because the live scene currently exposes no
+verified material-randomization control.
 
 Convert only the published successful pairs:
 
@@ -159,8 +202,9 @@ python3 scripts/convert_robolab_demo_to_groot.py \
 
 The converter rechecks the HDF5 success flag and quaternion convention and
 copies collection provenance/randomization values into `meta/episodes.jsonl`.
-The campaign additionally checks the recorder's append-only manifest and
-counts an episode only when its real gripper-contact admission summary passes.
+The campaign additionally requires `episode_acceptance.json`, checks the
+recorder's append-only manifest, and counts an episode only when both the
+world-effect gate and real gripper-contact admission summary pass.
 The live contact-sensor pilot admitted three episodes from three attempts and
 converted 3,291 frames into `artifacts/contact_sensor_pilot/lerobot`. All three
 episodes had 100% contact-sensor coverage; one includes a supervised physical

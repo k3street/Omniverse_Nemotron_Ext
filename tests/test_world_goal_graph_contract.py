@@ -312,6 +312,45 @@ def test_scene_inventory_attaches_current_entity_physical_evidence():
     assert red["physical_evidence"]["mass"]["mass_kg"] == 0.1
 
 
+def test_scene_inventory_fuses_tracked_center_with_rgbd_shape_and_identity():
+    state = {
+        "rgbd_scene_geometry": {
+            "available": True,
+            "geometries": [
+                {
+                    "runtime_id": "rubiks_cube",
+                    "center_base_m": [0.49, 0.05, 0.04],
+                    "visible_extent_base_m": [0.06, 0.06, 0.06],
+                    "oriented_footprint_axes_base": [
+                        [1.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                    ],
+                }
+            ],
+        },
+        "tracked_entity_positions_m": {
+            "rubiks_cube": [0.48, 0.04, 0.05]
+        },
+    }
+
+    inventory = semantic_scene_inventory_from_state(state)
+    cube = next(
+        item for item in inventory["entities"]
+        if item["entity_id"] == "rubiks_cube"
+    )
+
+    assert cube["geometry"]["center_base_m"] == [0.48, 0.04, 0.05]
+    assert cube["geometry"]["rgbd_visible_center_base_m"] == [
+        0.49,
+        0.05,
+        0.04,
+    ]
+    assert cube["geometry"]["visible_extent_base_m"] == [0.06, 0.06, 0.06]
+    assert cube["geometry"]["center_source"] == (
+        "runtime_tracker_plus_rgbd_center_calibration"
+    )
+
+
 def test_scene_inventory_rejects_stale_physical_evidence_entity():
     state = {
         "rgbd_scene_geometry": {"available": True, "geometries": []},
@@ -403,6 +442,28 @@ def test_revision_prompt_requests_complete_graph_without_hiding_blockers():
     assert "do not remove an entity" in lowered
     assert "silently\nexclude it" in lowered
     assert "large_object.does_not_fit_observed_envelope_of.grey_bin" in prompt
+
+
+def test_completed_goal_refresh_prompt_preserves_remaining_collective_outcomes():
+    prompt = build_world_goal_graph_prompt(
+        "Clean the table",
+        scene_inventory(),
+        revision_context={
+            "trigger": "selected_goal_completed",
+            "completed_goal_id": "red-in-bin",
+            "previous_graph": clean_table_graph(),
+            "unresolved_goal_ids": ["blue-in-bin"],
+        },
+    )
+    lowered = prompt.lower()
+
+    assert "fresh-graph boundary" in lowered
+    assert "complete replacement graph" in lowered
+    assert "preserve every unresolved outcome" in lowered
+    assert "no unresolved outcome remains" in lowered
+    assert "next independently achievable outcomes" in lowered
+    assert "red-in-bin" in prompt
+    assert "blue-in-bin" in prompt
     for forbidden in (
         "joint target",
         "inverse kinematics",

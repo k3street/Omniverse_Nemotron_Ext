@@ -15,6 +15,13 @@ from scripts.world_effect_operation_plan import (
     summarize_world_effect_operation_history,
 )
 from scripts.world_effect_provider_registry import RuntimeToolCapability
+from scripts.world_effect_composed_sequence import (
+    WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+    ComposedToolSequenceGate,
+    WorldEffectComposedSequenceError,
+    build_composed_tool_sequence_candidates,
+    build_composed_tool_sequence_prompt,
+)
 from scripts.world_effect_session import (
     WorldEffectSessionCandidate,
     WorldEffectSessionCandidateSet,
@@ -218,6 +225,522 @@ def planning_instance(**catalog_kwargs):
         catalog(**catalog_kwargs),
     )
     return candidate_set, decision, instance
+
+
+def composed_sequence_candidates(
+    *,
+    maximum_tool_calls=6,
+    grasp_corridor_aligned=True,
+    retained_contact_supported=False,
+    alignment_object_runtime_id="red_block",
+):
+    _, _, instance = planning_instance()
+    scene = inventory()
+    scene["entities"][0]["geometry"] = {
+        "center_base_m": [0.50, 0.20, 0.04],
+        "visible_aabb_min_base_m": [0.47, 0.17, 0.01],
+        "visible_aabb_max_base_m": [0.53, 0.23, 0.07],
+        "visible_extent_base_m": [0.06, 0.06, 0.06],
+        "oriented_footprint_axes_base": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+    }
+    scene["entities"][1]["geometry"] = {
+        "center_base_m": [0.42, -0.24, 0.05],
+        "visible_aabb_min_base_m": [0.30, -0.36, 0.0],
+        "visible_aabb_max_base_m": [0.54, -0.12, 0.10],
+        "visible_extent_base_m": [0.24, 0.24, 0.10],
+        "oriented_footprint_axes_base": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+    }
+    operation_candidates = build_world_effect_operation_candidates(
+        instance, scene
+    )
+    candidates = build_composed_tool_sequence_candidates(
+        instance=instance,
+        operation_candidates=operation_candidates,
+        inventory=scene,
+        execution_context={
+            "controlled_frame": {
+                "position_m": [0.3, 0.0, 0.4],
+                "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+            },
+            "interaction_frame": {
+                "contact_center_local_m": [0.0, 0.0, 0.1],
+                "closing_axis_local": [1.0, 0.0, 0.0],
+            },
+            "current_contact": {"touch": False},
+            "retained_contact_supported": retained_contact_supported,
+            "two_pad_grasp_alignment": {
+                "available": True,
+                "object_center_inside_full_grasp_corridor": (
+                    grasp_corridor_aligned
+                ),
+                "corrective_motion_grounding_contract": {
+                    "entity_id": alignment_object_runtime_id,
+                    "required_terminal_position_anchor_id": (
+                        f"{alignment_object_runtime_id}.center"
+                    ),
+                    "required_terminal_interaction_offset_from_anchor_m": [
+                        0.0,
+                        0.0,
+                        0.0,
+                    ],
+                    "maximum_terminal_position_error_m": 0.004,
+                },
+            },
+        },
+        maximum_tool_calls=maximum_tool_calls,
+    )
+    return scene, candidates
+
+
+def composed_call(
+    *,
+    call_id,
+    requirement_id,
+    tool_id,
+    tool_family,
+    semantic_effect_id,
+    invocation_arguments,
+    position_anchor_id=None,
+    interaction_offset_from_anchor_m=(),
+    orientation_alignment_id=None,
+    tool_configuration=None,
+):
+    return {
+        "call_id": call_id,
+        "requirement_id": requirement_id,
+        "tool_id": tool_id,
+        "tool_family": tool_family,
+        "semantic_effect_id": semantic_effect_id,
+        "purpose": "establish_precondition",
+        "target_entity_ids": ["red_block"],
+        "desired_outcome": f"{call_id} completed",
+        "stop_condition": f"{call_id} observed",
+        "tool_configuration": dict(tool_configuration or {}),
+        "geometry_drift_tolerance": {
+            "maximum_center_shift_m": 0.01,
+            "maximum_extent_change_fraction": 0.2,
+        },
+        "position_anchor_id": position_anchor_id,
+        "interaction_offset_from_anchor_m": list(
+            interaction_offset_from_anchor_m
+        ),
+        "orientation_alignment_id": orientation_alignment_id,
+        "invocation_arguments": invocation_arguments,
+        "expected_state_change": f"expected {call_id} state",
+        "reason": f"{call_id} advances the selected goal",
+    }
+
+
+def test_composed_sequence_accepts_many_tool_calls_from_one_model_response():
+    _, candidates = composed_sequence_candidates(maximum_tool_calls=6)
+    payload = {
+        "schema_version": WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_sequence",
+        "goal_id": candidates.goal_id,
+        "tool_calls": [
+            composed_call(
+                call_id="align",
+                requirement_id="observation_bound_spatial_motion",
+                tool_id="spatial_motion",
+                tool_family="motion",
+                semantic_effect_id=None,
+                invocation_arguments={},
+                position_anchor_id="red_block.center",
+                interaction_offset_from_anchor_m=[0.0, 0.0, 0.05],
+                orientation_alignment_id=(
+                    "red_block.oriented_footprint_axes_base.0"
+                ),
+            ),
+            composed_call(
+                call_id="acquire",
+                requirement_id="reversible_entity_attachment",
+                tool_id="reversible_attachment",
+                tool_family="actuator",
+                semantic_effect_id="entity_attachment.acquire",
+                invocation_arguments={"state": "engage"},
+            ),
+            composed_call(
+                call_id="release",
+                requirement_id="reversible_entity_attachment",
+                tool_id="reversible_attachment",
+                tool_family="actuator",
+                semantic_effect_id="entity_attachment.release",
+                invocation_arguments={"state": "disengage"},
+            ),
+        ],
+        "confidence": 0.9,
+        "reason": "The full foreseeable composition is grounded.",
+    }
+
+    decision = ComposedToolSequenceGate(candidates).dispatch(payload)
+
+    assert len(decision.tool_calls) == 3
+    assert decision.tool_calls[0].tool_family == "motion"
+    assert decision.tool_calls[1].invocation_arguments == {"state": "engage"}
+    assert decision.to_dict()["queue_authority"] == (
+        "pending_fresh_evidence_per_call"
+    )
+    assert not decision.to_dict()["execution_authority"]
+
+
+def test_composed_sequence_materializes_contact_guard_after_acquire():
+    _, candidates = composed_sequence_candidates(maximum_tool_calls=3)
+    acquire = composed_call(
+        call_id="acquire",
+        requirement_id="reversible_entity_attachment",
+        tool_id="reversible_attachment",
+        tool_family="actuator",
+        semantic_effect_id="entity_attachment.acquire",
+        invocation_arguments={"state": "engage"},
+    )
+    transport = composed_call(
+        call_id="transport",
+        requirement_id="observation_bound_spatial_motion",
+        tool_id="spatial_motion",
+        tool_family="motion",
+        semantic_effect_id=None,
+        invocation_arguments={},
+        position_anchor_id="red_block.center",
+        interaction_offset_from_anchor_m=[0.0, 0.0, 0.05],
+        orientation_alignment_id=(
+            "red_block.oriented_footprint_axes_base.0"
+        ),
+    )
+    payload = {
+        "schema_version": WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_sequence",
+        "goal_id": candidates.goal_id,
+        "tool_calls": [acquire, transport],
+        "confidence": 0.9,
+        "reason": "Acquire and retain the entity during transport.",
+    }
+
+    accepted = ComposedToolSequenceGate(candidates).dispatch(payload)
+    assert accepted.tool_calls[1].tool_configuration["require_contact"] is True
+
+
+def test_composed_sequence_materializes_contact_guard_for_fresh_loaded_queue():
+    _, candidates = composed_sequence_candidates(
+        maximum_tool_calls=1,
+        retained_contact_supported=True,
+    )
+    transport = composed_call(
+        call_id="transport",
+        requirement_id="observation_bound_spatial_motion",
+        tool_id="spatial_motion",
+        tool_family="motion",
+        semantic_effect_id=None,
+        invocation_arguments={},
+        position_anchor_id="grey_bin.center",
+        interaction_offset_from_anchor_m=[0.0, 0.0, 0.15],
+        orientation_alignment_id="grey_bin.oriented_footprint_axes_base.0",
+    )
+    payload = {
+        "schema_version": WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_sequence",
+        "goal_id": candidates.goal_id,
+        "tool_calls": [transport],
+        "confidence": 0.9,
+        "reason": "Continue a sensor-supported loaded transport.",
+    }
+
+    accepted = ComposedToolSequenceGate(candidates).dispatch(payload)
+    assert accepted.tool_calls[0].tool_configuration["require_contact"] is True
+
+
+def test_composed_sequence_removes_impossible_contact_guard_before_acquire():
+    _, candidates = composed_sequence_candidates(maximum_tool_calls=2)
+    approach = composed_call(
+        call_id="approach",
+        requirement_id="observation_bound_spatial_motion",
+        tool_id="spatial_motion",
+        tool_family="motion",
+        semantic_effect_id=None,
+        invocation_arguments={},
+        position_anchor_id="red_block.center",
+        interaction_offset_from_anchor_m=[0.0, 0.0, 0.0],
+        orientation_alignment_id=(
+            "red_block.oriented_footprint_axes_base.0"
+        ),
+        tool_configuration={"require_contact": True},
+    )
+    payload = {
+        "schema_version": WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_sequence",
+        "goal_id": candidates.goal_id,
+        "tool_calls": [approach],
+        "confidence": 0.9,
+        "reason": "Approach without claiming an existing attachment.",
+    }
+
+    accepted = ComposedToolSequenceGate(candidates).dispatch(payload)
+    assert "require_contact" not in accepted.tool_calls[0].tool_configuration
+
+
+def test_composed_sequence_allows_clearance_before_guarded_grasp_relation():
+    _, candidates = composed_sequence_candidates(
+        maximum_tool_calls=3,
+        grasp_corridor_aligned=False,
+    )
+    clearance = composed_call(
+        call_id="clearance",
+        requirement_id="observation_bound_spatial_motion",
+        tool_id="spatial_motion",
+        tool_family="motion",
+        semantic_effect_id=None,
+        invocation_arguments={},
+        position_anchor_id="red_block.center",
+        interaction_offset_from_anchor_m=[0.0, 0.0, 0.10],
+        orientation_alignment_id=(
+            "red_block.oriented_footprint_axes_base.0"
+        ),
+    )
+    centered = composed_call(
+        call_id="centered",
+        requirement_id="observation_bound_spatial_motion",
+        tool_id="spatial_motion",
+        tool_family="motion",
+        semantic_effect_id=None,
+        invocation_arguments={},
+        position_anchor_id="red_block.center",
+        interaction_offset_from_anchor_m=[0.0, 0.0, 0.0],
+        orientation_alignment_id=(
+            "red_block.oriented_footprint_axes_base.0"
+        ),
+    )
+    acquire = composed_call(
+        call_id="acquire",
+        requirement_id="reversible_entity_attachment",
+        tool_id="reversible_attachment",
+        tool_family="actuator",
+        semantic_effect_id="entity_attachment.acquire",
+        invocation_arguments={"state": "engage"},
+    )
+    payload = {
+        "schema_version": WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_sequence",
+        "goal_id": candidates.goal_id,
+        "tool_calls": [clearance, centered, acquire],
+        "confidence": 0.9,
+        "reason": "Use clearance, establish the relation, then acquire.",
+    }
+
+    accepted = ComposedToolSequenceGate(candidates).dispatch(payload)
+    assert "require_interaction_relation" not in (
+        accepted.tool_calls[0].tool_configuration
+    )
+    assert accepted.tool_calls[1].tool_configuration[
+        "require_interaction_relation"
+    ] is True
+    assert accepted.tool_calls[1].tool_configuration[
+        "position_tolerance_m"
+    ] == pytest.approx(0.004)
+
+
+def test_composed_sequence_materializes_fresh_grasp_relation_before_acquire():
+    _, candidates = composed_sequence_candidates(
+        maximum_tool_calls=2,
+        grasp_corridor_aligned=False,
+    )
+    imprecise_approach = composed_call(
+        call_id="approach",
+        requirement_id="observation_bound_spatial_motion",
+        tool_id="spatial_motion",
+        tool_family="motion",
+        semantic_effect_id=None,
+        invocation_arguments={},
+        position_anchor_id="red_block.center",
+        interaction_offset_from_anchor_m=[0.0, 0.0, 0.10],
+        orientation_alignment_id=(
+            "red_block.oriented_footprint_axes_base.0"
+        ),
+    )
+    acquire = composed_call(
+        call_id="acquire",
+        requirement_id="reversible_entity_attachment",
+        tool_id="reversible_attachment",
+        tool_family="actuator",
+        semantic_effect_id="entity_attachment.acquire",
+        invocation_arguments={"state": "engage"},
+    )
+    payload = {
+        "schema_version": WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_sequence",
+        "goal_id": candidates.goal_id,
+        "tool_calls": [imprecise_approach, acquire],
+        "confidence": 0.9,
+        "reason": "Approach and acquire using the sensed interaction relation.",
+    }
+
+    accepted = ComposedToolSequenceGate(candidates).dispatch(payload)
+    approach = accepted.tool_calls[0]
+    assert approach.position_anchor_id == "red_block.center"
+    assert approach.interaction_offset_from_anchor_m == pytest.approx(
+        (0.0, 0.0, 0.0)
+    )
+    assert approach.tool_configuration["require_interaction_relation"] is True
+    assert approach.tool_configuration["position_tolerance_m"] == pytest.approx(
+        0.004
+    )
+
+
+def test_composed_sequence_materializes_ordered_terminal_grasp_relation():
+    _, candidates = composed_sequence_candidates(
+        maximum_tool_calls=2,
+        grasp_corridor_aligned=False,
+    )
+    approach = composed_call(
+        call_id="approach_path",
+        requirement_id="observation_bound_spatial_motion",
+        tool_id="spatial_motion",
+        tool_family="motion",
+        semantic_effect_id=None,
+        invocation_arguments={
+            "ordered_waypoints": [
+                {
+                    "position_anchor_id": "red_block.center",
+                    "interaction_offset_from_anchor_m": [0.0, 0.0, 0.15],
+                    "orientation_alignment_id": (
+                        "red_block.oriented_footprint_axes_base.0"
+                    ),
+                },
+                {
+                    "position_anchor_id": "red_block.center",
+                    "interaction_offset_from_anchor_m": [0.0, 0.0, 0.10],
+                    "orientation_alignment_id": (
+                        "red_block.oriented_footprint_axes_base.0"
+                    ),
+                },
+            ]
+        },
+    )
+    acquire = composed_call(
+        call_id="acquire",
+        requirement_id="reversible_entity_attachment",
+        tool_id="reversible_attachment",
+        tool_family="actuator",
+        semantic_effect_id="entity_attachment.acquire",
+        invocation_arguments={"state": "engage"},
+    )
+    payload = {
+        "schema_version": WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_sequence",
+        "goal_id": candidates.goal_id,
+        "tool_calls": [approach, acquire],
+        "confidence": 0.9,
+        "reason": "Follow a clearance path and acquire.",
+    }
+
+    accepted = ComposedToolSequenceGate(candidates).dispatch(payload)
+    waypoints = accepted.tool_calls[0].invocation_arguments["ordered_waypoints"]
+    assert waypoints[0]["interaction_offset_from_anchor_m"] == [0.0, 0.0, 0.15]
+    assert waypoints[-1]["position_anchor_id"] == "red_block.center"
+    assert waypoints[-1]["interaction_offset_from_anchor_m"] == [0.0, 0.0, 0.0]
+    assert accepted.tool_calls[0].tool_configuration[
+        "require_interaction_relation"
+    ] is True
+
+
+def test_composed_sequence_ignores_alignment_for_an_unrelated_scene_role():
+    _, candidates = composed_sequence_candidates(
+        maximum_tool_calls=2,
+        grasp_corridor_aligned=False,
+        alignment_object_runtime_id="configured_but_unselected_object",
+    )
+    approach = composed_call(
+        call_id="approach",
+        requirement_id="observation_bound_spatial_motion",
+        tool_id="spatial_motion",
+        tool_family="motion",
+        semantic_effect_id=None,
+        invocation_arguments={},
+        position_anchor_id="red_block.center",
+        interaction_offset_from_anchor_m=[0.0, 0.0, 0.10],
+        orientation_alignment_id=(
+            "red_block.oriented_footprint_axes_base.0"
+        ),
+    )
+    acquire = composed_call(
+        call_id="acquire",
+        requirement_id="reversible_entity_attachment",
+        tool_id="reversible_attachment",
+        tool_family="actuator",
+        semantic_effect_id="entity_attachment.acquire",
+        invocation_arguments={"state": "engage"},
+    )
+    payload = {
+        "schema_version": WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_sequence",
+        "goal_id": candidates.goal_id,
+        "tool_calls": [approach, acquire],
+        "confidence": 0.9,
+        "reason": "Use only evidence for the selected goal subject.",
+    }
+
+    accepted = ComposedToolSequenceGate(candidates).dispatch(payload)
+    assert accepted.tool_calls[0].interaction_offset_from_anchor_m == pytest.approx(
+        (0.0, 0.0, 0.10)
+    )
+    assert "require_interaction_relation" not in (
+        accepted.tool_calls[0].tool_configuration
+    )
+
+
+def test_composed_sequence_rejects_budget_overflow_and_semantic_mismatch():
+    _, candidates = composed_sequence_candidates(maximum_tool_calls=1)
+    call = composed_call(
+        call_id="acquire",
+        requirement_id="reversible_entity_attachment",
+        tool_id="reversible_attachment",
+        tool_family="actuator",
+        semantic_effect_id="entity_attachment.acquire",
+        invocation_arguments={"state": "engage"},
+    )
+    payload = {
+        "schema_version": WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+        "observation_id": candidates.observation_id,
+        "decision": "propose_sequence",
+        "goal_id": candidates.goal_id,
+        "tool_calls": [call, {**call, "call_id": "second"}],
+        "confidence": 0.9,
+        "reason": "Too many calls.",
+    }
+    with pytest.raises(WorldEffectComposedSequenceError, match="budget"):
+        ComposedToolSequenceGate(candidates).dispatch(payload)
+
+    payload["tool_calls"] = [
+        {
+            **call,
+            "invocation_arguments": {"state": "disengage"},
+        }
+    ]
+    with pytest.raises(WorldEffectComposedSequenceError, match="contradicts"):
+        ComposedToolSequenceGate(candidates).dispatch(payload)
+
+
+def test_composed_prompt_requires_longest_queue_and_sensor_invalidated_suffix():
+    scene, candidates = composed_sequence_candidates(maximum_tool_calls=6)
+
+    prompt = build_composed_tool_sequence_prompt(
+        instruction="Put the red block in the grey bin",
+        inventory=scene,
+        candidate_set=candidates,
+        recent_operation_history={"entries": []},
+    )
+
+    assert "in ONE response" in prompt
+    assert "Do not return only the first call" in prompt
+    assert "discard the unexecuted suffix" in prompt
+    assert "without asking the model again" in prompt
+    assert "just-in-time validation" in prompt
 
 
 def test_only_selected_provider_factories_publish_declarative_specs():
@@ -502,12 +1025,17 @@ def test_operation_history_summarizes_motion_and_actuator_feedback():
                 "purpose": "establish_precondition",
                 "target_entity_ids": ["red_block"],
                 "dispatch": {
+                    "runtime_lease_after": {
+                        "revocation_reason": None,
+                    },
                     "outcome": {
                         "final_lease_state": "consumed",
                         "handler_result": {
                             "execution_report": {
                                 "converged": True,
                                 "target_error_after_m": 0.004,
+                                "target_xyz": [0.5, 0.2, 0.1],
+                                "target_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
                                 "grounding": {
                                     "position_anchor_id": "red_block.center",
                                     "interaction_offset_from_anchor_m": [0, 0, 0.03],
@@ -551,6 +1079,11 @@ def test_operation_history_summarizes_motion_and_actuator_feedback():
     assert history["entries"][0]["result"]["position_anchor_id"] == (
         "red_block.center"
     )
+    assert history["entries"][0]["result"]["terminal_target_position_m"] == [
+        0.5,
+        0.2,
+        0.1,
+    ]
     assert history["entries"][1]["result"]["requested_state"] == "engage"
     assert history["entries"][1]["result"]["active_contact_body_count_after"] == 2
     assert history["consecutive_same_semantic_selection_count"] == 1
@@ -588,6 +1121,11 @@ def test_operation_history_exposes_unmaterializable_operation_for_replan():
                                 "rejection": {
                                     "error_type": "WorldEffectToolInvocationError",
                                     "error": "materialized motion target is already within tolerance",
+                                    "evidence": {
+                                        "segment_displacement_m": 0.52,
+                                        "maximum_segment_displacement_m": 0.35,
+                                        "required_segment_count": 2,
+                                    },
                                 },
                             }
                         ]
@@ -603,6 +1141,9 @@ def test_operation_history_exposes_unmaterializable_operation_for_replan():
     assert entry["purpose"] == "establish_precondition"
     assert entry["target_entity_ids"] == ["red_block"]
     assert entry["result"]["invocation_rejection"]["attempts_exhausted"] is True
+    assert entry["result"]["invocation_rejection"]["evidence"][
+        "required_segment_count"
+    ] == 2
 
     _, _, instance = planning_instance()
     prompt = build_world_effect_operation_prompt(
@@ -615,6 +1156,66 @@ def test_operation_history_exposes_unmaterializable_operation_for_replan():
         execution_context={"recent_operation_history": history},
     )
     assert "choose a different advertised operation" in prompt
+    assert '"required_segment_count": 2' in prompt
+
+
+def test_operation_history_preserves_failed_terminal_pose_for_retry_admission():
+    history = summarize_world_effect_operation_history(
+        [
+            {
+                "operation_index": 6,
+                "tool_family": "motion",
+                "target_entity_ids": ["red_block"],
+                "dispatch": {
+                    "runtime_lease_after": {
+                        "revocation_reason": "dispatch.motion_not_converged",
+                    },
+                    "outcome": {
+                        "final_lease_state": "revoked",
+                        "handler_result": {
+                            "motion_report": {
+                                "converged": False,
+                                "target_xyz": [0.459, -0.003, 0.211],
+                                "target_quaternion_wxyz": [
+                                    0.7071,
+                                    -0.0236,
+                                    0.7063,
+                                    0.0258,
+                                ],
+                                "target_error_after_m": 0.055,
+                            }
+                        },
+                    },
+                },
+            }
+        ]
+    )
+
+    result = history["entries"][0]["result"]
+    assert result["converged"] is False
+    assert result["revocation_reason"] == "dispatch.motion_not_converged"
+    assert result["terminal_target_position_m"] == [0.459, -0.003, 0.211]
+
+
+def test_runner_checks_failed_motion_retry_before_issuing_continuation_lease():
+    source = (
+        Path(__file__).parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    start = source.index("def _plan_guarded_world_effect_continuation(")
+    end = source.index(
+        "def _dispatch_guarded_world_effect_continuation(", start
+    )
+    planner = source[start:end]
+
+    retry_gate = planner.index(
+        "compare_motion_invocation_to_recent_failures("
+    )
+    lease_issue = planner.index("issue_world_effect_runtime_lease(")
+    assert retry_gate < lease_issue
+    assert '"error_type": "RepeatedFailedMotionTarget"' in planner
+    assert '"execution_authority": False' in planner[retry_gate:lease_issue]
 
 
 def test_runner_wires_operation_plan_after_session_and_before_hard_boundary():

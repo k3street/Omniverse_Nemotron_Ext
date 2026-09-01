@@ -329,6 +329,161 @@ def compare_target_to_stalled_recovery(
     }
 
 
+def compare_motion_invocation_to_recent_failures(
+    *,
+    recent_operation_history: Mapping[str, Any] | None,
+    proposed_checkpoints: Sequence[Mapping[str, Any]],
+    minimum_translation_delta_m: float = 0.03,
+    minimum_orientation_delta_deg: float = 10.0,
+) -> dict[str, Any]:
+    """Reject a motion path whose terminal pose repeats a recent failed pose.
+
+    Only the trailing, uninterrupted run of physical motion failures is
+    considered. Planning-only rejections do not alter the scene and therefore
+    do not clear that run; a consumed actuator or successful motion does. The
+    thresholds are runtime configuration, so this contract contains no task,
+    object, controller, or embodiment identity.
+    """
+    for name, value in (
+        ("minimum_translation_delta_m", minimum_translation_delta_m),
+        ("minimum_orientation_delta_deg", minimum_orientation_delta_deg),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0.0
+        ):
+            raise MotionToolValidationError(
+                f"{name} must be a finite positive number"
+            )
+    if not isinstance(proposed_checkpoints, Sequence) or isinstance(
+        proposed_checkpoints, (str, bytes)
+    ) or not proposed_checkpoints:
+        raise MotionToolValidationError(
+            "proposed_checkpoints must be a non-empty array"
+        )
+    terminal = proposed_checkpoints[-1]
+    if not isinstance(terminal, Mapping):
+        raise MotionToolValidationError(
+            "proposed_checkpoints terminal entry must be an object"
+        )
+    proposed_target = _finite_vector(
+        terminal.get("target_position_m"),
+        "proposed_checkpoints[-1].target_position_m",
+    )
+    proposed_quaternion = _finite_quaternion(
+        terminal.get("target_quaternion_wxyz"),
+        "proposed_checkpoints[-1].target_quaternion_wxyz",
+    )
+    raw_entries = (
+        recent_operation_history.get("entries")
+        if isinstance(recent_operation_history, Mapping)
+        else None
+    )
+    if raw_entries is None:
+        raw_entries = []
+    if not isinstance(raw_entries, Sequence) or isinstance(
+        raw_entries, (str, bytes)
+    ):
+        raise MotionToolValidationError(
+            "recent_operation_history.entries must be an array"
+        )
+
+    comparisons: list[dict[str, Any]] = []
+    for reverse_index, raw_entry in enumerate(reversed(raw_entries)):
+        if not isinstance(raw_entry, Mapping):
+            raise MotionToolValidationError(
+                "recent_operation_history entries must be objects"
+            )
+        result = raw_entry.get("result")
+        result = result if isinstance(result, Mapping) else {}
+        planning_only_rejection = isinstance(
+            result.get("invocation_rejection"), Mapping
+        ) and result.get("converged") is None
+        if planning_only_rejection:
+            continue
+        failed_motion = bool(
+            raw_entry.get("tool_family") == "motion"
+            and result.get("converged") is False
+        )
+        if not failed_motion:
+            break
+        previous_target = _finite_vector(
+            result.get("terminal_target_position_m"),
+            (
+                "recent_operation_history.entries"
+                f"[{len(raw_entries) - reverse_index - 1}]"
+                ".result.terminal_target_position_m"
+            ),
+        )
+        previous_quaternion = _finite_quaternion(
+            result.get("terminal_target_quaternion_wxyz"),
+            (
+                "recent_operation_history.entries"
+                f"[{len(raw_entries) - reverse_index - 1}]"
+                ".result.terminal_target_quaternion_wxyz"
+            ),
+        )
+        translation_delta = math.sqrt(
+            sum(
+                (proposed - previous) ** 2
+                for proposed, previous in zip(
+                    proposed_target, previous_target
+                )
+            )
+        )
+        quaternion_dot = abs(
+            sum(
+                proposed * previous
+                for proposed, previous in zip(
+                    proposed_quaternion, previous_quaternion
+                )
+            )
+        )
+        orientation_delta = math.degrees(
+            2.0 * math.acos(min(1.0, max(-1.0, quaternion_dot)))
+        )
+        comparisons.append(
+            {
+                "operation_index": raw_entry.get("operation_index"),
+                "translation_delta_m": translation_delta,
+                "orientation_delta_deg": orientation_delta,
+                "revocation_reason": result.get("revocation_reason"),
+                "materially_distinct": bool(
+                    translation_delta >= float(minimum_translation_delta_m)
+                    or orientation_delta
+                    >= float(minimum_orientation_delta_deg)
+                ),
+            }
+        )
+
+    repeated = next(
+        (item for item in comparisons if not item["materially_distinct"]),
+        None,
+    )
+    return {
+        "admitted": repeated is None,
+        "reason": (
+            "materially_distinct_from_recent_failed_motion"
+            if repeated is None
+            else "repeated_recent_failed_motion_target"
+        ),
+        "comparison_frame": "robot_root_terminal_controlled_pose",
+        "minimum_translation_delta_m": float(minimum_translation_delta_m),
+        "minimum_orientation_delta_deg": float(
+            minimum_orientation_delta_deg
+        ),
+        "proposed_terminal_target_position_m": list(proposed_target),
+        "proposed_terminal_target_quaternion_wxyz": list(
+            proposed_quaternion
+        ),
+        "comparisons": comparisons,
+        "blocking_comparison": repeated,
+        "execution_authority": False,
+    }
+
+
 def opposing_contact_force_capacity(
     *,
     joint_effort_limit: float,

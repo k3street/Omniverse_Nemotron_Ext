@@ -978,6 +978,10 @@ supports, or observe again. When recent_operation_history reports
 planning_status=operation_replan_required with an invocation_rejection, the
 exact previous semantic operation could not be materialized from the same fresh
 evidence; choose a different advertised operation rather than repeating it. Do
+not propose a terminal pose close to a recent non-converged motion target. Use
+the measured failed target and retry deltas in recent_operation_history to
+choose a materially different route, change the physical preconditions through
+another advertised operation, observe again, or report the blocker. Do
 not require touch before every attachment
 attempt: contact may be created by the advertised actuator transition when the
 fresh interaction geometry shows the subject is aligned with its interaction
@@ -1053,6 +1057,12 @@ def summarize_world_effect_operation_history(
         actuator_report = handler_result.get("actuator_report")
         actuator_report = (
             actuator_report if isinstance(actuator_report, Mapping) else {}
+        )
+        runtime_lease_after = dispatch.get("runtime_lease_after")
+        runtime_lease_after = (
+            runtime_lease_after
+            if isinstance(runtime_lease_after, Mapping)
+            else {}
         )
 
         planning = raw_operation.get("planning")
@@ -1132,6 +1142,7 @@ def summarize_world_effect_operation_history(
             result["invocation_rejection"] = {
                 "error_type": last_rejection.get("error_type"),
                 "error": last_rejection.get("error"),
+                "evidence": last_rejection.get("evidence", {}),
                 "attempts_exhausted": True,
             }
         if motion_report:
@@ -1148,6 +1159,15 @@ def summarize_world_effect_operation_history(
                     "checkpoint_count": motion_report.get("checkpoint_count", 1),
                     "target_error_after_m": motion_report.get(
                         "target_error_after_m"
+                    ),
+                    "terminal_target_position_m": motion_report.get(
+                        "target_xyz"
+                    ),
+                    "terminal_target_quaternion_wxyz": motion_report.get(
+                        "target_quaternion_wxyz"
+                    ),
+                    "revocation_reason": runtime_lease_after.get(
+                        "revocation_reason"
                     ),
                     "early_stop_condition_id": early_stop.get("condition_id"),
                     "position_anchor_id": grounding.get("position_anchor_id"),

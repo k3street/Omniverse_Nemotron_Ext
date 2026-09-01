@@ -47,6 +47,15 @@ _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$")
 class WorldEffectToolInvocationError(ValueError):
     """Raised when a proposed invocation exceeds its evidence or tool schema."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        evidence: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.evidence = dict(evidence or {})
+
 
 def _identifier(value: Any, path: str) -> str:
     if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
@@ -144,8 +153,125 @@ def _rotate_wxyz(
     )
 
 
+def _multiply_wxyz(
+    left: Sequence[float], right: Sequence[float]
+) -> tuple[float, float, float, float]:
+    """Compose two scalar-first quaternions as ``left * right``."""
+    lw, lx, ly, lz = left
+    rw, rx, ry, rz = right
+    return (
+        lw * rw - lx * rx - ly * ry - lz * rz,
+        lw * rx + lx * rw + ly * rz - lz * ry,
+        lw * ry - lx * rz + ly * rw + lz * rx,
+        lw * rz + lx * ry - ly * rx + lz * rw,
+    )
+
+
+def _quaternion_aligning_axis(
+    current_quaternion: Sequence[float],
+    local_axis: Sequence[float],
+    observed_axis: Sequence[float],
+    *,
+    bidirectional: bool,
+) -> tuple[float, float, float, float]:
+    """Apply the shortest world-frame rotation that aligns one local axis.
+
+    The selected observed axis supplies only the missing geometric constraint.
+    Applying the shortest correction to the current controlled orientation keeps
+    the existing twist about that axis instead of asking a model to invent a
+    complete embodiment-specific quaternion.
+    """
+    current = _normalize(current_quaternion, "current controlled quaternion")
+    local = _normalize(local_axis, "local interaction alignment axis")
+    target = _normalize(observed_axis, "observed alignment axis")
+    realized = _normalize(
+        _rotate_wxyz(current, local),
+        "current realized interaction alignment axis",
+    )
+    dot = sum(left * right for left, right in zip(realized, target))
+    if bidirectional and dot < 0.0:
+        target = tuple(-value for value in target)
+        dot = -dot
+    dot = min(1.0, max(-1.0, dot))
+    if dot >= 1.0 - 1.0e-10:
+        return current  # type: ignore[return-value]
+    if dot <= -1.0 + 1.0e-10:
+        basis_index = min(range(3), key=lambda index: abs(realized[index]))
+        basis = tuple(1.0 if index == basis_index else 0.0 for index in range(3))
+        rotation_axis = _normalize(
+            (
+                realized[1] * basis[2] - realized[2] * basis[1],
+                realized[2] * basis[0] - realized[0] * basis[2],
+                realized[0] * basis[1] - realized[1] * basis[0],
+            ),
+            "opposite-axis rotation axis",
+        )
+        delta = (0.0, *rotation_axis)
+    else:
+        cross = (
+            realized[1] * target[2] - realized[2] * target[1],
+            realized[2] * target[0] - realized[0] * target[2],
+            realized[0] * target[1] - realized[1] * target[0],
+        )
+        delta = _normalize((1.0 + dot, *cross), "axis alignment quaternion")
+    return _normalize(
+        _multiply_wxyz(delta, current),
+        "materialized target quaternion",
+    )  # type: ignore[return-value]
+
+
 def _distance(left: Sequence[float], right: Sequence[float]) -> float:
     return math.sqrt(sum((a - b) ** 2 for a, b in zip(left, right)))
+
+
+def _reachable_radius_bounds(
+    constraints: Mapping[str, Any],
+) -> tuple[float, float]:
+    """Read an executor-published robot-root reachability shell."""
+    minimum = constraints.get("minimum_reachable_radius_m", 0.0)
+    maximum = constraints.get("maximum_reachable_radius_m", math.inf)
+    for path, value in (
+        ("minimum_reachable_radius_m", minimum),
+        ("maximum_reachable_radius_m", maximum),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or math.isnan(float(value))
+            or float(value) < 0.0
+        ):
+            raise WorldEffectToolInvocationError(
+                f"{path} must be a non-negative number"
+            )
+    minimum = float(minimum)
+    maximum = float(maximum)
+    if maximum <= minimum:
+        raise WorldEffectToolInvocationError(
+            "maximum_reachable_radius_m must exceed minimum_reachable_radius_m"
+        )
+    return minimum, maximum
+
+
+def _assess_reachable_radius(
+    target_position: Sequence[float],
+    constraints: Mapping[str, Any],
+    *,
+    path: str,
+) -> dict[str, Any]:
+    minimum, maximum = _reachable_radius_bounds(constraints)
+    radius = _distance(target_position, (0.0, 0.0, 0.0))
+    if radius < minimum or radius > maximum:
+        raise WorldEffectToolInvocationError(
+            f"{path} is outside the runtime-published reachable radius"
+        )
+    return {
+        "target_radius_robot_root_m": radius,
+        "minimum_reachable_radius_m": minimum,
+        "maximum_reachable_radius_m": (
+            maximum if math.isfinite(maximum) else None
+        ),
+        "within_runtime_reachability_shell": True,
+    }
 
 
 def _validate_schema_value(value: Any, schema: Mapping[str, Any], path: str) -> Any:
@@ -860,6 +986,7 @@ def build_shadow_tool_invocation_candidates(
                 "ordered waypoint schema must contain target_quaternion_wxyz"
             )
         waypoint_properties.pop("target_position_m")
+        waypoint_properties.pop("target_quaternion_wxyz")
         waypoint_properties.update(
             {
                 "position_anchor_id": {
@@ -881,7 +1008,9 @@ def build_shadow_tool_invocation_candidates(
             }
         )
         waypoint_items["required"] = [
-            field for field in waypoint_required if field != "target_position_m"
+            field
+            for field in waypoint_required
+            if field not in {"target_position_m", "target_quaternion_wxyz"}
         ] + [
             "position_anchor_id",
             "interaction_offset_from_anchor_m",
@@ -889,8 +1018,9 @@ def build_shadow_tool_invocation_candidates(
         ]
         materialized_argument_fields = (
             "ordered_waypoints[].target_position_m",
+            "ordered_waypoints[].target_quaternion_wxyz",
         )
-    elif requires_position:
+    elif requires_position or requires_orientation:
         model_properties = model_argument_schema.get("properties")
         model_required = model_argument_schema.get("required")
         if not isinstance(model_properties, dict) or not isinstance(
@@ -900,10 +1030,20 @@ def build_shadow_tool_invocation_candidates(
                 "invocation schema properties/required must be mutable collections"
             )
         model_properties.pop("target_position_m", None)
+        model_properties.pop("target_quaternion_wxyz", None)
         model_argument_schema["required"] = [
-            field for field in model_required if field != "target_position_m"
+            field
+            for field in model_required
+            if field not in {"target_position_m", "target_quaternion_wxyz"}
         ]
-        materialized_argument_fields = ("target_position_m",)
+        materialized_argument_fields = tuple(
+            field
+            for field, required in (
+                ("target_position_m", requires_position),
+                ("target_quaternion_wxyz", requires_orientation),
+            )
+            if required
+        )
     invalidation_ids = tuple(
         sorted(item.condition_id for item in lease_decision.invalidation_conditions)
     )
@@ -1071,6 +1211,9 @@ def _materialize_ordered_waypoint_path(
         else 0.0
     )
     previous_position: Sequence[float] = candidate.current_controlled_position_m
+    previous_quaternion: Sequence[float] = (
+        candidate.current_controlled_quaternion_wxyz
+    )
     path_length = 0.0
     materialized_waypoints: list[dict[str, Any]] = []
     assessments: list[dict[str, Any]] = []
@@ -1136,23 +1279,11 @@ def _materialize_ordered_waypoint_path(
             raise WorldEffectToolInvocationError(
                 f"ordered waypoint {index} orientation axis was not advertised"
             )
-        raw_quaternion = _vector(
-            waypoint.get("target_quaternion_wxyz"),
-            4,
-            (
-                "invocation_arguments.ordered_waypoints"
-                f"[{index}].target_quaternion_wxyz"
-            ),
-        )
-        quaternion_norm = math.sqrt(
-            sum(value * value for value in raw_quaternion)
-        )
-        if abs(quaternion_norm - 1.0) > 0.01:
-            raise WorldEffectToolInvocationError(
-                f"ordered waypoint {index} target quaternion is not normalized"
-            )
-        quaternion = _normalize(
-            raw_quaternion, f"ordered waypoint {index} target quaternion"
+        quaternion = _quaternion_aligning_axis(
+            previous_quaternion,
+            candidate.interaction_alignment_axis_local,
+            axis.axis_robot_root,
+            bidirectional=axis.bidirectional,
         )
         realized_axis = _normalize(
             _rotate_wxyz(
@@ -1172,7 +1303,20 @@ def _materialize_ordered_waypoint_path(
         )
         if alignment_error_deg > maximum_alignment_error:
             raise WorldEffectToolInvocationError(
-                f"ordered waypoint {index} exceeds observed-axis alignment limit"
+                f"ordered waypoint {index} alignment error "
+                f"{alignment_error_deg:.3f}deg exceeds observed-axis alignment "
+                f"limit {maximum_alignment_error:.3f}deg",
+                evidence={
+                    "waypoint_index": index,
+                    "alignment_error_deg": alignment_error_deg,
+                    "maximum_alignment_error_deg": maximum_alignment_error,
+                    "realized_interaction_axis_robot_root": list(realized_axis),
+                    "observed_alignment_axis_robot_root": list(
+                        axis.axis_robot_root
+                    ),
+                    "orientation_alignment_id": alignment_id,
+                    "bidirectional_axis": axis.bidirectional,
+                },
             )
         rotated_origin_offset = _rotate_wxyz(
             quaternion,
@@ -1195,6 +1339,11 @@ def _materialize_ordered_waypoint_path(
             raise WorldEffectToolInvocationError(
                 f"ordered waypoint {index} is outside runtime workspace bounds"
             )
+        reachability = _assess_reachable_radius(
+            target_position,
+            constraints,
+            path=f"ordered waypoint {index}",
+        )
         segment_displacement = _distance(target_position, previous_position)
         if segment_displacement <= minimum_segment_displacement:
             raise WorldEffectToolInvocationError(
@@ -1202,13 +1351,43 @@ def _materialize_ordered_waypoint_path(
                 "position tolerance"
             )
         if segment_displacement > maximum_segment_displacement:
+            required_segment_count = math.ceil(
+                segment_displacement / maximum_segment_displacement
+            )
             raise WorldEffectToolInvocationError(
-                f"ordered waypoint {index} exceeds runtime segment displacement bound"
+                f"ordered waypoint {index} segment displacement "
+                f"{segment_displacement:.4f}m exceeds runtime segment "
+                f"displacement bound {maximum_segment_displacement:.4f}m; "
+                f"subdivide into at least {required_segment_count} segments",
+                evidence={
+                    "waypoint_index": index,
+                    "previous_controlled_target_position_m": list(
+                        previous_position
+                    ),
+                    "rejected_controlled_target_position_m": list(
+                        target_position
+                    ),
+                    "segment_displacement_m": segment_displacement,
+                    "maximum_segment_displacement_m": (
+                        maximum_segment_displacement
+                    ),
+                    "required_segment_count": required_segment_count,
+                    "required_intermediate_waypoint_count": (
+                        required_segment_count - 1
+                    ),
+                },
             )
         path_length += segment_displacement
         if path_length > maximum_path_length:
             raise WorldEffectToolInvocationError(
-                "ordered waypoint path exceeds runtime path-length bound"
+                "ordered waypoint path length "
+                f"{path_length:.4f}m exceeds runtime path-length bound "
+                f"{maximum_path_length:.4f}m",
+                evidence={
+                    "waypoint_index": index,
+                    "path_length_m": path_length,
+                    "maximum_path_length_m": maximum_path_length,
+                },
             )
         materialized_waypoints.append(
             {
@@ -1234,9 +1413,11 @@ def _materialize_ordered_waypoint_path(
                 "realized_interaction_axis_robot_root": list(realized_axis),
                 "observed_alignment_axis_robot_root": list(axis.axis_robot_root),
                 "alignment_error_deg": alignment_error_deg,
+                "reachability": reachability,
             }
         )
         previous_position = target_position
+        previous_quaternion = quaternion
     materialized_arguments = dict(arguments)
     materialized_arguments["ordered_waypoints"] = materialized_waypoints
     return materialized_arguments, {
@@ -1247,6 +1428,7 @@ def _materialize_ordered_waypoint_path(
         "ordered_waypoint_path_length_m": path_length,
         "maximum_path_length_m": maximum_path_length,
         "maximum_segment_displacement_m": maximum_segment_displacement,
+        "reachability_source": "runtime_executor_advertisement",
         "ordered_waypoints": assessments,
     }
 
@@ -1422,6 +1604,10 @@ class ShadowToolInvocationGate:
         )
         if (
             candidate.tool_family == "motion"
+            and candidate.tool_configuration.get(
+                "require_interaction_relation"
+            )
+            is True
             and not candidate.retained_contact_supported
             and grasp_alignment.get("available") is True
             and grasp_alignment.get(
@@ -1541,21 +1727,17 @@ class ShadowToolInvocationGate:
                 raise WorldEffectToolInvocationError(
                     "orientation alignment axis was not advertised"
                 )
-            raw_quaternion = _vector(
-                arguments.get("target_quaternion_wxyz"),
-                4,
-                "invocation_arguments.target_quaternion_wxyz",
-            )
-            quaternion_norm = math.sqrt(sum(value * value for value in raw_quaternion))
-            if abs(quaternion_norm - 1.0) > 0.01:
-                raise WorldEffectToolInvocationError(
-                    "target quaternion must be normalized within 0.01"
-                )
-            quaternion = _normalize(raw_quaternion, "target_quaternion_wxyz")
             if candidate.interaction_alignment_axis_local is None:
                 raise WorldEffectToolInvocationError(
                     "interaction alignment axis is unavailable"
                 )
+            quaternion = _quaternion_aligning_axis(
+                candidate.current_controlled_quaternion_wxyz,
+                candidate.interaction_alignment_axis_local,
+                axis.axis_robot_root,
+                bidirectional=axis.bidirectional,
+            )
+            arguments["target_quaternion_wxyz"] = list(quaternion)
             realized_axis = _normalize(
                 _rotate_wxyz(
                     quaternion,
@@ -1579,7 +1761,21 @@ class ShadowToolInvocationGate:
             )
             if alignment_error_deg > maximum_alignment_error:
                 raise WorldEffectToolInvocationError(
-                    "target orientation exceeds observed-axis alignment limit"
+                    "target orientation alignment error "
+                    f"{alignment_error_deg:.3f}deg exceeds observed-axis "
+                    f"alignment limit {maximum_alignment_error:.3f}deg",
+                    evidence={
+                        "alignment_error_deg": alignment_error_deg,
+                        "maximum_alignment_error_deg": maximum_alignment_error,
+                        "realized_interaction_axis_robot_root": list(
+                            realized_axis
+                        ),
+                        "observed_alignment_axis_robot_root": list(
+                            axis.axis_robot_root
+                        ),
+                        "orientation_alignment_id": orientation_alignment_id,
+                        "bidirectional_axis": axis.bidirectional,
+                    },
                 )
             assessment.update(
                 {
@@ -1706,9 +1902,35 @@ class ShadowToolInvocationGate:
                 constraints.get("maximum_displacement_m", math.inf)
             )
             if displacement > maximum_displacement:
-                raise WorldEffectToolInvocationError(
-                    "target position exceeds runtime displacement bound"
+                required_segment_count = math.ceil(
+                    displacement / maximum_displacement
                 )
+                raise WorldEffectToolInvocationError(
+                    f"target position displacement {displacement:.4f}m exceeds "
+                    "runtime displacement bound "
+                    f"{maximum_displacement:.4f}m; use an ordered waypoint path "
+                    f"with at least {required_segment_count} segments",
+                    evidence={
+                        "current_controlled_position_m": list(
+                            candidate.current_controlled_position_m
+                        ),
+                        "rejected_controlled_target_position_m": list(
+                            target_position
+                        ),
+                        "displacement_m": displacement,
+                        "maximum_displacement_m": maximum_displacement,
+                        "required_segment_count": required_segment_count,
+                        "required_intermediate_waypoint_count": (
+                            required_segment_count - 1
+                        ),
+                        "recommended_tool_family": "ordered_waypoint_path",
+                    },
+                )
+            reachability = _assess_reachable_radius(
+                target_position,
+                constraints,
+                path="target position",
+            )
             assessment.update(
                 {
                     "position_anchor_id": position_anchor_id,
@@ -1722,6 +1944,10 @@ class ShadowToolInvocationGate:
                     "controlled_frame_displacement_m": displacement,
                     "maximum_controlled_frame_displacement_m": (
                         maximum_displacement
+                    ),
+                    "reachability": reachability,
+                    "reachability_source": (
+                        "runtime_executor_advertisement"
                     ),
                 }
             )
@@ -1939,17 +2165,19 @@ realize the selected observable outcome, or return blocked/observe_again so the
 provider can choose a different advertised operation.
 
 For an orientation-grounded invocation, select an observed orientation axis.
-The target quaternion must rotate the advertised local interaction alignment
-axis parallel to that observed axis within the runtime limit and honor the
-advertised interaction alignment_relation. Axes are
-bidirectional, so either sign is equivalent. Use the geometry and tool frames;
-do not infer a body part, embodiment, controller, or task phase.
+Do not output a target quaternion. The deterministic configurable motion tool
+applies the shortest rotation from the current controlled orientation that
+aligns the advertised local interaction axis to the selected observed axis,
+preserving the current twist about that axis. It validates the materialized
+quaternion against the runtime limit and interaction alignment_relation. Axes
+are bidirectional, so either sign is equivalent. Use the geometry and tool
+frames; do not infer a body part, embodiment, controller, or task phase.
 
 When ordered_waypoint_grounding_required is true, keep every top-level position
 and orientation grounding field empty. Fill ordered_waypoints in
 invocation_arguments instead. Each checkpoint independently selects an
 advertised RGB-D position anchor, an in-envelope interaction offset, an observed
-orientation axis, and a normalized target quaternion. Choose the fewest ordered
+orientation axis, and no target position or quaternion. Choose the fewest ordered
 checkpoints that realize the requested observable outcome while respecting the
 advertised segment and total path bounds. For loaded transport this can express
 a raised free-space checkpoint followed by destination alignment and lowering;

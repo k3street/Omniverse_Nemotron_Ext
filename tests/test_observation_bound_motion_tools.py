@@ -10,6 +10,7 @@ from scripts.observation_bound_motion_tools import (
     MotionToolValidationError,
     ObservationBoundMotionGate,
     ObservationBoundTaskFeasibilityGate,
+    compare_motion_invocation_to_recent_failures,
     motion_tool_schemas,
     opposing_contact_force_capacity,
     task_feasibility_tool_schema,
@@ -194,6 +195,82 @@ def test_opposing_contact_capacity_rejects_unobservable_mechanical_advantage():
             ],
             closing_axis=[1.0, 0.0, 0.0],
         )
+
+
+def test_recent_failed_motion_target_requires_materially_distinct_recovery():
+    history = {
+        "entries": [
+            {
+                "operation_index": 6,
+                "tool_family": "motion",
+                "result": {
+                    "converged": False,
+                    "revocation_reason": "dispatch.motion_not_converged",
+                    "terminal_target_position_m": [0.459, -0.003, 0.211],
+                    "terminal_target_quaternion_wxyz": [
+                        0.7071,
+                        -0.0236,
+                        0.7063,
+                        0.0258,
+                    ],
+                },
+            }
+        ]
+    }
+    assessment = compare_motion_invocation_to_recent_failures(
+        recent_operation_history=history,
+        proposed_checkpoints=[
+            {
+                "target_position_m": [0.456, -0.007, 0.212],
+                "target_quaternion_wxyz": [
+                    0.7187,
+                    -0.0082,
+                    0.6950,
+                    0.0191,
+                ],
+            }
+        ],
+    )
+
+    assert assessment["admitted"] is False
+    assert assessment["reason"] == "repeated_recent_failed_motion_target"
+    assert assessment["blocking_comparison"]["operation_index"] == 6
+
+
+def test_successful_physical_transition_clears_failed_motion_retry_history():
+    history = {
+        "entries": [
+            {
+                "operation_index": 6,
+                "tool_family": "motion",
+                "result": {
+                    "converged": False,
+                    "terminal_target_position_m": [0.45, 0.0, 0.21],
+                    "terminal_target_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                },
+            },
+            {
+                "operation_index": 7,
+                "tool_family": "actuator",
+                "result": {
+                    "final_lease_state": "consumed",
+                    "requested_state": "disengage",
+                },
+            },
+        ]
+    }
+    assessment = compare_motion_invocation_to_recent_failures(
+        recent_operation_history=history,
+        proposed_checkpoints=[
+            {
+                "target_position_m": [0.45, 0.0, 0.21],
+                "target_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+            }
+        ],
+    )
+
+    assert assessment["admitted"] is True
+    assert assessment["comparisons"] == []
 
 
 def test_schemas_are_runtime_discovered_and_protocol_is_neutral():

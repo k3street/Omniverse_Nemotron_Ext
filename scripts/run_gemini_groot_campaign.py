@@ -47,6 +47,8 @@ def plan_variations(
     light_min: float,
     light_max: float,
     start_index: int = 0,
+    movable_object_assets: tuple[str, ...] = ("banana",),
+    target_receptacle_assets: tuple[str, ...] = ("plate_large",),
 ) -> list[dict[str, Any]]:
     if attempts <= 0:
         raise ValueError("attempts must be positive")
@@ -54,6 +56,10 @@ def plan_variations(
         raise ValueError("pose ranges must be non-negative")
     if light_min <= 0 or light_max < light_min:
         raise ValueError("light range must be positive and ordered")
+    if not movable_object_assets or not all(movable_object_assets):
+        raise ValueError("at least one non-empty movable object asset is required")
+    if not target_receptacle_assets or not all(target_receptacle_assets):
+        raise ValueError("at least one non-empty target receptacle asset is required")
     primes = (2, 3, 5, 7, 11, 13)
     variations = []
     offset = max(0, seed) * 131 + 1
@@ -77,6 +83,12 @@ def plan_variations(
                 ),
                 "sphere_light_intensity": math.exp(light_log),
                 "appearance_seed": seed * 100_000 + attempt,
+                "movable_object_asset": movable_object_assets[
+                    (offset + attempt) % len(movable_object_assets)
+                ],
+                "target_receptacle_asset": target_receptacle_assets[
+                    (offset + attempt) % len(target_receptacle_assets)
+                ],
             }
         )
     return variations
@@ -91,12 +103,20 @@ def command_for_variation(
     randomize_background: bool,
     movable_object_asset: str = "banana",
     movable_object_label: str | None = None,
+    target_receptacle_asset: str = "plate_large",
+    target_receptacle_label: str | None = None,
     instruction: str | None = None,
+    task: str = "BananaOnPlateTask",
 ) -> list[str]:
     command = [
         str(LAUNCHER),
+        "--guarded-world-effect-execution",
+        "--task",
+        task,
         "--movable-object-asset",
         movable_object_asset,
+        "--target-receptacle-asset",
+        target_receptacle_asset,
         "--movable-object-offset",
         *(f"{value:.8f}" for value in variation["movable_object_offset_xy_m"]),
         "--plate-offset",
@@ -120,10 +140,12 @@ def command_for_variation(
     ]
     if movable_object_label:
         command.extend(("--movable-object-label", movable_object_label))
+    if target_receptacle_label:
+        command.extend(("--target-receptacle-label", target_receptacle_label))
     if instruction:
         command.extend(("--instruction", instruction))
     if headless:
-        command.append("--headless")
+        command.extend(("--viz", "none"))
     if randomize_background:
         command.append("--randomize-background")
     return command
@@ -151,12 +173,26 @@ def contact_admission_for_episode(
     return match
 
 
+def world_effect_acceptance_for_attempt(
+    artifact_dir: Path,
+) -> dict[str, Any] | None:
+    path = artifact_dir / "episode_acceptance.json"
+    if not path.is_file():
+        return None
+    try:
+        result = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    return result if isinstance(result, dict) else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-successes", type=int, default=100)
     parser.add_argument("--max-attempt-multiplier", type=float, default=2.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--start-index", type=int, default=0)
+    parser.add_argument("--task", default="BananaOnPlateTask")
     parser.add_argument(
         "--output", type=Path, default=REPO_ROOT / "artifacts/gemini_groot_campaign"
     )
@@ -176,7 +212,22 @@ def main() -> int:
         default=90.0,
     )
     parser.add_argument("--movable-object-asset", default="banana")
+    parser.add_argument(
+        "--movable-object-assets",
+        nargs="+",
+        help=(
+            "Optional deterministic asset rotation; each name must already be "
+            "present in the selected RoboLab scene."
+        ),
+    )
     parser.add_argument("--movable-object-label")
+    parser.add_argument("--target-receptacle-asset", default="plate_large")
+    parser.add_argument("--target-receptacle-label")
+    parser.add_argument(
+        "--target-receptacle-assets",
+        nargs="+",
+        help="Optional deterministic rotation across scene receptacles.",
+    )
     parser.add_argument(
         "--instruction",
         help=(
@@ -199,6 +250,12 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     episode_dir.mkdir(parents=True, exist_ok=True)
     attempts = int(math.ceil(args.target_successes * args.max_attempt_multiplier))
+    movable_object_assets = tuple(
+        args.movable_object_assets or (args.movable_object_asset,)
+    )
+    target_receptacle_assets = tuple(
+        args.target_receptacle_assets or (args.target_receptacle_asset,)
+    )
     variations = plan_variations(
         attempts,
         seed=args.seed,
@@ -208,15 +265,21 @@ def main() -> int:
         light_min=args.light_min,
         light_max=args.light_max,
         start_index=args.start_index,
+        movable_object_assets=movable_object_assets,
+        target_receptacle_assets=target_receptacle_assets,
     )
     plan = {
-        "schema_version": 4,
+        "schema_version": 5,
+        "task": args.task,
         "scene_roles": {
             "movable_object": {
-                "asset": args.movable_object_asset,
+                "assets": list(movable_object_assets),
                 "label": args.movable_object_label,
             },
-            "target_receptacle": {"asset": "plate_large", "label": "white plate"},
+            "target_receptacle": {
+                "assets": list(target_receptacle_assets),
+                "label": args.target_receptacle_label,
+            },
         },
         "teacher": "gemini-robotics-er-2-preview semantic supervision",
         "instruction": args.instruction,
@@ -224,8 +287,9 @@ def main() -> int:
             "runtime-registered, model-configurable bounded motion and actuator tools"
         ),
         "admission": (
-            "measured RGB-D/contact outcome predicates, clean release, and valid "
-            "nonzero gripper-contact telemetry; failures are not episodes"
+            "world-effect episode acceptance: fresh final predicates, clean "
+            "release/contact, no unexplained lease revocation, complete sensor/"
+            "action/model trace, and valid nonzero gripper-contact telemetry"
         ),
         "sensor_ingress": "simulator-native; ROS 2 deferred",
         "replanning": "event-driven local invalidation; periodic polling disabled",
@@ -233,6 +297,7 @@ def main() -> int:
         "maximum_attempts": attempts,
         "implemented_variations": [
             "movable_object_identity",
+            "target_receptacle_identity",
             "movable_object_xy",
             "movable_object_yaw",
             "plate_xy",
@@ -240,7 +305,6 @@ def main() -> int:
             "HDRI_background",
         ],
         "not_yet_implemented": [
-            "receptacle_identity",
             "table_material",
             "receptacle_material",
         ],
@@ -267,6 +331,7 @@ def main() -> int:
                         **variation,
                         "status": "already_complete",
                         "contact_telemetry": contact_admission,
+                        "acceptance": "published_manifest_resume",
                     }
                 )
                 continue
@@ -280,9 +345,12 @@ def main() -> int:
             artifact_dir=artifact_dir,
             headless=not (args.visible_first and variation["attempt"] == 0),
             randomize_background=not args.fixed_background,
-            movable_object_asset=args.movable_object_asset,
+            movable_object_asset=variation["movable_object_asset"],
             movable_object_label=args.movable_object_label,
+            target_receptacle_asset=variation["target_receptacle_asset"],
+            target_receptacle_label=args.target_receptacle_label,
             instruction=args.instruction,
+            task=args.task,
         )
         if args.dry_run:
             results.append({**variation, "status": "planned", "command": command})
@@ -290,11 +358,14 @@ def main() -> int:
         artifact_dir.mkdir(parents=True, exist_ok=True)
         completed = subprocess.run(command, cwd=REPO_ROOT, env=environment, check=False)
         contact_admission = contact_admission_for_episode(episode_dir, episode_index)
+        world_effect_acceptance = world_effect_acceptance_for_attempt(artifact_dir)
         admitted = (
             completed.returncode == 0
             and hdf5_path.is_file()
             and contact_admission is not None
             and contact_admission.get("passed") is True
+            and world_effect_acceptance is not None
+            and world_effect_acceptance.get("accepted") is True
         )
         success_count += int(admitted)
         results.append(
@@ -303,6 +374,7 @@ def main() -> int:
                 "status": "success" if admitted else "failed_not_admitted",
                 "returncode": completed.returncode,
                 "contact_telemetry": contact_admission,
+                "world_effect_acceptance": world_effect_acceptance,
             }
         )
         (output / "campaign_results.json").write_text(

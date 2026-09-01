@@ -8,6 +8,7 @@ from scripts.world_effect_guarded_dispatch import (
     DispatchInvalidationEvent,
     GuardedWorldEffectDispatcher,
     RuntimeWorldEffectHandlerRegistry,
+    TemporalShapeDriftConfirmation,
     WorldEffectGuardedDispatchError,
     build_fresh_dispatch_evidence,
     interaction_obstacle_geometry,
@@ -133,6 +134,89 @@ def test_fused_geometry_keeps_extent_change_fail_closed_without_independent_trac
     assert assessment["extent_measurement_reliable"]
     assert assessment["extent_change_invalidating"]
     assert assessment["invalidated"]
+
+
+def test_temporal_shape_drift_requires_two_of_three_tracked_stable_observations():
+    confirmation = TemporalShapeDriftConfirmation(
+        required_observations=2,
+        observation_window=3,
+    )
+    changed = assess_fused_target_geometry(
+        baseline_geometry=_geometry((0.49, 0.22, 0.048)),
+        current_geometry=_geometry(
+            (0.49, 0.22, 0.048), extent=(0.046, 0.04, 0.04)
+        ),
+        maximum_center_shift_m=0.01,
+        maximum_extent_change_fraction=0.1,
+        baseline_tracked_position_m=(0.5, 0.22, 0.025),
+        current_tracked_position_m=(0.5, 0.22, 0.025),
+    )
+
+    first = confirmation.assess("grey_bin", changed)
+    second = confirmation.assess("grey_bin", changed)
+
+    assert not first["invalidated"]
+    assert first["temporal_shape_drift_confirmation"]["decision"] == (
+        "pending_confirmation"
+    )
+    assert second["invalidated"]
+    assert second["temporal_shape_drift_confirmation"]["confirmed"]
+    assert confirmation.to_dict()["entities"]["grey_bin"][
+        "positive_observations"
+    ] == 2
+
+
+def test_temporal_shape_drift_accepts_two_of_three_not_only_consecutive_samples():
+    confirmation = TemporalShapeDriftConfirmation(2, 3)
+
+    def observation(extent):
+        return assess_fused_target_geometry(
+            baseline_geometry=_geometry((0.49, 0.22, 0.048)),
+            current_geometry=_geometry((0.49, 0.22, 0.048), extent=extent),
+            maximum_center_shift_m=0.01,
+            maximum_extent_change_fraction=0.1,
+            baseline_tracked_position_m=(0.5, 0.22, 0.025),
+            current_tracked_position_m=(0.5, 0.22, 0.025),
+        )
+
+    assert not confirmation.assess(
+        "grey_bin", observation((0.046, 0.04, 0.04))
+    )["invalidated"]
+    assert not confirmation.assess(
+        "grey_bin", observation((0.04, 0.04, 0.04))
+    )["invalidated"]
+    assert confirmation.assess(
+        "grey_bin", observation((0.046, 0.04, 0.04))
+    )["invalidated"]
+
+
+def test_temporal_shape_drift_never_delays_translation_or_untracked_extent_change():
+    confirmation = TemporalShapeDriftConfirmation(2, 3)
+    translated = assess_fused_target_geometry(
+        baseline_geometry=_geometry((0.49, 0.22, 0.048)),
+        current_geometry=_geometry((0.505, 0.22, 0.048)),
+        maximum_center_shift_m=0.01,
+        maximum_extent_change_fraction=0.1,
+        baseline_tracked_position_m=(0.5, 0.22, 0.025),
+        current_tracked_position_m=(0.515, 0.22, 0.025),
+    )
+    untracked_reshape = assess_fused_target_geometry(
+        baseline_geometry=_geometry((0.49, 0.22, 0.048)),
+        current_geometry=_geometry(
+            (0.49, 0.22, 0.048), extent=(0.046, 0.04, 0.04)
+        ),
+        maximum_center_shift_m=0.01,
+        maximum_extent_change_fraction=0.1,
+    )
+
+    assert confirmation.assess("red_block", translated)["invalidated"]
+    assert confirmation.assess("untracked", untracked_reshape)["invalidated"]
+
+
+@pytest.mark.parametrize("required,window", [(0, 3), (2, 1), (True, 3)])
+def test_temporal_shape_drift_configuration_fails_closed(required, window):
+    with pytest.raises(WorldEffectGuardedDispatchError):
+        TemporalShapeDriftConfirmation(required, window)
 
 
 def test_path_obstacles_exclude_only_the_selected_interaction_target():
@@ -344,6 +428,8 @@ def test_runner_guarded_mode_orders_permit_handler_dispatch_and_fresh_outcome():
     assert "tracked_position_references_m=(" in source
     assert "carry_reference_offset=carry_reference_offset" in source
     assert "tracked_object_id in set(retained_attachment_entity_ids)" in source
+    assert "except WorldEffectGuardedDispatchError as dispatch_error:" in source
+    assert '"fresh_dispatch_evidence_invalidated_call"' in source
     assert "retained_contact_supports_loaded_actuator(" in source
     assert "classify_expected_post_release_geometry_change(" in source
     assert '"expected_post_effect_events"' in source
@@ -360,7 +446,11 @@ def test_runner_guarded_mode_orders_permit_handler_dispatch_and_fresh_outcome():
     assert "rgbd.oriented_footprint_axis_set_robot_root" in source
     assert "observed_clearance_observer=(" in source
     assert "sim6.live_interaction_frame_plus_fresh_full_scene_rgbd" in source
-    assert "_runtime_geometry_by_id(_state(env, initial_object_z))" in source
+    assert source.count('"source": "fresh_shared_runtime_rgbd_state"') == 2
+    assert source.count("iteration_observer=") >= 2
+    assert "_runtime_geometry_by_id(_state(env, initial_object_z))" not in source
+    assert '"rgbd_sampling_cadence_changed": False' in source
+    assert '"model_polling_added": False' in source
     assert "build_fresh_dispatch_evidence(" in source
     assert "GuardedWorldEffectDispatcher(" in source
     assert "RuntimeWorldEffectHandlerRegistry(" in source

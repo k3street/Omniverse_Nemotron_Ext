@@ -57,8 +57,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--target-receptacle-label",
-    default="white plate",
-    help="Model-facing label for the target receptacle.",
+    help="Optional model-facing label; defaults to a humanized scene asset name.",
 )
 parser.add_argument(
     "--instruction",
@@ -66,6 +65,14 @@ parser.add_argument(
     help=(
         "Natural-language instruction supplied to the model at every fresh "
         "observation-bound motion decision."
+    ),
+)
+parser.add_argument(
+    "--isolate-scene-to-role-assets",
+    action="store_true",
+    help=(
+        "Move all task objects except the configured movable object and target "
+        "receptacle out of the workspace before collecting evidence."
     ),
 )
 parser.add_argument("--model", default="gemini-robotics-er-2-preview")
@@ -86,7 +93,7 @@ parser.add_argument(
 )
 parser.add_argument("--adaptive-tolerance", type=float, default=0.012)
 parser.add_argument("--adaptive-max-step", type=float, default=0.020)
-parser.add_argument("--adaptive-max-iterations", type=int, default=24)
+parser.add_argument("--adaptive-max-iterations", type=int, default=80)
 parser.add_argument("--adaptive-settle-steps", type=int, default=12)
 parser.add_argument("--adaptive-max-joint-step", type=float, default=0.07)
 parser.add_argument("--adaptive-damping", type=float, default=0.05)
@@ -410,11 +417,63 @@ parser.add_argument(
 parser.add_argument(
     "--world-effect-runtime-lease-duration-s",
     type=float,
-    default=120.0,
+    default=600.0,
     help=(
         "Runtime-owned wall-clock deadman for one issued exact-invocation "
         "lease. Sensor invalidations remain active throughout; this window "
-        "must cover one bounded rendered IK operation."
+        "must cover one bounded rendered IK operation, including conservative "
+        "model-selected step sizes in a live RTX viewport."
+    ),
+)
+parser.add_argument(
+    "--bounded-dls-minimum-reach-radius-m",
+    type=float,
+    default=0.10,
+    help=(
+        "Runtime executor's minimum robot-root reach radius. This is "
+        "advertised by the active motion tool, not encoded in the task contract."
+    ),
+)
+parser.add_argument(
+    "--bounded-dls-maximum-reach-radius-m",
+    type=float,
+    default=0.80,
+    help=(
+        "Runtime executor's maximum robot-root reach radius used before a "
+        "motion lease can be issued."
+    ),
+)
+parser.add_argument(
+    "--bounded-dls-maximum-segment-displacement-m",
+    type=float,
+    default=0.60,
+    help=(
+        "Maximum admitted controlled-frame displacement for one local DLS "
+        "checkpoint; longer routes require ordered intermediate waypoints."
+    ),
+)
+parser.add_argument(
+    "--bounded-dls-maximum-path-length-m",
+    type=float,
+    default=1.60,
+    help="Maximum admitted length of one ordered local DLS path.",
+)
+parser.add_argument(
+    "--failed-motion-retry-minimum-translation-m",
+    type=float,
+    default=0.03,
+    help=(
+        "Minimum terminal translation change required before retrying a "
+        "recently non-converged motion."
+    ),
+)
+parser.add_argument(
+    "--failed-motion-retry-minimum-orientation-deg",
+    type=float,
+    default=10.0,
+    help=(
+        "Alternative terminal orientation change that makes a retry "
+        "materially distinct from a recently non-converged motion."
     ),
 )
 parser.add_argument(
@@ -444,6 +503,24 @@ parser.add_argument(
         "independent runtime-tracker presence. Persisted identities expose no "
         "cached geometry; active operation targets still invalidate on the "
         "first visibility loss."
+    ),
+)
+parser.add_argument(
+    "--world-effect-shape-drift-confirmations",
+    type=int,
+    default=2,
+    help=(
+        "Required RGB-D extent-only drift observations before invalidation "
+        "when an independent tracked pose confirms a stable entity center."
+    ),
+)
+parser.add_argument(
+    "--world-effect-shape-drift-window",
+    type=int,
+    default=3,
+    help=(
+        "Bounded observation window used for tracked-stable RGB-D shape-drift "
+        "confirmation. Tracked translation and contact remain immediate."
     ),
 )
 parser.add_argument(
@@ -544,6 +621,7 @@ from observation_bound_motion_tools import (  # noqa: E402
     actuator_command_outcome_invalidation_reason,
     actuator_tool_schemas,
     compare_grasp_pose_to_failed_attempts,
+    compare_motion_invocation_to_recent_failures,
     compare_target_to_stalled_recovery,
     failed_grasp_pose_lease_released,
     motion_report_yields_to_scheduler,
@@ -613,6 +691,7 @@ from world_goal_activation import (  # noqa: E402
     WorldGoalActivationGate,
     build_goal_activation_candidates,
     build_world_goal_activation_prompt,
+    compact_goal_activation_revision_evidence,
     shadow_world_capability_registry,
 )
 from world_entity_physical_evidence import (  # noqa: E402
@@ -637,6 +716,16 @@ from world_effect_operation_plan import (  # noqa: E402
     build_world_effect_operation_prompt,
     summarize_world_effect_operation_history,
 )
+from world_effect_composed_sequence import (  # noqa: E402
+    ComposedToolCallDraft,
+    ComposedToolSequenceDecision,
+    ComposedToolSequenceGate,
+    WorldEffectComposedSequenceError,
+    WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION,
+    build_composed_tool_sequence_candidates,
+    build_composed_tool_sequence_prompt,
+    matching_operation_candidate,
+)
 from world_effect_execution_lease import (  # noqa: E402
     ShadowExecutionLeaseGate,
     WorldEffectExecutionLeaseError,
@@ -658,7 +747,9 @@ from world_effect_guarded_dispatch import (  # noqa: E402
     classify_expected_post_release_geometry_change,
     DispatchInvalidationEvent,
     GuardedWorldEffectDispatcher,
+    WorldEffectGuardedDispatchError,
     RuntimeWorldEffectHandlerRegistry,
+    TemporalShapeDriftConfirmation,
     build_fresh_dispatch_evidence,
     interaction_obstacle_geometry,
 )
@@ -666,6 +757,9 @@ from world_effect_closed_loop import (  # noqa: E402
     WorldEffectSequenceBudget,
     assess_retained_attachment_continuation,
     assess_world_effect_progress,
+)
+from world_effect_episode_acceptance import (  # noqa: E402
+    assess_world_effect_episode,
 )
 from world_scene_inventory_memory import (  # noqa: E402
     TemporalSceneInventoryMemory,
@@ -716,6 +810,7 @@ ACTIVE_SENSOR_MONITOR: SensorCaptureBuffer | None = None
 ACTIVE_SENSOR_SAMPLE_INDEX = 0
 ACTIVE_ROS2_SENSOR_INGRESS: ROS2SensorIngress | None = None
 ACTUATOR_CONTACT_LOCAL_GEOMETRY: dict[str, Any] | None = None
+RGBD_CAMERA_QUATERNION_CONVENTION: str | None = None
 MIN_RGBD_YAW_ANISOTROPY_FRACTION = 0.10
 
 
@@ -862,7 +957,8 @@ def _local_position(env: Any, asset_name: str) -> torch.Tensor:
 def _tracked_entity_positions_m(
     env: Any, entity_ids: Iterable[str]
 ) -> dict[str, list[float]]:
-    """Read task-neutral entity poses from the active runtime tracker adapter."""
+    """Read tracked geometric centers using any RGB-D/root calibration."""
+    center_offsets = getattr(env, "_gemini_rgbd_center_offsets_m", {})
     positions: dict[str, list[float]] = {}
     for entity_id in entity_ids:
         try:
@@ -870,8 +966,75 @@ def _tracked_entity_positions_m(
         except (KeyError, AttributeError, TypeError):
             continue
         if position.shape == (3,) and bool(torch.isfinite(position).all()):
+            offset = center_offsets.get(entity_id)
+            if (
+                isinstance(offset, (list, tuple))
+                and len(offset) == 3
+                and all(math.isfinite(float(value)) for value in offset)
+            ):
+                position = position + torch.as_tensor(
+                    offset, dtype=position.dtype, device=position.device
+                )
             positions[entity_id] = [float(value) for value in position.tolist()]
     return positions
+
+
+def _calibrate_tracked_entity_centers_m(
+    env: Any, rgbd_scene_geometry: Mapping[str, Any]
+) -> dict[str, list[float]]:
+    """Bind stable tracker translation to the first visible RGB-D center.
+
+    USD asset roots are not guaranteed to coincide with physical geometry.  The
+    first unobstructed RGB-D bounds supply a root-to-center offset; later tracker
+    samples preserve that geometric center through gripper occlusion.  Bounds
+    midpoint is preferred over the view-biased visible point-cloud centroid.
+    """
+    offsets = dict(getattr(env, "_gemini_rgbd_center_offsets_m", {}))
+    entity_ids: list[str] = []
+    for raw_geometry in rgbd_scene_geometry.get("geometries", []):
+        if not isinstance(raw_geometry, Mapping):
+            continue
+        entity_id = raw_geometry.get("runtime_id")
+        visible_center = raw_geometry.get("center_base_m")
+        aabb_min = raw_geometry.get("visible_aabb_min_base_m")
+        aabb_max = raw_geometry.get("visible_aabb_max_base_m")
+        if not isinstance(entity_id, str):
+            continue
+        entity_ids.append(entity_id)
+        if entity_id in offsets:
+            continue
+        center_source = visible_center
+        if (
+            isinstance(aabb_min, (list, tuple))
+            and isinstance(aabb_max, (list, tuple))
+            and len(aabb_min) == 3
+            and len(aabb_max) == 3
+            and all(
+                math.isfinite(float(value))
+                for value in (*aabb_min, *aabb_max)
+            )
+        ):
+            center_source = [
+                0.5 * (float(low) + float(high))
+                for low, high in zip(aabb_min, aabb_max, strict=True)
+            ]
+        if (
+            not isinstance(center_source, (list, tuple))
+            or len(center_source) != 3
+            or any(not math.isfinite(float(value)) for value in center_source)
+        ):
+            continue
+        try:
+            root_position = _local_position(env, entity_id)
+        except (KeyError, AttributeError, TypeError):
+            continue
+        if root_position.shape != (3,) or not bool(torch.isfinite(root_position).all()):
+            continue
+        root = np.asarray(root_position.tolist(), dtype=np.float64)
+        center = np.asarray(center_source, dtype=np.float64)
+        offsets[entity_id] = [float(value) for value in (center - root)]
+    setattr(env, "_gemini_rgbd_center_offsets_m", offsets)
+    return _tracked_entity_positions_m(env, entity_ids)
 
 
 def _temporal_inventory_tracked_presence_ids(
@@ -1073,6 +1236,38 @@ def _transform_asset_pose(
     asset.write_root_velocity_to_sim(torch.zeros_like(root_vel_w))
 
 
+def _isolate_scene_to_role_assets(
+    env: Any, task_object_ids: Iterable[str]
+) -> tuple[str, ...]:
+    """Remove unrelated task objects from the active workspace deterministically."""
+    keep = {
+        SCENE_ROLES.movable_object_asset,
+        SCENE_ROLES.target_receptacle_asset,
+        "table",
+    }
+    removed: list[str] = []
+    for index, asset_name in enumerate(
+        sorted({str(value) for value in task_object_ids} - keep)
+    ):
+        try:
+            asset = env.scene[asset_name]
+        except (KeyError, AttributeError, TypeError):
+            continue
+        root_pose_w = asset.data.root_pose_w
+        root_pose_w = getattr(root_pose_w, "torch", root_pose_w).clone()
+        root_pose_w[0, :3] = env.scene.env_origins[0] + torch.tensor(
+            [2.0 + 0.25 * index, 2.0, -1.0],
+            dtype=root_pose_w.dtype,
+            device=root_pose_w.device,
+        )
+        asset.write_root_pose_to_sim(root_pose_w)
+        root_vel_w = asset.data.root_vel_w
+        root_vel_w = getattr(root_vel_w, "torch", root_vel_w)
+        asset.write_root_velocity_to_sim(torch.zeros_like(root_vel_w))
+        removed.append(asset_name)
+    return tuple(removed)
+
+
 def _single_exterior_frame(obs: dict[str, Any]) -> np.ndarray:
     frame = obs["image_obs"]["over_shoulder_left_camera"][0]
     if isinstance(frame, torch.Tensor):
@@ -1178,6 +1373,7 @@ def _rgbd_object_axis_observation(
 
 def _rgbd_scene_geometry_observation(env: Any) -> dict[str, Any]:
     """Fuse current simulator RGB-D/instance data into robot-root geometry."""
+    global RGBD_CAMERA_QUATERNION_CONVENTION
     sensor = env.scene.sensors["over_shoulder_left_camera"]
     depth_value = sensor.data.output.get("depth")
     instance_value = sensor.data.output.get("instance_id_segmentation_fast")
@@ -1204,6 +1400,8 @@ def _rgbd_scene_geometry_observation(env: Any) -> dict[str, Any]:
         robot_quaternion_xyzw,
     )
     intrinsics = _tensor_numpy(sensor.data.intrinsic_matrices)
+    depth_m = _tensor_numpy(depth_value)
+    instance_ids = _tensor_numpy(instance_value)
     candidates: dict[str, tuple[np.ndarray, np.ndarray]] = {
         "camera_data_ros_xyzw": (
             camera_position_data_w,
@@ -1251,18 +1449,18 @@ def _rgbd_scene_geometry_observation(env: Any) -> dict[str, Any]:
             camera_position_usd_w,
             camera_quaternion_usd_ros_xyzw,
         )
-    scored: list[
-        tuple[float, str, dict[str, Any], np.ndarray, np.ndarray]
-    ] = []
-    for convention, (camera_position_w, quaternion_xyzw) in candidates.items():
+    def _score_camera_convention(
+        convention: str,
+    ) -> tuple[float, str, dict[str, Any], np.ndarray, np.ndarray]:
+        camera_position_w, quaternion_xyzw = candidates[convention]
         camera_to_world = transform_matrix_from_pose_xyzw(
             camera_position_w,
             quaternion_xyzw,
         )
         camera_to_robot = np.linalg.inv(robot_to_world) @ camera_to_world
         summary = summarize_labeled_scene_geometry(
-            depth_m=_tensor_numpy(depth_value),
-            instance_ids=_tensor_numpy(instance_value),
+            depth_m=depth_m,
+            instance_ids=instance_ids,
             id_to_labels=id_to_labels,
             intrinsics=intrinsics,
             camera_to_base=camera_to_robot,
@@ -1304,9 +1502,43 @@ def _rgbd_scene_geometry_observation(env: Any) -> dict[str, Any]:
             else float("inf")
         )
         summary["semantic_role_calibration"] = role_residuals
-        scored.append(
-            (score, convention, summary, camera_position_w, quaternion_xyzw)
+        return (
+            score,
+            convention,
+            summary,
+            camera_position_w,
+            quaternion_xyzw,
         )
+
+    cached_convention = RGBD_CAMERA_QUATERNION_CONVENTION
+    cache_hit = bool(cached_convention in candidates)
+    if cache_hit:
+        assert cached_convention is not None
+        scored = [_score_camera_convention(cached_convention)]
+        cached_score, _, cached_summary, _, _ = scored[0]
+        cached_role_calibration = cached_summary[
+            "semantic_role_calibration"
+        ]
+        cached_calibration_valid = bool(
+            np.isfinite(cached_score)
+            and cached_score <= 1.5
+            and cached_role_calibration
+            and all(
+                item["extent_normalized_residual"] <= 1.5
+                for item in cached_role_calibration
+            )
+        )
+        if not cached_calibration_valid:
+            scored.extend(
+                _score_camera_convention(convention)
+                for convention in candidates
+                if convention != cached_convention
+            )
+    else:
+        scored = [
+            _score_camera_convention(convention)
+            for convention in candidates
+        ]
     score, convention, summary, camera_position_w, quaternion_xyzw = min(
         scored, key=lambda item: item[0]
     )
@@ -1318,6 +1550,10 @@ def _rgbd_scene_geometry_observation(env: Any) -> dict[str, Any]:
         "quaternion_order_interpretation": convention,
         "camera_data_raw_quaternion": camera_quaternion_data_xyzw.tolist(),
         "selected_quaternion_xyzw": quaternion_xyzw.tolist(),
+        "quaternion_convention_cache_hit": bool(
+            cache_hit and convention == cached_convention
+        ),
+        "quaternion_convention_candidates_evaluated": len(scored),
     }
     summary["calibration_score"] = score
     role_calibration_valid = bool(
@@ -1329,6 +1565,9 @@ def _rgbd_scene_geometry_observation(env: Any) -> dict[str, Any]:
     )
     summary["calibration_valid"] = bool(
         np.isfinite(score) and score <= 1.5 and role_calibration_valid
+    )
+    RGBD_CAMERA_QUATERNION_CONVENTION = (
+        convention if summary["calibration_valid"] else None
     )
     if not summary["calibration_valid"]:
         summary["available"] = False
@@ -1671,6 +1910,10 @@ def _state(env: Any, initial_object_z: float) -> dict[str, Any]:
             "object_runtime_id": SCENE_ROLES.movable_object_asset,
             "error": str(exc),
         }
+    tracked_entity_positions_m = _calibrate_tracked_entity_centers_m(
+        env,
+        rgbd_scene_geometry,
+    )
     return {
         "scene_roles": SCENE_ROLES.to_dict(),
         "movable_object_xyz": movable_object.tolist(),
@@ -1683,6 +1926,7 @@ def _state(env: Any, initial_object_z: float) -> dict[str, Any]:
         "fingertip_object_distance_m": fingertip_distance,
         "actuator_contact_geometry": actuator_contact_geometry,
         "rgbd_scene_geometry": rgbd_scene_geometry,
+        "tracked_entity_positions_m": tracked_entity_positions_m,
         "pregrasp_axis_alignment": pregrasp_axis_alignment,
         "two_pad_grasp_alignment": two_pad_grasp_alignment,
         "finger_joint_rad": finger_joint_rad,
@@ -2389,10 +2633,20 @@ def _local_dls_executor_registry(
         "minimum_progress_m": {
             "type": "number", "minimum": 0.0001, "maximum": 0.01,
         },
+        "minimum_orientation_progress_deg": {
+            "type": "number", "minimum": 0.05, "maximum": 5.0,
+        },
         "maximum_stalled_observations": {
             "type": "integer", "minimum": 2, "maximum": 20,
         },
         "require_contact": {"type": "boolean"},
+        "require_interaction_relation": {
+            "type": "boolean",
+            "description": (
+                "Runtime-materialized guard requiring this motion to end at "
+                "the fresh advertised interaction relation."
+            ),
+        },
         "minimum_contact_force_n": {
             "type": "number", "minimum": 0.0, "maximum": 100.0,
         },
@@ -2460,7 +2714,15 @@ def _local_dls_executor_registry(
                     "coordinate_frame": "robot_root",
                     "workspace_min_m": [-0.75, -0.75, 0.02],
                     "workspace_max_m": [0.90, 0.90, 1.40],
-                    "maximum_displacement_m": 0.80,
+                    "minimum_reachable_radius_m": (
+                        args_cli.bounded_dls_minimum_reach_radius_m
+                    ),
+                    "maximum_reachable_radius_m": (
+                        args_cli.bounded_dls_maximum_reach_radius_m
+                    ),
+                    "maximum_displacement_m": (
+                        args_cli.bounded_dls_maximum_segment_displacement_m
+                    ),
                     "maximum_grounding_offset_m": 0.35,
                     "maximum_alignment_error_deg": 15.0,
                 },
@@ -2526,8 +2788,18 @@ def _local_dls_executor_registry(
                     "coordinate_frame": "robot_root",
                     "workspace_min_m": [-0.75, -0.75, 0.02],
                     "workspace_max_m": [0.90, 0.90, 1.40],
-                    "maximum_segment_displacement_m": 0.65,
-                    "maximum_path_length_m": 1.60,
+                    "minimum_reachable_radius_m": (
+                        args_cli.bounded_dls_minimum_reach_radius_m
+                    ),
+                    "maximum_reachable_radius_m": (
+                        args_cli.bounded_dls_maximum_reach_radius_m
+                    ),
+                    "maximum_segment_displacement_m": (
+                        args_cli.bounded_dls_maximum_segment_displacement_m
+                    ),
+                    "maximum_path_length_m": (
+                        args_cli.bounded_dls_maximum_path_length_m
+                    ),
                     "maximum_grounding_offset_m": 0.35,
                     "maximum_alignment_error_deg": 15.0,
                 },
@@ -3955,6 +4227,7 @@ def _guarded_dispatch_invalidation_events(
     current_tracked_presence_entity_ids: Iterable[str] = (),
     retained_attachment_entity_ids: Iterable[str] = (),
     attachment_recovery_entity_ids: Iterable[str] = (),
+    shape_drift_confirmation: TemporalShapeDriftConfirmation | None = None,
 ) -> tuple[DispatchInvalidationEvent, ...]:
     """Evaluate the issued condition set from fresh simulator/RGB-D evidence."""
     current_geometry = _runtime_geometry_by_id(state)
@@ -4086,6 +4359,10 @@ def _guarded_dispatch_invalidation_events(
                         current_tracked_positions_m.get(entity_id)
                     ),
                 )
+                if shape_drift_confirmation is not None:
+                    assessment = shape_drift_confirmation.assess(
+                        entity_id, assessment
+                    )
                 if assessment["invalidated"]:
                     emit(
                         binding,
@@ -4277,6 +4554,276 @@ field. Do not change the observation, candidate, provider, or semantics.
     raise RuntimeError("effect-session correction produced no decision")
 
 
+def _refresh_guarded_world_effect_goal_after_completion(
+    *,
+    coach: Any,
+    instruction: str,
+    frame: np.ndarray,
+    inventory: Mapping[str, Any],
+    previous_graph: Any,
+    previous_membership_lease: Any,
+    completed_goal_id: str,
+    scope_membership_audit: Any,
+    predicate_evaluator_advertisement: Mapping[str, Any],
+    predicate_registry: Any,
+    capability_registry: Any,
+    capability_advertisement: Mapping[str, Any],
+    provider_registry: Any,
+    runtime_effect_tools: Sequence[Any],
+    planning_factory_catalog: Any,
+) -> dict[str, Any]:
+    """Refresh the graph and next provider after one selected goal completes."""
+    prior_candidates = build_goal_activation_candidates(
+        previous_graph,
+        previous_membership_lease,
+        predicate_registry,
+        capability_registry,
+        inventory,
+    )
+    satisfied_goal_ids = set(prior_candidates.satisfied_goal_ids)
+    satisfied_goal_ids.add(completed_goal_id)
+    unresolved_goal_ids = tuple(
+        sorted(
+            goal.goal_id
+            for goal in previous_graph.goals
+            if goal.goal_id not in satisfied_goal_ids
+        )
+    )
+    revision_context = {
+        "trigger": "selected_goal_completed",
+        "completed_goal_id": completed_goal_id,
+        "previous_graph": previous_graph.to_dict(),
+        "fresh_previous_graph_evaluation": (
+            compact_goal_activation_revision_evidence(prior_candidates)
+        ),
+        "unresolved_goal_ids": list(unresolved_goal_ids),
+        "requirements": {
+            "complete_replacement_graph": True,
+            "fresh_graph_id": True,
+            "preserve_unresolved_outcomes": True,
+            "declare_complete_only_when_no_unresolved_outcome_remains": True,
+            "execution_authority": False,
+        },
+    }
+    graph_payload, graph_latency_s, graph_image_digest = coach.reason(
+        build_world_goal_graph_prompt(
+            instruction,
+            inventory,
+            predicate_evaluator_advertisement,
+            revision_context=revision_context,
+        ),
+        frame,
+    )
+    graph = WorldGoalGraph.from_mapping(graph_payload)
+    validate_world_goal_graph_entity_references(graph, inventory)
+    audited_included_entity_ids = tuple(
+        item.entity_id
+        for item in scope_membership_audit.decisions
+        if item.status == "included"
+    )
+    validate_world_goal_graph_revision(
+        previous_graph,
+        graph,
+        unresolved_goal_ids,
+        preserve_included_entity_ids=audited_included_entity_ids,
+    )
+
+    task_membership_assessment = assess_world_goal_graph_membership_audit(
+        graph,
+        scope_membership_audit,
+    )
+    predicate_admission = predicate_registry.assess_graph(graph, inventory)
+    scene_scope_admission = assess_world_goal_graph_scene_scope(graph, inventory)
+    task_membership_admitted = bool(
+        task_membership_assessment.admitted
+        or task_membership_assessment.resolved_subset_admitted
+    )
+    predicate_admitted = bool(
+        predicate_admission.admitted
+        or predicate_admission.resolved_subset_admitted
+    )
+    scene_scope_admitted = bool(
+        scene_scope_admission.admitted
+        or scene_scope_admission.resolved_subset_admitted
+    )
+    membership_lease = (
+        SceneMembershipLease.issue(graph, inventory, scene_scope_admission)
+        if scene_scope_admitted
+        else None
+    )
+    if not (
+        task_membership_admitted
+        and predicate_admitted
+        and scene_scope_admitted
+        and membership_lease is not None
+    ):
+        raise RuntimeError(
+            "fresh post-goal graph did not pass membership, predicate, and "
+            "scene-scope admission"
+        )
+
+    activation_candidates = build_goal_activation_candidates(
+        graph,
+        membership_lease,
+        predicate_registry,
+        capability_registry,
+        inventory,
+    )
+    completion_assessment = membership_lease.assess(
+        inventory,
+        task_completion_requested=True,
+    )
+    trace: dict[str, Any] = {
+        "schema_version": "world-effect-goal-transition.v1",
+        "completed_goal_id": completed_goal_id,
+        "previous_graph_id": previous_graph.graph_id,
+        "fresh_graph": graph.to_dict(),
+        "unresolved_previous_goal_ids": list(unresolved_goal_ids),
+        "task_membership_audit_admission": task_membership_assessment.to_dict(),
+        "predicate_evaluator_admission": predicate_admission.to_dict(),
+        "scene_scope_admission": scene_scope_admission.to_dict(),
+        "scene_membership_lease": membership_lease.to_dict(),
+        "activation_candidate_set": activation_candidates.to_dict(),
+        "task_completion_assessment": completion_assessment.to_dict(),
+        "graph_latency_s": graph_latency_s,
+        "graph_image_digest": graph_image_digest,
+        "motion_authority": False,
+        "execution_authority": False,
+        "authority_scope": [],
+    }
+    if graph.status == "complete":
+        if not completion_assessment.valid:
+            raise RuntimeError(
+                "fresh graph declared task complete without a valid complete "
+                "scene-membership lease"
+            )
+        if (
+            activation_candidates.candidates
+            or activation_candidates.evidence_blocked_goal_ids
+            or activation_candidates.dependency_blocked_goal_ids
+            or activation_candidates.completion_blocked_goal_ids
+        ):
+            raise RuntimeError(
+                "fresh graph declared task complete while goal candidates or "
+                "blockers remain"
+            )
+        trace["status"] = "task_complete"
+        return {
+            "status": "task_complete",
+            "graph": graph,
+            "membership_lease": membership_lease,
+            "activation_candidates": activation_candidates,
+            "activation_decision": None,
+            "planning_provider": None,
+            "trace": trace,
+        }
+
+    if not activation_candidates.candidates:
+        raise RuntimeError(
+            "fresh post-goal graph is not complete and has no activatable goal"
+        )
+    inventory_digest = hashlib.sha256(
+        json.dumps(
+            inventory,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    graph_digest = hashlib.sha256(
+        json.dumps(
+            graph.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    activation_observation_id = (
+        f"goal-activation:{inventory_digest}:{graph_digest}"
+    )
+    activation_payload, activation_latency_s, activation_image_digest = (
+        coach.reason(
+            build_world_goal_activation_prompt(
+                instruction=instruction,
+                observation_id=activation_observation_id,
+                graph=graph,
+                membership_lease=membership_lease,
+                inventory=inventory,
+                capability_advertisement=capability_advertisement,
+                candidate_set=activation_candidates,
+            ),
+            frame,
+        )
+    )
+    activation_decision = WorldGoalActivationGate(
+        activation_observation_id,
+        activation_candidates,
+    ).dispatch(activation_payload)
+    if activation_decision.decision != "select_goal":
+        raise RuntimeError(
+            "fresh post-goal activation did not select the next goal"
+        )
+
+    provider_assessment = provider_registry.assess(
+        activation_decision.capability_id,
+        runtime_effect_tools,
+    )
+    session_candidates = build_world_effect_session_candidates(
+        graph,
+        membership_lease,
+        activation_candidates,
+        activation_decision,
+        provider_assessment,
+    )
+    (
+        session_decision,
+        session_latency_s,
+        session_image_digest,
+        session_attempts,
+    ) = _reason_world_effect_session_with_correction(
+        coach=coach,
+        instruction=instruction,
+        graph=graph,
+        membership_lease=membership_lease,
+        activation_decision=activation_decision,
+        candidate_set=session_candidates,
+        frame=frame,
+    )
+    if session_decision.decision != "select_provider":
+        raise RuntimeError(
+            "fresh post-goal effect session did not select a provider"
+        )
+    planning_provider = build_planning_world_effect_provider_instance(
+        session_candidates,
+        session_decision,
+        runtime_effect_tools,
+        planning_factory_catalog,
+    )
+    trace.update(
+        {
+            "status": "next_goal_selected",
+            "activation_observation_id": activation_observation_id,
+            "activation_decision": activation_decision.to_dict(),
+            "activation_latency_s": activation_latency_s,
+            "activation_image_digest": activation_image_digest,
+            "provider_assessment": provider_assessment.to_dict(),
+            "effect_session_candidate_set": session_candidates.to_dict(),
+            "effect_session_decision": session_decision.to_dict(),
+            "effect_session_latency_s": session_latency_s,
+            "effect_session_image_digest": session_image_digest,
+            "effect_session_attempts": session_attempts,
+            "planning_provider_instance": planning_provider.to_dict(),
+        }
+    )
+    return {
+        "status": "next_goal_selected",
+        "graph": graph,
+        "membership_lease": membership_lease,
+        "activation_candidates": activation_candidates,
+        "activation_decision": activation_decision,
+        "planning_provider": planning_provider,
+        "trace": trace,
+    }
+
+
 def _reason_world_effect_execution_lease_with_correction(
     *,
     coach: Any,
@@ -4334,6 +4881,498 @@ def _reason_world_effect_execution_lease_with_correction(
             if attempt >= 2:
                 raise
     raise RuntimeError("execution-lease correction produced no decision")
+
+
+def _composed_runtime_tool_observation(
+    *,
+    inventory: Mapping[str, Any],
+    runtime_state: Mapping[str, Any],
+    source: str,
+) -> dict[str, Any]:
+    """Build the fresh observation used to bind one queued tool call."""
+    interaction_geometry = runtime_state.get("actuator_contact_geometry", {})
+    if not isinstance(interaction_geometry, Mapping):
+        raise ValueError("runtime interaction geometry must be an object")
+    return {
+        "schema_version": RUNTIME_TOOL_OBSERVATION_SCHEMA_VERSION,
+        "source": source,
+        "coordinate_frame": inventory.get("frame", "unknown"),
+        "controlled_frame": {
+            "position_m": runtime_state["eef_gripper_base_xyz"],
+            "quaternion_wxyz": runtime_state[
+                "eef_gripper_base_quaternion_wxyz"
+            ],
+        },
+        "interaction_frame": {
+            "origin_offset_local_m": interaction_geometry.get(
+                "contact_center_local_m"
+            ),
+            "alignment_axis_local": interaction_geometry.get(
+                "closing_axis_local"
+            ),
+            "alignment_relation": "surface_tangent",
+            "grasp_geometry": interaction_geometry.get(
+                "grasp_corridor_local"
+            ),
+            "two_pad_grasp_alignment": runtime_state.get(
+                "two_pad_grasp_alignment"
+            ),
+        },
+        "current_contact": runtime_state.get("current_contact"),
+        "retained_contact_supported": (
+            retained_contact_supports_loaded_actuator(
+                runtime_state.get("current_contact")
+            )
+        ),
+    }
+
+
+def _composed_operation_payload(
+    step: ComposedToolCallDraft,
+    candidate_set: Any,
+) -> dict[str, Any]:
+    candidate = matching_operation_candidate(step, candidate_set)
+    return {
+        "schema_version": candidate_set.to_dict()["schema_version"],
+        "observation_id": candidate_set.observation_id,
+        "decision": "propose_operation",
+        "operation_candidate_id": candidate.operation_candidate_id,
+        "requirement_id": candidate.requirement_id,
+        "tool_id": candidate.tool_id,
+        "purpose": step.purpose,
+        "target_entity_ids": list(step.target_entity_ids),
+        "desired_outcome": step.desired_outcome,
+        "stop_condition": step.stop_condition,
+        "confidence": 1.0,
+        "reason": step.reason,
+    }
+
+
+def _composed_execution_lease_payload(
+    step: ComposedToolCallDraft,
+    candidate_set: Any,
+) -> dict[str, Any]:
+    """Bind model configuration to every mandatory/config-linked sensor gate."""
+    if len(candidate_set.candidates) != 1:
+        raise WorldEffectComposedSequenceError(
+            "composed step requires one exact execution-lease candidate"
+        )
+    candidate = candidate_set.candidates[0]
+    configuration = dict(step.tool_configuration)
+    invalidations: list[dict[str, Any]] = []
+    for condition in candidate.invalidation_candidates:
+        linked_fields_present = bool(condition.linked_tool_configuration_fields) and all(
+            field in configuration
+            for field in condition.linked_tool_configuration_fields
+        )
+        selected = condition.mandatory or linked_fields_present
+        if condition.condition_id == "contact.required_contact_lost":
+            selected = configuration.get("require_contact") is True
+        if not selected:
+            continue
+        parameters: dict[str, Any] = {}
+        if condition.condition_id == "scene.target_geometry_drift":
+            parameters = step.geometry_drift_tolerance.to_dict()
+            parameter_properties = condition.parameter_schema.get(
+                "properties", {}
+            )
+            center_shift_schema = (
+                parameter_properties.get("maximum_center_shift_m")
+                if isinstance(parameter_properties, Mapping)
+                else None
+            )
+            fresh_maximum = (
+                center_shift_schema.get("maximum")
+                if isinstance(center_shift_schema, Mapping)
+                else None
+            )
+            requested_maximum = parameters.get("maximum_center_shift_m")
+            if all(
+                not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(float(value))
+                for value in (requested_maximum, fresh_maximum)
+            ):
+                # Approach/grasp occlusion can reduce the view-dependent visible
+                # extent without moving the tracked object.  Tightening a queued
+                # threshold to the fresh schema is safe and preserves the model's
+                # sequence; broadening it would require a fresh model decision.
+                parameters["maximum_center_shift_m"] = min(
+                    float(requested_maximum), float(fresh_maximum)
+                )
+        targets = (
+            list(candidate.operation_target_entity_ids)
+            if condition.entity_scope == "operation_targets"
+            else []
+        )
+        invalidations.append(
+            {
+                "condition_id": condition.condition_id,
+                "target_entity_ids": targets,
+                "parameters": parameters,
+            }
+        )
+    return {
+        "schema_version": candidate_set.to_dict()["schema_version"],
+        "observation_id": candidate_set.observation_id,
+        "decision": "propose_lease",
+        "candidate_id": candidate.candidate_id,
+        "provider_instance_id": candidate.provider_instance_id,
+        "operation_candidate_id": candidate.operation_candidate_id,
+        "tool_id": candidate.tool_id,
+        "grounding_entity_ids": [
+            item.entity_id for item in candidate.geometry_bindings
+        ],
+        "tool_configuration": configuration,
+        "invalidation_conditions": invalidations,
+        "confidence": 1.0,
+        "reason": step.reason,
+    }
+
+
+def _composed_invocation_payload(
+    step: ComposedToolCallDraft,
+    candidate_set: Any,
+) -> dict[str, Any]:
+    if len(candidate_set.candidates) != 1:
+        raise WorldEffectComposedSequenceError(
+            "composed step requires one exact invocation candidate"
+        )
+    candidate = candidate_set.candidates[0]
+    return {
+        "schema_version": candidate_set.to_dict()["schema_version"],
+        "observation_id": candidate_set.observation_id,
+        "decision": "propose_invocation",
+        "candidate_id": candidate.candidate_id,
+        "lease_id": candidate.lease_id,
+        "tool_id": candidate.tool_id,
+        "position_anchor_id": step.position_anchor_id,
+        "interaction_offset_from_anchor_m": list(
+            step.interaction_offset_from_anchor_m
+        ),
+        "orientation_alignment_id": step.orientation_alignment_id,
+        "invocation_arguments": dict(step.invocation_arguments),
+        "acknowledged_invalidation_condition_ids": list(
+            candidate.invalidation_condition_ids
+        ),
+        "confidence": 1.0,
+        "reason": step.reason,
+    }
+
+
+def _materialize_guarded_composed_step(
+    *,
+    step: ComposedToolCallDraft,
+    activation_decision: Any,
+    planning_provider: Any,
+    inventory: Mapping[str, Any],
+    runtime_state: Mapping[str, Any],
+    recent_operation_history: Mapping[str, Any],
+    maximum_duration_s: float,
+    operation_index: int,
+) -> dict[str, Any]:
+    """Rebind one queued draft to fresh evidence without a model call."""
+    runtime_state = _runtime_state_for_planning_provider(
+        runtime_state,
+        planning_provider,
+    )
+    operation_candidates = build_world_effect_operation_candidates(
+        planning_provider,
+        inventory,
+    )
+    operation_decision = WorldEffectOperationGate(
+        operation_candidates
+    ).dispatch(_composed_operation_payload(step, operation_candidates))
+    execution_context = {
+        "operation_index": operation_index,
+        "interaction_frame": runtime_state.get("actuator_contact_geometry"),
+        "two_pad_grasp_alignment": runtime_state.get(
+            "two_pad_grasp_alignment"
+        ),
+        "current_contact": runtime_state.get("current_contact"),
+        "fresh_rgbd_geometry": runtime_state.get("rgbd_scene_geometry"),
+        "rgbd_orientation_observability": runtime_state.get(
+            "rgbd_orientation_observability"
+        ),
+        "recent_operation_history": dict(recent_operation_history),
+    }
+    lease_candidates = build_shadow_execution_lease_candidates(
+        planning_provider,
+        operation_candidates,
+        operation_decision,
+        inventory,
+        execution_context=execution_context,
+    )
+    lease_decision = ShadowExecutionLeaseGate(lease_candidates).dispatch(
+        _composed_execution_lease_payload(step, lease_candidates)
+    )
+    runtime_observation = _composed_runtime_tool_observation(
+        inventory=inventory,
+        runtime_state=runtime_state,
+        source="fresh_composed_sequence_step",
+    )
+    invocation_candidates = build_shadow_tool_invocation_candidates(
+        planning_provider,
+        lease_candidates,
+        lease_decision,
+        runtime_observation,
+    )
+    invocation_decision = ShadowToolInvocationGate(
+        invocation_candidates
+    ).dispatch(_composed_invocation_payload(step, invocation_candidates))
+    invocation_candidate = invocation_candidates.candidates[0]
+    motion_retry_admission = None
+    if invocation_candidate.tool_family == "motion":
+        motion_retry_admission = compare_motion_invocation_to_recent_failures(
+            recent_operation_history=recent_operation_history,
+            proposed_checkpoints=_motion_invocation_checkpoints(
+                invocation_decision.invocation_arguments
+            ),
+            minimum_translation_delta_m=(
+                args_cli.failed_motion_retry_minimum_translation_m
+            ),
+            minimum_orientation_delta_deg=(
+                args_cli.failed_motion_retry_minimum_orientation_deg
+            ),
+        )
+        if not motion_retry_admission["admitted"]:
+            raise WorldEffectToolInvocationError(
+                "queued motion repeats a recent non-converged physical target",
+                evidence=motion_retry_admission,
+            )
+    runtime_lease = issue_world_effect_runtime_lease(
+        lease_candidates=lease_candidates,
+        lease_decision=lease_decision,
+        invocation_candidates=invocation_candidates,
+        invocation_decision=invocation_decision,
+        maximum_duration_s=maximum_duration_s,
+    )
+    trace = {
+        "operation_index": operation_index,
+        "planning_source": "one_call_composed_tool_sequence",
+        "composed_call": step.to_dict(),
+        "goal_activation": {
+            "decision": activation_decision.to_dict(),
+            "reused_from_active_goal": True,
+            "model_called": False,
+        },
+        "effect_session": {
+            "planning_provider_instance": planning_provider.to_dict(),
+            "reused_from_active_goal": True,
+            "model_called": False,
+        },
+        "operation_plan": {
+            "candidate_set": operation_candidates.to_dict(),
+            "decision": operation_decision.to_dict(),
+            "model_called": False,
+        },
+        "execution_lease": {
+            "candidate_set": lease_candidates.to_dict(),
+            "decision": lease_decision.to_dict(),
+            "fresh_geometry_drift_tightening": next(
+                (
+                    {
+                        "requested": step.geometry_drift_tolerance.to_dict(),
+                        "effective": item.parameters,
+                        "tightened": (
+                            item.parameters
+                            != step.geometry_drift_tolerance.to_dict()
+                        ),
+                    }
+                    for item in lease_decision.invalidation_conditions
+                    if item.condition_id == "scene.target_geometry_drift"
+                ),
+                None,
+            ),
+            "model_called": False,
+        },
+        "tool_invocation": {
+            "runtime_observation": runtime_observation,
+            "candidate_set": invocation_candidates.to_dict(),
+            "decision": invocation_decision.to_dict(),
+            "motion_retry_admission": motion_retry_admission,
+            "model_called": False,
+        },
+        "runtime_lease": runtime_lease.to_dict(),
+        "model_calls_for_step_materialization": 0,
+        "motion_authority": False,
+        "execution_authority": False,
+        "authority_scope": [],
+    }
+    return {
+        "status": "runtime_lease_issued",
+        "trace": trace,
+        "runtime_lease": runtime_lease,
+        "lease_candidates": lease_candidates,
+        "lease_decision": lease_decision,
+        "invocation_candidates": invocation_candidates,
+        "invocation_decision": invocation_decision,
+        "planning_provider": planning_provider,
+        "activation_decision": activation_decision,
+        "composed_call": step,
+    }
+
+
+def _reason_composed_tool_sequence(
+    *,
+    coach: Any,
+    instruction: str,
+    frame: np.ndarray,
+    planning_provider: Any,
+    inventory: Mapping[str, Any],
+    runtime_state: Mapping[str, Any],
+    recent_operation_history: Mapping[str, Any],
+    maximum_tool_calls: int,
+    invalidated_suffix: Mapping[str, Any] | None = None,
+) -> tuple[ComposedToolSequenceDecision, dict[str, Any]]:
+    """Make the sole action-planning model call for a complete tool queue."""
+    runtime_state = _runtime_state_for_planning_provider(
+        runtime_state,
+        planning_provider,
+    )
+    operation_candidates = build_world_effect_operation_candidates(
+        planning_provider,
+        inventory,
+    )
+    execution_context = {
+        "controlled_frame": {
+            "position_m": runtime_state.get("eef_gripper_base_xyz"),
+            "quaternion_wxyz": runtime_state.get(
+                "eef_gripper_base_quaternion_wxyz"
+            ),
+        },
+        "interaction_frame": runtime_state.get("actuator_contact_geometry"),
+        "two_pad_grasp_alignment": runtime_state.get(
+            "two_pad_grasp_alignment"
+        ),
+        "current_contact": runtime_state.get("current_contact"),
+        "retained_contact_supported": (
+            retained_contact_supports_loaded_actuator(
+                runtime_state.get("current_contact")
+            )
+        ),
+        "gripper_closed_fraction": runtime_state.get(
+            "gripper_closed_fraction"
+        ),
+        "fresh_rgbd_geometry": runtime_state.get("rgbd_scene_geometry"),
+        "rgbd_orientation_observability": runtime_state.get(
+            "rgbd_orientation_observability"
+        ),
+        "recent_operation_history": dict(recent_operation_history),
+    }
+    candidates = build_composed_tool_sequence_candidates(
+        instance=planning_provider,
+        operation_candidates=operation_candidates,
+        inventory=inventory,
+        execution_context=execution_context,
+        maximum_tool_calls=maximum_tool_calls,
+    )
+    attempts: list[dict[str, Any]] = []
+    correction_context = invalidated_suffix
+    total_latency_s = 0.0
+    image_digest = None
+    decision = None
+    for attempt_index in range(1, 3):
+        payload, latency_s, image_digest = coach.reason(
+            build_composed_tool_sequence_prompt(
+                instruction=instruction,
+                inventory=inventory,
+                candidate_set=candidates,
+                recent_operation_history=recent_operation_history,
+                invalidated_suffix=correction_context,
+            ),
+            frame,
+        )
+        total_latency_s += latency_s
+        normalized_payload = payload
+        schema_version_materialized = False
+        if (
+            isinstance(payload, Mapping)
+            and payload.get("schema_version")
+            != WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION
+            and set(payload)
+            == {
+                "schema_version",
+                "observation_id",
+                "decision",
+                "goal_id",
+                "tool_calls",
+                "confidence",
+                "reason",
+            }
+        ):
+            normalized_payload = dict(payload)
+            normalized_payload["schema_version"] = (
+                WORLD_EFFECT_COMPOSED_SEQUENCE_SCHEMA_VERSION
+            )
+            schema_version_materialized = True
+        try:
+            decision = ComposedToolSequenceGate(candidates).dispatch(
+                normalized_payload
+            )
+            attempts.append(
+                {
+                    "attempt": attempt_index,
+                    "status": "valid",
+                    "decision": decision.to_dict(),
+                    "schema_version_materialized": (
+                        schema_version_materialized
+                    ),
+                    "original_schema_version": payload.get(
+                        "schema_version"
+                    ),
+                    "latency_s": latency_s,
+                    "image_digest": image_digest,
+                }
+            )
+            break
+        except WorldEffectComposedSequenceError as composition_error:
+            rejection = {
+                "reason": "composition_contract_rejected",
+                "error_type": type(composition_error).__name__,
+                "error": str(composition_error),
+                "requirements": {
+                    "return_complete_replacement_sequence": True,
+                    "copy_schema_and_observation_ids_exactly": True,
+                    "do_not_return_only_one_corrected_call": True,
+                    "execution_authority": False,
+                },
+            }
+            attempts.append(
+                {
+                    "attempt": attempt_index,
+                    "status": "rejected",
+                    "proposal": payload,
+                    "rejection": rejection,
+                    "latency_s": latency_s,
+                    "image_digest": image_digest,
+                }
+            )
+            if attempt_index >= 2:
+                raise
+            correction_context = rejection
+            print(
+                "[world-effect-composition] CORRECT "
+                f"attempt={attempt_index} error={composition_error} "
+                "authority=none",
+                flush=True,
+            )
+    if decision is None:
+        raise RuntimeError("composed sequence produced no validated decision")
+    trace = {
+        "candidate_set": candidates.to_dict(),
+        "decision": decision.to_dict(),
+        "attempts": attempts,
+        "latency_s": total_latency_s,
+        "image_digest": image_digest,
+        "model_call_count": len(attempts),
+        "materialization_model_calls_per_tool": 0,
+        "dispatch_enabled": False,
+        "motion_authority": False,
+        "execution_authority": False,
+        "authority_scope": [],
+    }
+    return decision, trace
 
 
 def _plan_guarded_world_effect_continuation(
@@ -4640,6 +5679,7 @@ def _plan_guarded_world_effect_continuation(
                 "attempt": invocation_attempt,
                 "error_type": type(invocation_error).__name__,
                 "error": str(invocation_error),
+                "evidence": dict(invocation_error.evidence),
                 "requirements": {
                     "same_fresh_candidate_set": True,
                     "do_not_repeat_rejected_arguments": True,
@@ -4699,6 +5739,59 @@ def _plan_guarded_world_effect_continuation(
             },
         }
 
+    invocation_candidate = next(
+        item
+        for item in invocation_candidates.candidates
+        if item.candidate_id == invocation_decision.candidate_id
+    )
+    if invocation_candidate.tool_family == "motion":
+        motion_retry_admission = (
+            compare_motion_invocation_to_recent_failures(
+                recent_operation_history=recent_operation_history,
+                proposed_checkpoints=_motion_invocation_checkpoints(
+                    invocation_decision.invocation_arguments
+                ),
+                minimum_translation_delta_m=(
+                    args_cli.failed_motion_retry_minimum_translation_m
+                ),
+                minimum_orientation_delta_deg=(
+                    args_cli.failed_motion_retry_minimum_orientation_deg
+                ),
+            )
+        )
+        trace["tool_invocation"]["motion_retry_admission"] = (
+            motion_retry_admission
+        )
+        if not motion_retry_admission["admitted"]:
+            rejection_context = {
+                "attempt": "runtime_motion_retry_admission",
+                "error_type": "RepeatedFailedMotionTarget",
+                "error": (
+                    "terminal target is not materially distinct from a "
+                    "recent non-converged physical motion"
+                ),
+                "evidence": motion_retry_admission,
+                "requirements": {
+                    "propose_materially_distinct_route": True,
+                    "execution_authority": False,
+                },
+            }
+            trace["tool_invocation"]["attempts"].append(
+                {
+                    "attempt": "runtime_motion_retry_admission",
+                    "status": "rejected",
+                    "rejection": dict(rejection_context),
+                    "latency_s": 0.0,
+                    "image_digest": invocation_image_digest,
+                }
+            )
+            return {
+                "status": "operation_replan_required",
+                "trace": trace,
+                "activation_decision": activation_decision,
+                "operation_rejection": dict(rejection_context),
+            }
+
     runtime_lease = issue_world_effect_runtime_lease(
         lease_candidates=lease_candidates,
         lease_decision=lease_decision,
@@ -4720,6 +5813,123 @@ def _plan_guarded_world_effect_continuation(
     }
 
 
+def _runtime_state_for_planning_provider(
+    runtime_state: Mapping[str, Any],
+    planning_provider: Any,
+) -> dict[str, Any]:
+    """Retarget interaction observations to the selected world-goal subject."""
+    selected_state = dict(runtime_state)
+    subject_ids = {
+        item.get("subject_id")
+        for item in getattr(planning_provider, "desired_state", ())
+        if isinstance(item, Mapping) and isinstance(item.get("subject_id"), str)
+    }
+    if len(subject_ids) != 1:
+        selected_state["pregrasp_axis_alignment"] = {
+            "available": False,
+            "source": "selected_world_goal_subject",
+            "error": "selected goal does not expose one interaction subject",
+        }
+        selected_state["two_pad_grasp_alignment"] = {
+            "available": False,
+            "source": "selected_world_goal_subject",
+            "error": "selected goal does not expose one interaction subject",
+        }
+        return selected_state
+
+    subject_id = next(iter(subject_ids))
+    scene_geometry = selected_state.get("rgbd_scene_geometry")
+    actuator_geometry = selected_state.get("actuator_contact_geometry")
+    if not isinstance(scene_geometry, Mapping) or not isinstance(
+        actuator_geometry, Mapping
+    ):
+        selected_state["pregrasp_axis_alignment"] = {
+            "available": False,
+            "source": "selected_world_goal_subject",
+            "object_runtime_id": subject_id,
+            "error": "fresh scene or actuator geometry is unavailable",
+        }
+        selected_state["two_pad_grasp_alignment"] = {
+            "available": False,
+            "source": "selected_world_goal_subject",
+            "object_runtime_id": subject_id,
+            "error": "fresh scene or actuator geometry is unavailable",
+        }
+        return selected_state
+
+    tracked_positions = selected_state.get("tracked_entity_positions_m")
+    tracked_position = (
+        tracked_positions.get(subject_id)
+        if isinstance(tracked_positions, Mapping)
+        else None
+    )
+    if (
+        isinstance(tracked_position, (list, tuple))
+        and len(tracked_position) == 3
+        and all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            for value in tracked_position
+        )
+    ):
+        fused_scene_geometry = dict(scene_geometry)
+        fused_geometries: list[Any] = []
+        for raw_geometry in scene_geometry.get("geometries", []):
+            if not isinstance(raw_geometry, Mapping):
+                fused_geometries.append(raw_geometry)
+                continue
+            geometry = dict(raw_geometry)
+            if geometry.get("runtime_id") == subject_id:
+                geometry["rgbd_visible_center_base_m"] = geometry.get(
+                    "center_base_m"
+                )
+                geometry["center_base_m"] = [
+                    float(value) for value in tracked_position
+                ]
+                geometry["center_source"] = (
+                    "runtime_tracker_plus_rgbd_center_calibration"
+                )
+            fused_geometries.append(geometry)
+        fused_scene_geometry["geometries"] = fused_geometries
+        scene_geometry = fused_scene_geometry
+        selected_state["rgbd_scene_geometry"] = fused_scene_geometry
+
+    try:
+        selected_state["pregrasp_axis_alignment"] = (
+            pregrasp_axis_alignment_observation(
+                scene_geometry=scene_geometry,
+                actuator_geometry=actuator_geometry,
+                object_runtime_id=subject_id,
+                maximum_error_deg=args_cli.maximum_pregrasp_axis_error_deg,
+            )
+        )
+    except (TypeError, ValueError) as error:
+        selected_state["pregrasp_axis_alignment"] = {
+            "available": False,
+            "source": "selected_world_goal_subject",
+            "object_runtime_id": subject_id,
+            "error": str(error),
+        }
+    try:
+        selected_state["two_pad_grasp_alignment"] = (
+            two_pad_grasp_alignment_observation(
+                scene_geometry=scene_geometry,
+                actuator_geometry=actuator_geometry,
+                object_runtime_id=subject_id,
+            )
+        )
+    except (TypeError, ValueError) as error:
+        selected_state["two_pad_grasp_alignment"] = {
+            "available": False,
+            "source": "selected_world_goal_subject",
+            "object_runtime_id": subject_id,
+            "error": str(error),
+        }
+    selected_state["selected_world_goal_subject_id"] = subject_id
+    return selected_state
+
+
 def _dispatch_guarded_world_effect_continuation(
     *,
     env: Any,
@@ -4738,6 +5948,8 @@ def _dispatch_guarded_world_effect_continuation(
     preserve_actuator_engagement: bool,
     retained_attachment_entity_ids: Sequence[str],
     attachment_recovery_entity_ids: Sequence[str],
+    shape_drift_required_observations: int,
+    shape_drift_observation_window: int,
 ) -> tuple[dict[str, Any], bool, dict[str, Any]]:
     """Dispatch one continuation bundle through a fresh single-use permit."""
     runtime_lease = bundle["runtime_lease"]
@@ -4767,6 +5979,10 @@ def _dispatch_guarded_world_effect_continuation(
         for entity_id in target_ids
         if entity_id in baseline_tracked_positions_m
     }
+    shape_drift_confirmation = TemporalShapeDriftConfirmation(
+        required_observations=shape_drift_required_observations,
+        observation_window=shape_drift_observation_window,
+    )
     fresh_state = _state(env, initial_object_z)
     fresh_tracked = _tracked_entity_positions_m(env, target_ids)
     fresh_events = _guarded_dispatch_invalidation_events(
@@ -4788,6 +6004,7 @@ def _dispatch_guarded_world_effect_continuation(
         ),
         retained_attachment_entity_ids=retained_attachment_entity_ids,
         attachment_recovery_entity_ids=attachment_recovery_entity_ids,
+        shape_drift_confirmation=shape_drift_confirmation,
     )
     fresh_evidence = build_fresh_dispatch_evidence(
         runtime_lease=runtime_lease,
@@ -4867,9 +6084,34 @@ def _dispatch_guarded_world_effect_continuation(
                     else float(fresh_state["gripper_closed_fraction"])
                 ),
             )
+            monitor_observation = {
+                "state": fresh_state,
+                "tracked_positions_m": fresh_tracked,
+                "sample_index": 0,
+            }
+
+            def refresh_monitor_observation() -> Mapping[str, Any]:
+                monitor_observation["sample_index"] += 1
+                monitor_observation["state"] = _state(
+                    env, initial_object_z
+                )
+                monitor_observation["tracked_positions_m"] = (
+                    _tracked_entity_positions_m(env, target_ids)
+                )
+                return {
+                    "source": "fresh_shared_runtime_rgbd_state",
+                    "sample_index": monitor_observation["sample_index"],
+                    "rgbd_fresh": True,
+                    "shared_by": [
+                        "clearance",
+                        "orientation",
+                        "dispatch_invalidation",
+                    ],
+                }
 
             def observe_clearance() -> tuple[float, str]:
-                interaction = _actuator_contact_geometry(env, _eef_position(env))
+                monitor_state = monitor_observation["state"]
+                interaction = monitor_state.get("actuator_contact_geometry", {})
                 current_position = interaction.get("contact_center_xyz_m")
                 target_interaction_position = grounding_checkpoints[
                     active_waypoint_index
@@ -4881,7 +6123,7 @@ def _dispatch_guarded_world_effect_continuation(
                         "continuation clearance observer lacks an interaction frame"
                     )
                 fresh_obstacles = interaction_obstacle_geometry(
-                    _runtime_geometry_by_id(_state(env, initial_object_z)),
+                    _runtime_geometry_by_id(monitor_state),
                     interaction_target_entity_id=(
                         _interaction_target_entity_id(
                             invocation_candidate,
@@ -4909,7 +6151,9 @@ def _dispatch_guarded_world_effect_continuation(
             def observe_orientation(
                 entity_id: str, reference_axis: np.ndarray
             ) -> tuple[float, str, Mapping[str, Any]]:
-                geometry = _rgbd_scene_geometry_observation(env)
+                geometry = monitor_observation["state"].get(
+                    "rgbd_scene_geometry", {}
+                )
                 current = next(
                     (
                         item
@@ -4951,8 +6195,10 @@ def _dispatch_guarded_world_effect_continuation(
                     }
                     monitored_events.append(event)
                     return {**event, "converged": False}
-                monitor_state = _state(env, initial_object_z)
-                current_tracked = _tracked_entity_positions_m(env, target_ids)
+                monitor_state = monitor_observation["state"]
+                current_tracked = monitor_observation[
+                    "tracked_positions_m"
+                ]
                 events = _guarded_dispatch_invalidation_events(
                     runtime_lease=active_lease,
                     lease_candidate=lease_candidate,
@@ -4976,6 +6222,7 @@ def _dispatch_guarded_world_effect_continuation(
                     attachment_recovery_entity_ids=(
                         attachment_recovery_entity_ids
                     ),
+                    shape_drift_confirmation=shape_drift_confirmation,
                 )
                 if not events:
                     return None
@@ -5025,6 +6272,7 @@ def _dispatch_guarded_world_effect_continuation(
                     rgbd_axis_references=rgbd_axis_references,
                     tracked_orientation_observer=observe_orientation,
                     observed_clearance_observer=observe_clearance,
+                    iteration_observer=refresh_monitor_observation,
                     checkpoint_callback=None,
                     early_stop_callback=monitor,
                 )
@@ -5072,6 +6320,7 @@ def _dispatch_guarded_world_effect_continuation(
                 attachment_recovery_entity_ids=(
                     attachment_recovery_entity_ids
                 ),
+                shape_drift_confirmation=shape_drift_confirmation,
             )
             if post_events and active_lease.active:
                 event = post_events[0]
@@ -5100,6 +6349,14 @@ def _dispatch_guarded_world_effect_continuation(
                 "execution_report": motion_report,
                 "motion_report": motion_report,
                 "monitored_invalidation_events": monitored_events,
+                "shape_drift_confirmation": shape_drift_confirmation.to_dict(),
+                "motion_monitoring": {
+                    "fresh_shared_rgbd_state_count": monitor_observation[
+                        "sample_index"
+                    ],
+                    "rgbd_sampling_cadence_changed": False,
+                    "model_polling_added": False,
+                },
                 "terminal": terminal,
                 "final_action": final_action.detach().cpu().tolist(),
                 "post_dispatch_observation": {
@@ -5115,7 +6372,16 @@ def _dispatch_guarded_world_effect_continuation(
                     "tracked_entity_positions_m": post_tracked,
                     "current_contact": post_state.get("current_contact"),
                 },
-                "requires_model_replan": True,
+                "requires_model_replan": bool(
+                    monitored_events
+                    or terminal
+                    or not motion_report.get("converged")
+                ),
+                "queue_continuation_admitted": bool(
+                    not monitored_events
+                    and not terminal
+                    and motion_report.get("converged")
+                ),
             }
 
     elif lease_candidate.tool_family == "actuator":
@@ -5181,6 +6447,7 @@ def _dispatch_guarded_world_effect_continuation(
                 attachment_recovery_entity_ids=(
                     attachment_recovery_entity_ids
                 ),
+                shape_drift_confirmation=shape_drift_confirmation,
             )
             expected_post_effect_events: list[dict[str, Any]] = []
             authoritative_post_events: list[DispatchInvalidationEvent] = []
@@ -5217,6 +6484,7 @@ def _dispatch_guarded_world_effect_continuation(
                 "actuator_report": actuator_report,
                 "monitored_invalidation_events": monitored_events,
                 "expected_post_effect_events": expected_post_effect_events,
+                "shape_drift_confirmation": shape_drift_confirmation.to_dict(),
                 "terminal": terminal,
                 "final_action": final_action.detach().cpu().tolist(),
                 "post_dispatch_observation": {
@@ -5235,7 +6503,12 @@ def _dispatch_guarded_world_effect_continuation(
                         "gripper_closed_fraction"
                     ),
                 },
-                "requires_model_replan": True,
+                "requires_model_replan": bool(
+                    monitored_events or terminal
+                ),
+                "queue_continuation_admitted": bool(
+                    not monitored_events and not terminal
+                ),
             }
 
     else:
@@ -5288,7 +6561,12 @@ def _dispatch_guarded_world_effect_continuation(
         "permit": permit.to_dict(),
         "outcome": result,
         "runtime_lease_after": runtime_lease.to_dict(),
-        "requires_model_replan": True,
+        "requires_model_replan": bool(
+            handler_result.get("requires_model_replan")
+        ),
+        "queue_continuation_admitted": bool(
+            handler_result.get("queue_continuation_admitted")
+        ),
         "dispatch_enabled": False,
         "motion_authority": False,
         "execution_authority": False,
@@ -5375,6 +6653,21 @@ def _current_robot_joint_action(
     return action
 
 
+def _actuator_completion_sample(env: Any) -> dict[str, Any]:
+    """Read only actuator/contact channels needed for local command completion."""
+    robot = env.scene["robot"]
+    joint_positions = getattr(robot.data.joint_pos, "torch", robot.data.joint_pos)
+    finger_index = robot.data.joint_names.index("finger_joint")
+    finger_joint_rad = float(joint_positions[0, finger_index].detach().cpu())
+    return {
+        "finger_joint_rad": finger_joint_rad,
+        "gripper_closed_fraction": max(
+            0.0, min(1.0, finger_joint_rad / (math.pi / 4.0))
+        ),
+        "current_contact": _current_contact_observation(env),
+    }
+
+
 def _execute_binary_actuator_tool(
     env: Any,
     obs: dict[str, Any],
@@ -5407,6 +6700,58 @@ def _execute_binary_actuator_tool(
         settle_steps,
         gripper_closed=engaged_after,
     )
+    executed_settle_steps = settle_steps
+    completion_reason = "requested_settle_complete"
+    previous_joint_position = float(
+        _actuator_completion_sample(env)["finger_joint_rad"]
+    )
+    while not terminal and executed_settle_steps < 120:
+        current_state = _actuator_completion_sample(env)
+        current_contact = current_state["current_contact"]
+        closed_fraction = float(current_state["gripper_closed_fraction"])
+        if requested_state == "maintain":
+            break
+        if requested_state == "engage":
+            if retained_contact_supports_loaded_actuator(current_contact):
+                completion_reason = "opposing_retention_observed"
+                break
+            if closed_fraction >= 0.98:
+                completion_reason = "commanded_closed_state_reached"
+                break
+        elif closed_fraction <= 0.02:
+            completion_reason = "commanded_open_state_reached"
+            break
+        continuation_steps = min(8, 120 - executed_settle_steps)
+        obs, terminal = _hold_joint_action(
+            env,
+            obs,
+            command,
+            continuation_steps,
+            gripper_closed=engaged_after,
+        )
+        executed_settle_steps += continuation_steps
+        next_state = _actuator_completion_sample(env)
+        next_joint_position = float(next_state["finger_joint_rad"])
+        if requested_state == "engage" and retained_contact_supports_loaded_actuator(
+            next_state["current_contact"]
+        ):
+            completion_reason = "opposing_retention_observed"
+            break
+        if (
+            requested_state == "disengage"
+            and float(next_state["gripper_closed_fraction"]) <= 0.02
+        ):
+            completion_reason = "commanded_open_state_reached"
+            break
+        if abs(next_joint_position - previous_joint_position) < 0.002:
+            completion_reason = "actuator_motion_stalled"
+            break
+        previous_joint_position = next_joint_position
+    else:
+        if terminal:
+            completion_reason = "environment_terminal"
+        elif executed_settle_steps >= 120:
+            completion_reason = "maximum_settle_steps_reached"
     command[0, 7] = 1.0 if engaged_after else 0.0
     state_after = _state(env, initial_object_z)
     return (
@@ -5419,6 +6764,8 @@ def _execute_binary_actuator_tool(
             "engaged_before": engaged_before,
             "engaged_after": engaged_after,
             "settle_steps": settle_steps,
+            "executed_settle_steps": executed_settle_steps,
+            "completion_reason": completion_reason,
             "state_before": {
                 "finger_joint_rad": state_before["finger_joint_rad"],
                 "gripper_closed_fraction": state_before[
@@ -5494,6 +6841,7 @@ def _move_eef_to_target(
     ]
     | None = None,
     observed_clearance_observer: Callable[[], tuple[float, str]] | None = None,
+    iteration_observer: Callable[[], Mapping[str, Any] | None] | None = None,
     checkpoint_callback: Callable[
         [dict[str, Any], dict[str, Any]], dict[str, Any]
     ]
@@ -5519,6 +6867,7 @@ def _move_eef_to_target(
         "orientation_tolerance_deg": args_cli.adaptive_orientation_tolerance_deg,
         "rotation_step_limit_deg": args_cli.adaptive_max_angle_step_deg,
         "minimum_progress_m": 0.00025,
+        "minimum_orientation_progress_deg": 0.25,
         "maximum_stalled_observations": 3,
         "require_contact": False,
         "minimum_contact_force_n": 0.0,
@@ -5622,6 +6971,16 @@ def _move_eef_to_target(
             "orientation_error_after_deg": float(np.rad2deg(orientation_error_after)),
             "terminal": terminal,
         }
+        if iteration_observer is not None:
+            iteration_observation = iteration_observer()
+            if iteration_observation is not None:
+                if not isinstance(iteration_observation, Mapping):
+                    raise RuntimeError(
+                        "iteration observer must return an object or None"
+                    )
+                record["iteration_observation"] = dict(
+                    iteration_observation
+                )
         checkpoint_reason: str | None = None
         tracked_pose_error_m = None
         tracked_pose_source_id = None
@@ -5675,7 +7034,16 @@ def _move_eef_to_target(
         observed_at_s = time.monotonic()
         sensor_observations: list[SensorObservation] = []
         progress_m = previous_error - error_after
-        if progress_m < float(effective_config["minimum_progress_m"]):
+        orientation_progress_deg = float(
+            np.rad2deg(previous_orientation_error - orientation_error_after)
+        )
+        translation_progressed = progress_m >= float(
+            effective_config["minimum_progress_m"]
+        )
+        orientation_progressed = orientation_progress_deg >= float(
+            effective_config["minimum_orientation_progress_deg"]
+        )
+        if not translation_progressed and not orientation_progressed:
             stalled_observations += 1
         else:
             stalled_observations = 0
@@ -5689,6 +7057,7 @@ def _move_eef_to_target(
             )
         )
         record["measured_target_progress_m"] = progress_m
+        record["measured_orientation_progress_deg"] = orientation_progress_deg
         record["stalled_observation_count"] = stalled_observations
         if bool(current_contact.get("available")):
             contact_force_metric = current_contact.get("retained_force_n")
@@ -6946,6 +8315,50 @@ def main() -> int:
         )
     if args_cli.world_effect_runtime_lease_duration_s <= 0:
         raise ValueError("world-effect-runtime-lease-duration-s must be positive")
+    reachability_values = {
+        "bounded_dls_minimum_reach_radius_m": (
+            args_cli.bounded_dls_minimum_reach_radius_m
+        ),
+        "bounded_dls_maximum_reach_radius_m": (
+            args_cli.bounded_dls_maximum_reach_radius_m
+        ),
+        "bounded_dls_maximum_segment_displacement_m": (
+            args_cli.bounded_dls_maximum_segment_displacement_m
+        ),
+        "bounded_dls_maximum_path_length_m": (
+            args_cli.bounded_dls_maximum_path_length_m
+        ),
+        "failed_motion_retry_minimum_translation_m": (
+            args_cli.failed_motion_retry_minimum_translation_m
+        ),
+        "failed_motion_retry_minimum_orientation_deg": (
+            args_cli.failed_motion_retry_minimum_orientation_deg
+        ),
+    }
+    invalid_reachability_values = {
+        name: value
+        for name, value in reachability_values.items()
+        if not math.isfinite(value) or value <= 0.0
+    }
+    if invalid_reachability_values:
+        raise ValueError(
+            "motion-admission parameters must be finite and positive: "
+            f"{invalid_reachability_values}"
+        )
+    if (
+        args_cli.bounded_dls_maximum_reach_radius_m
+        <= args_cli.bounded_dls_minimum_reach_radius_m
+    ):
+        raise ValueError(
+            "bounded-dls-maximum-reach-radius-m must exceed the minimum"
+        )
+    if (
+        args_cli.bounded_dls_maximum_path_length_m
+        < args_cli.bounded_dls_maximum_segment_displacement_m
+    ):
+        raise ValueError(
+            "bounded-dls-maximum-path-length-m must be at least one segment"
+        )
     if args_cli.rgbd_geometry_stride <= 0:
         raise ValueError("rgbd-geometry-stride must be positive")
     if args_cli.rgbd_geometry_minimum_points < 3:
@@ -6956,6 +8369,18 @@ def main() -> int:
     if args_cli.world_effect_occlusion_grace_observations < 0:
         raise ValueError(
             "world-effect-occlusion-grace-observations must be non-negative"
+        )
+    if args_cli.world_effect_shape_drift_confirmations <= 0:
+        raise ValueError(
+            "world-effect-shape-drift-confirmations must be positive"
+        )
+    if (
+        args_cli.world_effect_shape_drift_window
+        < args_cli.world_effect_shape_drift_confirmations
+    ):
+        raise ValueError(
+            "world-effect-shape-drift-window must be at least the required "
+            "confirmation count"
         )
     if args_cli.world_effect_dispatch_evidence_max_age_s <= 0:
         raise ValueError(
@@ -7166,8 +8591,9 @@ def main() -> int:
     print(
         "Execution boundary: "
         + (
-            "GUARDED WORLD-EFFECT EXECUTION; bounded fresh-replan sequence "
-            f"(max {args_cli.world_effect_max_operations} single-use invocations)"
+            "GUARDED WORLD-EFFECT EXECUTION; one-call composed tool queue "
+            f"(max {args_cli.world_effect_max_operations} single-use invocations, "
+            "fresh recompose only on invalidation/exhaustion)"
             if args_cli.guarded_world_effect_execution
             else (
                 "SHADOW PLAN ONLY; legacy demonstration/providers/motion disabled"
@@ -7189,7 +8615,12 @@ def main() -> int:
     if world_effect_only_mode:
         print("Legacy runtime details: skipped")
     runtime_detail(
-        "Control cadence: one observation-bound model tool per runtime operation; "
+        (
+            "Control cadence: one Gemini call composes the tool queue; zero model "
+            "calls between valid queued operations; "
+            if args_cli.guarded_world_effect_execution
+            else "Control cadence: one model tool per runtime operation; "
+        )
         + (
             f"periodic + event checkpoints every {args_cli.coach_interval_iterations} "
             "local IK chunks"
@@ -7208,11 +8639,12 @@ def main() -> int:
         "engage/disengage/maintain with 8–120 settling steps"
     )
     runtime_detail(
-        "Operation scheduler: fresh-observation routing between continued "
-        "motion and actuator evaluation; no recorded gripper-state hints"
+        "Operation scheduler: fresh local typed admission for each queued "
+        "motion/actuator call; no recorded gripper-state hints"
     )
     runtime_detail(
-        "Post-actuation feedback: immediate Gemini reschedule when position "
+        "Post-actuation feedback: invalidate the queued suffix and request one "
+        "fresh composition only when unexpected position "
         f"change≥{actuator_feedback_policy.minimum_position_change:.3f} and "
         "touch changes or force delta≥"
         f"{actuator_feedback_policy.minimum_force_change_n:.3f}N"
@@ -7264,7 +8696,7 @@ def main() -> int:
         "Training capture: "
         + (
             "disabled"
-            if args_cli.disable_training_recording or world_effect_only_mode
+            if args_cli.disable_training_recording or args_cli.shadow_plan_only
             else f"successful Gemini completions only → {training_episode_dir}"
         )
     )
@@ -7352,6 +8784,17 @@ def main() -> int:
     env, _ = create_env(env_cfg, use_fabric=True, policy="gemini-er2")
     obs, _ = env.reset()
     SCENE_ROLES.validate_scene(env.scene)
+    isolated_scene_assets: tuple[str, ...] = ()
+    if args_cli.isolate_scene_to_role_assets:
+        isolated_scene_assets = _isolate_scene_to_role_assets(
+            env, env_cfg.contact_object_list
+        )
+        print(
+            "[scene-isolation] ACTIVE "
+            f"kept={[SCENE_ROLES.movable_object_asset, SCENE_ROLES.target_receptacle_asset]} "
+            f"removed={list(isolated_scene_assets)}",
+            flush=True,
+        )
     ACTIVE_SENSOR_MONITOR = SensorCaptureBuffer()
     ACTIVE_SENSOR_SAMPLE_INDEX = 0
     contact_sensor_info = contact_sensor_runtime_info(env)
@@ -7551,6 +8994,25 @@ def main() -> int:
                 else None
             ),
             "tracked_object_rgbd_axis_adapter_implemented": True,
+            "shape_only_drift_confirmation": {
+                "required_observations": (
+                    args_cli.world_effect_shape_drift_confirmations
+                ),
+                "observation_window": (
+                    args_cli.world_effect_shape_drift_window
+                ),
+                "scope": (
+                    "rgbd_extent_only_when_independent_tracked_center_is_stable"
+                ),
+                "immediate_invalidations_preserved": [
+                    "tracked_translation",
+                    "contact_loss",
+                    "collision_or_clearance",
+                    "provider_change",
+                    "membership_change",
+                    "visibility_loss",
+                ],
+            },
         },
         "checkpoint_recovery": {
             "rejected_tool_replan_limit": args_cli.motion_checkpoint_replans,
@@ -7730,6 +9192,14 @@ def main() -> int:
             "operations": [],
             "progress_observations": [],
             "continuation_evidence": [],
+            "goal_transitions": [],
+            "composed_tool_sequences": [],
+            "composition_policy": {
+                "one_model_call_per_queue": True,
+                "model_calls_between_valid_queued_calls": 0,
+                "suffix_invalidated_by_fresh_sensor_or_execution_evidence": True,
+                "just_in_time_local_typed_admission": True,
+            },
             "completed_operation_count": 0,
             "stop_reason": None,
             "task_completion_claimed": False,
@@ -7881,9 +9351,15 @@ def main() -> int:
     issued_invocation_candidates = None
     issued_invocation_decision = None
     issued_planning_provider_instance = None
+    composed_tool_sequence: ComposedToolSequenceDecision | None = None
+    composed_tool_sequence_trace: dict[str, Any] | None = None
+    composed_tool_queue: list[ComposedToolCallDraft] = []
+    active_composed_tool_call: ComposedToolCallDraft | None = None
+    composed_tool_sequence_model_call_count = 0
+    pending_composed_suffix_invalidation: dict[str, Any] | None = None
     initial_world_effect_replan_required = False
     initial_world_effect_replan_reason: dict[str, Any] | None = None
-    if not args_cli.disable_training_recording and not world_effect_only_mode:
+    if not args_cli.disable_training_recording and not args_cli.shadow_plan_only:
         episode_index = (
             args_cli.episode_index
             if args_cli.episode_index >= 0
@@ -7920,7 +9396,11 @@ def main() -> int:
         episode_trace["training_capture"] = {
             "status": "recording_unpublished",
             "episode_index": episode_index,
-            "admission_rule": "all_physical_and_supervision_tests_pass",
+            "admission_rule": (
+                "world_effect_episode_acceptance"
+                if args_cli.guarded_world_effect_execution
+                else "all_physical_and_supervision_tests_pass"
+            ),
         }
         _write_trace(trace_path, episode_trace)
 
@@ -8487,7 +9967,9 @@ def main() -> int:
                                 ),
                                 "previous_graph": previous_goal_graph.to_dict(),
                                 "activation_candidate_set": (
-                                    goal_activation_candidates.to_dict()
+                                    compact_goal_activation_revision_evidence(
+                                        goal_activation_candidates
+                                    )
                                 ),
                                 "runtime_effect_provider_assessment": (
                                     inside_effect_provider_assessment.to_dict()
@@ -8887,49 +10369,119 @@ def main() -> int:
                                                 semantic_scene_inventory,
                                             )
                                         )
-                                        (
-                                            operation_payload,
-                                            operation_latency,
-                                            operation_image_digest,
-                                        ) = coach.reason(
-                                            build_world_effect_operation_prompt(
-                                                instruction=(
-                                                    args_cli.instruction
+                                        if args_cli.guarded_world_effect_execution:
+                                            (
+                                                composed_tool_sequence,
+                                                composed_tool_sequence_trace,
+                                            ) = _reason_composed_tool_sequence(
+                                                coach=coach,
+                                                instruction=args_cli.instruction,
+                                                frame=frame,
+                                                planning_provider=(
+                                                    planning_provider_instance
                                                 ),
                                                 inventory=(
                                                     semantic_scene_inventory
                                                 ),
-                                                instance=(
-                                                    planning_provider_instance
+                                                runtime_state=preflight_state,
+                                                recent_operation_history={
+                                                    "entries": []
+                                                },
+                                                maximum_tool_calls=(
+                                                    args_cli.world_effect_max_operations
                                                 ),
-                                                candidate_set=(
-                                                    effect_operation_candidates
-                                                ),
-                                                execution_context={
-                                                    "controlled_frame": {
-                                                        "position_m": preflight_state.get(
-                                                            "eef_gripper_base_xyz"
+                                            )
+                                            composed_tool_sequence_model_call_count += int(
+                                                composed_tool_sequence_trace[
+                                                    "model_call_count"
+                                                ]
+                                            )
+                                            if (
+                                                composed_tool_sequence.decision
+                                                != "propose_sequence"
+                                                or not composed_tool_sequence.tool_calls
+                                            ):
+                                                raise WorldEffectComposedSequenceError(
+                                                    "initial composed tool sequence "
+                                                    f"was {composed_tool_sequence.decision}"
+                                                )
+                                            active_composed_tool_call = (
+                                                composed_tool_sequence.tool_calls[0]
+                                            )
+                                            composed_tool_queue = list(
+                                                composed_tool_sequence.tool_calls[1:]
+                                            )
+                                            operation_payload = (
+                                                _composed_operation_payload(
+                                                    active_composed_tool_call,
+                                                    effect_operation_candidates,
+                                                )
+                                            )
+                                            operation_latency = (
+                                                composed_tool_sequence_trace[
+                                                    "latency_s"
+                                                ]
+                                            )
+                                            operation_image_digest = (
+                                                composed_tool_sequence_trace[
+                                                    "image_digest"
+                                                ]
+                                            )
+                                            episode_trace[
+                                                "world_effect_composed_tool_sequence"
+                                            ] = composed_tool_sequence_trace
+                                            print(
+                                                "[world-effect-composition] VALID "
+                                                f"calls={len(composed_tool_sequence.tool_calls)} "
+                                                "model_calls="
+                                                f"{composed_tool_sequence_trace['model_call_count']} "
+                                                "queue=armed authority=none",
+                                                flush=True,
+                                            )
+                                        else:
+                                            (
+                                                operation_payload,
+                                                operation_latency,
+                                                operation_image_digest,
+                                            ) = coach.reason(
+                                                build_world_effect_operation_prompt(
+                                                    instruction=(
+                                                        args_cli.instruction
+                                                    ),
+                                                    inventory=(
+                                                        semantic_scene_inventory
+                                                    ),
+                                                    instance=(
+                                                        planning_provider_instance
+                                                    ),
+                                                    candidate_set=(
+                                                        effect_operation_candidates
+                                                    ),
+                                                    execution_context={
+                                                        "controlled_frame": {
+                                                            "position_m": preflight_state.get(
+                                                                "eef_gripper_base_xyz"
+                                                            ),
+                                                            "quaternion_wxyz": preflight_state.get(
+                                                                "eef_gripper_base_quaternion_wxyz"
+                                                            ),
+                                                        },
+                                                        "interaction_frame": preflight_state.get(
+                                                            "actuator_contact_geometry"
                                                         ),
-                                                        "quaternion_wxyz": preflight_state.get(
-                                                            "eef_gripper_base_quaternion_wxyz"
+                                                        "two_pad_grasp_alignment": preflight_state.get(
+                                                            "two_pad_grasp_alignment"
+                                                        ),
+                                                        "current_contact": preflight_state.get(
+                                                            "current_contact"
+                                                        ),
+                                                        "fresh_rgbd_geometry": preflight_state.get(
+                                                            "rgbd_scene_geometry"
                                                         ),
                                                     },
-                                                    "interaction_frame": preflight_state.get(
-                                                        "actuator_contact_geometry"
-                                                    ),
-                                                    "two_pad_grasp_alignment": preflight_state.get(
-                                                        "two_pad_grasp_alignment"
-                                                    ),
-                                                    "current_contact": preflight_state.get(
-                                                        "current_contact"
-                                                    ),
-                                                    "fresh_rgbd_geometry": preflight_state.get(
-                                                        "rgbd_scene_geometry"
-                                                    ),
-                                                },
-                                            ),
-                                            frame,
-                                        )
+                                                ),
+                                                frame,
+                                            )
                                         effect_operation_decision = (
                                             WorldEffectOperationGate(
                                                 effect_operation_candidates
@@ -9004,21 +10556,48 @@ def main() -> int:
                                                         },
                                                     )
                                                 )
-                                                (
-                                                    execution_lease_decision,
-                                                    lease_latency,
-                                                    lease_image_digest,
-                                                    lease_attempts,
-                                                ) = _reason_world_effect_execution_lease_with_correction(
-                                                    coach=coach,
-                                                    instruction=(
-                                                        args_cli.instruction
-                                                    ),
-                                                    candidate_set=(
-                                                        execution_lease_candidates
-                                                    ),
-                                                    frame=frame,
-                                                )
+                                                if (
+                                                    args_cli.guarded_world_effect_execution
+                                                    and active_composed_tool_call
+                                                    is not None
+                                                ):
+                                                    execution_lease_decision = (
+                                                        ShadowExecutionLeaseGate(
+                                                            execution_lease_candidates
+                                                        ).dispatch(
+                                                            _composed_execution_lease_payload(
+                                                                active_composed_tool_call,
+                                                                execution_lease_candidates,
+                                                            )
+                                                        )
+                                                    )
+                                                    lease_latency = 0.0
+                                                    lease_image_digest = (
+                                                        operation_image_digest
+                                                    )
+                                                    lease_attempts = [
+                                                        {
+                                                            "attempt": 1,
+                                                            "status": "valid_local_composition",
+                                                            "model_called": False,
+                                                        }
+                                                    ]
+                                                else:
+                                                    (
+                                                        execution_lease_decision,
+                                                        lease_latency,
+                                                        lease_image_digest,
+                                                        lease_attempts,
+                                                    ) = _reason_world_effect_execution_lease_with_correction(
+                                                        coach=coach,
+                                                        instruction=(
+                                                            args_cli.instruction
+                                                        ),
+                                                        candidate_set=(
+                                                            execution_lease_candidates
+                                                        ),
+                                                        frame=frame,
+                                                    )
                                                 episode_trace["world_effect_execution_lease_shadow"] = {
                                                     "status": "valid",
                                                     "candidate_set": (
@@ -9150,84 +10729,120 @@ def main() -> int:
                                                         invocation_latency = None
                                                         invocation_image_digest = None
                                                         rejection_context = None
-                                                        for invocation_attempt in range(
-                                                            1, 3
+                                                        if (
+                                                            args_cli.guarded_world_effect_execution
+                                                            and active_composed_tool_call
+                                                            is not None
                                                         ):
-                                                            (
-                                                                invocation_payload,
-                                                                invocation_latency,
-                                                                invocation_image_digest,
-                                                            ) = coach.reason(
-                                                                build_shadow_tool_invocation_prompt(
-                                                                    instruction=(
-                                                                        args_cli.instruction
-                                                                    ),
-                                                                    candidate_set=(
-                                                                        invocation_candidates
-                                                                    ),
-                                                                    rejection_context=(
-                                                                        rejection_context
-                                                                    ),
-                                                                ),
-                                                                frame,
+                                                            invocation_payload = (
+                                                                _composed_invocation_payload(
+                                                                    active_composed_tool_call,
+                                                                    invocation_candidates,
+                                                                )
                                                             )
-                                                            try:
-                                                                invocation_decision = (
-                                                                    ShadowToolInvocationGate(
-                                                                        invocation_candidates
-                                                                    ).dispatch(
-                                                                        invocation_payload
-                                                                    )
+                                                            invocation_decision = (
+                                                                ShadowToolInvocationGate(
+                                                                    invocation_candidates
+                                                                ).dispatch(
+                                                                    invocation_payload
                                                                 )
-                                                                invocation_attempts.append(
-                                                                    {
-                                                                        "attempt": invocation_attempt,
-                                                                        "status": "valid",
-                                                                        "decision": (
-                                                                            invocation_decision.to_dict()
-                                                                        ),
-                                                                        "latency_s": (
-                                                                            invocation_latency
-                                                                        ),
-                                                                        "image_digest": (
-                                                                            invocation_image_digest
-                                                                        ),
-                                                                    }
-                                                                )
-                                                                break
-                                                            except WorldEffectToolInvocationError as invocation_error:
-                                                                rejection_context = {
-                                                                    "attempt": invocation_attempt,
-                                                                    "error_type": type(
-                                                                        invocation_error
-                                                                    ).__name__,
-                                                                    "error": str(
-                                                                        invocation_error
-                                                                    ),
-                                                                    "requirements": {
-                                                                        "same_fresh_candidate_set": True,
-                                                                        "do_not_repeat_rejected_arguments": True,
-                                                                        "execution_authority": False,
-                                                                    },
+                                                            )
+                                                            invocation_latency = 0.0
+                                                            invocation_image_digest = (
+                                                                operation_image_digest
+                                                            )
+                                                            invocation_attempts.append(
+                                                                {
+                                                                    "attempt": 1,
+                                                                    "status": "valid_local_composition",
+                                                                    "decision": invocation_decision.to_dict(),
+                                                                    "latency_s": 0.0,
+                                                                    "image_digest": invocation_image_digest,
+                                                                    "model_called": False,
                                                                 }
-                                                                invocation_attempts.append(
-                                                                    {
-                                                                        "attempt": invocation_attempt,
-                                                                        "status": "rejected",
-                                                                        "proposal": invocation_payload,
-                                                                        "rejection": dict(
+                                                            )
+                                                        else:
+                                                            for invocation_attempt in range(
+                                                                1, 3
+                                                            ):
+                                                                (
+                                                                    invocation_payload,
+                                                                    invocation_latency,
+                                                                    invocation_image_digest,
+                                                                ) = coach.reason(
+                                                                    build_shadow_tool_invocation_prompt(
+                                                                        instruction=(
+                                                                            args_cli.instruction
+                                                                        ),
+                                                                        candidate_set=(
+                                                                            invocation_candidates
+                                                                        ),
+                                                                        rejection_context=(
                                                                             rejection_context
                                                                         ),
-                                                                        "latency_s": (
-                                                                            invocation_latency
-                                                                        ),
-                                                                        "image_digest": (
-                                                                            invocation_image_digest
-                                                                        ),
-                                                                    }
+                                                                    ),
+                                                                    frame,
                                                                 )
-                                                                if invocation_attempt >= 2:
-                                                                    raise
+                                                                try:
+                                                                    invocation_decision = (
+                                                                        ShadowToolInvocationGate(
+                                                                            invocation_candidates
+                                                                        ).dispatch(
+                                                                            invocation_payload
+                                                                        )
+                                                                    )
+                                                                    invocation_attempts.append(
+                                                                        {
+                                                                            "attempt": invocation_attempt,
+                                                                            "status": "valid",
+                                                                            "decision": (
+                                                                                invocation_decision.to_dict()
+                                                                            ),
+                                                                            "latency_s": (
+                                                                                invocation_latency
+                                                                            ),
+                                                                            "image_digest": (
+                                                                                invocation_image_digest
+                                                                            ),
+                                                                        }
+                                                                    )
+                                                                    break
+                                                                except WorldEffectToolInvocationError as invocation_error:
+                                                                    rejection_context = {
+                                                                        "attempt": invocation_attempt,
+                                                                        "error_type": type(
+                                                                            invocation_error
+                                                                        ).__name__,
+                                                                        "error": str(
+                                                                            invocation_error
+                                                                        ),
+                                                                        "evidence": dict(
+                                                                            invocation_error.evidence
+                                                                        ),
+                                                                        "requirements": {
+                                                                            "same_fresh_candidate_set": True,
+                                                                            "do_not_repeat_rejected_arguments": True,
+                                                                            "execution_authority": False,
+                                                                        },
+                                                                    }
+                                                                    invocation_attempts.append(
+                                                                        {
+                                                                            "attempt": invocation_attempt,
+                                                                            "status": "rejected",
+                                                                            "proposal": invocation_payload,
+                                                                            "rejection": dict(
+                                                                                rejection_context
+                                                                            ),
+                                                                            "latency_s": (
+                                                                                invocation_latency
+                                                                            ),
+                                                                            "image_digest": (
+                                                                                invocation_image_digest
+                                                                            ),
+                                                                        }
+                                                                    )
+                                                                    if invocation_attempt >= 2:
+                                                                        raise
                                                         if invocation_decision is None:
                                                             raise RuntimeError(
                                                                 "initial invocation produced no decision"
@@ -9419,6 +11034,26 @@ def main() -> int:
                                                                 "authority_scope": [],
                                                             }
                                                     except Exception as invocation_error:
+                                                        if (
+                                                            args_cli.guarded_world_effect_execution
+                                                            and isinstance(
+                                                                invocation_error,
+                                                                WorldEffectToolInvocationError,
+                                                            )
+                                                        ):
+                                                            initial_world_effect_replan_required = True
+                                                            initial_world_effect_replan_reason = dict(
+                                                                rejection_context
+                                                                or {
+                                                                    "error_type": type(
+                                                                        invocation_error
+                                                                    ).__name__,
+                                                                    "error": str(
+                                                                        invocation_error
+                                                                    ),
+                                                                    "execution_authority": False,
+                                                                }
+                                                            )
                                                         episode_trace["world_effect_tool_invocation_shadow"] = {
                                                             "status": "invalid",
                                                             "error": {
@@ -9848,40 +11483,119 @@ def main() -> int:
                         bootstrap_inventory = (
                             bootstrap_temporal_update.inventory
                         )
-                        bootstrap_bundle = (
-                            _plan_guarded_world_effect_continuation(
-                                coach=coach,
-                                instruction=args_cli.instruction,
-                                frame=_single_exterior_frame(obs),
-                                graph=goal_graph,
-                                membership_lease=(
-                                    goal_graph_membership_lease
+                        (
+                            composed_tool_sequence,
+                            composed_tool_sequence_trace,
+                        ) = _reason_composed_tool_sequence(
+                            coach=coach,
+                            instruction=args_cli.instruction,
+                            frame=_single_exterior_frame(obs),
+                            planning_provider=planning_provider_instance,
+                            inventory=bootstrap_inventory,
+                            runtime_state=bootstrap_state,
+                            recent_operation_history=(
+                                initial_replan_history
+                            ),
+                            maximum_tool_calls=(
+                                args_cli.world_effect_max_operations
+                            ),
+                            invalidated_suffix={
+                                "reason": "initial_composed_call_rejected",
+                                "rejection": dict(
+                                    initial_world_effect_replan_reason or {}
                                 ),
-                                inventory=bootstrap_inventory,
-                                predicate_registry=(
-                                    world_predicate_evaluator_registry
-                                ),
-                                capability_registry=(
-                                    world_capability_registry
-                                ),
-                                capability_advertisement=(
-                                    world_capability_advertisement
-                                ),
-                                provider_registry=(
-                                    world_effect_provider_registry
-                                ),
-                                runtime_effect_tools=runtime_effect_tools,
-                                trackable_object_ids=trackable_object_ids,
-                                runtime_state=bootstrap_state,
-                                recent_operation_history=(
-                                    initial_replan_history
-                                ),
-                                maximum_duration_s=(
-                                    args_cli.world_effect_runtime_lease_duration_s
-                                ),
-                                operation_index=1,
-                            )
+                                "execution_authority": False,
+                            },
                         )
+                        composed_tool_sequence_model_call_count += int(
+                            composed_tool_sequence_trace[
+                                "model_call_count"
+                            ]
+                        )
+                        if (
+                            composed_tool_sequence.decision
+                            != "propose_sequence"
+                            or not composed_tool_sequence.tool_calls
+                        ):
+                            bootstrap_bundle = {
+                                "status": "composition_not_proposed",
+                                "trace": composed_tool_sequence_trace,
+                                "activation_decision": (
+                                    goal_activation_decision
+                                ),
+                            }
+                            active_composed_tool_call = None
+                            composed_tool_queue.clear()
+                        else:
+                            active_composed_tool_call = (
+                                composed_tool_sequence.tool_calls[0]
+                            )
+                            composed_tool_queue = list(
+                                composed_tool_sequence.tool_calls[1:]
+                            )
+                            try:
+                                bootstrap_bundle = (
+                                    _materialize_guarded_composed_step(
+                                        step=active_composed_tool_call,
+                                        activation_decision=(
+                                            goal_activation_decision
+                                        ),
+                                        planning_provider=(
+                                            planning_provider_instance
+                                        ),
+                                        inventory=bootstrap_inventory,
+                                        runtime_state=bootstrap_state,
+                                        recent_operation_history=(
+                                            initial_replan_history
+                                        ),
+                                        maximum_duration_s=(
+                                            args_cli.world_effect_runtime_lease_duration_s
+                                        ),
+                                        operation_index=1,
+                                    )
+                                )
+                                bootstrap_bundle["trace"][
+                                    "composition_model_call"
+                                ] = composed_tool_sequence_trace
+                            except ValueError as composition_error:
+                                initial_world_effect_replan_reason = {
+                                    "error_type": type(
+                                        composition_error
+                                    ).__name__,
+                                    "error": str(composition_error),
+                                    "evidence": dict(
+                                        getattr(
+                                            composition_error,
+                                            "evidence",
+                                            {},
+                                        )
+                                    ),
+                                    "failed_call": (
+                                        active_composed_tool_call.to_dict()
+                                    ),
+                                    "execution_authority": False,
+                                }
+                                bootstrap_bundle = {
+                                    "status": "operation_replan_required",
+                                    "trace": {
+                                        "composition_model_call": (
+                                            composed_tool_sequence_trace
+                                        ),
+                                        "operation_rejection": (
+                                            initial_world_effect_replan_reason
+                                        ),
+                                        "model_calls_for_step_materialization": 0,
+                                        "execution_authority": False,
+                                    },
+                                    "activation_decision": (
+                                        goal_activation_decision
+                                    ),
+                                    "operation_rejection": (
+                                        initial_world_effect_replan_reason
+                                    ),
+                                }
+                                composed_tool_queue.clear()
+                                active_composed_tool_call = None
                         initial_replan_record = {
                             "attempt": initial_replan_attempt,
                             "status": bootstrap_bundle["status"],
@@ -10015,6 +11729,16 @@ def main() -> int:
                     for entity_id in lease_candidate.operation_target_entity_ids
                     if entity_id in preflight_tracked_positions_m
                 }
+                initial_shape_drift_confirmation = (
+                    TemporalShapeDriftConfirmation(
+                        required_observations=(
+                            args_cli.world_effect_shape_drift_confirmations
+                        ),
+                        observation_window=(
+                            args_cli.world_effect_shape_drift_window
+                        ),
+                    )
+                )
                 fresh_dispatch_state = _state(env, initial_object_z)
                 fresh_tracked_positions_m = _tracked_entity_positions_m(
                     env, lease_candidate.operation_target_entity_ids
@@ -10039,6 +11763,9 @@ def main() -> int:
                             env,
                             scene_inventory_memory,
                         )
+                    ),
+                    shape_drift_confirmation=(
+                        initial_shape_drift_confirmation
                     ),
                 )
                 fresh_evidence = build_fresh_dispatch_evidence(
@@ -10101,10 +11828,40 @@ def main() -> int:
                             fresh_dispatch_state["gripper_closed_fraction"]
                         ),
                     )
+                    monitor_observation = {
+                        "state": fresh_dispatch_state,
+                        "tracked_positions_m": fresh_tracked_positions_m,
+                        "sample_index": 0,
+                    }
+
+                    def refresh_guarded_monitor_observation() -> Mapping[str, Any]:
+                        monitor_observation["sample_index"] += 1
+                        monitor_observation["state"] = _state(
+                            env, initial_object_z
+                        )
+                        monitor_observation["tracked_positions_m"] = (
+                            _tracked_entity_positions_m(
+                                env,
+                                lease_candidate.operation_target_entity_ids,
+                            )
+                        )
+                        return {
+                            "source": "fresh_shared_runtime_rgbd_state",
+                            "sample_index": monitor_observation[
+                                "sample_index"
+                            ],
+                            "rgbd_fresh": True,
+                            "shared_by": [
+                                "clearance",
+                                "orientation",
+                                "dispatch_invalidation",
+                            ],
+                        }
 
                     def observe_guarded_path_clearance() -> tuple[float, str]:
-                        interaction = _actuator_contact_geometry(
-                            env, _eef_position(env)
+                        monitor_state = monitor_observation["state"]
+                        interaction = monitor_state.get(
+                            "actuator_contact_geometry", {}
                         )
                         current_position = interaction.get(
                             "contact_center_xyz_m"
@@ -10119,9 +11876,7 @@ def main() -> int:
                                 "guarded clearance observer lacks a live interaction frame"
                             )
                         fresh_obstacles = interaction_obstacle_geometry(
-                            _runtime_geometry_by_id(
-                                _state(env, initial_object_z)
-                            ),
+                            _runtime_geometry_by_id(monitor_state),
                             interaction_target_entity_id=(
                                 _interaction_target_entity_id(
                                     invocation_candidate,
@@ -10147,7 +11902,9 @@ def main() -> int:
                     def observe_guarded_orientation(
                         entity_id: str, reference_axis: np.ndarray
                     ) -> tuple[float, str, Mapping[str, Any]]:
-                        scene_geometry = _rgbd_scene_geometry_observation(env)
+                        scene_geometry = monitor_observation["state"].get(
+                            "rgbd_scene_geometry", {}
+                        )
                         current_geometry = next(
                             (
                                 item
@@ -10193,10 +11950,10 @@ def main() -> int:
                             }
                             monitored_events.append(event)
                             return {**event, "converged": False}
-                        monitor_state = _state(env, initial_object_z)
-                        monitor_tracked_positions_m = _tracked_entity_positions_m(
-                            env, lease_candidate.operation_target_entity_ids
-                        )
+                        monitor_state = monitor_observation["state"]
+                        monitor_tracked_positions_m = monitor_observation[
+                            "tracked_positions_m"
+                        ]
                         events = _guarded_dispatch_invalidation_events(
                             runtime_lease=active_lease,
                             lease_candidate=lease_candidate,
@@ -10219,6 +11976,9 @@ def main() -> int:
                                     env,
                                     scene_inventory_memory,
                                 )
+                            ),
+                            shape_drift_confirmation=(
+                                initial_shape_drift_confirmation
                             ),
                         )
                         if not events:
@@ -10277,6 +12037,9 @@ def main() -> int:
                             observed_clearance_observer=(
                                 observe_guarded_path_clearance
                             ),
+                            iteration_observer=(
+                                refresh_guarded_monitor_observation
+                            ),
                             checkpoint_callback=None,
                             early_stop_callback=monitor_lease,
                         )
@@ -10324,6 +12087,9 @@ def main() -> int:
                                 scene_inventory_memory,
                             )
                         ),
+                        shape_drift_confirmation=(
+                            initial_shape_drift_confirmation
+                        ),
                     )
                     if post_events and active_lease.active:
                         event = post_events[0]
@@ -10360,6 +12126,16 @@ def main() -> int:
                         "executor_tool_name": runtime_motion_spec.tool_name,
                         "motion_report": motion_report,
                         "monitored_invalidation_events": monitored_events,
+                        "shape_drift_confirmation": (
+                            initial_shape_drift_confirmation.to_dict()
+                        ),
+                        "motion_monitoring": {
+                            "fresh_shared_rgbd_state_count": (
+                                monitor_observation["sample_index"]
+                            ),
+                            "rgbd_sampling_cadence_changed": False,
+                            "model_polling_added": False,
+                        },
                         "terminal": terminal,
                         "final_action": final_action.detach().cpu().tolist(),
                         "post_dispatch_observation": {
@@ -10380,7 +12156,16 @@ def main() -> int:
                             ),
                             "current_contact": post_state.get("current_contact"),
                         },
-                        "requires_model_replan": True,
+                        "requires_model_replan": bool(
+                            monitored_events
+                            or terminal
+                            or not motion_report.get("converged")
+                        ),
+                        "queue_continuation_admitted": bool(
+                            not monitored_events
+                            and not terminal
+                            and motion_report.get("converged")
+                        ),
                         "replan_reason": (
                             "operation_completed"
                             if motion_report.get("converged")
@@ -10437,7 +12222,16 @@ def main() -> int:
                     "dispatch_performed": True,
                     "handler_bound": True,
                     "tool_called": True,
-                    "requires_model_replan": True,
+                    "requires_model_replan": bool(
+                        outcome_record["handler_result"].get(
+                            "requires_model_replan"
+                        )
+                    ),
+                    "queue_continuation_admitted": bool(
+                        outcome_record["handler_result"].get(
+                            "queue_continuation_admitted"
+                        )
+                    ),
                     "dispatch_enabled": False,
                     "motion_authority": False,
                     "execution_authority": False,
@@ -10461,10 +12255,22 @@ def main() -> int:
                 )
                 sequence_trace = episode_trace["world_effect_sequence"]
                 sequence_trace["status"] = "running"
+                if composed_tool_sequence_trace is not None:
+                    sequence_trace["composed_tool_sequences"].append(
+                        composed_tool_sequence_trace
+                    )
                 sequence_trace["operations"].append(
                     {
                         "operation_index": 1,
-                        "planning_source": "initial_world_effect_pipeline",
+                        "planning_source": "initial_one_call_composition",
+                        "composed_call": (
+                            active_composed_tool_call.to_dict()
+                            if active_composed_tool_call is not None
+                            else None
+                        ),
+                        "composition_model_call_count": (
+                            composed_tool_sequence_model_call_count
+                        ),
                         "selected_goal_id": goal_activation_decision.goal_id,
                         "tool_family": lease_candidate.tool_family,
                         "tool_id": runtime_lease.lease.tool_id,
@@ -10485,7 +12291,10 @@ def main() -> int:
                     f"converged={bool(motion_report.get('converged'))} "
                     f"lease={runtime_lease.state} "
                     f"iterations={len(motion_report.get('iterations', []))} "
-                    "replan=true authority=none",
+                    f"queue_remaining={len(composed_tool_queue)} "
+                    "replan="
+                    f"{str(bool(episode_trace['world_effect_guarded_dispatch'].get('requires_model_replan'))).lower()} "
+                    "authority=none",
                     flush=True,
                 )
 
@@ -10496,6 +12305,8 @@ def main() -> int:
                     )
                 current_operation_index = 1
                 sequence_stop_reason: str | None = None
+                completed_goal_ids: list[str] = []
+                task_completed_by_scheduler = False
                 active_attachment_entity_ids: tuple[str, ...] = ()
                 active_attachment_source_operation_index = 1
                 active_attachment_gripper_engaged = False
@@ -10592,8 +12403,164 @@ def main() -> int:
                         flush=True,
                     )
                     if not progress.may_plan_another_operation:
-                        sequence_stop_reason = progress.status
-                        break
+                        if progress.status != "selected_goal_completed":
+                            sequence_stop_reason = progress.status
+                            break
+                        if active_attachment_entity_ids:
+                            sequence_stop_reason = (
+                                "goal_completed_with_active_attachment"
+                            )
+                            break
+                        completed_goal_ids.append(selected_goal_id)
+                        composed_tool_queue.clear()
+                        active_composed_tool_call = None
+                        pending_composed_suffix_invalidation = None
+                        try:
+                            goal_transition = (
+                                _refresh_guarded_world_effect_goal_after_completion(
+                                    coach=coach,
+                                    instruction=args_cli.instruction,
+                                    frame=continuation_frame,
+                                    inventory=continuation_inventory,
+                                    previous_graph=goal_graph,
+                                    previous_membership_lease=(
+                                        goal_graph_membership_lease
+                                    ),
+                                    completed_goal_id=selected_goal_id,
+                                    scope_membership_audit=(
+                                        scope_membership_audit
+                                    ),
+                                    predicate_evaluator_advertisement=(
+                                        world_predicate_evaluator_advertisement
+                                    ),
+                                    predicate_registry=(
+                                        world_predicate_evaluator_registry
+                                    ),
+                                    capability_registry=(
+                                        world_capability_registry
+                                    ),
+                                    capability_advertisement=(
+                                        world_capability_advertisement
+                                    ),
+                                    provider_registry=(
+                                        world_effect_provider_registry
+                                    ),
+                                    runtime_effect_tools=(
+                                        runtime_effect_tools
+                                    ),
+                                    planning_factory_catalog=(
+                                        planning_factory_catalog
+                                    ),
+                                )
+                            )
+                        except Exception as goal_transition_error:
+                            sequence_trace["goal_transitions"].append(
+                                {
+                                    "schema_version": (
+                                        "world-effect-goal-transition.v1"
+                                    ),
+                                    "status": "invalid",
+                                    "completed_goal_id": selected_goal_id,
+                                    "error": {
+                                        "type": type(
+                                            goal_transition_error
+                                        ).__name__,
+                                        "message": str(
+                                            goal_transition_error
+                                        ),
+                                    },
+                                    "motion_authority": False,
+                                    "execution_authority": False,
+                                    "authority_scope": [],
+                                }
+                            )
+                            sequence_stop_reason = "goal_transition_failed"
+                            _write_trace(trace_path, episode_trace)
+                            print(
+                                "[world-goal-transition] INVALID completed="
+                                f"{selected_goal_id} "
+                                f"{type(goal_transition_error).__name__}: "
+                                f"{goal_transition_error} authority=none",
+                                flush=True,
+                            )
+                            break
+
+                        sequence_trace["goal_transitions"].append(
+                            goal_transition["trace"]
+                        )
+                        goal_graph = goal_transition["graph"]
+                        goal_graph_membership_lease = goal_transition[
+                            "membership_lease"
+                        ]
+                        episode_trace["world_goal_graph_shadow"][
+                            "goal_graph"
+                        ] = goal_graph.to_dict()
+                        episode_trace["world_goal_graph_shadow"][
+                            "scene_membership_lease"
+                        ] = goal_graph_membership_lease.to_dict()
+                        episode_trace["world_goal_graph_shadow"][
+                            "latest_goal_transition"
+                        ] = goal_transition["trace"]
+                        if goal_transition["status"] == "task_complete":
+                            task_completed_by_scheduler = True
+                            sequence_stop_reason = "task_completed"
+                            _write_trace(trace_path, episode_trace)
+                            print(
+                                "[world-goal-transition] TASK_COMPLETE "
+                                f"completed_goals={completed_goal_ids} "
+                                "fresh_graph=true authority=none",
+                                flush=True,
+                            )
+                            break
+
+                        goal_activation_candidates = goal_transition[
+                            "activation_candidates"
+                        ]
+                        goal_activation_decision = goal_transition[
+                            "activation_decision"
+                        ]
+                        planning_provider_instance = goal_transition[
+                            "planning_provider"
+                        ]
+                        selected_goal_id = goal_activation_decision.goal_id
+                        if selected_goal_id is None:
+                            sequence_stop_reason = (
+                                "goal_transition_selected_no_goal"
+                            )
+                            break
+                        episode_trace["world_goal_activation_shadow"] = {
+                            "status": "valid",
+                            "source": "post_goal_fresh_graph",
+                            "candidate_set": (
+                                goal_activation_candidates.to_dict()
+                            ),
+                            "decision": (
+                                goal_activation_decision.to_dict()
+                            ),
+                            "motion_authority": False,
+                            "execution_authority": False,
+                            "authority_scope": [],
+                        }
+                        episode_trace["world_effect_session_shadow"] = {
+                            "status": "valid",
+                            "source": "post_goal_fresh_graph",
+                            "decision": goal_transition["trace"].get(
+                                "effect_session_decision"
+                            ),
+                            "provider_instantiated": False,
+                            "motion_authority": False,
+                            "execution_authority": False,
+                            "authority_scope": [],
+                        }
+                        _write_trace(trace_path, episode_trace)
+                        print(
+                            "[world-goal-transition] NEXT_GOAL completed="
+                            f"{completed_goal_ids[-1]} next={selected_goal_id} "
+                            "fresh_graph=true provider_rebound=true "
+                            "authority=none",
+                            flush=True,
+                        )
+                        continue
                     next_operation_index = current_operation_index + 1
                     if not world_effect_sequence_budget.allows(
                         next_operation_index
@@ -10611,43 +12578,268 @@ def main() -> int:
                             env, continuation_entity_ids
                         )
                     )
-                    continuation_bundle = (
-                        _plan_guarded_world_effect_continuation(
+                    recent_operation_history = (
+                        summarize_world_effect_operation_history(
+                            sequence_trace["operations"]
+                        )
+                    )
+                    previous_dispatched_operation = next(
+                        (
+                            item
+                            for item in reversed(sequence_trace["operations"])
+                            if isinstance(item, Mapping)
+                            and isinstance(item.get("dispatch"), Mapping)
+                        ),
+                        None,
+                    )
+                    if previous_dispatched_operation is not None:
+                        previous_dispatch = previous_dispatched_operation[
+                            "dispatch"
+                        ]
+                        previous_outcome = previous_dispatch.get("outcome")
+                        previous_outcome = (
+                            previous_outcome
+                            if isinstance(previous_outcome, Mapping)
+                            else {}
+                        )
+                        previous_handler = previous_outcome.get(
+                            "handler_result"
+                        )
+                        previous_handler = (
+                            previous_handler
+                            if isinstance(previous_handler, Mapping)
+                            else {}
+                        )
+                        previous_events = previous_handler.get(
+                            "monitored_invalidation_events", []
+                        )
+                        previous_lease = previous_dispatch.get(
+                            "runtime_lease_after"
+                        )
+                        previous_lease = (
+                            previous_lease
+                            if isinstance(previous_lease, Mapping)
+                            else {}
+                        )
+                        if previous_events or previous_lease.get("state") == "revoked":
+                            pending_composed_suffix_invalidation = {
+                                "reason": "fresh_sensor_or_execution_invalidation",
+                                "source_operation_index": (
+                                    previous_dispatched_operation.get(
+                                        "operation_index"
+                                    )
+                                ),
+                                "monitored_invalidation_events": previous_events,
+                                "runtime_lease_after": previous_lease,
+                                "discarded_tool_calls": [
+                                    item.to_dict()
+                                    for item in composed_tool_queue
+                                ],
+                                "execution_authority": False,
+                            }
+                            composed_tool_queue.clear()
+                            print(
+                                "[world-effect-composition] INVALIDATE_SUFFIX "
+                                f"after={current_operation_index} "
+                                "reason=sensor_or_execution_event authority=none",
+                                flush=True,
+                            )
+
+                    continuation_bundle: dict[str, Any] | None = None
+                    continuation_planning_source = (
+                        "queued_one_call_composition"
+                    )
+                    if composed_tool_queue:
+                        active_composed_tool_call = composed_tool_queue.pop(0)
+                        try:
+                            continuation_bundle = (
+                                _materialize_guarded_composed_step(
+                                    step=active_composed_tool_call,
+                                    activation_decision=(
+                                        goal_activation_decision
+                                    ),
+                                    planning_provider=(
+                                        planning_provider_instance
+                                    ),
+                                    inventory=continuation_inventory,
+                                    runtime_state=continuation_state,
+                                    recent_operation_history=(
+                                        recent_operation_history
+                                    ),
+                                    maximum_duration_s=(
+                                        args_cli.world_effect_runtime_lease_duration_s
+                                    ),
+                                    operation_index=next_operation_index,
+                                )
+                            )
+                            print(
+                                "[world-effect-composition] DEQUEUE "
+                                f"index={next_operation_index} "
+                                f"call={active_composed_tool_call.call_id} "
+                                f"remaining={len(composed_tool_queue)} "
+                                "model_calls=0 authority=none",
+                                flush=True,
+                            )
+                        except ValueError as composition_error:
+                            pending_composed_suffix_invalidation = {
+                                "reason": "queued_call_failed_fresh_typed_admission",
+                                "source_operation_index": current_operation_index,
+                                "failed_call": active_composed_tool_call.to_dict(),
+                                "error_type": type(composition_error).__name__,
+                                "error": str(composition_error),
+                                "evidence": dict(
+                                    getattr(composition_error, "evidence", {})
+                                ),
+                                "discarded_tool_calls": [
+                                    item.to_dict()
+                                    for item in composed_tool_queue
+                                ],
+                                "execution_authority": False,
+                            }
+                            composed_tool_queue.clear()
+                            active_composed_tool_call = None
+                            continuation_bundle = None
+                            print(
+                                "[world-effect-composition] INVALIDATE_SUFFIX "
+                                f"after={current_operation_index} "
+                                "reason=fresh_typed_admission authority=none",
+                                flush=True,
+                            )
+
+                    if continuation_bundle is None:
+                        continuation_planning_source = (
+                            "fresh_one_call_composition"
+                        )
+                        remaining_tool_budget = (
+                            args_cli.world_effect_max_operations
+                            - current_operation_index
+                        )
+                        (
+                            composed_tool_sequence,
+                            composed_tool_sequence_trace,
+                        ) = _reason_composed_tool_sequence(
                             coach=coach,
                             instruction=args_cli.instruction,
                             frame=continuation_frame,
-                            graph=goal_graph,
-                            membership_lease=goal_graph_membership_lease,
+                            planning_provider=planning_provider_instance,
                             inventory=continuation_inventory,
-                            predicate_registry=(
-                                world_predicate_evaluator_registry
-                            ),
-                            capability_registry=world_capability_registry,
-                            capability_advertisement=(
-                                world_capability_advertisement
-                            ),
-                            provider_registry=(
-                                world_effect_provider_registry
-                            ),
-                            runtime_effect_tools=runtime_effect_tools,
-                            trackable_object_ids=trackable_object_ids,
                             runtime_state=continuation_state,
                             recent_operation_history=(
-                                summarize_world_effect_operation_history(
-                                    sequence_trace["operations"]
-                                )
+                                recent_operation_history
                             ),
-                            maximum_duration_s=(
-                                args_cli.world_effect_runtime_lease_duration_s
+                            maximum_tool_calls=remaining_tool_budget,
+                            invalidated_suffix=(
+                                pending_composed_suffix_invalidation
                             ),
-                            operation_index=next_operation_index,
                         )
-                    )
+                        composed_tool_sequence_model_call_count += int(
+                            composed_tool_sequence_trace[
+                                "model_call_count"
+                            ]
+                        )
+                        sequence_trace.setdefault(
+                            "composed_tool_sequences", []
+                        ).append(composed_tool_sequence_trace)
+                        if (
+                            composed_tool_sequence.decision
+                            != "propose_sequence"
+                            or not composed_tool_sequence.tool_calls
+                        ):
+                            continuation_bundle = {
+                                "status": "composition_not_proposed",
+                                "trace": composed_tool_sequence_trace,
+                                "activation_decision": (
+                                    goal_activation_decision
+                                ),
+                            }
+                            active_composed_tool_call = None
+                            composed_tool_queue.clear()
+                        else:
+                            active_composed_tool_call = (
+                                composed_tool_sequence.tool_calls[0]
+                            )
+                            composed_tool_queue = list(
+                                composed_tool_sequence.tool_calls[1:]
+                            )
+                            pending_composed_suffix_invalidation = None
+                            try:
+                                continuation_bundle = (
+                                    _materialize_guarded_composed_step(
+                                        step=active_composed_tool_call,
+                                        activation_decision=(
+                                            goal_activation_decision
+                                        ),
+                                        planning_provider=(
+                                            planning_provider_instance
+                                        ),
+                                        inventory=continuation_inventory,
+                                        runtime_state=continuation_state,
+                                        recent_operation_history=(
+                                            recent_operation_history
+                                        ),
+                                        maximum_duration_s=(
+                                            args_cli.world_effect_runtime_lease_duration_s
+                                        ),
+                                        operation_index=(
+                                            next_operation_index
+                                        ),
+                                    )
+                                )
+                                continuation_bundle["trace"][
+                                    "composition_model_call"
+                                ] = composed_tool_sequence_trace
+                                print(
+                                    "[world-effect-composition] REPLANNED "
+                                    f"calls={len(composed_tool_sequence.tool_calls)} "
+                                    f"model_calls_total={composed_tool_sequence_model_call_count} "
+                                    "authority=none",
+                                    flush=True,
+                                )
+                            except ValueError as composition_error:
+                                pending_composed_suffix_invalidation = {
+                                    "reason": (
+                                        "fresh_composition_failed_typed_admission"
+                                    ),
+                                    "failed_call": (
+                                        active_composed_tool_call.to_dict()
+                                    ),
+                                    "error_type": type(
+                                        composition_error
+                                    ).__name__,
+                                    "error": str(composition_error),
+                                    "evidence": dict(
+                                        getattr(
+                                            composition_error,
+                                            "evidence",
+                                            {},
+                                        )
+                                    ),
+                                    "execution_authority": False,
+                                }
+                                continuation_bundle = {
+                                    "status": "operation_replan_required",
+                                    "trace": {
+                                        "composition_model_call": (
+                                            composed_tool_sequence_trace
+                                        ),
+                                        "operation_rejection": (
+                                            pending_composed_suffix_invalidation
+                                        ),
+                                        "model_calls_for_step_materialization": 0,
+                                        "execution_authority": False,
+                                    },
+                                    "activation_decision": (
+                                        goal_activation_decision
+                                    ),
+                                    "operation_rejection": (
+                                        pending_composed_suffix_invalidation
+                                    ),
+                                }
+                                composed_tool_queue.clear()
+                                active_composed_tool_call = None
                     operation_record: dict[str, Any] = {
                         "operation_index": next_operation_index,
-                        "planning_source": (
-                            "fresh_post_effect_model_replan"
-                        ),
+                        "planning_source": continuation_planning_source,
                         "planning": continuation_bundle["trace"],
                         "planning_status": continuation_bundle["status"],
                     }
@@ -10703,8 +12895,9 @@ def main() -> int:
                         "authority=single_use_pending_fresh_evidence",
                         flush=True,
                     )
-                    obs, continuation_terminal, continuation_dispatch = (
-                        _dispatch_guarded_world_effect_continuation(
+                    try:
+                        obs, continuation_terminal, continuation_dispatch = (
+                            _dispatch_guarded_world_effect_continuation(
                             env=env,
                             obs=obs,
                             initial_object_z=initial_object_z,
@@ -10740,8 +12933,59 @@ def main() -> int:
                                 .recovery_actuator_only
                                 else ()
                             ),
+                            shape_drift_required_observations=(
+                                args_cli.world_effect_shape_drift_confirmations
+                            ),
+                            shape_drift_observation_window=(
+                                args_cli.world_effect_shape_drift_window
+                            ),
+                            )
                         )
-                    )
+                    except WorldEffectGuardedDispatchError as dispatch_error:
+                        dispatch_invalidation = {
+                            "reason": "fresh_dispatch_evidence_invalidated_call",
+                            "source_operation_index": current_operation_index,
+                            "failed_call": (
+                                continuation_bundle["composed_call"].to_dict()
+                                if continuation_bundle.get("composed_call")
+                                is not None
+                                else None
+                            ),
+                            "error_type": type(dispatch_error).__name__,
+                            "error": str(dispatch_error),
+                            "runtime_lease_after": continuation_bundle[
+                                "runtime_lease"
+                            ].to_dict(),
+                            "discarded_tool_calls": [
+                                item.to_dict() for item in composed_tool_queue
+                            ],
+                            "execution_authority": False,
+                        }
+                        operation_record["planning_status"] = (
+                            "fresh_dispatch_invalidation"
+                        )
+                        operation_record["dispatch_invalidation"] = (
+                            dispatch_invalidation
+                        )
+                        pending_composed_suffix_invalidation = (
+                            dispatch_invalidation
+                        )
+                        composed_tool_queue.clear()
+                        active_composed_tool_call = None
+                        operation_replan_attempts += 1
+                        _write_trace(trace_path, episode_trace)
+                        print(
+                            "[world-effect-composition] INVALIDATE_SUFFIX "
+                            f"after={current_operation_index} "
+                            "reason=fresh_dispatch_evidence authority=none",
+                            flush=True,
+                        )
+                        if operation_replan_attempts > 2:
+                            sequence_stop_reason = (
+                                "repeated_fresh_dispatch_invalidation"
+                            )
+                            break
+                        continue
                     operation_record["selected_goal_id"] = selected_goal_id
                     operation_record["dispatch"] = continuation_dispatch
                     operation_record["tool_family"] = continuation_dispatch[
@@ -10839,7 +13083,10 @@ def main() -> int:
                         f"index={current_operation_index} "
                         f"family={continuation_dispatch['tool_family']} "
                         f"lease={continuation_dispatch['runtime_lease_after']['state']} "
-                        "replan=true authority=none",
+                        f"queue_remaining={len(composed_tool_queue)} "
+                        "replan="
+                        f"{str(bool(continuation_dispatch.get('requires_model_replan'))).lower()} "
+                        "authority=none",
                         flush=True,
                     )
                     if continuation_terminal:
@@ -10848,34 +13095,98 @@ def main() -> int:
 
                 sequence_trace["status"] = "stopped"
                 sequence_trace["stop_reason"] = sequence_stop_reason
-                sequence_trace["task_completion_claimed"] = False
+                sequence_trace["composition_model_call_count"] = (
+                    composed_tool_sequence_model_call_count
+                )
+                sequence_trace["unexecuted_composed_tool_call_count"] = len(
+                    composed_tool_queue
+                )
+                sequence_trace["completed_goal_ids"] = list(
+                    completed_goal_ids
+                )
+                sequence_trace["task_completion_claimed"] = (
+                    task_completed_by_scheduler
+                )
                 episode_trace["status"] = "guarded_world_effect_sequence_stopped"
                 episode_trace["guarded_world_effect_result"] = {
-                    "complete": True,
+                    "complete": task_completed_by_scheduler or (
+                        sequence_stop_reason == "selected_goal_completed"
+                    ),
                     "dispatch_performed": True,
                     "operation_count": sequence_trace[
                         "completed_operation_count"
                     ],
                     "sequence_stop_reason": sequence_stop_reason,
                     "selected_goal_completed": (
-                        sequence_stop_reason == "selected_goal_completed"
+                        sequence_stop_reason in {
+                            "selected_goal_completed",
+                            "task_completed",
+                        }
                     ),
-                    "task_completion_claimed": False,
+                    "task_completion_claimed": (
+                        task_completed_by_scheduler
+                    ),
                     "fresh_complete_graph_required": True,
-                    "requires_model_replan": True,
+                    "requires_model_replan": (
+                        sequence_stop_reason
+                        not in {"selected_goal_completed", "task_completed"}
+                    ),
                     "motion_stage_count": len(episode_trace["stages"]),
                     "demonstration_loaded": False,
                 }
+                contact_summary = _active_contact_summary()
+                episode_trace["guarded_episode_contact_telemetry"] = (
+                    contact_summary
+                )
+                acceptance = assess_world_effect_episode(episode_trace)
+                episode_trace["episode_acceptance"] = acceptance.to_dict()
+                if episode_recorder is not None:
+                    if acceptance.accepted:
+                        ACTIVE_EPISODE_RECORDER = None
+                        episode_recorder.metadata["outcome"] = {
+                            "world_effect_episode_acceptance": (
+                                acceptance.to_dict()
+                            ),
+                            "operation_count": sequence_trace[
+                                "completed_operation_count"
+                            ],
+                            "selected_goal_completed": True,
+                            "task_completion_claimed": (
+                                task_completed_by_scheduler
+                            ),
+                        }
+                        _write_trace(trace_path, episode_trace)
+                        training_row = episode_recorder.publish_success(
+                            trace_path=trace_path
+                        )
+                        episode_trace["training_capture"] = {
+                            "status": "published_success",
+                            **training_row,
+                        }
+                    else:
+                        episode_trace["training_capture"] = {
+                            "status": "rejected",
+                            "reason": "world_effect_episode_acceptance_failed",
+                            "rejection_reasons": list(
+                                acceptance.rejection_reasons
+                            ),
+                            "samples_discarded": episode_recorder.sample_count,
+                        }
                 _write_trace(trace_path, episode_trace)
+                _write_trace(
+                    args_cli.artifact_dir / "episode_acceptance.json",
+                    acceptance.to_dict(),
+                )
                 print(
                     "[world-effect-sequence] STOPPED "
                     f"operations={sequence_trace['completed_operation_count']} "
                     f"reason={sequence_stop_reason} "
+                    f"dataset_admitted={acceptance.accepted} "
                     "task_complete=false authority=none",
                     flush=True,
                 )
                 print(f"Trace: {trace_path}", flush=True)
-                return 0
+                return 0 if acceptance.accepted else 2
             except Exception as guarded_error:
                 episode_trace["world_effect_guarded_dispatch"] = {
                     **guarded_trace,

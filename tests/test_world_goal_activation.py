@@ -9,6 +9,7 @@ from scripts.world_goal_activation import (
     WorldGoalActivationGate,
     build_goal_activation_candidates,
     build_world_goal_activation_prompt,
+    compact_goal_activation_revision_evidence,
     shadow_world_capability_registry,
 )
 from scripts.world_entity_physical_evidence import build_entity_physical_evidence
@@ -19,6 +20,7 @@ from scripts.world_effect_provider_registry import (
 from scripts.world_goal_graph_contract import (
     WORLD_GOAL_GRAPH_SCHEMA_VERSION,
     WorldGoalGraph,
+    build_world_goal_graph_prompt,
 )
 from scripts.world_goal_graph_membership import SceneMembershipLease
 from scripts.world_predicate_evaluator_registry import (
@@ -344,6 +346,71 @@ def test_visible_non_fit_is_not_an_activation_candidate():
         "red_block"
     )
     assert serialized["execution_authority"] is False
+
+
+def test_revision_evidence_compacts_blockers_without_nested_tool_schemas():
+    scene = inventory()
+    red = next(item for item in scene["entities"] if item["entity_id"] == "red_block")
+    red["geometry"] = {
+        "visible_aabb_min_base_m": [0.0, 0.0, 0.0],
+        "visible_aabb_max_base_m": [0.50, 0.50, 0.50],
+    }
+    tools = [
+        RuntimeToolCapability(
+            tool_id="sensor.geometry",
+            tool_family="sensor",
+            capability_tags=("scene.geometry.rgbd",),
+            activation_status="active",
+            source="test",
+        ),
+        RuntimeToolCapability(
+            tool_id="factory.motion",
+            tool_family="motion",
+            capability_tags=(
+                "spatial.pose_target",
+                "motion.observation_bound",
+                "motion.invalidation_feedback",
+            ),
+            activation_status="factory_available",
+            source="test",
+        ),
+    ]
+    provider_assessment = default_world_effect_provider_registry().assess(
+        "world_relation.realize_inside", tools
+    )
+    result = candidates(
+        scene=scene,
+        capability_registry=shadow_world_capability_registry(
+            effect_provider_assessment=provider_assessment.to_dict()
+        ),
+    )
+
+    compact = compact_goal_activation_revision_evidence(result)
+    blocker = compact["evidence_blockers"][0]
+    capability = blocker["capability_assessments"][0]
+    serialized = str(compact)
+
+    assert blocker["goal_id"] == "red-in-bin"
+    assert blocker["desired_state"] == [relation("red_block")]
+    assert capability["planning_blockers"] == [
+        "red_block.does_not_fit_observed_envelope_of.grey_bin"
+    ]
+    assert capability["runtime_effect_provider"]["binding_ready"] is False
+    assert capability["runtime_effect_provider"]["bindings"][0][
+        "missing_requirement_ids"
+    ] == ["reversible_entity_attachment"]
+    assert "requirement_bindings" not in serialized
+    assert "compatible_tools" not in serialized
+    assert "supported_effect_forms" not in serialized
+    prompt = build_world_goal_graph_prompt(
+        "Clean the table",
+        scene,
+        revision_context={
+            "trigger": "no_activatable_goal_with_evidence_blockers",
+            "activation_candidate_set": compact,
+        },
+    )
+    assert "red_block.does_not_fit_observed_envelope_of.grey_bin" in prompt
 
 
 def test_satisfied_and_dependency_blocked_goals_are_not_activation_candidates():

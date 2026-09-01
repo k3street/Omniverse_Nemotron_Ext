@@ -97,6 +97,15 @@ ORDERED_WAYPOINT_INVOCATION_SCHEMA = {
 }
 
 
+REACHABILITY_BOUNDED_INVOCATION_SCHEMA = deepcopy(INVOCATION_SCHEMA)
+REACHABILITY_BOUNDED_INVOCATION_SCHEMA["x-runtime-constraints"].update(
+    {
+        "minimum_reachable_radius_m": 0.20,
+        "maximum_reachable_radius_m": 0.60,
+    }
+)
+
+
 def fixture(
     *,
     tool_id="spatial_motion",
@@ -196,6 +205,7 @@ def fixture(
             "additionalProperties": False,
             "properties": {
                 "position_tolerance_m": {"type": "number"},
+                "require_interaction_relation": {"type": "boolean"},
             },
         },
         geometry_bindings=(geometry,),
@@ -228,7 +238,10 @@ def fixture(
         operation_candidate_id=lease_candidate.operation_candidate_id,
         tool_id=tool_id,
         grounding_entity_ids=("red_block",),
-        tool_configuration={"position_tolerance_m": 0.02},
+        tool_configuration={
+            "position_tolerance_m": 0.02,
+            "require_interaction_relation": True,
+        },
         invalidation_conditions=invalidation_selections,
         confidence=0.9,
         reason="Fresh geometry is bound.",
@@ -386,9 +399,7 @@ def proposal(candidate_set, **overrides):
         "orientation_alignment_id": (
             "red_block.oriented_footprint_axes_base.0"
         ),
-        "invocation_arguments": {
-            "target_quaternion_wxyz": [0.70710678, 0.0, 0.70710678, 0.0],
-        },
+        "invocation_arguments": {},
         "acknowledged_invalidation_condition_ids": list(
             candidate.invalidation_condition_ids
         ),
@@ -421,12 +432,6 @@ def waypoint_proposal(candidate_set, **overrides):
                     "orientation_alignment_id": (
                         "red_block.oriented_footprint_axes_base.0"
                     ),
-                    "target_quaternion_wxyz": [
-                        0.70710678,
-                        0.0,
-                        0.70710678,
-                        0.0,
-                    ],
                 },
                 {
                     "position_anchor_id": "red_block.center",
@@ -434,12 +439,6 @@ def waypoint_proposal(candidate_set, **overrides):
                     "orientation_alignment_id": (
                         "red_block.oriented_footprint_axes_base.0"
                     ),
-                    "target_quaternion_wxyz": [
-                        0.70710678,
-                        0.0,
-                        0.70710678,
-                        0.0,
-                    ],
                 },
             ],
         },
@@ -461,9 +460,16 @@ def test_candidate_uses_runtime_schema_frame_transform_and_rgbd_axes():
     assert candidate.tool_id == "spatial_motion"
     assert candidate.position_grounding_required
     assert candidate.orientation_grounding_required
-    assert candidate.materialized_argument_fields == ("target_position_m",)
+    assert candidate.materialized_argument_fields == (
+        "target_position_m",
+        "target_quaternion_wxyz",
+    )
     assert "target_position_m" in candidate.invocation_schema["properties"]
     assert "target_position_m" not in candidate.model_argument_schema["properties"]
+    assert (
+        "target_quaternion_wxyz"
+        not in candidate.model_argument_schema["properties"]
+    )
     assert {item.anchor_id for item in candidate.position_anchors} == {
         "red_block.center",
         "red_block.visible_aabb_top_center",
@@ -803,8 +809,10 @@ def test_ordered_waypoint_candidate_exposes_model_grounding_not_runtime_position
     assert candidate.ordered_waypoint_grounding_required
     assert candidate.materialized_argument_fields == (
         "ordered_waypoints[].target_position_m",
+        "ordered_waypoints[].target_quaternion_wxyz",
     )
     assert "target_position_m" not in item_schema["properties"]
+    assert "target_quaternion_wxyz" not in item_schema["properties"]
     assert set(item_schema["properties"]["position_anchor_id"]["enum"]) == {
         "red_block.center",
         "red_block.visible_aabb_top_center",
@@ -865,6 +873,36 @@ def test_gate_rejects_invalid_ordered_waypoint_envelope_and_noop_segment():
         ShadowToolInvocationGate(candidates).dispatch(duplicate)
 
 
+def test_segment_bound_rejection_reports_measured_subdivision_evidence():
+    schema = deepcopy(ORDERED_WAYPOINT_INVOCATION_SCHEMA)
+    schema["x-runtime-constraints"]["maximum_segment_displacement_m"] = 0.10
+    *_, candidates = fixture(
+        tool_id="bounded_dls_waypoint_path",
+        invocation_schema=schema,
+    )
+
+    with pytest.raises(
+        WorldEffectToolInvocationError,
+        match="subdivide into at least 3 segments",
+    ) as exc_info:
+        ShadowToolInvocationGate(candidates).dispatch(
+            waypoint_proposal(candidates)
+        )
+
+    evidence = exc_info.value.evidence
+    assert evidence["waypoint_index"] == 0
+    assert evidence["segment_displacement_m"] == pytest.approx(0.2601922)
+    assert evidence["maximum_segment_displacement_m"] == pytest.approx(0.10)
+    assert evidence["required_segment_count"] == 3
+    assert evidence["required_intermediate_waypoint_count"] == 2
+    assert evidence["previous_controlled_target_position_m"] == pytest.approx(
+        [0.36, 0.0, 0.47]
+    )
+    assert evidence["rejected_controlled_target_position_m"] == pytest.approx(
+        [0.50, 0.20, 0.38]
+    )
+
+
 def test_gate_accepts_exact_grounded_pose_and_recomputes_alignment():
     *_, candidates = fixture()
     decision = ShadowToolInvocationGate(candidates).dispatch(proposal(candidates))
@@ -880,6 +918,35 @@ def test_gate_accepts_exact_grounded_pose_and_recomputes_alignment():
     assert not serialized["execution_lease_issued"]
     assert not serialized["tool_called"]
     assert not serialized["dispatch_enabled"]
+
+
+def test_gate_records_executor_published_reachability_before_authority():
+    *_, candidates = fixture(
+        invocation_schema=REACHABILITY_BOUNDED_INVOCATION_SCHEMA,
+    )
+    decision = ShadowToolInvocationGate(candidates).dispatch(
+        proposal(candidates)
+    )
+
+    reachability = decision.grounding_assessment["reachability"]
+    assert reachability["within_runtime_reachability_shell"] is True
+    assert reachability["minimum_reachable_radius_m"] == 0.20
+    assert reachability["maximum_reachable_radius_m"] == 0.60
+    assert decision.grounding_assessment["reachability_source"] == (
+        "runtime_executor_advertisement"
+    )
+
+
+def test_gate_rejects_target_outside_executor_published_reachability():
+    schema = deepcopy(REACHABILITY_BOUNDED_INVOCATION_SCHEMA)
+    schema["x-runtime-constraints"]["maximum_reachable_radius_m"] = 0.55
+    *_, candidates = fixture(invocation_schema=schema)
+
+    with pytest.raises(
+        WorldEffectToolInvocationError,
+        match="outside the runtime-published reachable radius",
+    ):
+        ShadowToolInvocationGate(candidates).dispatch(proposal(candidates))
 
 
 def test_gate_rejects_stale_unadvertised_and_unacknowledged_invocations():
@@ -918,7 +985,7 @@ def test_prompt_surfaces_exact_candidate_lease_tool_identity_triple():
     assert '"tool_id": "bounded_dls_waypoint_path"' in prompt
 
 
-def test_gate_rejects_model_materialized_field_and_wrong_orientation_axis():
+def test_gate_rejects_both_model_materialized_pose_fields():
     *_, candidates = fixture()
     gate = ShadowToolInvocationGate(candidates)
     injected_arguments = dict(
@@ -930,13 +997,13 @@ def test_gate_rejects_model_materialized_field_and_wrong_orientation_axis():
             proposal(candidates, invocation_arguments=injected_arguments)
         )
 
-    rotated_arguments = dict(
+    injected_quaternion = dict(
         proposal(candidates)["invocation_arguments"],
         target_quaternion_wxyz=[0.70710678, 0.0, 0.0, 0.70710678],
     )
-    with pytest.raises(WorldEffectToolInvocationError, match="alignment limit"):
+    with pytest.raises(WorldEffectToolInvocationError, match="unknown fields"):
         gate.dispatch(
-            proposal(candidates, invocation_arguments=rotated_arguments)
+            proposal(candidates, invocation_arguments=injected_quaternion)
         )
 
 
@@ -973,7 +1040,12 @@ def test_prompt_is_explicitly_typed_grounded_and_non_dispatching():
         instruction="Clean the table",
         candidate_set=candidates,
         rejection_context={
-            "error": "materialized motion target is already within tolerance"
+            "error": "materialized motion target is already within tolerance",
+            "evidence": {
+                "segment_displacement_m": 0.42,
+                "maximum_segment_displacement_m": 0.35,
+                "required_segment_count": 2,
+            },
         },
     )
     lowered = prompt.lower()
@@ -988,8 +1060,10 @@ def test_prompt_is_explicitly_typed_grounded_and_non_dispatching():
     assert "gripper-base-to-contact distance" in lowered
     assert "previous proposal rejection" in lowered
     assert "already within tolerance" in lowered
+    assert '"required_segment_count": 2' in prompt
     assert "do not resubmit that no-op target" in lowered
-    assert "target quaternion must rotate" in lowered
+    assert "do not output a target quaternion" in lowered
+    assert "preserving the current twist" in lowered
     assert "object center\ncoincident with the advertised grasp-corridor center" in lowered
     assert "rejects\npremature acquisition" in lowered
     assert "opposing tactile\nevidence has already established the attachment" in lowered
@@ -1036,7 +1110,7 @@ def test_runner_wires_invocation_after_lease_and_before_shadow_boundary():
     assert "actuator_transition_handler(" not in block
 
 
-def test_runner_replans_a_nonexecuting_initial_invocation_before_handoff():
+def test_runner_recomposes_a_nonexecuting_initial_invocation_before_handoff():
     source = (
         Path(__file__).parents[1]
         / "scripts"
@@ -1048,15 +1122,52 @@ def test_runner_replans_a_nonexecuting_initial_invocation_before_handoff():
     replan_branch = source.index(
         "if initial_world_effect_replan_required:", replan_flag
     )
-    continuation_planner = source.index(
-        "_plan_guarded_world_effect_continuation(", replan_branch
+    composition_planner = source.index(
+        "_reason_composed_tool_sequence(", replan_branch
+    )
+    local_materializer = source.index(
+        "_materialize_guarded_composed_step(", composition_planner
     )
     required_handoff = source.index(
-        "required_handoff = {", continuation_planner
+        "required_handoff = {", local_materializer
     )
 
-    assert replan_flag < replan_branch < continuation_planner < required_handoff
+    assert (
+        replan_flag
+        < replan_branch
+        < composition_planner
+        < local_materializer
+        < required_handoff
+    )
     branch = source[replan_branch:required_handoff]
     assert '"world_effect_initial_replans"' in branch
     assert '== "runtime_lease_issued"' in branch
     assert "issued_runtime_lease = bootstrap_bundle" in branch
+    assert "composed_tool_sequence_model_call_count += int(" in branch
+    assert '"model_call_count"' in branch
+    assert '"model_calls_for_step_materialization": 0' in branch
+
+
+def test_runner_replans_a_rejected_initial_motion_target_before_handoff():
+    source = (
+        Path(__file__).parents[1]
+        / "scripts"
+        / "run_gemini_robotics_robolab.py"
+    ).read_text()
+    rejection_handler = source.index(
+        "except Exception as invocation_error:"
+    )
+    replan_flag = source.index(
+        "initial_world_effect_replan_required = True",
+        rejection_handler,
+    )
+    typed_error_check = source.index(
+        "WorldEffectToolInvocationError,", rejection_handler
+    )
+    replan_branch = source.index(
+        "if initial_world_effect_replan_required:", replan_flag
+    )
+    required_handoff = source.index("required_handoff = {", replan_branch)
+
+    assert rejection_handler < typed_error_check < replan_flag
+    assert replan_flag < replan_branch < required_handoff
