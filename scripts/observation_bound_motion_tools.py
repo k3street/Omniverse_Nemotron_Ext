@@ -2367,6 +2367,7 @@ class MotionLeaseConditions:
     """Runtime-evaluable invariants attached to a longer-lived motion call."""
 
     require_contact: bool = False
+    forbid_contact: bool = False
     minimum_contact_force_n: float = 0.0
     maximum_tracked_pose_error_m: float | None = None
     minimum_observed_clearance_m: float | None = None
@@ -2374,6 +2375,12 @@ class MotionLeaseConditions:
     def __post_init__(self) -> None:
         if not isinstance(self.require_contact, bool):
             raise MotionToolValidationError("require_contact must be boolean")
+        if not isinstance(self.forbid_contact, bool):
+            raise MotionToolValidationError("forbid_contact must be boolean")
+        if self.require_contact and self.forbid_contact:
+            raise MotionToolValidationError(
+                "require_contact and forbid_contact cannot both be true"
+            )
         force = float(self.minimum_contact_force_n)
         if not math.isfinite(force) or force < 0.0:
             raise MotionToolValidationError(
@@ -2394,6 +2401,7 @@ class MotionLeaseConditions:
     def to_dict(self) -> dict[str, Any]:
         return {
             "require_contact": self.require_contact,
+            "forbid_contact": self.forbid_contact,
             "minimum_contact_force_n": self.minimum_contact_force_n,
             "maximum_tracked_pose_error_m": self.maximum_tracked_pose_error_m,
             "minimum_observed_clearance_m": self.minimum_observed_clearance_m,
@@ -2457,6 +2465,11 @@ def assess_motion_lease(
             reasons.append("contact_force_unavailable")
         elif numeric["contact_force_n"] < conditions.minimum_contact_force_n:
             reasons.append("contact_force_below_lease_minimum")
+    elif conditions.forbid_contact:
+        if not contact_available:
+            reasons.append("contact_observation_unavailable")
+        elif touch is not False:
+            reasons.append("unexpected_contact")
     if conditions.maximum_tracked_pose_error_m is not None:
         tracked_error = numeric["tracked_pose_error_m"]
         if tracked_error is None:
@@ -2500,7 +2513,9 @@ def motion_lease_source_errors(
         if not isinstance(value, bool):
             raise MotionToolValidationError(f"{name} must be boolean")
     errors: list[str] = []
-    if conditions.require_contact and not contact_available:
+    if (
+        conditions.require_contact or conditions.forbid_contact
+    ) and not contact_available:
         errors.append("contact source is unavailable")
     if (
         conditions.maximum_tracked_pose_error_m is not None

@@ -12,7 +12,12 @@ from scripts.franka_sensor_schema import (
     VALIDITY_DIM,
     SensorFrame,
 )
-from scripts.gemini_episode_dataset import GeminiEpisodeDatasetRecorder
+from scripts.gemini_episode_dataset import (
+    ACTION_SEMANTICS,
+    EPISODE_SCHEMA_VERSION,
+    GeminiEpisodeDatasetRecorder,
+    sha256_file,
+)
 
 
 class FakeVideoWriter:
@@ -94,6 +99,8 @@ def test_successful_gemini_completion_publishes_convertible_pair(tmp_path):
     with h5py.File(tmp_path / "run_7.hdf5", "r") as source:
         demo = source["data/demo_0"]
         assert bool(demo.attrs["success"])
+        assert demo.attrs["episode_schema_version"] == EPISODE_SCHEMA_VERSION
+        assert demo.attrs["action_semantics"] == ACTION_SEMANTICS
         assert demo.attrs["source_policy"].startswith("gemini_robotics")
         assert demo["actions"].shape == (41, 8)
         assert demo["ee_pose/orientation"].shape == (41, 4)
@@ -103,6 +110,18 @@ def test_successful_gemini_completion_publishes_convertible_pair(tmp_path):
         )
     manifest = json.loads((tmp_path / "collection_manifest.jsonl").read_text())
     assert manifest["status"] == "success"
+    assert manifest["episode_schema_version"] == EPISODE_SCHEMA_VERSION
+    assert manifest["action_semantics"] == ACTION_SEMANTICS
+    assert manifest["artifacts"]["hdf5"] == {
+        "path": "run_7.hdf5",
+        "size_bytes": (tmp_path / "run_7.hdf5").stat().st_size,
+        "sha256": sha256_file(tmp_path / "run_7.hdf5"),
+    }
+    assert manifest["artifacts"]["video"] == {
+        "path": "episode_000007_policy.mp4",
+        "size_bytes": (tmp_path / "episode_000007_policy.mp4").stat().st_size,
+        "sha256": sha256_file(tmp_path / "episode_000007_policy.mp4"),
+    }
     assert manifest["banana_yaw_deg"] == 45.0
     provenance = episode_provenance(tmp_path / "run_7.hdf5", "demo_0")
     assert provenance["source_policy"].startswith("gemini_robotics")

@@ -396,6 +396,140 @@ def interaction_obstacle_geometry(
     return result
 
 
+def swept_carried_aabb_clearance_m(
+    *,
+    current_interaction_position_m: Sequence[float],
+    target_interaction_position_m: Sequence[float],
+    carried_geometry: Mapping[str, Any],
+    obstacle_geometries: Mapping[str, Mapping[str, Any]],
+    sample_count: int = 65,
+) -> tuple[float, str | None]:
+    """Measure signed clearance for a translated RGB-D carried-object AABB.
+
+    Positive values are separation, zero is touching, and negative values are
+    penetration.  An object that begins in support contact may move away from
+    that support; a route that maintains or deepens the overlap is unsafe.
+    Rotation is handled conservatively by refreshing the observed AABB at each
+    motion iteration rather than assuming an object-specific collision model.
+    """
+    if isinstance(sample_count, bool) or not isinstance(sample_count, int):
+        raise WorldEffectGuardedDispatchError("sample_count must be an integer")
+    if sample_count < 2:
+        raise WorldEffectGuardedDispatchError("sample_count must be at least two")
+
+    def vector3(value: Any, name: str) -> tuple[float, float, float]:
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            raise WorldEffectGuardedDispatchError(f"{name} must be a three-value array")
+        if len(value) != 3:
+            raise WorldEffectGuardedDispatchError(f"{name} must have three values")
+        result: list[float] = []
+        for component in value:
+            if (
+                isinstance(component, bool)
+                or not isinstance(component, (int, float))
+                or not math.isfinite(float(component))
+            ):
+                raise WorldEffectGuardedDispatchError(f"{name} must be finite")
+            result.append(float(component))
+        return result[0], result[1], result[2]
+
+    current = vector3(
+        current_interaction_position_m,
+        "current_interaction_position_m",
+    )
+    target = vector3(
+        target_interaction_position_m,
+        "target_interaction_position_m",
+    )
+    carried_lower = vector3(
+        carried_geometry.get("visible_aabb_min_base_m"),
+        "carried_geometry.visible_aabb_min_base_m",
+    )
+    carried_upper = vector3(
+        carried_geometry.get("visible_aabb_max_base_m"),
+        "carried_geometry.visible_aabb_max_base_m",
+    )
+    if any(lower > upper for lower, upper in zip(carried_lower, carried_upper)):
+        raise WorldEffectGuardedDispatchError("carried AABB bounds are inverted")
+
+    def signed_aabb_clearance(
+        moving_lower: Sequence[float],
+        moving_upper: Sequence[float],
+        obstacle_lower: Sequence[float],
+        obstacle_upper: Sequence[float],
+    ) -> float:
+        gaps = [
+            max(
+                obstacle_lower[index] - moving_upper[index],
+                moving_lower[index] - obstacle_upper[index],
+            )
+            for index in range(3)
+        ]
+        positive_gaps = [max(gap, 0.0) for gap in gaps]
+        if any(gap > 0.0 for gap in gaps):
+            return math.sqrt(sum(gap * gap for gap in positive_gaps))
+        overlaps = [
+            min(moving_upper[index], obstacle_upper[index])
+            - max(moving_lower[index], obstacle_lower[index])
+            for index in range(3)
+        ]
+        return -min(overlaps)
+
+    minimum = math.inf
+    nearest_id: str | None = None
+    for entity_id, geometry in obstacle_geometries.items():
+        if not isinstance(entity_id, str) or not entity_id:
+            raise WorldEffectGuardedDispatchError(
+                "obstacle geometry ids must be non-empty strings"
+            )
+        if not isinstance(geometry, Mapping):
+            raise WorldEffectGuardedDispatchError(
+                f"obstacle geometry for {entity_id!r} must be an object"
+            )
+        obstacle_lower = vector3(
+            geometry.get("visible_aabb_min_base_m"),
+            f"obstacle_geometries[{entity_id!r}].visible_aabb_min_base_m",
+        )
+        obstacle_upper = vector3(
+            geometry.get("visible_aabb_max_base_m"),
+            f"obstacle_geometries[{entity_id!r}].visible_aabb_max_base_m",
+        )
+        if any(lower > upper for lower, upper in zip(obstacle_lower, obstacle_upper)):
+            raise WorldEffectGuardedDispatchError(
+                f"obstacle AABB for {entity_id!r} is inverted"
+            )
+        samples: list[float] = []
+        for sample_index in range(sample_count):
+            alpha = sample_index / (sample_count - 1)
+            translation = tuple(
+                alpha * (target[index] - current[index]) for index in range(3)
+            )
+            moving_lower = tuple(
+                carried_lower[index] + translation[index] for index in range(3)
+            )
+            moving_upper = tuple(
+                carried_upper[index] + translation[index] for index in range(3)
+            )
+            samples.append(
+                signed_aabb_clearance(
+                    moving_lower,
+                    moving_upper,
+                    obstacle_lower,
+                    obstacle_upper,
+                )
+            )
+        starts_in_contact = samples[0] <= 0.0
+        monotonically_egressing = starts_in_contact and all(
+            later >= earlier - 1.0e-6
+            for earlier, later in zip(samples, samples[1:])
+        ) and samples[-1] > samples[0] + 1.0e-6
+        entity_clearance = samples[-1] if monotonically_egressing else min(samples)
+        if entity_clearance < minimum:
+            minimum = entity_clearance
+            nearest_id = entity_id
+    return minimum, nearest_id
+
+
 @dataclass(frozen=True)
 class DispatchInvalidationEvent:
     condition_id: str

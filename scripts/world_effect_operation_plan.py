@@ -1150,6 +1150,22 @@ def summarize_world_effect_operation_history(
             early_stop = early_stop if isinstance(early_stop, Mapping) else {}
             grounding = motion_report.get("grounding")
             grounding = grounding if isinstance(grounding, Mapping) else {}
+            orientation_error_after_deg = motion_report.get(
+                "orientation_error_after_deg"
+            )
+            orientation_tolerance_deg = motion_report.get(
+                "orientation_tolerance_deg"
+            )
+            orientation_relation_satisfied = bool(
+                isinstance(orientation_error_after_deg, (int, float))
+                and not isinstance(orientation_error_after_deg, bool)
+                and math.isfinite(float(orientation_error_after_deg))
+                and isinstance(orientation_tolerance_deg, (int, float))
+                and not isinstance(orientation_tolerance_deg, bool)
+                and math.isfinite(float(orientation_tolerance_deg))
+                and float(orientation_error_after_deg)
+                <= float(orientation_tolerance_deg)
+            )
             result.update(
                 {
                     "converged": motion_report.get("converged"),
@@ -1171,8 +1187,21 @@ def summarize_world_effect_operation_history(
                     ),
                     "early_stop_condition_id": early_stop.get("condition_id"),
                     "position_anchor_id": grounding.get("position_anchor_id"),
+                    "orientation_alignment_id": grounding.get(
+                        "orientation_alignment_id"
+                    ),
                     "interaction_offset_from_anchor_m": grounding.get(
                         "interaction_offset_from_anchor_m"
+                    ),
+                    "orientation_error_after_deg": (
+                        orientation_error_after_deg
+                    ),
+                    "orientation_tolerance_deg": orientation_tolerance_deg,
+                    "orientation_relation_satisfied": (
+                        orientation_relation_satisfied
+                    ),
+                    "orientation_relation_evidence_source": (
+                        "fresh_rgbd_grounded_motion_report"
                     ),
                 }
             )
@@ -1219,6 +1248,32 @@ def summarize_world_effect_operation_history(
 
     return {
         "entries": entries,
+        "satisfied_spatial_relations": [
+            {
+                "relation": "orientation_alignment",
+                "operation_index": entry.get("operation_index"),
+                "target_entity_ids": list(entry.get("target_entity_ids", [])),
+                "orientation_alignment_id": entry.get("result", {}).get(
+                    "orientation_alignment_id"
+                ),
+                "error_deg": entry.get("result", {}).get(
+                    "orientation_error_after_deg"
+                ),
+                "tolerance_deg": entry.get("result", {}).get(
+                    "orientation_tolerance_deg"
+                ),
+                "status": "satisfied",
+                "preserve_until_fresh_reliable_invalidation": True,
+                "source": entry.get("result", {}).get(
+                    "orientation_relation_evidence_source"
+                ),
+            }
+            for entry in entries
+            if entry.get("result", {}).get(
+                "orientation_relation_satisfied"
+            )
+            is True
+        ],
         "consecutive_same_semantic_selection_count": (
             consecutive_same_semantic_selection_count
         ),

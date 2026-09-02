@@ -438,6 +438,205 @@ def _grounding_catalog(
     }
 
 
+def build_unbound_composed_grounding_catalog(
+    inventory: Mapping[str, Any],
+    execution_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Advertise scene-relative grounding before a provider is selected.
+
+    A bundled task-planning response must be able to name generic RGB-D anchors
+    and axes in the same model call that selects its goal and provider.  This
+    catalog grants no tool or execution authority; the selected provider and
+    every queued call are still rebound through the normal typed gates.
+    """
+    entity_ids = frozenset(
+        str(item.get("entity_id"))
+        for item in inventory.get("entities", [])
+        if isinstance(item, Mapping)
+        and isinstance(item.get("entity_id"), str)
+    )
+    return _grounding_catalog(
+        inventory,
+        execution_context,
+        allowed_entity_ids=entity_ids,
+    )
+
+
+def rebind_composed_tool_call_to_fresh_interaction_relation(
+    step: ComposedToolCallDraft,
+    execution_context: Mapping[str, Any],
+) -> tuple[ComposedToolCallDraft, dict[str, Any] | None]:
+    """Rebind a pending interaction motion to the latest sensed relation."""
+    if (
+        step.tool_family != "motion"
+        or step.tool_configuration.get("require_interaction_relation") is not True
+    ):
+        return step, None
+    alignment = execution_context.get("two_pad_grasp_alignment")
+    if not isinstance(alignment, Mapping) or alignment.get("available") is not True:
+        return step, None
+    if alignment.get("object_center_inside_full_grasp_corridor") is not False:
+        return step, None
+    contract = alignment.get("corrective_motion_grounding_contract")
+    if not isinstance(contract, Mapping):
+        return step, None
+    anchor_id = _identifier(
+        contract.get("required_terminal_position_anchor_id"),
+        "corrective_motion_grounding_contract.required_terminal_position_anchor_id",
+    )
+    raw_offset = contract.get(
+        "required_terminal_interaction_offset_from_anchor_m"
+    )
+    if not isinstance(raw_offset, Sequence) or isinstance(raw_offset, (str, bytes)):
+        raise WorldEffectComposedSequenceError(
+            "fresh corrective interaction offset must be a three-value array"
+        )
+    offset = tuple(
+        _finite_number(
+            value,
+            "corrective_motion_grounding_contract."
+            "required_terminal_interaction_offset_from_anchor_m",
+        )
+        for value in raw_offset
+    )
+    if len(offset) != 3:
+        raise WorldEffectComposedSequenceError(
+            "fresh corrective interaction offset must have three values"
+        )
+    before = {
+        "position_anchor_id": step.position_anchor_id,
+        "interaction_offset_from_anchor_m": list(
+            step.interaction_offset_from_anchor_m
+        ),
+    }
+    arguments = dict(step.invocation_arguments)
+    waypoints = arguments.get("ordered_waypoints")
+    if isinstance(waypoints, list) and waypoints:
+        rebound_waypoints = [dict(item) for item in waypoints]
+        rebound_waypoints[-1]["position_anchor_id"] = anchor_id
+        rebound_waypoints[-1]["interaction_offset_from_anchor_m"] = list(offset)
+        arguments["ordered_waypoints"] = rebound_waypoints
+        rebound = replace(step, invocation_arguments=arguments)
+    else:
+        rebound = replace(
+            step,
+            position_anchor_id=anchor_id,
+            interaction_offset_from_anchor_m=offset,
+        )
+    configuration = dict(rebound.tool_configuration)
+    fresh_tolerance = contract.get("maximum_terminal_position_error_m")
+    if (
+        isinstance(fresh_tolerance, (int, float))
+        and not isinstance(fresh_tolerance, bool)
+        and math.isfinite(float(fresh_tolerance))
+        and 0.001 <= float(fresh_tolerance) <= 0.05
+    ):
+        requested = configuration.get("position_tolerance_m")
+        configuration["position_tolerance_m"] = min(
+            float(fresh_tolerance),
+            float(requested)
+            if isinstance(requested, (int, float))
+            and not isinstance(requested, bool)
+            and math.isfinite(float(requested))
+            else float(fresh_tolerance),
+        )
+        rebound = replace(rebound, tool_configuration=configuration)
+    return rebound, {
+        "source": "fresh_rgbd_plus_runtime_interaction_geometry",
+        "before": before,
+        "after": {
+            "position_anchor_id": anchor_id,
+            "interaction_offset_from_anchor_m": list(offset),
+        },
+        "model_called": False,
+        "execution_authority": False,
+    }
+
+
+def admit_fresh_contact_egress_motion(
+    step: ComposedToolCallDraft,
+    execution_context: Mapping[str, Any],
+    *,
+    fresh_replan_after_invalidation: bool,
+) -> tuple[ComposedToolCallDraft, dict[str, Any] | None]:
+    """Let one freshly reasoned motion escape already-observed contact.
+
+    The no-contact lease prevents a new pre-grasp collision.  Once that lease
+    has fired, however, the first motion from the resulting fresh model plan
+    must be able to leave the existing contact state.  Later queued approach
+    motions keep their normal no-contact lease.
+    """
+    contact = execution_context.get("current_contact")
+    if (
+        not fresh_replan_after_invalidation
+        or step.tool_family != "motion"
+        or step.tool_configuration.get("forbid_contact") is not True
+        or not isinstance(contact, Mapping)
+        or contact.get("touch") is not True
+    ):
+        return step, None
+    configuration = dict(step.tool_configuration)
+    configuration.pop("forbid_contact", None)
+    rebound = replace(step, tool_configuration=configuration)
+    return rebound, {
+        "source": "fresh_post_invalidation_contact_state",
+        "reason": "allow_first_freshly_reasoned_motion_to_egress_existing_contact",
+        "observed_touch": True,
+        "observed_net_force_n": contact.get("net_force_n"),
+        "model_called_for_recovery_plan": True,
+        "applies_to_this_call_only": True,
+        "execution_authority": False,
+    }
+
+
+def rebind_loaded_motion_targets_to_fresh_attachment(
+    step: ComposedToolCallDraft,
+    inventory: Mapping[str, Any],
+) -> tuple[ComposedToolCallDraft, dict[str, Any] | None]:
+    """Carry fresh retained-attachment lineage into a loaded motion call."""
+    if (
+        step.tool_family != "motion"
+        or step.tool_configuration.get("require_contact") is not True
+    ):
+        return step, None
+    continuation = inventory.get("world_effect_continuation_evidence")
+    if (
+        not isinstance(continuation, Mapping)
+        or continuation.get("retained_contact_supported") is not True
+    ):
+        return step, None
+    raw_attachment_ids = continuation.get("attachment_entity_ids")
+    if not isinstance(raw_attachment_ids, list) or not raw_attachment_ids:
+        return step, None
+    inventory_ids = {
+        str(item.get("entity_id"))
+        for item in inventory.get("entities", [])
+        if isinstance(item, Mapping)
+        and isinstance(item.get("entity_id"), str)
+    }
+    attachment_ids = tuple(
+        _identifier(entity_id, "attachment_entity_ids")
+        for entity_id in raw_attachment_ids
+        if isinstance(entity_id, str) and entity_id in inventory_ids
+    )
+    if not attachment_ids:
+        return step, None
+    rebound_targets = tuple(
+        dict.fromkeys((*step.target_entity_ids, *attachment_ids))
+    )
+    if rebound_targets == step.target_entity_ids:
+        return step, None
+    rebound = replace(step, target_entity_ids=rebound_targets)
+    return rebound, {
+        "source": "fresh_retained_attachment_continuation_evidence",
+        "before_target_entity_ids": list(step.target_entity_ids),
+        "after_target_entity_ids": list(rebound_targets),
+        "attachment_entity_ids": list(attachment_ids),
+        "model_called": False,
+        "execution_authority": False,
+    }
+
+
 def build_composed_tool_sequence_candidates(
     *,
     instance: PlanningWorldEffectProviderInstance,
@@ -541,11 +740,25 @@ class ComposedToolSequenceGate:
             and isinstance(item.get("offset_max_m"), list)
             and len(item.get("offset_max_m")) == 3
         }
+        self._anchor_entities = {
+            str(item.get("anchor_id")): str(item.get("entity_id"))
+            for item in catalog.get("position_anchors", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("anchor_id"), str)
+            and isinstance(item.get("entity_id"), str)
+        }
         self._axis_ids = {
             str(item.get("orientation_alignment_id"))
             for item in catalog.get("orientation_axes", [])
             if isinstance(item, Mapping)
             and isinstance(item.get("orientation_alignment_id"), str)
+        }
+        self._axis_entities = {
+            str(item.get("orientation_alignment_id")): str(item.get("entity_id"))
+            for item in catalog.get("orientation_axes", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("orientation_alignment_id"), str)
+            and isinstance(item.get("entity_id"), str)
         }
         self._geometry_drift_limits = {
             str(item.get("entity_id")): float(item["maximum_center_shift_m"])
@@ -877,6 +1090,39 @@ class ComposedToolSequenceGate:
                     "composed sequence call_id values must be unique"
                 )
             materialized_calls = list(calls)
+            for index, call in enumerate(materialized_calls):
+                if (
+                    call.semantic_effect_id != "entity_attachment.acquire"
+                    or index == 0
+                    or materialized_calls[index - 1].tool_family != "motion"
+                ):
+                    continue
+                motion = materialized_calls[index - 1]
+                terminal_anchor_id = motion.position_anchor_id
+                terminal_axis_id = motion.orientation_alignment_id
+                waypoints = motion.invocation_arguments.get("ordered_waypoints")
+                if isinstance(waypoints, list) and waypoints:
+                    terminal = waypoints[-1]
+                    if isinstance(terminal, Mapping):
+                        terminal_anchor_id = terminal.get("position_anchor_id")
+                        terminal_axis_id = terminal.get(
+                            "orientation_alignment_id"
+                        )
+                anchor_entity_id = self._anchor_entities.get(
+                    str(terminal_anchor_id)
+                )
+                axis_entity_id = self._axis_entities.get(str(terminal_axis_id))
+                if (
+                    anchor_entity_id is None
+                    or axis_entity_id is None
+                    or anchor_entity_id != axis_entity_id
+                    or anchor_entity_id not in call.target_entity_ids
+                ):
+                    raise WorldEffectComposedSequenceError(
+                        f"tool_calls[{index - 1}] terminal grasp position and "
+                        "orientation must both be grounded to the entity "
+                        f"acquired by tool_calls[{index}]"
+                    )
             grasp_alignment = self.candidate_set.execution_context.get(
                 "two_pad_grasp_alignment"
             )
@@ -1041,18 +1287,34 @@ class ComposedToolSequenceGate:
             for index, call in enumerate(materialized_calls):
                 if call.tool_family == "motion" and attachment_active:
                     contact_configuration = dict(call.tool_configuration)
+                    contact_configuration.pop("forbid_contact", None)
                     contact_configuration["require_contact"] = True
+                    # Collision monitoring is a local authority constraint, not
+                    # a model-authored task phase.  Zero requests detection of
+                    # actual RGB-D AABB penetration without imposing a fixed
+                    # object- or embodiment-specific clearance distance.
+                    contact_configuration.setdefault(
+                        "minimum_observed_clearance_m", 0.0
+                    )
                     call = replace(
                         call,
                         tool_configuration=contact_configuration,
                     )
                     materialized_calls[index] = call
-                elif (
-                    call.tool_family == "motion"
-                    and "require_contact" in call.tool_configuration
-                ):
+                elif call.tool_family == "motion":
                     contact_configuration = dict(call.tool_configuration)
                     contact_configuration.pop("require_contact", None)
+                    if any(
+                        future.semantic_effect_id
+                        == "entity_attachment.acquire"
+                        for future in materialized_calls[index + 1 :]
+                    ):
+                        # An approach which is intended to end with a later
+                        # actuator acquisition must remain contact-free.  Touch
+                        # before that semantic boundary is a fresh physical
+                        # event, so revoke and let the model recompose instead
+                        # of driving through the target.
+                        contact_configuration["forbid_contact"] = True
                     call = replace(
                         call,
                         tool_configuration=contact_configuration,
@@ -1256,6 +1518,14 @@ hard-coded task routine or embodiment phase list. Select only an exact
 advertised requirement_id/tool_id/semantic_effect_id combination. Use each
 tool's advertised configuration and invocation schemas.
 
+Treat satisfied_spatial_relations in recent_operation_history as measured
+state, including when the containing operation stopped for a different sensor
+condition. Preserve a satisfied orientation alignment on a replan unless fresh,
+reliable orientation evidence explicitly invalidates it. An ambiguous or
+axis-symmetric fresh footprint is not evidence that a previously satisfied
+orientation became wrong. Continue from the remaining unsatisfied relation
+instead of undoing an already-correct wrist alignment.
+
 Motion must be expressed relative to advertised RGB-D position anchors and
 orientation axes. For a single-pose tool, put its selected anchor, interaction
 offset, and orientation axis in the top-level grounding fields; leave both
@@ -1268,12 +1538,17 @@ target_quaternion_wxyz. The configurable motion tool derives each quaternion by
 shortest-axis alignment while preserving wrist twist. Every offset must remain
 inside its advertised RGB-D anchor envelope. Use enough waypoints to satisfy the advertised maximum
 segment displacement and path length. Align the interaction axis, including the
-wrist rotation, before acquisition. For actuator effects, use null/empty
+wrist rotation, before acquisition. The motion immediately preceding an
+attachment acquisition must ground both its terminal position anchor and its
+terminal orientation axis to the entity being acquired; a destination,
+receptacle, or unrelated entity axis is invalid for that grasp. For actuator effects, use null/empty
 grounding and copy the advertised semantic command binding exactly.
 
 tool_configuration is the configuration for that call. Loaded motion always
 receives require_contact=true from the deterministic sequence gate, even if the
-draft omits it; do not use false to request open-loop transport. Before an
+draft omits it; do not use false to request open-loop transport. Pre-attachment
+motion that leads to an acquisition receives forbid_contact=true, so unexpected
+touch revokes that motion and requires fresh reasoning. Before an
 acquisition, include an immediately preceding motion for the interaction. When
 a fresh corrective_motion_grounding_contract applies, the runtime motion tool
 will bind that motion's terminal anchor and offset to the exact sensed relation;

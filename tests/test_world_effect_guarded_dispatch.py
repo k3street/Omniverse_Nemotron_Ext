@@ -12,6 +12,7 @@ from scripts.world_effect_guarded_dispatch import (
     WorldEffectGuardedDispatchError,
     build_fresh_dispatch_evidence,
     interaction_obstacle_geometry,
+    swept_carried_aabb_clearance_m,
 )
 from tests.test_world_effect_runtime_lease import FakeClock, issued_fixture
 
@@ -234,6 +235,46 @@ def test_path_obstacles_exclude_only_the_selected_interaction_target():
     assert set(obstacles) == {"grey_bin", "nearby_block"}
     assert obstacles["grey_bin"] is geometries["grey_bin"]
     assert "red_block" in geometries
+
+
+def test_carried_rgbd_aabb_sweep_detects_collision_missed_by_gripper_point():
+    clearance, nearest = swept_carried_aabb_clearance_m(
+        current_interaction_position_m=[0.0, 0.0, 0.20],
+        target_interaction_position_m=[0.40, 0.0, 0.20],
+        carried_geometry={
+            "visible_aabb_min_base_m": [-0.03, -0.03, 0.14],
+            "visible_aabb_max_base_m": [0.03, 0.03, 0.20],
+        },
+        obstacle_geometries={
+            "grey_bin": {
+                "visible_aabb_min_base_m": [0.25, -0.08, 0.08],
+                "visible_aabb_max_base_m": [0.35, 0.08, 0.18],
+            }
+        },
+    )
+
+    assert clearance < 0.0
+    assert nearest == "grey_bin"
+
+
+def test_carried_rgbd_aabb_sweep_allows_monotonic_support_egress():
+    clearance, nearest = swept_carried_aabb_clearance_m(
+        current_interaction_position_m=[0.0, 0.0, 0.10],
+        target_interaction_position_m=[0.0, 0.0, 0.25],
+        carried_geometry={
+            "visible_aabb_min_base_m": [-0.02, -0.02, -0.001],
+            "visible_aabb_max_base_m": [0.02, 0.02, 0.04],
+        },
+        obstacle_geometries={
+            "table": {
+                "visible_aabb_min_base_m": [-0.5, -0.5, -0.05],
+                "visible_aabb_max_base_m": [0.5, 0.5, 0.0],
+            }
+        },
+    )
+
+    assert clearance > 0.0
+    assert nearest == "table"
 
 
 def _release_geometry_event(entity_id="red_block"):

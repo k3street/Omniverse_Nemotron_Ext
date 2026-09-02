@@ -78,6 +78,26 @@ def test_unadvertised_evidence_never_invalidates_a_lease():
     assert assessment.valid
 
 
+def test_forbidden_contact_invalidates_pre_attachment_motion():
+    assessment = _assess(MotionLeaseConditions(forbid_contact=True))
+    assert not assessment.valid
+    assert assessment.invalidation_reasons == ("unexpected_contact",)
+
+
+def test_forbidden_contact_accepts_contact_free_motion():
+    assessment = _assess(
+        MotionLeaseConditions(forbid_contact=True),
+        touch=False,
+        contact_force_n=0.0,
+    )
+    assert assessment.valid
+
+
+def test_motion_lease_rejects_conflicting_contact_requirements():
+    with pytest.raises(MotionToolValidationError):
+        MotionLeaseConditions(require_contact=True, forbid_contact=True)
+
+
 def test_required_but_unavailable_observations_fail_closed():
     assessment = _assess(
         MotionLeaseConditions(
@@ -133,6 +153,7 @@ def test_runner_executor_advertises_configurable_lease_conditions():
     ).read_text()
     for field in (
         '"require_contact"',
+        '"forbid_contact"',
         '"minimum_contact_force_n"',
         '"maximum_tracked_pose_error_m"',
         '"maximum_tracked_orientation_error_deg"',

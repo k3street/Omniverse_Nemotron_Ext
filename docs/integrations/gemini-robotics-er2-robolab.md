@@ -192,16 +192,35 @@ grasp profiles, or a task routine. Table and receptacle material mutation are
 still reported as unimplemented because the live scene currently exposes no
 verified material-randomization control.
 
-Convert only the published successful pairs:
+Publish a validated GR00T N1.7 projection without changing the canonical
+episodes:
 
 ```bash
-python3 scripts/convert_robolab_demo_to_groot.py \
+./path/to/Isaac-GR00T/.venv/bin/python \
+  scripts/export_gemini_episode_dataset.py \
   --input-dir artifacts/gemini_groot_campaign/episodes \
-  --output artifacts/lerobot/gemini_groot_campaign
+  --store-root artifacts/gemini_groot_campaign/dataset_store \
+  --groot-root /path/to/Isaac-GR00T \
+  --instruction 'Clean the table by putting all movable items in the grey bin'
 ```
 
-The converter rechecks the HDF5 success flag and quaternion convention and
-copies collection provenance/randomization values into `meta/episodes.jsonl`.
+The publisher treats every source HDF5/MP4 pair as immutable. It validates and
+hashes the complete collection, writes a content-addressed source manifest,
+converts into a staging directory, generates N1.7 40-step relative-action
+statistics with NVIDIA's own tool, loads a complete multimodal episode through
+the N1.7 OXE-DROID loader, re-hashes the originals, and only then atomically
+publishes the model-specific export. An identical source and transform cannot
+be overwritten. A changed source collection or transform produces a different
+directory under `dataset_store/exports/groot-n17-droid-lerobot-v2.1/`.
+
+Each export contains `export_manifest.json` with source/transform/tool hashes
+and `validation_report.json` with structural, video-decode, statistics, and
+NVIDIA-loader results. `source_manifests/` preserves the canonical snapshot
+contract. The underlying converter rechecks the HDF5 success flag and
+quaternion convention and copies collection provenance/randomization values
+into `meta/episodes.jsonl`; it is invoked only against a fresh staging
+directory by the publisher.
+
 The campaign additionally requires `episode_acceptance.json`, checks the
 recorder's append-only manifest, and counts an episode only when both the
 world-effect gate and real gripper-contact admission summary pass.

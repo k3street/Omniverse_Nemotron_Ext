@@ -7,6 +7,7 @@ training HDF5 files.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +34,19 @@ except ModuleNotFoundError:
         summarize_contact_telemetry,
         write_sensor_group,
     )
+
+
+EPISODE_SCHEMA_VERSION = "robolab-gemini-episode.v1"
+ACTION_SEMANTICS = "absolute_joint_position_target_7_plus_binary_gripper_1"
+
+
+def sha256_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+    """Return the complete SHA-256 digest of one published artifact."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 @dataclass
@@ -200,6 +214,8 @@ class GeminiEpisodeDatasetRecorder:
             demo = target.create_group("data/demo_0")
             demo.attrs["success"] = True
             demo.attrs["num_samples"] = self.sample_count
+            demo.attrs["episode_schema_version"] = EPISODE_SCHEMA_VERSION
+            demo.attrs["action_semantics"] = ACTION_SEMANTICS
             demo.attrs["source_policy"] = "gemini_robotics_er2_model_governed_runtime_tools"
             demo.attrs["quaternion_convention"] = "wxyz"
             demo.attrs["movable_object_asset"] = self.movable_object_asset
@@ -239,9 +255,23 @@ class GeminiEpisodeDatasetRecorder:
             )
         temporary_hdf5.replace(self.hdf5_path)
         self._partial_video_path.replace(self._final_video_path)
+        published_artifacts = {
+            "hdf5": {
+                "path": self.hdf5_path.name,
+                "size_bytes": self.hdf5_path.stat().st_size,
+                "sha256": sha256_file(self.hdf5_path),
+            },
+            "video": {
+                "path": self.video_path.name,
+                "size_bytes": self.video_path.stat().st_size,
+                "sha256": sha256_file(self.video_path),
+            },
+        }
         row = {
             "episode_index": self.episode_index,
             "status": "success",
+            "episode_schema_version": EPISODE_SCHEMA_VERSION,
+            "action_semantics": ACTION_SEMANTICS,
             "source_policy": "gemini_robotics_er2_model_governed_runtime_tools",
             "scene_roles": {
                 "movable_object": self.movable_object_asset,
@@ -249,6 +279,7 @@ class GeminiEpisodeDatasetRecorder:
             },
             "hdf5": self.hdf5_path.name,
             "video": self.video_path.name,
+            "artifacts": published_artifacts,
             "trace": str(trace_path),
             "samples": self.sample_count,
             "contact_telemetry": contact_summary,
