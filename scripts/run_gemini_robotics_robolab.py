@@ -9374,10 +9374,16 @@ def main() -> int:
             for spec in actuator_executor_registry.specs()
         )
     world_effect_provider_registry = default_world_effect_provider_registry()
-    inside_effect_provider_assessment = world_effect_provider_registry.assess(
-        "world_relation.realize_inside",
-        runtime_effect_tools,
-    )
+    effect_provider_assessments = {
+        capability_id: world_effect_provider_registry.assess(
+            capability_id,
+            runtime_effect_tools,
+        ).to_dict()
+        for capability_id in (
+            "world_relation.realize_inside",
+            "world_relation.realize_left_of",
+        )
+    }
     world_predicate_evaluator_registry = (
         rgbd_world_predicate_evaluator_registry()
     )
@@ -9385,7 +9391,7 @@ def main() -> int:
         world_predicate_evaluator_registry.advertisement()
     )
     world_capability_registry = shadow_world_capability_registry(
-        effect_provider_assessment=inside_effect_provider_assessment.to_dict()
+        effect_provider_assessments=effect_provider_assessments
     )
     world_capability_advertisement = world_capability_registry.advertisement()
     initial_object = _movable_object_position(env)
@@ -9396,11 +9402,11 @@ def main() -> int:
     spawn_ok = bool(initial_eef[2] > 0.15 and initial_eef[2] < 1.50)
     print(
         f"[spawn] robot_root={robot_root_w.tolist()} eef_root={initial_eef.tolist()} "
-        f"tabletop_z≈0.0 valid={spawn_ok}",
+        f"runtime_pose_valid={spawn_ok}",
         flush=True,
     )
     if not spawn_ok:
-        raise RuntimeError("Robot/table spawn validation failed before policy execution")
+        raise RuntimeError("Robot spawn validation failed before policy execution")
 
     tests: dict[str, bool] = {"runtime": sim6_ok}
     digests: list[str] = []
@@ -9594,9 +9600,10 @@ def main() -> int:
             "provider_advertisement": (
                 world_effect_provider_registry.advertisement()
             ),
-            "inside_relation_assessment": (
-                inside_effect_provider_assessment.to_dict()
-            ),
+            "inside_relation_assessment": effect_provider_assessments[
+                "world_relation.realize_inside"
+            ],
+            "capability_assessments": effect_provider_assessments,
         },
         "world_effect_session_shadow": {
             "status": (
@@ -10569,7 +10576,7 @@ def main() -> int:
                                     )
                                 ),
                                 "runtime_effect_provider_assessment": (
-                                    inside_effect_provider_assessment.to_dict()
+                                    effect_provider_assessments
                                 ),
                                 "task_membership_audit": (
                                     scope_membership_audit.to_dict()

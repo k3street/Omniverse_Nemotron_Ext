@@ -164,6 +164,24 @@ Its [RGB-D collision supervision guide](docs/integrations/rgbd-collision-supervi
 covers detector box/mask plus depth fusion, swept robot-capsule clearance, and
 the real-camera calibration inputs required for local collision stops.
 
+Gemini training campaigns can also be planned across task, scene, and robot
+embodiment combinations without silently substituting an unsupported runtime:
+
+```bash
+python3 scripts/run_gemini_training_matrix.py \
+  --spec config/gemini_training_matrix.example.json \
+  --output artifacts/gemini_training_matrix
+```
+
+The example matrix covers inside and directional object-placement goals across
+Franka, vacuum, dual-arm, and Amber Revan/Psyonic configurations. Planning is
+dry-run by default and reports unsupported cells with their missing runtime,
+RGB-D evaluator, world-effect, or dataset adapter. Add `--execute` with an
+explicit `--campaign` (or use `--runnable-only`) to collect only validated
+cells. See the workflow guide's
+[task and embodiment training matrix](docs/integrations/gemini-robotics-er2-robolab.md#task-and-embodiment-training-matrix)
+section for the supported campaigns and execution safeguards.
+
 #### Containerized service
 
 The container packages the core HTTP service. Live ROS2, Kit, and voice

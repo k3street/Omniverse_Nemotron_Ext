@@ -192,6 +192,41 @@ grasp profiles, or a task routine. Table and receptacle material mutation are
 still reported as unimplemented because the live scene currently exposes no
 verified material-randomization control.
 
+### Task and embodiment training matrix
+
+Use the validated matrix when expanding beyond one task or robot:
+
+```bash
+python3 scripts/run_gemini_training_matrix.py \
+  --spec config/gemini_training_matrix.example.json \
+  --output artifacts/gemini_training_matrix
+```
+
+Planning is the default and does not launch Isaac Sim. The example contains
+single-object inside/left/right/front/behind tasks, the working Franka with
+parallel gripper, a vacuum variant, a dual-Franka embodiment, and the local
+Amber Revan dual-Psyonic asset. It currently reports two runnable cells
+(inside and robot-frame left-of) and six blocked cells. Each blocked cell names
+the missing world capability, RGB-D completion evaluator, or embodiment runtime
+adapter; it can never fall back silently to the Franka launcher.
+
+Run just the proven cell with GUI visible for its first attempt:
+
+```bash
+python3 scripts/run_gemini_training_matrix.py \
+  --campaign franka_cube_inside_bowl \
+  --output artifacts/gemini_training_matrix \
+  --execute
+```
+
+The task records contain only instruction, semantic roles, desired world
+relation, and completion evaluator. Arm count, end-effectors, controller/runtime
+adapter, and dataset adapter live in the embodiment records. A new embodiment
+therefore reuses the same task contract and must supply a real runtime and data
+adapter before collection is enabled. `--execute` refuses a selected matrix
+that includes blocked cells; use explicit `--campaign` selection or
+`--runnable-only` when that is intentional.
+
 Publish a validated GR00T N1.7 projection without changing the canonical
 episodes:
 

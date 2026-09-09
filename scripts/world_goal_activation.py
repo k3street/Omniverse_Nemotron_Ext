@@ -871,6 +871,23 @@ def _inside_effect_matcher(predicate: WorldPredicate) -> bool:
     )
 
 
+def _left_of_effect_matcher(predicate: WorldPredicate) -> bool:
+    if predicate.reference_id is None:
+        return False
+    return bool(
+        (
+            predicate.attribute == "left_of"
+            and predicate.operator in {"==", "equals"}
+            and predicate.value is True
+        )
+        or (
+            predicate.attribute == "spatial_relation"
+            and predicate.operator in {"==", "equals"}
+            and predicate.value == "left_of"
+        )
+    )
+
+
 def _inventory_by_id(inventory: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     entities = inventory.get("entities") if isinstance(inventory, Mapping) else None
     if not isinstance(entities, list):
@@ -1119,11 +1136,143 @@ def _inside_capability_assessor(
     )
 
 
+def _relative_position_capability_assessor(
+    goal: WorldGoalNode,
+    inventory: Mapping[str, Any],
+    *,
+    capability_id: str,
+    effect_provider_assessment: Mapping[str, Any] | None = None,
+) -> WorldCapabilityAssessment:
+    """Assess a model-selected directional relation without encoding a robot."""
+    entities = _inventory_by_id(inventory)
+    subject_ids = {item.subject_id for item in goal.desired_state}
+    reference_ids = {
+        item.reference_id
+        for item in goal.desired_state
+        if item.reference_id is not None
+    }
+    related_ids = subject_ids | reference_ids
+    retained_subject_ids = _retained_attachment_subject_ids(goal, inventory)
+    visible = {
+        entity_id: bool(
+            entity_id in entities
+            and entities[entity_id].get("observation_status") == "visible_rgbd"
+            and isinstance(entities[entity_id].get("geometry"), Mapping)
+            and bool(entities[entity_id].get("geometry"))
+        )
+        for entity_id in sorted(related_ids)
+    }
+    planning_entity_ready = {
+        entity_id: bool(
+            visible[entity_id]
+            or (entity_id in subject_ids and entity_id in retained_subject_ids)
+        )
+        for entity_id in sorted(related_ids)
+    }
+    missing = [
+        entity_id.replace("-", "_") + ".visible_geometry"
+        for entity_id, available in visible.items()
+        if not available
+    ]
+    subject_physical_evidence: dict[str, Any] = {}
+    mobility_unknown = False
+    mass_unknown = False
+    planning_blockers: list[str] = []
+    for subject_id in sorted(subject_ids):
+        entity = entities.get(subject_id, {})
+        raw_physical = entity.get("physical_evidence", {})
+        if not isinstance(raw_physical, Mapping):
+            raw_physical = {}
+        raw_mobility = raw_physical.get("mobility", {})
+        raw_mass = raw_physical.get("mass", {})
+        mobility_status = (
+            raw_mobility.get("status")
+            if isinstance(raw_mobility, Mapping)
+            else None
+        )
+        mass_available = bool(
+            isinstance(raw_mass, Mapping)
+            and raw_mass.get("available") is True
+            and isinstance(raw_mass.get("mass_kg"), (int, float))
+            and not isinstance(raw_mass.get("mass_kg"), bool)
+            and math.isfinite(float(raw_mass["mass_kg"]))
+        )
+        subject_physical_evidence[subject_id] = {
+            "mobility_status": mobility_status or "unknown",
+            "mobility_available": mobility_status in {"dynamic", "deformable"},
+            "mass_available": mass_available,
+            "mass_kg": float(raw_mass["mass_kg"]) if mass_available else None,
+            "source": raw_physical.get("source"),
+        }
+        if mobility_status not in {"dynamic", "deformable"}:
+            if mobility_status in {"fixed", "kinematic"}:
+                planning_blockers.append(
+                    f"{subject_id}.mobility_status={mobility_status}"
+                )
+            else:
+                mobility_unknown = True
+        if not mass_available:
+            mass_unknown = True
+    if mobility_unknown:
+        missing.append("subject_mobility")
+    if mass_unknown:
+        missing.append("subject_mass")
+
+    provider_evidence = (
+        dict(effect_provider_assessment)
+        if isinstance(effect_provider_assessment, Mapping)
+        else {
+            "binding_ready": False,
+            "active_binding_ready": False,
+            "reason": "runtime effect-provider assessment was not supplied",
+            "execution_authority": False,
+        }
+    )
+    if provider_evidence.get("binding_ready") is not True:
+        missing.append("runtime_effect_provider_binding")
+    elif provider_evidence.get("active_binding_ready") is not True:
+        missing.append("runtime_effect_provider_activation")
+    planning_ready = bool(
+        planning_entity_ready
+        and all(planning_entity_ready.values())
+        and not planning_blockers
+    )
+    return WorldCapabilityAssessment(
+        capability_id=capability_id,
+        planning_ready=planning_ready,
+        execution_ready=False,
+        missing_evidence=tuple(missing),
+        evidence={
+            "related_entity_visibility": visible,
+            "related_entity_planning_ready": planning_entity_ready,
+            "retained_attachment_subject_ids": sorted(retained_subject_ids),
+            "subject_physical_evidence": subject_physical_evidence,
+            "runtime_effect_provider_assessment": provider_evidence,
+            "planning_blockers": planning_blockers,
+            "effect_supported": True,
+            "shadow_only": True,
+        },
+    )
+
+
 def shadow_world_capability_registry(
     *,
     effect_provider_assessment: Mapping[str, Any] | None = None,
+    effect_provider_assessments: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> WorldCapabilityRegistry:
     """Advertise measurable effects while execution provider binding is pending."""
+    provider_assessments = (
+        dict(effect_provider_assessments)
+        if isinstance(effect_provider_assessments, Mapping)
+        else {}
+    )
+    inside_provider_assessment = provider_assessments.get(
+        "world_relation.realize_inside",
+        effect_provider_assessment,
+    )
+    left_of_provider_assessment = provider_assessments.get(
+        "world_relation.realize_left_of"
+    )
     registry = WorldCapabilityRegistry()
     registry.register(
         WorldCapabilitySpec(
@@ -1147,9 +1296,11 @@ def shadow_world_capability_registry(
                 },
             ),
             limitations=(
-                "entities without runtime physics metadata retain unknown mobility or mass",
+                "entities without runtime physics metadata retain unknown "
+                "mobility or mass",
                 "visible destination bounds are a planning-only capacity upper bound",
-                "destination interior clearance and insertion paths are not yet observed",
+                "destination interior clearance and insertion paths are not "
+                "yet observed",
                 "dynamic runtime effect-provider binding is not connected",
             ),
             matcher=_inside_effect_matcher,
@@ -1157,7 +1308,47 @@ def shadow_world_capability_registry(
                 lambda goal, inventory: _inside_capability_assessor(
                     goal,
                     inventory,
-                    effect_provider_assessment,
+                    inside_provider_assessment,
+                )
+            ),
+        )
+    )
+    registry.register(
+        WorldCapabilitySpec(
+            capability_id="world_relation.realize_left_of",
+            description=(
+                "Propose establishing a robot-frame left-of relation between "
+                "two observed entities; tools are selected at runtime."
+            ),
+            supported_effect_forms=(
+                {
+                    "attribute": "left_of",
+                    "operator": "==",
+                    "value": True,
+                    "reference_id": "required_inventory_entity_id",
+                },
+                {
+                    "attribute": "spatial_relation",
+                    "operator": "equals",
+                    "value": "left_of",
+                    "reference_id": "required_inventory_entity_id",
+                },
+            ),
+            limitations=(
+                "both entities require fresh geometry in the robot_root frame",
+                "entities without runtime physics metadata retain unknown "
+                "mobility or mass",
+                "collision-free transport and stable placement require "
+                "runtime feedback",
+                "dynamic runtime effect-provider binding is observation-scoped",
+            ),
+            matcher=_left_of_effect_matcher,
+            assessor=(
+                lambda goal, inventory: _relative_position_capability_assessor(
+                    goal,
+                    inventory,
+                    capability_id="world_relation.realize_left_of",
+                    effect_provider_assessment=left_of_provider_assessment,
                 )
             ),
         )

@@ -158,6 +158,67 @@ def graph(*, green_depends_on_red=False):
     )
 
 
+def left_of_graph():
+    return WorldGoalGraph.from_mapping(
+        {
+            "schema_version": WORLD_GOAL_GRAPH_SCHEMA_VERSION,
+            "graph_id": "place-left",
+            "status": "ready",
+            "root_goal_ids": ["red-left-of-bin"],
+            "goals": [
+                {
+                    "goal_id": "red-left-of-bin",
+                    "desired_state": [
+                        {
+                            "subject_id": "red_block",
+                            "attribute": "left_of",
+                            "operator": "==",
+                            "value": True,
+                            "reference_id": "grey_bin",
+                        }
+                    ],
+                    "depends_on": [],
+                    "valid_while": [],
+                    "completion_policy": "all",
+                    "reobserve_after": "state_change",
+                    "rationale": "Red block must be left of the bin.",
+                }
+            ],
+            "entity_scope": [
+                {
+                    "entity_id": "observed_scene",
+                    "status": "context",
+                    "reason": "Inventory scope.",
+                },
+                {
+                    "entity_id": "table",
+                    "status": "context",
+                    "reason": "Task surface.",
+                },
+                {
+                    "entity_id": "grey_bin",
+                    "status": "included",
+                    "reason": "Goal reference.",
+                },
+                {
+                    "entity_id": "red_block",
+                    "status": "included",
+                    "reason": "Goal subject.",
+                },
+                {
+                    "entity_id": "green_block",
+                    "status": "context",
+                    "reason": "Visible but unrelated scene context.",
+                },
+            ],
+            "constraints": [],
+            "required_observations": [],
+            "confidence": 0.9,
+            "reason": "One measurable directional outcome.",
+        }
+    )
+
+
 def candidates(scene=None, task_graph=None, capability_registry=None):
     scene = scene or inventory()
     task_graph = task_graph or graph()
@@ -191,6 +252,24 @@ def test_capability_registry_matches_world_effect_without_execution_authority():
     assert capacity["available"]
     assert capacity["subject_fits_observed_envelope"]
     assert capacity["authority"] == "planning_only_upper_bound"
+
+
+def test_left_of_is_a_distinct_measurable_world_capability():
+    result = candidates(task_graph=left_of_graph())
+
+    assert [item.goal_id for item in result.candidates] == ["red-left-of-bin"]
+    evaluation = result.candidates[0].predicate_evaluations[0]["evaluation"]
+    assert evaluation["evaluator_id"] == "rgbd.visible_geometry_left_of"
+    assert evaluation["status"] == "unsatisfied"
+    assessment = result.candidates[0].capability_assessments[0]
+    assert assessment.capability_id == "world_relation.realize_left_of"
+    assert assessment.planning_ready
+    assert assessment.missing_evidence == (
+        "subject_mobility",
+        "subject_mass",
+        "runtime_effect_provider_binding",
+    )
+    assert "destination_capacity_estimates" not in assessment.evidence
 
 
 def _with_physical_evidence(scene, entity_id, *, mobility, mass_kg=0.1):
@@ -712,7 +791,8 @@ def test_live_runner_discovers_effect_provider_before_goal_activation():
     )
     block = source[provider_registry:candidates_call]
     assert '"world_relation.realize_inside"' in block
-    assert "inside_effect_provider_assessment.to_dict()" in block
+    assert '"world_relation.realize_left_of"' in block
+    assert "effect_provider_assessments=effect_provider_assessments" in block
 
 
 def test_live_runner_revises_only_blocked_graph_before_final_activation():

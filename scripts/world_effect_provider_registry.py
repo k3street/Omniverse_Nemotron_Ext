@@ -376,7 +376,10 @@ def default_world_effect_provider_registry() -> WorldEffectProviderRegistry:
     registry.register(
         WorldEffectProviderSpec(
             provider_id="transport.reversible_attachment",
-            supported_world_capability_ids=("world_relation.realize_inside",),
+            supported_world_capability_ids=(
+                "world_relation.realize_inside",
+                "world_relation.realize_left_of",
+            ),
             description=(
                 "Realize a spatial relation by observing the scene, acquiring "
                 "and later releasing an entity, and executing observation-bound "

@@ -144,16 +144,23 @@ def clean_graph(*, include_unverifiable_root=True):
     )
 
 
-def test_rgbd_registry_advertises_only_measurable_containment_forms():
+def test_rgbd_registry_advertises_only_implemented_measurable_forms():
     advertisement = rgbd_world_predicate_evaluator_registry().advertisement()
 
     assert advertisement["completion_requires_advertised_evaluator"] is True
     assert [item["evaluator_id"] for item in advertisement["evaluators"]] == [
-        "rgbd.visible_geometry_inside"
+        "rgbd.visible_geometry_inside",
+        "rgbd.visible_geometry_left_of",
     ]
     assert advertisement["evaluators"][0]["authority"] == "completion"
     assert advertisement["evaluators"][0]["supported_predicate_forms"][0] == {
         "attribute": "inside",
+        "operator": "==",
+        "value": True,
+        "reference_id": "required_inventory_entity_id",
+    }
+    assert advertisement["evaluators"][1]["supported_predicate_forms"][0] == {
+        "attribute": "left_of",
         "operator": "==",
         "value": True,
         "reference_id": "required_inventory_entity_id",
@@ -196,6 +203,47 @@ def test_missing_visible_geometry_is_unknown_not_false_completion():
     assert result.status == "unknown"
     assert result.satisfied is None
     assert result.reason == "predicate_geometry_unavailable"
+
+
+@pytest.mark.parametrize(
+    "subject_min,subject_max,expected_status",
+    [
+        ([0.20, 0.50, 0.02], [0.25, 0.55, 0.07], "satisfied"),
+        ([0.60, 0.50, 0.02], [0.65, 0.55, 0.07], "unsatisfied"),
+        ([0.20, 0.00, 0.02], [0.25, 0.05, 0.07], "unsatisfied"),
+    ],
+)
+def test_rgbd_left_of_matches_robolab_robot_frame_cone(
+    subject_min, subject_max, expected_status
+):
+    scene = inventory()
+    red = next(item for item in scene["entities"] if item["entity_id"] == "red_block")
+    red["geometry"]["visible_aabb_min_base_m"] = subject_min
+    red["geometry"]["visible_aabb_max_base_m"] = subject_max
+    relation = WorldPredicate.from_mapping(
+        predicate("red_block", "left_of", "==", True, "grey_bin"),
+        "predicate",
+    )
+
+    result = rgbd_world_predicate_evaluator_registry().evaluate(relation, scene)
+
+    assert result.status == expected_status
+    assert result.evidence["axis_convention"] == "robot_root_positive_y_is_left"
+    assert result.evidence["cone_degrees"] == 45.0
+
+
+def test_rgbd_left_of_fails_unknown_outside_robot_root_frame():
+    scene = inventory()
+    scene["frame"] = "camera_optical"
+    relation = WorldPredicate.from_mapping(
+        predicate("red_block", "left_of", "==", True, "grey_bin"),
+        "predicate",
+    )
+
+    result = rgbd_world_predicate_evaluator_registry().evaluate(relation, scene)
+
+    assert result.status == "unknown"
+    assert result.reason == "predicate_frame_unsupported"
 
 
 def test_temporarily_occluded_geometry_cannot_prove_a_predicate():

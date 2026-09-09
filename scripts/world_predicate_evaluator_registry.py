@@ -375,6 +375,22 @@ def _inside_predicate_matcher(predicate: WorldPredicate) -> bool:
     )
 
 
+def _left_of_predicate_matcher(predicate: WorldPredicate) -> bool:
+    if predicate.reference_id is None:
+        return False
+    if (
+        predicate.attribute == "left_of"
+        and predicate.operator in {"==", "equals"}
+        and predicate.value is True
+    ):
+        return True
+    return bool(
+        predicate.attribute == "spatial_relation"
+        and predicate.operator in {"==", "equals"}
+        and predicate.value == "left_of"
+    )
+
+
 def _vector3(value: Any, path: str) -> tuple[float, float, float]:
     if not isinstance(value, (list, tuple)) or len(value) != 3:
         raise WorldPredicateEvaluatorError(f"{path} must be a three-vector")
@@ -474,6 +490,129 @@ def _rgbd_inside_evaluator(
     )
 
 
+def _visible_center(
+    geometry: Mapping[str, Any],
+    path: str,
+) -> tuple[tuple[float, float, float], str] | None:
+    if "center_base_m" in geometry:
+        return _vector3(geometry["center_base_m"], f"{path}.center_base_m"), (
+            "center_base_m"
+        )
+    required = ("visible_aabb_min_base_m", "visible_aabb_max_base_m")
+    if not all(key in geometry for key in required):
+        return None
+    lower = _vector3(
+        geometry["visible_aabb_min_base_m"],
+        f"{path}.visible_aabb_min_base_m",
+    )
+    upper = _vector3(
+        geometry["visible_aabb_max_base_m"],
+        f"{path}.visible_aabb_max_base_m",
+    )
+    return tuple((low + high) * 0.5 for low, high in zip(lower, upper)), (
+        "visible_aabb_midpoint"
+    )
+
+
+def _rgbd_left_of_evaluator(
+    predicate: WorldPredicate,
+    inventory: Mapping[str, Any],
+) -> WorldPredicateEvaluation:
+    evaluator_id = "rgbd.visible_geometry_left_of"
+    entities = _inventory_entities(inventory)
+    subject = entities.get(predicate.subject_id)
+    reference = entities.get(str(predicate.reference_id))
+    if subject is None or reference is None:
+        return WorldPredicateEvaluation(
+            evaluator_id=evaluator_id,
+            status="unknown",
+            reason="predicate_entity_absent",
+            evidence={"predicate": predicate.to_dict()},
+        )
+    subject_status = subject.get("observation_status")
+    reference_status = reference.get("observation_status")
+    if subject_status != "visible_rgbd" or reference_status != "visible_rgbd":
+        return WorldPredicateEvaluation(
+            evaluator_id=evaluator_id,
+            status="unknown",
+            reason="predicate_geometry_not_fresh_visible",
+            evidence={
+                "predicate": predicate.to_dict(),
+                "subject_observation_status": subject_status,
+                "reference_observation_status": reference_status,
+                "stale_geometry_accepted": False,
+            },
+        )
+    if inventory.get("frame") != "robot_root":
+        return WorldPredicateEvaluation(
+            evaluator_id=evaluator_id,
+            status="unknown",
+            reason="predicate_frame_unsupported",
+            evidence={
+                "predicate": predicate.to_dict(),
+                "required_frame": "robot_root",
+                "observed_frame": inventory.get("frame"),
+            },
+        )
+    subject_geometry = subject.get("geometry")
+    reference_geometry = reference.get("geometry")
+    if not isinstance(subject_geometry, Mapping) or not isinstance(
+        reference_geometry, Mapping
+    ):
+        return WorldPredicateEvaluation(
+            evaluator_id=evaluator_id,
+            status="unknown",
+            reason="predicate_geometry_unavailable",
+            evidence={"predicate": predicate.to_dict()},
+        )
+    subject_center = _visible_center(subject_geometry, "subject_geometry")
+    reference_center = _visible_center(reference_geometry, "reference_geometry")
+    if subject_center is None or reference_center is None:
+        return WorldPredicateEvaluation(
+            evaluator_id=evaluator_id,
+            status="unknown",
+            reason="predicate_geometry_unavailable",
+            evidence={"predicate": predicate.to_dict()},
+        )
+    subject_xyz, subject_center_source = subject_center
+    reference_xyz, reference_center_source = reference_center
+    delta_x = subject_xyz[0] - reference_xyz[0]
+    delta_y = subject_xyz[1] - reference_xyz[1]
+    planar_separation = math.hypot(delta_x, delta_y)
+    cone_degrees = 45.0
+    cosine_to_left_axis = (
+        delta_y / planar_separation if planar_separation > 1e-6 else 0.0
+    )
+    left_of = bool(
+        planar_separation > 1e-6
+        and delta_y > 0.0
+        and cosine_to_left_axis >= math.cos(math.radians(cone_degrees))
+    )
+    return WorldPredicateEvaluation(
+        evaluator_id=evaluator_id,
+        status="satisfied" if left_of else "unsatisfied",
+        reason=(
+            "visible_geometry_left_of"
+            if left_of
+            else "visible_geometry_not_left_of"
+        ),
+        evidence={
+            "subject_id": predicate.subject_id,
+            "reference_id": predicate.reference_id,
+            "frame": inventory.get("frame"),
+            "subject_center_m": list(subject_xyz),
+            "reference_center_m": list(reference_xyz),
+            "subject_center_source": subject_center_source,
+            "reference_center_source": reference_center_source,
+            "delta_xy_m": [delta_x, delta_y],
+            "planar_separation_m": planar_separation,
+            "cosine_to_left_axis": cosine_to_left_axis,
+            "cone_degrees": cone_degrees,
+            "axis_convention": "robot_root_positive_y_is_left",
+        },
+    )
+
+
 def rgbd_world_predicate_evaluator_registry() -> WorldPredicateEvaluatorRegistry:
     """Register only predicates supported by the current synchronized RGB-D view."""
     registry = WorldPredicateEvaluatorRegistry()
@@ -507,6 +646,39 @@ def rgbd_world_predicate_evaluator_registry() -> WorldPredicateEvaluatorRegistry
             ),
             matcher=_inside_predicate_matcher,
             evaluator=_rgbd_inside_evaluator,
+        )
+    )
+    registry.register(
+        WorldPredicateEvaluatorSpec(
+            evaluator_id="rgbd.visible_geometry_left_of",
+            description=(
+                "Determine whether one visible entity center lies within the "
+                "leftward 45-degree cone of another entity in robot-root frame."
+            ),
+            authority="completion",
+            evidence_source="synchronized_rgbd_instance_geometry",
+            supported_predicate_forms=(
+                {
+                    "attribute": "left_of",
+                    "operator": "==",
+                    "value": True,
+                    "reference_id": "required_inventory_entity_id",
+                },
+                {
+                    "attribute": "spatial_relation",
+                    "operator": "equals",
+                    "value": "left_of",
+                    "reference_id": "required_inventory_entity_id",
+                },
+            ),
+            limitations=(
+                "both entities must have fresh visible RGB-D geometry",
+                "the scene inventory must use the robot_root frame",
+                "the relation uses entity centers and a 45-degree planar cone",
+                "occlusion may make the relation unknown",
+            ),
+            matcher=_left_of_predicate_matcher,
+            evaluator=_rgbd_left_of_evaluator,
         )
     )
     return registry

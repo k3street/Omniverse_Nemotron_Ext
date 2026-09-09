@@ -66,6 +66,19 @@ def test_available_factories_form_a_compatible_but_inactive_binding():
     assert result["execution_authority"] is False
 
 
+def test_same_embodiment_neutral_transport_provider_supports_left_of():
+    assessment = default_world_effect_provider_registry().assess(
+        "world_relation.realize_left_of",
+        [rgbd_tool(), motion_tool(active=True), attachment_tool(active=True)],
+    )
+
+    assert assessment.binding_ready
+    assert assessment.active_binding_ready
+    assert assessment.to_dict()["preferred_provider_id"] == (
+        "transport.reversible_attachment"
+    )
+
+
 def test_active_runtime_tools_form_an_active_binding_without_naming_mechanism():
     assessment = default_world_effect_provider_registry().assess(
         "world_relation.realize_inside",
