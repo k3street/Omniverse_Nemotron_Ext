@@ -164,6 +164,11 @@ Its [RGB-D collision supervision guide](docs/integrations/rgbd-collision-supervi
 covers detector box/mask plus depth fusion, swept robot-capsule clearance, and
 the real-camera calibration inputs required for local collision stops.
 
+[![Gemini Robotics running in Isaac Lab](docs/media/gemini-robotics-demo-preview.jpg)](docs/media/gemini-robotics-demo-2x.mp4)
+
+*Gemini Robotics supervising a RoboLab manipulation run in Isaac Lab — click
+the preview to watch the 2×-speed demo.*
+
 Gemini training campaigns can also be planned across task, scene, and robot
 embodiment combinations without silently substituting an unsupported runtime:
 
