@@ -486,6 +486,47 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--cosmos3-edge-policy",
+    action="store_true",
+    help=(
+        "Advertise the Cosmos 3 Edge learned policy as an additional motion "
+        "executor. Requires the OpenPI policy server "
+        "(cosmos_framework action_policy_server_robolab) and registers the "
+        "wrist/left/right camera preset the policy observes."
+    ),
+)
+parser.add_argument(
+    "--cosmos3-edge-only",
+    action="store_true",
+    help=(
+        "Advertise the Cosmos 3 Edge learned policy as the ONLY motion "
+        "executor (bounded DLS IK is not advertised; the binary clamp "
+        "actuator is unchanged). Evaluates the learned policy inside "
+        "guarded composed execution. Implies --cosmos3-edge-policy."
+    ),
+)
+parser.add_argument(
+    "--prefer-cosmos3-edge",
+    action="store_true",
+    help=(
+        "Advertise a session-scoped operator preference for the Cosmos 3 "
+        "Edge executor when it and bounded DLS IK could both accomplish a "
+        "motion. Safety gates and lease conditions are unchanged."
+    ),
+)
+parser.add_argument(
+    "--cosmos3-edge-host",
+    type=str,
+    default="localhost",
+    help="Host of the Cosmos 3 Edge OpenPI policy server.",
+)
+parser.add_argument(
+    "--cosmos3-edge-port",
+    type=int,
+    default=8000,
+    help="Port of the Cosmos 3 Edge OpenPI policy server.",
+)
+parser.add_argument(
     "--world-effect-max-operations",
     type=int,
     default=8,
@@ -546,6 +587,8 @@ parser.add_argument(
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli, _ = parser.parse_known_args()
+if getattr(args_cli, "cosmos3_edge_only", False):
+    args_cli.cosmos3_edge_policy = True
 SCENE_ROLES = ManipulationSceneRoles.create(
     movable_object_asset=args_cli.movable_object_asset,
     movable_object_label=args_cli.movable_object_label,
@@ -572,7 +615,20 @@ from robolab.core.utils.video_utils import VideoWriter  # noqa: E402
 from robolab.registrations.droid.auto_env_registrations_abs_ik import (  # noqa: E402
     auto_register_droid_abs_ik_envs,
 )
+from robolab.registrations.droid.camera_presets import (  # noqa: E402
+    WRIST_LEFT_RIGHT,
+)
 from robolab.robots.droid import DroidJointPositionActionCfg  # noqa: E402
+from cosmos3_edge_client import (  # noqa: E402
+    ACTION_HORIZON as COSMOS3_EDGE_ACTION_HORIZON,
+    Cosmos3EdgeChunkClient,
+    Cosmos3EdgeClientError,
+)
+from cosmos3_edge_executor import (  # noqa: E402
+    COSMOS3_EDGE_CAPABILITY_TAG,
+    COSMOS3_EDGE_EXECUTOR_ID,
+    build_cosmos3_edge_motion_executor_spec,
+)
 from adaptive_pick_place import (  # noqa: E402
     apply_object_relative_grasp,
     derive_object_relative_grasp,
@@ -2715,6 +2771,28 @@ def _local_dls_executor_registry(
             ),
         }
     registry = MotionExecutorRegistry()
+    if getattr(args_cli, "cosmos3_edge_only", False):
+        registry.register(
+            build_cosmos3_edge_motion_executor_spec(
+                capability_tags=(
+                    *SPATIAL_MOTION_CAPABILITY_TAGS,
+                    COSMOS3_EDGE_CAPABILITY_TAG,
+                ),
+                minimum_reachable_radius_m=(
+                    args_cli.bounded_dls_minimum_reach_radius_m
+                ),
+                maximum_reachable_radius_m=(
+                    args_cli.bounded_dls_maximum_reach_radius_m
+                ),
+                maximum_displacement_m=(
+                    args_cli.bounded_dls_maximum_segment_displacement_m
+                ),
+                operator_preferred=getattr(
+                    args_cli, "prefer_cosmos3_edge", False
+                ),
+            )
+        )
+        return registry
     registry.register(
         MotionExecutorSpec(
             executor_id="bounded_dls_ik",
@@ -2851,6 +2929,27 @@ def _local_dls_executor_registry(
             },
         )
     )
+    if getattr(args_cli, "cosmos3_edge_policy", False):
+        registry.register(
+            build_cosmos3_edge_motion_executor_spec(
+                capability_tags=(
+                    *SPATIAL_MOTION_CAPABILITY_TAGS,
+                    COSMOS3_EDGE_CAPABILITY_TAG,
+                ),
+                minimum_reachable_radius_m=(
+                    args_cli.bounded_dls_minimum_reach_radius_m
+                ),
+                maximum_reachable_radius_m=(
+                    args_cli.bounded_dls_maximum_reach_radius_m
+                ),
+                maximum_displacement_m=(
+                    args_cli.bounded_dls_maximum_segment_displacement_m
+                ),
+                operator_preferred=getattr(
+                    args_cli, "prefer_cosmos3_edge", False
+                ),
+            )
+        )
     return registry
 
 
@@ -6735,7 +6834,8 @@ def _dispatch_guarded_world_effect_continuation(
                     terminal,
                     final_action,
                     checkpoint_report,
-                ) = _move_eef_to_target(
+                ) = _execute_motion_checkpoint(
+                    runtime_spec,
                     env,
                     next_obs,
                     final_action,
@@ -7303,6 +7403,357 @@ def _actuator_feedback_event_from_execution(
     if invalidation_reason is not None:
         result["triggered"] = True
     return result
+
+
+_COSMOS3_EDGE_EXECUTOR_ID = COSMOS3_EDGE_EXECUTOR_ID
+_COSMOS3_EDGE_CAMERA_NAMES = (
+    "wrist_cam",
+    "over_shoulder_left_camera",
+    "over_shoulder_right_camera",
+)
+_COSMOS3_EDGE_MONITOR_INTERVAL_STEPS = 8
+_COSMOS3_EDGE_CLIENT_CACHE: dict[str, Cosmos3EdgeChunkClient] = {}
+
+
+def _cosmos3_edge_client() -> Cosmos3EdgeChunkClient:
+    """One process-wide chunk client; reconnects are handled inside it."""
+    client = _COSMOS3_EDGE_CLIENT_CACHE.get("client")
+    if client is None:
+        client = Cosmos3EdgeChunkClient(
+            host=args_cli.cosmos3_edge_host,
+            port=args_cli.cosmos3_edge_port,
+        )
+        _COSMOS3_EDGE_CLIENT_CACHE["client"] = client
+    return client
+
+
+def _cosmos3_edge_frames(
+    obs: Mapping[str, Any],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Extract the wrist/left/right RGB frames the policy was trained on."""
+    image_obs = obs.get("image_obs") if isinstance(obs, Mapping) else None
+    if not isinstance(image_obs, Mapping):
+        raise RuntimeError(
+            "cosmos3_edge_policy requires camera observations in "
+            "obs['image_obs']"
+        )
+    frames: list[np.ndarray] = []
+    for name in _COSMOS3_EDGE_CAMERA_NAMES:
+        if name not in image_obs:
+            raise RuntimeError(
+                f"cosmos3_edge_policy requires camera {name!r}; launch with "
+                "--cosmos3-edge-policy so the wrist/left/right preset is "
+                "registered"
+            )
+        tensor = image_obs[name][0]
+        array = (
+            tensor.detach().cpu().numpy()
+            if hasattr(tensor, "detach")
+            else np.asarray(tensor)
+        )
+        frames.append(array[..., :3].astype(np.uint8))
+    return frames[0], frames[1], frames[2]
+
+
+def _quaternion_error_deg(
+    current_wxyz: torch.Tensor, target_wxyz: torch.Tensor
+) -> float:
+    dot = float(
+        torch.abs(
+            torch.sum(
+                torch.nn.functional.normalize(
+                    current_wxyz.reshape(-1).float().cpu(), dim=0
+                )
+                * torch.nn.functional.normalize(
+                    target_wxyz.reshape(-1).float().cpu(), dim=0
+                )
+            )
+        )
+    )
+    return float(np.rad2deg(2.0 * math.acos(min(1.0, max(-1.0, dot)))))
+
+
+def _execute_cosmos3_edge_chunks(
+    env: Any,
+    obs: dict[str, Any],
+    last_action: torch.Tensor,
+    target: torch.Tensor,
+    target_quaternion_wxyz: torch.Tensor,
+    phase: str,
+    *,
+    gripper_closed: bool,
+    initial_object_z: float,
+    executor_config: dict[str, Any] | None = None,
+    iteration_observer: Any = None,
+    early_stop_callback: Any = None,
+) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
+    """Stream Cosmos 3 Edge action chunks under the active motion lease.
+
+    Return contract matches ``_move_eef_to_target``: the supplied target pose
+    is the model's expected outcome used for grounding and telemetry; the
+    policy itself is driven by the cameras and the current instruction. On a
+    monitored invalidation the remaining chunk suffix is discarded.
+    """
+    effective_config = dict(executor_config or {})
+    maximum_chunks = int(effective_config.get("maximum_action_chunks", 1))
+    chunk_steps = int(
+        effective_config.get(
+            "chunk_execution_steps", COSMOS3_EDGE_ACTION_HORIZON
+        )
+    )
+    position_tolerance = float(
+        effective_config.get(
+            "position_tolerance_m",
+            effective_config.get("completion_position_tolerance_m", 0.05),
+        )
+    )
+    require_contact = bool(effective_config.get("require_contact", False))
+    forbid_contact = bool(effective_config.get("forbid_contact", False))
+    require_interaction_relation = bool(
+        effective_config.get("require_interaction_relation", False)
+    )
+    minimum_contact_force_n = float(
+        effective_config.get("minimum_contact_force_n", 0.0)
+    )
+    instruction = str(args_cli.instruction)
+    client = _cosmos3_edge_client()
+    target_cpu = target.detach().reshape(-1).float().cpu()
+    target_quat_cpu = target_quaternion_wxyz.detach().reshape(-1).float().cpu()
+
+    def position_error_m() -> float:
+        return float(
+            torch.linalg.norm(_eef_position(env).float().cpu() - target_cpu)
+        )
+
+    error_start = position_error_m()
+    orientation_error_start = _quaternion_error_deg(
+        _eef_quaternion(env), target_quat_cpu
+    )
+    eef_start = _eef_position(env).float().cpu().tolist()
+    command = last_action.clone()
+    command[0, 7] = 1.0 if gripper_closed else 0.0
+    terminal = False
+    early_stop: dict[str, Any] | None = None
+    chunk_records: list[dict[str, Any]] = []
+    executed_env_steps = 0
+
+    def contact_sample() -> tuple[bool, float | None]:
+        contact = _actuator_completion_sample(env).get("current_contact")
+        if not isinstance(contact, Mapping) or not contact.get("available"):
+            return False, None
+        return bool(contact.get("touch")), contact.get("net_force_n")
+
+    def observe_and_monitor() -> dict[str, Any] | None:
+        if iteration_observer is not None:
+            iteration_observer()
+        if forbid_contact:
+            touched, force_n = contact_sample()
+            if touched:
+                return {
+                    "condition_id": "lease.forbid_contact_violated",
+                    "reason": (
+                        "gripper contact observed while forbid_contact is set"
+                    ),
+                    "net_force_n": force_n,
+                    "converged": False,
+                }
+        if early_stop_callback is not None:
+            return early_stop_callback()
+        return None
+
+    for chunk_index in range(maximum_chunks):
+        wrist_rgb, left_rgb, right_rgb = _cosmos3_edge_frames(obs)
+        completion = _actuator_completion_sample(env)
+        proprio_action = _current_robot_joint_action(
+            env,
+            gripper_closed_fraction=completion["gripper_closed_fraction"],
+        )
+        try:
+            chunk = client.infer_chunk(
+                wrist_rgb=wrist_rgb,
+                left_rgb=left_rgb,
+                right_rgb=right_rgb,
+                joint_position_rad=(
+                    proprio_action[0, :7].detach().cpu().numpy()
+                ),
+                gripper_position=[completion["gripper_closed_fraction"]],
+                prompt=instruction,
+            )
+        except Cosmos3EdgeClientError as error:
+            early_stop = {
+                "condition_id": "runtime.policy_server_unavailable",
+                "reason": str(error),
+                "converged": False,
+            }
+            break
+        chunk_executed_steps = 0
+        for step_index in range(min(chunk_steps, len(chunk.actions))):
+            command = command.clone()
+            command[0, :8] = torch.as_tensor(
+                chunk.actions[step_index],
+                dtype=torch.float32,
+                device=env.device,
+            )
+            obs, _, terminated, truncated, _ = _step_env(env, command)
+            executed_env_steps += 1
+            chunk_executed_steps += 1
+            terminal = bool(torch.as_tensor(terminated).any()) or bool(
+                torch.as_tensor(truncated).any()
+            )
+            if terminal:
+                break
+            if (
+                chunk_executed_steps % _COSMOS3_EDGE_MONITOR_INTERVAL_STEPS
+                == 0
+            ):
+                early_stop = observe_and_monitor()
+                if early_stop is not None:
+                    break
+        chunk_records.append(
+            {
+                "chunk_index": chunk_index,
+                "executed_steps": chunk_executed_steps,
+                "inference_seconds": chunk.inference_seconds,
+                "gripper_commands": sorted(
+                    set(float(v) for v in chunk.gripper_commands)
+                ),
+            }
+        )
+        if terminal or early_stop is not None:
+            break
+        early_stop = observe_and_monitor()
+        if early_stop is not None:
+            break
+        if position_error_m() <= position_tolerance:
+            break
+    error_final = position_error_m()
+    orientation_error_final = _quaternion_error_deg(
+        _eef_quaternion(env), target_quat_cpu
+    )
+    converged = bool(
+        not terminal and early_stop is None and chunk_records
+    )
+    completion_conditions: list[dict[str, Any]] = []
+    if require_contact:
+        touched_final, force_final_n = contact_sample()
+        contact_ok = touched_final and (
+            force_final_n is None
+            or force_final_n >= minimum_contact_force_n
+        )
+        completion_conditions.append(
+            {
+                "condition": "require_contact",
+                "satisfied": contact_ok,
+                "touch": touched_final,
+                "net_force_n": force_final_n,
+                "minimum_contact_force_n": minimum_contact_force_n,
+            }
+        )
+        converged = converged and contact_ok
+    if require_interaction_relation:
+        relation_ok = error_final <= position_tolerance
+        completion_conditions.append(
+            {
+                "condition": "require_interaction_relation",
+                "satisfied": relation_ok,
+                "target_error_m": error_final,
+                "position_tolerance_m": position_tolerance,
+            }
+        )
+        converged = converged and relation_ok
+    report = {
+        "enabled": True,
+        "phase": phase,
+        "target_source": "model_expected_outcome_pose",
+        "target_xyz": target_cpu.tolist(),
+        "target_quaternion_wxyz": target_quat_cpu.tolist(),
+        "eef_start_xyz": eef_start,
+        "eef_final_xyz": _eef_position(env).float().cpu().tolist(),
+        "target_error_before_m": error_start,
+        "target_error_after_m": error_final,
+        "orientation_error_before_deg": orientation_error_start,
+        "orientation_error_after_deg": orientation_error_final,
+        "executor_id": _COSMOS3_EDGE_EXECUTOR_ID,
+        "executor_config": effective_config,
+        "converged": converged,
+        "convergence_semantics": (
+            "chunks_completed_under_active_lease; target pose is telemetry "
+            "unless require_interaction_relation is set; contact conditions "
+            "enforced at monitor cadence and completion"
+        ),
+        "completion_conditions": completion_conditions,
+        # Shared motion-report contract: `iterations` is the list of
+        # per-iteration records (here, one per executed action chunk) that
+        # callers len() for a step count.
+        "iterations": chunk_records,
+        "chunk_count": len(chunk_records),
+        "executed_env_steps": executed_env_steps,
+        "instruction": instruction,
+        "policy_server": {
+            "host": args_cli.cosmos3_edge_host,
+            "port": args_cli.cosmos3_edge_port,
+        },
+        "early_stop": early_stop,
+        "recovery_request": None,
+    }
+    return obs, terminal, command, report
+
+
+def _execute_motion_checkpoint(
+    runtime_spec: MotionExecutorSpec,
+    env: Any,
+    obs: dict[str, Any],
+    last_action: torch.Tensor,
+    target: torch.Tensor,
+    target_quaternion_wxyz: torch.Tensor,
+    *,
+    phase: str,
+    gripper_closed: bool,
+    initial_object_z: float,
+    executor_config: dict[str, Any] | None = None,
+    carry_reference_offset: torch.Tensor | None = None,
+    tracked_position_references_m: Mapping[str, Any] | None = None,
+    rgbd_axis_references: dict[str, np.ndarray] | None = None,
+    tracked_orientation_observer: Any = None,
+    observed_clearance_observer: Any = None,
+    iteration_observer: Any = None,
+    checkpoint_callback: Any = None,
+    early_stop_callback: Any = None,
+) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
+    """Route one composed motion checkpoint to its runtime executor."""
+    if runtime_spec.executor_id == _COSMOS3_EDGE_EXECUTOR_ID:
+        return _execute_cosmos3_edge_chunks(
+            env,
+            obs,
+            last_action,
+            target,
+            target_quaternion_wxyz,
+            phase,
+            gripper_closed=gripper_closed,
+            initial_object_z=initial_object_z,
+            executor_config=executor_config,
+            iteration_observer=iteration_observer,
+            early_stop_callback=early_stop_callback,
+        )
+    return _move_eef_to_target(
+        env,
+        obs,
+        last_action,
+        target,
+        target_quaternion_wxyz,
+        phase=phase,
+        gripper_closed=gripper_closed,
+        initial_object_z=initial_object_z,
+        executor_config=executor_config,
+        carry_reference_offset=carry_reference_offset,
+        tracked_position_references_m=tracked_position_references_m,
+        rgbd_axis_references=rgbd_axis_references,
+        tracked_orientation_observer=tracked_orientation_observer,
+        observed_clearance_observer=observed_clearance_observer,
+        iteration_observer=iteration_observer,
+        checkpoint_callback=checkpoint_callback,
+        early_stop_callback=early_stop_callback,
+    )
 
 
 def _move_eef_to_target(
@@ -9206,6 +9657,13 @@ def main() -> int:
     auto_register_droid_abs_ik_envs(
         task=args_cli.task,
         contact_sensors=False,
+        # The Cosmos 3 Edge policy observes wrist + both over-shoulder views;
+        # the default preset omits the right camera.
+        **(
+            {"cameras": WRIST_LEFT_RIGHT}
+            if args_cli.cosmos3_edge_policy
+            else {}
+        ),
     )
     env_cfg = parse_env_cfg(
         args_cli.task, device="cuda:0", seed=0, num_envs=1, use_fabric=True
@@ -12730,7 +13188,8 @@ def main() -> int:
                             terminal,
                             final_action,
                             checkpoint_report,
-                        ) = _move_eef_to_target(
+                        ) = _execute_motion_checkpoint(
+                            runtime_motion_spec,
                             env,
                             obs,
                             final_action,
@@ -13938,6 +14397,7 @@ def main() -> int:
                     "authority=none",
                     flush=True,
                 )
+                traceback.print_exc()
                 print(f"Trace: {trace_path}", flush=True)
                 return 2
 

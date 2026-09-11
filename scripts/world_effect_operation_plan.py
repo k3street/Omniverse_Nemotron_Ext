@@ -1002,7 +1002,11 @@ goal-completion evidence. For loaded transport, preserve that attachment and
 prefer a fresh visible destination or support entity as the motion anchor.
 When an advertised motion candidate includes spatial.ordered_waypoints, choose
 it when the semantic outcome needs intermediate clearance or alignment that one
-direct pose cannot express. Include every related entity whose fresh geometry is
+direct pose cannot express. When several advertised motion candidates could
+realize the same observable outcome and one of them carries
+operator.session_preferred in its capability_tags, select that candidate: it is
+a session-scoped operator preference, and every admission gate, lease
+condition, and evidence requirement still applies to it unchanged. Include every related entity whose fresh geometry is
 needed to ground the ordered checkpoints, such as both a retained source entity
 and a visible destination; do not invent controller phases or fixed waypoints.
 When continuation evidence says recovery_actuator_only, the engaged attachment
