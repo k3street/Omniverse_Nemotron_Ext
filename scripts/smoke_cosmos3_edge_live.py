@@ -26,7 +26,17 @@ parser.add_argument("--host", default="localhost")
 parser.add_argument("--port", type=int, default=8000)
 parser.add_argument(
     "--instruction",
-    default="pick up the object and put it in the bin",
+    default="pick up the blue block",
+)
+parser.add_argument(
+    "--object",
+    default="blue_block",
+    help="Scene asset whose end-effector distance and displacement are reported.",
+)
+parser.add_argument(
+    "--dump-frames",
+    default=None,
+    help="Directory to save the three camera views and the composite the policy sees.",
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -46,6 +56,7 @@ from robolab.registrations.droid.camera_presets import (  # noqa: E402
 )
 from robolab.robots.droid import DroidJointPositionActionCfg  # noqa: E402
 from cosmos3_edge_client import Cosmos3EdgeChunkClient  # noqa: E402
+from sim6_camera_offsets import convert_sim5_camera_offsets  # noqa: E402
 
 CAMERA_NAMES = (
     "wrist_cam",
@@ -87,6 +98,14 @@ def eef_xyz(env):
     return (positions[0, body_index] - root[0]).detach().float().cpu().clone()
 
 
+def object_xyz(env, name):
+    asset = env.scene[name]
+    positions = getattr(asset.data.root_pos_w, "torch", asset.data.root_pos_w)
+    robot = env.scene["robot"]
+    root = getattr(robot.data.root_pos_w, "torch", robot.data.root_pos_w)
+    return (positions[0] - root[0]).detach().float().cpu().clone()
+
+
 def main():
     auto_register_droid_abs_ik_envs(
         task=args_cli.task,
@@ -106,6 +125,7 @@ def main():
         asset_cfg = getattr(env_cfg.scene, asset_name)
         w, x, y, z = asset_cfg.init_state.rot
         asset_cfg.init_state.rot = (x, y, z, w)
+    print(f"[smoke] converted camera offsets: {convert_sim5_camera_offsets(env_cfg)}")
     env_cfg.actions = DroidJointPositionActionCfg()
     env_cfg.terminations = None
     env_cfg.subtasks = None
@@ -120,9 +140,32 @@ def main():
     for name in CAMERA_NAMES:
         assert name in obs["image_obs"], f"camera {name} missing from obs"
         print(f"[smoke] camera {name}: {frame(obs, name).shape}")
+    if args_cli.dump_frames:
+        from pathlib import Path
+
+        from PIL import Image
+        from cosmos3_edge_client import pack_composite_frame
+
+        out = Path(args_cli.dump_frames)
+        out.mkdir(parents=True, exist_ok=True)
+        for name in CAMERA_NAMES:
+            Image.fromarray(frame(obs, name)).save(out / f"{name}.png")
+        Image.fromarray(
+            pack_composite_frame(
+                frame(obs, "wrist_cam"),
+                frame(obs, "over_shoulder_left_camera"),
+                frame(obs, "over_shoulder_right_camera"),
+            )
+        ).save(out / "composite.png")
+        print(f"[smoke] dumped policy input frames to {out}")
 
     client = Cosmos3EdgeChunkClient(host=args_cli.host, port=args_cli.port)
     start_xyz = eef_xyz(env)
+    object_start = object_xyz(env, args_cli.object)
+    print(
+        f"[smoke] instruction={args_cli.instruction!r} object={args_cli.object} "
+        f"eef-to-object {float(torch.linalg.norm(start_xyz - object_start)):.3f} m"
+    )
     total_steps = 0
     for chunk_index in range(args_cli.chunks):
         action = current_joint_action(env)
@@ -147,10 +190,15 @@ def main():
             )
             obs, *_ = env.step(command)
             total_steps += 1
-    moved_m = float(torch.linalg.norm(eef_xyz(env) - start_xyz))
+    end_xyz = eef_xyz(env)
+    object_end = object_xyz(env, args_cli.object)
+    moved_m = float(torch.linalg.norm(end_xyz - start_xyz))
     print(
         f"[smoke] PASS: {args_cli.chunks} chunks / {total_steps} env steps "
-        f"executed; eef moved {moved_m:.3f} m from start"
+        f"executed; eef moved {moved_m:.3f} m from start; "
+        f"eef-to-object {float(torch.linalg.norm(end_xyz - object_end)):.3f} m; "
+        f"object displaced {float(torch.linalg.norm(object_end - object_start)):.3f} m "
+        f"(z {float(object_end[2] - object_start[2]):+.3f})"
     )
     env.close()
     simulation_app.close()

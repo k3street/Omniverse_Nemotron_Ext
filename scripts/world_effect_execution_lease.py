@@ -1487,6 +1487,20 @@ image; choose a threshold inside those advertised bounds with room for sensor
 variation.
 Each invalidation selection must use the exact target list required by its
 entity_scope and parameters matching its parameter_schema.
+When the candidate tool's capability_tags include
+policy.language_conditioned_action_chunks, the executor is a learned
+visuomotor policy: it establishes contact as part of acquisition and does not
+servo the end-effector to the invocation pose. Configure maximum_action_chunks
+(4-8 for an acquisition or transport rollout, 1-2 for a short adjustment) and
+position_tolerance_m of at least 0.10 m — the policy stops at the object
+itself, roughly 0.10-0.15 m from a standoff pre-grasp pose, so tighter
+tolerances are rejected; gripper contact attributed to an operation target also
+counts as having reached it. For such a candidate, forbid_contact revokes only gripper
+contact that is not attributable to an operation target (contact with the
+target it was sent to is the intended interaction, and a closed empty gripper
+is not contact), and require_contact means an object retained between the
+pads. Do not set require_interaction_relation; the rollout's result is judged
+from the fresh observation returned when it ends.
 If a previous proposal was rejected, correct only the reported contract error
 against this identical candidate set; do not switch identifiers or evidence.
 

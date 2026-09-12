@@ -80,9 +80,17 @@ def test_configuration_validation_bounds():
         "chunk_execution_steps": 16,
     }
     with pytest.raises(MotionToolValidationError):
-        spec.validate_configuration({"maximum_action_chunks": 5})
+        spec.validate_configuration({"maximum_action_chunks": 0})
     with pytest.raises(MotionToolValidationError):
         spec.validate_configuration({"chunk_execution_steps": 4})
+    # A pose-servo-grade tolerance is not a contract a learned policy can honour:
+    # it stops at the object, ~0.10-0.15 m from a standoff pre-grasp pose.
+    for too_tight in (0.003, 0.05):
+        with pytest.raises(MotionToolValidationError):
+            spec.validate_configuration({"position_tolerance_m": too_tight})
+    assert spec.validate_configuration({"position_tolerance_m": 0.12}) == {
+        "position_tolerance_m": 0.12
+    }
     with pytest.raises(MotionToolValidationError):
         spec.validate_configuration({"unknown_setting": True})
 
@@ -137,4 +145,133 @@ def test_non_image_input_fails_loud():
             wrist_rgb=np.zeros((360, 640), dtype=np.uint8),
             left_rgb=np.zeros((360, 640, 3), dtype=np.uint8),
             right_rgb=np.zeros((360, 640, 3), dtype=np.uint8),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Per-operation policy instruction (lane 2b)
+# ---------------------------------------------------------------------------
+
+def test_policy_instruction_realize_effect_with_receptacle():
+    from scripts.cosmos3_edge_executor import policy_instruction_for_operation
+
+    instruction, source = policy_instruction_for_operation(
+        purpose="realize_effect",
+        target_entity_ids=("grey_bin", "blue_block"),
+        receptacle_entity_id="grey_bin",
+        fallback_instruction="Clean the table",
+    )
+    assert instruction == "put the blue block in the grey bin"
+    assert source == "runtime_operation_template"
+
+
+def test_policy_instruction_precondition_and_single_object():
+    from scripts.cosmos3_edge_executor import policy_instruction_for_operation
+
+    move, _ = policy_instruction_for_operation(
+        purpose="establish_precondition",
+        target_entity_ids=("lizard_figurine_01",),
+        receptacle_entity_id="grey_bin",
+        fallback_instruction="Clean the table",
+    )
+    assert move == "move to the lizard figurine 01"
+    pick, _ = policy_instruction_for_operation(
+        purpose="realize_effect",
+        target_entity_ids=("red_block",),
+        receptacle_entity_id="grey_bin",
+        fallback_instruction="Clean the table",
+    )
+    assert pick == "pick up the red block"
+
+
+def test_policy_instruction_falls_back_to_session_instruction():
+    from scripts.cosmos3_edge_executor import policy_instruction_for_operation
+
+    for purpose, targets in (
+        ("observe", ("blue_block",)),
+        ("realize_effect", ()),
+        ("realize_effect", ("grey_bin",)),
+    ):
+        instruction, source = policy_instruction_for_operation(
+            purpose=purpose,
+            target_entity_ids=targets,
+            receptacle_entity_id="grey_bin",
+            fallback_instruction="Clean the table",
+        )
+        assert instruction == "Clean the table"
+        assert source == "session_instruction"
+
+
+def test_sim5_camera_offsets_reordered_once_for_present_cameras():
+    from types import SimpleNamespace
+
+    from scripts.sim6_camera_offsets import (
+        POLICY_CAMERA_NAMES,
+        convert_sim5_camera_offsets,
+    )
+
+    def camera(rot):
+        return SimpleNamespace(offset=SimpleNamespace(rot=rot))
+
+    env_cfg = SimpleNamespace(
+        scene=SimpleNamespace(
+            wrist_cam=camera((-0.420, 0.570, 0.576, -0.409)),
+            over_shoulder_left_camera=camera((-0.393, -0.195, 0.399, 0.805)),
+        )
+    )
+    converted = convert_sim5_camera_offsets(env_cfg)
+    assert converted == ["wrist_cam", "over_shoulder_left_camera"]
+    assert set(converted) < set(POLICY_CAMERA_NAMES)
+    # (w, x, y, z) -> (x, y, z, w)
+    assert env_cfg.scene.wrist_cam.offset.rot == (0.570, 0.576, -0.409, -0.420)
+    assert env_cfg.scene.over_shoulder_left_camera.offset.rot == (
+        -0.195, 0.399, 0.805, -0.393
+    )
+
+
+def test_gripper_contact_classification():
+    from scripts.cosmos3_edge_executor import classify_gripper_contact
+
+    def classify(**kwargs):
+        base = dict(
+            touch=True, closed_fraction=0.3, retained_force_n=0.0,
+            target_distance_m=None,
+        )
+        base.update(kwargs)
+        return classify_gripper_contact(**base)
+
+    assert classify(touch=False)["contact_class"] == "none"
+    # A fully closed empty gripper is the pads pressing each other.
+    assert classify(closed_fraction=0.98)["contact_class"] == "self_closure"
+    assert classify(closed_fraction=0.98, retained_force_n=2.0)[
+        "contact_class"
+    ] == "self_closure"
+    # An opposing pinch with the gripper stopped by something is a grasp.
+    assert classify(closed_fraction=0.6, retained_force_n=1.5)[
+        "contact_class"
+    ] == "retained_object"
+    external = classify(closed_fraction=0.0)
+    assert external["contact_class"] == "external"
+    assert external["attributed_to_target"] is False
+    # Touching the entity the rollout was sent to is the intended interaction.
+    near = classify(closed_fraction=0.0, target_distance_m=0.08)
+    assert near["attributed_to_target"] is True
+    far = classify(closed_fraction=0.0, target_distance_m=0.40)
+    assert far["attributed_to_target"] is False
+    # Self-closure is never attributed as contact, even next to a target.
+    assert classify(closed_fraction=1.0, target_distance_m=0.02)[
+        "attributed_to_target"
+    ] is False
+
+
+def test_rollout_budget_bounds():
+    from scripts.cosmos3_edge_executor import MAXIMUM_ACTION_CHUNKS
+
+    spec = _spec()
+    assert spec.validate_configuration(
+        {"maximum_action_chunks": MAXIMUM_ACTION_CHUNKS}
+    ) == {"maximum_action_chunks": MAXIMUM_ACTION_CHUNKS}
+    with pytest.raises(MotionToolValidationError):
+        spec.validate_configuration(
+            {"maximum_action_chunks": MAXIMUM_ACTION_CHUNKS + 1}
         )

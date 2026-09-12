@@ -25,6 +25,106 @@ COSMOS3_EDGE_CAPABILITY_TAG = "policy.language_conditioned_action_chunks"
 # see only tool_id + capability_tags, so preference must travel as a tag.
 OPERATOR_SESSION_PREFERRED_TAG = "operator.session_preferred"
 
+MAXIMUM_ACTION_CHUNKS = 8
+DEFAULT_ACTION_CHUNKS = 4
+
+# A two-finger gripper closed past this fraction has nothing between its pads:
+# the sensed touch is the pads pressing each other, not an object.
+SELF_CLOSURE_FRACTION = 0.95
+# Gripper contact that begins within this distance of an operation target is
+# the intended interaction with that target, not a collision. Measured at the
+# finger-pad center (the sensed bodies): pads touching or straddling a ~5 cm
+# object sit within a few centimetres of its center.
+PAD_CONTACT_ATTRIBUTION_RADIUS_M = 0.08
+# Fallback when the finger bodies are unavailable: measured from the gripper
+# base frame, ~0.15 m above the fingertips.
+CONTACT_ATTRIBUTION_RADIUS_M = 0.25
+# A learned policy stops at the object it was sent to, not at a standoff
+# pre-grasp pose, so it ends roughly 0.10-0.15 m from a planner-grounded
+# interaction pose (measured live: 0.09-0.13 m). A completion tolerance below
+# this floor would be a contract the executor cannot honour.
+MINIMUM_POSITION_TOLERANCE_M = 0.10
+DEFAULT_POSITION_TOLERANCE_M = 0.15
+
+
+def classify_gripper_contact(
+    *,
+    touch: bool | None,
+    closed_fraction: float | None,
+    retained_force_n: float | None,
+    target_distance_m: float | None,
+    attribution_radius_m: float = CONTACT_ATTRIBUTION_RADIUS_M,
+) -> dict[str, object]:
+    """Interpret one gripper contact sample for a learned-policy rollout.
+
+    Returns ``contact_class`` in {"none", "self_closure", "external",
+    "retained_object"} and ``attributed_to_target`` (external or retained
+    contact that began within ``attribution_radius_m`` of an operation
+    target). A learned policy closes its own gripper, so a fully closed empty
+    gripper must not read as contact; the pose-servo executors never faced
+    this because only the clamp actuator closed the gripper.
+    """
+    fraction = float(closed_fraction) if closed_fraction is not None else 0.0
+    if not touch:
+        contact_class = "none"
+    elif fraction >= SELF_CLOSURE_FRACTION:
+        contact_class = "self_closure"
+    elif retained_force_n is not None and float(retained_force_n) > 0.0:
+        contact_class = "retained_object"
+    else:
+        contact_class = "external"
+    attributed = bool(
+        contact_class in ("external", "retained_object")
+        and target_distance_m is not None
+        and float(target_distance_m) <= float(attribution_radius_m)
+    )
+    return {
+        "contact_class": contact_class,
+        "attributed_to_target": attributed,
+        "touch": bool(touch),
+        "closed_fraction": fraction,
+        "retained_force_n": retained_force_n,
+        "target_distance_m": target_distance_m,
+    }
+
+
+def _entity_label(entity_id: str) -> str:
+    return " ".join(part for part in entity_id.replace("-", "_").split("_") if part)
+
+
+def policy_instruction_for_operation(
+    *,
+    purpose: str | None,
+    target_entity_ids: Sequence[str],
+    receptacle_entity_id: str | None,
+    fallback_instruction: str,
+) -> tuple[str, str]:
+    """Derive the language prompt for one policy rollout from the operation.
+
+    The composed planner phrases a whole-task instruction; a DROID-style policy
+    was trained on short imperative commands about the entities it should act
+    on. The runtime owns this template so the prompt the policy receives is
+    recorded verbatim in the execution report. Returns (instruction, source).
+    """
+    targets = [str(item) for item in target_entity_ids if isinstance(item, str) and item]
+    receptacle = (
+        receptacle_entity_id
+        if isinstance(receptacle_entity_id, str) and receptacle_entity_id in targets
+        else None
+    )
+    objects = [item for item in targets if item != receptacle]
+    if not objects or purpose not in ("establish_precondition", "realize_effect"):
+        return fallback_instruction, "session_instruction"
+    subject = _entity_label(objects[0])
+    if purpose == "establish_precondition":
+        return f"move to the {subject}", "runtime_operation_template"
+    if receptacle is not None:
+        return (
+            f"put the {subject} in the {_entity_label(receptacle)}",
+            "runtime_operation_template",
+        )
+    return f"pick up the {subject}", "runtime_operation_template"
+
 
 def build_cosmos3_edge_motion_executor_spec(
     *,
@@ -67,10 +167,14 @@ def build_cosmos3_edge_motion_executor_spec(
             "additionalProperties": False,
             "properties": {
                 "maximum_action_chunks": {
-                    "type": "integer", "minimum": 1, "maximum": 4,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAXIMUM_ACTION_CHUNKS,
                     "description": (
-                        "Consecutive 32-step chunks admitted under this one "
-                        "lease before control returns."
+                        "Consecutive 32-step chunks (about 2.1 s each) "
+                        "admitted under this one lease before a fresh "
+                        "observation is returned; 4-8 for an acquisition or "
+                        "transport rollout, 1-2 for a short adjustment."
                     ),
                 },
                 "chunk_execution_steps": {
@@ -81,27 +185,51 @@ def build_cosmos3_edge_motion_executor_spec(
                     ),
                 },
                 "completion_position_tolerance_m": {
-                    "type": "number", "minimum": 0.005, "maximum": 0.30,
+                    "type": "number",
+                    "minimum": MINIMUM_POSITION_TOLERANCE_M,
+                    "maximum": 0.30,
                 },
                 # Shared lease-condition vocabulary the runtime rules teach
                 # for motion executors; the chunk executor enforces each of
                 # these at its monitor cadence or at completion.
                 "position_tolerance_m": {
-                    "type": "number", "minimum": 0.001, "maximum": 0.05,
+                    "type": "number",
+                    "minimum": MINIMUM_POSITION_TOLERANCE_M,
+                    "maximum": 0.20,
+                    "description": (
+                        "Completion tolerance around the grounded pose. The "
+                        "policy stops at the object itself, roughly "
+                        "0.10-0.15 m from a standoff pre-grasp pose; values "
+                        "below 0.10 m are not achievable and are rejected. "
+                        "Gripper contact attributed to an operation target "
+                        "also counts as having reached it."
+                    ),
                 },
-                "require_contact": {"type": "boolean"},
+                "require_contact": {
+                    "type": "boolean",
+                    "description": (
+                        "Completion requires an object retained between the "
+                        "gripper pads (an opposing pinch); a fully closed "
+                        "empty gripper does not count."
+                    ),
+                },
                 "forbid_contact": {
                     "type": "boolean",
                     "description": (
-                        "Revoke the motion immediately if gripper contact "
-                        "is observed."
+                        "Revoke the rollout on gripper contact that is not "
+                        "attributable to an operation target. Contact while "
+                        "the finger pads are within 0.08 m of a target is "
+                        "the intended interaction; a fully closed empty "
+                        "gripper is not contact."
                     ),
                 },
                 "require_interaction_relation": {
                     "type": "boolean",
                     "description": (
-                        "Completion requires ending within position "
-                        "tolerance of the grounded expected-outcome pose."
+                        "Completion requires having reached the grounded "
+                        "expected-outcome pose: ending within position "
+                        "tolerance of it, or gripper contact attributed to "
+                        "an operation target."
                     ),
                 },
                 "minimum_contact_force_n": {

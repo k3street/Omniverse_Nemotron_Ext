@@ -624,10 +624,17 @@ from cosmos3_edge_client import (  # noqa: E402
     Cosmos3EdgeChunkClient,
     Cosmos3EdgeClientError,
 )
+from sim6_camera_offsets import convert_sim5_camera_offsets  # noqa: E402
 from cosmos3_edge_executor import (  # noqa: E402
     COSMOS3_EDGE_CAPABILITY_TAG,
     COSMOS3_EDGE_EXECUTOR_ID,
+    DEFAULT_ACTION_CHUNKS as COSMOS3_EDGE_DEFAULT_ACTION_CHUNKS,
+    DEFAULT_POSITION_TOLERANCE_M as COSMOS3_EDGE_DEFAULT_POSITION_TOLERANCE_M,
+    CONTACT_ATTRIBUTION_RADIUS_M as COSMOS3_EDGE_BASE_ATTRIBUTION_RADIUS_M,
+    PAD_CONTACT_ATTRIBUTION_RADIUS_M as COSMOS3_EDGE_PAD_ATTRIBUTION_RADIUS_M,
     build_cosmos3_edge_motion_executor_spec,
+    classify_gripper_contact,
+    policy_instruction_for_operation,
 )
 from adaptive_pick_place import (  # noqa: E402
     apply_object_relative_grasp,
@@ -5139,6 +5146,51 @@ def _composed_execution_lease_payload(
         )
     candidate = candidate_set.candidates[0]
     configuration = dict(step.tool_configuration)
+    fresh_properties = candidate.tool_configuration_schema.get("properties", {})
+    retired_fields = sorted(
+        key
+        for key in configuration
+        if isinstance(fresh_properties, Mapping) and key not in fresh_properties
+    )
+    for key in retired_fields:
+        # The queued configuration was authored against the composition-time
+        # schema. Fresh evidence can retire a field (a contact threshold with
+        # no fresh contact evidence); the executor could not enforce it, so
+        # dropping it preserves the model's sequence like tightening does.
+        configuration.pop(key)
+    clamped_fields: dict[str, list[Any]] = {}
+    for key, value in list(configuration.items()):
+        schema = (
+            fresh_properties.get(key)
+            if isinstance(fresh_properties, Mapping)
+            else None
+        )
+        if (
+            not isinstance(schema, Mapping)
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
+            continue
+        reconciled: float = float(value)
+        for bound_key, choose in (("minimum", max), ("maximum", min)):
+            bound = schema.get(bound_key)
+            if isinstance(bound, (int, float)) and not isinstance(bound, bool):
+                reconciled = choose(reconciled, float(bound))
+        if reconciled != float(value):
+            # A queued value outside the executor's advertised bounds is not a
+            # contract the executor can honour; the nearest admissible value
+            # is recorded and carried in the lease's tool_configuration.
+            configuration[key] = (
+                int(reconciled) if schema.get("type") == "integer" else reconciled
+            )
+            clamped_fields[key] = [value, configuration[key]]
+    if retired_fields or clamped_fields:
+        print(
+            "[world-effect-composition] RECONCILED_CONFIG "
+            f"call={step.call_id} tool={candidate.tool_id} "
+            f"retired={retired_fields} clamped={clamped_fields} authority=none",
+            flush=True,
+        )
     invalidations: list[dict[str, Any]] = []
     for condition in candidate.invalidation_candidates:
         linked_fields_present = bool(condition.linked_tool_configuration_fields) and all(
@@ -6858,6 +6910,12 @@ def _dispatch_guarded_world_effect_continuation(
                     iteration_observer=refresh_monitor_observation,
                     checkpoint_callback=None,
                     early_stop_callback=monitor,
+                    policy_instruction=_cosmos3_edge_policy_instruction(
+                        lease_candidate
+                    ),
+                    target_entity_ids=tuple(
+                        lease_candidate.operation_target_entity_ids
+                    ),
                 )
                 checkpoint_report = {
                     **checkpoint_report,
@@ -7427,6 +7485,18 @@ def _cosmos3_edge_client() -> Cosmos3EdgeChunkClient:
     return client
 
 
+def _cosmos3_edge_policy_instruction(lease_candidate: Any) -> tuple[str, str]:
+    """Phrase one rollout's prompt from the lease's operation semantics."""
+    return policy_instruction_for_operation(
+        purpose=getattr(lease_candidate, "purpose", None),
+        target_entity_ids=tuple(
+            getattr(lease_candidate, "operation_target_entity_ids", ()) or ()
+        ),
+        receptacle_entity_id=SCENE_ROLES.target_receptacle_asset,
+        fallback_instruction=str(args_cli.instruction),
+    )
+
+
 def _cosmos3_edge_frames(
     obs: Mapping[str, Any],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -7486,6 +7556,8 @@ def _execute_cosmos3_edge_chunks(
     executor_config: dict[str, Any] | None = None,
     iteration_observer: Any = None,
     early_stop_callback: Any = None,
+    policy_instruction: tuple[str, str] | None = None,
+    target_entity_ids: Sequence[str] = (),
 ) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
     """Stream Cosmos 3 Edge action chunks under the active motion lease.
 
@@ -7495,7 +7567,11 @@ def _execute_cosmos3_edge_chunks(
     monitored invalidation the remaining chunk suffix is discarded.
     """
     effective_config = dict(executor_config or {})
-    maximum_chunks = int(effective_config.get("maximum_action_chunks", 1))
+    maximum_chunks = int(
+        effective_config.get(
+            "maximum_action_chunks", COSMOS3_EDGE_DEFAULT_ACTION_CHUNKS
+        )
+    )
     chunk_steps = int(
         effective_config.get(
             "chunk_execution_steps", COSMOS3_EDGE_ACTION_HORIZON
@@ -7504,7 +7580,10 @@ def _execute_cosmos3_edge_chunks(
     position_tolerance = float(
         effective_config.get(
             "position_tolerance_m",
-            effective_config.get("completion_position_tolerance_m", 0.05),
+            effective_config.get(
+                "completion_position_tolerance_m",
+                COSMOS3_EDGE_DEFAULT_POSITION_TOLERANCE_M,
+            ),
         )
     )
     require_contact = bool(effective_config.get("require_contact", False))
@@ -7515,7 +7594,13 @@ def _execute_cosmos3_edge_chunks(
     minimum_contact_force_n = float(
         effective_config.get("minimum_contact_force_n", 0.0)
     )
-    instruction = str(args_cli.instruction)
+    if policy_instruction is None:
+        instruction, instruction_source = (
+            str(args_cli.instruction),
+            "session_instruction",
+        )
+    else:
+        instruction, instruction_source = policy_instruction
     client = _cosmos3_edge_client()
     target_cpu = target.detach().reshape(-1).float().cpu()
     target_quat_cpu = target_quaternion_wxyz.detach().reshape(-1).float().cpu()
@@ -7537,24 +7622,82 @@ def _execute_cosmos3_edge_chunks(
     chunk_records: list[dict[str, Any]] = []
     executed_env_steps = 0
 
-    def contact_sample() -> tuple[bool, float | None]:
-        contact = _actuator_completion_sample(env).get("current_contact")
-        if not isinstance(contact, Mapping) or not contact.get("available"):
-            return False, None
-        return bool(contact.get("touch")), contact.get("net_force_n")
+    target_ids = tuple(
+        str(item) for item in target_entity_ids if isinstance(item, str) and item
+    )
+
+    def pad_center_or_base() -> tuple[np.ndarray, str, float]:
+        """Finger-pad midpoint (the sensed bodies) or the base-frame fallback."""
+        robot = env.scene["robot"]
+        names = list(robot.data.body_names)
+        pad_names = ("left_inner_finger", "right_inner_finger")
+        if all(name in names for name in pad_names):
+            body_pos_w = getattr(
+                robot.data.body_pos_w, "torch", robot.data.body_pos_w
+            )
+            root_pos_w = getattr(
+                robot.data.root_pos_w, "torch", robot.data.root_pos_w
+            )
+            pads = torch.stack(
+                [body_pos_w[0, names.index(name)] for name in pad_names]
+            ).mean(dim=0)
+            center = (pads - root_pos_w[0]).detach().float().cpu().numpy()
+            return center, "finger_pads", COSMOS3_EDGE_PAD_ATTRIBUTION_RADIUS_M
+        return (
+            _eef_position(env).float().cpu().numpy(),
+            "gripper_base",
+            COSMOS3_EDGE_BASE_ATTRIBUTION_RADIUS_M,
+        )
+
+    def contact_state() -> dict[str, Any]:
+        sample = _actuator_completion_sample(env)
+        contact = sample.get("current_contact")
+        available = isinstance(contact, Mapping) and bool(
+            contact.get("available")
+        )
+        target_distance: float | None = None
+        reference, frame, radius = pad_center_or_base()
+        if target_ids:
+            distances = []
+            for position in _tracked_entity_positions_m(env, target_ids).values():
+                if position is None:
+                    continue
+                array = np.asarray(
+                    getattr(position, "tolist", lambda: position)(),
+                    dtype=np.float64,
+                ).reshape(-1)
+                if array.shape == (3,) and np.isfinite(array).all():
+                    distances.append(float(np.linalg.norm(reference - array)))
+            if distances:
+                target_distance = min(distances)
+        state = classify_gripper_contact(
+            touch=bool(contact.get("touch")) if available else False,
+            closed_fraction=sample.get("gripper_closed_fraction"),
+            retained_force_n=contact.get("retained_force_n") if available else None,
+            target_distance_m=target_distance,
+            attribution_radius_m=radius,
+        )
+        state["attribution_frame"] = frame
+        state["attribution_radius_m"] = radius
+        return state
+
+    contact_at_start = contact_state()
 
     def observe_and_monitor() -> dict[str, Any] | None:
         if iteration_observer is not None:
             iteration_observer()
         if forbid_contact:
-            touched, force_n = contact_sample()
-            if touched:
+            contact = contact_state()
+            if contact["contact_class"] in ("external", "retained_object") and (
+                not contact["attributed_to_target"]
+            ):
                 return {
                     "condition_id": "lease.forbid_contact_violated",
                     "reason": (
-                        "gripper contact observed while forbid_contact is set"
+                        "gripper contact not attributable to an operation "
+                        "target while forbid_contact is set"
                     ),
-                    "net_force_n": force_n,
+                    "contact": contact,
                     "converged": False,
                 }
         if early_stop_callback is not None:
@@ -7630,34 +7773,51 @@ def _execute_cosmos3_edge_chunks(
     orientation_error_final = _quaternion_error_deg(
         _eef_quaternion(env), target_quat_cpu
     )
-    converged = bool(
+    # A learned policy does not servo to the invocation pose, so `converged`
+    # keeps the shared meaning (target reached within tolerance) and the
+    # rollout's own progress is reported separately for the planner.
+    rollout_completed = bool(
         not terminal and early_stop is None and chunk_records
     )
+    contact_at_end = contact_state()
+    touched_final = contact_at_end["contact_class"] in (
+        "external",
+        "retained_object",
+    )
+    # Reaching the target: within tolerance of the grounded pose, or the
+    # gripper is in contact attributed to an operation target — direct
+    # evidence it is on the thing it was sent to.
+    target_reached = error_final <= position_tolerance or bool(
+        contact_at_end.get("attributed_to_target")
+    )
+    converged = rollout_completed and target_reached
     completion_conditions: list[dict[str, Any]] = []
     if require_contact:
-        touched_final, force_final_n = contact_sample()
-        contact_ok = touched_final and (
-            force_final_n is None
-            or force_final_n >= minimum_contact_force_n
+        retained_force = contact_at_end.get("retained_force_n")
+        contact_ok = contact_at_end["contact_class"] == "retained_object" and (
+            retained_force is None
+            or float(retained_force) >= minimum_contact_force_n
         )
         completion_conditions.append(
             {
                 "condition": "require_contact",
                 "satisfied": contact_ok,
-                "touch": touched_final,
-                "net_force_n": force_final_n,
+                "contact": contact_at_end,
                 "minimum_contact_force_n": minimum_contact_force_n,
             }
         )
         converged = converged and contact_ok
     if require_interaction_relation:
-        relation_ok = error_final <= position_tolerance
+        relation_ok = target_reached
         completion_conditions.append(
             {
                 "condition": "require_interaction_relation",
                 "satisfied": relation_ok,
                 "target_error_m": error_final,
                 "position_tolerance_m": position_tolerance,
+                "contact_attributed_to_target": bool(
+                    contact_at_end.get("attributed_to_target")
+                ),
             }
         )
         converged = converged and relation_ok
@@ -7688,7 +7848,17 @@ def _execute_cosmos3_edge_chunks(
         "iterations": chunk_records,
         "chunk_count": len(chunk_records),
         "executed_env_steps": executed_env_steps,
+        "rollout_completed": rollout_completed,
+        "progress_m": error_start - error_final,
+        "contact_established": touched_final,
+        "contact_at_start": contact_at_start,
+        "contact_at_end": contact_at_end,
+        "gripper_self_closed_at_start": (
+            contact_at_start["contact_class"] == "self_closure"
+        ),
+        "operation_target_entity_ids": list(target_ids),
         "instruction": instruction,
+        "instruction_source": instruction_source,
         "policy_server": {
             "host": args_cli.cosmos3_edge_host,
             "port": args_cli.cosmos3_edge_port,
@@ -7719,6 +7889,8 @@ def _execute_motion_checkpoint(
     iteration_observer: Any = None,
     checkpoint_callback: Any = None,
     early_stop_callback: Any = None,
+    policy_instruction: tuple[str, str] | None = None,
+    target_entity_ids: Sequence[str] = (),
 ) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
     """Route one composed motion checkpoint to its runtime executor."""
     if runtime_spec.executor_id == _COSMOS3_EDGE_EXECUTOR_ID:
@@ -7734,6 +7906,8 @@ def _execute_motion_checkpoint(
             executor_config=executor_config,
             iteration_observer=iteration_observer,
             early_stop_callback=early_stop_callback,
+            policy_instruction=policy_instruction,
+            target_entity_ids=target_entity_ids,
         )
     return _move_eef_to_target(
         env,
@@ -9680,6 +9854,15 @@ def main() -> int:
         asset_cfg = getattr(env_cfg.scene, asset_name)
         w, x, y, z = asset_cfg.init_state.rot
         asset_cfg.init_state.rot = (x, y, z, w)
+    if args_cli.cosmos3_edge_policy:
+        # The policy observes RoboLab's wrist/left/right cameras, whose
+        # offsets carry the same legacy quaternion order as the spawn poses.
+        converted_cameras = convert_sim5_camera_offsets(env_cfg)
+        print(
+            "[cosmos3-edge] converted Sim 5 camera offsets: "
+            f"{converted_cameras}",
+            flush=True,
+        )
     if not args_cli.disable_contact_telemetry:
         install_sim6_gripper_contact_sensor(env_cfg)
     if args_cli.randomize_background:
@@ -13219,6 +13402,14 @@ def main() -> int:
                             ),
                             checkpoint_callback=None,
                             early_stop_callback=monitor_lease,
+                            policy_instruction=(
+                                _cosmos3_edge_policy_instruction(
+                                    lease_candidate
+                                )
+                            ),
+                            target_entity_ids=tuple(
+                                lease_candidate.operation_target_entity_ids
+                            ),
                         )
                         checkpoint_report = {
                             **checkpoint_report,
