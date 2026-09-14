@@ -990,7 +990,16 @@ acquisition only when the object fits the configured-open aperture and is fully
 between both advertised pad planes, with its center inside both transverse
 pad-face bounds. Otherwise select corrective motion whose
 observable outcome makes the object center coincide with the grasp-corridor
-center; do not treat a top-center clearance pose as grasp-ready. These are
+center; do not treat a top-center clearance pose as grasp-ready. That
+pad-alignment precondition governs an actuator candidate that only opens and
+closes a gripper. An actuator candidate whose capability_tags include
+policy.language_conditioned_action_chunks performs its own approach and
+alignment inside the acquisition rollout, so select it for acquisition
+whenever the target is visible, including when the object is not yet between
+the pads and when a further corrective motion would not meaningfully change
+the end-effector pose. When the end-effector has effectively reached the
+target anchor, another motion toward it is rejected as a no-op: select that
+acquisition instead of re-proposing the motion. These are
 runtime-advertised tool and RGB-D relations, not an inferred embodiment or a
 task-specific grasp profile. When the alignment observation includes a
 corrective_motion_grounding_contract, the selected corrective motion must end

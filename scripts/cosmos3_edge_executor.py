@@ -8,18 +8,28 @@ without launching Isaac. Execution itself lives in the runner
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Any, Collection, Sequence
 
 try:
-    from .observation_bound_motion_tools import MotionExecutorSpec
+    from .observation_bound_motion_tools import (
+        ActuatorExecutorSpec,
+        MotionExecutorSpec,
+    )
 except ImportError:  # Script execution adds this directory directly to sys.path.
     from observation_bound_motion_tools import (  # type: ignore[no-redef]
+        ActuatorExecutorSpec,
         MotionExecutorSpec,
     )
 
 COSMOS3_EDGE_EXECUTOR_ID = "cosmos3_edge_policy"
 COSMOS3_EDGE_TOOL_NAME = "execute_cosmos3_edge_policy"
 COSMOS3_EDGE_CAPABILITY_TAG = "policy.language_conditioned_action_chunks"
+COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID = "cosmos3_edge_acquire"
+COSMOS3_EDGE_ACQUIRE_TOOL_NAME = "execute_cosmos3_edge_acquire"
+
+# A policy acquisition rollout is a whole grasp attempt, not a settling delay.
+DEFAULT_ACQUIRE_ACTION_CHUNKS = 6
+MAXIMUM_ACQUIRE_ACTION_CHUNKS = 10
 # Generic marker the operation-proposal prompt explains: a session-scoped
 # operator preference among otherwise-qualifying candidates. Selection stages
 # see only tool_id + capability_tags, so preference must travel as a tag.
@@ -277,5 +287,136 @@ def build_cosmos3_edge_motion_executor_spec(
                 "maximum_grounding_offset_m": 0.35,
                 "maximum_alignment_error_deg": 15.0,
             },
+        },
+    )
+
+
+def drop_redundant_pre_acquisition_motions(
+    tool_calls: Sequence[Any],
+    acquisition_tool_ids: Collection[str],
+) -> list[Any]:
+    """Remove approach motions that a policy acquisition performs itself.
+
+    A composed sequence written for a gripper-only actuator reads
+    "move to the object, then close". An acquisition executor that approaches
+    and aligns inside its own rollout makes that leading motion redundant, and
+    the runtime rejects it outright once the end-effector is already within
+    the configured position tolerance — which discards the whole composition,
+    acquisition included. Dropping the motion here keeps the plan executable
+    without depending on the planner to omit it.
+
+    Only motions that share a target entity with a later policy acquisition
+    are dropped; motions toward anything else (a destination, a clearance
+    waypoint) are preserved.
+    """
+    calls = list(tool_calls)
+    acquisition_ids = set(acquisition_tool_ids)
+    if not acquisition_ids:
+        return calls
+    first_acquisition_index: int | None = None
+    acquisition_targets: set[str] = set()
+    for index, call in enumerate(calls):
+        effect_id = getattr(call, "semantic_effect_id", None)
+        if (
+            getattr(call, "tool_id", None) in acquisition_ids
+            and isinstance(effect_id, str)
+            and effect_id.endswith(".acquire")
+        ):
+            first_acquisition_index = index
+            acquisition_targets = {
+                str(item)
+                for item in getattr(call, "target_entity_ids", ()) or ()
+            }
+            break
+    if first_acquisition_index is None or not acquisition_targets:
+        return calls
+    kept: list[Any] = []
+    for index, call in enumerate(calls):
+        if index < first_acquisition_index and getattr(
+            call, "tool_family", None
+        ) == "motion":
+            targets = {
+                str(item)
+                for item in getattr(call, "target_entity_ids", ()) or ()
+            }
+            if targets & acquisition_targets:
+                continue
+        kept.append(call)
+    return kept
+
+
+def build_cosmos3_edge_acquire_executor_spec(
+    *,
+    capability_tags: Sequence[str],
+) -> "ActuatorExecutorSpec":
+    """Advertise Cosmos 3 Edge as a reversible attachment actuator.
+
+    The planner decomposes manipulation the way a pose-servo stack needs it:
+    move to a standoff pose, then close a clamp. A DROID-trained policy's
+    native unit is the whole acquisition — approach, align, and close on the
+    object in one contact-rich rollout — so here the policy owns ``engage``.
+
+    The command vocabulary stays the runtime's own ``engage``/``disengage``/
+    ``maintain``, so retained-attachment bookkeeping and post-release
+    geometry-change classification consume this executor unchanged.
+    ``disengage`` and ``maintain`` remain the deterministic gripper commands:
+    releasing needs no policy.
+    """
+    return ActuatorExecutorSpec(
+        executor_id=COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+        tool_name=COSMOS3_EDGE_ACQUIRE_TOOL_NAME,
+        description=(
+            "Acquire or release an entity with the language-conditioned "
+            "Cosmos 3 Edge policy. Engage runs one acquisition rollout: the "
+            "policy approaches, aligns, and closes the gripper on the "
+            "operation target from the live cameras, and reports engagement "
+            "only when an object is measurably retained between the pads. "
+            "Use engage instead of a separate approach motion followed by a "
+            "clamp: the whole grasp is one rollout, and gripper contact with "
+            "the target is expected rather than a fault. Disengage opens the "
+            "gripper and maintain preserves its current command, both "
+            "directly. Select this for acquisition when the target is "
+            "visible; a clamp engage still suits an already-aligned grasp."
+        ),
+        command_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "state": {
+                    "type": "string",
+                    "enum": ["engage", "disengage", "maintain"],
+                }
+            },
+            "required": ["state"],
+        },
+        configuration_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "maximum_action_chunks": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAXIMUM_ACQUIRE_ACTION_CHUNKS,
+                    "description": (
+                        "Acquisition rollout budget in 32-step chunks (about "
+                        "2.1 s each). Engage only; 4-8 suits a grasp from a "
+                        "visible standoff."
+                    ),
+                },
+                "settle_steps": {
+                    "type": "integer",
+                    "minimum": 8,
+                    "maximum": 120,
+                    "description": (
+                        "Settling steps for the direct disengage and "
+                        "maintain commands."
+                    ),
+                },
+            },
+        },
+        capability_tags=tuple(capability_tags),
+        semantic_command_bindings={
+            "entity_attachment.acquire": {"state": "engage"},
+            "entity_attachment.release": {"state": "disengage"},
         },
     )

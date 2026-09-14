@@ -626,6 +626,10 @@ from cosmos3_edge_client import (  # noqa: E402
 )
 from sim6_camera_offsets import convert_sim5_camera_offsets  # noqa: E402
 from cosmos3_edge_executor import (  # noqa: E402
+    COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+    DEFAULT_ACQUIRE_ACTION_CHUNKS as COSMOS3_EDGE_DEFAULT_ACQUIRE_CHUNKS,
+    build_cosmos3_edge_acquire_executor_spec,
+    drop_redundant_pre_acquisition_motions,
     COSMOS3_EDGE_CAPABILITY_TAG,
     COSMOS3_EDGE_EXECUTOR_ID,
     DEFAULT_ACTION_CHUNKS as COSMOS3_EDGE_DEFAULT_ACTION_CHUNKS,
@@ -2960,6 +2964,21 @@ def _local_dls_executor_registry(
     return registry
 
 
+def _policy_acquisition_tool_ids(registry: Any) -> frozenset[str]:
+    """Actuator executors that approach and align inside their acquisition."""
+    if registry is None:
+        return frozenset()
+    return frozenset(
+        spec.executor_id
+        for spec in registry.specs()
+        if COSMOS3_EDGE_CAPABILITY_TAG in spec.capability_tags
+        and any(
+            effect_id.endswith(".acquire")
+            for effect_id in spec.semantic_command_bindings
+        )
+    )
+
+
 def _local_binary_actuator_registry() -> ActuatorExecutorRegistry:
     """Register the current runtime actuator without changing the protocol."""
     registry = ActuatorExecutorRegistry()
@@ -3003,6 +3022,15 @@ def _local_binary_actuator_registry() -> ActuatorExecutorRegistry:
             },
         )
     )
+    if getattr(args_cli, "cosmos3_edge_policy", False):
+        registry.register(
+            build_cosmos3_edge_acquire_executor_spec(
+                capability_tags=(
+                    *REVERSIBLE_ATTACHMENT_CAPABILITY_TAGS,
+                    COSMOS3_EDGE_CAPABILITY_TAG,
+                ),
+            )
+        )
     return registry
 
 
@@ -7051,7 +7079,8 @@ def _dispatch_guarded_world_effect_continuation(
                 ),
             )
             next_obs, terminal, final_action, actuator_report = (
-                _execute_binary_actuator_tool(
+                _execute_actuator_command(
+                    runtime_spec,
                     env,
                     obs,
                     initial_action,
@@ -7060,6 +7089,7 @@ def _dispatch_guarded_world_effect_continuation(
                         "command": command,
                         "executor_config": configuration,
                     },
+                    target_entity_ids=target_ids,
                     initial_object_z=initial_object_z,
                 )
             )
@@ -7307,6 +7337,193 @@ def _actuator_completion_sample(env: Any) -> dict[str, Any]:
         ),
         "current_contact": _current_contact_observation(env),
     }
+
+
+def _execute_cosmos3_edge_acquire(
+    env: Any,
+    obs: dict[str, Any],
+    last_action: torch.Tensor,
+    decision: dict[str, Any],
+    *,
+    initial_object_z: float,
+    target_entity_ids: Sequence[str] = (),
+) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
+    """Run one Cosmos 3 Edge acquisition as a reversible attachment command.
+
+    ``engage`` is the whole grasp: the policy approaches, aligns, and closes
+    the gripper itself from the live cameras, and engagement is reported only
+    when contact evidence shows an object retained between the pads — the same
+    predicate the runtime uses to decide a loaded actuator is supported.
+    ``disengage`` and ``maintain`` reuse the deterministic clamp path, because
+    releasing and holding need no policy.
+
+    The report matches the binary clamp's so retained-attachment bookkeeping
+    and post-release geometry-change classification consume it unchanged.
+    """
+    requested_state = decision.get("command", {}).get("state")
+    if requested_state not in {"engage", "disengage", "maintain"}:
+        raise RuntimeError(f"Invalid admitted actuator state: {requested_state!r}")
+    if requested_state != "engage":
+        obs, terminal, command, report = _execute_binary_actuator_tool(
+            env,
+            obs,
+            last_action,
+            {**decision, "executor_id": "binary_end_effector_clamp"},
+            initial_object_z=initial_object_z,
+        )
+        return (
+            obs,
+            terminal,
+            command,
+            {
+                **report,
+                "executor_id": decision["executor_id"],
+                "acquisition_source": "direct_gripper_command",
+            },
+        )
+
+    configuration = dict(decision.get("executor_config", {}))
+    maximum_chunks = int(
+        configuration.get(
+            "maximum_action_chunks", COSMOS3_EDGE_DEFAULT_ACQUIRE_CHUNKS
+        )
+    )
+    target_ids = tuple(
+        str(item) for item in target_entity_ids if isinstance(item, str) and item
+    )
+    # Acquisition is always a pick-up, never a place: pass no receptacle.
+    instruction, instruction_source = policy_instruction_for_operation(
+        purpose="realize_effect",
+        target_entity_ids=target_ids,
+        receptacle_entity_id=None,
+        fallback_instruction=str(args_cli.instruction),
+    )
+    client = _cosmos3_edge_client()
+    state_before = _state(env, initial_object_z)
+    engaged_before = bool(float(last_action[0, 7].detach().cpu()) > 0.5)
+    command = last_action.clone()
+    terminal = False
+    executed_steps = 0
+    chunk_records: list[dict[str, Any]] = []
+    completion_reason = "policy_rollout_complete_without_retention"
+    retained = False
+
+    for chunk_index in range(maximum_chunks):
+        wrist_rgb, left_rgb, right_rgb = _cosmos3_edge_frames(obs)
+        completion = _actuator_completion_sample(env)
+        proprio_action = _current_robot_joint_action(
+            env, gripper_closed_fraction=completion["gripper_closed_fraction"]
+        )
+        try:
+            chunk = client.infer_chunk(
+                wrist_rgb=wrist_rgb,
+                left_rgb=left_rgb,
+                right_rgb=right_rgb,
+                joint_position_rad=proprio_action[0, :7].detach().cpu().numpy(),
+                gripper_position=[completion["gripper_closed_fraction"]],
+                prompt=instruction,
+            )
+        except Cosmos3EdgeClientError as error:
+            completion_reason = "policy_server_unavailable"
+            chunk_records.append({"chunk_index": chunk_index, "error": str(error)})
+            break
+        chunk_steps = 0
+        for step_index in range(len(chunk.actions)):
+            command = command.clone()
+            command[0, :8] = torch.as_tensor(
+                chunk.actions[step_index], dtype=torch.float32, device=env.device
+            )
+            obs, _, terminated, truncated, _ = _step_env(env, command)
+            executed_steps += 1
+            chunk_steps += 1
+            terminal = bool(torch.as_tensor(terminated).any()) or bool(
+                torch.as_tensor(truncated).any()
+            )
+            if terminal:
+                break
+        sample = _actuator_completion_sample(env)
+        retained = bool(
+            retained_contact_supports_loaded_actuator(sample["current_contact"])
+        )
+        chunk_records.append(
+            {
+                "chunk_index": chunk_index,
+                "executed_steps": chunk_steps,
+                "inference_seconds": chunk.inference_seconds,
+                "gripper_closed_fraction": sample["gripper_closed_fraction"],
+                "retained_contact": retained,
+            }
+        )
+        if terminal:
+            completion_reason = "environment_terminal"
+            break
+        if retained:
+            completion_reason = "policy_retained_object"
+            break
+
+    state_after = _state(env, initial_object_z)
+    engaged_after = bool(
+        retained_contact_supports_loaded_actuator(state_after["current_contact"])
+    )
+    # Hold the reported engagement so later motion commands agree with it.
+    command[0, 7] = 1.0 if engaged_after else 0.0
+    return (
+        obs,
+        terminal,
+        command,
+        {
+            "executor_id": decision["executor_id"],
+            "requested_state": requested_state,
+            "engaged_before": engaged_before,
+            "engaged_after": engaged_after,
+            "settle_steps": int(configuration.get("settle_steps", 0)),
+            "executed_settle_steps": executed_steps,
+            "completion_reason": completion_reason,
+            "state_before": {
+                "finger_joint_rad": state_before["finger_joint_rad"],
+                "gripper_closed_fraction": state_before["gripper_closed_fraction"],
+                "current_contact": state_before["current_contact"],
+            },
+            "state_after": {
+                "finger_joint_rad": state_after["finger_joint_rad"],
+                "gripper_closed_fraction": state_after["gripper_closed_fraction"],
+                "current_contact": state_after["current_contact"],
+            },
+            "terminal": terminal,
+            "acquisition_source": "cosmos3_edge_policy_rollout",
+            "instruction": instruction,
+            "instruction_source": instruction_source,
+            "operation_target_entity_ids": list(target_ids),
+            "executed_env_steps": executed_steps,
+            "iterations": chunk_records,
+            "chunk_count": len(chunk_records),
+        },
+    )
+
+
+def _execute_actuator_command(
+    runtime_spec: Any,
+    env: Any,
+    obs: dict[str, Any],
+    last_action: torch.Tensor,
+    decision: dict[str, Any],
+    *,
+    initial_object_z: float,
+    target_entity_ids: Sequence[str] = (),
+) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
+    """Route one admitted actuator command to its runtime executor."""
+    if runtime_spec.executor_id == COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID:
+        return _execute_cosmos3_edge_acquire(
+            env,
+            obs,
+            last_action,
+            decision,
+            initial_object_z=initial_object_z,
+            target_entity_ids=target_entity_ids,
+        )
+    return _execute_binary_actuator_tool(
+        env, obs, last_action, decision, initial_object_z=initial_object_z
+    )
 
 
 def _execute_binary_actuator_tool(
@@ -11715,12 +11932,16 @@ def main() -> int:
                                                     "initial composed tool sequence "
                                                     f"was {composed_tool_sequence.decision}"
                                                 )
-                                            active_composed_tool_call = (
-                                                composed_tool_sequence.tool_calls[0]
+                                            admitted_composed_calls = (
+                                                drop_redundant_pre_acquisition_motions(
+                                                    composed_tool_sequence.tool_calls,
+                                                    _policy_acquisition_tool_ids(
+                                                        actuator_executor_registry
+                                                    ),
+                                                )
                                             )
-                                            composed_tool_queue = list(
-                                                composed_tool_sequence.tool_calls[1:]
-                                            )
+                                            active_composed_tool_call = admitted_composed_calls[0]
+                                            composed_tool_queue = list(admitted_composed_calls[1:])
                                             (
                                                 active_composed_tool_call,
                                                 initial_relation_rebinding,
@@ -12850,12 +13071,16 @@ def main() -> int:
                             active_composed_tool_call = None
                             composed_tool_queue.clear()
                         else:
-                            active_composed_tool_call = (
-                                composed_tool_sequence.tool_calls[0]
+                            admitted_composed_calls = (
+                                drop_redundant_pre_acquisition_motions(
+                                    composed_tool_sequence.tool_calls,
+                                    _policy_acquisition_tool_ids(
+                                        actuator_executor_registry
+                                    ),
+                                )
                             )
-                            composed_tool_queue = list(
-                                composed_tool_sequence.tool_calls[1:]
-                            )
+                            active_composed_tool_call = admitted_composed_calls[0]
+                            composed_tool_queue = list(admitted_composed_calls[1:])
                             try:
                                 bootstrap_bundle = (
                                     _materialize_guarded_composed_step(
@@ -13033,11 +13258,26 @@ def main() -> int:
                     ),
                     None,
                 )
-                if runtime_motion_spec is None:
+                runtime_actuator_spec = next(
+                    (
+                        item
+                        for item in actuator_executor_registry.specs()
+                        if item.executor_id == runtime_lease.lease.tool_id
+                    ),
+                    None,
+                )
+                # A policy that owns acquisition can legitimately be the first
+                # operation, so this path is no longer motion-only.
+                if lease_candidate.tool_family == "actuator":
+                    if runtime_actuator_spec is None:
+                        raise RuntimeError(
+                            "issued tool has no active runtime actuator executor"
+                        )
+                elif runtime_motion_spec is None:
                     raise RuntimeError(
                         "issued tool has no active runtime motion executor"
                     )
-                if runtime_motion_spec.invocation_schema is None:
+                elif runtime_motion_spec.invocation_schema is None:
                     raise RuntimeError(
                         "active runtime motion executor has no invocation schema"
                     )
@@ -13541,8 +13781,155 @@ def main() -> int:
                         ),
                     }
 
+                def guarded_actuator_handler(
+                    invocation_arguments: Mapping[str, Any],
+                    tool_configuration: Mapping[str, Any],
+                    active_lease: Any,
+                ) -> Mapping[str, Any]:
+                    """First-operation actuator dispatch.
+
+                    Mirrors the continuation branch so an acquisition that the
+                    model selects as operation 1 is dispatched under the same
+                    permit, lease, and attachment-evidence contract.
+                    """
+                    nonlocal obs, terminal
+                    actuator_command = runtime_actuator_spec.validate_command(
+                        invocation_arguments
+                    )
+                    actuator_configuration = (
+                        runtime_actuator_spec.validate_configuration(
+                            tool_configuration
+                        )
+                    )
+                    actuator_targets = tuple(
+                        lease_candidate.operation_target_entity_ids
+                    )
+                    initial_action = _current_robot_joint_action(
+                        env,
+                        gripper_closed_fraction=float(
+                            fresh_dispatch_state["gripper_closed_fraction"]
+                        ),
+                    )
+                    (
+                        obs,
+                        terminal,
+                        final_action,
+                        actuator_report,
+                    ) = _execute_actuator_command(
+                        runtime_actuator_spec,
+                        env,
+                        obs,
+                        initial_action,
+                        {
+                            "executor_id": runtime_actuator_spec.executor_id,
+                            "command": actuator_command,
+                            "executor_config": actuator_configuration,
+                        },
+                        target_entity_ids=actuator_targets,
+                        initial_object_z=initial_object_z,
+                    )
+                    post_state = _state(env, initial_object_z)
+                    post_tracked_positions_m = _tracked_entity_positions_m(
+                        env, actuator_targets
+                    )
+                    post_events = _guarded_dispatch_invalidation_events(
+                        runtime_lease=active_lease,
+                        lease_candidate=lease_candidate,
+                        invocation_candidate=invocation_candidate,
+                        invocation_decision=invocation_decision,
+                        baseline_membership_ids=baseline_membership_ids,
+                        current_provider_instance_id=(
+                            planning_provider_instance.instance_id
+                        ),
+                        state=post_state,
+                        baseline_tracked_positions_m=(
+                            baseline_tracked_positions_m
+                        ),
+                        current_tracked_positions_m=post_tracked_positions_m,
+                        scene_inventory_memory=scene_inventory_memory,
+                        current_tracked_presence_entity_ids=(
+                            _temporal_inventory_tracked_presence_ids(
+                                env,
+                                scene_inventory_memory,
+                            )
+                        ),
+                        shape_drift_confirmation=(
+                            initial_shape_drift_confirmation
+                        ),
+                    )
+                    expected_post_effect_events: list[dict[str, Any]] = []
+                    for event in post_events:
+                        expected_effect = (
+                            classify_expected_post_release_geometry_change(
+                                event,
+                                invocation_arguments=invocation_arguments,
+                                actuator_report=actuator_report,
+                                target_entity_ids=actuator_targets,
+                            )
+                        )
+                        if expected_effect is None:
+                            if active_lease.active:
+                                active_lease.observe_invalidation(
+                                    event.condition_id, event.evidence
+                                )
+                                monitored_events.append(event.to_dict())
+                            break
+                        expected_post_effect_events.append(
+                            {**event.to_dict(), "assessment": expected_effect}
+                        )
+                    if terminal and active_lease.active:
+                        active_lease.revoke(
+                            reason="dispatch.environment_terminal",
+                            evidence={"terminal": True},
+                        )
+                    return {
+                        "executor_id": runtime_actuator_spec.executor_id,
+                        "executor_tool_name": runtime_actuator_spec.tool_name,
+                        "tool_family": "actuator",
+                        "execution_report": actuator_report,
+                        "actuator_report": actuator_report,
+                        "monitored_invalidation_events": monitored_events,
+                        "expected_post_effect_events": (
+                            expected_post_effect_events
+                        ),
+                        "shape_drift_confirmation": (
+                            initial_shape_drift_confirmation.to_dict()
+                        ),
+                        "terminal": terminal,
+                        "final_action": final_action.detach().cpu().tolist(),
+                        "post_dispatch_observation": {
+                            "eef_gripper_base_xyz": post_state[
+                                "eef_gripper_base_xyz"
+                            ],
+                            "eef_gripper_base_quaternion_wxyz": post_state[
+                                "eef_gripper_base_quaternion_wxyz"
+                            ],
+                            "rgbd_scene_geometry": post_state.get(
+                                "rgbd_scene_geometry"
+                            ),
+                            "tracked_entity_positions_m": (
+                                post_tracked_positions_m
+                            ),
+                            "current_contact": post_state.get(
+                                "current_contact"
+                            ),
+                            "gripper_closed_fraction": post_state.get(
+                                "gripper_closed_fraction"
+                            ),
+                        },
+                        "requires_model_replan": bool(
+                            monitored_events or terminal
+                        ),
+                        "queue_continuation_admitted": bool(
+                            not monitored_events and not terminal
+                        ),
+                    }
+
                 handler_registry.register(
-                    runtime_lease.lease.tool_id, guarded_motion_handler
+                    runtime_lease.lease.tool_id,
+                    guarded_actuator_handler
+                    if lease_candidate.tool_family == "actuator"
+                    else guarded_motion_handler,
                 )
                 dispatcher = GuardedWorldEffectDispatcher(
                     runtime_lease=runtime_lease,
@@ -13611,7 +13998,12 @@ def main() -> int:
                     "lease_armed": runtime_lease.active,
                 }
                 handler_result = outcome_record["handler_result"]
-                motion_report = handler_result["motion_report"]
+                # The first operation may now be an acquisition.
+                motion_report = (
+                    handler_result.get("motion_report")
+                    or handler_result.get("actuator_report")
+                    or {}
+                )
                 episode_trace["stages"].append(
                     {
                         "phase": f"world_effect:{lease_candidate.purpose}",
@@ -13656,7 +14048,7 @@ def main() -> int:
                 print(
                     "[world-effect-guarded-dispatch] OPERATION_COMPLETE "
                     "index=1 "
-                    f"converged={bool(motion_report.get('converged'))} "
+                    f"converged={bool(motion_report.get('converged', motion_report.get('engaged_after')))} "
                     f"lease={runtime_lease.state} "
                     f"iterations={len(motion_report.get('iterations', []))} "
                     f"queue_remaining={len(composed_tool_queue)} "
@@ -14129,12 +14521,16 @@ def main() -> int:
                             active_composed_tool_call = None
                             composed_tool_queue.clear()
                         else:
-                            active_composed_tool_call = (
-                                composed_tool_sequence.tool_calls[0]
+                            admitted_composed_calls = (
+                                drop_redundant_pre_acquisition_motions(
+                                    composed_tool_sequence.tool_calls,
+                                    _policy_acquisition_tool_ids(
+                                        actuator_executor_registry
+                                    ),
+                                )
                             )
-                            composed_tool_queue = list(
-                                composed_tool_sequence.tool_calls[1:]
-                            )
+                            active_composed_tool_call = admitted_composed_calls[0]
+                            composed_tool_queue = list(admitted_composed_calls[1:])
                             pending_composed_suffix_invalidation = None
                             try:
                                 continuation_bundle = (

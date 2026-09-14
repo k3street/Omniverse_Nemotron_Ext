@@ -275,3 +275,206 @@ def test_rollout_budget_bounds():
         spec.validate_configuration(
             {"maximum_action_chunks": MAXIMUM_ACTION_CHUNKS + 1}
         )
+
+
+# ---------------------------------------------------------------------------
+# Policy-owned acquisition (actuator family)
+# ---------------------------------------------------------------------------
+
+def _acquire_spec():
+    from scripts.cosmos3_edge_executor import (
+        COSMOS3_EDGE_CAPABILITY_TAG,
+        build_cosmos3_edge_acquire_executor_spec,
+    )
+
+    return build_cosmos3_edge_acquire_executor_spec(
+        capability_tags=(
+            "entity_attachment.acquire",
+            "entity_attachment.release",
+            "actuation.observation_bound",
+            COSMOS3_EDGE_CAPABILITY_TAG,
+        )
+    )
+
+
+def test_acquire_spec_coexists_with_the_binary_clamp():
+    from scripts.observation_bound_motion_tools import (
+        ActuatorExecutorRegistry,
+        ActuatorExecutorSpec,
+    )
+    from scripts.cosmos3_edge_executor import (
+        COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+        COSMOS3_EDGE_ACQUIRE_TOOL_NAME,
+    )
+
+    clamp = ActuatorExecutorSpec(
+        executor_id="binary_end_effector_clamp",
+        tool_name="execute_binary_end_effector_clamp",
+        description="Binary clamp.",
+        command_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "state": {"type": "string", "enum": ["engage", "disengage", "maintain"]}
+            },
+            "required": ["state"],
+        },
+        configuration_schema={"type": "object", "properties": {}},
+        capability_tags=(
+            "entity_attachment.acquire",
+            "entity_attachment.release",
+            "actuation.observation_bound",
+        ),
+        semantic_command_bindings={
+            "entity_attachment.acquire": {"state": "engage"},
+            "entity_attachment.release": {"state": "disengage"},
+        },
+    )
+    registry = ActuatorExecutorRegistry()
+    registry.register(clamp)
+    registry.register(_acquire_spec())
+    assert {spec.executor_id for spec in registry.specs()} == {
+        "binary_end_effector_clamp",
+        COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+    }
+    assert registry.resolve(COSMOS3_EDGE_ACQUIRE_TOOL_NAME) is not None
+
+
+def test_acquire_spec_keeps_the_runtime_command_vocabulary():
+    # Attachment bookkeeping keys off requested_state, and post-release
+    # geometry-change classification requires a literal "disengage".
+    spec = _acquire_spec()
+    advertisement = spec.advertisement()
+    assert advertisement["tool_family"] == "actuator"
+    assert advertisement["semantic_command_bindings"] == {
+        "entity_attachment.acquire": {"state": "engage"},
+        "entity_attachment.release": {"state": "disengage"},
+    }
+    assert set(
+        advertisement["command_schema"]["properties"]["state"]["enum"]
+    ) == {"engage", "disengage", "maintain"}
+    # The operation planner filters recovery candidates by a ".release" suffix.
+    assert any(
+        effect_id.endswith(".release")
+        for effect_id in advertisement["semantic_command_bindings"]
+    )
+    for command in advertisement["semantic_command_bindings"].values():
+        assert spec.validate_command(command) == command
+
+
+def test_acquire_rollout_budget_is_bounded():
+    from scripts.cosmos3_edge_executor import MAXIMUM_ACQUIRE_ACTION_CHUNKS
+    from scripts.observation_bound_motion_tools import MotionToolValidationError
+
+    spec = _acquire_spec()
+    assert spec.validate_configuration(
+        {"maximum_action_chunks": MAXIMUM_ACQUIRE_ACTION_CHUNKS}
+    ) == {"maximum_action_chunks": MAXIMUM_ACQUIRE_ACTION_CHUNKS}
+    with pytest.raises(MotionToolValidationError):
+        spec.validate_configuration(
+            {"maximum_action_chunks": MAXIMUM_ACQUIRE_ACTION_CHUNKS + 1}
+        )
+    # settle_steps still configures the direct disengage/maintain commands.
+    assert spec.validate_configuration({"settle_steps": 35}) == {"settle_steps": 35}
+
+
+# ---------------------------------------------------------------------------
+# Approach folded into a policy acquisition (lane 2c)
+# ---------------------------------------------------------------------------
+
+class _Call:
+    def __init__(self, call_id, tool_id, tool_family, targets, effect=None):
+        self.call_id = call_id
+        self.tool_id = tool_id
+        self.tool_family = tool_family
+        self.target_entity_ids = tuple(targets)
+        self.semantic_effect_id = effect
+
+    def __repr__(self):
+        return f"<{self.call_id}>"
+
+
+def _ids(calls):
+    return [c.call_id for c in calls]
+
+
+def test_alignment_motion_before_policy_acquisition_is_dropped():
+    from scripts.cosmos3_edge_executor import (
+        COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+        drop_redundant_pre_acquisition_motions,
+    )
+
+    calls = [
+        _Call("align", "cosmos3_edge_policy", "motion", ["red_block"]),
+        _Call(
+            "acquire",
+            COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+            "actuator",
+            ["red_block"],
+            "entity_attachment.acquire",
+        ),
+        _Call("transport", "cosmos3_edge_policy", "motion", ["grey_bin"]),
+        _Call(
+            "release",
+            COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+            "actuator",
+            ["red_block"],
+            "entity_attachment.release",
+        ),
+    ]
+    kept = drop_redundant_pre_acquisition_motions(
+        calls, {COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID}
+    )
+    # The approach is part of the acquisition; transport is not.
+    assert _ids(kept) == ["acquire", "transport", "release"]
+
+
+def test_unrelated_and_post_acquisition_motions_are_preserved():
+    from scripts.cosmos3_edge_executor import (
+        COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+        drop_redundant_pre_acquisition_motions,
+    )
+
+    calls = [
+        _Call("clear_lid", "cosmos3_edge_policy", "motion", ["grey_bin"]),
+        _Call(
+            "acquire",
+            COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+            "actuator",
+            ["red_block"],
+            "entity_attachment.acquire",
+        ),
+        _Call("nudge", "cosmos3_edge_policy", "motion", ["red_block"]),
+    ]
+    kept = drop_redundant_pre_acquisition_motions(
+        calls, {COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID}
+    )
+    assert _ids(kept) == ["clear_lid", "acquire", "nudge"]
+
+
+def test_clamp_sequences_and_empty_registries_are_untouched():
+    from scripts.cosmos3_edge_executor import (
+        COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
+        drop_redundant_pre_acquisition_motions,
+    )
+
+    clamp_calls = [
+        _Call("align", "bounded_dls_ik", "motion", ["red_block"]),
+        _Call(
+            "clamp",
+            "binary_end_effector_clamp",
+            "actuator",
+            ["red_block"],
+            "entity_attachment.acquire",
+        ),
+    ]
+    # A gripper-only clamp still needs its alignment motion.
+    assert _ids(
+        drop_redundant_pre_acquisition_motions(
+            clamp_calls, {COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID}
+        )
+    ) == ["align", "clamp"]
+    assert _ids(drop_redundant_pre_acquisition_motions(clamp_calls, set())) == [
+        "align",
+        "clamp",
+    ]

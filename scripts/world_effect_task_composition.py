@@ -874,9 +874,22 @@ For propose_task_plan:
   grounding and no ordered_waypoints is invalid. Never echo target_position_m
   or target_quaternion_wxyz from the executor schema; the runtime materializes
   both from the selected RGB-D anchor, offset, and orientation axis.
-- Include an alignment motion immediately before acquisition. The runtime may
-  tighten geometry thresholds and bind the terminal grasp relation to fresh
-  RGB-D/tactile evidence, but it never broadens the model's safety thresholds.
+- Include an alignment motion immediately before acquisition when the
+  acquiring tool only opens and closes a gripper. When the acquiring tool's
+  capability_tags include policy.language_conditioned_action_chunks it
+  approaches and aligns on the target itself inside the acquisition call:
+  issue that acquisition directly, without a preceding alignment motion, and
+  do not follow it with a corrective motion toward the same anchor. Approach is
+  part of that acquisition, so plan no motion toward the object before it:
+  when the target is visible, the acquisition is the first call of the
+  sequence regardless of how far the end-effector currently is. The runtime
+  rejects the whole
+  composition when a motion's materialized target is already within its
+  configured position_tolerance_m of the current end-effector pose, so never
+  plan a motion toward an anchor the end-effector has effectively reached. The
+  runtime may tighten geometry thresholds and bind the terminal grasp relation
+  to fresh RGB-D/tactile evidence, but it never broadens the model's safety
+  thresholds.
 - Future calls are drafts. Contact loss, slip, pose/orientation drift, collision,
   clearance, visibility, membership, provider, or motion failure invalidates the
   remaining suffix before execution.
