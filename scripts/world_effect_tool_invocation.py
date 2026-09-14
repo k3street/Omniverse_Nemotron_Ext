@@ -44,6 +44,15 @@ RUNTIME_TOOL_OBSERVATION_SCHEMA_VERSION = "runtime-tool-observation.v1"
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$")
 
 
+# An acquisition executor advertising this capability approaches and aligns on
+# the target inside its own rollout, so the pre-grasp corridor checks below --
+# which exist because a gripper-only clamp closing on nothing achieves nothing
+# -- are preconditions it establishes rather than ones it requires.
+SELF_ALIGNING_ACQUISITION_CAPABILITY_TAG = (
+    "policy.language_conditioned_action_chunks"
+)
+
+
 class WorldEffectToolInvocationError(ValueError):
     """Raised when a proposed invocation exceeds its evidence or tool schema."""
 
@@ -448,6 +457,7 @@ class ShadowToolInvocationCandidate:
     retained_contact_supported: bool
     position_anchors: tuple[PositionGroundingAnchor, ...]
     orientation_axes: tuple[OrientationGroundingAxis, ...]
+    self_aligning_acquisition: bool = False
 
     @property
     def position_grounding_required(self) -> bool:
@@ -1058,7 +1068,12 @@ def build_shadow_tool_invocation_candidates(
         "current_interaction_offsets_from_anchors": current_interaction_offsets,
         "orientation_axes": [item.to_dict() for item in orientation_axes],
     }
+    self_aligning_acquisition = (
+        SELF_ALIGNING_ACQUISITION_CAPABILITY_TAG
+        in tuple(getattr(activation, "capability_tags", ()) or ())
+    )
     candidate = ShadowToolInvocationCandidate(
+        self_aligning_acquisition=self_aligning_acquisition,
         candidate_id="tool-invocation:" + _digest(candidate_seed),
         lease_observation_id=lease_decision.observation_id,
         lease_id=lease_decision.lease_id,
@@ -1543,6 +1558,7 @@ class ShadowToolInvocationGate:
         if (
             candidate.semantic_effect_id == "entity_attachment.acquire"
             and candidate.interaction_grasp_geometry
+            and not candidate.self_aligning_acquisition
         ):
             grasp_alignment = candidate.two_pad_grasp_alignment
             if grasp_alignment.get("available") is not True:
