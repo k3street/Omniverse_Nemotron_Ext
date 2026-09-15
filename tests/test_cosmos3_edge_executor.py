@@ -478,3 +478,28 @@ def test_clamp_sequences_and_empty_registries_are_untouched():
         "align",
         "clamp",
     ]
+
+
+# ---------------------------------------------------------------------------
+# A policy engage without retention must not read as a completed operation
+# ---------------------------------------------------------------------------
+
+def test_policy_engage_without_retention_is_flagged():
+    from scripts.cosmos3_edge_executor import acquisition_not_retained
+
+    base = {
+        "acquisition_source": "cosmos3_edge_policy_rollout",
+        "requested_state": "engage",
+    }
+    assert acquisition_not_retained({**base, "engaged_after": False}) is True
+    assert acquisition_not_retained({**base, "engaged_after": True}) is False
+    # Release and hold are direct gripper commands; they settle, they do not grasp.
+    assert acquisition_not_retained(
+        {**base, "requested_state": "disengage", "engaged_after": False}
+    ) is False
+    # The binary clamp keeps its own semantics untouched.
+    assert acquisition_not_retained(
+        {"executor_id": "binary_end_effector_clamp", "requested_state": "engage",
+         "engaged_after": False}
+    ) is False
+    assert acquisition_not_retained(None) is False

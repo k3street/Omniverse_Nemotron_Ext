@@ -628,6 +628,7 @@ from sim6_camera_offsets import convert_sim5_camera_offsets  # noqa: E402
 from cosmos3_edge_executor import (  # noqa: E402
     COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
     DEFAULT_ACQUIRE_ACTION_CHUNKS as COSMOS3_EDGE_DEFAULT_ACQUIRE_CHUNKS,
+    acquisition_not_retained,
     build_cosmos3_edge_acquire_executor_spec,
     drop_redundant_pre_acquisition_motions,
     COSMOS3_EDGE_CAPABILITY_TAG,
@@ -7146,6 +7147,19 @@ def _dispatch_guarded_world_effect_continuation(
                     reason="dispatch.environment_terminal",
                     evidence={"terminal": True},
                 )
+            not_retained = acquisition_not_retained(actuator_report)
+            if not_retained and active_lease.active:
+                active_lease.revoke(
+                    reason="dispatch.acquisition_not_retained",
+                    evidence={
+                        "completion_reason": actuator_report.get(
+                            "completion_reason"
+                        ),
+                        "gripper_closed_fraction": (
+                            actuator_report.get("state_after") or {}
+                        ).get("gripper_closed_fraction"),
+                    },
+                )
             handler_result_box["_obs"] = next_obs
             return {
                 "executor_id": runtime_spec.executor_id,
@@ -7175,10 +7189,10 @@ def _dispatch_guarded_world_effect_continuation(
                     ),
                 },
                 "requires_model_replan": bool(
-                    monitored_events or terminal
+                    monitored_events or terminal or not_retained
                 ),
                 "queue_continuation_admitted": bool(
-                    not monitored_events and not terminal
+                    not monitored_events and not terminal and not not_retained
                 ),
             }
 
@@ -13882,6 +13896,19 @@ def main() -> int:
                             reason="dispatch.environment_terminal",
                             evidence={"terminal": True},
                         )
+                    not_retained = acquisition_not_retained(actuator_report)
+                    if not_retained and active_lease.active:
+                        active_lease.revoke(
+                            reason="dispatch.acquisition_not_retained",
+                            evidence={
+                                "completion_reason": actuator_report.get(
+                                    "completion_reason"
+                                ),
+                                "gripper_closed_fraction": (
+                                    actuator_report.get("state_after") or {}
+                                ).get("gripper_closed_fraction"),
+                            },
+                        )
                     return {
                         "executor_id": runtime_actuator_spec.executor_id,
                         "executor_tool_name": runtime_actuator_spec.tool_name,
@@ -13918,10 +13945,12 @@ def main() -> int:
                             ),
                         },
                         "requires_model_replan": bool(
-                            monitored_events or terminal
+                            monitored_events or terminal or not_retained
                         ),
                         "queue_continuation_admitted": bool(
-                            not monitored_events and not terminal
+                            not monitored_events
+                            and not terminal
+                            and not not_retained
                         ),
                     }
 

@@ -8,7 +8,7 @@ without launching Isaac. Execution itself lives in the runner
 
 from __future__ import annotations
 
-from typing import Any, Collection, Sequence
+from typing import Any, Collection, Mapping, Sequence
 
 try:
     from .observation_bound_motion_tools import (
@@ -343,6 +343,25 @@ def drop_redundant_pre_acquisition_motions(
                 continue
         kept.append(call)
     return kept
+
+
+def acquisition_not_retained(actuator_report: Mapping[str, Any]) -> bool:
+    """A policy engage that ended without a retained object is not complete.
+
+    The clamp's lease semantics treat a settled command as done, because a
+    closed clamp either holds the object or the alignment gates already ruled
+    the grasp out. A policy acquisition has no such upstream guarantee: its
+    rollout can finish with the gripper open or closed on nothing. Reporting
+    that as a completed operation lets the planner re-issue the same grasp
+    indefinitely; revoking the lease instead forces a fresh decision.
+    """
+    return bool(
+        isinstance(actuator_report, Mapping)
+        and actuator_report.get("acquisition_source")
+        == "cosmos3_edge_policy_rollout"
+        and actuator_report.get("requested_state") == "engage"
+        and not actuator_report.get("engaged_after")
+    )
 
 
 def build_cosmos3_edge_acquire_executor_spec(
