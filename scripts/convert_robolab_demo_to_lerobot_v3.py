@@ -25,6 +25,21 @@ no re-encoding to concatenate them.
 The frame content, action semantics, sensor block, and ``modality.json`` are
 produced by the shared v2.1 code path, so both exports describe the same
 episodes.
+
+Two constraints matter when feeding ``cosmos-framework``'s
+``DROIDLeRobotDataset``, both verified by loading an export through it:
+
+* It derives its feature mapping from ``os.path.basename(root)`` and rejects
+  any name outside its ``LEROBOT_ROOTS`` table. Only
+  ``droid_lerobot_20260115_no_noops`` expects the feature names written here
+  (``observation.state``, ``action``, ``observation.images.*``), so the export
+  directory must carry that name to be consumed.
+* It reads three cameras -- wrist, ``exterior_image_1_left`` and
+  ``exterior_image_2_left``. A recording with the two-camera combined video
+  produces the first two, which satisfies ``viewpoint="wrist_view"`` but not
+  ``"concat_view"`` or ``"third_person_view"``; those additionally query the
+  right camera and fail on the missing column. Recording the right
+  over-shoulder view (the ``WRIST_LEFT_RIGHT`` preset) is what unlocks them.
 """
 from __future__ import annotations
 
