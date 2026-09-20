@@ -187,6 +187,61 @@ cells. See the workflow guide's
 [task and embodiment training matrix](docs/integrations/gemini-robotics-er2-robolab.md#task-and-embodiment-training-matrix)
 section for the supported campaigns and execution safeguards.
 
+#### Cosmos 3 Edge on-device policy
+
+[NVIDIA Cosmos 3 Edge](https://huggingface.co/nvidia/Cosmos3-Edge-Policy-DROID) is a
+4B world-action model small enough to run on the robot's own compute. It serves
+32-step action chunks over the OpenPI WebSocket protocol, and the composed
+execution stack can use it two ways: as a motion executor beside bounded DLS IK,
+and as a reversible-attachment actuator that owns a whole grasp — approach,
+align and close — in one rollout.
+
+```bash
+# Serve the policy locally (Blackwell/Thor-class device or workstation GPU).
+python -m cosmos_framework.scripts.action_policy_server_robolab \
+  --checkpoint-path nvidia/Cosmos3-Edge-Policy-DROID --port 8000 \
+  --format-prompt-as-json True --guidance-interval 960 1001
+
+# Plan with Gemini, act with the local policy.
+./launch_gemini_robotics_robolab.sh --guarded-world-effect-execution \
+  --cosmos3-edge-policy --task BlocksInBinTask
+```
+
+Every lease condition, invalidation monitor and attachment record applies to the
+learned policy exactly as it does to the analytic executors: a rollout that ends
+without an object retained between the gripper pads revokes its lease instead of
+reporting a completed operation.
+
+#### Scripted demonstrations and post-training datasets
+
+Post-training needs far more demonstrations than a supervised campaign can
+collect. A privileged scripted oracle generates successful episodes unattended,
+with no model API in the loop — each one verified by RoboLab's own success
+detector:
+
+```bash
+# Generate demonstrations (RoboLab's Isaac Sim 5.1 environment).
+python scripts/generate_banana_on_plate_demos.py \
+  --episodes 50 --xy-jitter 0.03 --output artifacts/banana_demos --headless
+
+# Project them for post-training: LeRobot v3.0 for Cosmos 3, v2.1 for GR00T N1.7.
+python scripts/convert_robolab_demo_to_lerobot_v3.py \
+  --input-dir artifacts/banana_demos --output <dataset-dir> \
+  --instruction "Pick up the banana and put it on the plate"
+```
+
+[![Scripted banana-on-plate demonstrations in Isaac Lab](docs/media/cosmos3-edge-oracle-demos-preview.jpg)](docs/media/cosmos3-edge-oracle-demos-2x.mp4)
+
+*Four successful scripted demonstrations — exterior and wrist views, the two
+cameras recorded into every episode. Click the preview to watch at 2× speed.*
+
+A 50-episode run yields roughly 47 successful demonstrations in about 40
+minutes, which convert to ~8,000 Cosmos training samples. The v3.0 writer emits
+the chunked `data/`, `videos/` and `meta/episodes/` layout that
+`cosmos-framework`'s `DROIDLeRobotDataset` consumes; note that its feature
+mapping is selected by the dataset directory name, and that a two-camera
+recording supports `viewpoint="wrist_view"`.
+
 #### Containerized service
 
 The container packages the core HTTP service. Live ROS2, Kit, and voice
