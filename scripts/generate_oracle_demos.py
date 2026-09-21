@@ -22,7 +22,10 @@ from isaaclab.app import AppLauncher
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--task", default="BananaOnPlate", choices=("BananaOnPlate", "BlocksInBin"))
+parser.add_argument("--task", default="BananaOnPlate", choices=(
+    "BananaOnPlate", "BlocksInBin",
+    "BananaInBowl", "RubiksCubeInBowl", "ToyInBin",
+))
 parser.add_argument("--episodes", type=int, default=1)
 # Each episode seeds its jitter from its index, so a second run with the same
 # range reproduces the same scenes. Offset the index to get new ones.
@@ -86,6 +89,35 @@ class TaskProfile:
     jitter_objects: tuple[str, ...] = ()
 
 
+# Bins are walled, so the release has to clear the rim rather than hover over a
+# flat plate. These heights are shared by every bin task below.
+BIN_HEIGHTS = dict(place_clearance_m=0.34, place_release_m=0.26, retreat_m=0.34)
+
+
+# A bowl has a rim to clear but is shallower than a bin.
+BOWL_HEIGHTS = dict(place_clearance_m=0.30, place_release_m=0.20, retreat_m=0.30)
+
+
+def _bin_task(task: str, obj: str, container: str, *, grasp=None, heights=None) -> "TaskProfile":
+    """A single-object pick-and-place into a container.
+
+    Single-object tasks are the valuable ones: the task marks itself successful
+    exactly when its one object lands, so the recorder's own verdict can be
+    trusted, and there is no second grasp to compound the failure rate. They
+    also reuse the small-object grasp, since these are all table-top items of
+    roughly the same size as a block.
+    """
+    return TaskProfile(
+        task=task,
+        pick_objects=(obj,),
+        place_target=container,
+        grasp_offset=BLOCK_GRASP_OFFSET if grasp is None else grasp,
+        grasp_quaternion=BANANA_GRASP_QUAT,
+        jitter_objects=(obj,),
+        **(BIN_HEIGHTS if heights is None else heights),
+    )
+
+
 TASK_PROFILES = {
     "BananaOnPlate": TaskProfile(
         task="BananaOnPlateTask",
@@ -109,6 +141,23 @@ TASK_PROFILES = {
         retreat_m=0.34,
         jitter_objects=("red_block", "blue_block", "green_block", "yellow_block"),
     ),
+    # Single-object tasks, each a different object in a different scene. Scene
+    # variety is what the policy has to generalise over, and these cost only
+    # simulator time.
+    # A centroid top-down grip only works on objects narrower than the
+    # gripper's ~8 cm opening. Measured footprints ruled out two otherwise
+    # appealing tasks: raisin_box is 124 x 86 mm and spring_clamp 211 x 165 mm,
+    # and both simply slid out -- they need a real grasp pose, not an offset.
+    # These three are small enough, and their scenes hold barely any clutter,
+    # which is the other thing that decides yield.
+    "BananaInBowl": _bin_task(
+        "BananaInBowlTask", "banana", "bowl",
+        grasp=BANANA_GRASP_OFFSET, heights=BOWL_HEIGHTS,
+    ),
+    "RubiksCubeInBowl": _bin_task(
+        "RubiksCubeTask", "rubiks_cube", "bowl", heights=BOWL_HEIGHTS,
+    ),
+    "ToyInBin": _bin_task("ToyInBinTask", "lizard_figurine", "grey_bin"),
 }
 
 PROFILE = TASK_PROFILES[args.task]
