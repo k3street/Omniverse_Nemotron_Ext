@@ -236,9 +236,15 @@ python scripts/generate_oracle_demos.py --task BlocksInBin \
 python scripts/stage_oracle_episodes.py --judge placement \
   --input artifacts/block_demos --output artifacts/block_demos_staged
 
+# Keep only the episodes worth training on, renumbered contiguously.
+python scripts/stage_oracle_episodes.py \
+  --input artifacts/banana_demos --output artifacts/banana_demos_staged
+
 # Project them for post-training: LeRobot v3.0 for Cosmos 3, v2.1 for GR00T N1.7.
+# The converter needs pyarrow and does NOT need Isaac, so run it from an
+# environment that has one (RoboLab's Isaac Sim venv has no pyarrow).
 python scripts/convert_robolab_demo_to_lerobot_v3.py \
-  --input-dir artifacts/banana_demos --output <dataset-dir> \
+  --input-dir artifacts/banana_demos_staged --output <dataset-dir> \
   --instruction "Pick up the banana and put it on the plate"
 ```
 
