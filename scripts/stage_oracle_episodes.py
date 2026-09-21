@@ -14,8 +14,14 @@ Two things make this more than a copy loop:
   to close on nothing.
 """
 import argparse
+import os
 import shutil
 from pathlib import Path
+
+# Staging only ever reads. Without this, selecting episodes while the generator
+# is still writing later ones fails with "unable to lock file", which is a
+# needless serialisation of two jobs that do not conflict.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
 import numpy as np
 
@@ -36,8 +42,16 @@ def attempted_objects(demo) -> tuple[str, ...] | None:
 
 
 def object_tracks(demo) -> dict[str, np.ndarray]:
-    """Per-object xyz over the episode, pulled out of the recorder's groups."""
-    rigid = demo["states"]["rigid_object"]
+    """Per-object xyz over the episode, pulled out of the recorder's groups.
+
+    An episode where the controller found nothing worth attempting records no
+    object states at all, so this has to come back empty rather than raise --
+    a degenerate recording is something to drop, not something to crash on.
+    """
+    states = demo.get("states")
+    rigid = states.get("rigid_object") if states is not None else None
+    if rigid is None:
+        return {}
     return {
         name: np.asarray(rigid[name]["root_pose"])[:, :3] for name in rigid
     }
@@ -68,6 +82,8 @@ def judge_by_placement(
     ``attempted`` restricts the verdict to the objects the controller set out
     to move, when the recording says which those were.
     """
+    if container not in tracks:
+        return False, "no recorded object states"
     target_xy = tracks[container][-1, :2]
     placed, dropped = [], []
     for name, track in tracks.items():
