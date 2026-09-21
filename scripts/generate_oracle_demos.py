@@ -119,8 +119,23 @@ def scene_object_names(env) -> tuple[str, ...]:
     return tuple(objects.keys()) if objects else ()
 
 
+# The fingers sweep roughly this far either side of the grasp axis on the way
+# down, so a neighbour inside it can foul them even when its centre is not
+# especially close.
+FINGER_RADIUS_M = 0.12
+
+
 def graspable_objects(env, profile: "TaskProfile", min_clearance_m: float) -> tuple[str, ...]:
-    """Keep only pick targets with room around them for a top-down descent."""
+    """Keep only pick targets with room around them for a top-down descent.
+
+    Lateral distance alone is not enough. A short neighbour close by is
+    harmless -- the fingers pass above it -- while a TALLER one further out
+    stops the descent short and the gripper closes on nothing. Measured on
+    toys_cleanup: a block that cleared the 8 cm distance test still jammed
+    3.4 cm above its target, fouled by a taller neighbour about 9 cm away.
+    Centroid height stands in for object height here; the sim exposes root
+    poses cheaply, and a taller object sits higher.
+    """
     if min_clearance_m <= 0:
         return profile.pick_objects
     others = [
@@ -132,19 +147,24 @@ def graspable_objects(env, profile: "TaskProfile", min_clearance_m: float) -> tu
     ]
     keep = []
     for name in profile.pick_objects:
-        here = object_position(env, name)[:2]
-        clearance = min(
-            (
-                float(torch.linalg.norm(object_position(env, other)[:2] - here))
-                for other in others
-                if other != name
-            ),
-            default=float("inf"),
-        )
-        if clearance >= min_clearance_m:
+        here = object_position(env, name)
+        blocker, reason = None, ""
+        for other in others:
+            if other == name:
+                continue
+            there = object_position(env, other)
+            gap = float(torch.linalg.norm(there[:2] - here[:2]))
+            if gap < min_clearance_m:
+                blocker, reason = other, f"{gap:.3f} m away"
+                break
+            # Taller and within finger sweep: it will stop the descent.
+            if gap < FINGER_RADIUS_M and float(there[2]) >= float(here[2]):
+                blocker, reason = other, f"taller, {gap:.3f} m away"
+                break
+        if blocker is None:
             keep.append(name)
         else:
-            print(f"[oracle] skipping {name}: nearest object {clearance:.3f} m < {min_clearance_m:.3f} m")
+            print(f"[oracle] skipping {name}: {blocker} {reason}")
     return tuple(keep)
 
 
