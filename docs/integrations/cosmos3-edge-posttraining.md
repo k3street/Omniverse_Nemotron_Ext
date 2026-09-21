@@ -195,3 +195,37 @@ prints nothing per iteration. Two traps when turning it on:
 
 `wandb_mode="offline"` did not record usable history either, so the console
 override is the practical route.
+
+## What 1000 iterations on 47 episodes actually bought
+
+Measured with `scripts/eval_action_chunk_prediction.py` on **episode 32**, the
+one `DROIDLeRobotDataset` holds out as its val split, so neither model had
+trained on it. Both served through `action_policy_server_robolab` with identical
+settings (`joint_pos`, `action_dim=8`, `chunk=32`, `fps=15`, res 480), 8 sampled
+start frames, 32-step horizon:
+
+| Model | Joint MAE | Gripper MAE | Gripper spread |
+| --- | --- | --- | --- |
+| `nvidia/Cosmos3-Edge-Policy-DROID` (stock) | 0.212 rad (~12 deg) | 0.145 | varies 0 to 1 |
+| Post-trained here (base Edge + 47 episodes, 1000 iters) | **0.088 rad (~5 deg)** | 0.645 | **0.000** |
+
+**The arm got substantially better and the gripper died.** Joint error fell
+2.4x, which is a real generalisation gain on a held-out episode of the target
+task. But the post-trained policy emits a gripper value of exactly 0.000 at
+every timestep of every chunk, while stock transitions 0 to 1 as it grasps. A
+policy that never closes cannot pick anything up, so despite the better
+trajectory this checkpoint is not usable for grasping.
+
+That is the expected shape of the constraint named above: the action head is not
+warm-started, and 47 single-task episodes over 1000 iterations is enough to fit
+the arm trajectory but not to learn a binary channel that is one of 8 dimensions
+inside a 64-wide padded action space. Report the gripper separately from the
+joints -- averaging them into one number hides exactly this failure, which is
+why the harness never combines them and also reports the predicted gripper's
+spread.
+
+The closed-loop grasp benchmark could not be used as the check here:
+`bench_cosmos3_edge_grasp.py` skipped every trial because the environment would
+not return the arm to its spawn pose (0.943 rad error, unchanged at 8x the
+settle budget). That is an Isaac/environment issue, independent of the policy --
+homing happens before the policy is ever queried.
