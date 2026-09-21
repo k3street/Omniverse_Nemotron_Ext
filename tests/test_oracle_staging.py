@@ -69,3 +69,17 @@ def test_attempted_list_scopes_the_verdict():
     tracks = {CONTAINER: BIN_TRACK, "red_block": DELIVERED, "blue_block": MISPLACED}
     assert judge_by_placement(tracks, attempted=("red_block",), **LIMITS)[0]
     assert not judge_by_placement(tracks, attempted=("red_block", "blue_block"), **LIMITS)[0]
+
+
+def test_an_attempted_object_that_never_left_the_table_is_a_failure():
+    # Without a record of intent a motionless object is ambiguous, so it is
+    # ignored. Once the controller says it went for that object, not lifting it
+    # means the gripper closed on nothing -- which is the demonstration that
+    # teaches the very failure we are training out.
+    tracks = {CONTAINER: BIN_TRACK, "red_block": DELIVERED, "yellow_block": UNTOUCHED}
+    assert judge_by_placement(tracks, **LIMITS)[0]
+    ok, why = judge_by_placement(
+        tracks, attempted=("red_block", "yellow_block"), **LIMITS
+    )
+    assert not ok
+    assert "yellow_block" in why

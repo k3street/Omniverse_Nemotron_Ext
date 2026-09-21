@@ -89,11 +89,19 @@ def judge_by_placement(
     for name, track in tracks.items():
         if name in {container, "table"}:
             continue
-        if attempted is not None and name not in attempted:
+        on_purpose = attempted is not None and name in attempted
+        if attempted is not None and not on_purpose:
             continue
         lifted = float(track[:, 2].max() - track[0, 2])
         if lifted < min_lift_m:
-            continue  # never picked up: untouched, or nudged in passing
+            # Never left the table. Without a record of intent that is
+            # indistinguishable from clutter brushed in passing, so ignore it;
+            # but when the controller says it went for this object, not
+            # lifting it is a grasp that closed on nothing -- the precise
+            # demonstration we must keep out of the training set.
+            if on_purpose:
+                dropped.append(name)
+            continue
         if float(np.linalg.norm(track[-1, :2] - target_xy)) <= radius_m:
             placed.append(name)
         else:
@@ -149,7 +157,15 @@ def main() -> None:
         if not ok:
             continue
         if not args.dry_run:
-            shutil.copy2(hdf5, args.output / f"run_{kept}.hdf5")
+            staged = args.output / f"run_{kept}.hdf5"
+            shutil.copy2(hdf5, staged)
+            # Record who admitted this episode, without touching the
+            # recorder's own `success` attribute. A multi-object task only
+            # sets that when every object is placed, so a clean single-object
+            # pick-and-place reads as a failure there and would otherwise be
+            # refused downstream.
+            with h5py.File(staged, "r+") as target:
+                target[f"data/{DEMO_KEY}"].attrs["stage_verdict"] = why
             if video.is_file():
                 shutil.copy2(video, args.output / f"episode_{kept:06d}_policy.mp4")
             else:

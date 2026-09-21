@@ -46,8 +46,18 @@ def episode_provenance(hdf5_path: Path, demo_key: str) -> dict:
     """Read admission/provenance metadata and reject non-successful demos."""
     with h5py.File(hdf5_path, "r") as source:
         demo = source[f"data/{demo_key}"]
-        if not bool(demo.attrs.get("success", False)):
-            raise ValueError(f"Episode is not marked successful: {hdf5_path}:{demo_key}")
+        # A multi-object task only sets `success` once every object is placed,
+        # so an episode that cleanly picked and placed what it attempted still
+        # reads as a failure. stage_oracle_episodes.py judges those from the
+        # recorded trajectories and stamps its verdict; accept either signal,
+        # and carry whichever admitted the episode into provenance.
+        verdict = demo.attrs.get("stage_verdict")
+        if isinstance(verdict, bytes):
+            verdict = verdict.decode()
+        if not bool(demo.attrs.get("success", False)) and not verdict:
+            raise ValueError(
+                f"Episode is neither marked successful nor staged: {hdf5_path}:{demo_key}"
+            )
         convention = str(demo.attrs.get("quaternion_convention", "wxyz"))
         if convention != "wxyz":
             raise ValueError(
@@ -69,6 +79,12 @@ def episode_provenance(hdf5_path: Path, demo_key: str) -> dict:
             "source_policy": str(demo.attrs.get("source_policy", "unknown")),
             "quaternion_convention": convention,
             "collection": metadata,
+            # Which signal admitted this episode, so a dataset can be audited
+            # back to the decision that let each episode in.
+            "admitted_by": "recorder_success" if bool(
+                demo.attrs.get("success", False)
+            ) else "stage_verdict",
+            "stage_verdict": str(verdict) if verdict else None,
         }
 
 
