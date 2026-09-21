@@ -103,10 +103,21 @@ matching the reference sample count would take far longer than the iteration
 count alone suggests. Plan a real post-training run as hours-to-days of
 multi-GPU time, and treat short runs strictly as pipeline validation.
 
-For reference, on 7xA100-80GB with the tokenizer compile disabled, iterations
-ran at roughly 2.2 s each and a checkpoint at iteration 100 was 36 GB (weights
-plus optimizer and EMA state) — large enough that pulling checkpoints off a
-rented node is itself a planning item.
+Measured on 7xA100-80GB with the tokenizer compile disabled:
+
+| `max_samples_per_batch` | samples/iteration | s/iteration | samples/s | GPU memory |
+| --- | --- | --- | --- | --- |
+| 4  | 28  | 2.2 | 12.7 | ~15-19 GB |
+| 16 | 112 | 6.8 | 16.5 | ~17-22 GB |
+
+Memory barely moved between the two, so it is dominated by model and optimizer
+state rather than activations (full activation checkpointing is on) — there is
+room for a much larger batch than the shipped default implies, and the larger
+batch is ~30% more efficient per sample. A checkpoint is 36 GB (weights plus
+optimizer and EMA state), large enough that pulling one off a rented node is
+itself a planning item; `cosmos_framework.scripts.export_model` converts a DCP
+checkpoint to a far smaller Hugging Face model directory, which is what the
+policy server wants anyway.
 
 ## Launching
 
@@ -128,5 +139,20 @@ torchrun --nproc_per_node=<gpus> --standalone \
   dataloader_train.dataloader.datasets.droid.dataset.viewpoint=wrist_view
 ```
 
-Note the recipe sets `log_train_loss_to_console: False`, so a healthy run prints
-nothing per iteration — progress shows up as checkpoint saves at `save_iter`.
+### Seeing that it is actually training
+
+The recipe sets `log_train_loss_to_console: False`, so by default a healthy run
+prints nothing per iteration. Two traps when turning it on:
+
+- **Do not put it in the TOML.** `[trainer.callbacks.wandb]` is rejected by the
+  config schema: `ValidationError: trainer.callbacks.wandb — Extra inputs are not
+  permitted`. Only certain callback tables (e.g. `compile_tokenizer`) are
+  allowed there. Pass it as a Hydra CLI override instead —
+  `trainer.callbacks.wandb.log_train_loss_to_console=true` — which is accepted.
+- **The `iter_speed` callback is rate-limited to the first 50 iterations**
+  (`Hit counter: N/50`). After iteration 50 it goes quiet, so a watch grepping
+  for later iteration numbers sees nothing and silence looks like a hang. Past
+  iteration 50 the only routine progress signal is checkpoint saves.
+
+`wandb_mode="offline"` did not record usable history either, so the console
+override is the practical route.
