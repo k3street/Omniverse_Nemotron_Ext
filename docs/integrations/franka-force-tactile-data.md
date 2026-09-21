@@ -47,7 +47,7 @@ this signal and remain mask-invalid.
 
 ## Simulation collection and conversion
 
-`generate_banana_on_plate_demos.py` now attaches the canonical
+`generate_oracle_demos.py` now attaches the canonical
 `sensors/franka` group to every generated HDF5 episode. Isaac actuator torque is
 correctly labeled as commanded torque—not measured torque. Simulated contact
 force and touch are valid only when RoboLab has a live contact sensor.

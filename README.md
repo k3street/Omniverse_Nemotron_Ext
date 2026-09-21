@@ -221,8 +221,20 @@ detector:
 
 ```bash
 # Generate demonstrations (RoboLab's Isaac Sim 5.1 environment).
-python scripts/generate_banana_on_plate_demos.py \
-  --episodes 50 --xy-jitter 0.03 --output artifacts/banana_demos --headless
+# --seed-offset picks fresh scenes: each episode seeds its jitter from its
+# index, so repeating a range reproduces the same demonstrations.
+python scripts/generate_oracle_demos.py --task BananaOnPlate \
+  --episodes 50 --xy-jitter 0.04 --seed-offset 0 \
+  --output artifacts/banana_demos --headless
+
+# Cluttered scenes need a clearance test so the arm only attempts grasps it can
+# reach, and their success is judged from telemetry rather than the recorder's
+# all-or-nothing attribute. Staging renumbers survivors contiguously, which the
+# converter requires -- it pairs HDF5 and video by index.
+python scripts/generate_oracle_demos.py --task BlocksInBin \
+  --episodes 50 --min-clearance 0.08 --output artifacts/block_demos --headless
+python scripts/stage_oracle_episodes.py --judge placement \
+  --input artifacts/block_demos --output artifacts/block_demos_staged
 
 # Project them for post-training: LeRobot v3.0 for Cosmos 3, v2.1 for GR00T N1.7.
 python scripts/convert_robolab_demo_to_lerobot_v3.py \

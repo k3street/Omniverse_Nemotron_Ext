@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Generate privileged scripted BananaOnPlate demonstrations in RoboLab."""
+"""Generate privileged scripted pick-and-place demonstrations in RoboLab.
+
+The controller reads object poses straight out of the simulator, so it needs no
+model API and costs nothing to run. Each task is described by a TaskProfile;
+multi-object tasks are driven one object at a time, re-reading poses between
+objects because earlier placements disturb the scene.
+"""
 from __future__ import annotations
 
 import argparse
 import math
 import sys
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2  # Must precede Isaac Lab imports.
@@ -15,10 +22,18 @@ from isaaclab.app import AppLauncher
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--task", default="BananaOnPlate", choices=("BananaOnPlate", "BlocksInBin"))
 parser.add_argument("--episodes", type=int, default=1)
+# Each episode seeds its jitter from its index, so a second run with the same
+# range reproduces the same scenes. Offset the index to get new ones.
+parser.add_argument("--seed-offset", type=int, default=0)
 parser.add_argument("--hold-steps", type=int, default=35)
 parser.add_argument("--output", type=Path, default=Path("output/banana_on_plate_oracle"))
 parser.add_argument("--xy-jitter", type=float, default=0.03)
+# Cluttered scenes park small objects centimetres apart. Descending onto one of
+# those closes the gripper on its neighbour instead, which is worse than not
+# demonstrating it: it teaches exactly the failure we are trying to train out.
+parser.add_argument("--min-clearance", type=float, default=0.0)
 parser.add_argument("--no-save-videos", action="store_true")
 AppLauncher.add_app_launcher_args(parser)
 args, _ = parser.parse_known_args()
@@ -48,6 +63,94 @@ BANANA_GRASP_OFFSET = torch.tensor([-0.010, -0.023, 0.147], dtype=torch.float32)
 BANANA_GRASP_QUAT = torch.tensor([0.555, 0.385, 0.616, -0.406], dtype=torch.float32)
 BANANA_GRASP_QUAT /= torch.linalg.norm(BANANA_GRASP_QUAT)
 
+# The blocks are small cubes, so the same downward-facing wrist works; only the
+# lateral bias (tuned for the banana's curve) drops out.
+BLOCK_GRASP_OFFSET = torch.tensor([0.0, 0.0, 0.147], dtype=torch.float32)
+
+
+@dataclass(frozen=True)
+class TaskProfile:
+    """Everything the scripted controller needs to drive one task."""
+
+    task: str
+    pick_objects: tuple[str, ...]
+    place_target: str
+    grasp_offset: torch.Tensor
+    grasp_quaternion: torch.Tensor
+    # Heights are relative to the picked object and the place target centroids.
+    approach_m: float = 0.10
+    lift_m: float = 0.14
+    place_clearance_m: float = 0.27
+    place_release_m: float = 0.16
+    retreat_m: float = 0.28
+    jitter_objects: tuple[str, ...] = ()
+
+
+TASK_PROFILES = {
+    "BananaOnPlate": TaskProfile(
+        task="BananaOnPlateTask",
+        pick_objects=("banana",),
+        place_target="plate_large",
+        grasp_offset=BANANA_GRASP_OFFSET,
+        grasp_quaternion=BANANA_GRASP_QUAT,
+        jitter_objects=("banana", "plate_large"),
+    ),
+    # Four blocks into a walled bin: one episode yields four grasp cycles, and
+    # the release has to clear the bin wall rather than hovering over a flat
+    # plate, so it is staged higher than the banana's.
+    "BlocksInBin": TaskProfile(
+        task="BlocksInBinTask",
+        pick_objects=("red_block", "blue_block", "green_block", "yellow_block"),
+        place_target="grey_bin",
+        grasp_offset=BLOCK_GRASP_OFFSET,
+        grasp_quaternion=BANANA_GRASP_QUAT,
+        place_clearance_m=0.34,
+        place_release_m=0.26,
+        retreat_m=0.34,
+        jitter_objects=("red_block", "blue_block", "green_block", "yellow_block"),
+    ),
+}
+
+PROFILE = TASK_PROFILES[args.task]
+
+
+def scene_object_names(env) -> tuple[str, ...]:
+    objects = getattr(getattr(env, "scene", None), "rigid_objects", None)
+    return tuple(objects.keys()) if objects else ()
+
+
+def graspable_objects(env, profile: "TaskProfile", min_clearance_m: float) -> tuple[str, ...]:
+    """Keep only pick targets with room around them for a top-down descent."""
+    if min_clearance_m <= 0:
+        return profile.pick_objects
+    others = [
+        name
+        for name in scene_object_names(env)
+        # The table is the support surface and the bin is where things go; a
+        # block sitting near either is still perfectly graspable.
+        if name not in {"table", profile.place_target}
+    ]
+    keep = []
+    for name in profile.pick_objects:
+        here = object_position(env, name)[:2]
+        clearance = min(
+            (
+                float(torch.linalg.norm(object_position(env, other)[:2] - here))
+                for other in others
+                if other != name
+            ),
+            default=float("inf"),
+        )
+        if clearance >= min_clearance_m:
+            keep.append(name)
+        else:
+            print(f"[oracle] skipping {name}: nearest object {clearance:.3f} m < {min_clearance_m:.3f} m")
+    return tuple(keep)
+
+
+def _up(height_m: float) -> torch.Tensor:
+    return torch.tensor([0.0, 0.0, height_m], dtype=torch.float32)
+
 
 def object_position(env, name: str) -> torch.Tensor:
     return env.scene[name].data.root_pos_w[0].detach().cpu().clone()
@@ -73,32 +176,40 @@ def run_episode(
     if hasattr(env.recorder_manager, "set_hdf5_file"):
         env.recorder_manager.set_hdf5_file(f"run_{episode}.hdf5")
         env.recorder_manager.set_episode_index(0, env_ids=[0])
-    generator = torch.Generator(device="cpu").manual_seed(episode)
-    jitter_object(env, "banana", args.xy_jitter, generator)
-    jitter_object(env, "plate_large", args.xy_jitter, generator)
+    generator = torch.Generator(device="cpu").manual_seed(episode + args.seed_offset)
+    for name in PROFILE.jitter_objects:
+        jitter_object(env, name, args.xy_jitter, generator)
     video = None
     if not args.no_save_videos:
         video = VideoWriter(str(output / f"episode_{episode:06d}_policy.mp4"), fps=15)
     frames = env.scene["frames"]
     eef_index = frames.data.target_frame_names.index("eef_frame")
-    banana = object_position(env, "banana")
-    plate = object_position(env, "plate_large")
+    target_xyz = object_position(env, PROFILE.place_target)
 
     # Keep the gripper's known reachable downward-facing orientation and move
     # through conservative vertical waypoints derived from privileged object poses.
-    waypoints = [
-        ("approach banana", banana + BANANA_GRASP_OFFSET + torch.tensor([0.0, 0.0, 0.10]), 0.0, hold_steps),
-        ("descend", banana + BANANA_GRASP_OFFSET, 0.0, hold_steps),
-        ("grasp", banana + BANANA_GRASP_OFFSET, 1.0, hold_steps),
-        ("lift", banana + BANANA_GRASP_OFFSET + torch.tensor([0.0, 0.0, 0.14]), 1.0, hold_steps),
-        ("above plate", plate + torch.tensor([0.0, 0.0, 0.27]), 1.0, hold_steps + 10),
-        ("lower to plate", plate + torch.tensor([0.0, 0.0, 0.16]), 1.0, hold_steps),
-        ("release", plate + torch.tensor([0.0, 0.0, 0.16]), 0.0, hold_steps),
-        ("retreat", plate + torch.tensor([0.0, 0.0, 0.28]), 0.0, hold_steps),
-    ]
+    # Pick poses are read before the first approach: nothing moves an object
+    # until the gripper reaches it, and re-reading mid-episode would pick up a
+    # block already being carried.
+    waypoints = []
+    attempted = graspable_objects(env, PROFILE, args.min_clearance)
+    print(f"[oracle] attempting {len(attempted)}/{len(PROFILE.pick_objects)} objects: {list(attempted)}")
+    for name in attempted:
+        grasp = object_position(env, name) + PROFILE.grasp_offset
+        place = PROFILE.place_target
+        waypoints += [
+            (f"approach {name}", grasp + _up(PROFILE.approach_m), 0.0, hold_steps),
+            (f"descend {name}", grasp, 0.0, hold_steps),
+            (f"grasp {name}", grasp, 1.0, hold_steps),
+            (f"lift {name}", grasp + _up(PROFILE.lift_m), 1.0, hold_steps),
+            (f"above {place}", target_xyz + _up(PROFILE.place_clearance_m), 1.0, hold_steps + 10),
+            (f"lower {name}", target_xyz + _up(PROFILE.place_release_m), 1.0, hold_steps),
+            (f"release {name}", target_xyz + _up(PROFILE.place_release_m), 0.0, hold_steps),
+            (f"retreat {name}", target_xyz + _up(PROFILE.retreat_m), 0.0, hold_steps),
+        ]
 
     action = torch.zeros((1, 8), dtype=torch.float32, device=env.device)
-    action_quat = BANANA_GRASP_QUAT.to(env.device)
+    action_quat = PROFILE.grasp_quaternion.to(env.device)
     terminated = False
     sensor_buffer = SensorCaptureBuffer()
     sensor_warning_printed = False
@@ -171,12 +282,12 @@ def main() -> None:
     # consume roughly 1.6 GB per episode.
     robolab.constants.RECORD_IMAGE_DATA = False
     robolab.constants.VERBOSE = False
-    auto_register_droid_abs_ik_envs(task="BananaOnPlateTask")
+    auto_register_droid_abs_ik_envs(task=PROFILE.task)
     successes = 0
     for episode in range(args.episodes):
         # RoboLab's streaming recorder is single-shot after a terminal episode;
         # use a fresh manager per demo so all state/action streams are re-armed.
-        env, _ = create_env("BananaOnPlateTask", num_envs=1, use_fabric=True)
+        env, _ = create_env(PROFILE.task, num_envs=1, use_fabric=True)
         success, sensor_buffer = run_episode(env, args.hold_steps, episode, output)
         successes += int(success)
         end_episode(env)
