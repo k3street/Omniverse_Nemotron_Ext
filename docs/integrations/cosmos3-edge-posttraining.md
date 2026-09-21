@@ -119,6 +119,45 @@ itself a planning item; `cosmos_framework.scripts.export_model` converts a DCP
 checkpoint to a far smaller Hugging Face model directory, which is what the
 policy server wants anyway.
 
+## Exporting a trained checkpoint
+
+`cosmos_framework.scripts.export_model` turns a 36 GB DCP checkpoint into a
+~7.3 GB Hugging Face directory, which is the format the policy server wants. On
+a Nano-derived Edge experiment it needs three fixes:
+
+1. **Set the config's env vars.** Export rebuilds the experiment config, so the
+   `${oc.env:...}` interpolations must resolve or it dies with
+   `KeyError: 'DROID_ROOT'`. Export with the same `DROID_ROOT`,
+   `BASE_CHECKPOINT_PATH`, `WAN_VAE_PATH` and `IMAGINAIRE_OUTPUT_ROOT` as training.
+2. **The Edge export expects the Edge dataloader shape.**
+   `_build_edge_policy_metadata` reads
+   `dataloader_train.dataloaders.action_data.dataloader.dataset` with a
+   `list_of_datasets`, while the shipped action-policy recipes use
+   `dataloader_train.dataloader.datasets.<name>.dataset`. It only needs three
+   values — `action_chunk_size`, `conditioning_fps`, `domain_name` — so a
+   fallback reading the Nano shape is enough. `domain_name` cannot be read off
+   the config at all (`DROIDLeRobotDataset` pins `embodiment_type="droid_lerobot"`
+   inside `super().__init__`, and the factory is a plain function with no
+   `EMBODIMENT_TYPE`), so supply it directly.
+3. **The public alias table is incomplete and partly stale.**
+   `inference/common/public_model_config.py` raises
+   `No public alias registered for type path: ...` for
+   `multiview_attention.MultiviewAttentionMaskConfig` (absent) and for
+   `LBLConfig` (registered under `configs.base.defaults.model_config`, but it
+   actually lives in `model.generator.utils.load_balancing_stats`). Rather than
+   adding entries one failure at a time, make unregistered types and targets
+   pass through by canonical path — the reverse direction already rewrites
+   `projects.cosmos3.vfm.*` back to `cosmos_framework.*`, so it round-trips.
+
+A correct export writes `checkpoint.json` carrying the policy manifest, e.g.
+`{"action_chunk_size": 32, "conditioning_fps": 15.0, "domain_name": "droid_lerobot"}`,
+with `use_ema_weights: true` and the processor and vision tower bundled from
+`nvidia/Cosmos3-Edge`.
+
+Note the `vision_encoder/` subdirectory holds its own `.safetensors`, so an
+`--exclude "*.safetensors"` when copying the export off the node silently drops
+~934 MB of it.
+
 ## Launching
 
 Parallelism must be set in the TOML — `model.parallelism.*` is rejected as a
