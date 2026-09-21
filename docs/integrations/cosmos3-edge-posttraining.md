@@ -88,6 +88,26 @@ query the right over-shoulder view and fail on the missing column.
   100% GPU while hung, so utilization is not a liveness signal. Pass
   `dataloader_train.dataloader.num_workers=2` at this dataset size.
 
+## The action head trains from scratch
+
+`checkpoint.keys_to_skip_loading` drops `action2llm`, `llm2action`,
+`action_modality_embed` and `action_pos_embed`, so the action head is *not*
+warm-started from the base checkpoint even though the reasoner and generation
+heads are. A short run therefore cannot produce a working policy no matter how
+good the data is — there is no pretrained action head to nudge.
+
+Size expectations follow from that. The reference DROID run is 10,000
+iterations at global batch 8192 (64 nodes x 4 GB200). On a single 8x80 GB node
+at `max_samples_per_batch=4`, one iteration is a global batch of 32, so
+matching the reference sample count would take far longer than the iteration
+count alone suggests. Plan a real post-training run as hours-to-days of
+multi-GPU time, and treat short runs strictly as pipeline validation.
+
+For reference, on 7xA100-80GB with the tokenizer compile disabled, iterations
+ran at roughly 2.2 s each and a checkpoint at iteration 100 was 36 GB (weights
+plus optimizer and EMA state) — large enough that pulling checkpoints off a
+rented node is itself a planning item.
+
 ## Launching
 
 Parallelism must be set in the TOML — `model.parallelism.*` is rejected as a
