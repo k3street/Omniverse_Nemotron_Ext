@@ -119,6 +119,19 @@ def closed_fraction(env):
     )
 
 
+def default_arm_targets(env):
+    """The arm's spawn joint targets, from the articulation defaults.
+
+    Reading the live joint state right after a reset returns the previous
+    rollout's pose before the write has propagated; holding that value drives
+    the arm straight back to where the last trial left it.
+    """
+    robot = env.scene["robot"]
+    defaults = torch_view(robot.data.default_joint_pos)
+    ids = [robot.data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)]
+    return defaults[0, ids].detach().float().clone().to(env.device)
+
+
 def arm_joints(env):
     robot = env.scene["robot"]
     joint_pos = torch_view(robot.data.joint_pos)
@@ -141,7 +154,7 @@ def classify(max_closed, final_closed, lift_m, displacement_m):
     return "closed_without_effect"
 
 
-def reset_scene(env, object_names):
+def reset_scene(env, object_names, home_full):
     """Restore the robot and the objects to their spawn state.
 
     ``env.reset()`` alone did not restore articulation state in this Sim 6
@@ -151,11 +164,23 @@ def reset_scene(env, object_names):
     """
     obs, _ = env.reset()
     robot = env.scene["robot"]
-    default_joint_pos = torch_view(robot.data.default_joint_pos).clone()
-    default_joint_vel = torch_view(robot.data.default_joint_vel).clone()
+    default_joint_pos = home_full.clone()
+    default_joint_vel = torch.zeros_like(default_joint_pos)
     robot.write_joint_state_to_sim(default_joint_pos, default_joint_vel)
+    # Writing the state alone leaves the articulation's position targets at
+    # zero, and the controller then drags the arm to the zero pose (straight
+    # up) during the settle steps. Command the defaults as targets too.
+    robot.set_joint_position_target(default_joint_pos)
+    robot.write_data_to_sim()
     robot.reset()
-    for name in object_names:
+    env.sim.step(render=False)
+    robot.update(env.physics_dt)
+    # Reset every rigid body in the scene, not just the task's
+    # contact_object_list: that list is task-specific and need not contain the
+    # manipulated object, which then keeps whatever pose the last rollout left
+    # it in -- including having been knocked off the table.
+    names = set(object_names) | set(getattr(env.scene, "rigid_objects", {}) or {})
+    for name in sorted(names):
         try:
             asset = env.scene[name]
         except (KeyError, TypeError):
@@ -193,6 +218,12 @@ def main():
     env_cfg.subtasks = None
     env_cfg.recorders = None
     env, _ = create_env(env_cfg, use_fabric=True, policy="cosmos3-edge-bench")
+    # Snapshot the spawn pose ONCE. Reading default_joint_pos right after
+    # robot.reset() returns unpopulated buffers, and commanding those zeros
+    # drives the arm to the zero pose instead of holding home.
+    home_full = torch_view(env.scene["robot"].data.default_joint_pos).clone()
+    home_arm = default_arm_targets(env).clone()
+    print(f"[bench] home pose captured: {home_arm.cpu().numpy().round(2)}", flush=True)
     print("[bench] env ready; connecting to policy server", flush=True)
     client = Cosmos3EdgeChunkClient(host=args_cli.host, port=args_cli.port)
     print("[bench] policy client connected", flush=True)
@@ -200,15 +231,40 @@ def main():
     object_names = tuple(getattr(env_cfg, "contact_object_list", ()) or ())
     trials = []
     for trial in range(args_cli.trials):
-        obs = reset_scene(env, object_names)
+        obs = reset_scene(env, object_names, home_full)
         hold = torch.zeros((1, 8), dtype=torch.float32, device=env.device)
-        hold[0, :7] = torch.as_tensor(
-            arm_joints(env), dtype=torch.float32, device=env.device
-        )
-        for _ in range(args_cli.settle_steps):
+        hold[0, :7] = home_arm
+        # Drive to the spawn pose and verify it, rather than assuming a fixed
+        # number of settle steps is enough: an arm left far away by the last
+        # rollout otherwise starts the next trial wherever it stopped, which
+        # silently corrupts every distance in this table.
+        homed = False
+        for _ in range(args_cli.settle_steps * 8):
             obs, *_ = env.step(hold)
+            error = float(
+                np.max(np.abs(arm_joints(env) - home_arm.cpu().numpy()))
+            )
+            if error <= 0.05:
+                homed = True
+                break
+        if not homed:
+            print(
+                f"[bench] trial {trial}: SKIPPED -- arm did not return to the "
+                f"spawn pose (max joint error {error:.3f} rad)",
+                flush=True,
+            )
+            continue
 
-        print(f"[bench] trial {trial} reset done", flush=True)
+        _pad = pad_center_m(env)
+        _obj = object_xyz_m(env, args_cli.object)
+        print(
+            f"[bench] trial {trial} reset: dist="
+            f"{float(np.linalg.norm(_pad - _obj)):.3f} "
+            f"pad={np.round(_pad, 3)} obj={np.round(_obj, 3)} "
+            f"default_q={np.round(default_arm_targets(env).detach().cpu().numpy(), 2)} "
+            f"live_q={np.round(arm_joints(env), 2)}",
+            flush=True,
+        )
         object_start = object_xyz_m(env, args_cli.object)
         start_distance = float(
             np.linalg.norm(pad_center_m(env) - object_start)
