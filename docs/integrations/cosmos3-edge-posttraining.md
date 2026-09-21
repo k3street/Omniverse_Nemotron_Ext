@@ -73,6 +73,14 @@ query the right over-shoulder view and fail on the missing column.
 - **Set the shard degree to the GPUs you actually have.** Verify with
   `nvidia-smi -L | wc -l` — a node billed as 8× can come up with 7, and
   `torchrun --nproc_per_node=8` then dies with `CUDA error: invalid device ordinal`.
+- **Disable `compile_tokenizer` without a CUDA toolkit.** The callback AOT-compiles
+  the Wan VAE encoder and *raises* rather than falling back when `CUDA_HOME` is
+  unset: `RuntimeError: AOT compilation produced no loadable functions`, on every
+  rank, at the first training step. Rented GPU nodes routinely ship the driver
+  with no toolkit (`nvidia-smi` reports a CUDA version; `/usr/local/cuda` and
+  `nvcc` are absent). It is a speed optimisation, so set
+  `[trainer.callbacks.compile_tokenizer] enabled = false` unless a toolkit is
+  installed.
 - **Lower `num_workers` for small datasets.** The recipe's `num_workers=16`
   shards episodes by rank × worker. 46 episodes over 7 ranks × 16 workers leaves
   most workers with no episode, pre-warm never buffers its 16 samples, and the
