@@ -25,6 +25,16 @@ import numpy as np
 DEMO_KEY = "demo_0"
 
 
+def attempted_objects(demo) -> tuple[str, ...] | None:
+    """The objects the controller tried to move, if the recording says."""
+    raw = demo.attrs.get("attempted_objects")
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    return tuple(x for x in str(raw).split(",") if x)
+
+
 def object_tracks(demo) -> dict[str, np.ndarray]:
     """Per-object xyz over the episode, pulled out of the recorder's groups."""
     rigid = demo["states"]["rigid_object"]
@@ -44,18 +54,31 @@ def judge_by_placement(
     container: str,
     radius_m: float,
     min_lift_m: float,
-    move_m: float,
+    attempted: tuple[str, ...] | None = None,
 ) -> tuple[bool, str]:
+    """Decide an episode from where the objects ended up.
+
+    Lift is the signal, not lateral movement. A grasp that misses leaves its
+    target sitting exactly where it was -- measured on the cluttered scene, the
+    gripper stopped 2.7 cm short and closed on nothing, and the block never
+    moved. Objects the arm merely brushed past on its way through the scene do
+    shift a centimetre or two, and counting that as an attempt threw away whole
+    episodes whose actual grasp was clean.
+
+    ``attempted`` restricts the verdict to the objects the controller set out
+    to move, when the recording says which those were.
+    """
     target_xy = tracks[container][-1, :2]
     placed, dropped = [], []
     for name, track in tracks.items():
         if name in {container, "table"}:
             continue
+        if attempted is not None and name not in attempted:
+            continue
         lifted = float(track[:, 2].max() - track[0, 2])
-        moved = float(np.linalg.norm(track[-1, :2] - track[0, :2]))
-        if lifted < min_lift_m and moved < move_m:
-            continue  # untouched: neither attempted nor disturbed
-        if lifted >= min_lift_m and float(np.linalg.norm(track[-1, :2] - target_xy)) <= radius_m:
+        if lifted < min_lift_m:
+            continue  # never picked up: untouched, or nudged in passing
+        if float(np.linalg.norm(track[-1, :2] - target_xy)) <= radius_m:
             placed.append(name)
         else:
             dropped.append(name)
@@ -74,7 +97,6 @@ def main() -> None:
     parser.add_argument("--container", default="grey_bin")
     parser.add_argument("--radius", type=float, default=0.13)
     parser.add_argument("--min-lift", type=float, default=0.05)
-    parser.add_argument("--move", type=float, default=0.02)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -104,7 +126,7 @@ def main() -> None:
                     container=args.container,
                     radius_m=args.radius,
                     min_lift_m=args.min_lift,
-                    move_m=args.move,
+                    attempted=attempted_objects(demo),
                 )
         status = "KEEP" if ok else "drop"
         print(f"[stage] {status} {hdf5.parent.name}/{hdf5.name}: {why}")

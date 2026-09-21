@@ -169,7 +169,7 @@ def jitter_object(env, name: str, amount: float, generator: torch.Generator) -> 
 
 def run_episode(
     env, hold_steps: int, episode: int, output: Path
-) -> tuple[bool, SensorCaptureBuffer]:
+) -> tuple[bool, SensorCaptureBuffer, tuple[str, ...]]:
     obs, _ = env.reset()
     # Arm recording only after reset. Arming before reset causes the recorder to
     # finalize an empty episode and leaves subsequent simulator steps unrecorded.
@@ -246,7 +246,7 @@ def run_episode(
     if video is not None:
         video.release()
     print(f"[oracle] result: success={success} details={results}")
-    return success, sensor_buffer
+    return success, sensor_buffer, attempted
 
 
 def attach_sensor_recording(
@@ -288,7 +288,7 @@ def main() -> None:
         # RoboLab's streaming recorder is single-shot after a terminal episode;
         # use a fresh manager per demo so all state/action streams are re-armed.
         env, _ = create_env(PROFILE.task, num_envs=1, use_fabric=True)
-        success, sensor_buffer = run_episode(env, args.hold_steps, episode, output)
+        success, sensor_buffer, attempted = run_episode(env, args.hold_steps, episode, output)
         successes += int(success)
         end_episode(env)
         env.close()
@@ -296,6 +296,12 @@ def main() -> None:
         if not hdf5_path.is_file():
             raise FileNotFoundError(f"RoboLab recorder did not create {hdf5_path}")
         attach_sensor_recording(hdf5_path, sensor_buffer)
+        # Record what the controller set out to move. A multi-object task only
+        # marks itself successful when every object is placed, so selecting
+        # episodes later means comparing outcome against intent -- and intent
+        # cannot be recovered from the trajectories alone.
+        with h5py.File(hdf5_path, "r+") as target:
+            target["data/demo_0"].attrs["attempted_objects"] = ",".join(attempted)
     simulation_app.close()
     print(f"[oracle] complete: {successes}/{args.episodes} successful")
     if successes != args.episodes:
