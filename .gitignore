@@ -24,6 +24,7 @@ __pycache__/
 lora_model/
 .nim-cache/
 *.gguf
+/artifacts/
 data/*
 !data/bin_interior_metadata.yaml
 outputs/
@@ -56,6 +57,8 @@ workspace/nvidia/
 # Screen recordings
 *.mkv
 *.mp4
+# Documentation media is small, versioned, and referenced from the README.
+!docs/media/*.mp4
 *.avi
 
 # Personal launch override (tracked version is launch_isaac.sh)

@@ -149,6 +149,99 @@ clip-retrieval, and robotic-grounding pipelines as dry-run-first tools. V2D is
 installed separately so its GPU/container dependencies do not enter the
 sidecar environment. See [the V2D integration guide](docs/integrations/video-to-data.md).
 
+An isolated, dry-run-first adapter also exposes NVIDIA Isaac GR00T N1.7
+status, inference, policy serving, and fine-tuning commands. See the
+[GR00T N1.7 integration guide](docs/integrations/groot-n17.md).
+Use `./launch_groot_robolab.sh replay` for the bundled Isaac Sim visualization,
+or `./launch_groot_robolab.sh live` to connect RoboLab to a GR00T policy server.
+Franka torque/contact collection and masked sensor-aware datasets are documented
+in [the force/contact data guide](docs/integrations/franka-force-tactile-data.md).
+
+The separate [Gemini Robotics ER 2 RoboLab workflow](docs/integrations/gemini-robotics-er2-robolab.md)
+uses Gemini as a visual phase supervisor and bounded local IK to retarget the
+current DROID/Franka robot to live banana and plate poses.
+Its [RGB-D collision supervision guide](docs/integrations/rgbd-collision-supervision.md)
+covers detector box/mask plus depth fusion, swept robot-capsule clearance, and
+the real-camera calibration inputs required for local collision stops.
+
+[![Gemini Robotics running in Isaac Lab](docs/media/gemini-robotics-demo-preview.jpg)](docs/media/gemini-robotics-demo-2x.mp4)
+
+*Gemini Robotics supervising a RoboLab manipulation run in Isaac Lab — click
+the preview to watch the 2×-speed demo.*
+
+Gemini training campaigns can also be planned across task, scene, and robot
+embodiment combinations without silently substituting an unsupported runtime:
+
+```bash
+python3 scripts/run_gemini_training_matrix.py \
+  --spec config/gemini_training_matrix.example.json \
+  --output artifacts/gemini_training_matrix
+```
+
+The example matrix covers inside and directional object-placement goals across
+Franka, vacuum, dual-arm, and Amber Revan/Psyonic configurations. Planning is
+dry-run by default and reports unsupported cells with their missing runtime,
+RGB-D evaluator, world-effect, or dataset adapter. Add `--execute` with an
+explicit `--campaign` (or use `--runnable-only`) to collect only validated
+cells. See the workflow guide's
+[task and embodiment training matrix](docs/integrations/gemini-robotics-er2-robolab.md#task-and-embodiment-training-matrix)
+section for the supported campaigns and execution safeguards.
+
+#### Cosmos 3 Edge on-device policy
+
+[NVIDIA Cosmos 3 Edge](https://huggingface.co/nvidia/Cosmos3-Edge-Policy-DROID) is a
+4B world-action model small enough to run on the robot's own compute. It serves
+32-step action chunks over the OpenPI WebSocket protocol, and the composed
+execution stack can use it two ways: as a motion executor beside bounded DLS IK,
+and as a reversible-attachment actuator that owns a whole grasp — approach,
+align and close — in one rollout.
+
+```bash
+# Serve the policy locally (Blackwell/Thor-class device or workstation GPU).
+python -m cosmos_framework.scripts.action_policy_server_robolab \
+  --checkpoint-path nvidia/Cosmos3-Edge-Policy-DROID --port 8000 \
+  --format-prompt-as-json True --guidance-interval 960 1001
+
+# Plan with Gemini, act with the local policy.
+./launch_gemini_robotics_robolab.sh --guarded-world-effect-execution \
+  --cosmos3-edge-policy --task BlocksInBinTask
+```
+
+Every lease condition, invalidation monitor and attachment record applies to the
+learned policy exactly as it does to the analytic executors: a rollout that ends
+without an object retained between the gripper pads revokes its lease instead of
+reporting a completed operation.
+
+#### Scripted demonstrations and post-training datasets
+
+Post-training needs far more demonstrations than a supervised campaign can
+collect. A privileged scripted oracle generates successful episodes unattended,
+with no model API in the loop — each one verified by RoboLab's own success
+detector:
+
+```bash
+# Generate demonstrations (RoboLab's Isaac Sim 5.1 environment).
+python scripts/generate_banana_on_plate_demos.py \
+  --episodes 50 --xy-jitter 0.03 --output artifacts/banana_demos --headless
+
+# Project them for post-training: LeRobot v3.0 for Cosmos 3, v2.1 for GR00T N1.7.
+python scripts/convert_robolab_demo_to_lerobot_v3.py \
+  --input-dir artifacts/banana_demos --output <dataset-dir> \
+  --instruction "Pick up the banana and put it on the plate"
+```
+
+[![Scripted banana-on-plate demonstrations in Isaac Lab](docs/media/cosmos3-edge-oracle-demos-preview.jpg)](docs/media/cosmos3-edge-oracle-demos-2x.mp4)
+
+*Four successful scripted demonstrations — exterior and wrist views, the two
+cameras recorded into every episode. Click the preview to watch at 2× speed.*
+
+A 50-episode run yields roughly 47 successful demonstrations in about 40
+minutes, which convert to ~8,000 Cosmos training samples. The v3.0 writer emits
+the chunked `data/`, `videos/` and `meta/episodes/` layout that
+`cosmos-framework`'s `DROIDLeRobotDataset` consumes; note that its feature
+mapping is selected by the dataset directory name, and that a two-camera
+recording supports `viewpoint="wrist_view"`.
+
 #### Containerized service
 
 The container packages the core HTTP service. Live ROS2, Kit, and voice

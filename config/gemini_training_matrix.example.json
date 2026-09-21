@@ -1,0 +1,274 @@
+{
+  "schema_version": "gemini-training-matrix.v1",
+  "description": "Embodiment-independent single-object task matrix. Runnable support is determined by registered scene, runtime, evaluator, and dataset adapters.",
+  "tasks": [
+    {
+      "task_id": "cube_inside_bowl",
+      "instruction": "Put the Rubik's cube inside the bowl.",
+      "required_world_capability_id": "world_relation.realize_inside",
+      "completion_predicate": {
+        "relation": "inside",
+        "subject_role": "subject",
+        "reference_role": "destination",
+        "evaluator_id": "rgbd.visible_geometry_inside"
+      }
+    },
+    {
+      "task_id": "cube_left_of_bowl",
+      "instruction": "Put the Rubik's cube on the table to the left of the bowl.",
+      "required_world_capability_id": "world_relation.realize_left_of",
+      "completion_predicate": {
+        "relation": "left_of",
+        "subject_role": "subject",
+        "reference_role": "reference",
+        "evaluator_id": "rgbd.visible_geometry_left_of"
+      }
+    },
+    {
+      "task_id": "cube_right_of_bowl",
+      "instruction": "Put the Rubik's cube on the table to the right of the bowl.",
+      "required_world_capability_id": "world_relation.realize_right_of",
+      "completion_predicate": {
+        "relation": "right_of",
+        "subject_role": "subject",
+        "reference_role": "reference",
+        "evaluator_id": "rgbd.visible_geometry_right_of"
+      }
+    },
+    {
+      "task_id": "cube_in_front_of_bowl",
+      "instruction": "Put the Rubik's cube on the table in front of the bowl, closer to the robot.",
+      "required_world_capability_id": "world_relation.realize_in_front_of",
+      "completion_predicate": {
+        "relation": "in_front_of",
+        "subject_role": "subject",
+        "reference_role": "reference",
+        "evaluator_id": "rgbd.visible_geometry_in_front_of"
+      }
+    },
+    {
+      "task_id": "cube_behind_bowl",
+      "instruction": "Put the Rubik's cube on the table behind the bowl, farther from the robot.",
+      "required_world_capability_id": "world_relation.realize_behind",
+      "completion_predicate": {
+        "relation": "behind",
+        "subject_role": "subject",
+        "reference_role": "reference",
+        "evaluator_id": "rgbd.visible_geometry_behind"
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "scene_id": "robolab_rubiks_cube_bowl_family",
+      "description": "RoboLab benchmark scenes containing one Rubik's cube and a bowl; each task binding selects its authoritative RoboLab task/scene.",
+      "compatible_runtime_adapter_ids": [
+        "robolab_franka_guarded_world_effect_v1"
+      ],
+      "task_bindings": {
+        "cube_inside_bowl": {
+          "robolab_task": "RubiksCubeTask",
+          "roles": {
+            "subject": {
+              "asset": "rubiks_cube",
+              "label": "Rubik's cube"
+            },
+            "destination": {
+              "asset": "bowl",
+              "label": "bowl"
+            }
+          }
+        },
+        "cube_left_of_bowl": {
+          "robolab_task": "RubiksCubeLeftOfBowlTask",
+          "roles": {
+            "subject": {
+              "asset": "rubiks_cube",
+              "label": "Rubik's cube"
+            },
+            "reference": {
+              "asset": "bowl",
+              "label": "bowl"
+            }
+          }
+        },
+        "cube_right_of_bowl": {
+          "robolab_task": "RubiksCubeRightOfBowlTask",
+          "roles": {
+            "subject": {
+              "asset": "rubiks_cube",
+              "label": "Rubik's cube"
+            },
+            "reference": {
+              "asset": "bowl",
+              "label": "bowl"
+            }
+          }
+        },
+        "cube_in_front_of_bowl": {
+          "robolab_task": "RubiksCubeInFrontOfBowlTask",
+          "roles": {
+            "subject": {
+              "asset": "rubiks_cube",
+              "label": "Rubik's cube"
+            },
+            "reference": {
+              "asset": "bowl",
+              "label": "bowl"
+            }
+          }
+        },
+        "cube_behind_bowl": {
+          "robolab_task": "RubiksCubeBehindBowlTask",
+          "roles": {
+            "subject": {
+              "asset": "rubiks_cube",
+              "label": "Rubik's cube"
+            },
+            "reference": {
+              "asset": "bowl",
+              "label": "bowl"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "embodiments": [
+    {
+      "embodiment_id": "franka_robotiq_2f85",
+      "label": "Franka arm with Robotiq 2F-85 parallel gripper",
+      "arm_count": 1,
+      "end_effectors": [
+        {
+          "end_effector_id": "robotiq_2f85",
+          "kind": "parallel_gripper"
+        }
+      ],
+      "runtime_adapter_id": "robolab_franka_guarded_world_effect_v1",
+      "dataset_adapter_id": "robolab_droid_hdf5_v1"
+    },
+    {
+      "embodiment_id": "franka_vacuum",
+      "label": "Franka arm with a vacuum end effector",
+      "arm_count": 1,
+      "end_effectors": [
+        {
+          "end_effector_id": "vacuum_cup",
+          "kind": "vacuum"
+        }
+      ],
+      "runtime_adapter_id": null,
+      "dataset_adapter_id": null
+    },
+    {
+      "embodiment_id": "dual_franka_parallel_grippers",
+      "label": "Two Franka arms with independent parallel grippers",
+      "arm_count": 2,
+      "end_effectors": [
+        {
+          "end_effector_id": "left_parallel_gripper",
+          "kind": "parallel_gripper"
+        },
+        {
+          "end_effector_id": "right_parallel_gripper",
+          "kind": "parallel_gripper"
+        }
+      ],
+      "runtime_adapter_id": null,
+      "dataset_adapter_id": null
+    },
+    {
+      "embodiment_id": "amber_revan_dual_psyonic",
+      "label": "Amber Revan dual arm with left and right Psyonic hands",
+      "arm_count": 2,
+      "end_effectors": [
+        {
+          "end_effector_id": "left_psyonic_hand",
+          "kind": "anthropomorphic_hand"
+        },
+        {
+          "end_effector_id": "right_psyonic_hand",
+          "kind": "anthropomorphic_hand"
+        }
+      ],
+      "asset_path": "workspace/generated_robots/amber_revan_psyonic_lsmall_rsmall_newton_hydro/amber_revan_psyonic_lsmall_rsmall_newton_hydro.usda",
+      "runtime_adapter_id": null,
+      "dataset_adapter_id": null
+    }
+  ],
+  "campaigns": [
+    {
+      "campaign_id": "franka_cube_inside_bowl",
+      "task_id": "cube_inside_bowl",
+      "scene_id": "robolab_rubiks_cube_bowl_family",
+      "embodiment_id": "franka_robotiq_2f85",
+      "target_successes": 30,
+      "max_attempt_multiplier": 2.0,
+      "seed": 0,
+      "object_xy_range": 0.05,
+      "reference_xy_range": 0.04,
+      "object_yaw_range_deg": 180.0,
+      "light_min": 1800.0,
+      "light_max": 8500.0,
+      "visible_first": true
+    },
+    {
+      "campaign_id": "franka_cube_left_of_bowl",
+      "task_id": "cube_left_of_bowl",
+      "scene_id": "robolab_rubiks_cube_bowl_family",
+      "embodiment_id": "franka_robotiq_2f85",
+      "target_successes": 20,
+      "seed": 101,
+      "visible_first": true
+    },
+    {
+      "campaign_id": "franka_cube_right_of_bowl",
+      "task_id": "cube_right_of_bowl",
+      "scene_id": "robolab_rubiks_cube_bowl_family",
+      "embodiment_id": "franka_robotiq_2f85",
+      "target_successes": 20,
+      "seed": 102
+    },
+    {
+      "campaign_id": "franka_cube_in_front_of_bowl",
+      "task_id": "cube_in_front_of_bowl",
+      "scene_id": "robolab_rubiks_cube_bowl_family",
+      "embodiment_id": "franka_robotiq_2f85",
+      "target_successes": 20,
+      "seed": 103
+    },
+    {
+      "campaign_id": "franka_cube_behind_bowl",
+      "task_id": "cube_behind_bowl",
+      "scene_id": "robolab_rubiks_cube_bowl_family",
+      "embodiment_id": "franka_robotiq_2f85",
+      "target_successes": 20,
+      "seed": 104
+    },
+    {
+      "campaign_id": "vacuum_cube_inside_bowl",
+      "task_id": "cube_inside_bowl",
+      "scene_id": "robolab_rubiks_cube_bowl_family",
+      "embodiment_id": "franka_vacuum",
+      "target_successes": 20,
+      "seed": 201
+    },
+    {
+      "campaign_id": "dual_franka_cube_inside_bowl",
+      "task_id": "cube_inside_bowl",
+      "scene_id": "robolab_rubiks_cube_bowl_family",
+      "embodiment_id": "dual_franka_parallel_grippers",
+      "target_successes": 20,
+      "seed": 301
+    },
+    {
+      "campaign_id": "amber_revan_cube_inside_bowl",
+      "task_id": "cube_inside_bowl",
+      "scene_id": "robolab_rubiks_cube_bowl_family",
+      "embodiment_id": "amber_revan_dual_psyonic",
+      "target_successes": 20,
+      "seed": 401
+    }
+  ]
+}

@@ -779,7 +779,7 @@ def _gen_evaluate_groot(args: Dict) -> str:
     Args:
         args: tool-call args dict containing:
             - task (str): IsaacLab task identifier to evaluate.
-            - model_id (str, default ``"nvidia/GR00T-N1.6-3B"``): Hugging Face
+            - model_id (str, default ``"nvidia/GR00T-N1.7-3B"``): Hugging Face
               model ID or local model name.
             - num_episodes (int, default 50): number of evaluation rollouts.
             - checkpoint (str, optional): path to a fine-tuned checkpoint; if
@@ -789,7 +789,7 @@ def _gen_evaluate_groot(args: Dict) -> str:
         str: Python source that runs the full evaluation pipeline and prints
         success rate and task metrics.
     """
-    model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
+    model_id = args.get("model_id", "nvidia/GR00T-N1.7-3B")
     task = args["task"]
     num_episodes = args.get("num_episodes", 50)
     checkpoint = args.get("checkpoint")
@@ -873,7 +873,7 @@ def _gen_finetune_groot(args: Dict) -> str:
     Args:
         args: tool-call args dict containing:
             - demo_data (str): path to a LeRobot-format or HDF5 demo dataset.
-            - model_id (str, default ``"nvidia/GR00T-N1.6-3B"``): base model
+            - model_id (str, default ``"nvidia/GR00T-N1.7-3B"``): base model
               identifier.
             - num_steps (int, default 10 000): fine-tuning gradient steps.
             - lora (bool, default ``True``): use LoRA rank-16 (fits 1×RTX4090)
@@ -885,7 +885,7 @@ def _gen_finetune_groot(args: Dict) -> str:
         str: Python source that launches the fine-tuning subprocess and prints
         the PID and output directory.
     """
-    model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
+    model_id = args.get("model_id", "nvidia/GR00T-N1.7-3B")
     demo_data = args["demo_data"]
     num_steps = args.get("num_steps", 10000)
     lora = args.get("lora", True)
@@ -1886,7 +1886,7 @@ async def _handle_load_groot_policy(args: Dict) -> Dict:
         args: tool-call args dict containing:
             - robot_path (str): USD prim path of the robot that will connect
               to the policy server via gRPC.
-            - model_id (str, default ``"nvidia/GR00T-N1.6-3B"``): Hugging
+            - model_id (str, default ``"nvidia/GR00T-N1.7-3B"``): Hugging
               Face model identifier.
             - embodiment (str, default ``"custom"``): embodiment key from
               ``_GROOT_EMBODIMENTS``; one of ``"LIBERO_PANDA"``,
@@ -1903,7 +1903,7 @@ async def _handle_load_groot_policy(args: Dict) -> Dict:
             - instructions (str): numbered human-readable steps.
     """
     # Phase 8 wave 13 — _GROOT_EMBODIMENTS migrated.
-    model_id = args.get("model_id", "nvidia/GR00T-N1.6-3B")
+    model_id = args.get("model_id", "nvidia/GR00T-N1.7-3B")
     robot_path = args["robot_path"]
     embodiment_key = args.get("embodiment", "custom")
 

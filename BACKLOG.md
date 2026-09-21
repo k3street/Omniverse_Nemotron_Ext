@@ -514,3 +514,93 @@ the gate.
 Hub multi-reviewer auth, id-collision dedupe, corrupt-file guard,
 priors coverage (~25 classes; some ranges too broad — split
 electronics_handheld), thumbnail re-render after corrective actions.
+
+## 11. EgoSuite one-shot task induction -> Gemini -> GR00T
+
+Objective: induce a new, embodiment-independent task from one annotated human
+egocentric episode, let Gemini bind that task to the runtime's advertised
+tools, execute and correct it from live Isaac Sim observations, then turn only
+successful robot executions into immutable GR00T N1.7 training data. The human
+episode teaches task structure and object interactions; it is never relabeled
+as Franka action data.
+
+Initial challenge: select an EgoPro single-arm episode with articulation,
+occlusion, and multiple outcomes--preferably open a drawer, retrieve or
+relocate an object, place it inside, and close the drawer. This is deliberately
+harder than direct cube placement while remaining feasible for the current
+Franka and parallel gripper.
+
+- [ ] **EGO-1 -- Acquire and select one source episode.** Obtain access to
+      `LightwheelAI/EgoDemo`, inspect manifests before downloading bulk data,
+      and fetch only one annotated EgoPro candidate with synchronized head and
+      wrist video, 3D hand pose, semantic segments, calibration, and source
+      provenance. Record license/access terms and reject clips whose outcome
+      cannot be represented in the available simulator.
+- [ ] **EGO-2 -- Add an immutable EgoSuite source adapter.** Read LeRobot v3
+      and/or MCAP without rewriting either source. Publish a content-addressed
+      source manifest containing `source_episode_uuid`, modality flags,
+      calibration version, duration, and complete SHA-256 hashes. Keyframes,
+      thumbnails, transcoded clips, and normalized pose streams must live in
+      versioned derived directories with transform manifests.
+- [ ] **EGO-3 -- Define the Gemini task-induction contract.** One multimodal
+      call consumes the selected episode evidence and emits an embodiment-free
+      task graph: initial predicates, object roles, desired terminal relations,
+      ordered/conditional subgoals, object-relative approach/contact evidence,
+      articulation constraints, recovery branches, success predicates,
+      uncertainty, and source time spans. The contract must contain no robot
+      joints, fixed IK targets, gripper profile, or named controller routine.
+- [ ] **EGO-4 -- Make induction inspectable before motion.** Visualize the
+      source timeline, selected keyframes, hand/object contacts, inferred role
+      bindings, task graph, confidence, and unresolved assumptions. Preserve
+      Gemini's raw response and the normalized graph as separate immutable
+      artifacts. Fail closed when required objects, contacts, or terminal
+      evidence are ambiguous.
+- [ ] **EGO-5 -- Bind outcomes to the live embodiment.** Query the runtime tool
+      registry, current robot state, workspace/reachability, payload limits,
+      end-effector affordances, perception channels, and available controllers.
+      Produce a capability-binding plan or an explicit infeasibility report;
+      do not modify the task graph to smuggle in Franka-specific behavior. A
+      second embodiment or end effector must be able to bind the same graph
+      through different providers.
+- [ ] **EGO-6 -- Reconstruct the challenge in Isaac Sim.** Match source object
+      roles to the asset catalogue, instantiate verified articulated and rigid
+      assets, author observable terminal predicates, and randomize only through
+      registered scene tools. Keep source-to-sim asset substitutions and scale,
+      articulation, material, and collision assumptions in a versioned scene
+      manifest.
+- [ ] **EGO-7 -- Execute the one-shot task with the existing guarded stack.**
+      Gemini composes the longest supported operation queue from the task graph;
+      configurable local providers execute it. RGB-D, articulation state,
+      contact/tactile, gripper state, reachability, unexpected motion, and goal
+      predicates invalidate only the unexecuted suffix and request a fresh
+      Gemini correction. Admit an episode only after observed terminal
+      predicates and the existing trace/contact/lease gates pass.
+- [ ] **EGO-8 -- Expand one success into a controlled campaign.** Vary object
+      pose, articulation state, clutter, distractors, lighting, materials,
+      camera pose, and valid asset substitutions while preserving the induced
+      task graph. Store every successful robot episode canonically; store
+      failures and corrections as evaluation evidence, never demonstrations.
+      Target at least 100 admitted episodes with a predeclared held-out scene
+      split before GR00T post-training.
+- [ ] **EGO-9 -- Distill and evaluate without Gemini.** Publish the campaign
+      through the immutable GR00T N1.7 exporter, post-train from the DROID/base
+      checkpoint as appropriate, serve the resulting checkpoint, and evaluate
+      with Gemini disconnected. Report task success, subgoal success, recovery
+      rate, collision/contact failures, and performance on unseen pose, clutter,
+      and asset substitutions; never score training-scene replay as
+      generalization.
+
+End-to-end acceptance gate:
+
+1. The original EgoSuite episode remains byte-identical and independently
+   traceable through every derivative and robot episode.
+2. Gemini produces one evidence-linked task graph from the human episode, and
+   that graph contains no embodiment-specific commands.
+3. The current Franka binds and executes the graph without an object- or
+   task-specific hard-coded routine; failures produce sensor-grounded
+   corrections or explicit infeasibility.
+4. At least one genuinely successful execution is recorded with synchronized
+   simulator observations and executed robot actions, then expanded into a
+   held-out campaign.
+5. GR00T N1.7 consumes the validated derivative and is evaluated as the sole
+   policy on unseen scene variants.

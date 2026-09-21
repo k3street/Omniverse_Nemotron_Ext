@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-23T00:30:11+00:00
-Tool count: 447
+Generated: 2026-08-23T16:06:26+00:00
+Tool count: 451
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -1452,7 +1452,7 @@ class LoadGrootPolicyArgs(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     robot_path: str = Field(..., description="USD path to the robot articulation, e.g. '/World/Robot'")
-    model_id: Optional[str] = Field(None, description="HuggingFace model ID. Default: 'nvidia/GR00T-N1.6-3B'")
+    model_id: Optional[str] = Field(None, description="HuggingFace model ID. Default: 'nvidia/GR00T-N1.7-3B'")
     embodiment: Optional[str] = Field(None, description="Embodiment preset for the robot. Determines observation/action space mapping.")
 
 
@@ -1461,7 +1461,7 @@ class EvaluateGrootArgs(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     task: str = Field(..., description="Evaluation task name, e.g. 'Isaac-GR00T-Reach-v0'")
-    model_id: Optional[str] = Field(None, description="HuggingFace model ID. Default: 'nvidia/GR00T-N1.6-3B'")
+    model_id: Optional[str] = Field(None, description="HuggingFace model ID. Default: 'nvidia/GR00T-N1.7-3B'")
     num_episodes: Optional[int] = Field(None, description="Number of evaluation episodes. Default: 50")
     checkpoint: Optional[str] = Field(None, description="Optional path to a custom fine-tuned checkpoint")
 
@@ -1471,7 +1471,7 @@ class FinetuneGrootArgs(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     demo_data: str = Field(..., description="Path to demonstration data in LeRobot v2 format")
-    model_id: Optional[str] = Field(None, description="HuggingFace model ID. Default: 'nvidia/GR00T-N1.6-3B'")
+    model_id: Optional[str] = Field(None, description="HuggingFace model ID. Default: 'nvidia/GR00T-N1.7-3B'")
     num_steps: Optional[int] = Field(None, description="Number of training steps. Default: 10000")
     lora: Optional[bool] = Field(None, description="Use LoRA for lower VRAM requirements. Default: true")
     output_dir: Optional[str] = Field(None, description="Directory for saving checkpoints. Default: 'workspace/groot_checkpoints'")
@@ -4023,6 +4023,51 @@ class V2dStatusArgs(BaseModel):
     pass
 
 
+class GrootN17StatusArgs(BaseModel):
+    """Inspect the isolated NVIDIA Isaac GR00T N1.7 checkout, Python environment, Spark readiness, demo data, and live-execution gate."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    pass
+
+
+class GrootN17InferArgs(BaseModel):
+    """Run GR00T N1.7 open-loop inference on a GR00T/LeRobot-v2 dataset. Defaults to a safe argv-only dry run."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    dataset_path: str
+    embodiment_tag: str
+    model_path: Optional[str] = Field(None)
+    trajectory_ids: Optional[List[int]] = Field(None)
+    inference_mode: Optional[str] = Field(None)
+    execution_horizon: Optional[int] = Field(None)
+    dry_run: Optional[bool] = Field(None, description="Return the exact command without executing; default true.")
+
+
+class GrootN17ServeArgs(BaseModel):
+    """Start the GR00T N1.7 ZeroMQ policy server command. Defaults to dry run; use an external supervisor for long-running live service."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    embodiment_tag: str
+    model_path: Optional[str] = Field(None)
+    port: Optional[int] = Field(None)
+    device: Optional[str] = Field(None)
+    dry_run: Optional[bool] = Field(None, description="Return the exact command without executing; default true.")
+
+
+class GrootN17FinetuneArgs(BaseModel):
+    """Fine-tune GR00T N1.7 on GR00T LeRobot-v2 data with an explicit modality configuration. Defaults to dry run."""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    dataset_path: str
+    modality_config_path: str
+    output_dir: str
+    embodiment_tag: Optional[str] = Field(None)
+    model_path: Optional[str] = Field(None)
+    max_steps: Optional[int] = Field(None)
+    global_batch_size: Optional[int] = Field(None)
+    dry_run: Optional[bool] = Field(None, description="Return the exact command without executing; default true.")
+
+
 class V2dIngestVideoArgs(BaseModel):
     """Segment a demonstration video and build V2D's queryable action database. Defaults to a safe command-only dry run."""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
@@ -4512,6 +4557,10 @@ MODEL_REGISTRY = {
     "execute_contact_sequence_plan": ExecuteContactSequencePlanArgs,
     "rebind_role": RebindRoleArgs,
     "v2d_status": V2dStatusArgs,
+    "groot_n17_status": GrootN17StatusArgs,
+    "groot_n17_infer": GrootN17InferArgs,
+    "groot_n17_serve": GrootN17ServeArgs,
+    "groot_n17_finetune": GrootN17FinetuneArgs,
     "v2d_ingest_video": V2dIngestVideoArgs,
     "v2d_retrieve_clips": V2dRetrieveClipsArgs,
     "v2d_reconstruct_depth": V2dReconstructDepthArgs,
