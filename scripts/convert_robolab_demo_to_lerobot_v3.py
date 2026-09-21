@@ -34,6 +34,13 @@ Two constraints matter when feeding ``cosmos-framework``'s
   ``droid_lerobot_20260115_no_noops`` expects the feature names written here
   (``observation.state``, ``action``, ``observation.images.*``), so the export
   directory must carry that name to be consumed.
+* ``action_space="joint_pos"`` -- the space the Cosmos 3 Edge policy is
+  post-trained in -- reads ``action.joint_position``,
+  ``observation.state.joint_positions`` and the two scalar gripper columns
+  rather than the packed vectors, and that branch does not honour
+  ``IS_FLAT_ACTION``. The export writes both layouts so one directory serves
+  either. The gripper columns follow DROID's 0=closed convention (the reader
+  flips them back), while the packed vectors keep this repo's 1=closed.
 * It reads three cameras -- wrist, ``exterior_image_1_left`` and
   ``exterior_image_2_left``. A recording with the two-camera combined video
   produces the first two, which satisfies ``viewpoint="wrist_view"`` but not
@@ -86,6 +93,21 @@ EXTERIOR_VIDEO_KEY = "observation.images.exterior_image_1_left"
 WRIST_VIDEO_KEY = "observation.images.wrist_image_left"
 VIDEO_KEYS = (EXTERIOR_VIDEO_KEY, WRIST_VIDEO_KEY)
 
+# Sub-ranges of the packed 17-D observation.state / action vectors.
+EEF_9D_SLICE = slice(0, 9)
+GRIPPER_SLICE = slice(9, 10)
+JOINT_POSITION_SLICE = slice(10, 17)
+JOINT_POSITION_DIM = JOINT_POSITION_SLICE.stop - JOINT_POSITION_SLICE.start
+
+# cosmos-framework's action_space="joint_pos" branch reads these split columns
+# directly and, unlike the cartesian branches, does not honour IS_FLAT_ACTION --
+# so the packed vectors alone cannot drive it. Emitting both keeps one export
+# readable as the flat layout and as the joint-space recipe.
+JOINT_ACTION_COLUMN = "action.joint_position"
+GRIPPER_ACTION_COLUMN = "action.gripper_position"
+JOINT_STATE_COLUMN = "observation.state.joint_positions"
+GRIPPER_STATE_COLUMN = "observation.state.gripper_position"
+
 
 def update_chunk_file_indices(
     chunk_index: int, file_index: int, chunks_size: int = DEFAULT_CHUNK_SIZE
@@ -123,6 +145,19 @@ def _flatten_stats(episode_stats: dict[str, dict[str, list]]) -> dict[str, list]
     }
 
 
+def _modality_slices() -> dict:
+    return {
+        "eef_9d": {"start": EEF_9D_SLICE.start, "end": EEF_9D_SLICE.stop},
+        "gripper_position": {
+            "start": GRIPPER_SLICE.start, "end": GRIPPER_SLICE.stop,
+        },
+        "joint_position": {
+            "start": JOINT_POSITION_SLICE.start,
+            "end": JOINT_POSITION_SLICE.stop,
+        },
+    }
+
+
 def _features(state_dim: int, action_dim: int, height: int, width: int) -> dict:
     video_shape = [height, width, 3]
     video_names = ["height", "width", "channels"]
@@ -141,6 +176,15 @@ def _features(state_dim: int, action_dim: int, height: int, width: int) -> dict:
             "dtype": "float32", "shape": [VALIDITY_DIM], "names": None,
         },
         "action": {"dtype": "float32", "shape": [action_dim], "names": None},
+        JOINT_ACTION_COLUMN: {
+            "dtype": "float32", "shape": [JOINT_POSITION_DIM], "names": None,
+        },
+        JOINT_STATE_COLUMN: {
+            "dtype": "float32", "shape": [JOINT_POSITION_DIM], "names": None,
+        },
+        # Scalar, not length-1: the reader stacks these to [T] and unsqueezes.
+        GRIPPER_ACTION_COLUMN: {"dtype": "float32", "shape": [1], "names": None},
+        GRIPPER_STATE_COLUMN: {"dtype": "float32", "shape": [1], "names": None},
     }
     # lerobot merges these into every dataset; readers rely on them.
     features.update(
@@ -228,6 +272,17 @@ def convert_many_v3(
                 SENSOR_COLUMN: list(sensor_values),
                 VALIDITY_COLUMN: list(sensor_validity),
                 "action": list(action),
+                JOINT_ACTION_COLUMN: list(action[:, JOINT_POSITION_SLICE]),
+                JOINT_STATE_COLUMN: list(
+                    observation_state[:, JOINT_POSITION_SLICE]
+                ),
+                # DROID stores the gripper as 0=closed and the reader flips it
+                # back to 1=closed; the packed vectors keep this repo's 1=closed
+                # convention, so invert here rather than at the reader.
+                GRIPPER_ACTION_COLUMN: 1.0 - action[:, GRIPPER_SLICE].ravel(),
+                GRIPPER_STATE_COLUMN: (
+                    1.0 - observation_state[:, GRIPPER_SLICE].ravel()
+                ),
                 "timestamp": np.arange(length, dtype=np.float32) / fps,
                 "frame_index": np.arange(length, dtype=np.int64),
                 "episode_index": np.full(length, episode_index, dtype=np.int64),
@@ -350,16 +405,10 @@ def convert_many_v3(
 
     modality = {
         "state": {
-            "eef_9d": {"start": 0, "end": 9},
-            "gripper_position": {"start": 9, "end": 10},
-            "joint_position": {"start": 10, "end": 17},
+            **_modality_slices(),
             **sensor_modality_metadata(),
         },
-        "action": {
-            "eef_9d": {"start": 0, "end": 9},
-            "gripper_position": {"start": 9, "end": 10},
-            "joint_position": {"start": 10, "end": 17},
-        },
+        "action": _modality_slices(),
         "video": {
             "exterior_image_1_left": {"original_key": EXTERIOR_VIDEO_KEY},
             "wrist_image_left": {"original_key": WRIST_VIDEO_KEY},
