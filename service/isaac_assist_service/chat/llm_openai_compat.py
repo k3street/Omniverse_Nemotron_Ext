@@ -29,6 +29,9 @@ class LLMResponse:
     text: str
     actions: List[Dict] = field(default_factory=list)
     tool_calls: Optional[List[Dict]] = None
+    # (prompt_tokens, completion_tokens) as reported by the API. Needed to
+    # meter spend; a run cannot be capped on usage it never recorded.
+    usage: Optional[tuple] = None
 
 
 def is_reasoning_model(model: str) -> bool:
@@ -135,10 +138,15 @@ class OpenAICompatProvider:
                             for tc in raw_tool_calls
                         ]
 
+                    reported = data.get("usage") or {}
                     return LLMResponse(
                         text=reply,
                         actions=self._parse_actions(reply),
                         tool_calls=tool_calls,
+                        usage=(
+                            int(reported.get("prompt_tokens", 0)),
+                            int(reported.get("completion_tokens", 0)),
+                        ),
                     )
 
             except aiohttp.ClientError as e:

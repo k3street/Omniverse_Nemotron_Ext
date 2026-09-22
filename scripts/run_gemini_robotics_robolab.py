@@ -82,6 +82,12 @@ parser.add_argument("--model", default="gemini-robotics-er-2-preview")
 # different provider is a swap rather than a rewrite.
 parser.add_argument("--provider", default="gemini", choices=("gemini", "openai"))
 parser.add_argument(
+    "--budget-usd",
+    type=float,
+    default=25.0,
+    help="Stop the run before model spend exceeds this. 0 disables the cap.",
+)
+parser.add_argument(
     "--provider-base-url",
     default=None,
     help="Override the OpenAI-compatible endpoint (Azure, Bedrock, a proxy).",
@@ -869,6 +875,7 @@ from world_scope_membership_audit import (  # noqa: E402
 from world_predicate_evaluator_registry import (  # noqa: E402
     rgbd_world_predicate_evaluator_registry,
 )
+from model_budget import BudgetExceeded, BudgetLedger  # noqa: E402
 from service.isaac_assist_service.chat.llm_gemini import GeminiProvider  # noqa: E402
 from service.isaac_assist_service.chat.llm_openai_compat import (  # noqa: E402
     OpenAICompatProvider,
@@ -877,6 +884,8 @@ from service.isaac_assist_service.chat.llm_openai_compat import (  # noqa: E402
 
 MODEL_ID = args_cli.model
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+# One ledger per run, shared by every provider the run builds.
+ACTIVE_BUDGET_LEDGER: "BudgetLedger | None" = None
 
 
 def _provider_api_key() -> str:
@@ -892,12 +901,53 @@ def _provider_api_key() -> str:
     return key
 
 
+class MeteredProvider:
+    """Wraps a provider so every call is counted against a spend cap.
+
+    Metering sits at the provider boundary rather than at each call site: the
+    planner reasons, checks feasibility, picks motions and picks actuators
+    through separate paths, and any one of them added later would otherwise
+    spend unmetered.
+    """
+
+    def __init__(self, inner: Any, ledger: BudgetLedger):
+        self.inner = inner
+        self.ledger = ledger
+
+    async def complete(self, messages: Any, context: Any):
+        self.ledger.check_before_call()
+        response = await self.inner.complete(messages, context)
+        usage = getattr(response, "usage", None)
+        if usage:
+            cost = self.ledger.record(int(usage[0]), int(usage[1]))
+            print(
+                f"[budget] call {self.ledger.calls}: ${cost:.4f} | "
+                f"{self.ledger.summary()}",
+                flush=True,
+            )
+        else:
+            # A provider that reports no usage cannot be metered, and a cap
+            # that silently stops counting is worse than no cap.
+            raise RuntimeError(
+                f"{type(self.inner).__name__} returned no token usage; refusing to "
+                "run uncapped. Fix the provider's usage parsing."
+            )
+        return response
+
+
 def _build_provider(api_key: str):
     if args_cli.provider == "openai":
-        return OpenAICompatProvider(
+        inner = OpenAICompatProvider(
             api_key, MODEL_ID, args_cli.provider_base_url or OPENAI_CHAT_URL
         )
-    return GeminiProvider(api_key, MODEL_ID)
+    else:
+        inner = GeminiProvider(api_key, MODEL_ID)
+    if args_cli.budget_usd <= 0:
+        return inner
+    global ACTIVE_BUDGET_LEDGER
+    if ACTIVE_BUDGET_LEDGER is None:
+        ACTIVE_BUDGET_LEDGER = BudgetLedger(model=MODEL_ID, cap_usd=args_cli.budget_usd)
+    return MeteredProvider(inner, ACTIVE_BUDGET_LEDGER)
 
 GRIPPER_BASE_TO_FINGERTIP_M = 0.149
 SPATIAL_MOTION_CAPABILITY_TAGS = (
@@ -9935,6 +9985,8 @@ def main() -> int:
     print("=" * 78)
     print("VISIBLE TEST SUITE: Gemini Robotics ER 2 + RoboLab DROID/Franka")
     print(f"Model: {MODEL_ID} (provider: {args_cli.provider})")
+    if args_cli.budget_usd > 0:
+        print(f"Model spend cap: ${args_cli.budget_usd:.2f}")
     print(f"Task:  {args_cli.task}")
     print(
         "Scene roles: "
@@ -19169,9 +19221,16 @@ if __name__ == "__main__":
     exit_code = 1
     try:
         exit_code = main()
+    except BudgetExceeded as error:
+        # Hitting the cap is the cap working, not a crash: say what was spent
+        # and stop, without a traceback that reads like a failure.
+        print(f"[budget] stopping: {error}", flush=True)
+        exit_code = 3
     except Exception as error:
         print(f"[ER2 TEST SUITE] ERROR: {error}", flush=True)
         traceback.print_exc()
     finally:
+        if ACTIVE_BUDGET_LEDGER is not None:
+            print(f"[budget] final: {ACTIVE_BUDGET_LEDGER.summary()}", flush=True)
         simulation_app.close()
     sys.exit(exit_code)
