@@ -121,6 +121,53 @@ fixed demonstration is used only to establish a safe initial arm posture; the
 live grasp target is an object-frame transform applied to the current banana
 pose.
 
+## Running it, and choosing the model
+
+Always go through `./launch_gemini_robotics_robolab.sh`. Calling
+`python scripts/run_gemini_robotics_robolab.py` directly fails on the first
+import:
+
+```
+ModuleNotFoundError: No module named 'cv2'
+```
+
+That is the interpreter, not the code. The planner needs Isaac Sim's Python
+together with `OMNI_KIT_ACCEPT_EULA`, the `libgomp` preload and the Isaac Lab
+and RoboLab paths on `PYTHONPATH` — all of which the launcher sets. A plain
+`python3` on this machine resolves to whichever virtualenv is active, and
+`.venv-newton` (used for the headless Newton solver work) carries neither cv2
+nor Isaac.
+
+The planner speaks one dialect on the wire — messages with `image_url` data
+URIs, `tools` with `tool_choice`, `.tool_calls` back — and each provider
+translates. Selecting one is a flag:
+
+```bash
+# Gemini (default)
+./launch_gemini_robotics_robolab.sh --task BlocksInBinTask ...
+
+# GPT-6 Astra, capped at $25 of model spend
+OPENAI_API_KEY=sk-... ./launch_gemini_robotics_robolab.sh \
+  --provider openai --model gpt-6-astra --budget-usd 25 \
+  --task BlocksInBinTask ...
+```
+
+Two things to know before pointing it at OpenAI:
+
+* **Reasoning models take the Responses endpoint, not chat completions.**
+  `gpt-6-astra` refuses function tools on `/v1/chat/completions` outright, and
+  the provider routes the whole reasoning family to `/v1/responses` for that
+  reason. Nothing in the planner changes; the translation is inside the
+  provider.
+* **Do not reuse `OPENAI_API_BASE` from `.env`.** It points at a local Ollama
+  (`http://localhost:11434/v1`), so anything that adopts it silently talks to
+  a local model instead of OpenAI. The planner defaults to `api.openai.com`
+  and only moves when `--provider-base-url` says so.
+
+`--budget-usd` stops the run before the call that would breach it, and prints
+what was spent. It defaults to $25; `0` disables it. Astra runs roughly four to
+five times the cost per call of Gemini, so the cap matters more there.
+
 ## Training episodes versus evaluation traces
 
 `sequence_trace.json` is audit evidence, not a demonstration. The live runner
