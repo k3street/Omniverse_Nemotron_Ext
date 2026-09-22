@@ -31,6 +31,40 @@ class LLMResponse:
     tool_calls: Optional[List[Dict]] = None
 
 
+def is_reasoning_model(model: str) -> bool:
+    """Families that take max_completion_tokens and reject a chosen temperature.
+
+    Matched by family prefix so each release does not need its own line: gpt-6
+    fell outside an explicit gpt-5/o1/o3 list and would have been sent
+    max_tokens, and a 400.
+    """
+    return (model or "").startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
+
+
+def build_payload(model: str, messages: List[Dict], context: Dict) -> Dict:
+    """The request body, separated from the I/O so it can be checked."""
+    name = model or ""
+    reasoning = is_reasoning_model(name)
+    payload: Dict = {
+        "model": model,
+        "messages": messages,
+        ("max_completion_tokens" if reasoning else "max_tokens"): 4096,
+    }
+    if not reasoning:
+        payload["temperature"] = 0.2
+    # Kimi K2.6 (Moonshot) rejects any temperature != 1 with 400.
+    if "kimi-k2.6" in name or "kimi-k2-thinking" in name:
+        payload["temperature"] = 1.0
+    tools = context.get("tools")
+    if tools:
+        payload["tools"] = tools
+        # Honour the caller's choice. Callers that then require exactly one tool
+        # call pass "required"; forcing "auto" here let the model answer with
+        # prose instead, and the caller raised on the missing call.
+        payload["tool_choice"] = context.get("tool_choice", "auto")
+    return payload
+
+
 class OpenAICompatProvider:
     """
     Generic OpenAI-compatible chat completion provider.
@@ -51,26 +85,7 @@ class OpenAICompatProvider:
         else:
             full_messages = messages
 
-        # gpt-5.x and o-series models require max_completion_tokens; older models use max_tokens
-        _use_completion_tokens = (
-            self.model.startswith("gpt-5") or self.model.startswith("o1") or self.model.startswith("o3")
-        )
-        payload = {
-            "model": self.model,
-            "messages": full_messages,
-            ("max_completion_tokens" if _use_completion_tokens else "max_tokens"): 4096,
-            "temperature": 0.2,
-        }
-        # Kimi K2.6 (Moonshot) rejects any temperature != 1 with 400.
-        # Detect by model name and override.
-        if self.model and ("kimi-k2.6" in self.model or "kimi-k2-thinking" in self.model):
-            payload["temperature"] = 1.0
-
-        # Add tools if provided
-        tools = context.get("tools")
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
+        payload = build_payload(self.model, full_messages, context)
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",

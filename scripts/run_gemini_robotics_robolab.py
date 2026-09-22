@@ -76,6 +76,16 @@ parser.add_argument(
     ),
 )
 parser.add_argument("--model", default="gemini-robotics-er-2-preview")
+# The planner already speaks OpenAI shapes on the wire -- messages with
+# image_url parts, `tools` + `tool_choice`, and `.tool_calls` on the way back.
+# GeminiProvider translates those into Gemini's own format, so selecting a
+# different provider is a swap rather than a rewrite.
+parser.add_argument("--provider", default="gemini", choices=("gemini", "openai"))
+parser.add_argument(
+    "--provider-base-url",
+    default=None,
+    help="Override the OpenAI-compatible endpoint (Azure, Bedrock, a proxy).",
+)
 parser.add_argument("--retry-steps", type=int, default=20)
 parser.add_argument(
     "--motion-checkpoint-replans",
@@ -860,13 +870,34 @@ from world_predicate_evaluator_registry import (  # noqa: E402
     rgbd_world_predicate_evaluator_registry,
 )
 from service.isaac_assist_service.chat.llm_gemini import GeminiProvider  # noqa: E402
+from service.isaac_assist_service.chat.llm_openai_compat import (  # noqa: E402
+    OpenAICompatProvider,
+)
 
 
 MODEL_ID = args_cli.model
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{MODEL_ID}:generateContent"
-)
+OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+
+
+def _provider_api_key() -> str:
+    """The key for whichever provider was selected."""
+    if args_cli.provider == "openai":
+        key = os.environ.get("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("Set OPENAI_API_KEY in the environment")
+        return key
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not key:
+        raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY in the environment")
+    return key
+
+
+def _build_provider(api_key: str):
+    if args_cli.provider == "openai":
+        return OpenAICompatProvider(
+            api_key, MODEL_ID, args_cli.provider_base_url or OPENAI_CHAT_URL
+        )
+    return GeminiProvider(api_key, MODEL_ID)
 
 GRIPPER_BASE_TO_FINGERTIP_M = 0.149
 SPATIAL_MOTION_CAPABILITY_TAGS = (
@@ -974,61 +1005,60 @@ def _critic_context(memory: dict[str, Any], phase: str) -> str:
     )
 
 
-class GeminiRoboticsER2:
-    def __init__(self, api_key: str, timeout: float):
+class SceneReasoner:
+    """One frame plus a prompt, JSON back.
+
+    This goes through the same provider abstraction as the tool-calling paths
+    rather than posting to one vendor's REST endpoint, so perception follows
+    whichever model the run selected. The message it sends is already the
+    shape those paths use -- an image_url data URI beside the text -- and the
+    Gemini provider translates it, so nothing about the prompt changes.
+    """
+
+    def __init__(self, provider: Any, timeout: float):
+        self.provider = provider
         self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update(
-            {"x-goog-api-key": api_key, "Content-Type": "application/json"}
-        )
 
     def reason(self, prompt: str, frame: np.ndarray) -> tuple[dict[str, Any], float, str]:
         image_b64, digest = _encode_frame(frame)
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": image_b64,
-                            }
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_b64}",
+                            "detail": "high",
                         },
-                    ],
-                }
-            ],
-            "generationConfig": {"temperature": 0.2},
-        }
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
         started = time.perf_counter()
         response = None
         for attempt in range(args_cli.model_max_retries + 1):
             try:
-                response = self.session.post(
-                    GEMINI_URL, json=payload, timeout=self.timeout
+                response = asyncio.run(
+                    asyncio.wait_for(
+                        self.provider.complete(messages, {}), timeout=self.timeout
+                    )
                 )
                 break
-            except requests.RequestException as error:
+            except Exception as error:
                 if attempt >= args_cli.model_max_retries:
                     raise
                 delay = args_cli.model_retry_backoff * (2**attempt)
                 print(
-                    f"[ER2] transient request failure ({type(error).__name__}); "
+                    f"[reasoner] transient failure ({type(error).__name__}); "
                     f"retry {attempt + 1}/{args_cli.model_max_retries} in {delay:.1f}s",
                     flush=True,
                 )
                 time.sleep(delay)
         assert response is not None
         latency = time.perf_counter() - started
-        if not response.ok:
-            raise RuntimeError(
-                f"Gemini API HTTP {response.status_code}: {response.text[:500]}"
-            )
-        body = response.json()
-        parts = body.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        text = "\n".join(str(part.get("text", "")) for part in parts if part.get("text"))
-        return _json_from_text(text), latency, digest
+        return _json_from_text(response.text), latency, digest
 
 
 def _local_position(env: Any, asset_name: str) -> torch.Tensor:
@@ -2510,7 +2540,7 @@ tool call. Do not output joint commands or an embodiment-specific plan.
 
 
 def _choose_observation_bound_task_feasibility(
-    provider: GeminiProvider,
+    provider: Any,
     *,
     frame: np.ndarray,
     state: dict[str, Any],
@@ -3456,7 +3486,7 @@ def _motion_registry_for_observation_sources(
 
 
 def _choose_observation_bound_motion_tool(
-    provider: GeminiProvider,
+    provider: Any,
     registry: MotionExecutorRegistry,
     *,
     instruction: str,
@@ -3735,7 +3765,7 @@ call.
 
 
 def _choose_observation_bound_actuator_tool(
-    provider: GeminiProvider,
+    provider: Any,
     registry: ActuatorExecutorRegistry,
     *,
     instruction: str,
@@ -3966,7 +3996,7 @@ emit prose or JSON outside the single native tool call.
 
 
 def _choose_observation_bound_operation(
-    provider: GeminiProvider,
+    provider: Any,
     *,
     instruction: str,
     observation_prefix: str,
@@ -9637,9 +9667,7 @@ def _retreat_after_release(
 def main() -> int:
     global ACTIVE_EPISODE_RECORDER, ACTIVE_SENSOR_MONITOR, ACTIVE_SENSOR_SAMPLE_INDEX
     global ACTIVE_ROS2_SENSOR_INGRESS
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY in the environment")
+    api_key = _provider_api_key()
     world_effect_only_mode = bool(
         args_cli.shadow_plan_only or args_cli.guarded_world_effect_execution
     )
@@ -9906,7 +9934,7 @@ def main() -> int:
 
     print("=" * 78)
     print("VISIBLE TEST SUITE: Gemini Robotics ER 2 + RoboLab DROID/Franka")
-    print(f"Model: {MODEL_ID}")
+    print(f"Model: {MODEL_ID} (provider: {args_cli.provider})")
     print(f"Task:  {args_cli.task}")
     print(
         "Scene roles: "
@@ -10177,8 +10205,8 @@ def main() -> int:
     _set_sim6_camera_views(env)
     env.sim.render()
     obs = env.observation_manager.compute()
-    coach = GeminiRoboticsER2(api_key, args_cli.timeout)
-    motion_tool_provider: GeminiProvider | None = None
+    coach = SceneReasoner(_build_provider(api_key), args_cli.timeout)
+    motion_tool_provider: Any | None = None
     trackable_object_ids = tuple(
         object_id
         for object_id in env_cfg.contact_object_list
@@ -10187,7 +10215,7 @@ def main() -> int:
     motion_executor_registry: MotionExecutorRegistry | None = None
     actuator_executor_registry: ActuatorExecutorRegistry | None = None
     if not args_cli.shadow_plan_only or args_cli.guarded_world_effect_execution:
-        motion_tool_provider = GeminiProvider(api_key, MODEL_ID)
+        motion_tool_provider = _build_provider(api_key)
         motion_executor_registry = _local_dls_executor_registry(
             trackable_object_ids
         )
