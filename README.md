@@ -236,6 +236,11 @@ python scripts/generate_oracle_demos.py --task BlocksInBin \
 python scripts/stage_oracle_episodes.py --judge placement \
   --input artifacts/block_demos --output artifacts/block_demos_staged
 
+# The recipe reads ONE dataset root, so merge the per-task exports into a
+# single multi-task root rather than editing the dataloader on a rented GPU.
+python scripts/merge_lerobot_v3_datasets.py \
+  --input <banana-dataset> <blocks-dataset> ... --output <merged-root>
+
 # Keep only the episodes worth training on, renumbered contiguously.
 python scripts/stage_oracle_episodes.py \
   --input artifacts/banana_demos --output artifacts/banana_demos_staged
