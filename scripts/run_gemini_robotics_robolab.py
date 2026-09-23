@@ -927,10 +927,13 @@ class MeteredProvider:
             )
         else:
             # A provider that reports no usage cannot be metered, and a cap
-            # that silently stops counting is worse than no cap.
+            # that silently stops counting is worse than no cap. Carry the
+            # reply text: when a provider answers an API error instead of
+            # raising, that text is the only record of what actually failed.
+            detail = (getattr(response, "text", "") or "")[:400]
             raise RuntimeError(
                 f"{type(self.inner).__name__} returned no token usage; refusing to "
-                "run uncapped. Fix the provider's usage parsing."
+                f"run uncapped. Reply was: {detail!r}"
             )
         return response
 

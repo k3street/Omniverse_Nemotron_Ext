@@ -203,7 +203,13 @@ class OpenAICompatProvider:
                     logger.error(
                         f"API Error ({response.status}) from {url}: {error_text}"
                     )
-                    return LLMResponse(text=f"API Error ({response.status}): {error_text}")
+                    # Raise rather than return the error as if it were a reply.
+                    # A caller metering spend sees only a response with no
+                    # usage on it, and reports a usage-parsing problem while
+                    # the API's actual complaint goes unread.
+                    raise RuntimeError(
+                        f"{url} returned HTTP {response.status}: {error_text[:800]}"
+                    )
                 data = await response.json()
         text, tool_calls, usage = parse_responses_body(data)
         return LLMResponse(
