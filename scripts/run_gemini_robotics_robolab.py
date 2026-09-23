@@ -37,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
 load_dotenv(REPO_ROOT / ".env")
 
 from manipulation_scene_roles import ManipulationSceneRoles
+from provider_credentials import check_api_key
 
 parser = argparse.ArgumentParser(
     description="Run all visible Gemini Robotics ER 2 tests on RoboLab's current DROID robot."
@@ -614,6 +615,17 @@ SCENE_ROLES = ManipulationSceneRoles.create(
 )
 args_cli.instruction = args_cli.instruction or SCENE_ROLES.default_instruction()
 args_cli.enable_cameras = True
+# Check the credential before the simulator starts. Validating it inside main()
+# still costs a full Isaac boot first, which is most of the wait for a run that
+# was never going to authenticate.
+PROVIDER_API_KEY = (
+    check_api_key("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY"))
+    if args_cli.provider == "openai"
+    else check_api_key(
+        "GEMINI_API_KEY",
+        os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
+    )
+)
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
@@ -877,7 +889,6 @@ from world_predicate_evaluator_registry import (  # noqa: E402
     rgbd_world_predicate_evaluator_registry,
 )
 from model_budget import BudgetExceeded, BudgetLedger  # noqa: E402
-from provider_credentials import check_api_key  # noqa: E402
 from service.isaac_assist_service.chat.llm_gemini import GeminiProvider  # noqa: E402
 from service.isaac_assist_service.chat.llm_openai_compat import (  # noqa: E402
     OpenAICompatProvider,
@@ -891,13 +902,8 @@ ACTIVE_BUDGET_LEDGER: "BudgetLedger | None" = None
 
 
 def _provider_api_key() -> str:
-    """The key for whichever provider was selected."""
-    if args_cli.provider == "openai":
-        return check_api_key("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY"))
-    return check_api_key(
-        "GEMINI_API_KEY",
-        os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
-    )
+    """The key validated before the simulator was started."""
+    return PROVIDER_API_KEY
 
 
 class MeteredProvider:
