@@ -15,6 +15,7 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import time
 import traceback
@@ -876,6 +877,7 @@ from world_predicate_evaluator_registry import (  # noqa: E402
     rgbd_world_predicate_evaluator_registry,
 )
 from model_budget import BudgetExceeded, BudgetLedger  # noqa: E402
+from provider_credentials import check_api_key  # noqa: E402
 from service.isaac_assist_service.chat.llm_gemini import GeminiProvider  # noqa: E402
 from service.isaac_assist_service.chat.llm_openai_compat import (  # noqa: E402
     OpenAICompatProvider,
@@ -891,14 +893,11 @@ ACTIVE_BUDGET_LEDGER: "BudgetLedger | None" = None
 def _provider_api_key() -> str:
     """The key for whichever provider was selected."""
     if args_cli.provider == "openai":
-        key = os.environ.get("OPENAI_API_KEY")
-        if not key:
-            raise RuntimeError("Set OPENAI_API_KEY in the environment")
-        return key
-    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not key:
-        raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY in the environment")
-    return key
+        return check_api_key("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY"))
+    return check_api_key(
+        "GEMINI_API_KEY",
+        os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
+    )
 
 
 class MeteredProvider:
