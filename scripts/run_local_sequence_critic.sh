@@ -52,5 +52,8 @@ if ! curl -fsS --max-time 2 "$ENDPOINT/models" >/dev/null 2>&1; then
     exit 1
 fi
 
-python3 "$ROOT/scripts/critique_robot_sequence.py" \
+# Not a bare python3: that resolves to whichever virtualenv is active, and
+# .venv-newton has no Pillow. The system interpreter carries everything the
+# critic imports.
+"${CRITIC_PYTHON:-/usr/bin/python3}" "$ROOT/scripts/critique_robot_sequence.py" \
     --artifact-dir "$ARTIFACT_DIR" --endpoint "$ENDPOINT" --model "$MODEL"
