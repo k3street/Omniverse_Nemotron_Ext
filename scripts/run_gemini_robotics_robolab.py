@@ -19243,5 +19243,7 @@ if __name__ == "__main__":
     finally:
         if ACTIVE_BUDGET_LEDGER is not None:
             print(f"[budget] final: {ACTIVE_BUDGET_LEDGER.summary()}", flush=True)
-        simulation_app.close()
+        # close() may end the process itself via os._exit, so it has to carry
+        # the status; otherwise every crash reaches the launcher as a 0.
+        simulation_app.close(exit_code=exit_code)
     sys.exit(exit_code)
