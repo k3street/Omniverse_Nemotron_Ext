@@ -686,6 +686,11 @@ from residual_centering import (  # noqa: E402
     bounded_xy_step,
     damped_least_squares_delta,
 )
+from kinematic_reachability import (  # noqa: E402
+    ProbeConfig,
+    ProbePose,
+    probe_pose_sequence,
+)
 from franka_sensor_schema import (  # noqa: E402
     SENSOR_DIM,
     SIGNAL_SLICES,
@@ -2251,11 +2256,176 @@ def _runtime_scene_entity_physical_evidence(
     return result
 
 
+class _LiveArmKinematics:
+    """Kinematic-only view of the arm the IK executors drive.
+
+    Joint positions are written straight into the articulation and refreshed
+    with ``sim.forward()``, which updates kinematics without stepping physics.
+    Joint targets are never touched, so once the probe restores the original
+    positions the next environment step holds exactly what it held before.
+    """
+
+    def __init__(self, env: Any):
+        self._env = env
+        self._robot = env.scene["robot"]
+        data = self._robot.data
+        self._arm_joint_ids = [
+            data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)
+        ]
+        body_idx = data.body_names.index("base_link")
+        self._jacobi_body_idx = (
+            body_idx - 1 if self._robot.is_fixed_base else body_idx
+        )
+        self._jacobi_joint_ids = [
+            index + self._robot.num_base_dofs for index in self._arm_joint_ids
+        ]
+        # The shoulder links barely move and sit at mount height, so they would
+        # always read as the lowest link; clearance is about the rest.
+        self._link_ids = [
+            index
+            for index, name in enumerate(data.body_names)
+            if name not in {"panda_link0", "panda_link1", "panda_link2", "panda_link3"}
+        ]
+        self.link_names = tuple(data.body_names[i] for i in self._link_ids)
+
+    def joint_positions(self) -> torch.Tensor:
+        positions = self._robot.data.joint_pos.torch[0, self._arm_joint_ids]
+        return positions.detach().cpu().to(torch.float64)
+
+    def joint_limits(self) -> torch.Tensor:
+        limits = self._robot.data.soft_joint_pos_limits.torch[0, self._arm_joint_ids]
+        return limits.detach().cpu().to(torch.float64)
+
+    def set_joint_positions(self, positions: torch.Tensor) -> None:
+        self._robot.write_joint_position_to_sim_index(
+            position=positions.to(device=self._env.device, dtype=torch.float32)[None],
+            joint_ids=self._arm_joint_ids,
+        )
+        self._env.sim.forward()
+
+    def eef_pose(self) -> tuple[torch.Tensor, torch.Tensor]:
+        return (
+            _eef_position(self._env).to(torch.float64),
+            _eef_quaternion(self._env).to(torch.float64),
+        )
+
+    def jacobian(self) -> torch.Tensor:
+        jacobian = self._robot.data.body_link_jacobian_w.torch[
+            0, self._jacobi_body_idx
+        ][:, self._jacobi_joint_ids]
+        return jacobian.detach().cpu().to(torch.float64)
+
+    def link_positions(self) -> torch.Tensor:
+        link_pos_w = self._robot.data.body_link_pose_w.torch[0, self._link_ids, :3]
+        root_pos_w = self._robot.data.root_pos_w.torch[0]
+        return (link_pos_w - root_pos_w).detach().cpu().to(torch.float64)
+
+
+def _preflight_reachability_probe(
+    env: Any,
+    state: dict[str, Any],
+    grasp_offset_object: torch.Tensor,
+    object_to_grasp_quat: torch.Tensor,
+) -> dict[str, Any]:
+    """Check, without moving, that the runtime's own seeded poses are reachable.
+
+    The poses are the ones execution seeds from: the calibrated object-relative
+    grasp, the approach and lift clearances above it, the hover height over the
+    receptacle, and the release height inside it. The model's motion tool may
+    later choose other targets, which this does not cover.
+    """
+
+    def vector(key: str) -> torch.Tensor:
+        return torch.as_tensor(state[key], dtype=torch.float64)
+
+    object_xyz = vector("movable_object_xyz")
+    target_xyz = vector("target_receptacle_xyz")
+    grasp_xyz, grasp_quaternion = apply_object_relative_grasp(
+        object_xyz,
+        vector("movable_object_quaternion_wxyz"),
+        grasp_offset_object.detach().cpu().to(torch.float64),
+        object_to_grasp_quat.detach().cpu().to(torch.float64),
+    )
+    grasp_offset = grasp_xyz - object_xyz
+    clearances = {
+        "approach_clearance": args_cli.approach_clearance,
+        "lift_clearance": args_cli.lift_clearance,
+        "plate_hover_height": args_cli.plate_hover_height,
+    }
+
+    def seeded(phase: str, **extra: Any) -> torch.Tensor:
+        return live_phase_target(
+            phase, object_xyz, target_xyz, grasp_offset, **clearances, **extra
+        )
+
+    lift_xyz = seeded("lift")
+    above_target_xyz = seeded("above_plate", eef_xyz=lift_xyz)
+    place_xyz = target_xyz + grasp_offset
+    place_xyz[2] = target_xyz[2] + args_cli.release_height + grasp_offset[2]
+    poses = [
+        ProbePose("approach_object", seeded("approach_object"), grasp_quaternion),
+        ProbePose("grasp", seeded("grasp"), grasp_quaternion),
+        ProbePose("lift", lift_xyz, grasp_quaternion),
+        ProbePose("above_target_receptacle", above_target_xyz, grasp_quaternion),
+        ProbePose("place", place_xyz, grasp_quaternion),
+    ]
+
+    geometries = {
+        item.get("runtime_id"): item
+        for item in state.get("rgbd_scene_geometry", {}).get("geometries", [])
+        if isinstance(item, Mapping)
+    }
+    object_geometry = geometries.get(SCENE_ROLES.movable_object_asset, {})
+    receptacle_geometry = geometries.get(SCENE_ROLES.target_receptacle_asset, {})
+    # The object rests on the support, so the bottom of its visible box is the
+    # best available support height; no table-height key is published.
+    support_height_m = (
+        float(object_geometry["visible_aabb_min_base_m"][2])
+        if object_geometry.get("visible_aabb_min_base_m") is not None
+        else None
+    )
+    probe = probe_pose_sequence(
+        _LiveArmKinematics(env),
+        poses,
+        support_height_m=support_height_m,
+        config=ProbeConfig(
+            position_tolerance_m=args_cli.adaptive_tolerance,
+            orientation_tolerance_deg=args_cli.adaptive_orientation_tolerance_deg,
+            translation_step_limit_m=args_cli.adaptive_max_step,
+            rotation_step_limit_deg=args_cli.adaptive_max_angle_step_deg,
+            joint_step_limit_rad=args_cli.adaptive_max_joint_step,
+            damping=args_cli.adaptive_damping,
+        ),
+    )
+    if not probe["restored"]:
+        # The arm is not where every later decision believes it is.
+        raise RuntimeError(
+            "reachability probe could not restore the arm's joint positions"
+        )
+    probe["pose_source"] = "runtime_seeded_phase_targets"
+    probe["support_height_m"] = support_height_m
+    probe["support_height_source"] = (
+        "movable_object_visible_aabb_min_z" if support_height_m is not None else None
+    )
+    rim = receptacle_geometry.get("visible_aabb_max_base_m")
+    for record in probe["poses"]:
+        if record["name"] == "above_target_receptacle" and rim is not None and record.get("reachable"):
+            record["fingertip_height_above_receptacle_rim_m"] = (
+                record["target_xyz_m"][2] - GRIPPER_BASE_TO_FINGERTIP_M - float(rim[2])
+            )
+    probe["limitations"] = [
+        "link origins are compared with the support height; no mesh collision query is made",
+        "seeded poses only; a model-chosen motion target is not covered",
+    ]
+    return probe
+
+
 def _runtime_task_capability_evidence(
     env: Any,
     state: dict[str, Any],
     motion_registry: MotionExecutorRegistry,
     actuator_registry: ActuatorExecutorRegistry,
+    reachability_probe: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Publish task-neutral physical evidence from active runtime adapters."""
 
@@ -2487,6 +2657,7 @@ def _runtime_task_capability_evidence(
             ),
             "rated_workspace_envelope": None,
             "rated_workspace_envelope_status": "not_published_by_active_adapter",
+            "non_actuating_reachability_probe": reachability_probe,
         },
         "actuator": {
             "registered_executors": [
@@ -2544,6 +2715,12 @@ def _runtime_task_capability_evidence(
         },
         "evidence_limitations": [
             *(["rated_workspace_envelope"]),
+            "mesh_collision_clearance",
+            *(
+                []
+                if (reachability_probe or {}).get("status") == "evaluated"
+                else ["non_actuating_reachability_probe"]
+            ),
             *(
                 []
                 if force_capability.get("available")
@@ -2586,7 +2763,14 @@ published transmission model. A capacity derived by the runtime from live
 contact-point Jacobians and virtual work is admissible simulator evidence; cite
 its assumptions and compare its friction-supported load with object weight.
 The lack of a manufacturer-rated payload is still a limitation but does not by
-itself invalidate a fully available simulator-derived capacity. Other missing
+itself invalidate a fully available simulator-derived capacity. The runtime's
+non-actuating reachability probe solves the seeded approach, grasp, lift,
+transfer and placement poses on the live arm kinematics without stepping
+physics; its per-pose convergence, errors and joint-limit margins are
+admissible reachability evidence for those poses. It compares link origins
+with the support height rather than querying mesh collisions, so cite that as
+a limitation. An unreachable or unavailable probe pose is not reachability
+evidence. Other missing
 essential evidence remains unknown; do not guess it or mark an unknown category
 feasible. motion_authorized may be true only when
 both scene roles are visible and all four feasibility categories are feasible.
@@ -15200,11 +15384,27 @@ def main() -> int:
         preflight_frame, preflight_depth_summary = _rgbd_checkpoint_frame(
             env, frame
         )
+        # After the preflight frame is captured: the probe moves the arm
+        # kinematically, and the model must see the arm where it really is.
+        reachability_probe = _preflight_reachability_probe(
+            env, preflight_state, grasp_offset_object, object_to_grasp_quat
+        )
+        print(
+            "[reachability probe] "
+            f"status={reachability_probe['status']} "
+            f"all_reachable={reachability_probe['all_reachable']} "
+            + " ".join(
+                f"{record['name']}={record.get('reachable')}"
+                for record in reachability_probe["poses"]
+            ),
+            flush=True,
+        )
         capability_evidence = _runtime_task_capability_evidence(
             env,
             preflight_state,
             motion_executor_registry,
             actuator_executor_registry,
+            reachability_probe=reachability_probe,
         )
         scene, latency, digest = _choose_observation_bound_task_feasibility(
             motion_tool_provider,

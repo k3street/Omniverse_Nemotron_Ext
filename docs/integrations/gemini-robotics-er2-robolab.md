@@ -168,6 +168,30 @@ Two things to know before pointing it at OpenAI:
 what was spent. It defaults to $25; `0` disables it. Astra runs roughly four to
 five times the cost per call of Gemini, so the cap matters more there.
 
+Scene roles default to the banana task's `banana` and `plate_large`; any other
+task needs them bound, e.g. `--movable-object-asset red_block
+--target-receptacle-asset grey_bin` for `BlocksInBinTask`.
+
+### Reachability before motion
+
+Astra will not authorize motion on object positions and a list of IK executors
+alone: it asks for collision-free reachability of the grasp, carry and
+placement first, and Gemini used to assert it without evidence. Before the
+feasibility call, the runtime now solves the seeded approach, grasp, lift,
+above-receptacle and place poses with damped least squares IK on the live arm
+(`scripts/kinematic_reachability.py`). It writes joint positions and refreshes
+kinematics with `sim.forward()`, never stepping physics or touching a joint
+target, then restores the arm and aborts the run if it cannot. The result is
+published as `motion.non_actuating_reachability_probe`: per-pose convergence,
+errors, joint-limit margin along the path and the lowest link origin above the
+support. It compares link origins with the support height, not meshes, and it
+covers the seeded poses, not whatever target the model later picks.
+
+On `BlocksInBinTask` (2026-09-27) all five poses solved with joint-limit
+margins of at least 0.185, and Astra went from withholding motion to
+authorizing it. A held-arm experiment showed the probe leaves the end effector
+where it found it to within a nanometre.
+
 ## Training episodes versus evaluation traces
 
 `sequence_trace.json` is audit evidence, not a demonstration. The live runner
