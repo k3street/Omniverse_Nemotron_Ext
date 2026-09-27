@@ -2435,10 +2435,13 @@ def _runtime_task_capability_evidence(
     joint_pos = torch_view(robot.data.joint_pos)[0]
     joint_limits = torch_view(robot.data.soft_joint_pos_limits)[0]
     effort_limits = torch_view(robot.data.joint_effort_limits)[0]
+    # Only the arm joints the IK executors drive. The gripper's passive mimic
+    # joints rest on a limit whenever it is open, which would report a zero
+    # margin for an arm that has plenty of travel left.
     motion_joint_margins: list[float] = []
-    for index in range(len(joint_pos)):
-        if index == finger_index:
-            continue
+    for index in (
+        robot.data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)
+    ):
         lower = float(joint_limits[index, 0])
         upper = float(joint_limits[index, 1])
         width = upper - lower
