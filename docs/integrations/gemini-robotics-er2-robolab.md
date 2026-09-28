@@ -225,6 +225,11 @@ scripts/evaluate_planner.py run  config/planner_eval/blocks_in_bin_astra_v1.json
 scripts/evaluate_planner.py score runs/eval-dev
 ```
 
+To screen a cheaper model on the development split without editing the frozen
+file, pass `--provider`/`--model` (refused on the final split, which always
+measures the model the acceptance file names). The model must have a price in
+`scripts/model_budget.py`, or the run stops rather than metering it at zero.
+
 ## Training episodes versus evaluation traces
 
 `sequence_trace.json` is audit evidence, not a demonstration. The live runner

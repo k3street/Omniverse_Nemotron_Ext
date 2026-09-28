@@ -63,8 +63,13 @@ def episodes_for(acceptance: dict[str, Any], split: str) -> list[dict[str, Any]]
     )
 
 
-def command_for(acceptance: dict[str, Any], episode: dict[str, Any], artifact_dir: Path) -> list[str]:
-    launch = acceptance["launch"]
+def command_for(
+    acceptance: dict[str, Any],
+    episode: dict[str, Any],
+    artifact_dir: Path,
+    overrides: dict[str, str] | None = None,
+) -> list[str]:
+    launch = {**acceptance["launch"], **(overrides or {})}
     command = [
         str(LAUNCHER),
         "--viz", "none",
@@ -125,6 +130,8 @@ def score_run(output: Path) -> dict[str, Any]:
     summary = {
         "name": acceptance["name"],
         "split": meta["split"],
+        "provider": meta.get("overrides", {}).get("provider", acceptance["launch"]["provider"]),
+        "model": meta.get("overrides", {}).get("model", acceptance["launch"]["model"]),
         "acceptance_frozen": is_frozen(acceptance),
         "planner_commit": meta["git"],
         "final_seeds_previously_used": meta.get("final_seeds_previously_used", False),
@@ -171,6 +178,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     acceptance = load_acceptance(args.config)
     git = git_state()
     repeated = False
+    overrides = {k: v for k, v in (("provider", args.provider), ("model", args.model)) if v}
+    if overrides and args.split == "final":
+        sys.exit("final split refused: it measures the model the acceptance file names, not an override")
     if args.split == "final":
         if not is_frozen(acceptance):
             sys.exit("final split refused: acceptance file is not frozen, or was edited after freezing")
@@ -194,11 +204,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     episodes = episodes_for(acceptance, args.split)
     if run_meta_path.exists():
         previous_meta = json.loads(run_meta_path.read_text())
-        if previous_meta["acceptance"] != acceptance or previous_meta["split"] != args.split:
-            sys.exit(f"{output} holds a run with a different acceptance file or split; use a new --output")
+        if (
+            previous_meta["acceptance"] != acceptance
+            or previous_meta["split"] != args.split
+            or previous_meta.get("overrides", {}) != overrides
+        ):
+            sys.exit(f"{output} holds a run with a different acceptance file, split or model; use a new --output")
     else:
         run_meta_path.write_text(json.dumps({
-            "split": args.split, "acceptance": acceptance, "git": git,
+            "split": args.split, "acceptance": acceptance, "overrides": overrides, "git": git,
             "final_seeds_previously_used": repeated, "episodes": episodes,
             "started_utc": datetime.now(timezone.utc).isoformat(),
         }, indent=1) + "\n")
@@ -222,7 +236,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         with (directory / "run.log").open("w") as log:
             try:
                 completed = subprocess.run(
-                    command_for(acceptance, episode, directory), cwd=REPO_ROOT, env=environment,
+                    command_for(acceptance, episode, directory, overrides), cwd=REPO_ROOT, env=environment,
                     stdout=log, stderr=subprocess.STDOUT, timeout=acceptance["launch"]["episode_timeout_s"],
                 )
                 returncode: int | None = completed.returncode
@@ -251,6 +265,8 @@ def main() -> int:
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--max-total-usd", type=float, default=100.0)
     run.add_argument("--allow-repeat-final", action="store_true")
+    run.add_argument("--provider", help="development only: screen another provider")
+    run.add_argument("--model", help="development only: screen another model")
     score = sub.add_parser("score")
     score.add_argument("output", type=Path)
     freeze = sub.add_parser("freeze")
