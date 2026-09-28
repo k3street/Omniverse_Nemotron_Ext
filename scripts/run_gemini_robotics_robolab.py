@@ -17389,14 +17389,52 @@ def main() -> int:
                     "converged": not terminal,
                 }
             elif not args_cli.disable_adaptive_ik:
-                seed_steps = 0
+                orientation_seed: dict[str, Any] | None = None
                 if phase == "approach_object":
-                    # Establish the demonstrated downward grasp orientation at
-                    # a safe hover height before translating to a moved banana.
-                    obs, terminal, last_action = _run_joint_segment(
-                        env, obs, joint_states, recorded_actions, start, end
+                    # Turn to the calibrated downward grasp orientation where
+                    # the arm already hovers, before translating. This used to
+                    # replay the banana demonstration's approach, which carries
+                    # the arm to wherever the banana was: on BlocksInBinTask
+                    # that is low over the bin, and the approach then dragged
+                    # the open fingers across its rim.
+                    _, seed_quaternion = apply_object_relative_grasp(
+                        torch.tensor(current["movable_object_xyz"], dtype=torch.float32),
+                        torch.tensor(
+                            current["movable_object_quaternion_wxyz"],
+                            dtype=torch.float32,
+                        ),
+                        grasp_offset_object,
+                        object_to_grasp_quat,
                     )
-                    seed_steps = end - start
+                    obs, terminal, last_action, seed_report = _move_eef_to_target(
+                        env,
+                        obs,
+                        last_action,
+                        _eef_position(env),
+                        seed_quaternion,
+                        phase,
+                        gripper_closed=False,
+                        initial_object_z=initial_object_z,
+                    )
+                    orientation_seed = {
+                        "executor": "bounded_dls_ik_in_place",
+                        "iterations": len(seed_report.get("iterations") or []),
+                        "converged": bool(seed_report.get("converged")),
+                        "eef_start_xyz": seed_report.get("eef_start_xyz"),
+                        "eef_final_xyz": seed_report.get("eef_final_xyz"),
+                        "orientation_error_before_deg": seed_report.get(
+                            "orientation_error_before_deg"
+                        ),
+                        "orientation_error_after_deg": seed_report.get(
+                            "orientation_error_after_deg"
+                        ),
+                    }
+                    print(f"[orientation seed] {orientation_seed}", flush=True)
+                    if not orientation_seed["converged"] and not terminal:
+                        raise RuntimeError(
+                            "In-place grasp orientation seed did not converge: "
+                            f"{orientation_seed}"
+                        )
                 if terminal:
                     raise RuntimeError(f"Environment terminated during {phase} seed motion")
                 motion_attempts: list[dict[str, Any]] = []
@@ -17549,7 +17587,7 @@ def main() -> int:
                         ],
                         "converged": motion_attempts[-1]["converged"],
                     }
-                motion_report["demonstration_orientation_seed_steps"] = seed_steps
+                motion_report["orientation_seed"] = orientation_seed
                 if not bool(motion_report["converged"]) and not bool(
                     motion_report.get("yielded_to_scheduler")
                 ):
