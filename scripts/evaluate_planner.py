@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -39,6 +40,10 @@ from run_gemini_groot_campaign import plan_variations  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = REPO_ROOT / "launch_gemini_robotics_robolab.sh"
 STALE_KIT_LOCK = Path("/dev/shm/sem.carbonite-sharedmemory")
+# A healthy launch logs within seconds; a Kit blocked on a stale shared-memory
+# lock logs nothing at all. The lock file itself is not evidence: it can
+# outlive a clean shutdown, so its presence alone would block every run.
+SILENT_STARTUP_S = 180
 
 
 def load_acceptance(path: Path) -> dict[str, Any]:
@@ -229,23 +234,40 @@ def cmd_run(args: argparse.Namespace) -> int:
         if spent >= args.max_total_usd:
             print(f"stopping: ${spent:.2f} spent of the ${args.max_total_usd:.2f} run cap")
             break
-        if STALE_KIT_LOCK.exists() and not subprocess.run(
-            ["pgrep", "-f", "kit/python/bin/python3"], capture_output=True
-        ).stdout:
-            sys.exit(f"{STALE_KIT_LOCK} is held with no Kit process alive; remove it or every launch will hang")
         directory.mkdir(parents=True, exist_ok=True)
         started = time.time()
-        with (directory / "run.log").open("w") as log:
-            try:
-                completed = subprocess.run(
-                    command_for(acceptance, episode, directory, overrides), cwd=REPO_ROOT, env=environment,
-                    stdout=log, stderr=subprocess.STDOUT, timeout=acceptance["launch"]["episode_timeout_s"],
-                )
-                returncode: int | None = completed.returncode
-            except subprocess.TimeoutExpired:
-                returncode = None
+        log_path = directory / "run.log"
+        with log_path.open("w") as log:
+            process = subprocess.Popen(
+                command_for(acceptance, episode, directory, overrides), cwd=REPO_ROOT, env=environment,
+                stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+            )
+            outcome = "exited"
+            while process.poll() is None:
+                elapsed = time.time() - started
+                if elapsed > acceptance["launch"]["episode_timeout_s"]:
+                    outcome = "timed_out"
+                elif elapsed > SILENT_STARTUP_S and log_path.stat().st_size == 0:
+                    outcome = "hung_at_startup"
+                if outcome != "exited":
+                    # SIGINT lets Kit shut down and release its shared-memory
+                    # lock; a SIGTERM'd Kit is what leaves the lock stale.
+                    os.killpg(process.pid, signal.SIGINT)
+                    try:
+                        process.wait(timeout=60)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGTERM)
+                        process.wait()
+                    break
+                time.sleep(5)
         (directory / "result.json").write_text(json.dumps(
-            {"returncode": returncode, "timed_out": returncode is None, "wall_s": time.time() - started}) + "\n")
+            {"returncode": process.returncode, "outcome": outcome, "wall_s": time.time() - started}) + "\n")
+        if outcome == "hung_at_startup":
+            sys.exit(
+                f"episode {episode['attempt']} printed nothing for {SILENT_STARTUP_S}s: Kit is most likely waiting "
+                f"on a stale {STALE_KIT_LOCK} left by a killed Isaac process. With no Kit process alive, remove it "
+                "and the carb-RStringInternals files of dead PIDs, delete this episode's directory, and rerun."
+            )
         summary = score_run(output)
         spent = summary["cost_usd_total"]
         print(f"episode {episode['attempt']}: {summary['passes']}/{summary['episodes_run']} passed, ${spent:.2f} spent",
