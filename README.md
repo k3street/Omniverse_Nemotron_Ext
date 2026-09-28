@@ -159,7 +159,7 @@ in [the force/contact data guide](docs/integrations/franka-force-tactile-data.md
 
 The separate [Gemini Robotics ER 2 RoboLab workflow](docs/integrations/gemini-robotics-er2-robolab.md)
 uses Gemini as a visual phase supervisor and bounded local IK to retarget the
-current DROID/Franka robot to live banana and plate poses.
+current DROID/Franka robot to live object and receptacle poses.
 Its [RGB-D collision supervision guide](docs/integrations/rgbd-collision-supervision.md)
 covers detector box/mask plus depth fusion, swept robot-capsule clearance, and
 the real-camera calibration inputs required for local collision stops.
@@ -168,6 +168,31 @@ the real-camera calibration inputs required for local collision stops.
 
 *Gemini Robotics supervising a RoboLab manipulation run in Isaac Lab — click
 the preview to watch the 2×-speed demo.*
+
+The planner can also run on an OpenAI reasoning model, with a cap on model
+spend. Tasks other than the banana one need their scene roles bound:
+
+```bash
+# OPENAI_API_KEY is read from .env
+./launch_gemini_robotics_robolab.sh --provider openai --model gpt-6-astra \
+  --budget-usd 25 --task BlocksInBinTask \
+  --movable-object-asset red_block --target-receptacle-asset grey_bin
+```
+
+On 2026-09-27 GPT-6 Astra completed `BlocksInBinTask` with all ten checks
+passing: the block ended 2 mm from the bin centre, after 37 model calls
+costing $7.28. Two runtime changes made that possible:
+
+* **Reachability before motion.** The feasibility check now receives
+  inverse-kinematics solutions for the approach, grasp, lift, carry and place
+  poses. They are solved on the live arm without stepping physics, and the arm
+  is restored afterwards.
+* **Grasp orientation set in place.** The approach no longer replays the
+  banana demo's approach to set the grasp orientation, which took the arm to
+  wherever the banana had been.
+
+The [launch section of the workflow guide](docs/integrations/gemini-robotics-er2-robolab.md#running-it-and-choosing-the-model)
+covers interpreters, endpoints and the budget.
 
 Gemini training campaigns can also be planned across task, scene, and robot
 embodiment combinations without silently substituting an unsupported runtime:
@@ -221,12 +246,35 @@ detector:
 
 ```bash
 # Generate demonstrations (RoboLab's Isaac Sim 5.1 environment).
-python scripts/generate_banana_on_plate_demos.py \
-  --episodes 50 --xy-jitter 0.03 --output artifacts/banana_demos --headless
+# --seed-offset picks fresh scenes: each episode seeds its jitter from its
+# index, so repeating a range reproduces the same demonstrations.
+python scripts/generate_oracle_demos.py --task BananaOnPlate \
+  --episodes 50 --xy-jitter 0.04 --seed-offset 0 \
+  --output artifacts/banana_demos --headless
+
+# Cluttered scenes need a clearance test so the arm only attempts grasps it can
+# reach, and their success is judged from telemetry rather than the recorder's
+# all-or-nothing attribute. Staging renumbers survivors contiguously, which the
+# converter requires -- it pairs HDF5 and video by index.
+python scripts/generate_oracle_demos.py --task BlocksInBin \
+  --episodes 50 --min-clearance 0.08 --output artifacts/block_demos --headless
+python scripts/stage_oracle_episodes.py --judge placement \
+  --input artifacts/block_demos --output artifacts/block_demos_staged
+
+# The recipe reads ONE dataset root, so merge the per-task exports into a
+# single multi-task root rather than editing the dataloader on a rented GPU.
+python scripts/merge_lerobot_v3_datasets.py \
+  --input <banana-dataset> <blocks-dataset> ... --output <merged-root>
+
+# Keep only the episodes worth training on, renumbered contiguously.
+python scripts/stage_oracle_episodes.py \
+  --input artifacts/banana_demos --output artifacts/banana_demos_staged
 
 # Project them for post-training: LeRobot v3.0 for Cosmos 3, v2.1 for GR00T N1.7.
+# The converter needs pyarrow and does NOT need Isaac, so run it from an
+# environment that has one (RoboLab's Isaac Sim venv has no pyarrow).
 python scripts/convert_robolab_demo_to_lerobot_v3.py \
-  --input-dir artifacts/banana_demos --output <dataset-dir> \
+  --input-dir artifacts/banana_demos_staged --output <dataset-dir> \
   --instruction "Pick up the banana and put it on the plate"
 ```
 

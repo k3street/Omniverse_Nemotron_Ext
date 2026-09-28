@@ -111,6 +111,9 @@ class LLMResponse:
     actions: List[Dict] = field(default_factory=list)
     tool_calls: Optional[List[Dict]] = None
     thoughts: Optional[List[str]] = None
+    # (prompt_tokens, completion_tokens) as reported by the API, so a run can
+    # be metered against a spend cap.
+    usage: Optional[tuple] = None
 
 SYSTEM_PROMPT = (
     "You are Isaac Assist, an expert AI embedded inside NVIDIA Isaac Sim — "
@@ -490,11 +493,18 @@ class GeminiProvider:
                 tool_calls.append(entry)
 
         text = "\n".join(text_parts)
+        # Gemini names these differently to the OpenAI shape; normalise so a
+        # caller metering spend does not care which provider answered.
+        reported = data.get("usageMetadata") or {}
         return LLMResponse(
             text=text,
             actions=self._parse_actions(text),
             tool_calls=tool_calls if tool_calls else None,
             thoughts=thoughts if thoughts else None,
+            usage=(
+                int(reported.get("promptTokenCount", 0)),
+                int(reported.get("candidatesTokenCount", 0)),
+            ),
         )
 
     def _clean_params(self, params: Dict) -> Dict:

@@ -15,6 +15,7 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import time
 import traceback
@@ -36,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
 load_dotenv(REPO_ROOT / ".env")
 
 from manipulation_scene_roles import ManipulationSceneRoles
+from provider_credentials import check_api_key
 
 parser = argparse.ArgumentParser(
     description="Run all visible Gemini Robotics ER 2 tests on RoboLab's current DROID robot."
@@ -76,6 +78,22 @@ parser.add_argument(
     ),
 )
 parser.add_argument("--model", default="gemini-robotics-er-2-preview")
+# The planner already speaks OpenAI shapes on the wire -- messages with
+# image_url parts, `tools` + `tool_choice`, and `.tool_calls` on the way back.
+# GeminiProvider translates those into Gemini's own format, so selecting a
+# different provider is a swap rather than a rewrite.
+parser.add_argument("--provider", default="gemini", choices=("gemini", "openai"))
+parser.add_argument(
+    "--budget-usd",
+    type=float,
+    default=25.0,
+    help="Stop the run before model spend exceeds this. 0 disables the cap.",
+)
+parser.add_argument(
+    "--provider-base-url",
+    default=None,
+    help="Override the OpenAI-compatible endpoint (Azure, Bedrock, a proxy).",
+)
 parser.add_argument("--retry-steps", type=int, default=20)
 parser.add_argument(
     "--motion-checkpoint-replans",
@@ -597,6 +615,17 @@ SCENE_ROLES = ManipulationSceneRoles.create(
 )
 args_cli.instruction = args_cli.instruction or SCENE_ROLES.default_instruction()
 args_cli.enable_cameras = True
+# Check the credential before the simulator starts. Validating it inside main()
+# still costs a full Isaac boot first, which is most of the wait for a run that
+# was never going to authenticate.
+PROVIDER_API_KEY = (
+    check_api_key("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY"))
+    if args_cli.provider == "openai"
+    else check_api_key(
+        "GEMINI_API_KEY",
+        os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
+    )
+)
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
@@ -656,6 +685,11 @@ from residual_centering import (  # noqa: E402
     bounded_vector_step,
     bounded_xy_step,
     damped_least_squares_delta,
+)
+from kinematic_reachability import (  # noqa: E402
+    ProbeConfig,
+    ProbePose,
+    probe_pose_sequence,
 )
 from franka_sensor_schema import (  # noqa: E402
     SENSOR_DIM,
@@ -859,14 +893,74 @@ from world_scope_membership_audit import (  # noqa: E402
 from world_predicate_evaluator_registry import (  # noqa: E402
     rgbd_world_predicate_evaluator_registry,
 )
+from model_budget import BudgetExceeded, BudgetLedger  # noqa: E402
 from service.isaac_assist_service.chat.llm_gemini import GeminiProvider  # noqa: E402
+from service.isaac_assist_service.chat.llm_openai_compat import (  # noqa: E402
+    OpenAICompatProvider,
+)
 
 
 MODEL_ID = args_cli.model
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{MODEL_ID}:generateContent"
-)
+OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+# One ledger per run, shared by every provider the run builds.
+ACTIVE_BUDGET_LEDGER: "BudgetLedger | None" = None
+
+
+def _provider_api_key() -> str:
+    """The key validated before the simulator was started."""
+    return PROVIDER_API_KEY
+
+
+class MeteredProvider:
+    """Wraps a provider so every call is counted against a spend cap.
+
+    Metering sits at the provider boundary rather than at each call site: the
+    planner reasons, checks feasibility, picks motions and picks actuators
+    through separate paths, and any one of them added later would otherwise
+    spend unmetered.
+    """
+
+    def __init__(self, inner: Any, ledger: BudgetLedger):
+        self.inner = inner
+        self.ledger = ledger
+
+    async def complete(self, messages: Any, context: Any):
+        self.ledger.check_before_call()
+        response = await self.inner.complete(messages, context)
+        usage = getattr(response, "usage", None)
+        if usage:
+            cost = self.ledger.record(int(usage[0]), int(usage[1]))
+            print(
+                f"[budget] call {self.ledger.calls}: ${cost:.4f} | "
+                f"{self.ledger.summary()}",
+                flush=True,
+            )
+        else:
+            # A provider that reports no usage cannot be metered, and a cap
+            # that silently stops counting is worse than no cap. Carry the
+            # reply text: when a provider answers an API error instead of
+            # raising, that text is the only record of what actually failed.
+            detail = (getattr(response, "text", "") or "")[:400]
+            raise RuntimeError(
+                f"{type(self.inner).__name__} returned no token usage; refusing to "
+                f"run uncapped. Reply was: {detail!r}"
+            )
+        return response
+
+
+def _build_provider(api_key: str):
+    if args_cli.provider == "openai":
+        inner = OpenAICompatProvider(
+            api_key, MODEL_ID, args_cli.provider_base_url or OPENAI_CHAT_URL
+        )
+    else:
+        inner = GeminiProvider(api_key, MODEL_ID)
+    if args_cli.budget_usd <= 0:
+        return inner
+    global ACTIVE_BUDGET_LEDGER
+    if ACTIVE_BUDGET_LEDGER is None:
+        ACTIVE_BUDGET_LEDGER = BudgetLedger(model=MODEL_ID, cap_usd=args_cli.budget_usd)
+    return MeteredProvider(inner, ACTIVE_BUDGET_LEDGER)
 
 GRIPPER_BASE_TO_FINGERTIP_M = 0.149
 SPATIAL_MOTION_CAPABILITY_TAGS = (
@@ -974,61 +1068,60 @@ def _critic_context(memory: dict[str, Any], phase: str) -> str:
     )
 
 
-class GeminiRoboticsER2:
-    def __init__(self, api_key: str, timeout: float):
+class SceneReasoner:
+    """One frame plus a prompt, JSON back.
+
+    This goes through the same provider abstraction as the tool-calling paths
+    rather than posting to one vendor's REST endpoint, so perception follows
+    whichever model the run selected. The message it sends is already the
+    shape those paths use -- an image_url data URI beside the text -- and the
+    Gemini provider translates it, so nothing about the prompt changes.
+    """
+
+    def __init__(self, provider: Any, timeout: float):
+        self.provider = provider
         self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update(
-            {"x-goog-api-key": api_key, "Content-Type": "application/json"}
-        )
 
     def reason(self, prompt: str, frame: np.ndarray) -> tuple[dict[str, Any], float, str]:
         image_b64, digest = _encode_frame(frame)
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": image_b64,
-                            }
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_b64}",
+                            "detail": "high",
                         },
-                    ],
-                }
-            ],
-            "generationConfig": {"temperature": 0.2},
-        }
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
         started = time.perf_counter()
         response = None
         for attempt in range(args_cli.model_max_retries + 1):
             try:
-                response = self.session.post(
-                    GEMINI_URL, json=payload, timeout=self.timeout
+                response = asyncio.run(
+                    asyncio.wait_for(
+                        self.provider.complete(messages, {}), timeout=self.timeout
+                    )
                 )
                 break
-            except requests.RequestException as error:
+            except Exception as error:
                 if attempt >= args_cli.model_max_retries:
                     raise
                 delay = args_cli.model_retry_backoff * (2**attempt)
                 print(
-                    f"[ER2] transient request failure ({type(error).__name__}); "
+                    f"[reasoner] transient failure ({type(error).__name__}); "
                     f"retry {attempt + 1}/{args_cli.model_max_retries} in {delay:.1f}s",
                     flush=True,
                 )
                 time.sleep(delay)
         assert response is not None
         latency = time.perf_counter() - started
-        if not response.ok:
-            raise RuntimeError(
-                f"Gemini API HTTP {response.status_code}: {response.text[:500]}"
-            )
-        body = response.json()
-        parts = body.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        text = "\n".join(str(part.get("text", "")) for part in parts if part.get("text"))
-        return _json_from_text(text), latency, digest
+        return _json_from_text(response.text), latency, digest
 
 
 def _local_position(env: Any, asset_name: str) -> torch.Tensor:
@@ -2163,11 +2256,176 @@ def _runtime_scene_entity_physical_evidence(
     return result
 
 
+class _LiveArmKinematics:
+    """Kinematic-only view of the arm the IK executors drive.
+
+    Joint positions are written straight into the articulation and refreshed
+    with ``sim.forward()``, which updates kinematics without stepping physics.
+    Joint targets are never touched, so once the probe restores the original
+    positions the next environment step holds exactly what it held before.
+    """
+
+    def __init__(self, env: Any):
+        self._env = env
+        self._robot = env.scene["robot"]
+        data = self._robot.data
+        self._arm_joint_ids = [
+            data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)
+        ]
+        body_idx = data.body_names.index("base_link")
+        self._jacobi_body_idx = (
+            body_idx - 1 if self._robot.is_fixed_base else body_idx
+        )
+        self._jacobi_joint_ids = [
+            index + self._robot.num_base_dofs for index in self._arm_joint_ids
+        ]
+        # The shoulder links barely move and sit at mount height, so they would
+        # always read as the lowest link; clearance is about the rest.
+        self._link_ids = [
+            index
+            for index, name in enumerate(data.body_names)
+            if name not in {"panda_link0", "panda_link1", "panda_link2", "panda_link3"}
+        ]
+        self.link_names = tuple(data.body_names[i] for i in self._link_ids)
+
+    def joint_positions(self) -> torch.Tensor:
+        positions = self._robot.data.joint_pos.torch[0, self._arm_joint_ids]
+        return positions.detach().cpu().to(torch.float64)
+
+    def joint_limits(self) -> torch.Tensor:
+        limits = self._robot.data.soft_joint_pos_limits.torch[0, self._arm_joint_ids]
+        return limits.detach().cpu().to(torch.float64)
+
+    def set_joint_positions(self, positions: torch.Tensor) -> None:
+        self._robot.write_joint_position_to_sim_index(
+            position=positions.to(device=self._env.device, dtype=torch.float32)[None],
+            joint_ids=self._arm_joint_ids,
+        )
+        self._env.sim.forward()
+
+    def eef_pose(self) -> tuple[torch.Tensor, torch.Tensor]:
+        return (
+            _eef_position(self._env).to(torch.float64),
+            _eef_quaternion(self._env).to(torch.float64),
+        )
+
+    def jacobian(self) -> torch.Tensor:
+        jacobian = self._robot.data.body_link_jacobian_w.torch[
+            0, self._jacobi_body_idx
+        ][:, self._jacobi_joint_ids]
+        return jacobian.detach().cpu().to(torch.float64)
+
+    def link_positions(self) -> torch.Tensor:
+        link_pos_w = self._robot.data.body_link_pose_w.torch[0, self._link_ids, :3]
+        root_pos_w = self._robot.data.root_pos_w.torch[0]
+        return (link_pos_w - root_pos_w).detach().cpu().to(torch.float64)
+
+
+def _preflight_reachability_probe(
+    env: Any,
+    state: dict[str, Any],
+    grasp_offset_object: torch.Tensor,
+    object_to_grasp_quat: torch.Tensor,
+) -> dict[str, Any]:
+    """Check, without moving, that the runtime's own seeded poses are reachable.
+
+    The poses are the ones execution seeds from: the calibrated object-relative
+    grasp, the approach and lift clearances above it, the hover height over the
+    receptacle, and the release height inside it. The model's motion tool may
+    later choose other targets, which this does not cover.
+    """
+
+    def vector(key: str) -> torch.Tensor:
+        return torch.as_tensor(state[key], dtype=torch.float64)
+
+    object_xyz = vector("movable_object_xyz")
+    target_xyz = vector("target_receptacle_xyz")
+    grasp_xyz, grasp_quaternion = apply_object_relative_grasp(
+        object_xyz,
+        vector("movable_object_quaternion_wxyz"),
+        grasp_offset_object.detach().cpu().to(torch.float64),
+        object_to_grasp_quat.detach().cpu().to(torch.float64),
+    )
+    grasp_offset = grasp_xyz - object_xyz
+    clearances = {
+        "approach_clearance": args_cli.approach_clearance,
+        "lift_clearance": args_cli.lift_clearance,
+        "plate_hover_height": args_cli.plate_hover_height,
+    }
+
+    def seeded(phase: str, **extra: Any) -> torch.Tensor:
+        return live_phase_target(
+            phase, object_xyz, target_xyz, grasp_offset, **clearances, **extra
+        )
+
+    lift_xyz = seeded("lift")
+    above_target_xyz = seeded("above_plate", eef_xyz=lift_xyz)
+    place_xyz = target_xyz + grasp_offset
+    place_xyz[2] = target_xyz[2] + args_cli.release_height + grasp_offset[2]
+    poses = [
+        ProbePose("approach_object", seeded("approach_object"), grasp_quaternion),
+        ProbePose("grasp", seeded("grasp"), grasp_quaternion),
+        ProbePose("lift", lift_xyz, grasp_quaternion),
+        ProbePose("above_target_receptacle", above_target_xyz, grasp_quaternion),
+        ProbePose("place", place_xyz, grasp_quaternion),
+    ]
+
+    geometries = {
+        item.get("runtime_id"): item
+        for item in state.get("rgbd_scene_geometry", {}).get("geometries", [])
+        if isinstance(item, Mapping)
+    }
+    object_geometry = geometries.get(SCENE_ROLES.movable_object_asset, {})
+    receptacle_geometry = geometries.get(SCENE_ROLES.target_receptacle_asset, {})
+    # The object rests on the support, so the bottom of its visible box is the
+    # best available support height; no table-height key is published.
+    support_height_m = (
+        float(object_geometry["visible_aabb_min_base_m"][2])
+        if object_geometry.get("visible_aabb_min_base_m") is not None
+        else None
+    )
+    probe = probe_pose_sequence(
+        _LiveArmKinematics(env),
+        poses,
+        support_height_m=support_height_m,
+        config=ProbeConfig(
+            position_tolerance_m=args_cli.adaptive_tolerance,
+            orientation_tolerance_deg=args_cli.adaptive_orientation_tolerance_deg,
+            translation_step_limit_m=args_cli.adaptive_max_step,
+            rotation_step_limit_deg=args_cli.adaptive_max_angle_step_deg,
+            joint_step_limit_rad=args_cli.adaptive_max_joint_step,
+            damping=args_cli.adaptive_damping,
+        ),
+    )
+    if not probe["restored"]:
+        # The arm is not where every later decision believes it is.
+        raise RuntimeError(
+            "reachability probe could not restore the arm's joint positions"
+        )
+    probe["pose_source"] = "runtime_seeded_phase_targets"
+    probe["support_height_m"] = support_height_m
+    probe["support_height_source"] = (
+        "movable_object_visible_aabb_min_z" if support_height_m is not None else None
+    )
+    rim = receptacle_geometry.get("visible_aabb_max_base_m")
+    for record in probe["poses"]:
+        if record["name"] == "above_target_receptacle" and rim is not None and record.get("reachable"):
+            record["fingertip_height_above_receptacle_rim_m"] = (
+                record["target_xyz_m"][2] - GRIPPER_BASE_TO_FINGERTIP_M - float(rim[2])
+            )
+    probe["limitations"] = [
+        "link origins are compared with the support height; no mesh collision query is made",
+        "seeded poses only; a model-chosen motion target is not covered",
+    ]
+    return probe
+
+
 def _runtime_task_capability_evidence(
     env: Any,
     state: dict[str, Any],
     motion_registry: MotionExecutorRegistry,
     actuator_registry: ActuatorExecutorRegistry,
+    reachability_probe: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Publish task-neutral physical evidence from active runtime adapters."""
 
@@ -2347,10 +2605,13 @@ def _runtime_task_capability_evidence(
     joint_pos = torch_view(robot.data.joint_pos)[0]
     joint_limits = torch_view(robot.data.soft_joint_pos_limits)[0]
     effort_limits = torch_view(robot.data.joint_effort_limits)[0]
+    # Only the arm joints the IK executors drive. The gripper's passive mimic
+    # joints rest on a limit whenever it is open, which would report a zero
+    # margin for an arm that has plenty of travel left.
     motion_joint_margins: list[float] = []
-    for index in range(len(joint_pos)):
-        if index == finger_index:
-            continue
+    for index in (
+        robot.data.joint_names.index(f"panda_joint{i}") for i in range(1, 8)
+    ):
         lower = float(joint_limits[index, 0])
         upper = float(joint_limits[index, 1])
         width = upper - lower
@@ -2396,6 +2657,7 @@ def _runtime_task_capability_evidence(
             ),
             "rated_workspace_envelope": None,
             "rated_workspace_envelope_status": "not_published_by_active_adapter",
+            "non_actuating_reachability_probe": reachability_probe,
         },
         "actuator": {
             "registered_executors": [
@@ -2453,6 +2715,12 @@ def _runtime_task_capability_evidence(
         },
         "evidence_limitations": [
             *(["rated_workspace_envelope"]),
+            "mesh_collision_clearance",
+            *(
+                []
+                if (reachability_probe or {}).get("status") == "evaluated"
+                else ["non_actuating_reachability_probe"]
+            ),
             *(
                 []
                 if force_capability.get("available")
@@ -2495,7 +2763,14 @@ published transmission model. A capacity derived by the runtime from live
 contact-point Jacobians and virtual work is admissible simulator evidence; cite
 its assumptions and compare its friction-supported load with object weight.
 The lack of a manufacturer-rated payload is still a limitation but does not by
-itself invalidate a fully available simulator-derived capacity. Other missing
+itself invalidate a fully available simulator-derived capacity. The runtime's
+non-actuating reachability probe solves the seeded approach, grasp, lift,
+transfer and placement poses on the live arm kinematics without stepping
+physics; its per-pose convergence, errors and joint-limit margins are
+admissible reachability evidence for those poses. It compares link origins
+with the support height rather than querying mesh collisions, so cite that as
+a limitation. An unreachable or unavailable probe pose is not reachability
+evidence. Other missing
 essential evidence remains unknown; do not guess it or mark an unknown category
 feasible. motion_authorized may be true only when
 both scene roles are visible and all four feasibility categories are feasible.
@@ -2510,7 +2785,7 @@ tool call. Do not output joint commands or an embodiment-specific plan.
 
 
 def _choose_observation_bound_task_feasibility(
-    provider: GeminiProvider,
+    provider: Any,
     *,
     frame: np.ndarray,
     state: dict[str, Any],
@@ -3456,7 +3731,7 @@ def _motion_registry_for_observation_sources(
 
 
 def _choose_observation_bound_motion_tool(
-    provider: GeminiProvider,
+    provider: Any,
     registry: MotionExecutorRegistry,
     *,
     instruction: str,
@@ -3735,7 +4010,7 @@ call.
 
 
 def _choose_observation_bound_actuator_tool(
-    provider: GeminiProvider,
+    provider: Any,
     registry: ActuatorExecutorRegistry,
     *,
     instruction: str,
@@ -3966,7 +4241,7 @@ emit prose or JSON outside the single native tool call.
 
 
 def _choose_observation_bound_operation(
-    provider: GeminiProvider,
+    provider: Any,
     *,
     instruction: str,
     observation_prefix: str,
@@ -9637,9 +9912,7 @@ def _retreat_after_release(
 def main() -> int:
     global ACTIVE_EPISODE_RECORDER, ACTIVE_SENSOR_MONITOR, ACTIVE_SENSOR_SAMPLE_INDEX
     global ACTIVE_ROS2_SENSOR_INGRESS
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY in the environment")
+    api_key = _provider_api_key()
     world_effect_only_mode = bool(
         args_cli.shadow_plan_only or args_cli.guarded_world_effect_execution
     )
@@ -9906,7 +10179,9 @@ def main() -> int:
 
     print("=" * 78)
     print("VISIBLE TEST SUITE: Gemini Robotics ER 2 + RoboLab DROID/Franka")
-    print(f"Model: {MODEL_ID}")
+    print(f"Model: {MODEL_ID} (provider: {args_cli.provider})")
+    if args_cli.budget_usd > 0:
+        print(f"Model spend cap: ${args_cli.budget_usd:.2f}")
     print(f"Task:  {args_cli.task}")
     print(
         "Scene roles: "
@@ -10177,8 +10452,8 @@ def main() -> int:
     _set_sim6_camera_views(env)
     env.sim.render()
     obs = env.observation_manager.compute()
-    coach = GeminiRoboticsER2(api_key, args_cli.timeout)
-    motion_tool_provider: GeminiProvider | None = None
+    coach = SceneReasoner(_build_provider(api_key), args_cli.timeout)
+    motion_tool_provider: Any | None = None
     trackable_object_ids = tuple(
         object_id
         for object_id in env_cfg.contact_object_list
@@ -10187,7 +10462,7 @@ def main() -> int:
     motion_executor_registry: MotionExecutorRegistry | None = None
     actuator_executor_registry: ActuatorExecutorRegistry | None = None
     if not args_cli.shadow_plan_only or args_cli.guarded_world_effect_execution:
-        motion_tool_provider = GeminiProvider(api_key, MODEL_ID)
+        motion_tool_provider = _build_provider(api_key)
         motion_executor_registry = _local_dls_executor_registry(
             trackable_object_ids
         )
@@ -15109,11 +15384,27 @@ def main() -> int:
         preflight_frame, preflight_depth_summary = _rgbd_checkpoint_frame(
             env, frame
         )
+        # After the preflight frame is captured: the probe moves the arm
+        # kinematically, and the model must see the arm where it really is.
+        reachability_probe = _preflight_reachability_probe(
+            env, preflight_state, grasp_offset_object, object_to_grasp_quat
+        )
+        print(
+            "[reachability probe] "
+            f"status={reachability_probe['status']} "
+            f"all_reachable={reachability_probe['all_reachable']} "
+            + " ".join(
+                f"{record['name']}={record.get('reachable')}"
+                for record in reachability_probe["poses"]
+            ),
+            flush=True,
+        )
         capability_evidence = _runtime_task_capability_evidence(
             env,
             preflight_state,
             motion_executor_registry,
             actuator_executor_registry,
+            reachability_probe=reachability_probe,
         )
         scene, latency, digest = _choose_observation_bound_task_feasibility(
             motion_tool_provider,
@@ -17098,14 +17389,52 @@ def main() -> int:
                     "converged": not terminal,
                 }
             elif not args_cli.disable_adaptive_ik:
-                seed_steps = 0
+                orientation_seed: dict[str, Any] | None = None
                 if phase == "approach_object":
-                    # Establish the demonstrated downward grasp orientation at
-                    # a safe hover height before translating to a moved banana.
-                    obs, terminal, last_action = _run_joint_segment(
-                        env, obs, joint_states, recorded_actions, start, end
+                    # Turn to the calibrated downward grasp orientation where
+                    # the arm already hovers, before translating. This used to
+                    # replay the banana demonstration's approach, which carries
+                    # the arm to wherever the banana was: on BlocksInBinTask
+                    # that is low over the bin, and the approach then dragged
+                    # the open fingers across its rim.
+                    _, seed_quaternion = apply_object_relative_grasp(
+                        torch.tensor(current["movable_object_xyz"], dtype=torch.float32),
+                        torch.tensor(
+                            current["movable_object_quaternion_wxyz"],
+                            dtype=torch.float32,
+                        ),
+                        grasp_offset_object,
+                        object_to_grasp_quat,
                     )
-                    seed_steps = end - start
+                    obs, terminal, last_action, seed_report = _move_eef_to_target(
+                        env,
+                        obs,
+                        last_action,
+                        _eef_position(env),
+                        seed_quaternion,
+                        phase,
+                        gripper_closed=False,
+                        initial_object_z=initial_object_z,
+                    )
+                    orientation_seed = {
+                        "executor": "bounded_dls_ik_in_place",
+                        "iterations": len(seed_report.get("iterations") or []),
+                        "converged": bool(seed_report.get("converged")),
+                        "eef_start_xyz": seed_report.get("eef_start_xyz"),
+                        "eef_final_xyz": seed_report.get("eef_final_xyz"),
+                        "orientation_error_before_deg": seed_report.get(
+                            "orientation_error_before_deg"
+                        ),
+                        "orientation_error_after_deg": seed_report.get(
+                            "orientation_error_after_deg"
+                        ),
+                    }
+                    print(f"[orientation seed] {orientation_seed}", flush=True)
+                    if not orientation_seed["converged"] and not terminal:
+                        raise RuntimeError(
+                            "In-place grasp orientation seed did not converge: "
+                            f"{orientation_seed}"
+                        )
                 if terminal:
                     raise RuntimeError(f"Environment terminated during {phase} seed motion")
                 motion_attempts: list[dict[str, Any]] = []
@@ -17258,7 +17587,7 @@ def main() -> int:
                         ],
                         "converged": motion_attempts[-1]["converged"],
                     }
-                motion_report["demonstration_orientation_seed_steps"] = seed_steps
+                motion_report["orientation_seed"] = orientation_seed
                 if not bool(motion_report["converged"]) and not bool(
                     motion_report.get("yielded_to_scheduler")
                 ):
@@ -19141,9 +19470,18 @@ if __name__ == "__main__":
     exit_code = 1
     try:
         exit_code = main()
+    except BudgetExceeded as error:
+        # Hitting the cap is the cap working, not a crash: say what was spent
+        # and stop, without a traceback that reads like a failure.
+        print(f"[budget] stopping: {error}", flush=True)
+        exit_code = 3
     except Exception as error:
         print(f"[ER2 TEST SUITE] ERROR: {error}", flush=True)
         traceback.print_exc()
     finally:
-        simulation_app.close()
+        if ACTIVE_BUDGET_LEDGER is not None:
+            print(f"[budget] final: {ACTIVE_BUDGET_LEDGER.summary()}", flush=True)
+        # close() may end the process itself via os._exit, so it has to carry
+        # the status; otherwise every crash reaches the launcher as a 0.
+        simulation_app.close(exit_code=exit_code)
     sys.exit(exit_code)

@@ -15,6 +15,41 @@ def humanize_asset_name(asset_name: str) -> str:
     return normalized.replace("_", " ").strip()
 
 
+
+def scene_asset_names(scene: Any) -> tuple[str, ...]:
+    """Assets the scene actually holds, for reporting a role that missed.
+
+    Isaac's scene exposes rigid bodies under ``rigid_objects``; anything
+    mapping-like is read directly. Returns empty rather than raising, because
+    this only ever runs while building an error message.
+    """
+    try:
+        objects = getattr(scene, "rigid_objects", None)
+        if objects:
+            return tuple(sorted(objects.keys()))
+        return tuple(sorted(scene.keys()))
+    except Exception:
+        return ()
+
+
+def missing_roles_message(missing, available) -> str:
+    """Say which roles missed, what the scene has, and how to rebind them.
+
+    The default roles are the banana task's, so every other task fails here
+    until both are rebound -- and it fails after the simulator has booted. The
+    message has to carry the fix, or the next person reads a bare KeyError and
+    starts looking for a broken scene.
+    """
+    lines = [f"scene-role assets are unavailable: {sorted(missing)}"]
+    if available:
+        lines.append(f"scene provides: {list(available)}")
+    lines.append(
+        "bind them with --movable-object-asset and --target-receptacle-asset "
+        "(they default to the banana task's 'banana' and 'plate_large')"
+    )
+    return "; ".join(lines)
+
+
 @dataclass(frozen=True)
 class ManipulationSceneRoles:
     """Bind semantic task roles to assets without leaking them into tool schemas."""
@@ -60,7 +95,7 @@ class ManipulationSceneRoles:
             except (KeyError, TypeError, IndexError):
                 missing.append(asset)
         if missing:
-            raise KeyError(f"scene-role assets are unavailable: {missing}")
+            raise KeyError(missing_roles_message(missing, scene_asset_names(scene)))
 
     def default_instruction(self) -> str:
         return (

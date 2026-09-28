@@ -15,9 +15,18 @@ from scripts.convert_robolab_demo_to_lerobot_v3 import (
     DATA_PATH,
     DEFAULT_CHUNK_SIZE,
     EPISODES_PATH,
+    GRIPPER_ACTION_COLUMN,
+    GRIPPER_SLICE,
+    GRIPPER_STATE_COLUMN,
+    JOINT_ACTION_COLUMN,
+    JOINT_POSITION_DIM,
+    JOINT_POSITION_SLICE,
+    JOINT_STATE_COLUMN,
     VIDEO_PATH,
     _feature_stats,
+    _features,
     _flatten_stats,
+    _modality_slices,
     update_chunk_file_indices,
 )
 
@@ -77,3 +86,32 @@ def test_stats_are_flattened_into_episode_columns():
     # lerobot stores per-episode stats as stats/<feature>/<statistic> columns
     # and drops them on load, so the prefix must be exact.
     assert flattened == {"stats/action/mean": [1.0], "stats/action/count": [2]}
+
+
+def test_joint_pos_columns_are_declared_for_cosmos():
+    # cosmos-framework's action_space="joint_pos" reads these four columns by
+    # name; the packed vectors alone do not drive that branch.
+    features = _features(state_dim=17, action_dim=17, height=360, width=640)
+    for column in (JOINT_ACTION_COLUMN, JOINT_STATE_COLUMN):
+        assert features[column]["shape"] == [JOINT_POSITION_DIM], column
+    for column in (GRIPPER_ACTION_COLUMN, GRIPPER_STATE_COLUMN):
+        assert features[column]["shape"] == [1], column
+    # The packed layout stays, so one export serves both readers.
+    assert features["action"]["shape"] == [17]
+    assert features["observation.state"]["shape"] == [17]
+
+
+def test_modality_slices_cover_the_packed_vector():
+    slices = _modality_slices()
+    assert slices["joint_position"] == {
+        "start": JOINT_POSITION_SLICE.start, "end": JOINT_POSITION_SLICE.stop,
+    }
+    assert slices["gripper_position"] == {
+        "start": GRIPPER_SLICE.start, "end": GRIPPER_SLICE.stop,
+    }
+    # Contiguous and exactly the 17 dimensions the vectors carry.
+    bounds = sorted((v["start"], v["end"]) for v in slices.values())
+    assert bounds[0][0] == 0
+    assert bounds[-1][1] == 17
+    for (_, end), (start, _) in zip(bounds, bounds[1:]):
+        assert end == start
