@@ -192,6 +192,36 @@ margins of at least 0.185, and Astra went from withholding motion to
 authorizing it. A held-arm experiment showed the probe leaves the end effector
 where it found it to within a nanometre.
 
+## Measuring a pass rate
+
+One passing episode is an anecdote. `scripts/evaluate_planner.py` runs a fixed
+set of seeded scene variations (object and receptacle offsets, object yaw,
+light, background), one Isaac process each, and grades every episode from its
+trace with `scripts/planner_eval_gate.py` rather than trusting the runner's own
+PASS. The report gives the pass rate with a 95% Wilson interval, which failure
+checks fired, model calls and spend.
+
+The thresholds live in an acceptance file, e.g.
+`config/planner_eval/blocks_in_bin_astra_v1.json`, with two seed splits:
+
+* `development` is for iterating on the planner.
+* `final` is refused until the file is frozen (`evaluate_planner.py freeze`,
+  which stamps it with a hash so a later edit is detected) and the working tree
+  is clean. Each final run is appended to a ledger next to the file; running
+  the final seeds again needs `--allow-repeat-final`, and the report says so.
+
+After freezing, a check may only be tightened, with a dated entry in `changes`.
+Each episode gets a fresh artifact directory and the passive critic is off, so
+no lessons carry between episodes; the gate fails any episode that applied
+some. Runs resume where they stopped and halt at `--max-total-usd`.
+
+```bash
+scripts/evaluate_planner.py plan config/planner_eval/blocks_in_bin_astra_v1.json --split development
+scripts/evaluate_planner.py run  config/planner_eval/blocks_in_bin_astra_v1.json \
+  --split development --output runs/eval-dev --max-total-usd 100
+scripts/evaluate_planner.py score runs/eval-dev
+```
+
 ## Training episodes versus evaluation traces
 
 `sequence_trace.json` is audit evidence, not a demonstration. The live runner
