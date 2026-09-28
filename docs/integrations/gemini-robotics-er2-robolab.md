@@ -171,6 +171,15 @@ ER 2 on 2027-01-01), so the cap matters more there. The one full BlocksInBinTask
 episode sent 659K input tokens and 14K output, and input was 90% of its $7.28:
 each call resends a growing observation history.
 
+**One Isaac process at a time.** Concurrent Kit processes have wedged NVIDIA
+UVM on this DGX Spark, which only a host reboot clears. The launcher therefore
+takes the lock HomeHero's `sim_run_guard.sh` uses (`/tmp/homehero_isaac_sim.lock`,
+override with `ISAAC_LOCK_PATH`) and also waits until no other Kit process is
+running, printing `[isaac-lock] waiting ...` every five minutes and
+`[isaac-lock] acquired ...` when it starts. `ISAAC_LOCK_WAIT_SECONDS` bounds
+the wait (0, the default, waits indefinitely); on giving up it exits 76. The
+evaluation harness starts each episode's timeout at the `acquired` line.
+
 Scene roles default to the banana task's `banana` and `plate_large`; any other
 task needs them bound, e.g. `--movable-object-asset red_block
 --target-receptacle-asset grey_bin` for `BlocksInBinTask`.

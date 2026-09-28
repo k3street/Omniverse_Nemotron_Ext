@@ -44,6 +44,8 @@ STALE_KIT_LOCK = Path("/dev/shm/sem.carbonite-sharedmemory")
 # lock logs nothing at all. The lock file itself is not evidence: it can
 # outlive a clean shutdown, so its presence alone would block every run.
 SILENT_STARTUP_S = 180
+# Printed by launch_gemini_robotics_robolab.sh once it holds the one-Kit slot.
+LOCK_ACQUIRED = "[isaac-lock] acquired"
 
 
 def load_acceptance(path: Path) -> dict[str, Any]:
@@ -243,11 +245,20 @@ def cmd_run(args: argparse.Namespace) -> int:
                 stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
             )
             outcome = "exited"
+            # The launcher first queues for the machine's single Isaac slot, so
+            # the clock starts when it gets the slot, not when it starts waiting.
+            acquired_at: float | None = None
+            size_at_acquire = 0
             while process.poll() is None:
-                elapsed = time.time() - started
+                if acquired_at is None:
+                    if LOCK_ACQUIRED in log_path.read_text(errors="replace"):
+                        acquired_at, size_at_acquire = time.time(), log_path.stat().st_size
+                    time.sleep(5)
+                    continue
+                elapsed = time.time() - acquired_at
                 if elapsed > acceptance["launch"]["episode_timeout_s"]:
                     outcome = "timed_out"
-                elif elapsed > SILENT_STARTUP_S and log_path.stat().st_size == 0:
+                elif elapsed > SILENT_STARTUP_S and log_path.stat().st_size == size_at_acquire:
                     outcome = "hung_at_startup"
                 if outcome != "exited":
                     # SIGINT lets Kit shut down and release its shared-memory
@@ -261,10 +272,11 @@ def cmd_run(args: argparse.Namespace) -> int:
                     break
                 time.sleep(5)
         (directory / "result.json").write_text(json.dumps(
-            {"returncode": process.returncode, "outcome": outcome, "wall_s": time.time() - started}) + "\n")
+            {"returncode": process.returncode, "outcome": outcome, "wall_s": time.time() - started,
+             "queued_s": (acquired_at - started) if acquired_at else None}) + "\n")
         if outcome == "hung_at_startup":
             sys.exit(
-                f"episode {episode['attempt']} printed nothing for {SILENT_STARTUP_S}s: Kit is most likely waiting "
+                f"episode {episode['attempt']} printed nothing for {SILENT_STARTUP_S}s after taking the Isaac slot: Kit is most likely waiting "
                 f"on a stale {STALE_KIT_LOCK} left by a killed Isaac process. With no Kit process alive, remove it "
                 "and the carb-RStringInternals files of dead PIDs, delete this episode's directory, and rerun."
             )
