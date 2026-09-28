@@ -165,8 +165,11 @@ Two things to know before pointing it at OpenAI:
   and only moves when `--provider-base-url` says so.
 
 `--budget-usd` stops the run before the call that would breach it, and prints
-what was spent. It defaults to $25; `0` disables it. Astra runs roughly four to
-five times the cost per call of Gemini, so the cap matters more there.
+what was spent. It defaults to $25; `0` disables it. Per token, Astra costs 10x
+Gemini Robotics-ER 2 ($10/$50 against $1/$5 per million in/out; Google doubles
+ER 2 on 2027-01-01), so the cap matters more there. The one full BlocksInBinTask
+episode sent 659K input tokens and 14K output, and input was 90% of its $7.28:
+each call resends a growing observation history.
 
 Scene roles default to the banana task's `banana` and `plate_large`; any other
 task needs them bound, e.g. `--movable-object-asset red_block
