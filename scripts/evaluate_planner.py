@@ -181,6 +181,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     overrides = {k: v for k, v in (("provider", args.provider), ("model", args.model)) if v}
     if overrides and args.split == "final":
         sys.exit("final split refused: it measures the model the acceptance file names, not an override")
+    if args.limit is not None and args.split == "final":
+        sys.exit("final split refused: a partial final run would read as a pass rate over fewer seeds")
     if args.split == "final":
         if not is_frozen(acceptance):
             sys.exit("final split refused: acceptance file is not frozen, or was edited after freezing")
@@ -201,7 +203,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     run_meta_path = output / "run.json"
-    episodes = episodes_for(acceptance, args.split)
+    episodes = episodes_for(acceptance, args.split)[: args.limit]
     if run_meta_path.exists():
         previous_meta = json.loads(run_meta_path.read_text())
         if (
@@ -267,6 +269,7 @@ def main() -> int:
     run.add_argument("--allow-repeat-final", action="store_true")
     run.add_argument("--provider", help="development only: screen another provider")
     run.add_argument("--model", help="development only: screen another model")
+    run.add_argument("--limit", type=int, help="development only: run just the first N episodes")
     score = sub.add_parser("score")
     score.add_argument("output", type=Path)
     freeze = sub.add_parser("freeze")
