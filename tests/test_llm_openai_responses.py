@@ -107,3 +107,71 @@ def test_output_text_is_gathered():
     })
     assert text == "hello"
     assert calls is None
+
+
+# --- transient failures on the Responses path ---
+import asyncio
+
+from aiohttp import web
+
+
+def _serve_and_call(statuses, monkeypatch, served=None):
+    """Serve `statuses` in order from a local /v1/responses, then call it."""
+    from service.isaac_assist_service.chat import llm_openai_compat as compat
+
+    monkeypatch.setattr(compat, "RETRY_FIRST_BACKOFF_S", 0.01)
+    served = [] if served is None else served
+    ok_body = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "done"}]}],
+               "usage": {"input_tokens": 3, "output_tokens": 1}}
+
+    async def handler(request):
+        status = statuses[min(len(served), len(statuses) - 1)]
+        served.append(status)
+        if status == 200:
+            return web.json_response(ok_body)
+        return web.json_response({"error": "x"}, status=status, headers={"retry-after": "0"})
+
+    async def main():
+        app = web.Application()
+        app.router.add_post("/v1/responses", handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        provider = compat.OpenAICompatProvider("k", "gpt-6-sol", f"http://127.0.0.1:{port}/v1/chat/completions")
+        try:
+            return await provider.complete([{"role": "user", "content": "hi"}], {})
+        finally:
+            await runner.cleanup()
+
+    return asyncio.run(main()), served
+
+
+def test_a_rate_limit_is_retried_and_the_reply_returned(monkeypatch):
+    response, served = _serve_and_call([429, 200], monkeypatch)
+    assert response.text == "done" and served == [429, 200]
+
+
+def test_a_client_error_is_not_retried(monkeypatch):
+    with pytest.raises(RuntimeError, match="HTTP 400"):
+        _serve_and_call([400, 200], monkeypatch)
+
+
+def test_persistent_server_errors_give_up_after_the_attempt_limit(monkeypatch):
+    from service.isaac_assist_service.chat.llm_openai_compat import RETRY_ATTEMPTS
+
+    served = []
+    with pytest.raises(RuntimeError, match="HTTP 503"):
+        _serve_and_call([503], monkeypatch, served)
+    assert len(served) == RETRY_ATTEMPTS
+
+
+def test_retry_after_lengthens_but_never_shortens_the_wait():
+    from service.isaac_assist_service.chat.llm_openai_compat import RETRY_MAX_WAIT_S, retry_wait_s
+
+    assert retry_wait_s(4.0, None) == 4.0
+    assert retry_wait_s(4.0, "1") == 4.0
+    assert retry_wait_s(4.0, "12") == 12.0
+    assert retry_wait_s(4.0, "900") == RETRY_MAX_WAIT_S
+    assert retry_wait_s(4.0, "soon") == 4.0
