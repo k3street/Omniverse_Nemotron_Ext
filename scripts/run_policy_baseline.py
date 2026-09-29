@@ -45,7 +45,11 @@ parser.add_argument("--randomize-background", action="store_true")
 parser.add_argument("--artifact-dir", type=Path, required=True)
 parser.add_argument("--acceptance", type=Path,
                     default=Path(__file__).resolve().parents[1] / "config/planner_eval/blocks_in_bin_astra_v1.json")
-parser.add_argument("--max-steps-per-waypoint", type=int, default=90)
+# Like the planner's executor: hold each IK command for a few physics steps so
+# the arm's joint drives catch up before the next Jacobian is taken. One step
+# per command left the arm 3 cm short of the grasp after 90 steps.
+parser.add_argument("--settle-steps", type=int, default=12)
+parser.add_argument("--max-iterations-per-waypoint", type=int, default=40)
 parser.add_argument("--hold-steps", type=int, default=20)
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -180,17 +184,21 @@ def main() -> int:
         started = time.time()
         for label, target, gripper in policy.waypoints:
             steps, reached = 0, False
-            limit = args.hold_steps if label in ("grasp", "release") else args.max_steps_per_waypoint
-            while steps < limit:
+            dwell = label in ("grasp", "release")
+            iterations = 1 if dwell else args.max_iterations_per_waypoint
+            for _ in range(iterations):
                 action, err_m, err_deg = policy.step_toward(target, gripper)
-                obs, *_ = env.step(action.to(env.device))
-                pos, q = eef_pose(env)
-                recorder.append(env, action, obs, eef_position=pos.numpy(), eef_quaternion_wxyz=q.numpy())
-                steps += 1
-                if label not in ("grasp", "release") and err_m < 0.006 and err_deg < 3.0:
-                    reached = True
-                    break
-            trace["waypoints"].append({"label": label, "steps": steps, "reached": reached or label in ("grasp", "release"),
+                for _ in range(args.hold_steps if dwell else args.settle_steps):
+                    obs, *_ = env.step(action.to(env.device))
+                    pos, q = eef_pose(env)
+                    recorder.append(env, action, obs, eef_position=pos.numpy(), eef_quaternion_wxyz=q.numpy())
+                    steps += 1
+                if not dwell:
+                    _, err_m, err_deg = policy.step_toward(target, gripper)
+                    if err_m < 0.006 and err_deg < 3.0:
+                        reached = True
+                        break
+            trace["waypoints"].append({"label": label, "steps": steps, "reached": reached or dwell,
                                        "position_error_m": err_m, "orientation_error_deg": err_deg})
             print(f"[baseline] {label}: steps={steps} error={err_m:.4f} m {err_deg:.1f} deg", flush=True)
         for _ in range(15):  # let the object settle before grading
