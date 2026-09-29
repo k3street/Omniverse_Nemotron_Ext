@@ -60,8 +60,19 @@ while :; do
     if flock -n 9; then
         # Anchored on the executable (or the bash running an Isaac script), so
         # a shell that merely mentions these names does not count.
+        # Skip our own ancestors: a harness running under Isaac's Python
+        # launched this script and must not count as a second simulator.
+        ancestors=" $$ "
+        pid=$$
+        while [[ -n "$pid" && "$pid" != 1 ]]; do
+            pid="$(awk '/^PPid:/{print $2}' "/proc/$pid/status" 2>/dev/null || true)"
+            ancestors+="$pid "
+        done
         other_kit="$(pgrep -af '^(\S*bash )?\S*(kit/python/bin/python3|kit_app|isaac-sim\.sh)( |$)' \
-            | grep -v 'omni.telemetry.transmitter' || true)"
+            | grep -v 'omni.telemetry.transmitter' \
+            | while read -r kit_pid kit_rest; do
+                [[ "$ancestors" == *" $kit_pid "* ]] || echo "$kit_pid $kit_rest"
+              done || true)"
         [[ -z "$other_kit" ]] && break
         flock -u 9
     else
