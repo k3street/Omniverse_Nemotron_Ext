@@ -32,6 +32,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from planner_eval_gate import (  # noqa: E402
     acceptance_digest,
     check_episode,
+    check_final_state,
+    outcome_from_episode_hdf5,
+    outcome_from_trace,
     is_frozen,
     wilson_interval,
 )
@@ -39,6 +42,7 @@ from run_gemini_groot_campaign import plan_variations  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = REPO_ROOT / "launch_gemini_robotics_robolab.sh"
+DEFAULT_CONFIG = REPO_ROOT / "config" / "planner_eval" / "blocks_in_bin_astra_v1.json"
 STALE_KIT_LOCK = Path("/dev/shm/sem.carbonite-sharedmemory")
 # A healthy launch logs within seconds; a Kit blocked on a stale shared-memory
 # lock logs nothing at all. The lock file itself is not evidence: it can
@@ -111,6 +115,27 @@ def ledger_path(config: Path) -> Path:
     return config.with_suffix(".final_runs.jsonl")
 
 
+def final_state_grade(directory: Path, trace: dict | None, acceptance: dict) -> dict[str, Any] | None:
+    """The policy-neutral grade, from the episode's recording (or its trace)."""
+    # One definition across runs: a run launched before the final-state grade
+    # existed is graded by the current acceptance file's, and says so.
+    source = "run_acceptance"
+    if acceptance.get("final_state") is None:
+        acceptance = {**acceptance, "final_state": load_acceptance(DEFAULT_CONFIG)["final_state"]}
+        source = f"current {DEFAULT_CONFIG.relative_to(REPO_ROOT)}"
+    spec = acceptance["final_state"]
+    recordings = sorted((directory / "training_episodes").glob("run_*.hdf5")) or sorted(
+        (directory / "training_episodes" / "failed_evidence").glob("run_*_failed_*.hdf5")
+    )
+    outcome = (
+        outcome_from_episode_hdf5(recordings[-1], spec["object"], spec["receptacle"])
+        if recordings
+        else (outcome_from_trace(trace) if trace else None)
+    )
+    passed, details = check_final_state(outcome, acceptance)
+    return {"passed": passed, "definition": source, **details}
+
+
 def score_run(output: Path) -> dict[str, Any]:
     meta = json.loads((output / "run.json").read_text())
     acceptance = meta["acceptance"]
@@ -123,9 +148,10 @@ def score_run(output: Path) -> dict[str, Any]:
             continue  # not attempted yet
         trace = json.loads(trace_path.read_text()) if trace_path.exists() else None
         passed, details = check_episode(trace, log_path.read_text(errors="replace"), acceptance)
+        final_state = final_state_grade(directory, trace, acceptance)
         result_path = directory / "result.json"
         extra = json.loads(result_path.read_text()) if result_path.exists() else {}
-        episodes.append({**episode, **extra, "passed": passed, **details})
+        episodes.append({**episode, **extra, "passed": passed, **details, "final_state": final_state})
     passes = sum(e["passed"] for e in episodes)
     low, high = wilson_interval(passes, len(episodes))
     costs = [e["cost_usd"] for e in episodes if e.get("cost_usd") is not None]
@@ -145,6 +171,7 @@ def score_run(output: Path) -> dict[str, Any]:
         "episodes_run": len(episodes),
         "episodes_planned": len(meta["episodes"]),
         "passes": passes,
+        "final_state_passes": sum(bool((e.get("final_state") or {}).get("passed")) for e in episodes),
         "pass_rate": passes / len(episodes) if episodes else None,
         "pass_rate_95ci": [low, high],
         "failure_counts": failures,

@@ -126,3 +126,91 @@ def wilson_interval(passes: int, trials: int, z: float = 1.96) -> tuple[float, f
     centre = (p + z * z / (2 * trials)) / denominator
     half = z * math.sqrt(p * (1 - p) / trials + z * z / (4 * trials * trials)) / denominator
     return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+# --- Final-state grading, common to every kind of policy --------------------
+#
+# check_episode above grades the planner from its own trace. A scripted oracle
+# or an end-to-end VLA run through RoboLab has no such trace, so comparing them
+# needs a grade every runner can produce: where the object and the receptacle
+# ended up, whether the gripper let go, and whether the object is at rest. All
+# of it is read from the per-step recording each runner writes, and measured in
+# the receptacle's own frame so the robot's frame convention does not matter.
+
+
+def _yaw_from_wxyz(q) -> float:
+    w, x, y, z = (float(v) for v in q)
+    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+
+def _in_receptacle_frame(point, receptacle_xyz, receptacle_quat_wxyz):
+    yaw = _yaw_from_wxyz(receptacle_quat_wxyz)
+    dx, dy = point[0] - receptacle_xyz[0], point[1] - receptacle_xyz[1]
+    c, s = math.cos(-yaw), math.sin(-yaw)
+    return (c * dx - s * dy, s * dx + c * dy, point[2] - receptacle_xyz[2])
+
+
+def outcome_from_episode_hdf5(path, object_name: str, receptacle_name: str, *, fps: float = 15.0) -> dict:
+    """Final state of one recorded episode (RoboLab, oracle or planner recorder)."""
+    import h5py
+    import numpy as np
+
+    with h5py.File(path, "r") as source:
+        demo = source["data/demo_0"]
+        rigid = demo["states/rigid_object"]
+        obj = np.asarray(rigid[object_name]["root_pose"])
+        rec = np.asarray(rigid[receptacle_name]["root_pose"])
+        actions = np.asarray(demo["actions"])
+    window = max(1, int(round(fps)))
+    tail = obj[-min(window, len(obj)):, :3]
+    return {
+        "source": "episode_recording",
+        "object_xyz": obj[-1, :3].tolist(),
+        "receptacle_xyz": rec[-1, :3].tolist(),
+        "receptacle_quat_wxyz": rec[-1, 3:7].tolist(),
+        "gripper_command": float(actions[-1, 7]),
+        "object_motion_last_second_m": float(np.linalg.norm(tail[-1] - tail[0])),
+        "steps": int(len(obj)),
+    }
+
+
+def outcome_from_trace(trace: Mapping[str, Any]) -> dict | None:
+    """The same outcome from an older planner trace that has no recording."""
+    final = trace.get("final") or {}
+    retreat = trace.get("release_retreat") or {}
+    if final.get("movable_object_xyz") is None or final.get("target_receptacle_xyz") is None:
+        return None
+    return {
+        "source": "planner_trace",
+        "object_xyz": final["movable_object_xyz"],
+        "receptacle_xyz": final["target_receptacle_xyz"],
+        "receptacle_quat_wxyz": [1.0, 0.0, 0.0, 0.0],  # the trace does not record bin yaw
+        "gripper_command": 0.0 if retreat.get("eef_retreat_z_m") is not None else 1.0,
+        "object_motion_last_second_m": retreat.get("object_motion_during_retreat_m"),
+        "steps": None,
+    }
+
+
+def check_final_state(outcome: Mapping[str, Any] | None, acceptance: Mapping[str, Any]) -> tuple[bool, dict]:
+    """Grade an outcome against the acceptance file's final-state checks."""
+    spec = acceptance["final_state"]
+    footprint = spec["receptacle_footprint_m"]
+    details: dict[str, Any] = {}
+    if not outcome:
+        return False, {"failed": ["outcome_missing"]}
+    x, y, z = _in_receptacle_frame(outcome["object_xyz"], outcome["receptacle_xyz"], outcome["receptacle_quat_wxyz"])
+    inset = spec["inset_m"]
+    margin = min(footprint["half_x"] - inset - abs(x), footprint["half_y"] - inset - abs(y))
+    motion = outcome.get("object_motion_last_second_m")
+    results = {
+        "inside_receptacle": margin >= 0.0,
+        "resting_low": 0.0 <= z <= spec["max_object_height_above_receptacle_m"],
+        "gripper_released": outcome["gripper_command"] < 0.5,
+        "object_still": motion is not None and motion <= spec["max_object_motion_last_second_m"],
+    }
+    details.update(
+        inside_margin_m=margin, height_above_receptacle_m=z, object_motion_last_second_m=motion,
+        outcome_source=outcome.get("source"), checks=results,
+        failed=[name for name, ok in results.items() if not ok],
+    )
+    return not details["failed"], details

@@ -1,3 +1,4 @@
+import math
 import copy
 import json
 from pathlib import Path
@@ -121,3 +122,66 @@ def test_wilson_interval_is_wide_for_one_success():
     assert low < 0.25 and high == pytest.approx(1.0)
     low, high = wilson_interval(24, 30)
     assert 0.6 < low < 0.8 < high < 0.95
+
+
+# --- final-state grade, common to every policy type ---
+import h5py
+import numpy as np
+
+from scripts.planner_eval_gate import check_final_state, outcome_from_episode_hdf5, outcome_from_trace
+
+BIN_POSE = [0.467, -0.191, 0.003, 1.0, 0.0, 0.0, 0.0]
+
+
+def recording(tmp_path, block_xyz, *, bin_pose=BIN_POSE, gripper=0.0, drift=0.0, steps=30):
+    path = tmp_path / "run_0.hdf5"
+    with h5py.File(path, "w") as target:
+        demo = target.create_group("data/demo_0")
+        block = np.tile(np.array([*block_xyz, 1.0, 0.0, 0.0, 0.0]), (steps, 1))
+        block[:, 0] += np.linspace(0.0, drift, steps)
+        demo.create_dataset("states/rigid_object/red_block/root_pose", data=block)
+        demo.create_dataset("states/rigid_object/grey_bin/root_pose", data=np.tile(bin_pose, (steps, 1)))
+        actions = np.zeros((steps, 8))
+        actions[-1, 7] = gripper
+        demo.create_dataset("actions", data=actions)
+    return path
+
+
+def grade(path):
+    return check_final_state(outcome_from_episode_hdf5(path, "red_block", "grey_bin"), ACCEPTANCE)
+
+
+def test_a_block_resting_in_the_bin_and_released_passes(tmp_path):
+    passed, details = grade(recording(tmp_path, [0.47, -0.19, 0.034]))
+    assert passed, details["failed"]
+    assert details["inside_margin_m"] == pytest.approx(0.12 - 0.001, abs=0.002)
+
+
+def test_a_block_on_the_table_beside_the_bin_fails(tmp_path):
+    passed, details = grade(recording(tmp_path, [0.47, 0.05, 0.026]))
+    assert details["failed"] == ["inside_receptacle"]
+
+
+def test_a_block_still_held_fails_release(tmp_path):
+    passed, details = grade(recording(tmp_path, [0.47, -0.19, 0.2], gripper=1.0))
+    assert set(details["failed"]) == {"resting_low", "gripper_released"}
+
+
+def test_a_block_still_sliding_fails_stillness(tmp_path):
+    passed, details = grade(recording(tmp_path, [0.47, -0.19, 0.034], drift=0.02, steps=15))
+    assert details["failed"] == ["object_still"]
+
+
+def test_the_footprint_follows_a_rotated_bin(tmp_path):
+    quarter_turn = [0.467, -0.191, 0.003, math.cos(math.pi / 4), 0.0, 0.0, math.sin(math.pi / 4)]
+    # 0.17 m along world x is inside the bin's long axis unrotated, but past its
+    # short half-width (0.14 - 0.02) once the bin has turned 90 degrees.
+    inside = [0.467 + 0.17, -0.191, 0.034]
+    assert grade(recording(tmp_path, inside))[0]
+    assert grade(recording(tmp_path, inside, bin_pose=quarter_turn))[1]["failed"] == ["inside_receptacle"]
+
+
+def test_an_unfinished_trace_is_a_missing_outcome_not_a_pass():
+    assert outcome_from_trace({"status": "failed_not_admitted"}) is None
+    passed, details = check_final_state(None, ACCEPTANCE)
+    assert not passed and details["failed"] == ["outcome_missing"]

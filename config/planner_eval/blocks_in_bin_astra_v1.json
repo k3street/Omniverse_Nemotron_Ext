@@ -42,6 +42,19 @@
     "physics_steps_are_local": true,
     "no_critic_memory": true
   },
+  "final_state": {
+    "note": "Common grade for every policy type, read from each runner's per-step recording. Footprint from RoboLab assets/fixtures/grey_bin.usd (42 x 28 cm, 10.5 cm rim, origin at the base centre).",
+    "object": "red_block",
+    "receptacle": "grey_bin",
+    "receptacle_footprint_m": {
+      "half_x": 0.21,
+      "half_y": 0.14,
+      "rim_height": 0.105
+    },
+    "inset_m": 0.02,
+    "max_object_height_above_receptacle_m": 0.08,
+    "max_object_motion_last_second_m": 0.005
+  },
   "final_target": {
     "min_passes": 24,
     "episodes": 30
