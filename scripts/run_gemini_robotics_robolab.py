@@ -672,6 +672,7 @@ from cosmos3_edge_executor import (  # noqa: E402
 )
 from adaptive_pick_place import (  # noqa: E402
     apply_object_relative_grasp,
+    choose_grasp_yaw,
     derive_object_relative_grasp,
     derive_manipulation_feedback,
     live_phase_target,
@@ -2319,6 +2320,70 @@ class _LiveArmKinematics:
         link_pos_w = self._robot.data.body_link_pose_w.torch[0, self._link_ids, :3]
         root_pos_w = self._robot.data.root_pos_w.torch[0]
         return (link_pos_w - root_pos_w).detach().cpu().to(torch.float64)
+
+
+
+def _seed_grasp_orientation(
+    env: Any,
+    obs: dict[str, Any],
+    last_action: torch.Tensor,
+    initial_object_z: float,
+    grasp_offset_object: torch.Tensor,
+    object_to_grasp_quat: torch.Tensor,
+) -> tuple[dict[str, Any], bool, torch.Tensor, dict[str, Any]]:
+    """Turn the open hand, in place, to the grasp orientation it will need.
+
+    Done before the model picks the approach target, so the model starts from
+    jaws that already match an object axis instead of asking for a large turn
+    that the 45-degree correction limit rejects. Of the symmetric copies of the
+    calibrated grasp, the one whose closing axis leaves the fingers the most
+    room beside the neighbours wins, then the smallest turn: on
+    BlocksInBinTask a block 4 mm from a Rubik's cube stalled every model
+    because the nearer axis put a finger on the cube.
+    """
+    state = _state(env, initial_object_z)
+    _, seed_quaternion = apply_object_relative_grasp(
+        torch.tensor(state["movable_object_xyz"], dtype=torch.float32),
+        torch.tensor(state["movable_object_quaternion_wxyz"], dtype=torch.float32),
+        grasp_offset_object,
+        object_to_grasp_quat,
+    )
+    alignment = state.get("pregrasp_axis_alignment") or {}
+    comparisons = alignment.get("axis_comparisons") or []
+    closing_axis = (state.get("actuator_contact_geometry") or {}).get("closing_axis_local")
+    extents = alignment.get("object_footprint_extents_m") or []
+    choice: dict[str, Any] | None = None
+    if alignment.get("available") and comparisons and closing_axis is not None:
+        square = len(extents) == 2 and min(extents) > 0 and max(extents) / min(extents) <= 1.25
+        seed_quaternion, choice = choose_grasp_yaw(
+            seed_quaternion,
+            _eef_quaternion(env),
+            torch.tensor(closing_axis, dtype=torch.float32),
+            [c["object_axis_base"][:2] for c in comparisons],
+            [c.get("finger_clearance_m") for c in comparisons],
+            quarter_turn_symmetric=square,
+        )
+    obs, terminal, last_action, report = _move_eef_to_target(
+        env,
+        obs,
+        last_action,
+        _eef_position(env),
+        seed_quaternion,
+        "approach_object",
+        gripper_closed=False,
+        initial_object_z=initial_object_z,
+    )
+    seed = {
+        "executor": "bounded_dls_ik_in_place",
+        "grasp_yaw_choice": choice,
+        "iterations": len(report.get("iterations") or []),
+        "converged": bool(report.get("converged")),
+        "eef_start_xyz": report.get("eef_start_xyz"),
+        "eef_final_xyz": report.get("eef_final_xyz"),
+        "orientation_error_before_deg": report.get("orientation_error_before_deg"),
+        "orientation_error_after_deg": report.get("orientation_error_after_deg"),
+    }
+    return obs, terminal, last_action, seed
 
 
 def _preflight_reachability_probe(
@@ -16737,6 +16802,23 @@ def main() -> int:
             scheduler_decision: dict[str, Any] | None = None
             scheduler_latency = 0.0
             scheduler_digest: str | None = None
+            orientation_seed: dict[str, Any] | None = None
+            if (
+                phase == "approach_object"
+                and not args_cli.disable_adaptive_ik
+                and not actuator_engaged_at_stage_start
+            ):
+                obs, terminal, last_action, orientation_seed = _seed_grasp_orientation(
+                    env, obs, last_action, initial_object_z,
+                    grasp_offset_object, object_to_grasp_quat,
+                )
+                print(f"[orientation seed] {orientation_seed}", flush=True)
+                if terminal:
+                    raise RuntimeError("Environment terminated during the grasp orientation seed")
+                if not orientation_seed["converged"]:
+                    raise RuntimeError(
+                        f"In-place grasp orientation seed did not converge: {orientation_seed}"
+                    )
             current = _state(env, initial_object_z)
             if (
                 not args_cli.disable_adaptive_ik
@@ -17389,52 +17471,6 @@ def main() -> int:
                     "converged": not terminal,
                 }
             elif not args_cli.disable_adaptive_ik:
-                orientation_seed: dict[str, Any] | None = None
-                if phase == "approach_object":
-                    # Turn to the calibrated downward grasp orientation where
-                    # the arm already hovers, before translating. This used to
-                    # replay the banana demonstration's approach, which carries
-                    # the arm to wherever the banana was: on BlocksInBinTask
-                    # that is low over the bin, and the approach then dragged
-                    # the open fingers across its rim.
-                    _, seed_quaternion = apply_object_relative_grasp(
-                        torch.tensor(current["movable_object_xyz"], dtype=torch.float32),
-                        torch.tensor(
-                            current["movable_object_quaternion_wxyz"],
-                            dtype=torch.float32,
-                        ),
-                        grasp_offset_object,
-                        object_to_grasp_quat,
-                    )
-                    obs, terminal, last_action, seed_report = _move_eef_to_target(
-                        env,
-                        obs,
-                        last_action,
-                        _eef_position(env),
-                        seed_quaternion,
-                        phase,
-                        gripper_closed=False,
-                        initial_object_z=initial_object_z,
-                    )
-                    orientation_seed = {
-                        "executor": "bounded_dls_ik_in_place",
-                        "iterations": len(seed_report.get("iterations") or []),
-                        "converged": bool(seed_report.get("converged")),
-                        "eef_start_xyz": seed_report.get("eef_start_xyz"),
-                        "eef_final_xyz": seed_report.get("eef_final_xyz"),
-                        "orientation_error_before_deg": seed_report.get(
-                            "orientation_error_before_deg"
-                        ),
-                        "orientation_error_after_deg": seed_report.get(
-                            "orientation_error_after_deg"
-                        ),
-                    }
-                    print(f"[orientation seed] {orientation_seed}", flush=True)
-                    if not orientation_seed["converged"] and not terminal:
-                        raise RuntimeError(
-                            "In-place grasp orientation seed did not converge: "
-                            f"{orientation_seed}"
-                        )
                 if terminal:
                     raise RuntimeError(f"Environment terminated during {phase} seed motion")
                 motion_attempts: list[dict[str, Any]] = []
