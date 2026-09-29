@@ -150,17 +150,13 @@ def _in_receptacle_frame(point, receptacle_xyz, receptacle_quat_wxyz):
     return (c * dx - s * dy, s * dx + c * dy, point[2] - receptacle_xyz[2])
 
 
-def outcome_from_episode_hdf5(path, object_name: str, receptacle_name: str, *, fps: float = 15.0) -> dict:
-    """Final state of one recorded episode (RoboLab, oracle or planner recorder)."""
-    import h5py
+def outcome_from_arrays(object_poses, receptacle_poses, actions, *, fps: float = 15.0) -> dict:
+    """Final state from per-step (N, 7) poses [xyz, wxyz] and (N, 8) actions."""
     import numpy as np
 
-    with h5py.File(path, "r") as source:
-        demo = source["data/demo_0"]
-        rigid = demo["states/rigid_object"]
-        obj = np.asarray(rigid[object_name]["root_pose"])
-        rec = np.asarray(rigid[receptacle_name]["root_pose"])
-        actions = np.asarray(demo["actions"])
+    obj = np.asarray(object_poses, dtype=float)
+    rec = np.asarray(receptacle_poses, dtype=float)
+    actions = np.asarray(actions, dtype=float)
     window = max(1, int(round(fps)))
     tail = obj[-min(window, len(obj)):, :3]
     return {
@@ -172,6 +168,19 @@ def outcome_from_episode_hdf5(path, object_name: str, receptacle_name: str, *, f
         "object_motion_last_second_m": float(np.linalg.norm(tail[-1] - tail[0])),
         "steps": int(len(obj)),
     }
+
+
+def outcome_from_episode_hdf5(path, object_name: str, receptacle_name: str, *, fps: float = 15.0) -> dict:
+    """Final state of one recorded episode (RoboLab, oracle or planner recorder)."""
+    import h5py
+
+    with h5py.File(path, "r") as source:
+        demo = source["data/demo_0"]
+        rigid = demo["states/rigid_object"]
+        return outcome_from_arrays(
+            rigid[object_name]["root_pose"][()], rigid[receptacle_name]["root_pose"][()],
+            demo["actions"][()], fps=fps,
+        )
 
 
 def outcome_from_trace(trace: Mapping[str, Any]) -> dict | None:

@@ -662,6 +662,11 @@ from cosmos3_edge_client import (  # noqa: E402
     Cosmos3EdgeClientError,
 )
 from sim6_camera_offsets import convert_sim5_camera_offsets  # noqa: E402
+from robolab_sim6_env import (  # noqa: E402
+    build_env_cfg,
+    set_camera_views,
+    transform_asset_pose,
+)
 from cosmos3_edge_executor import (  # noqa: E402
     COSMOS3_EDGE_ACQUIRE_EXECUTOR_ID,
     DEFAULT_ACQUIRE_ACTION_CHUNKS as COSMOS3_EDGE_DEFAULT_ACQUIRE_CHUNKS,
@@ -1393,20 +1398,8 @@ def _current_contact_observation(env: Any) -> dict[str, Any]:
         }
 
 
-def _set_sim6_camera_views(env: Any) -> None:
-    """Use look-at poses instead of legacy Sim 5 camera quaternions."""
-    origins = env.scene.env_origins
-    views = {
-        "over_shoulder_left_camera": ((0.05, 0.57, 0.66), (0.48, -0.05, 0.05)),
-        "egocentric_mirrored_camera": ((1.50, 0.00, 1.00), (0.42, 0.00, 0.10)),
-    }
-    for name, (eye, target) in views.items():
-        camera = env.scene.sensors[name]
-        eye_offset = torch.tensor(eye, dtype=torch.float32, device=camera.device)
-        target_offset = torch.tensor(target, dtype=torch.float32, device=camera.device)
-        camera.set_world_poses_from_view(origins.to(camera.device) + eye_offset,
-                                         origins.to(camera.device) + target_offset)
-        camera._update_poses(None)
+# Shared with every other runner in these scenes (robolab_sim6_env).
+_set_sim6_camera_views = set_camera_views
 
 
 def _transform_asset_pose(
@@ -1416,27 +1409,7 @@ def _transform_asset_pose(
     *,
     yaw_degrees: float = 0.0,
 ) -> None:
-    """Apply deterministic post-reset translation and world-Z rotation."""
-    if offset_xy == (0.0, 0.0) and yaw_degrees == 0.0:
-        return
-    asset = env.scene[asset_name]
-    root_pose_w = asset.data.root_pose_w
-    root_pose_w = getattr(root_pose_w, "torch", root_pose_w).clone()
-    root_pose_w[0, :2] += torch.tensor(
-        offset_xy, dtype=root_pose_w.dtype, device=root_pose_w.device
-    )
-    if yaw_degrees != 0.0:
-        current_wxyz = _xyzw_to_wxyz(root_pose_w[0, 3:7])
-        yaw_wxyz = yaw_quaternion_wxyz(
-            np.deg2rad(yaw_degrees), like=current_wxyz
-        )
-        root_pose_w[0, 3:7] = _wxyz_to_xyzw(
-            quaternion_multiply_wxyz(yaw_wxyz, current_wxyz)
-        )
-    asset.write_root_pose_to_sim(root_pose_w)
-    root_vel_w = asset.data.root_vel_w
-    root_vel_w = getattr(root_vel_w, "torch", root_vel_w)
-    asset.write_root_velocity_to_sim(torch.zeros_like(root_vel_w))
+    transform_asset_pose(env, asset_name, offset_xy, yaw_degrees=yaw_degrees)
 
 
 def _isolate_scene_to_role_assets(
@@ -10407,84 +10380,19 @@ def main() -> int:
     sim6_ok = sim_version.startswith("6.")
     _test_line(1, "Isaac Sim 6 runtime", sim6_ok, sim_version)
 
-    auto_register_droid_abs_ik_envs(
-        task=args_cli.task,
-        contact_sensors=False,
-        # The Cosmos 3 Edge policy observes wrist + both over-shoulder views;
-        # the default preset omits the right camera.
-        **(
-            {"cameras": WRIST_LEFT_RIGHT}
-            if args_cli.cosmos3_edge_policy
-            else {}
-        ),
+    # Every runner shares the Sim 6 corrections (spawn quaternion order,
+    # joint-position control, no RoboLab recorder): see robolab_sim6_env.
+    env_cfg = build_env_cfg(
+        args_cli.task,
+        instruction=args_cli.instruction,
+        cameras=WRIST_LEFT_RIGHT if args_cli.cosmos3_edge_policy else None,
+        convert_camera_offsets=args_cli.cosmos3_edge_policy,
+        contact_telemetry=not args_cli.disable_contact_telemetry,
+        randomize_background=args_cli.randomize_background,
+        appearance_seed=args_cli.appearance_seed,
+        light_intensity=args_cli.light_intensity,
+        rgbd=args_cli.rgbd_safety,
     )
-    env_cfg = parse_env_cfg(
-        args_cli.task, device="cuda:0", seed=0, num_envs=1, use_fabric=True
-    )
-    # RoboLab's explicit robot/object poses came from the Sim 5 (w, x, y, z)
-    # configuration contract. This Sim 6 source build consumes spawn poses as
-    # (x, y, z, w); convert only the legacy-authored fields at the boundary.
-    env_cfg.scene.robot.init_state.rot = (0.0, 0.0, 0.0, 1.0)
-    fixture_rot = env_cfg.scene.table_fixture.init_state.rot
-    env_cfg.scene.table_fixture.init_state.rot = (
-        fixture_rot[1], fixture_rot[2], fixture_rot[3], fixture_rot[0]
-    )
-    for asset_name in env_cfg.contact_object_list:
-        asset_cfg = getattr(env_cfg.scene, asset_name)
-        w, x, y, z = asset_cfg.init_state.rot
-        asset_cfg.init_state.rot = (x, y, z, w)
-    if args_cli.cosmos3_edge_policy:
-        # The policy observes RoboLab's wrist/left/right cameras, whose
-        # offsets carry the same legacy quaternion order as the spawn poses.
-        converted_cameras = convert_sim5_camera_offsets(env_cfg)
-        print(
-            "[cosmos3-edge] converted Sim 5 camera offsets: "
-            f"{converted_cameras}",
-            flush=True,
-        )
-    if not args_cli.disable_contact_telemetry:
-        install_sim6_gripper_contact_sensor(env_cfg)
-    if args_cli.randomize_background:
-        from robolab.variations.backgrounds import find_background_files
-
-        backgrounds = find_background_files()
-        current_background = str(env_cfg.scene.dome_light.spawn.texture_file)
-        backgrounds = [path for path in backgrounds if str(path) != current_background]
-        if not backgrounds:
-            raise FileNotFoundError("No non-default RoboLab HDRI backgrounds are available")
-        env_cfg.scene.dome_light.spawn.texture_file = random.Random(
-            args_cli.appearance_seed
-        ).choice(backgrounds)
-    if args_cli.light_intensity is not None:
-        sphere_light = getattr(env_cfg.scene, "sphere_light", None)
-        if sphere_light is None:
-            raise RuntimeError("Requested light variation but scene has no sphere_light")
-        sphere_light.spawn.intensity = args_cli.light_intensity
-    if args_cli.rgbd_safety:
-        for camera_name in ("over_shoulder_left_camera", "wrist_cam"):
-            camera_cfg = getattr(env_cfg.scene, camera_name)
-            if "depth" not in camera_cfg.data_types:
-                camera_cfg.data_types = [*camera_cfg.data_types, "depth"]
-        exterior_camera_cfg = env_cfg.scene.over_shoulder_left_camera
-        if "instance_id_segmentation_fast" not in exterior_camera_cfg.data_types:
-            exterior_camera_cfg.data_types = [
-                *exterior_camera_cfg.data_types,
-                "instance_id_segmentation_fast",
-            ]
-        exterior_camera_cfg.renderer_cfg.colorize_instance_id_segmentation = False
-        env_cfg.scene.lazy_sensor_update = False
-    # Sim 6's absolute-IK bridge currently resolves the Robotiq control body
-    # incorrectly. Replay the demonstrated arm states through the stable joint
-    # controller while ER 2 performs fresh visual gates at semantic boundaries.
-    env_cfg.actions = DroidJointPositionActionCfg()
-    env_cfg.terminations = None
-    env_cfg.subtasks = None
-    # The environment task supplies the scene template only. The model-facing
-    # goal comes from the current human instruction and semantic scene roles.
-    env_cfg.instruction = args_cli.instruction
-    # RoboLab's EE-state recorder still consumes the removed Sim 5 tensor API
-    # and is not needed for this live control/visualization test.
-    env_cfg.recorders = None
     env, _ = create_env(env_cfg, use_fabric=True, policy="gemini-er2")
     obs, _ = env.reset()
     SCENE_ROLES.validate_scene(env.scene)

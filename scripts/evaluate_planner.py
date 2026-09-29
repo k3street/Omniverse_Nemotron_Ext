@@ -42,6 +42,7 @@ from run_gemini_groot_campaign import plan_variations  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = REPO_ROOT / "launch_gemini_robotics_robolab.sh"
+BASELINE_LAUNCHER = REPO_ROOT / "launch_policy_baseline.sh"
 DEFAULT_CONFIG = REPO_ROOT / "config" / "planner_eval" / "blocks_in_bin_astra_v1.json"
 STALE_KIT_LOCK = Path("/dev/shm/sem.carbonite-sharedmemory")
 # A healthy launch logs within seconds; a Kit blocked on a stale shared-memory
@@ -81,13 +82,19 @@ def command_for(
     overrides: dict[str, str] | None = None,
 ) -> list[str]:
     launch = {**acceptance["launch"], **(overrides or {})}
-    command = [
-        str(LAUNCHER),
-        "--viz", "none",
-        "--provider", launch["provider"],
-        "--model", launch["model"],
-        "--budget-usd", str(launch["per_episode_budget_usd"]),
-        "--task", launch["task"],
+    if launch.get("policy"):
+        # A non-planner baseline: same scene flags, no model or budget.
+        command = [str(BASELINE_LAUNCHER), "--viz", "none", "--policy", launch["policy"], "--task", launch["task"]]
+    else:
+        command = [
+            str(LAUNCHER),
+            "--viz", "none",
+            "--provider", launch["provider"],
+            "--model", launch["model"],
+            "--budget-usd", str(launch["per_episode_budget_usd"]),
+            "--task", launch["task"],
+        ]
+    command += [
         "--movable-object-asset", launch["movable_object_asset"],
         "--target-receptacle-asset", launch["target_receptacle_asset"],
         "--movable-object-offset", *(f"{v:.8f}" for v in episode["movable_object_offset_xy_m"]),
@@ -147,8 +154,14 @@ def score_run(output: Path) -> dict[str, Any]:
         if not log_path.exists():
             continue  # not attempted yet
         trace = json.loads(trace_path.read_text()) if trace_path.exists() else None
-        passed, details = check_episode(trace, log_path.read_text(errors="replace"), acceptance)
         final_state = final_state_grade(directory, trace, acceptance)
+        if (directory / "baseline_trace.json").exists():
+            # A baseline has no planner trace; the common final-state grade is its grade.
+            passed = bool(final_state and final_state.get("passed"))
+            details = {"model_calls": 0, "cost_usd": 0.0,
+                       "failed": list((final_state or {}).get("failed") or ["outcome_missing"])}
+        else:
+            passed, details = check_episode(trace, log_path.read_text(errors="replace"), acceptance)
         result_path = directory / "result.json"
         extra = json.loads(result_path.read_text()) if result_path.exists() else {}
         episodes.append({**episode, **extra, "passed": passed, **details, "final_state": final_state})
@@ -164,7 +177,8 @@ def score_run(output: Path) -> dict[str, Any]:
         "name": acceptance["name"],
         "split": meta["split"],
         "provider": meta.get("overrides", {}).get("provider", acceptance["launch"]["provider"]),
-        "model": meta.get("overrides", {}).get("model", acceptance["launch"]["model"]),
+        "model": meta.get("overrides", {}).get("policy")
+        or meta.get("overrides", {}).get("model", acceptance["launch"]["model"]),
         "acceptance_frozen": is_frozen(acceptance),
         "planner_commit": meta["git"],
         "final_seeds_previously_used": meta.get("final_seeds_previously_used", False),
@@ -212,7 +226,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     acceptance = load_acceptance(args.config)
     git = git_state()
     repeated = False
-    overrides = {k: v for k, v in (("provider", args.provider), ("model", args.model)) if v}
+    overrides = {k: v for k, v in (("provider", args.provider), ("model", args.model), ("policy", args.policy)) if v}
     if overrides and args.split == "final":
         sys.exit("final split refused: it measures the model the acceptance file names, not an override")
     if args.limit is not None and args.split == "final":
@@ -330,6 +344,8 @@ def main() -> int:
     run.add_argument("--allow-repeat-final", action="store_true")
     run.add_argument("--provider", help="development only: screen another provider")
     run.add_argument("--model", help="development only: screen another model")
+    run.add_argument("--policy", choices=("oracle",),
+                     help="development only: run a non-planner baseline in the same scenes")
     run.add_argument("--limit", type=int, help="development only: run just the first N episodes")
     score = sub.add_parser("score")
     score.add_argument("output", type=Path)
