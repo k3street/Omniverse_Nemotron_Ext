@@ -293,6 +293,14 @@ parser.add_argument(
 )
 parser.add_argument("--appearance-seed", type=int, default=0)
 parser.add_argument(
+    "--discard-failed-episodes",
+    action="store_true",
+    help=(
+        "Delete a failed run's recording instead of keeping it, labelled, under "
+        "the training-episode directory's failed_evidence/ folder."
+    ),
+)
+parser.add_argument(
     "--light-intensity",
     type=float,
     help="Override the RoboLab sphere-light intensity for appearance diversity.",
@@ -19497,7 +19505,22 @@ def main() -> int:
             ros2_sensor_ingress.stop()
         ACTIVE_ROS2_SENSOR_INGRESS = None
         if episode_recorder is not None:
-            episode_recorder.discard()
+            if args_cli.discard_failed_episodes:
+                episode_recorder.discard()
+            else:
+                # A run that never reached publish_success is kept as labelled
+                # failure evidence, outside the admitted dataset: failures are
+                # what a reviewer needs to watch and what learning from
+                # experience needs to see. publish_success closes the recorder,
+                # so an admitted run is untouched here.
+                failure = episode_trace.get("failure") or {}
+                reason = failure.get("message") or episode_trace.get("status") or "not admitted"
+                evidence = episode_recorder.preserve_failure(
+                    reason=str(reason)[:2000], trace_path=trace_path
+                )
+                if evidence is not None:
+                    episode_trace["failed_evidence"] = evidence
+                    _write_trace(trace_path, episode_trace)
         end_episode(env)
         env.close()
 
