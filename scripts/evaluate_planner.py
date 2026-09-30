@@ -143,6 +143,24 @@ def final_state_grade(directory: Path, trace: dict | None, acceptance: dict) -> 
     return {"passed": passed, "definition": source, **details}
 
 
+# Failures whose cause is outside the policy under test. They are shown, with
+# the reason, but do not count against the policy's pass rate.
+INFRASTRUCTURE_CAUSES = (
+    (("insufficient_quota", "credit_balance_exhausted"), "model provider out of credits"),
+    (("Connection reset by peer", "ServerDisconnectedError", "ClientConnectorError"), "network connection dropped"),
+    (("KeyboardInterrupt",), "interrupted from outside the run"),
+)
+
+
+def infrastructure_cause(log_text: str, result: dict) -> str | None:
+    if result.get("outcome") == "hung_at_startup":
+        return "simulator hung at startup"
+    for markers, cause in INFRASTRUCTURE_CAUSES:
+        if any(marker in log_text for marker in markers):
+            return cause
+    return None
+
+
 def score_run(output: Path) -> dict[str, Any]:
     meta = json.loads((output / "run.json").read_text())
     acceptance = meta["acceptance"]
@@ -164,9 +182,12 @@ def score_run(output: Path) -> dict[str, Any]:
             passed, details = check_episode(trace, log_path.read_text(errors="replace"), acceptance)
         result_path = directory / "result.json"
         extra = json.loads(result_path.read_text()) if result_path.exists() else {}
-        episodes.append({**episode, **extra, "passed": passed, **details, "final_state": final_state})
-    passes = sum(e["passed"] for e in episodes)
-    low, high = wilson_interval(passes, len(episodes))
+        invalid = None if passed else infrastructure_cause(log_path.read_text(errors="replace"), extra)
+        episodes.append({**episode, **extra, "passed": passed, **details, "final_state": final_state,
+                         "invalid": invalid})
+    valid = [e for e in episodes if not e.get("invalid")]
+    passes = sum(e["passed"] for e in valid)
+    low, high = wilson_interval(passes, len(valid))
     costs = [e["cost_usd"] for e in episodes if e.get("cost_usd") is not None]
     calls = [e["model_calls"] for e in episodes if e.get("model_calls") is not None]
     failures: dict[str, int] = {}
@@ -183,10 +204,12 @@ def score_run(output: Path) -> dict[str, Any]:
         "planner_commit": meta["git"],
         "final_seeds_previously_used": meta.get("final_seeds_previously_used", False),
         "episodes_run": len(episodes),
+        "episodes_valid": len(valid),
+        "episodes_invalid": [{"attempt": e["attempt"], "cause": e["invalid"]} for e in episodes if e.get("invalid")],
         "episodes_planned": len(meta["episodes"]),
         "passes": passes,
-        "final_state_passes": sum(bool((e.get("final_state") or {}).get("passed")) for e in episodes),
-        "pass_rate": passes / len(episodes) if episodes else None,
+        "final_state_passes": sum(bool((e.get("final_state") or {}).get("passed")) for e in valid),
+        "pass_rate": passes / len(valid) if valid else None,
         "pass_rate_95ci": [low, high],
         "failure_counts": failures,
         "cost_usd_total": sum(costs),
