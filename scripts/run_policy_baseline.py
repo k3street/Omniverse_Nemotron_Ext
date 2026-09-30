@@ -160,7 +160,16 @@ def true_scene_geometry(env, movable: str) -> dict:
             extents = hi - lo
             item["oriented_footprint_extents_m"] = sorted([float(extents[0]), float(extents[1])], reverse=True)
         geometries.append(item)
-    return {"geometries": geometries}
+    # A box that contains the object's own centre is what it stands on or in
+    # (the table, a fixture spanning the scene), not a neighbour a finger can
+    # hit. Left in, one such box read as a 19.7 m finger overlap on every axis.
+    target = next(g for g in geometries if g["runtime_id"] == movable)
+    cx, cy = target["center_base_m"][:2]
+    return {"geometries": [
+        g for g in geometries
+        if g is target or not (g["visible_aabb_min_base_m"][0] <= cx <= g["visible_aabb_max_base_m"][0]
+                               and g["visible_aabb_min_base_m"][1] <= cy <= g["visible_aabb_max_base_m"][1])
+    ]}
 
 
 class OraclePolicy:
@@ -235,7 +244,8 @@ def run_oracle(env, recorder, trace: dict, initial_object_yaw: float) -> torch.T
     trace["grasp_choice"] = policy.grasp_choice
     print(f"[baseline] grasp axis {policy.grasp_choice['chosen_object_axis_index']}, "
           f"quarter turns {policy.grasp_choice['chosen_quarter_turns']}, clearances "
-          f"{[round(c['finger_clearance_m'] or 0, 4) for c in policy.grasp_choice['clearances']]}", flush=True)
+          f"{[(round(c['finger_clearance_m'] or 0, 4), c['nearest_obstruction']) for c in policy.grasp_choice['clearances']]}",
+          flush=True)
     action = None
     for label, target, gripper in policy.waypoints:
         steps, reached = 0, False
