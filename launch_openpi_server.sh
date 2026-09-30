@@ -10,6 +10,9 @@ POLICY_CONFIG="${POLICY_CONFIG:-pi05_droid_jointpos}"
 POLICY_DIR="${POLICY_DIR:-gs://openpi-assets-simeval/pi05_droid_jointpos}"
 cd "$OPENPI_ROOT"
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
+# JAX 0.5.3's Triton GEMM path aborts on GB10 (sm_121) with "Unsupported
+# conversion from bf16 to f16"; cuBLAS GEMMs run the checkpoint fine.
+export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_enable_triton_gemm=false}"
 export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.35}"
 exec uv run scripts/serve_policy.py policy:checkpoint \
     --policy.config="$POLICY_CONFIG" --policy.dir="$POLICY_DIR" "$@"
