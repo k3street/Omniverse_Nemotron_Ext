@@ -129,6 +129,9 @@ def _serve_and_call(statuses, monkeypatch, served=None):
         served.append(status)
         if status == 200:
             return web.json_response(ok_body)
+        if status == "quota":
+            return web.json_response({"error": {"type": "insufficient_quota", "code": "credit_balance_exhausted",
+                                                "message": "You have no credits remaining."}}, status=429)
         return web.json_response({"error": "x"}, status=status, headers={"retry-after": "0"})
 
     async def main():
@@ -175,3 +178,10 @@ def test_retry_after_lengthens_but_never_shortens_the_wait():
     assert retry_wait_s(4.0, "12") == 12.0
     assert retry_wait_s(4.0, "900") == RETRY_MAX_WAIT_S
     assert retry_wait_s(4.0, "soon") == 4.0
+
+
+def test_an_empty_account_is_not_retried(monkeypatch):
+    served = []
+    with pytest.raises(RuntimeError, match="no credits remaining"):
+        _serve_and_call(["quota", 200], monkeypatch, served)
+    assert served == ["quota"]
