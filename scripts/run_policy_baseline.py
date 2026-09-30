@@ -61,7 +61,13 @@ from robolab.core.environments.runtime import create_env, end_episode  # noqa: E
 from robolab.core.observations.observation_utils import unpack_image_obs  # noqa: E402
 from robolab.core.utils.video_utils import VideoWriter  # noqa: E402
 
-from adaptive_pick_place import quaternion_error_axis_angle_wxyz, quaternion_multiply_wxyz, yaw_quaternion_wxyz  # noqa: E402
+from adaptive_pick_place import (  # noqa: E402
+    choose_grasp_yaw,
+    quaternion_error_axis_angle_wxyz,
+    quaternion_multiply_wxyz,
+    yaw_quaternion_wxyz,
+)
+from rgbd_collision_safety import grasp_axis_finger_clearance  # noqa: E402
 from gemini_episode_dataset import GeminiEpisodeDatasetRecorder  # noqa: E402
 from planner_eval_gate import check_final_state, outcome_from_arrays  # noqa: E402
 from residual_centering import bounded_vector_step, damped_least_squares_delta  # noqa: E402
@@ -74,6 +80,13 @@ DOWNWARD_GRASP_WXYZ = torch.tensor([0.555, 0.385, 0.616, -0.406])
 DOWNWARD_GRASP_WXYZ = DOWNWARD_GRASP_WXYZ / torch.linalg.norm(DOWNWARD_GRASP_WXYZ)
 # Bin heights for base_link above the receptacle root: clear the 10.5 cm rim.
 APPROACH_M, LIFT_M, ABOVE_BIN_M, RELEASE_M, RETREAT_M = 0.10, 0.14, 0.34, 0.26, 0.34
+# Robotiq 2F-85 finger bodies in the gripper-base frame, as the planner's
+# runtime publishes them: the jaws close along local y, fingers are 2.7 cm wide.
+FINGER_BOUNDS_LOCAL = {
+    "left_inner_finger": {"min_m": [0.093, 0.0417, -0.0135], "max_m": [0.150, 0.0730, 0.0135]},
+    "right_inner_finger": {"min_m": [0.093, -0.0730, -0.0135], "max_m": [0.150, -0.0417, 0.0135]},
+}
+CLOSING_AXIS_LOCAL = torch.tensor([0.0, -1.0, 0.0])
 
 
 def torch_view(value):
@@ -100,6 +113,47 @@ def yaw_of(q_wxyz: torch.Tensor) -> float:
     return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
 
 
+def true_scene_geometry(env, movable: str) -> dict:
+    """Every rigid object's true box, from its USD shape at its live pose.
+
+    The planner estimates these from RGB-D; the oracle may read them. Poses
+    come from the simulator tensors (physics does not write moved poses back
+    to USD), shapes from each prim's untransformed USD bound.
+    """
+    import omni.usd
+    from pxr import Usd, UsdGeom
+
+    stage = omni.usd.get_context().get_stage()
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    geometries = []
+    for name in env.scene.rigid_objects.keys():
+        prim = stage.GetPrimAtPath(f"/World/envs/env_0/scene/{name}")
+        if not prim.IsValid():
+            continue
+        local = cache.ComputeUntransformedBound(prim).ComputeAlignedRange()
+        lo, hi = np.array(local.GetMin()), np.array(local.GetMax())
+        corners = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+        pos, q = object_pose(env, name)
+        w, x, y, z = (float(v) for v in q)
+        rotation = np.array([
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ])
+        world = corners @ rotation.T + pos.numpy()
+        item = {"runtime_id": name, "visible_aabb_min_base_m": world.min(0).tolist(),
+                "visible_aabb_max_base_m": world.max(0).tolist()}
+        if name == movable:
+            yaw = yaw_of(q)
+            item["center_base_m"] = world.mean(0).tolist()
+            item["oriented_footprint_axes_base"] = [[math.cos(yaw), math.sin(yaw), 0.0],
+                                                    [-math.sin(yaw), math.cos(yaw), 0.0]]
+            extents = hi - lo
+            item["oriented_footprint_extents_m"] = sorted([float(extents[0]), float(extents[1])], reverse=True)
+        geometries.append(item)
+    return {"geometries": geometries}
+
+
 class OraclePolicy:
     """Waypoints from privileged poses, reached with bounded DLS IK."""
 
@@ -111,7 +165,28 @@ class OraclePolicy:
         # object's yaw by the smallest turn that squares the jaws with a face.
         turn = yaw_of(obj_q) - initial_object_yaw
         turn = ((turn + math.pi / 4) % (math.pi / 2)) - math.pi / 4
-        self.grasp_q = quaternion_multiply_wxyz(yaw_quaternion_wxyz(turn, like=DOWNWARD_GRASP_WXYZ), DOWNWARD_GRASP_WXYZ)
+        seed = quaternion_multiply_wxyz(yaw_quaternion_wxyz(turn, like=DOWNWARD_GRASP_WXYZ), DOWNWARD_GRASP_WXYZ)
+        # Of the grasps a quarter turn apart, take the one whose fingers have
+        # the most room beside the neighbours (then the smallest wrist turn),
+        # with the same code the planner uses, fed true geometry instead of
+        # RGB-D estimates. Choosing by wrist turn alone put a finger on a
+        # neighbour in development scene 2.
+        geometry = true_scene_geometry(env, movable)
+        target = next(g for g in geometry["geometries"] if g["runtime_id"] == movable)
+        clearances = grasp_axis_finger_clearance(
+            scene_geometry=geometry,
+            actuator_geometry={"contact_body_bounds_local_m": FINGER_BOUNDS_LOCAL},
+            object_runtime_id=movable,
+        )
+        extents = target["oriented_footprint_extents_m"]
+        _, current_q = eef_pose(env)
+        self.grasp_q, self.grasp_choice = choose_grasp_yaw(
+            seed, current_q, CLOSING_AXIS_LOCAL,
+            [axis[:2] for axis in target["oriented_footprint_axes_base"]],
+            [c["finger_clearance_m"] for c in clearances],
+            quarter_turn_symmetric=max(extents) / max(min(extents), 1e-6) <= 1.25,
+        )
+        self.grasp_choice["clearances"] = clearances
         up = lambda h: torch.tensor([0.0, 0.0, h])  # noqa: E731
         grasp = obj + up(GRASP_HEIGHT_M)
         self.waypoints = [
@@ -181,6 +256,10 @@ def main() -> int:
             video_writer_factory=VideoWriter, unpack_images=unpack_image_obs, fps=15,
         )
         policy = OraclePolicy(env, args.movable_object_asset, args.target_receptacle_asset, yaw_of(initial_q))
+        trace["grasp_choice"] = policy.grasp_choice
+        print(f"[baseline] grasp axis {policy.grasp_choice['chosen_object_axis_index']}, "
+              f"quarter turns {policy.grasp_choice['chosen_quarter_turns']}, clearances "
+              f"{[round(c['finger_clearance_m'] or 0, 4) for c in policy.grasp_choice['clearances']]}", flush=True)
         started = time.time()
         for label, target, gripper in policy.waypoints:
             steps, reached = 0, False
