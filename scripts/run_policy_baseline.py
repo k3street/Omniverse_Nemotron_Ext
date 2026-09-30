@@ -12,6 +12,10 @@ Policies:
   oracle  scripted expert: reads the true object and receptacle poses and
           follows fixed waypoints with damped-least-squares IK. An upper
           reference: it knows what no camera-driven policy can.
+  pi05    Physical Intelligence's pi0.5, DROID joint-position checkpoint,
+          through RoboLab's own OpenPI client: over-shoulder and wrist images
+          plus joint state in, 15-step chunks of joint targets and a binary
+          gripper out. Needs an OpenPI policy server (see launch_openpi_server.sh).
 
 Launch through launch_policy_baseline.sh, which waits for the machine's single
 Isaac slot like the planner launcher does.
@@ -32,7 +36,12 @@ import torch
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-parser.add_argument("--policy", choices=("oracle",), default="oracle")
+parser.add_argument("--policy", choices=("oracle", "pi05"), default="oracle")
+parser.add_argument("--instruction", default="Put the red block in the grey bin")
+parser.add_argument("--policy-host", default="localhost")
+parser.add_argument("--policy-port", type=int, default=8000)
+parser.add_argument("--max-policy-steps", type=int, default=600,
+                    help="pi05 episode length in control steps (40 s at 15 Hz)")
 parser.add_argument("--task", default="BlocksInBinTask")
 parser.add_argument("--movable-object-asset", default="red_block")
 parser.add_argument("--target-receptacle-asset", default="grey_bin")
@@ -221,6 +230,56 @@ class OraclePolicy:
         return action, float(torch.linalg.vector_norm(error)), math.degrees(float(torch.linalg.vector_norm(rot_error)))
 
 
+def run_oracle(env, recorder, trace: dict, initial_object_yaw: float) -> torch.Tensor:
+    policy = OraclePolicy(env, args.movable_object_asset, args.target_receptacle_asset, initial_object_yaw)
+    trace["grasp_choice"] = policy.grasp_choice
+    print(f"[baseline] grasp axis {policy.grasp_choice['chosen_object_axis_index']}, "
+          f"quarter turns {policy.grasp_choice['chosen_quarter_turns']}, clearances "
+          f"{[round(c['finger_clearance_m'] or 0, 4) for c in policy.grasp_choice['clearances']]}", flush=True)
+    action = None
+    for label, target, gripper in policy.waypoints:
+        steps, reached = 0, False
+        dwell = label in ("grasp", "release")
+        iterations = 1 if dwell else args.max_iterations_per_waypoint
+        for _ in range(iterations):
+            action, err_m, err_deg = policy.step_toward(target, gripper)
+            for _ in range(args.hold_steps if dwell else args.settle_steps):
+                obs, *_ = env.step(action.to(env.device))
+                pos, q = eef_pose(env)
+                recorder.append(env, action, obs, eef_position=pos.numpy(), eef_quaternion_wxyz=q.numpy())
+                steps += 1
+            if not dwell:
+                _, err_m, err_deg = policy.step_toward(target, gripper)
+                if err_m < 0.006 and err_deg < 3.0:
+                    reached = True
+                    break
+        trace["waypoints"].append({"label": label, "steps": steps, "reached": reached or dwell,
+                                   "position_error_m": err_m, "orientation_error_deg": err_deg})
+        print(f"[baseline] {label}: steps={steps} error={err_m:.4f} m {err_deg:.1f} deg", flush=True)
+    return action
+
+
+def run_pi05(env, obs, recorder, trace: dict) -> torch.Tensor:
+    """Closed-loop pi0.5 through RoboLab's client, which handles action chunking."""
+    from policies.pi0_family.client import Pi0DroidJointposClient
+
+    client = Pi0DroidJointposClient(remote_host=args.policy_host, remote_port=args.policy_port, policy_variant="pi05")
+    client.reset()
+    trace["instruction"] = args.instruction
+    trace["policy_server"] = f"{args.policy_host}:{args.policy_port}"
+    action = None
+    for step in range(args.max_policy_steps):
+        chunk_action = np.asarray(client.infer(obs, args.instruction)["action"], dtype=np.float32).reshape(-1)
+        action = torch.from_numpy(chunk_action[:8]).reshape(1, 8)
+        obs, *_ = env.step(action.to(env.device))
+        pos, q = eef_pose(env)
+        recorder.append(env, action, obs, eef_position=pos.numpy(), eef_quaternion_wxyz=q.numpy())
+        if step % 75 == 0:
+            print(f"[baseline] pi05 step {step}: gripper={float(action[0, 7]):.0f} eef={pos.numpy().round(3).tolist()}", flush=True)
+    trace["policy_steps"] = args.max_policy_steps
+    return action
+
+
 def main() -> int:
     acceptance = json.loads(args.acceptance.read_text())
     args.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -255,31 +314,11 @@ def main() -> int:
                       "movable_object_yaw_deg": args.movable_object_yaw_deg},
             video_writer_factory=VideoWriter, unpack_images=unpack_image_obs, fps=15,
         )
-        policy = OraclePolicy(env, args.movable_object_asset, args.target_receptacle_asset, yaw_of(initial_q))
-        trace["grasp_choice"] = policy.grasp_choice
-        print(f"[baseline] grasp axis {policy.grasp_choice['chosen_object_axis_index']}, "
-              f"quarter turns {policy.grasp_choice['chosen_quarter_turns']}, clearances "
-              f"{[round(c['finger_clearance_m'] or 0, 4) for c in policy.grasp_choice['clearances']]}", flush=True)
         started = time.time()
-        for label, target, gripper in policy.waypoints:
-            steps, reached = 0, False
-            dwell = label in ("grasp", "release")
-            iterations = 1 if dwell else args.max_iterations_per_waypoint
-            for _ in range(iterations):
-                action, err_m, err_deg = policy.step_toward(target, gripper)
-                for _ in range(args.hold_steps if dwell else args.settle_steps):
-                    obs, *_ = env.step(action.to(env.device))
-                    pos, q = eef_pose(env)
-                    recorder.append(env, action, obs, eef_position=pos.numpy(), eef_quaternion_wxyz=q.numpy())
-                    steps += 1
-                if not dwell:
-                    _, err_m, err_deg = policy.step_toward(target, gripper)
-                    if err_m < 0.006 and err_deg < 3.0:
-                        reached = True
-                        break
-            trace["waypoints"].append({"label": label, "steps": steps, "reached": reached or dwell,
-                                       "position_error_m": err_m, "orientation_error_deg": err_deg})
-            print(f"[baseline] {label}: steps={steps} error={err_m:.4f} m {err_deg:.1f} deg", flush=True)
+        if args.policy == "pi05":
+            action = run_pi05(env, obs, recorder, trace)
+        else:
+            action = run_oracle(env, recorder, trace, yaw_of(initial_q))
         for _ in range(15):  # let the object settle before grading
             obs, *_ = env.step(action.to(env.device))
             pos, q = eef_pose(env)

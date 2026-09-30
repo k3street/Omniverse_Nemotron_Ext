@@ -17,7 +17,11 @@ export ISAAC_SIM_ROOT
 export ISAAC_SIM_PATH="$ISAAC_SIM_ROOT"
 export OMNI_KIT_ACCEPT_EULA="${OMNI_KIT_ACCEPT_EULA:-Y}"
 export LD_PRELOAD="/lib/aarch64-linux-gnu/libgomp.so.1${LD_PRELOAD:+:$LD_PRELOAD}"
-export PYTHONPATH="$ISAAC_LAB_ROOT/source/isaaclab:$ISAAC_LAB_ROOT/source/isaaclab_tasks:$ROBOLAB_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+# openpi_client (+ dm-tree) for the pi05 policy lives outside Isaac's own
+# site-packages: `python.sh -m pip install --target "$OPENPI_CLIENT_DIR" --no-deps
+# dm-tree <openpi>/packages/openpi-client`.
+OPENPI_CLIENT_DIR="${OPENPI_CLIENT_DIR:-$HOME/.local/share/openpi_client_isaac}"
+export PYTHONPATH="$ISAAC_LAB_ROOT/source/isaaclab:$ISAAC_LAB_ROOT/source/isaaclab_tasks:$ROBOLAB_ROOT:$OPENPI_CLIENT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 cd "$ROOT"
 source "$ROOT/scripts/isaac_slot.sh"

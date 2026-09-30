@@ -368,7 +368,7 @@ def main() -> int:
     run.add_argument("--allow-repeat-final", action="store_true")
     run.add_argument("--provider", help="development only: screen another provider")
     run.add_argument("--model", help="development only: screen another model")
-    run.add_argument("--policy", choices=("oracle",),
+    run.add_argument("--policy", choices=("oracle", "pi05"),
                      help="development only: run a non-planner baseline in the same scenes")
     run.add_argument("--limit", type=int, help="development only: run just the first N episodes")
     score = sub.add_parser("score")
