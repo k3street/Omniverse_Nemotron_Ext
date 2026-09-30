@@ -40,8 +40,8 @@ parser.add_argument("--policy", choices=("oracle", "pi05"), default="oracle")
 parser.add_argument("--instruction", default="Put the red block in the grey bin")
 parser.add_argument("--policy-host", default="localhost")
 parser.add_argument("--policy-port", type=int, default=8000)
-parser.add_argument("--max-policy-steps", type=int, default=600,
-                    help="pi05 episode length in control steps (40 s at 15 Hz)")
+parser.add_argument("--max-policy-steps", type=int, default=2250,
+                    help="pi05 episode length in control steps (the task's 150 s at 15 Hz)")
 parser.add_argument("--task", default="BlocksInBinTask")
 parser.add_argument("--movable-object-asset", default="red_block")
 parser.add_argument("--target-receptacle-asset", default="grey_bin")
@@ -80,7 +80,9 @@ from rgbd_collision_safety import grasp_axis_finger_clearance  # noqa: E402
 from gemini_episode_dataset import GeminiEpisodeDatasetRecorder  # noqa: E402
 from planner_eval_gate import check_final_state, outcome_from_arrays  # noqa: E402
 from residual_centering import bounded_vector_step, damped_least_squares_delta  # noqa: E402
-from robolab_sim6_env import apply_harness_scene, build_env_cfg, set_camera_views  # noqa: E402
+from robolab_sim6_env import (  # noqa: E402
+    DROID_EXTERIOR_TARGET, apply_harness_scene, build_env_cfg, set_camera_views,
+)
 
 # The planner's calibrated top-down grasp: base_link 14.9 cm above the object's
 # root, wrist in the orientation RoboLab's successful demonstration used.
@@ -276,6 +278,7 @@ def run_pi05(env, obs, recorder, trace: dict) -> torch.Tensor:
     client = Pi0DroidJointposClient(remote_host=args.policy_host, remote_port=args.policy_port, policy_variant="pi05")
     client.reset()
     trace["instruction"] = args.instruction
+    trace["exterior_camera_target"] = list(DROID_EXTERIOR_TARGET)
     trace["policy_server"] = f"{args.policy_host}:{args.policy_port}"
     action = None
     for step in range(args.max_policy_steps):
@@ -309,7 +312,8 @@ def main() -> int:
             "plate_offset_xy_m": args.plate_offset,
             "movable_object_yaw_deg": args.movable_object_yaw_deg,
         })
-        set_camera_views(env)
+        # pi0.5 was trained on DROID views, so it sees RoboLab's camera pose as-is.
+        set_camera_views(env, **({"exterior_target": DROID_EXTERIOR_TARGET} if args.policy == "pi05" else {}))
         robot = env.scene["robot"]
         hold = torch.zeros((1, 8), dtype=torch.float32)
         hold[0, :7] = torch_view(robot.data.joint_pos)[0, :7].detach().cpu()

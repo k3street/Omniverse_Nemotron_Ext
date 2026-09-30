@@ -128,11 +128,17 @@ def build_env_cfg(
     return env_cfg
 
 
-def set_camera_views(env: Any) -> None:
+# Where RoboLab's DROID-matched over-shoulder camera (OverShoulderLeftCameraCfg,
+# a Sim 5 quaternion) looks: its forward axis meets z=0.05 here, with no roll.
+# The planners' default view is aimed 13.7 degrees further right.
+DROID_EXTERIOR_TARGET = (0.682, 0.077, 0.05)
+
+
+def set_camera_views(env: Any, *, exterior_target: Sequence[float] = (0.48, -0.05, 0.05)) -> None:
     """Use look-at poses instead of legacy Sim 5 camera quaternions."""
     origins = env.scene.env_origins
     views = {
-        "over_shoulder_left_camera": ((0.05, 0.57, 0.66), (0.48, -0.05, 0.05)),
+        "over_shoulder_left_camera": ((0.05, 0.57, 0.66), tuple(exterior_target)),
         "egocentric_mirrored_camera": ((1.50, 0.00, 1.00), (0.42, 0.00, 0.10)),
     }
     for name, (eye, target) in views.items():
