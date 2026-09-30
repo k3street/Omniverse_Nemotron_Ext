@@ -177,7 +177,8 @@ def score_run(output: Path) -> dict[str, Any]:
             # A baseline has no planner trace; the common final-state grade is its grade.
             passed = bool(final_state and final_state.get("passed"))
             details = {"model_calls": 0, "cost_usd": 0.0,
-                       "failed": list((final_state or {}).get("failed") or ["outcome_missing"])}
+                       "failed": list(final_state["failed"]) if final_state else ["outcome_missing"],
+                       "object_inset_margin_m": (final_state or {}).get("inside_margin_m")}
         else:
             passed, details = check_episode(trace, log_path.read_text(errors="replace"), acceptance)
         result_path = directory / "result.json"
