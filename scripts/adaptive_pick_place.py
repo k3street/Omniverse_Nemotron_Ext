@@ -1,6 +1,8 @@
 """Pure live-pose target planning helpers for adaptive pick and place."""
 from __future__ import annotations
 
+import math
+
 import torch
 
 
@@ -282,3 +284,74 @@ def live_phase_target(
     target[:2] += target_xyz[:2] - object_xyz[:2]
     target[2] = target_xyz[2] + plate_hover_height
     return target
+
+
+def choose_grasp_yaw(
+    seed_quaternion_wxyz: torch.Tensor,
+    current_quaternion_wxyz: torch.Tensor,
+    closing_axis_local: torch.Tensor,
+    object_axes_xy: list[list[float]],
+    axis_clearances_m: list[float | None],
+    *,
+    quarter_turn_symmetric: bool,
+    tie_m: float = 0.003,
+) -> tuple[torch.Tensor, dict]:
+    """Pick which symmetric copy of a top-down grasp to turn the wrist to.
+
+    Rotating the grasp about world Z by a half turn (any object) or a quarter
+    turn (a square footprint) grips the same object. The copies differ in
+    which footprint axis the jaws close along, and so in whether a finger lands
+    on a neighbour, and in how far the wrist must turn from where it is. Keep
+    the copies whose axis has the most finger clearance (within `tie_m`), then
+    the smallest turn. An axis with unknown clearance counts as the worst.
+    """
+    if len(object_axes_xy) != len(axis_clearances_m) or not object_axes_xy:
+        raise ValueError("need one clearance per object footprint axis")
+    steps = (0, 1, 2, 3) if quarter_turn_symmetric else (0, 2)
+    candidates = []
+    for step in steps:
+        quaternion = quaternion_multiply_wxyz(
+            yaw_quaternion_wxyz(step * math.pi / 2.0, like=seed_quaternion_wxyz),
+            seed_quaternion_wxyz,
+        )
+        jaw = rotate_vector_wxyz(quaternion, closing_axis_local)[:2]
+        jaw = jaw / torch.linalg.vector_norm(jaw).clamp(min=1.0e-9)
+        alignment = [
+            abs(float(jaw[0]) * axis[0] + float(jaw[1]) * axis[1]) for axis in object_axes_xy
+        ]
+        axis_index = int(max(range(len(alignment)), key=alignment.__getitem__))
+        clearance = axis_clearances_m[axis_index]
+        turn_deg = math.degrees(
+            float(torch.linalg.vector_norm(
+                quaternion_error_axis_angle_wxyz(quaternion, current_quaternion_wxyz)
+            ))
+        )
+        candidates.append(
+            {
+                "quarter_turns": step,
+                "object_axis_index": axis_index,
+                "finger_clearance_m": clearance,
+                "wrist_turn_deg": turn_deg,
+                "quaternion_wxyz": quaternion,
+            }
+        )
+    worst = -math.inf
+    best_clearance = max(
+        (c["finger_clearance_m"] if c["finger_clearance_m"] is not None else worst)
+        for c in candidates
+    )
+    eligible = [
+        c
+        for c in candidates
+        if (c["finger_clearance_m"] if c["finger_clearance_m"] is not None else worst)
+        >= best_clearance - tie_m
+    ]
+    chosen = min(eligible, key=lambda c: c["wrist_turn_deg"])
+    report = {
+        "chosen_quarter_turns": chosen["quarter_turns"],
+        "chosen_object_axis_index": chosen["object_axis_index"],
+        "candidates": [
+            {k: v for k, v in c.items() if k != "quaternion_wxyz"} for c in candidates
+        ],
+    }
+    return chosen["quaternion_wxyz"], report

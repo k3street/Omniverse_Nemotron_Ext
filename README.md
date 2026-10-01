@@ -194,6 +194,69 @@ costing $7.28. Two runtime changes made that possible:
 The [launch section of the workflow guide](docs/integrations/gemini-robotics-er2-robolab.md#running-it-and-choosing-the-model)
 covers interpreters, endpoints and the budget.
 
+##### Comparing planner models
+
+One success is an anecdote, so `scripts/evaluate_planner.py` measures a pass
+rate. It runs seeded scene variations, one Isaac process each, and grades every
+episode against the acceptance file
+[`config/planner_eval/blocks_in_bin_astra_v1.json`](config/planner_eval/blocks_in_bin_astra_v1.json)
+rather than trusting the runner's own PASS. The common grade reads the final
+state from the per-step recording: the block inside the bin's footprint (2 cm
+inset), resting low, released and still. Episodes lost to infrastructure
+faults, such as a dropped connection or an exhausted API quota, are reported
+but left out of every rate, and failed runs keep their recording under
+`failed_evidence/`.
+
+```bash
+ISAAC_PY=~/Documents/Github/isaacsim/_build/linux-aarch64/release/python.sh
+CONFIG=config/planner_eval/blocks_in_bin_astra_v1.json
+
+# Screen a model on the first three development seeds.
+$ISAAC_PY -u scripts/evaluate_planner.py run $CONFIG --split development --limit 3 \
+  --provider gemini --model gemini-robotics-er-2-preview --max-total-usd 10 \
+  --output runs/dev-gemini
+$ISAAC_PY scripts/evaluate_planner.py score runs/dev-gemini
+
+# Baselines on the same scenes: a scripted oracle that reads true poses, and
+# the free, open-weights pi0.5-DROID checkpoint served locally over OpenPI.
+$ISAAC_PY -u scripts/evaluate_planner.py run $CONFIG --split development --limit 3 \
+  --policy oracle --output runs/dev-oracle
+./launch_openpi_server.sh &   # port 8000; first inference compiles for ~4 s
+$ISAAC_PY -u scripts/evaluate_planner.py run $CONFIG --split development --limit 3 \
+  --policy pi05 --output runs/dev-pi05
+```
+
+The qualification gates are fixed in the acceptance file before any run.
+**Screen** needs 2 of the first 3 development seeds to earn a full development
+run; **development** needs 7/10; **final** needs 24/30. The final split is
+refused until the file is frozen (`evaluate_planner.py freeze`) and the tree is
+clean, and each use of its seeds is logged, so reusing them shows in every
+report.
+
+Development seeds 0–2, as of 2026-09-30:
+
+| Policy | Passes | Spend | Notes |
+| --- | --- | --- | --- |
+| Gemini Robotics-ER 2 | 2/3 | $2.07 | clears the screen gate; $1.03 per success |
+| GPT-6 Astra | 1/3 | $9.74 | |
+| GPT-6 Sol | 0/1 | | 2 episodes excluded: network drop, quota exhausted |
+| Scripted oracle | 3/3 | free | privileged poses; the planner's clearance-aware grasp axis |
+| π0.5-DROID | 0/3 | free | full 150 s from RoboLab's DROID camera; never carried the block |
+
+The oracle passing every scene shows the scenes are solvable, so the models'
+failures are the planner's or the models' limits. The π0.5 baseline sees
+RoboLab's DROID-matched exterior camera; the planners keep their own view,
+which is aimed 13.7° further right.
+
+Only one Isaac/Kit process may run at a time on the DGX Spark, because
+concurrent Kit processes have wedged NVIDIA UVM. Both launchers queue on
+`/tmp/homehero_isaac_sim.lock` (`scripts/isaac_slot.sh`), and the harness
+interrupts a launch that logs nothing for 180 s. If Kit hangs on a stale
+`/dev/shm/sem.carbonite-sharedmemory`, run `scripts/clear_stale_kit_locks.sh`,
+which removes it only when no Kit process is alive. On the GB10 the OpenPI
+launcher disables XLA's Triton GEMMs, which abort with "Unsupported conversion
+from bf16 to f16" under JAX 0.5.3.
+
 Gemini training campaigns can also be planned across task, scene, and robot
 embodiment combinations without silently substituting an unsupported runtime:
 
