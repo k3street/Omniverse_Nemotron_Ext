@@ -74,7 +74,11 @@ def critique(images: list[str], expect: str) -> dict:
     )
     if resp.stop_reason == "refusal":
         raise RuntimeError("model declined the critique")
-    out = json.loads(next(b.text for b in resp.content if b.type == "text"))
+    text = next((b.text for b in resp.content if b.type == "text"), None)
+    if not text:
+        raise RuntimeError(f"no verdict text (stop_reason={resp.stop_reason}, "
+                           f"blocks={[b.type for b in resp.content]}, usage={resp.usage})")
+    out = json.loads(text)
     out["judge"] = "claude-opus-5"
     return out
 
