@@ -178,7 +178,7 @@ def draft_articulation(entry: dict) -> str:
     # tier 1: geometry-driven proposal (symmetry, wheel detection, link
     # grouping) — falls back to the naive parent-of-mesh listing
     cls = entry.get("class_hint") or entry.get("report", {}).get("matched_class")
-    if cls == "door":
+    if cls in ("door", "elevator_door"):
         from door_draft import propose_door
         spec, notes = propose_door(stage, asset_root)
         stage.GetRootLayer().Save()  # the tier may have split the leaf out
@@ -187,6 +187,9 @@ def draft_articulation(entry: dict) -> str:
         entry["articulation_draft"] = json.dumps(spec, indent=1)
         save_queue_entry(entry)
         a = spec["_analysis"]
+        if a.get("kind") == "bi_parting_sliding":
+            return ("door draft: bi-parting sliding door, leaves "
+                    + ", ".join(Path(x).name for x in a["leaves"]) + " — check travel and coupling, then Apply")
         return (f"door draft: leaf {Path(a['leaf']).name}, frame {Path(a['frame']).name}, "
                 f"push bar {Path(a['push_bar']).name if a['push_bar'] else 'NOT FOUND'}, "
                 f"push side {a['push_side']}, hinge at {a['hinge_edge']}"
@@ -285,11 +288,12 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     for a, b in filtered_pairs:
         UsdPhysics.FilteredPairsAPI.Apply(stage.GetPrimAtPath(a)).CreateFilteredPairsRel().AddTarget(Sdf.Path(b))
     made = []
+    from add_mechanism import add_couple, add_latch
+    builders = {"latch": add_latch, "couple": add_couple}
     for m in mechanisms:
-        if m.get("type") != "latch":
-            raise ValueError(f"unknown mechanism type {m.get('type')!r}")
-        from add_mechanism import add_latch
-        made.append(add_latch(stage, spec["prim_path"], m))
+        if m.get("type") not in builders:
+            raise ValueError(f"unknown mechanism type {m.get('type')!r}; known: {sorted(builders)}")
+        made.append(builders[m["type"]](stage, spec["prim_path"], m))
     stage.GetRootLayer().Save()
     entry["articulation_draft"] = spec_text
     entry["applied_fixes"] = entry.get("applied_fixes", []) + [

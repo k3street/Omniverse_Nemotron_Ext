@@ -82,6 +82,50 @@ def leaf_slab(stage, mesh_path, width_axis, thick_axis):
     return box_lo, box_hi
 
 
+def hinge_barrels(parts, leaf, width_axis, thick):
+    """Small parts on one vertical edge of the leaf, at two or more heights."""
+    h = leaf["size"][2]
+    edge = {-1: [], 1: []}
+    for p in parts:
+        if p is leaf or max(p["size"]) > 0.12 * h or p["size"][2] > 0.15 * h:
+            continue
+        for side, x in ((-1, leaf["min"][width_axis]), (1, leaf["max"][width_axis])):
+            if abs(p["centroid"][width_axis] - x) < 0.04:
+                edge[side].append(p)
+    best = max(edge.values(), key=len)
+    heights = {round(p["centroid"][2], 1) for p in best}
+    return best if len(heights) >= 2 else []
+
+
+def propose_bi_parting(stage, asset_root, frame, a, b, width_axis, tpl, notes):
+    """Two leaves sliding apart, coupled so they move as one."""
+    W = "XYZ"[width_axis]
+    travel_a = round(a["size"][width_axis] * 0.95, 4)
+    travel_b = round(b["size"][width_axis] * 0.95, 4)
+    joints = [
+        {"name": "leaf_left_slide", "joint_type": "prismatic", "parent_prim": frame["path"], "child_prim": a["path"],
+         "axis": W, "lower_limit": -travel_a, "upper_limit": 0.0, "anchor": [round(v, 4) for v in a["centroid"]],
+         "stiffness": 0.0, "damping": 50.0, "max_force": 1.0e4},
+        {"name": "leaf_right_slide", "joint_type": "prismatic", "parent_prim": frame["path"], "child_prim": b["path"],
+         "axis": W, "lower_limit": 0.0, "upper_limit": travel_b, "anchor": [round(v, 4) for v in b["centroid"]],
+         "stiffness": 0.0, "damping": 50.0, "max_force": 1.0e4},
+    ]
+    notes.append("two equal leaves side by side and no hinge barrels: bi-parting sliding door")
+    return {
+        "prim_path": asset_root, "fixed_base": True, "approximation": "convexDecomposition",
+        "joints": joints,
+        "link_masses": {frame["path"]: float(tpl.get("frame_kg", 20)),
+                        a["path"]: float(tpl.get("leaf_kg", 35)), b["path"]: float(tpl.get("leaf_kg", 35))},
+        "no_collision": [], "filtered_pairs": [],
+        # the right leaf mirrors the left: right + 1 * left = 0
+        "mechanisms": [{"type": "couple", "follower": "leaf_right_slide", "leader": "leaf_left_slide",
+                        "gearing": 1.0}],
+        "_analysis": {"tier": "door", "kind": "bi_parting_sliding", "leaves": [a["path"], b["path"]],
+                      "frame": frame["path"], "notes": notes},
+        "_instructions": "Bi-parting sliding door drafted from geometry. CHECK the travel and the coupling.",
+    }, notes
+
+
 def propose_door(stage, asset_root: str) -> tuple[dict, list[str]]:
     """Returns (spec draft, notes). May split a fused leaf out of its frame."""
     from articulation_draft import collect_parts
@@ -99,20 +143,29 @@ def propose_door(stage, asset_root: str) -> tuple[dict, list[str]]:
     W = "XYZ"[width_axis]
     T = "XYZ"[thick]
 
-    # 1. leaf and frame: split a fused shell first
-    biggest = max(parts, key=lambda p: p["volume"])
+    # 1. leaf and frame: split a fused shell first. The frame is the part
+    # with the largest face (it surrounds the leaf); bounding-box volume is
+    # wrong for a thin frame around a thick leaf.
+    face = lambda p: p["size"][width_axis] * p["size"][2]  # noqa: E731
+    biggest = max(parts, key=face)
     others_like_leaf = [p for p in parts if p is not biggest
-                        and p["size"][width_axis] > 0.6 * biggest["size"][width_axis]
+                        and p["size"][width_axis] > 0.3 * biggest["size"][width_axis]
                         and p["size"][2] > 0.6 * biggest["size"][2]]
+    # two similar leaves side by side, no hinge barrels: a bi-parting sliding door
+    if len(others_like_leaf) == 2:
+        a, b = sorted(others_like_leaf, key=lambda p: p["centroid"][width_axis])
+        similar = abs(a["size"][width_axis] - b["size"][width_axis]) < 0.15 * max(a["size"][width_axis], 1e-6)
+        if similar and not hinge_barrels(parts, a, width_axis, thick) and not hinge_barrels(parts, b, width_axis, thick):
+            return propose_bi_parting(stage, asset_root, biggest, a, b, width_axis, tpl, notes)
     if not others_like_leaf:
         box_lo, box_hi = leaf_slab(stage, biggest["path"], width_axis, thick)
         split_mesh_by_box(stage, biggest["path"], box_lo, box_hi, "DoorLeaf", "DoorFrame")
         notes.append("split the leaf out of the frame by its front/back faces")
         parts = collect_parts(stage, asset_root)
     leaf = max((p for p in parts if p["path"].endswith("DoorLeaf")), key=lambda p: p["volume"], default=None) \
-        or sorted(parts, key=lambda p: p["volume"])[-2]
+        or max(others_like_leaf, key=face)
     frame = max((p for p in parts if p["path"].endswith("DoorFrame")), key=lambda p: p["volume"], default=None) \
-        or max(parts, key=lambda p: p["volume"])
+        or biggest
     leaf_mid_t = leaf["centroid"][thick]
     leaf_mid_w = leaf["centroid"][width_axis]
 
@@ -137,6 +190,20 @@ def propose_door(stage, asset_root: str) -> tuple[dict, list[str]]:
     swing_face = leaf["max"][thick] if swing_sign > 0 else leaf["min"][thick]
     anchor = [0.0, 0.0, round(0.5 * (leaf["min"][2] + leaf["max"][2]), 4)]
     anchor[width_axis], anchor[thick] = round(hinge_w, 4), round(swing_face, 4)
+    barrels = hinge_barrels(parts, leaf, width_axis, thick)
+    if barrels:
+        # The barrels are the hinge: their edge is the hinge side, their
+        # axis the pivot, and they show on the side the door opens toward.
+        bw = sum(p["centroid"][width_axis] for p in barrels) / len(barrels)
+        bt = sum(p["centroid"][thick] for p in barrels) / len(barrels)
+        b_latch = 1 if bw < leaf_mid_w else -1
+        b_swing = 1 if bt > leaf_mid_t else -1
+        if bar and (b_latch != latch_sign or b_swing != swing_sign):
+            notes.append("the push bar and the hinge barrels disagree on the hinge; the barrels win")
+        latch_sign, swing_sign = b_latch, b_swing
+        anchor[width_axis], anchor[thick] = round(bw, 4), round(bt, 4)
+        notes[:] = [n for n in notes if not n.startswith("no push bar found")]
+        notes.append(f"no push bar; hinge side, pivot and swing from {len(barrels)} hinge barrel parts")
     # +angle about +Z moves the latch edge along Z x r; open toward swing_sign
     r_w = latch_sign  # direction from hinge to latch along the width axis
     z_cross_r_thick = r_w if (width_axis == 0) else -r_w
@@ -161,11 +228,20 @@ def propose_door(stage, asset_root: str) -> tuple[dict, list[str]]:
                        "damping": float(tpl.get("bar_damping", 50)), "max_force": 1.0e4})
         masses[bar["path"]] = float(tpl.get("bar_kg", 2))
         filtered.append([frame["path"], bar["path"]])
-    # 3. everything else inside the leaf's footprint rides on the leaf
+    # 3. everything else inside the leaf's footprint rides on the leaf; of a
+    # hinge's two halves, the one reaching further onto the leaf is the leaf's
+    on_leaf = set()
+    for p in barrels:
+        mates = [q for q in barrels if q is not p and abs(q["centroid"][2] - p["centroid"][2]) < 0.05]
+        reach = lambda q: q["max"][width_axis] if latch_sign > 0 else -q["min"][width_axis]  # noqa: E731
+        if not mates or reach(p) > max(reach(q) for q in mates):
+            on_leaf.add(p["path"])
     for p in parts:
         if p in (leaf, frame, bar):
             continue
         inside = all(leaf["min"][k] - 0.01 <= p["centroid"][k] <= leaf["max"][k] + 0.01 for k in (width_axis, 2))
+        if p in barrels:
+            inside = p["path"] in on_leaf
         parent = leaf if inside else frame
         name = f"{Path(p['path']).name}_on_{'leaf' if inside else 'frame'}"
         joints.append({"name": name.replace("-", "_"), "joint_type": "fixed",

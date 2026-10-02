@@ -192,3 +192,80 @@ def test_chess_board_finds_a1_and_reads_the_position():
     assert by["Mesh_0_000_4"]["kind"] == "p" and by["Mesh_0_000_4"]["color"] == "white"
     placed = {(i["file"], i["rank"]): letter(i["kind"], i["color"]) for i in a["pieces"]}
     assert fen_placement(placed) == "4k3/p7/8/8/8/8/PPP5/4K3"
+
+
+# --- doors without a push bar ------------------------------------------------
+
+def _plain_door(with_barrels: bool, leaves: int):
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, ROOT)
+    # a thin frame around a thicker leaf: the frame has the larger face
+    _mesh(stage, f"{ROOT}/Frame", [((-0.55, -0.03, 0.0), (-0.5, 0.03, 2.1)), ((0.5, -0.03, 0.0), (0.55, 0.03, 2.1)),
+                                    ((-0.55, -0.03, 2.05), (0.55, 0.03, 2.1))])
+    if leaves == 1:
+        _mesh(stage, f"{ROOT}/Leaf", [((-0.45, -0.05, 0.0), (0.45, 0.05, 2.0))])
+    else:
+        _mesh(stage, f"{ROOT}/LeafA", [((-0.5, -0.02, 0.0), (0.0, 0.02, 2.0))])
+        _mesh(stage, f"{ROOT}/LeafB", [((0.0, -0.02, 0.0), (0.5, 0.02, 2.0))])
+    if with_barrels:
+        for i, z in enumerate((0.3, 1.7)):
+            _mesh(stage, f"{ROOT}/HingeFrame{i}", [((-0.495, 0.05, z), (-0.455, 0.07, z + 0.15))])
+            _mesh(stage, f"{ROOT}/HingeLeaf{i}", [((-0.48, 0.05, z + 0.03), (-0.43, 0.07, z + 0.12))])
+    return stage
+
+
+def test_hinge_barrels_give_the_hinge_side_and_swing():
+    from door_draft import propose_door
+
+    spec, notes = propose_door(_plain_door(True, 1), ROOT)
+    hinge = next(j for j in spec["joints"] if j["name"] == "door_hinge")
+    assert hinge["parent_prim"].endswith("Frame") and hinge["child_prim"].endswith("Leaf")
+    assert hinge["anchor"][0] < -0.44            # the barrels' edge
+    assert hinge["anchor"][1] > 0.05             # their side: the door opens toward +y
+    assert (hinge["lower_limit"], hinge["upper_limit"]) == (0.0, 90.0)
+    fixed = {j["child_prim"].rsplit("/", 1)[-1]: j["parent_prim"].rsplit("/", 1)[-1]
+             for j in spec["joints"] if j["joint_type"] == "fixed"}
+    # of each hinge's halves, the one reaching onto the leaf rides on the leaf
+    assert fixed["HingeLeaf0"] == "Leaf" and fixed["HingeFrame0"] == "Frame"
+    assert any("hinge barrel" in n for n in notes)
+
+
+def test_two_equal_leaves_without_barrels_slide_apart_coupled():
+    from door_draft import propose_door
+
+    spec, _ = propose_door(_plain_door(False, 2), ROOT)
+    joints = {j["name"]: j for j in spec["joints"]}
+    left, right = joints["leaf_left_slide"], joints["leaf_right_slide"]
+    assert left["joint_type"] == right["joint_type"] == "prismatic" and left["axis"] == "X"
+    assert left["upper_limit"] == 0.0 and left["lower_limit"] < -0.4
+    assert right["lower_limit"] == 0.0 and right["upper_limit"] > 0.4
+    (couple,) = spec["mechanisms"]
+    assert couple["type"] == "couple" and couple["follower"] == "leaf_right_slide" and couple["gearing"] == 1.0
+    _articulate_with_couple(spec)
+
+
+def _articulate_with_couple(spec):
+    stage = _plain_door(False, 2)
+    spec, _ = __import__("door_draft").propose_door(stage, ROOT)
+    from add_mechanism import add_couple
+
+    import types
+    from service.isaac_assist_service.chat.tools.handlers.physics import _gen_articulate_asset
+    body = {k: v for k, v in spec.items() if not k.startswith("_") and k not in
+            ("link_masses", "no_collision", "filtered_pairs", "mechanisms")}
+    omni = types.ModuleType("omni")
+    omni_usd = types.ModuleType("omni.usd")
+    omni_usd.get_context = lambda: type("C", (), {"get_stage": lambda self: stage})()
+    omni.usd = omni_usd
+    sys.modules["omni"], sys.modules["omni.usd"] = omni, omni_usd
+    exec(compile(_gen_articulate_asset(body), "<articulate>", "exec"), {"__builtins__": __builtins__})
+    add_couple(stage, ROOT, spec["mechanisms"][0])
+    follower = stage.GetPrimAtPath(f"{ROOT}/Joints/leaf_right_slide")
+    # authored metadata: a bare OpenUSD build does not register PhysX schemas,
+    # so GetAppliedSchemas() hides them (Isaac lists them)
+    assert "PhysxMimicJointAPI:rotX" in follower.GetMetadata("apiSchemas").GetAddedOrExplicitItems()
+    assert str(follower.GetRelationship("physxMimicJoint:rotX:referenceJoint").GetTargets()[0]).endswith("leaf_left_slide")
+    root = stage.GetPrimAtPath(ROOT)
+    assert root.GetAttribute("physxArticulation:enabledSelfCollisions").Get() is False

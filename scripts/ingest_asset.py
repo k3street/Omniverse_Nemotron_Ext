@@ -704,6 +704,54 @@ def _already_processed(file_path: str, asset_id: str | None = None) -> str | Non
     return None
 
 
+def relink_sources(search_dir: str) -> list[str]:
+    """Re-point queue entries whose source file moved.
+
+    Wrappers reference their source by absolute path, so moving a download
+    breaks every wrapper built on it. A moved source is found by content:
+    an entry's recorded source_sha1 must match. Entries ingested before
+    hashes were recorded can only be matched by file name; those relinks say
+    so and record the hash from then on.
+    """
+    root = Path(search_dir).expanduser().resolve()
+    by_name: dict[str, list[Path]] = {}
+    for p in root.rglob("*"):
+        if p.suffix.lower() in _USD_EXTS and p.is_file():
+            by_name.setdefault(p.name, []).append(p)
+    report = []
+    for qf in sorted(QUEUE_DIR.glob("*.json")):
+        e = json.loads(qf.read_text())
+        src = e.get("original_file") or e.get("file")
+        if not src or Path(src).exists():
+            continue
+        candidates = by_name.get(Path(src).name, [])
+        want = e.get("source_sha1")
+        match, how = None, ""
+        for c in candidates:
+            if want and _file_sha1(str(c)) == want:
+                match, how = c, "content"
+                break
+        if match is None and not want and len(candidates) == 1:
+            match, how = candidates[0], "name only (no recorded content hash)"
+        if match is None:
+            report.append(f"{e['asset_id']}: source {src} missing, no match in {root}")
+            continue
+        new = str(match.resolve())
+        wrapper = e.get("file")
+        if wrapper and wrapper != src and Path(wrapper).exists() and wrapper.endswith(".usda"):
+            text = Path(wrapper).read_text()
+            Path(wrapper).write_text(text.replace(f"@{src}@", f"@{new}@"))
+        if e.get("original_file") == src:
+            e["original_file"] = new
+        if e.get("file") == src:
+            e["file"] = new
+        e["source_sha1"] = want or _file_sha1(new)
+        e.setdefault("applied_fixes", []).append(f"source relinked by {how}: {src} -> {new}")
+        qf.write_text(json.dumps(e, indent=1))
+        report.append(f"{e['asset_id']}: relinked by {how} -> {new}")
+    return report
+
+
 def scan_dir(directory: str, limit: int = 0, max_size_mb: float = 200.0) -> dict:
     """Discover USD assets under a directory and queue new/changed ones.
 
@@ -778,6 +826,8 @@ def main() -> int:
                     help="max new assets to queue per scan (0 = no limit)")
     ap.add_argument("--max-size-mb", type=float, default=200.0,
                     help="skip files larger than this (default 200 MB)")
+    ap.add_argument("--relink", metavar="DIR",
+                    help="re-point queue entries whose source moved, finding it in DIR by content")
     ap.add_argument("--class-hint", default=None)
     ap.add_argument("--id", default=None, help="asset_id (default: from filename)")
     ns = ap.parse_args()
@@ -809,6 +859,10 @@ def main() -> int:
         print("review at the asset review hub (launch_review_hub.sh)")
         return 0
 
+    if ns.relink:
+        for line in relink_sources(ns.relink):
+            print(line)
+        return 0
     if not ns.file:
         ap.error("provide a FILE or --scan DIR")
     file_path = str(Path(ns.file).resolve())

@@ -3303,6 +3303,7 @@ _fixed_base = {fixed_base!r}
 _add_collisions = {add_collisions!r}
 _approx = {approximation!r}
 _link_mass = {link_mass!r}
+_self_collisions = {bool(args.get("self_collisions", False))!r}
 _static_warnings = {static_warnings!r}
 """
     body = """\
@@ -3416,6 +3417,13 @@ if not _art_prim or not _art_prim.IsValid():
 if not _art_prim.HasAPI(UsdPhysics.ArticulationRootAPI):
     UsdPhysics.ArticulationRootAPI.Apply(_art_prim)
 result['articulation_root'] = _art_root
+# Parts of one mechanism start in contact by design (interleaved hinge
+# barrels, a leaf in its frame): left colliding, PhysX forces them apart at
+# the first step. Joint limits, not contacts, bound the motion; anything
+# outside the articulation (a latch keeper, the floor) still collides.
+_art_prim.AddAppliedSchema('PhysxArticulationAPI')
+_art_prim.CreateAttribute('physxArticulation:enabledSelfCollisions', Sdf.ValueTypeNames.Bool).Set(_self_collisions)
+result['self_collisions'] = _self_collisions
 if _fixed_base:
     _fb_path = _scope + '/FixedBase'
     _fb = UsdPhysics.FixedJoint.Define(stage, Sdf.Path(_fb_path))

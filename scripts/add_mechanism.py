@@ -268,6 +268,29 @@ def add_latch(stage, asset_root: str, spec: dict) -> dict:
             "edge": edge, "height_z": z, "swing_sign": swing_sign, "gate": gate}
 
 
+def add_couple(stage, asset_root: str, spec: dict) -> dict:
+    """One joint follows another: follower + gearing * leader + offset = 0.
+
+    A PhysX mimic joint, so the coupling is physical and two-way: pushing
+    either moves both. Bi-parting doors (gearing 1, opposite axes), screws
+    (a revolute leader, a prismatic follower, gearing = -pitch / 360 m/deg)
+    and linked levers are all this.
+    """
+    from pxr import Sdf
+
+    joints = f"{asset_root}/Joints"
+    follower = stage.GetPrimAtPath(f"{joints}/{spec['follower']}")
+    leader = stage.GetPrimAtPath(f"{joints}/{spec['leader']}")
+    if not follower.IsValid() or not leader.IsValid():
+        raise ValueError(f"couple: joints {spec['follower']!r} / {spec['leader']!r} not found under {joints}")
+    # the instance name is ignored for single-axis joints (omni.physx.demos MimicJointDemo)
+    follower.AddAppliedSchema("PhysxMimicJointAPI:rotX")
+    follower.CreateAttribute("physxMimicJoint:rotX:gearing", Sdf.ValueTypeNames.Float).Set(float(spec.get("gearing", 1.0)))
+    follower.CreateAttribute("physxMimicJoint:rotX:offset", Sdf.ValueTypeNames.Float).Set(float(spec.get("offset", 0.0)))
+    follower.CreateRelationship("physxMimicJoint:rotX:referenceJoint").SetTargets([leader.GetPath()])
+    return {"follower": str(follower.GetPath()), "leader": str(leader.GetPath()), "gearing": spec.get("gearing", 1.0)}
+
+
 def main() -> int:
     if len(sys.argv) != 4 or sys.argv[2] != "latch":
         print(__doc__)
