@@ -325,6 +325,31 @@ class TestGeneratedCodeOnRealStage:
         )
         assert [str(t) for t in fixed.GetBody1Rel().GetTargets()] == ["/World/Cabinet/Body"]
 
+    def test_rotated_asset_keeps_world_axes_and_base_pose(self, stage_env):
+        """A Y-up wrapper turns every link 90 degrees about X; the drawer must
+        still slide along WORLD Y and the base stay where it stands."""
+        from pxr import Gf, UsdGeom, UsdPhysics
+
+        stage = stage_env
+        cabinet = UsdGeom.XformCommonAPI(stage.GetPrimAtPath("/World/Cabinet"))
+        cabinet.SetTranslate(Gf.Vec3d(2.0, -1.0, 0.0))
+        cabinet.SetRotate(Gf.Vec3f(90, 0, 0))
+        code = _gen_articulate_asset({
+            "prim_path": "/World/Cabinet", "joints": [_drawer_joint()], "fixed_base": True,
+        })
+        exec(compile(code, "<gen>", "exec"), {"__builtins__": __builtins__})
+
+        cache = UsdGeom.XformCache()
+        slide = UsdPhysics.PrismaticJoint(stage.GetPrimAtPath("/World/Cabinet/Joints/drawer_slide"))
+        for body, rot in (("Body", slide.GetLocalRot0Attr()), ("Drawer", slide.GetLocalRot1Attr())):
+            world = cache.GetLocalToWorldTransform(stage.GetPrimAtPath(f"/World/Cabinet/{body}"))
+            joint_in_world = Gf.Rotation(Gf.Quatd(rot.Get())) * world.ExtractRotation()
+            assert Gf.IsClose(joint_in_world.TransformDir(Gf.Vec3d(0, 1, 0)), Gf.Vec3d(0, 1, 0), 1e-5)
+        fixed = UsdPhysics.FixedJoint(stage.GetPrimAtPath("/World/Cabinet/Joints/FixedBase"))
+        assert Gf.IsClose(Gf.Vec3d(fixed.GetLocalPos0Attr().Get()), Gf.Vec3d(2.0, -1.0, 0.0), 1e-5)
+        held = Gf.Rotation(Gf.Quatd(fixed.GetLocalRot0Attr().Get()))
+        assert Gf.IsClose(held.TransformDir(Gf.Vec3d(0, 1, 0)), Gf.Vec3d(0, 0, 1), 1e-5)
+
 
 # ---------------------------------------------------------------------------
 # scene building consumes the sim-ready library (BACKLOG #8)
