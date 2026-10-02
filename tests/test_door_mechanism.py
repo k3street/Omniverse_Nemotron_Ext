@@ -141,3 +141,54 @@ def test_bar_pushed_toward_minus_axis_flips_the_gearing(door_stage):
     assert (joints["door_hinge"]["lower_limit"], joints["door_hinge"]["upper_limit"]) == (-90.0, 0.0)
     (made,) = _articulate(door_stage, spec)
     assert made["gearing"] == pytest.approx(-1.25)
+
+
+# --- chess sets: one body per piece, a board that knows its squares -----------
+
+def _chess_stage():
+    """Board of 8 x 0.06 m squares at z<=0; white king on e1, black king on e8,
+    white pawns on rank 2 named only by shape (as in a real Sketchfab export)."""
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    root = "/World/Set/Pieces"
+    UsdGeom.Xform.Define(stage, "/World/Set")
+    UsdGeom.Xform.Define(stage, root)
+    UsdGeom.Xform.Define(stage, f"{root}/Board_0")
+    _mesh(stage, f"{root}/Board_0/Squares", [((-0.24, -0.24, -0.01), (0.24, 0.24, 0.0))])
+    sq = lambda f, r: (-0.21 + 0.06 * f, -0.21 + 0.06 * r)  # noqa: E731
+
+    def piece(name, f, r, w, h):
+        x, y = sq(f, r)
+        UsdGeom.Xform.Define(stage, f"{root}/{name}")
+        _mesh(stage, f"{root}/{name}/Geo", [((x - w, y - w, 0.0), (x + w, y + w, h))])
+
+    piece("King_WHITE_1", 4, 0, 0.02, 0.09)
+    piece("King_BLACK_2", 4, 7, 0.02, 0.09)
+    piece("Pawn_BLACK_3", 0, 6, 0.01, 0.04)
+    for f in range(3):
+        piece(f"Mesh_0_00{f}_{f + 4}", f, 1, 0.01, 0.04)
+    return stage
+
+
+def test_set_members_are_the_separate_objects():
+    from ingest_asset import set_members
+
+    stage = _chess_stage()
+    names = sorted(p.GetName() for p in set_members(stage, "/World/Set"))
+    assert names[0] == "Board_0" and len(names) == 7
+
+
+def test_chess_board_finds_a1_and_reads_the_position():
+    from chess_board import analyse, fen_placement, letter
+
+    a = analyse(_chess_stage(), "/World/Set")
+    assert a["size"] == pytest.approx(0.06)
+    assert a["rank_dir"] == (0.0, 1.0) and a["file_dir"] == (1.0, -0.0)
+    assert a["a1"] == pytest.approx((-0.21, -0.21))
+    by = {Path(i["path"]).name: i for i in a["pieces"]}
+    assert by["King_WHITE_1"]["square"] == "e1" and by["King_BLACK_2"]["square"] == "e8"
+    # unnamed meshes: pawn by shape, white by side of the board
+    assert by["Mesh_0_000_4"]["kind"] == "p" and by["Mesh_0_000_4"]["color"] == "white"
+    placed = {(i["file"], i["rank"]): letter(i["kind"], i["color"]) for i in a["pieces"]}
+    assert fen_placement(placed) == "4k3/p7/8/8/8/8/PPP5/4K3"
