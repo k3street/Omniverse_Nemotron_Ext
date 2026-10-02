@@ -218,7 +218,10 @@ def classify_entry(asset_id: str) -> str:
         # the corrected class. Never touch joint-authored derivatives.
         factor = entry["report"].get("suggested_scale_correction")
         has_joints = bool(entry["report"].get("structure", {}).get("joints"))
-        if factor or (new_class != old_class and not has_joints):
+        # a set seen for the first time needs a body per object
+        new_set = (result.get("content_kind") == "object_set"
+                   and (entry.get("vlm_prev_kind") != "object_set"))
+        if factor or ((new_class != old_class or new_set) and not has_joints):
             from ingest_asset import (apply_rigid_physics, build_wrapper,
                                       refresh_renders)
             entry.setdefault("original_file", entry["file"])
@@ -226,7 +229,8 @@ def classify_entry(asset_id: str) -> str:
                 entry, float(factor) if factor else None)
             entry.setdefault("applied_fixes", []).append(
                 (f"auto scale x{factor} " if factor else "physics rebuild ")
-                + f"(after VLM reclass to {new_class})")
+                + (f"(after VLM reclass to {new_class})" if new_class != old_class
+                   else "(the VLM sees separate objects)" if new_set else f"(VLM confirmed {new_class})"))
             entry["report"] = run_report(entry["file"], new_class)
             note = apply_rigid_physics(entry)
             if note:
@@ -236,6 +240,7 @@ def classify_entry(asset_id: str) -> str:
             # renders must follow the file they judge — a stale image is
             # evidence about the wrong asset
             refresh_renders(entry)
+    entry["vlm_prev_kind"] = result.get("content_kind")
     seen = result.get("asset_class")
     if entry.get("name_class") and seen and seen != entry["name_class"]:
         # the file is named for one thing and shows another ('elevator key'

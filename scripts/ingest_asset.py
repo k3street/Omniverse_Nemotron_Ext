@@ -543,6 +543,14 @@ def apply_rigid_physics(entry: dict) -> str | None:
             est = (mass_range[0] + mass_range[1]) / 2.0
         args["mass_kg"] = round(
             min(max(est, mass_range[0]), mass_range[1]), 4)
+    # the VLM saw several objects in the file: a body each, not one welded lump
+    if (entry.get("vlm") or {}).get("content_kind") == "object_set" and profile == "manipulable" \
+            and len(object_groups(stage, args["prim_path"])) > 1:
+        note = apply_group_physics(stage, args["prim_path"], prior,
+                                   args.get("mass_kg") or sum(mass_range or [0.1, 0.1]) / 2)
+        stage.GetRootLayer().Save()
+        del stage
+        return note
     code = _gen_make_sim_ready(args)
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
@@ -623,6 +631,121 @@ def apply_set_physics(stage, asset_root: str, prior: dict) -> str:
         total += mass
     return (f"set physics: {len(members) - surfaces} separate bodies + {surfaces} surface, "
             f"{round(total, 3)} kg total")
+
+
+def object_groups(stage, asset_root: str) -> list[list]:
+    """The separate objects in a file that holds several (a bottle and its
+    dropper lying beside it; a screw and a loose washer): its members joined
+    when one's centre lies in the other's box or their surfaces touch. A
+    bottle modelled as glass, liquid and label is one object."""
+    import numpy as np
+    from pxr import Gf, Usd, UsdGeom
+
+    members = set_members(stage, asset_root)
+    if len(members) < 2:
+        return [members]
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    boxes = [cache.ComputeWorldBound(m).ComputeAlignedRange() for m in members]
+    span = max(max(b.GetMax()[k] for b in boxes) - min(b.GetMin()[k] for b in boxes) for k in range(3))
+    rng = np.random.default_rng(0)
+
+    def points(prim):
+        pts = []
+        for p in Usd.PrimRange(prim):
+            if p.IsA(UsdGeom.Mesh):
+                m = UsdGeom.Xformable(p).ComputeLocalToWorldTransform(0)
+                pts += [list(m.Transform(Gf.Vec3d(*v))) for v in UsdGeom.Mesh(p).GetPointsAttr().Get()]
+        a = np.array(pts)
+        return a[rng.choice(len(a), min(1500, len(a)), replace=False)] if len(a) else a
+
+    pts = [points(m) for m in members]
+    parent = list(range(len(members)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(members)):
+        for j in range(i + 1, len(members)):
+            a, b = boxes[i], boxes[j]
+            if a.IsEmpty() or b.IsEmpty():
+                continue
+            joined = a.Contains(b.GetMidpoint()) or b.Contains(a.GetMidpoint())
+            if not joined and not Gf.Range3d.GetIntersection(a, b).IsEmpty() and len(pts[i]) and len(pts[j]):
+                gap = min(float(np.linalg.norm(pts[j] - x, axis=1).min()) for x in pts[i])
+                joined = gap < 0.002 * span
+            if joined:
+                parent[find(i)] = find(j)
+    groups = {}
+    for i, m in enumerate(members):
+        groups.setdefault(find(i), []).append((m, boxes[i]))
+    vol = lambda b: max(1e-18, b.GetSize()[0] * b.GetSize()[1] * b.GetSize()[2])  # noqa: E731
+    return [[m for m, _ in sorted(g, key=lambda t: -vol(t[1]))] for g in groups.values()]
+
+
+def apply_group_physics(stage, asset_root: str, prior: dict, total_mass: float) -> str:
+    """A rigid body per object in a set file; an object's other meshes are
+    fixed to its largest, and the mass is shared by bounding volume."""
+    import contextlib
+    import io
+
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    from service.isaac_assist_service.chat.tools.handlers.physics import _gen_make_sim_ready
+
+    groups = object_groups(stage, asset_root)
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+
+    def vol(prim):
+        s = cache.ComputeWorldBound(prim).ComputeAlignedRange().GetSize()
+        return max(1e-18, abs(s[0] * s[1] * s[2]))
+
+    vols = {str(m.GetPath()): vol(m) for g in groups for m in g}
+    whole = sum(vols.values())
+    mats = prior.get("typical_materials") or []
+    UsdGeom.Scope.Define(stage, f"{asset_root}/Joints")
+    n_joints = 0
+    for gi, group in enumerate(groups):
+        for m in group:
+            args = {"prim_path": str(m.GetPath()), "profile": "manipulable",
+                    "mass_kg": round(max(1e-4, total_mass * vols[str(m.GetPath())] / whole), 5)}
+            if prior.get("collision_approximation"):
+                args["approximation"] = prior["collision_approximation"]
+            if mats:
+                args["material"] = mats[0]
+            with contextlib.redirect_stdout(io.StringIO()):
+                exec(compile(_gen_make_sim_ready(args), "<group-physics>", "exec"),
+                     {"__builtins__": __builtins__})
+        # nested meshes of one object (liquid inside its glass) overlap: their
+        # colliders would push apart against the joints holding them
+        for a in group:
+            fp = UsdPhysics.FilteredPairsAPI.Apply(a)
+            for b in group:
+                if b != a:
+                    fp.CreateFilteredPairsRel().AddTarget(b.GetPath())
+        if len(group) > 1:
+            # an articulation per object: its fixed joints are exact, where
+            # joints between free bodies flex on impact (5 mm when a dropper
+            # with a light bulb fell 8 cm)
+            UsdPhysics.ArticulationRootAPI.Apply(group[0])
+            group[0].AddAppliedSchema("PhysxArticulationAPI")
+            from pxr import Sdf
+            group[0].CreateAttribute("physxArticulation:enabledSelfCollisions",
+                                     Sdf.ValueTypeNames.Bool).Set(False)
+        for m in group[1:]:
+            j = UsdPhysics.FixedJoint.Define(stage, f"{asset_root}/Joints/object{gi}_{m.GetName()}")
+            j.CreateBody0Rel().SetTargets([group[0].GetPath()])
+            j.CreateBody1Rel().SetTargets([m.GetPath()])
+            from add_mechanism import _joint_frames
+            xf = UsdGeom.XformCache()
+            anchor = cache.ComputeWorldBound(m).ComputeAlignedRange().GetMidpoint()
+            _joint_frames(j, xf.GetLocalToWorldTransform(group[0]), xf.GetLocalToWorldTransform(m), anchor)
+            n_joints += 1
+    _tune_small_colliders(stage, asset_root)
+    return (f"set physics: {len(groups)} separate objects "
+            f"({', '.join(str(len(g)) for g in groups)} meshes), {n_joints} fixed joints, {round(total_mass, 4)} kg")
 
 
 def queue_file(file_path: str, class_hint: str | None = None,

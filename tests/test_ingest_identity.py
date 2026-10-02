@@ -171,3 +171,46 @@ def test_a_file_named_for_one_thing_that_shows_another_is_flagged(tmp_path, queu
     # a second look keeps what the name said, not the class it was changed to
     vlm_classify.classify_entry("elevator_key")
     assert json.loads((queue / "elevator_key.json").read_text())["name_class"] == "key"
+
+
+def _set_file(tmp_path):
+    return _stage_with(tmp_path / "set.usda", {
+        "Glass": ((-0.013, -0.013, 0.0), (0.013, 0.013, 0.05)),       # a bottle...
+        "Liquid": ((-0.011, -0.011, 0.002), (0.011, 0.011, 0.033)),   # ...with its liquid inside
+        "Pipette": ((-0.004, 0.03, 0.06), (0.004, 0.06, 0.105)),       # the dropper beside it...
+        "Bulb": ((-0.006, 0.04, 0.09), (0.006, 0.05, 0.11)),           # ...and its bulb
+    })
+
+
+def test_a_set_file_splits_into_its_objects_not_its_meshes(tmp_path):
+    from ingest_asset import object_groups
+
+    stage = Usd.Stage.Open(str(_set_file(tmp_path)))
+    groups = sorted(sorted(m.GetName() for m in g) for g in object_groups(stage, "/Asset"))
+    assert groups == [["Bulb", "Pipette"], ["Glass", "Liquid"]]
+
+
+def test_each_object_of_a_set_is_its_own_rigid_articulation(tmp_path):
+    import types
+
+    from ingest_asset import apply_group_physics
+
+    stage = Usd.Stage.Open(str(_set_file(tmp_path)))
+    omni = types.ModuleType("omni")
+    omni_usd = types.ModuleType("omni.usd")
+    omni_usd.get_context = lambda: type("C", (), {"get_stage": lambda self: stage})()
+    omni.usd = omni_usd
+    sys.modules["omni"], sys.modules["omni.usd"] = omni, omni_usd
+    note = apply_group_physics(stage, "/Asset", {"typical_materials": ["glass"]}, 0.1)
+    assert "2 separate objects" in note
+    roots = [p.GetName() for p in stage.Traverse() if p.HasAPI(UsdPhysics.ArticulationRootAPI)]
+    assert sorted(roots) == ["Glass", "Pipette"]   # the larger mesh of each object
+    joints = {UsdPhysics.Joint(p).GetBody1Rel().GetTargets()[0].name: UsdPhysics.Joint(p).GetBody0Rel().GetTargets()[0].name
+              for p in stage.Traverse() if p.IsA(UsdPhysics.FixedJoint)}
+    assert joints == {"Liquid": "Glass", "Bulb": "Pipette"}
+    # the liquid sits inside the glass: their colliders must not fight the joint
+    assert [t.name for t in UsdPhysics.FilteredPairsAPI(stage.GetPrimAtPath("/Asset/Liquid"))
+            .GetFilteredPairsRel().GetTargets()] == ["Glass"]
+    masses = [stage.GetPrimAtPath(f"/Asset/{n}").GetAttribute("physics:mass").Get()
+              for n in ("Glass", "Liquid", "Pipette", "Bulb")]
+    assert sum(masses) == pytest.approx(0.1, rel=1e-3)

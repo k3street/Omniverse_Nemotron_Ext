@@ -1424,7 +1424,7 @@
     0.03,
     0.2
    ],
-   "articulable": true,
+   "articulable": false,
    "typical_materials": [
     "glass"
    ],
