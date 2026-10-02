@@ -163,6 +163,10 @@ def fix_scale(entry: dict) -> str:
                 for c in entry["report"]["callouts"]) else "scale still flagged"))
 
 
+def _load_priors_fresh() -> dict:
+    return json.loads((REPO / "workspace" / "knowledge" / "asset_class_priors.json").read_text())["classes"]
+
+
 def draft_articulation(entry: dict) -> str:
     """Propose a joint-spec draft from the asset's part structure. The
     reviewer edits it (types, axes, limits are judgment) and applies."""
@@ -195,6 +199,13 @@ def draft_articulation(entry: dict) -> str:
                 f"push side {a['push_side']}, hinge at {a['hinge_edge']}"
                 + (f" — {'; '.join(a['notes'])}" if a["notes"] else "")
                 + " — check hinge side and swing, then Apply")
+    prior = _load_priors_fresh().get(cls or "", {})
+    if "buttons" in prior.get("mechanism_templates", {}):
+        from button_draft import propose_buttons
+        spec, notes = propose_buttons(stage, asset_root, prior["mechanism_templates"]["buttons"])
+        entry["articulation_draft"] = json.dumps(spec, indent=1)
+        save_queue_entry(entry)
+        return f"button draft: {'; '.join(notes)} — check travel and press force, then Apply"
     try:
         from articulation_draft import propose
         spec = propose(stage, asset_root, asset_root)
@@ -260,6 +271,9 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     spec = json.loads(spec_text)
     spec.pop("_instructions", None)
     spec.pop("_analysis", None)
+    spec.pop("button_joints", None)
+    for j in spec.get("joints", []):
+        j.pop("_role", None)
     # keys articulate_asset does not take: applied after it, on the same stage
     link_masses = spec.pop("link_masses", {})
     no_collision = spec.pop("no_collision", [])

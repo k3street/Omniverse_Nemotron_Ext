@@ -212,6 +212,14 @@ for j in primaries:
              "moves": {j["name"]: (far, rest - 0.1 * (far - rest), None)}},
             {"seconds": 1.0, "label": "closed", "moves": {}},
         ]
+    elif not j["revolute"] and abs(j["upper"] - j["lower"]) <= 0.01:
+        # a button or a short slider: a quick press, not a slow sweep (a
+        # remote has dozens)
+        segments += [
+            {"seconds": 0.3, "label": f"{j['name']} pressed", "moves": {j["name"]: (rest, far, None)}},
+            {"seconds": 0.2, "label": "hold", "moves": {}},
+            {"seconds": 0.3, "label": f"{j['name']} released", "moves": {j["name"]: (far, rest, None)}},
+        ]
     else:
         segments += [
             {"seconds": 0.5, "label": f"{j['name']}: at rest", "moves": {}},

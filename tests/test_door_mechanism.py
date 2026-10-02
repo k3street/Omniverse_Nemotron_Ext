@@ -269,3 +269,28 @@ def _articulate_with_couple(spec):
     assert str(follower.GetRelationship("physxMimicJoint:rotX:referenceJoint").GetTargets()[0]).endswith("leaf_left_slide")
     root = stage.GetPrimAtPath(ROOT)
     assert root.GetAttribute("physxArticulation:enabledSelfCollisions").Get() is False
+
+
+# --- buttons -----------------------------------------------------------------
+
+def test_buttons_press_into_their_face_and_carry_their_labels():
+    from button_draft import propose_buttons
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Remote")
+    _mesh(stage, "/World/Remote/Body", [((-0.02, -0.09, -0.006), (0.02, 0.09, 0.006))])
+    for i, y in enumerate((-0.03, 0.0, 0.03)):
+        _mesh(stage, f"/World/Remote/Key{i}", [((-0.006, y - 0.006, 0.004), (0.006, y + 0.006, 0.0085))])
+    _mesh(stage, "/World/Remote/KeyCopy", [((-0.006, -0.006, 0.004), (0.006, 0.006, 0.0085))])  # Key1 again
+    _mesh(stage, "/World/Remote/Label", [((-0.003, 0.027, 0.0085), (0.003, 0.033, 0.009))])     # on Key2
+    spec, notes = propose_buttons(stage, "/World/Remote", {"press_force_n": 2.0, "max_travel_m": 0.0015})
+    buttons = [j for j in spec["joints"] if j.get("_role") == "button"]
+    assert len(buttons) == 3 and all(j["axis"] == "Z" for j in buttons)
+    assert all((j["lower_limit"], j["upper_limit"]) == (-0.0015, 0.0) for j in buttons)  # into the +Z face
+    assert buttons[0]["stiffness"] == pytest.approx(2.0 / 0.0015, rel=1e-3)
+    fixed = {j["child_prim"].rsplit("/", 1)[-1]: j["parent_prim"].rsplit("/", 1)[-1]
+             for j in spec["joints"] if j["joint_type"] == "fixed"}
+    assert fixed["Label"] == "Key2" and fixed["KeyCopy"] == "Key1"
+    assert spec["fixed_base"] is False
