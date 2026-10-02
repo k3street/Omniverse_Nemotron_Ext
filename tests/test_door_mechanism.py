@@ -467,3 +467,51 @@ def test_press_fit_is_a_breakable_joint_outside_the_articulation_released_by_rul
     tip = stage.GetPrimAtPath("/World/Pip/Tip")
     assert tip.HasAPI(UsdPhysics.RigidBodyAPI)
     assert tip.GetAttribute("physics:approximation").Get() == "convexHull"
+
+
+# --- watches -----------------------------------------------------------------
+
+def _rotated_bar(stage, path, length, width, z, angle_deg, tail=0.15):
+    """A hand: a bar from the centre out to `length` (with a short tail) at an angle."""
+    import math
+
+    m = _mesh(stage, path, [((-tail * length, -width / 2, z), (length, width / 2, z + 0.0004))])
+    c, s = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
+    m.GetPointsAttr().Set([Gf.Vec3f(c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]) for p in m.GetPointsAttr().Get()])
+    return m
+
+
+def _watch_stage():
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/W")
+    _mesh(stage, "/World/W/Case", [((-0.02, -0.02, -0.006), (0.02, 0.02, 0.004))])
+    _mesh(stage, "/World/W/Back", [((-0.022, -0.022, -0.008), (0.022, 0.022, -0.0065))])   # a bigger disc behind
+    _mesh(stage, "/World/W/Dial", [((-0.016, -0.016, 0.004), (0.016, 0.016, 0.0045))])
+    _mesh(stage, "/World/W/Glass", [((-0.017, -0.017, 0.007), (0.017, 0.017, 0.0075))])   # a disc in front
+    _rotated_bar(stage, "/World/W/Minute", 0.014, 0.0012, 0.005, 45.0)                     # diagonal
+    _rotated_bar(stage, "/World/W/MinuteGold", 0.014, 0.0012, 0.005, 45.0)                  # same hand, 2nd material
+    _rotated_bar(stage, "/World/W/Hour", 0.009, 0.0015, 0.0055, 200.0)
+    _mesh(stage, "/World/W/Logo", [((-0.006, -0.001, 0.0046), (0.006, 0.001, 0.0048))])    # centred: not a hand
+    _mesh(stage, "/World/W/Crown", [((0.02, -0.002, -0.003), (0.024, 0.002, 0.001))])
+    return stage
+
+
+def test_watch_finds_dial_crown_and_hands_and_gears_the_hour_hand():
+    from watch_draft import propose_watch
+
+    spec, notes = propose_watch(_watch_stage(), "/World/W", {})
+    name = lambda p: p.rsplit("/", 1)[-1]  # noqa: E731
+    moving = {j["name"]: j for j in spec["joints"] if j["joint_type"] == "revolute"}
+    assert name(spec["_analysis"]["dial"]) == "Dial" and name(spec["_analysis"]["case"]) == "Case"
+    assert name(moving["crown"]["child_prim"]) == "Crown" and moving["crown"]["axis"] == "X"
+    assert name(moving["hand_0"]["child_prim"]).startswith("Minute") and name(moving["hand_1"]["child_prim"]) == "Hour"
+    assert moving["hand_0"]["axis"] == "Z" and moving["hand_0"]["anchor"][:2] == pytest.approx([0, 0], abs=1e-4)
+    assert spec["mechanisms"] == [{"type": "couple", "follower": "hand_1", "leader": "hand_0",
+                                   "gearing": round(-1 / 12, 6)}]
+    fixed = {name(j["child_prim"]): name(j["parent_prim"]) for j in spec["joints"] if j["joint_type"] == "fixed"}
+    assert fixed["Logo"] == "Case" and fixed["Glass"] == "Case"
+    twin = {"Minute", "MinuteGold"} - {name(moving["hand_0"]["child_prim"])}
+    assert name(next(iter(twin))) in fixed and fixed[next(iter(twin))].startswith("Minute")

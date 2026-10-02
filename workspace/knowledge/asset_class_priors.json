@@ -1098,7 +1098,12 @@
    "source": "vlm",
    "proposed_by": "chronograph_watch_mudmaster",
    "proposed_on": "2026-10-02",
-   "curated_on": "2026-10-02"
+   "curated_on": "2026-10-02",
+   "mechanism_templates": {
+    "watch": {
+     "crown_turns": 2
+    }
+   }
   },
   "picture_frame": {
    "keywords": [

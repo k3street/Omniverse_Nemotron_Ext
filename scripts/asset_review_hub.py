@@ -205,6 +205,7 @@ def draft_articulation(entry: dict) -> str:
     tiers = {"pivot": ("pivot_draft", "propose_pivot", "check which arm is fixed and the opening"),
              "thread": ("thread_draft", "propose_thread", "check the size and pitch"),
              "plunger": ("pipette_draft", "propose_pipette", "check the travels and forces"),
+             "watch": ("watch_draft", "propose_watch", "check the crown, bezel and which hand is which"),
              "buttons": ("button_draft", "propose_buttons", "check travel and press force")}
     for key, (module, fn, check) in tiers.items():
         if key in templates:

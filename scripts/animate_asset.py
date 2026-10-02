@@ -152,17 +152,40 @@ def body_pose(path: str):
     return Gf.Vec3d(*r["position"]), Gf.Rotation(Gf.Quatd(q[3], q[0], q[1], q[2]))
 
 
+def _rot3(path):
+    """World rotation of a body as a 3x3 (column vectors) from PhysX."""
+    import numpy as np
+
+    x, y, z, w = px.get_rigidbody_transformation(path)["rotation"]
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+
+
 def measure(j) -> float:
     """Joint position from the two bodies' live poses and the joint frames."""
     p0, r0 = body_pose(j["body0"])
     p1, r1 = body_pose(j["body1"])
     f0 = j["lr0"] * r0
-    f1 = j["lr1"] * r1
     if j["revolute"]:
-        rel = (f1 * f0.GetInverse()).GetQuat()
-        axis_w = f0.TransformDir(Gf.Vec3d(*[1.0 if k == j["axis"] else 0.0 for k in range(3)]))
-        imag = rel.GetImaginary()
-        a = math.degrees(2.0 * math.atan2(Gf.Dot(imag, axis_w), rel.GetReal()))
+        # The child's turn relative to the parent since the start, about the
+        # joint axis in the parent's frame: independent of how the meshes
+        # are oriented in the model (a watch hand at 1:30 read backwards
+        # through the joint frames).
+        import numpy as np
+
+        R0, R1 = _rot3(j["body0"]), _rot3(j["body1"])
+        C = R0.T @ R1
+        if "_C0" not in j:
+            j["_C0"] = C
+            q = j["lr0"].GetQuat()  # joint frame -> body0 frame (Gf rotates row vectors)
+            m = Gf.Matrix4d().SetRotate(q)
+            e = [0.0, 0.0, 0.0]
+            e[j["axis"]] = 1.0
+            j["_a0"] = np.array(list(m.TransformDir(Gf.Vec3d(*e))))
+        D = C @ j["_C0"].T
+        v = np.array([D[2, 1] - D[1, 2], D[0, 2] - D[2, 0], D[1, 0] - D[0, 1]])
+        a = math.degrees(math.atan2(0.5 * float(v @ j["_a0"]), 0.5 * (np.trace(D) - 1.0)))
         # poses only give the angle mod 360; a screw turns many times, so
         # unwrap against the previous frame's reading
         prev = j.get("_last")
@@ -279,13 +302,18 @@ with Usd.EditContext(stage, stage.GetSessionLayer()):
         p.IsA(UsdPhysics.Joint) and not UsdPhysics.Joint(p).GetBody0Rel().GetTargets()
         and UsdPhysics.Joint(p).GetBody1Rel().GetTargets() for p in stage.Traverse())
     # A loose asset much taller than its footprint (a pipette on its end)
-    # topples before anything moves: hold its root link still instead.
-    if not anchored and (args.hold or size[2] > 1.5 * max(size[0], size[1])):
-        art = [UsdPhysics.Joint(p) for p in stage.Traverse() if p.IsA(UsdPhysics.Joint)
-               and not (p.GetAttribute("physics:excludeFromArticulation").Get() or False)]
-        parents = {str(t) for j in art for t in j.GetBody0Rel().GetTargets()}
-        children = {str(t) for j in art for t in j.GetBody1Rel().GetTargets()}
-        root_links = sorted(parents - children)
+    # topples before anything moves, and one whose main body is carried up
+    # by other parts (a watch case above its hanging strap) lands face down:
+    # hold its root link still instead, as a hand or a stand would.
+    art = [UsdPhysics.Joint(p) for p in stage.Traverse() if p.IsA(UsdPhysics.Joint)
+           and not (p.GetAttribute("physics:excludeFromArticulation").Get() or False)]
+    parents = {str(t) for j in art for t in j.GetBody0Rel().GetTargets()}
+    children = {str(t) for j in art for t in j.GetBody1Rel().GetTargets()}
+    root_links = sorted(parents - children)
+    root_floats = bool(root_links) and \
+        bbox.ComputeWorldBound(stage.GetPrimAtPath(root_links[0])).ComputeAlignedRange().GetMin()[2] \
+        > lo[2] + 0.3 * size[2]
+    if not anchored and (args.hold or size[2] > 1.5 * max(size[0], size[1]) or root_floats):
         if root_links:
             UsdPhysics.FixedJoint.Define(stage, "/AnimView/Hold").CreateBody1Rel().SetTargets([root_links[0]])
             anchored = True
