@@ -69,6 +69,11 @@ def _schema() -> dict:
                                             "enum": materials},
                                            {"type": "null"}],
                                  "description": "Dominant physical material"},
+            "content_kind": {"type": "string",
+                             "enum": ["single_object", "object_set", "scene_fragment", "scene"],
+                             "description": "One object; several separate objects (a chess set, a screw and a "
+                                            "loose washer); part of a larger thing (one wall of an elevator "
+                                            "car, a lone drawer); or a whole scene or room"},
             "deformable_type": {"anyOf": [{"type": "string",
                                            "enum": ["cloth", "sponge",
                                                     "rubber", "gel", "rope"]},
@@ -78,7 +83,7 @@ def _schema() -> dict:
         "required": ["object_name", "asset_class", "confidence", "articulable",
                      "visible_moving_parts", "notes", "proposed_class_key",
                      "est_max_dim_m", "est_mass_kg", "primary_material",
-                     "deformable_type"],
+                     "content_kind", "deformable_type"],
         "additionalProperties": False,
     }
 
@@ -129,8 +134,10 @@ def register_provisional_class(result: dict, asset_id: str) -> str | None:
     return key
 
 
-def classify_thumbnail(png_path: str) -> dict:
-    """One vision call: thumbnail -> structured classification."""
+def classify_thumbnail(png_path: str, views: list[str] = ()) -> dict:
+    """One vision call: the thumbnail and the orbit views -> structured
+    classification. One view is often edge-on; four from around the object
+    are what a person would look at."""
     import anthropic
 
     classes = json.loads(PRIORS_PATH.read_text())["classes"]
@@ -138,7 +145,10 @@ def classify_thumbnail(png_path: str) -> dict:
         f"- {k}: keywords {v['keywords']}, plausible max dimension "
         f"{v['max_dim_m'][0]}-{v['max_dim_m'][1]} m"
         for k, v in classes.items())
-    image_data = base64.standard_b64encode(Path(png_path).read_bytes()).decode()
+    images = [{"type": "image",
+               "source": {"type": "base64", "media_type": "image/png",
+                          "data": base64.standard_b64encode(Path(p).read_bytes()).decode()}}
+              for p in [png_path, *[v for v in views if Path(v).exists()]]]
 
     client = anthropic.Anthropic()
     response = client.messages.create(
@@ -147,17 +157,18 @@ def classify_thumbnail(png_path: str) -> dict:
         messages=[{
             "role": "user",
             "content": [
-                {"type": "image",
-                 "source": {"type": "base64", "media_type": "image/png",
-                            "data": image_data}},
+                *images,
                 {"type": "text", "text": (
-                    "This is a render of a 3D asset being ingested into a robotics "
+                    "These are renders of one 3D asset (a hero view, then views from "
+                    "around it) being ingested into a robotics "
                     "simulation pipeline. Identify what the object is, whether the "
                     "real-world object has moving parts, and which class from this "
                     "list fits best (null if none). If NO class fits, propose a new "
                     "snake_case class key for this KIND of object plus plausible "
                     "real-world max-dimension and mass ranges, its dominant "
-                    "material, and whether it is deformable:\n\n" + class_list)},
+                    "material, and whether it is deformable. Say whether the render shows "
+                    "one object, a set of separate objects, a fragment of something larger, "
+                    "or a whole scene:\n\n" + class_list)},
             ],
         }],
         output_config={"format": {"type": "json_schema", "schema": _schema()}},
@@ -174,9 +185,13 @@ def classify_entry(asset_id: str) -> str:
     thumb = entry.get("thumbnail")
     if not thumb or not Path(thumb).exists():
         return f"{asset_id}: no thumbnail — render one first (re-ingest)"
-    result = classify_thumbnail(thumb)
+    result = classify_thumbnail(thumb, entry.get("views") or [])
     entry["vlm"] = result
     old_class = entry.get("report", {}).get("matched_class")
+    # what the file's NAME says, kept from the first look: a later reclass
+    # overwrites matched_class, and the disagreement is the evidence
+    if "name_class" not in entry:
+        entry["name_class"] = old_class if entry.get("class_source", "filename_guess") == "filename_guess" else None
     new_class = result.get("asset_class")
     if (not new_class and result.get("confidence") in ("high", "medium")):
         new_class = register_provisional_class(result, asset_id)
@@ -221,6 +236,16 @@ def classify_entry(asset_id: str) -> str:
             # renders must follow the file they judge — a stale image is
             # evidence about the wrong asset
             refresh_renders(entry)
+    seen = result.get("asset_class")
+    if entry.get("name_class") and seen and seen != entry["name_class"]:
+        # the file is named for one thing and shows another ('elevator key'
+        # that is a call-button panel): the name cannot be trusted for size,
+        # mechanisms or search. At low confidence it is only possible.
+        entry["identity_mismatch"] = {"name_says": entry["name_class"], "content_is": seen,
+                                      "object_name": result.get("object_name"),
+                                      "confidence": result.get("confidence")}
+    else:
+        entry.pop("identity_mismatch", None)
     qf.write_text(json.dumps(entry, indent=1))
     change = (f"{old_class} -> {new_class}" if new_class and new_class != old_class
               else f"confirmed {old_class}" if new_class
@@ -236,6 +261,12 @@ def classify_entry(asset_id: str) -> str:
             change += "; " + enrich_entry(asset_id)
         except Exception as e:
             change += f"; spec lookup failed: {str(e)[:80]}"
+    kind = result.get("content_kind", "single_object")
+    if kind != "single_object":
+        change += f"; content is {kind.replace('_', ' ')}, not one object"
+    if entry.get("identity_mismatch"):
+        change += (f"; {'POSSIBLE ' if result.get('confidence') == 'low' else ''}"
+                   f"NAME MISMATCH: named as {entry['name_class']}")
     return (f"{asset_id}: VLM sees '{result['object_name']}' "
             f"({result['confidence']} confidence) — {change}"
             + (f"; moving parts: {', '.join(result['visible_moving_parts'])}"

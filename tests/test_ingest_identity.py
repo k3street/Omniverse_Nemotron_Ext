@@ -144,3 +144,30 @@ def test_a_wrong_size_is_corrected_as_a_unit_slip_first(tmp_path):
     # a 3 cm screw authored in centimetres as metres: x0.01, not the range's middle
     r = run_report(str(_box_usd(tmp_path / "Screw.usda", 3.0)), None)
     assert r["matched_class"] == "bolt_fastener" and r["suggested_scale_correction"] == 0.01
+
+
+def test_a_file_named_for_one_thing_that_shows_another_is_flagged(tmp_path, queue, monkeypatch):
+    import ingest_asset
+    import vlm_classify
+
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(b"png")
+    (queue / "elevator_key.json").write_text(json.dumps({
+        "asset_id": "elevator_key", "file": str(tmp_path / "x.usda"), "thumbnail": str(thumb),
+        "class_source": "filename_guess", "report": {"matched_class": "key"}}))
+    monkeypatch.setattr(vlm_classify, "QUEUE_DIR", queue)
+    monkeypatch.setattr(vlm_classify, "classify_thumbnail", lambda p, views=(): {
+        "object_name": "elevator call-button panel", "asset_class": "elevator_panel", "confidence": "high",
+        "visible_moving_parts": ["buttons"], "content_kind": "single_object"})
+    monkeypatch.setattr(vlm_classify, "run_report", lambda f, c: {"matched_class": c})
+    monkeypatch.setattr(vlm_classify, "propose_category", lambda r: "prop")
+    for name in ("build_wrapper", "apply_rigid_physics", "refresh_renders"):
+        monkeypatch.setattr(ingest_asset, name, lambda *a, **k: None)
+    msg = vlm_classify.classify_entry("elevator_key")
+    entry = json.loads((queue / "elevator_key.json").read_text())
+    assert entry["identity_mismatch"] == {"name_says": "key", "content_is": "elevator_panel",
+                                          "object_name": "elevator call-button panel", "confidence": "high"}
+    assert "NAME MISMATCH" in msg
+    # a second look keeps what the name said, not the class it was changed to
+    vlm_classify.classify_entry("elevator_key")
+    assert json.loads((queue / "elevator_key.json").read_text())["name_class"] == "key"

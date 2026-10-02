@@ -491,6 +491,26 @@ def render_entry(e: dict) -> str:
     if e.get("applied_fixes"):
         fixes = ('<p class="meta">applied fixes: '
                  + " · ".join(html.escape(f) for f in e["applied_fixes"]) + "</p>")
+    seen = ""
+    v = e.get("vlm") or {}
+    if v:
+        kind = v.get("content_kind", "single_object")
+        seen = (f'<p class="meta">VLM sees <b>{html.escape(str(v.get("object_name")))}</b> '
+                f'({html.escape(str(v.get("confidence")))} confidence)'
+                + (f' · <span style="color:#ffb86b">{html.escape(kind.replace("_", " "))}, not one object</span>'
+                   if kind != "single_object" else "") + "</p>")
+    if e.get("vlm_suggestion", {}).get("applied") is False:
+        sg = e["vlm_suggestion"]
+        seen += (f'<p class="meta">VLM suggests class <code>{html.escape(str(sg.get("asset_class")))}</code> '
+                 f'at low confidence — not applied; set it as the class hint if it is right</p>')
+    if e.get("identity_mismatch"):
+        mm = e["identity_mismatch"]
+        seen += (f'<p class="meta" style="color:#ff8f8f">'
+                 f'{"possible " if mm.get("confidence") == "low" else ""}name/content mismatch: the file is named as '
+                 f'<code>{html.escape(str(mm["name_says"]))}</code> but shows '
+                 f'<code>{html.escape(str(mm["content_is"]))}</code> '
+                 f'({html.escape(str(mm.get("object_name")))})</p>')
+    fixes += seen
     actions = ""
     if status not in ("approved", "rejected"):
         # judgment actions only — mechanical fixes run automatically at

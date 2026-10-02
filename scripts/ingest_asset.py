@@ -294,38 +294,47 @@ def _find_usdrecord() -> str | None:
 
 
 def render_thumbnail(file_path: str, asset_id: str) -> str | None:
-    """Render a review thumbnail with usdrecord (Storm). The reviewer must
-    see WHAT the object is — the filename may have nothing to do with it."""
-    import subprocess
-    usdrecord = _find_usdrecord()
-    if not usdrecord:
+    """The review thumbnail: one three-quarter view, framed and lit like the
+    orbit views. The reviewer (and the VLM) must see WHAT the object is —
+    the filename may have nothing to do with it."""
+    import shutil
+
+    frames = _orbit_render(file_path, f"{asset_id}__hero", [THREE_QUARTER_AZ_DEG])
+    if not frames:
         return None
-    thumbs = QUEUE_DIR / "thumbs"
-    thumbs.mkdir(parents=True, exist_ok=True)
-    out = thumbs / f"{asset_id}.png"
-    try:
-        subprocess.run(
-            [usdrecord, "--renderer", "Storm", "--imageWidth", "512",
-             file_path, str(out)],
-            capture_output=True, timeout=180, check=False)
-    except Exception:
-        return None
-    return str(out) if out.exists() else None
+    out = QUEUE_DIR / "thumbs" / f"{asset_id}.png"
+    shutil.move(frames[0], out)
+    return str(out)
 
 
 def render_views(file_path: str, asset_id: str, n_views: int = 4,
                  width: int = 512) -> list[str]:
-    """Orbit renders for visual QA — one usdrecord run with a time-sampled
-    camera circling the asset. Integrity judgment needs more than a front
-    view: a missing back face, hollow interior, or untextured patch hides
-    from a single frame."""
+    """Orbit renders for visual QA. Integrity judgment needs more than a
+    front view: a missing back face, hollow interior, or untextured patch
+    hides from a single frame."""
+    return _orbit_render(file_path, f"{asset_id}__view",
+                         [THREE_QUARTER_AZ_DEG + 360.0 * i / n_views for i in range(n_views)], width)
+
+
+THREE_QUARTER_AZ_DEG = 35.0
+ELEVATION_DEG = 25.0
+FRAME_MARGIN = 1.15
+
+
+def _orbit_render(file_path: str, prefix: str, azimuths: list[float],
+                  width: int = 512) -> list[str]:
+    """One usdrecord (Storm) run with a time-sampled camera circling the
+    asset: <prefix>.<n>.png per azimuth. The camera frames the bounding
+    sphere in the narrower (vertical) field of view, so nothing is cropped
+    and the object fills the frame; a dome and a key light are added when
+    the asset brings none (unlit metal renders as a black silhouette)."""
     import math
     import subprocess
 
     usdrecord = _find_usdrecord()
     if not usdrecord:
         return []
-    from pxr import Gf, Sdf, Usd, UsdGeom
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux
 
     src = Usd.Stage.Open(file_path)
     if not src:
@@ -338,19 +347,18 @@ def render_views(file_path: str, asset_id: str, n_views: int = 4,
     if rng.IsEmpty():
         return []
     center = Gf.Vec3d(rng.GetMidpoint())
-    # 3.2x the largest dimension keeps the whole object in frame at the
-    # default 50mm-equivalent lens (~24 deg FOV)
-    dist = (3.2 * max(rng.GetSize())) or 1.0
+    radius = 0.5 * rng.GetSize().GetLength() or 0.5
     z_up = str(UsdGeom.GetStageUpAxis(src)).upper() == "Z"
+    has_lights = any(p.HasAPI(UsdLux.LightAPI) for p in src.Traverse())
     default = src.GetDefaultPrim()
     default_path = str(default.GetPath()) if default else None
     del src
 
     thumbs = QUEUE_DIR / "thumbs"
     thumbs.mkdir(parents=True, exist_ok=True)
-    for stale in thumbs.glob(f"{asset_id}__view.*.png"):
+    for stale in thumbs.glob(f"{prefix}.*.png"):
         stale.unlink()
-    orbit = thumbs / f"{asset_id}__orbit.usda"
+    orbit = thumbs / f"{prefix}__orbit.usda"
     layer = Sdf.Layer.Find(str(orbit))
     if layer:
         layer.Clear()
@@ -362,19 +370,28 @@ def render_views(file_path: str, asset_id: str, n_views: int = 4,
     UsdGeom.SetStageUpAxis(
         stage, UsdGeom.Tokens.z if z_up else UsdGeom.Tokens.y)
     stage.SetStartTimeCode(1)
-    stage.SetEndTimeCode(n_views)
+    stage.SetEndTimeCode(len(azimuths))
     asset = stage.DefinePrim("/Asset", "Xform")
     if default_path:
         asset.GetReferences().AddReference(file_path, default_path)
     else:
         asset.GetReferences().AddReference(file_path)
     cam = UsdGeom.Camera.Define(stage, "/OrbitCam")
+    # usdrecord keeps the aperture's aspect: the vertical view is the narrow one
+    v_half = math.atan(0.5 * cam.GetVerticalApertureAttr().Get() / cam.GetFocalLengthAttr().Get())
+    dist = FRAME_MARGIN * radius / math.sin(v_half)
     cam.GetClippingRangeAttr().Set(Gf.Vec2f(dist * 0.01, dist * 10.0))
     up = Gf.Vec3d(0, 0, 1) if z_up else Gf.Vec3d(0, 1, 0)
+    if not has_lights:
+        UsdLux.DomeLight.Define(stage, "/Lights/Dome").CreateIntensityAttr(0.6)
+        key = UsdLux.DistantLight.Define(stage, "/Lights/Key")
+        key.CreateIntensityAttr(1.5)
+        key.CreateAngleAttr(1.0)
+        UsdGeom.XformCommonAPI(key).SetRotate(Gf.Vec3f(-45, 0, -30) if z_up else Gf.Vec3f(-45, -30, 0))
     xf = cam.AddTransformOp()
-    elev = math.radians(20.0)
-    for i in range(n_views):
-        az = 2.0 * math.pi * i / n_views
+    elev = math.radians(ELEVATION_DEG)
+    for i, az_deg in enumerate(azimuths):
+        az = math.radians(az_deg)
         if z_up:
             off = Gf.Vec3d(math.sin(az) * math.cos(elev),
                            -math.cos(az) * math.cos(elev),
@@ -391,12 +408,12 @@ def render_views(file_path: str, asset_id: str, n_views: int = 4,
     try:
         subprocess.run(
             [usdrecord, "--renderer", "Storm", "--imageWidth", str(width),
-             "--camera", "/OrbitCam", "--frames", f"1:{n_views}",
-             str(orbit), str(thumbs / f"{asset_id}__view.#.png")],
+             "--camera", "/OrbitCam", "--frames", f"1:{len(azimuths)}",
+             str(orbit), str(thumbs / f"{prefix}.#.png")],
             capture_output=True, timeout=300, check=False)
     except Exception:
         return []
-    return sorted(str(p) for p in thumbs.glob(f"{asset_id}__view.*.png"))
+    return sorted(str(p) for p in thumbs.glob(f"{prefix}.*.png"))
 
 
 def refresh_renders(entry: dict) -> None:
