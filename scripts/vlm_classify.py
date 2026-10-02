@@ -101,9 +101,12 @@ def register_provisional_class(result: dict, asset_id: str) -> str | None:
     data = json.loads(PRIORS_PATH.read_text())
     if key in data["classes"]:
         return key  # raced/already registered — just use it
-    tokens = [t for t in _re.split(r"[\W_]+",
-                                   (key + " " + result["object_name"]).lower())
-              if len(t) > 2]
+    # Only the class key's own words become keywords. The free-text object
+    # name ("Socket head cap screw with partially threaded shank") yields
+    # "with", "cap", "head": under longest-keyword matching those capture
+    # unrelated files ("Bottle_with_cap" -> bolt_fastener). A human widens
+    # the keywords when confirming the class.
+    tokens = [t for t in _re.split(r"[\W_]+", key.lower()) if len(t) > 2]
     data["classes"][key] = {
         "keywords": sorted(set(tokens)),
         "max_dim_m": [float(dims[0]), float(dims[1])],
@@ -118,6 +121,11 @@ def register_provisional_class(result: dict, asset_id: str) -> str | None:
         "proposed_on": _date.today().isoformat(),
     }
     PRIORS_PATH.write_text(json.dumps(data, indent=1))
+    # the ingest report reads priors through an lru_cache: without this the
+    # re-check right after registering cannot see the new class, falls back
+    # to "no class", and skips the scale correction the class exists for
+    from service.isaac_assist_service.chat.tools.handlers.physics import _load_asset_priors
+    _load_asset_priors.cache_clear()
     return key
 
 

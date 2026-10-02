@@ -543,6 +543,7 @@ def queue_file(file_path: str, class_hint: str | None = None,
     entry = {
         "asset_id": asset_id,
         "file": file_path,
+        "source_sha1": _file_sha1(file_path),
         "class_hint": class_hint,
         "source_mtime": Path(file_path).stat().st_mtime,
         "queued": date.today().isoformat(),
@@ -584,10 +585,62 @@ def queue_file(file_path: str, class_hint: str | None = None,
     return entry
 
 
-def _already_processed(file_path: str) -> str | None:
+def _file_sha1(path: str) -> str:
+    import hashlib
+
+    h = hashlib.sha1()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def content_index() -> dict:
+    """source content hash -> asset_id, for queue entries that recorded one."""
+    index = {}
+    for qf in QUEUE_DIR.glob("*.json"):
+        try:
+            e = json.loads(qf.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if e.get("source_sha1"):
+            index[e["source_sha1"]] = e.get("asset_id", qf.stem)
+    return index
+
+
+def resolve_identity(file_path: str, index: dict | None = None) -> tuple[str | None, str | None]:
+    """(asset_id, skip reason). A file name is not an identity: two different
+    files can share one (Remote_Control.usdz from two shops), and one file
+    can arrive under two (Vilya.usdz, Vilya(1).usdz). Content decides."""
+    src = str(Path(file_path).resolve())
+    sha = _file_sha1(src)
+    index = content_index() if index is None else index
+    base = _asset_id_for(src)
+    if sha in index:
+        other = json.loads((QUEUE_DIR / f"{index[sha]}.json").read_text())
+        if src not in (other.get("file"), other.get("original_file")):
+            return None, f"same content as {index[sha]}"
+    qf = QUEUE_DIR / f"{base}.json"
+    if not qf.exists():
+        return base, None
+    e = json.loads(qf.read_text())
+    if src in (e.get("file"), e.get("original_file")):
+        return base, None  # the same file again: the usual re-ingest rules apply
+    theirs = e.get("original_file") or e.get("file")
+    try:
+        # length first (different lengths cannot match), content only when equal
+        if theirs and Path(theirs).exists() and Path(theirs).stat().st_size == Path(src).stat().st_size \
+                and _file_sha1(theirs) == sha:
+            return None, f"same content as {base} ({theirs})"
+    except OSError:
+        pass
+    return f"{base}_{sha[:6]}", None  # same name, different file
+
+
+def _already_processed(file_path: str, asset_id: str | None = None) -> str | None:
     """Reason to skip this source file, or None to ingest it."""
     src = str(Path(file_path).resolve())
-    asset_id = _asset_id_for(src)
+    asset_id = asset_id or _asset_id_for(src)
     qf = QUEUE_DIR / f"{asset_id}.json"
     if qf.exists():
         try:
@@ -648,6 +701,7 @@ def scan_dir(directory: str, limit: int = 0, max_size_mb: float = 200.0) -> dict
                 return anc
             anc = anc.parent
         return None
+    index = content_index()
     for p in candidates:
         if limit and len(out["queued"]) >= limit:
             out["skipped"].append((str(p), f"scan limit {limit} reached"))
@@ -665,12 +719,15 @@ def scan_dir(directory: str, limit: int = 0, max_size_mb: float = 200.0) -> dict
         if size_mb > max_size_mb:
             out["skipped"].append((str(p), f"{size_mb:.0f} MB > {max_size_mb:.0f} MB cap"))
             continue
-        reason = _already_processed(str(p))
+        asset_id, reason = resolve_identity(str(p), index)
+        reason = reason or _already_processed(str(p), asset_id)
         if reason:
             out["skipped"].append((str(p), reason))
             continue
         try:
-            entry = queue_file(str(p))
+            entry = queue_file(str(p), asset_id=asset_id)
+            if entry.get("source_sha1"):
+                index[entry["source_sha1"]] = entry["asset_id"]
             out["queued"].append(entry)
         except Exception as e:
             out["errors"].append((str(p), str(e)[:200]))
@@ -723,7 +780,13 @@ def main() -> int:
     if not Path(file_path).exists():
         print(f"error: no such file: {file_path}", file=sys.stderr)
         return 1
-    entry = queue_file(file_path, ns.class_hint, ns.id)
+    asset_id = ns.id
+    if not asset_id:
+        asset_id, reason = resolve_identity(file_path)
+        if reason:
+            print(f"skipped {Path(file_path).name}: {reason}")
+            return 0
+    entry = queue_file(file_path, ns.class_hint, asset_id)
     report = entry["report"]
     errors = [c for c in report.get("callouts", []) if c["severity"] == "error"]
     print(f"queued {entry['asset_id']}: {report.get('verdict')}"

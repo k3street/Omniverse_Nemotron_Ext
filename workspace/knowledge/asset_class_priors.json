@@ -1058,6 +1058,150 @@
     "surface_approximation": "boundingCube"
    },
    "game": "chess"
+  },
+  "wristwatch": {
+   "keywords": [
+    "wristwatch",
+    "watch",
+    "smartwatch",
+    "chronograph"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.26
+   ],
+   "mass_kg": [
+    0.04,
+    0.12
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "chronograph_watch_mudmaster",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02"
+  },
+  "picture_frame": {
+   "keywords": [
+    "picture frame",
+    "photo frame",
+    "mirror frame"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.8
+   ],
+   "mass_kg": [
+    0.8,
+    5.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "source": "vlm",
+   "proposed_by": "543_ring",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02"
+  },
+  "ring_jewelry": {
+   "keywords": [
+    "ring",
+    "jewelry",
+    "jewellery",
+    "engagement ring",
+    "wedding ring"
+   ],
+   "max_dim_m": [
+    0.018,
+    0.028
+   ],
+   "mass_kg": [
+    0.002,
+    0.01
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "diamond_ring_day_1_3dinktober2019_ring",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02"
+  },
+  "wall_switch_panel": {
+   "keywords": [
+    "switch panel",
+    "light switch",
+    "wall switch",
+    "socket strip"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.9
+   ],
+   "mass_kg": [
+    0.2,
+    1.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "elevator_control_panel",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02"
+  },
+  "bolt_fastener": {
+   "keywords": [
+    "bolt",
+    "screw",
+    "fastener",
+    "hex bolt",
+    "socket screw",
+    "inbus"
+   ],
+   "max_dim_m": [
+    0.04,
+    0.15
+   ],
+   "mass_kg": [
+    0.015,
+    0.2
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "inbus_screw_bolt",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02"
+  },
+  "micropipette": {
+   "keywords": [
+    "micropipette",
+    "pipette"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.28
+   ],
+   "mass_kg": [
+    0.06,
+    0.15
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "mechanical_pipette",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02"
   }
  }
 }
