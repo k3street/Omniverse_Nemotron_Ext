@@ -204,6 +204,7 @@ def draft_articulation(entry: dict) -> str:
     # template key -> (module, drafter, what the reviewer should check)
     tiers = {"pivot": ("pivot_draft", "propose_pivot", "check which arm is fixed and the opening"),
              "thread": ("thread_draft", "propose_thread", "check the size and pitch"),
+             "plunger": ("pipette_draft", "propose_pipette", "check the travels and forces"),
              "buttons": ("button_draft", "propose_buttons", "check travel and press force")}
     for key, (module, fn, check) in tiers.items():
         if key in templates:
@@ -313,8 +314,9 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     for a, b in filtered_pairs:
         UsdPhysics.FilteredPairsAPI.Apply(stage.GetPrimAtPath(a)).CreateFilteredPairsRel().AddTarget(Sdf.Path(b))
     made = []
-    from add_mechanism import add_couple, add_helix, add_latch
-    builders = {"latch": add_latch, "couple": add_couple, "helix": add_helix}
+    from add_mechanism import add_couple, add_helix, add_latch, add_press_fit, add_two_stop
+    builders = {"latch": add_latch, "couple": add_couple, "helix": add_helix,
+                "two_stop": add_two_stop, "press_fit": add_press_fit}
     for m in mechanisms:
         if m.get("type") not in builders:
             raise ValueError(f"unknown mechanism type {m.get('type')!r}; known: {sorted(builders)}")

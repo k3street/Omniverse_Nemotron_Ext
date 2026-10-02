@@ -48,6 +48,8 @@ ap.add_argument("--height", type=int, default=720)
 ap.add_argument("--push-torque", type=float, default=80.0,
                 help="N m (revolute) used to test a gate: about a firm one-hand shove on a door")
 ap.add_argument("--push-force", type=float, default=100.0, help="N (prismatic) used to test a gate")
+ap.add_argument("--hold", action="store_true",
+                help="hold a loose asset still (as a hand or a stand would); automatic for tall ones that would topple")
 args = ap.parse_args()
 
 if args.asset.endswith((".usd", ".usda", ".usdc", ".usdz")):
@@ -124,6 +126,18 @@ for prim in stage.Traverse():
         "authored": _authored_drive(prim, revolute),
     })
 by_name = {j["name"]: j for j in joints}
+# Releases (customData `simReady:releasedBy` on a fixed joint, written by
+# add_mechanism.add_press_fit): a press-fitted part held until another joint
+# has travelled far enough - a pipette tip until the ejector passes its
+# collar. A light part on a joint is too compliant for a pusher to build
+# the break force, so tools release it by rule.
+releases = []
+for prim in stage.Traverse():
+    rel = prim.GetCustomDataByKey("simReady:releasedBy") if prim.IsA(UsdPhysics.Joint) else None
+    if rel:
+        rel = json.loads(rel) if isinstance(rel, str) else dict(rel)
+        releases.append({"path": str(prim.GetPath()), "name": prim.GetName(), "by": rel["joint"],
+                         "travel": float(rel["travel_m"]), "released_at": None})
 actuators = {j["gate"]["actuator_joint"] for j in joints if j["gate"]}
 primaries = [j for j in joints if not j["follower"] and j["name"] not in actuators]
 if not joints:
@@ -264,6 +278,17 @@ with Usd.EditContext(stage, stage.GetSessionLayer()):
     anchored = any(
         p.IsA(UsdPhysics.Joint) and not UsdPhysics.Joint(p).GetBody0Rel().GetTargets()
         and UsdPhysics.Joint(p).GetBody1Rel().GetTargets() for p in stage.Traverse())
+    # A loose asset much taller than its footprint (a pipette on its end)
+    # topples before anything moves: hold its root link still instead.
+    if not anchored and (args.hold or size[2] > 1.5 * max(size[0], size[1])):
+        art = [UsdPhysics.Joint(p) for p in stage.Traverse() if p.IsA(UsdPhysics.Joint)
+               and not (p.GetAttribute("physics:excludeFromArticulation").Get() or False)]
+        parents = {str(t) for j in art for t in j.GetBody0Rel().GetTargets()}
+        children = {str(t) for j in art for t in j.GetBody1Rel().GetTargets()}
+        root_links = sorted(parents - children)
+        if root_links:
+            UsdPhysics.FixedJoint.Define(stage, "/AnimView/Hold").CreateBody1Rel().SetTargets([root_links[0]])
+            anchored = True
     if not anchored:
         ground = UsdGeom.Cube.Define(stage, "/AnimView/Ground")
         ground.CreateSizeAttr(1.0)
@@ -356,6 +381,11 @@ for seg in segments:
         rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
         Image.fromarray(rgb.get_data()[:, :, :3]).save(frames_dir / f"f{frame_i:05d}.png")
         measured = {j["name"]: measure(j) for j in joints}
+        for r in releases:
+            if r["released_at"] is None and r["by"] in measured and abs(measured[r["by"]]) >= r["travel"]:
+                with Usd.EditContext(stage, stage.GetSessionLayer()):
+                    stage.GetPrimAtPath(r["path"]).GetAttribute("physics:jointEnabled").Set(False)
+                r["released_at"] = round(frame_i / args.fps, 3)
         if seg.get("gate_check"):
             g = by_name[seg["gate_check"]]
             peak = max(peak, abs(measured[g["name"]] - rest_of(g)))
@@ -381,7 +411,9 @@ with open(out_dir / "joints.csv", "w", newline="") as fh:
     w.writeheader()
     w.writerows(log_rows)
 summary = {"asset": asset_id, "usd": usd_path, "frames": frame_i, "fps": args.fps,
-           "joints": {}, "gates": gate_results}
+           "joints": {}, "gates": gate_results,
+           "releases": {r["name"]: {"by": r["by"], "at_travel": r["travel"], "released_at_s": r["released_at"]}
+                        for r in releases}}
 for j in joints:
     meas = [r[f"{j['name']}_meas"] for r in log_rows]
     entry = {"type": "revolute" if j["revolute"] else "prismatic", "limits": [j["lower"], j["upper"]],

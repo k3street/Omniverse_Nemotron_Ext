@@ -391,3 +391,79 @@ def test_helix_replaces_the_placeholder_with_two_coupled_joints():
     # self-locking: the thread's running torque damps the turn
     drive = UsdPhysics.DriveAPI.Get(stage.GetPrimAtPath(made["turn"]), "angular")
     assert drive.GetStiffnessAttr().Get() == 0.0 and drive.GetDampingAttr().Get() > 0.0
+
+
+# --- plungers ----------------------------------------------------------------
+
+def _pipette_stage():
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Pip")
+    _mesh(stage, "/World/Pip/Body", [((-0.02, -0.008, 0.0), (0.016, 0.008, 0.1))])          # handle
+    _mesh(stage, "/World/Pip/Rest", [((-0.024, -0.003, 0.09), (-0.018, 0.003, 0.098))])     # finger rest, off axis
+    _mesh(stage, "/World/Pip/Knob", [((-0.007, -0.007, 0.1), (0.007, 0.007, 0.112))])       # plunger
+    _mesh(stage, "/World/Pip/KnobCap", [((-0.005, -0.005, 0.112), (0.005, 0.005, 0.115))])
+    _mesh(stage, "/World/Pip/Ejector", [((-0.004, -0.006, -0.06), (0.024, 0.006, 0.095))])  # sleeve + button
+    _mesh(stage, "/World/Pip/Tip", [((-0.003, -0.003, -0.11), (0.003, 0.003, -0.075))])     # disposable tip
+    return stage
+
+
+def test_pipette_plunger_ejector_and_tip_are_found():
+    from pipette_draft import propose_pipette
+
+    spec, notes = propose_pipette(_pipette_stage(), "/World/Pip", {})
+    name = lambda p: p.rsplit("/", 1)[-1]  # noqa: E731
+    two_stop = next(m for m in spec["mechanisms"] if m["type"] == "two_stop")
+    assert name(two_stop["body"]) == "Body" and two_stop["press"] == -1.0 and two_stop["axis"] == "Z"
+    assert {name(two_stop["plunger"])} | {name(j["child_prim"]) for j in spec["joints"]
+                                           if j["name"].startswith("plunger_")} == {"Knob", "KnobCap"}
+    ejector = next(j for j in spec["joints"] if j["name"] == "tip_ejector")
+    assert name(ejector["child_prim"]) == "Ejector" and ejector["upper_limit"] == 0.0
+    # the sleeve ends 15 mm above the tip: it travels there and 4 mm further
+    assert ejector["lower_limit"] == pytest.approx(-0.019, abs=1e-4)
+    fit = next(m for m in spec["mechanisms"] if m["type"] == "press_fit")
+    assert name(fit["part"]) == "Tip" and fit["released_by"]["joint"] == "tip_ejector"
+    fixed = {name(j["child_prim"]) for j in spec["joints"] if j["joint_type"] == "fixed"}
+    assert "Rest" in fixed and "Tip" not in {name(j["child_prim"]) for j in spec["joints"]}
+
+
+def test_two_stop_springs_are_preloaded_in_series_through_a_carrier_as_heavy_as_the_plunger():
+    from add_mechanism import add_two_stop
+
+    stage = _pipette_stage()
+    for p in ("/World/Pip/Body", "/World/Pip/Knob"):
+        UsdPhysics.RigidBodyAPI.Apply(stage.GetPrimAtPath(p))
+    UsdPhysics.MassAPI.Apply(stage.GetPrimAtPath("/World/Pip/Knob")).CreateMassAttr().Set(0.004)
+    made = add_two_stop(stage, "/World/Pip", {
+        "body": "/World/Pip/Body", "plunger": "/World/Pip/Knob", "axis": "Z", "press": -1, "anchor": [0, 0, 0.1],
+        "first_stop_m": 0.012, "blowout_m": 0.004, "first_force_n": 10.0, "blowout_force_n": 25.0})
+    assert stage.GetPrimAtPath(made["carrier"]).GetAttribute("physics:mass").Get() == pytest.approx(0.004)
+    for key, travel, force, preload in (("stroke", 0.012, 10.0, 2.0), ("blowout", 0.004, 25.0, 12.0)):
+        j = stage.GetPrimAtPath(made[key])
+        assert (j.GetAttribute("physics:lowerLimit").Get(), j.GetAttribute("physics:upperLimit").Get()) == \
+            pytest.approx((-travel, 0.0))
+        d = UsdPhysics.DriveAPI.Get(j, "linear")
+        k, target = d.GetStiffnessAttr().Get(), d.GetTargetPositionAttr().Get()
+        # at rest the spring pushes back with the preload; at full travel with the full force
+        assert k * target == pytest.approx(preload, rel=1e-3)
+        assert k * (target + travel) == pytest.approx(force, rel=1e-3)
+
+
+def test_press_fit_is_a_breakable_joint_outside_the_articulation_released_by_rule():
+    from add_mechanism import PHYSX_BREAK_FORCE_SCALE, add_press_fit
+
+    stage = _pipette_stage()
+    UsdPhysics.RigidBodyAPI.Apply(stage.GetPrimAtPath("/World/Pip/Body"))
+    made = add_press_fit(stage, "/World/Pip", {"holder": "/World/Pip/Body", "part": "/World/Pip/Tip",
+                                               "anchor": [0, 0, -0.075], "break_force_n": 15.0,
+                                               "released_by": {"joint": "tip_ejector", "travel_m": 0.016}})
+    j = stage.GetPrimAtPath(made["joint"])
+    assert j.GetAttribute("physics:excludeFromArticulation").Get() is True
+    assert j.GetAttribute("physics:breakForce").Get() == pytest.approx(15.0 * PHYSX_BREAK_FORCE_SCALE)
+    assert j.GetCustomDataByKey("simReady:breakForceN") == 15.0
+    assert dict(j.GetCustomDataByKey("simReady:releasedBy")) == {"joint": "tip_ejector", "travel_m": 0.016}
+    tip = stage.GetPrimAtPath("/World/Pip/Tip")
+    assert tip.HasAPI(UsdPhysics.RigidBodyAPI)
+    assert tip.GetAttribute("physics:approximation").Get() == "convexHull"

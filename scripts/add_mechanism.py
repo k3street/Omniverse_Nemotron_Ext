@@ -385,6 +385,146 @@ def add_helix(stage, asset_root: str, spec: dict) -> dict:
             "gearing": gearing}
 
 
+def _carrier(stage, asset_root, name, anchor, mass):
+    """A light massless-looking body between two joints in series."""
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    xf = UsdGeom.XformCache(Usd.TimeCode.Default())
+    UsdGeom.Scope.Define(stage, f"{asset_root}/Mechanisms")
+    carrier = UsdGeom.Xform.Define(stage, f"{asset_root}/Mechanisms/{name}")
+    to_local = xf.GetLocalToWorldTransform(stage.GetPrimAtPath(asset_root)).GetInverse()
+    carrier.AddTranslateOp().Set(to_local.Transform(Gf.Vec3d(*anchor)))
+    cp = carrier.GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(cp)
+    m = UsdPhysics.MassAPI.Apply(cp)
+    m.CreateMassAttr().Set(mass)
+    m.CreateDiagonalInertiaAttr().Set(Gf.Vec3f(*(0.4 * mass * 0.005 ** 2,) * 3))
+    return cp
+
+
+def _remove_joints_between(stage, joints, a, b):
+    scope = stage.GetPrimAtPath(joints)
+    for j in list(scope.GetChildren()) if scope else []:
+        bodies = {str(t) for r in ("physics:body0", "physics:body1")
+                  for t in (j.GetRelationship(r).GetTargets() if j.GetRelationship(r) else [])}
+        if bodies == {a, b}:
+            stage.RemovePrim(j.GetPath())
+
+
+def add_two_stop(stage, asset_root: str, spec: dict) -> dict:
+    """A plunger with two stops, as a pipette's: a soft spring to the first
+    stop (the measured stroke), then a stiffer one to blow-out.
+
+    Two prismatic joints in series through a light carrier: body -> carrier
+    (blow-out) and carrier -> plunger (stroke). Each spring is preloaded
+    against its rest stop, so the blow-out stage does not move until the
+    thumb pushes harder than the whole stroke spring - a felt first stop.
+
+    Spec (world, metres, newtons): {"body": <prim>, "plunger": <prim>,
+    "axis": "Z", "press": -1, "anchor": [x, y, z], "first_stop_m": 0.004,
+    "blowout_m": 0.0015, "first_force_n": 2.0, "blowout_force_n": 6.0}.
+    "press" is the direction (+1/-1 along the axis) the plunger goes in.
+    """
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    joints = f"{asset_root}/Joints"
+    body, plunger = spec["body"], spec["plunger"]
+    _remove_joints_between(stage, joints, body, plunger)
+    axis, press = spec.get("axis", "Z"), float(spec.get("press", -1))
+    stroke, blow = float(spec["first_stop_m"]), float(spec["blowout_m"])
+    f1, f2 = float(spec["first_force_n"]), float(spec["blowout_force_n"])
+    # The carrier weighs what the plunger does. Two prismatics in series on
+    # one axis through a much lighter link starve the solver: verified in
+    # PhysX, a carrier at 5% of the load lets the body-side stage run
+    # through its preload and its stop (4.8 mm at 6 N for a 4 mm stop held
+    # by a 12 N preload); matched, both stages land within 0.1 mm.
+    mass = UsdPhysics.MassAPI(stage.GetPrimAtPath(plunger)).GetMassAttr().Get() \
+        if stage.GetPrimAtPath(plunger).HasAPI(UsdPhysics.MassAPI) else None
+    if not mass:
+        bound = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_]) \
+            .ComputeWorldBound(stage.GetPrimAtPath(plunger)).ComputeAlignedRange().GetSize()
+        mass = 0.5 * 1100.0 * bound[0] * bound[1] * bound[2]  # half-solid plastic
+    cp = _carrier(stage, asset_root, f"{Path(plunger).name}_stop", spec["anchor"], max(float(mass), 0.001))
+    xf = UsdGeom.XformCache(Usd.TimeCode.Default())
+    anchor = Gf.Vec3d(*spec["anchor"])
+    made = {}
+    # (name, parent, child, travel, force at full travel, preload force)
+    stages = [("blowout", body, str(cp.GetPath()), blow, f2, 1.2 * f1),
+              ("stroke", str(cp.GetPath()), plunger, stroke, f1, 0.2 * f1)]
+    for name, parent, child, travel, force, preload in stages:
+        j = UsdPhysics.PrismaticJoint.Define(stage, f"{joints}/{Path(plunger).name}_{name}")
+        j.CreateBody0Rel().SetTargets([parent])
+        j.CreateBody1Rel().SetTargets([child])
+        j.CreateAxisAttr().Set(axis)
+        lo, hi = sorted([0.0, press * travel])
+        j.CreateLowerLimitAttr().Set(lo)
+        j.CreateUpperLimitAttr().Set(hi)
+        _joint_frames(j, xf.GetLocalToWorldTransform(stage.GetPrimAtPath(parent)),
+                      xf.GetLocalToWorldTransform(stage.GetPrimAtPath(child)), anchor)
+        # the spring passes the preload force at rest: its target sits
+        # behind the rest stop, and the stop holds it there
+        k = (force - preload) / travel
+        drive = UsdPhysics.DriveAPI.Apply(j.GetPrim(), "linear")
+        drive.CreateTypeAttr().Set("force")
+        drive.CreateStiffnessAttr().Set(k)
+        drive.CreateDampingAttr().Set(0.02 * k)
+        drive.CreateTargetPositionAttr().Set(-press * preload / k)
+        made[name] = str(j.GetPath())
+    return {"carrier": str(cp.GetPath()), **made}
+
+
+# PhysX (omni.physx 110.1, this build) breaks a joint at about 1/31 of its
+# authored physics:breakForce: measured by hanging weights from a press-fit
+# on a fixed base - authored 15/150/300/450 N broke at 0.4-0.6/3.9-5.9/
+# 9.3-9.8/9.8-14.7 N, the same at 60 and 120 Hz and at any body scale. The
+# intended force is kept as customData simReady:breakForceN; re-measure
+# (tests/ ... hang a weight) when the PhysX version changes.
+PHYSX_BREAK_FORCE_SCALE = 31.0
+
+
+def add_press_fit(stage, asset_root: str, spec: dict) -> dict:
+    """A part pushed onto another (a pipette tip on its shaft, a cap on a
+    pen): held by a fixed joint that breaks above break_force_n, so a robot
+    or an ejector can push it off. The part stays its own body, outside the
+    articulation (articulation joints cannot break).
+
+    Spec: {"holder": <prim>, "part": <prim>, "anchor": [x, y, z],
+    "break_force_n": 8.0, "mass_kg": 0.001, "released_by": {"joint":
+    "tip_ejector", "travel_m": 0.014}}. A pusher on a light part cannot build
+    the break force (the joint gives instead), so "released_by" records the
+    joint whose travel releases it; tools that drive joints honour it.
+    """
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    joints = f"{asset_root}/Joints"
+    holder, part = spec["holder"], spec["part"]
+    _remove_joints_between(stage, joints, holder, part)
+    pp = stage.GetPrimAtPath(part)
+    UsdPhysics.RigidBodyAPI.Apply(pp)
+    UsdPhysics.CollisionAPI.Apply(pp)
+    if pp.IsA(UsdGeom.Mesh):
+        # a dynamic body cannot collide as a triangle mesh
+        mc = UsdPhysics.MeshCollisionAPI.Apply(pp)
+        if mc.GetApproximationAttr().Get() in (None, "none", "meshSimplification"):
+            mc.CreateApproximationAttr().Set(spec.get("approximation", "convexHull"))
+    if spec.get("mass_kg"):
+        UsdPhysics.MassAPI.Apply(pp).CreateMassAttr().Set(float(spec["mass_kg"]))
+    xf = UsdGeom.XformCache(Usd.TimeCode.Default())
+    j = UsdPhysics.FixedJoint.Define(stage, f"{joints}/{pp.GetName()}_press_fit")
+    j.CreateBody0Rel().SetTargets([holder])
+    j.CreateBody1Rel().SetTargets([part])
+    _joint_frames(j, xf.GetLocalToWorldTransform(stage.GetPrimAtPath(holder)),
+                  xf.GetLocalToWorldTransform(pp), Gf.Vec3d(*spec["anchor"]))
+    want = float(spec.get("break_force_n", 8.0))
+    j.CreateBreakForceAttr().Set(want * PHYSX_BREAK_FORCE_SCALE)
+    j.GetPrim().SetCustomDataByKey("simReady:breakForceN", want)
+    if spec.get("released_by"):
+        # {"joint": name, "travel_m": x}: a pusher releases it by rule
+        j.GetPrim().SetCustomDataByKey("simReady:releasedBy", dict(spec["released_by"]))
+    j.CreateExcludeFromArticulationAttr().Set(True)
+    return {"joint": str(j.GetPath()), "break_force_n": want}
+
+
 def main() -> int:
     if len(sys.argv) != 4 or sys.argv[2] != "latch":
         print(__doc__)
