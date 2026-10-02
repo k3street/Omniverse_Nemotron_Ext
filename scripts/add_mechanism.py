@@ -291,6 +291,100 @@ def add_couple(stage, asset_root: str, spec: dict) -> dict:
     return {"follower": str(follower.GetPath()), "leader": str(leader.GetPath()), "gearing": spec.get("gearing", 1.0)}
 
 
+HELIX_CARRIER_MASS_FRACTION = 0.05
+
+
+def add_helix(stage, asset_root: str, spec: dict) -> dict:
+    """A thread: the bolt turns about its axis and advances pitch per turn.
+
+    PhysX articulations have no screw joint, so the thread is two joints in
+    series through a light carrier body, a prismatic (nut -> carrier) that
+    follows a revolute (carrier -> bolt) by a mimic coupling. Any joint the
+    articulation already had between nut and bolt is replaced.
+
+    Spec (world coordinates, metres): {"nut": <prim>, "bolt": <prim>,
+    "axis": "Z", "anchor": [x, y, z], "pitch_m": 0.0008,
+    "turns": [lo, hi]} - turns from the modelled pose; a right-hand thread
+    (the default, "hand": "right") advances toward +axis turning positively.
+    """
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
+
+    joints = f"{asset_root}/Joints"
+    nut, bolt = stage.GetPrimAtPath(spec["nut"]), stage.GetPrimAtPath(spec["bolt"])
+    if not nut.IsValid() or not bolt.IsValid():
+        raise ValueError(f"helix: nut {spec['nut']!r} / bolt {spec['bolt']!r} not found")
+    axis = spec.get("axis", "Z")
+    pitch = float(spec["pitch_m"])
+    lo_turns, hi_turns = (float(t) for t in spec.get("turns", (-2.0, 2.0)))
+    hand = 1.0 if spec.get("hand", "right") == "right" else -1.0
+    for j in list(stage.GetPrimAtPath(joints).GetChildren()) if stage.GetPrimAtPath(joints) else []:
+        bodies = {str(t) for r in ("physics:body0", "physics:body1")
+                  for t in (j.GetRelationship(r).GetTargets() if j.GetRelationship(r) else [])}
+        if bodies == {spec["nut"], spec["bolt"]}:
+            stage.RemovePrim(j.GetPath())
+
+    xf = UsdGeom.XformCache(Usd.TimeCode.Default())
+    anchor = Gf.Vec3d(*spec["anchor"])
+    mech = f"{asset_root}/Mechanisms"
+    UsdGeom.Scope.Define(stage, mech)
+    carrier = UsdGeom.Xform.Define(stage, f"{mech}/{bolt.GetName()}_thread")
+    to_local = xf.GetLocalToWorldTransform(stage.GetPrimAtPath(asset_root)).GetInverse()
+    carrier.AddTranslateOp().Set(to_local.Transform(anchor))
+    cp = carrier.GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(cp)
+    bolt_mass = UsdPhysics.MassAPI(bolt).GetMassAttr().Get() if bolt.HasAPI(UsdPhysics.MassAPI) else None
+    mass = HELIX_CARRIER_MASS_FRACTION * (bolt_mass or 0.01)
+    m = UsdPhysics.MassAPI.Apply(cp)
+    m.CreateMassAttr().Set(mass)
+    # a small solid: it has no geometry, so give it inertia explicitly
+    r = 0.005
+    m.CreateDiagonalInertiaAttr().Set(Gf.Vec3f(*(0.4 * mass * r * r,) * 3))
+    xf.Clear()
+    carrier_w = xf.GetLocalToWorldTransform(cp)
+
+    advance = UsdPhysics.PrismaticJoint.Define(stage, f"{joints}/{bolt.GetName()}_advance")
+    advance.CreateBody0Rel().SetTargets([nut.GetPath()])
+    advance.CreateBody1Rel().SetTargets([cp.GetPath()])
+    advance.CreateAxisAttr().Set(axis)
+    travel = sorted([hand * pitch * lo_turns, hand * pitch * hi_turns])
+    # a hair beyond the turn limits so the revolute's limit is the one that stops it
+    advance.CreateLowerLimitAttr().Set(travel[0] - 0.1 * pitch)
+    advance.CreateUpperLimitAttr().Set(travel[1] + 0.1 * pitch)
+    _joint_frames(advance, xf.GetLocalToWorldTransform(nut), carrier_w, anchor)
+
+    turn = UsdPhysics.RevoluteJoint.Define(stage, f"{joints}/{bolt.GetName()}_turn")
+    turn.CreateBody0Rel().SetTargets([cp.GetPath()])
+    turn.CreateBody1Rel().SetTargets([bolt.GetPath()])
+    turn.CreateAxisAttr().Set(axis)
+    turn.CreateLowerLimitAttr().Set(360.0 * lo_turns)
+    turn.CreateUpperLimitAttr().Set(360.0 * hi_turns)
+    _joint_frames(turn, carrier_w, xf.GetLocalToWorldTransform(bolt), anchor)
+
+    # A real thread is self-locking: friction on the flanks holds a load that
+    # a frictionless helix turns into spinning (an M8 bolt hanging in a fixed
+    # nut unscrews two turns in a second). PhysX joint friction only slows
+    # that, so the turn also gets the thread's running torque as a damper:
+    # run_torque_nm at one turn per second.
+    friction = float(spec.get("friction", 0.3))
+    for jp in (advance.GetPrim(), turn.GetPrim()):
+        jp.AddAppliedSchema("PhysxJointAPI")
+        jp.CreateAttribute("physxJoint:jointFriction", Sdf.ValueTypeNames.Float).Set(friction)
+    run_torque = float(spec.get("run_torque_nm", 0.05))
+    drive = UsdPhysics.DriveAPI.Apply(turn.GetPrim(), "angular")
+    drive.CreateTypeAttr().Set("force")
+    drive.CreateStiffnessAttr().Set(0.0)
+    drive.CreateDampingAttr().Set(run_torque / 360.0)  # N m per deg/s
+    # advance + gearing * turn = 0, in the joints' USD units (metres, degrees)
+    gearing = -hand * pitch / 360.0
+    ap = advance.GetPrim()
+    ap.AddAppliedSchema("PhysxMimicJointAPI:rotX")
+    ap.CreateAttribute("physxMimicJoint:rotX:gearing", Sdf.ValueTypeNames.Float).Set(gearing)
+    ap.CreateAttribute("physxMimicJoint:rotX:offset", Sdf.ValueTypeNames.Float).Set(0.0)
+    ap.CreateRelationship("physxMimicJoint:rotX:referenceJoint").SetTargets([turn.GetPath()])
+    return {"carrier": str(cp.GetPath()), "advance": str(ap.GetPath()), "turn": str(turn.GetPath()),
+            "gearing": gearing}
+
+
 def main() -> int:
     if len(sys.argv) != 4 or sys.argv[2] != "latch":
         print(__doc__)

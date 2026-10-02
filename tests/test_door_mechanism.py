@@ -320,3 +320,74 @@ def test_pivot_turns_one_arm_about_the_pin_from_closed_to_open():
     assert (pivot["lower_limit"], pivot["upper_limit"]) == pytest.approx((-30.0, 30.0), abs=0.5)
     fixed = {j["child_prim"].rsplit("/", 1)[-1] for j in spec["joints"] if j["joint_type"] == "fixed"}
     assert fixed == {"Pin"} and spec["fixed_base"] is False
+
+
+# --- threads -----------------------------------------------------------------
+
+def _bolt_stage(with_nut=True):
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Bolt")
+    # M8 x 40: an 8 mm shank, a 13 mm head on top
+    _mesh(stage, "/World/Bolt/Screw", [((-0.004, -0.004, -0.04), (0.004, 0.004, 0.0)),
+                                       ((-0.0065, -0.0065, 0.0), (0.0065, 0.0065, 0.0055))])
+    ring = [((-0.0065, -0.0065, 0), (-0.0042, 0.0065, 1)), ((0.0042, -0.0065, 0), (0.0065, 0.0065, 1)),
+            ((-0.0042, -0.0065, 0), (0.0042, -0.0042, 1)), ((-0.0042, 0.0042, 0), (0.0042, 0.0065, 1))]
+
+    def at(z0, z1):
+        return [((lo[0], lo[1], z0), (hi[0], hi[1], z1)) for lo, hi in ring]
+    _mesh(stage, "/World/Bolt/Washer", at(-0.0016, 0.0))
+    if with_nut:
+        _mesh(stage, "/World/Bolt/Nut", at(-0.03, -0.0235))
+    _mesh(stage, "/World/Bolt/Ground", [((-0.1, -0.1, -0.05), (0.1, 0.1, -0.05))])  # a backdrop plane
+    return stage
+
+
+def test_thread_sizes_the_bolt_and_lets_the_nut_run_from_tip_to_head():
+    from thread_draft import propose_thread
+
+    spec, notes = propose_thread(_bolt_stage(), "/World/Bolt", {})
+    assert spec["thread"]["nominal_m"] == 0.008 and spec["thread"]["pitch_m"] == 0.00125
+    assert spec["thread"]["axis"] == "Z" and spec["thread"]["head_end"] == "+"
+    helix = spec["mechanisms"][0]
+    assert helix["type"] == "helix" and helix["nut"].endswith("Nut") and helix["bolt"].endswith("Screw")
+    # nut 6.5 mm thick at -30..-23.5 mm on a -40..0 shank: bolt moves -16.5 mm (nut at the
+    # head) to +10 mm (nut at the tip)
+    assert helix["turns"] == pytest.approx([-0.0235 / 0.00125, 0.010 / 0.00125], abs=0.6)
+    fixed = {j["child_prim"].rsplit("/", 1)[-1] for j in spec["joints"] if j["joint_type"] == "fixed"}
+    assert fixed == {"Washer"}  # the backdrop plane is not a part
+
+
+def test_a_loose_bolt_gets_no_joint_but_keeps_its_thread():
+    from thread_draft import propose_thread
+
+    spec, notes = propose_thread(_bolt_stage(with_nut=False), "/World/Bolt", {})
+    assert not spec["mechanisms"] and spec["thread"]["nominal_m"] == 0.008
+    assert any("loose fastener" in n for n in notes)
+
+
+def test_helix_replaces_the_placeholder_with_two_coupled_joints():
+    from add_mechanism import add_helix
+
+    stage = _bolt_stage()
+    for p in ("/World/Bolt/Nut", "/World/Bolt/Screw"):
+        UsdPhysics.RigidBodyAPI.Apply(stage.GetPrimAtPath(p))
+    UsdGeom.Scope.Define(stage, "/World/Bolt/Joints")
+    placeholder = UsdPhysics.RevoluteJoint.Define(stage, "/World/Bolt/Joints/thread")
+    placeholder.CreateBody0Rel().SetTargets(["/World/Bolt/Nut"])
+    placeholder.CreateBody1Rel().SetTargets(["/World/Bolt/Screw"])
+    made = add_helix(stage, "/World/Bolt", {"nut": "/World/Bolt/Nut", "bolt": "/World/Bolt/Screw", "axis": "Z",
+                                            "anchor": [0, 0, -0.027], "pitch_m": 0.00125, "turns": [-18, 8]})
+    assert not stage.GetPrimAtPath("/World/Bolt/Joints/thread").IsValid()
+    turn = UsdPhysics.RevoluteJoint(stage.GetPrimAtPath(made["turn"]))
+    assert (turn.GetLowerLimitAttr().Get(), turn.GetUpperLimitAttr().Get()) == (-18 * 360.0, 8 * 360.0)
+    advance = stage.GetPrimAtPath(made["advance"])
+    # metres per degree: PhysX takes the gearing in the joints' USD units
+    assert advance.GetAttribute("physxMimicJoint:rotX:gearing").Get() == pytest.approx(-0.00125 / 360)
+    assert str(advance.GetRelationship("physxMimicJoint:rotX:referenceJoint").GetTargets()[0]) == made["turn"]
+    assert stage.GetPrimAtPath(made["carrier"]).HasAPI(UsdPhysics.RigidBodyAPI)
+    # self-locking: the thread's running torque damps the turn
+    drive = UsdPhysics.DriveAPI.Get(stage.GetPrimAtPath(made["turn"]), "angular")
+    assert drive.GetStiffnessAttr().Get() == 0.0 and drive.GetDampingAttr().Get() > 0.0

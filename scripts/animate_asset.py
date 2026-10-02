@@ -148,7 +148,14 @@ def measure(j) -> float:
         rel = (f1 * f0.GetInverse()).GetQuat()
         axis_w = f0.TransformDir(Gf.Vec3d(*[1.0 if k == j["axis"] else 0.0 for k in range(3)]))
         imag = rel.GetImaginary()
-        return math.degrees(2.0 * math.atan2(Gf.Dot(imag, axis_w), rel.GetReal()))
+        a = math.degrees(2.0 * math.atan2(Gf.Dot(imag, axis_w), rel.GetReal()))
+        # poses only give the angle mod 360; a screw turns many times, so
+        # unwrap against the previous frame's reading
+        prev = j.get("_last")
+        if prev is not None:
+            a += 360.0 * round((prev - a) / 360.0)
+        j["_last"] = a
+        return a
     a0 = p0 + r0.TransformDir(Gf.CompMult(j["lp0"], Gf.Vec3d(*j["scale0"])))
     a1 = p1 + r1.TransformDir(Gf.CompMult(j["lp1"], Gf.Vec3d(*j["scale1"])))
     axis_w = f0.TransformDir(Gf.Vec3d(*[1.0 if k == j["axis"] else 0.0 for k in range(3)]))

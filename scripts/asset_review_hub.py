@@ -200,18 +200,17 @@ def draft_articulation(entry: dict) -> str:
                 + (f" — {'; '.join(a['notes'])}" if a["notes"] else "")
                 + " — check hinge side and swing, then Apply")
     prior = _load_priors_fresh().get(cls or "", {})
-    if "pivot" in prior.get("mechanism_templates", {}):
-        from pivot_draft import propose_pivot
-        spec, notes = propose_pivot(stage, asset_root, prior["mechanism_templates"]["pivot"])
-        entry["articulation_draft"] = json.dumps(spec, indent=1)
-        save_queue_entry(entry)
-        return f"pivot draft: {'; '.join(notes)} — check which arm is fixed and the opening, then Apply"
-    if "buttons" in prior.get("mechanism_templates", {}):
-        from button_draft import propose_buttons
-        spec, notes = propose_buttons(stage, asset_root, prior["mechanism_templates"]["buttons"])
-        entry["articulation_draft"] = json.dumps(spec, indent=1)
-        save_queue_entry(entry)
-        return f"button draft: {'; '.join(notes)} — check travel and press force, then Apply"
+    templates = prior.get("mechanism_templates", {})
+    # template key -> (module, drafter, what the reviewer should check)
+    tiers = {"pivot": ("pivot_draft", "propose_pivot", "check which arm is fixed and the opening"),
+             "thread": ("thread_draft", "propose_thread", "check the size and pitch"),
+             "buttons": ("button_draft", "propose_buttons", "check travel and press force")}
+    for key, (module, fn, check) in tiers.items():
+        if key in templates:
+            spec, notes = getattr(__import__(module), fn)(stage, asset_root, templates[key])
+            entry["articulation_draft"] = json.dumps(spec, indent=1)
+            save_queue_entry(entry)
+            return f"{key} draft: {'; '.join(notes)} — {check}, then Apply"
     try:
         from articulation_draft import propose
         spec = propose(stage, asset_root, asset_root)
@@ -285,6 +284,7 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     no_collision = spec.pop("no_collision", [])
     filtered_pairs = spec.pop("filtered_pairs", [])
     mechanisms = spec.pop("mechanisms", [])
+    thread = spec.pop("thread", None)
     if any("|" in str(j.get("joint_type", "")) for j in spec.get("joints", [])):
         return "spec still has placeholder joint_type values — edit before applying"
     stage = Usd.Stage.Open(entry["file"])
@@ -295,11 +295,16 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     omni.usd = omni_usd
     sys.modules["omni"] = omni
     sys.modules["omni.usd"] = omni_usd
-    code = _gen_articulate_asset(spec)
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        exec(compile(code, "<articulate>", "exec"), {"__builtins__": __builtins__})
+    if spec.get("joints"):
+        code = _gen_articulate_asset(spec)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            exec(compile(code, "<articulate>", "exec"), {"__builtins__": __builtins__})
     from pxr import Sdf, UsdPhysics
+
+    if thread:
+        # what a mating part needs to know, kept with the asset
+        stage.GetPrimAtPath(spec["prim_path"]).SetCustomDataByKey("simReady:thread", thread)
 
     for path, kg in link_masses.items():
         UsdPhysics.MassAPI.Apply(stage.GetPrimAtPath(path)).CreateMassAttr().Set(float(kg))
@@ -308,8 +313,8 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     for a, b in filtered_pairs:
         UsdPhysics.FilteredPairsAPI.Apply(stage.GetPrimAtPath(a)).CreateFilteredPairsRel().AddTarget(Sdf.Path(b))
     made = []
-    from add_mechanism import add_couple, add_latch
-    builders = {"latch": add_latch, "couple": add_couple}
+    from add_mechanism import add_couple, add_helix, add_latch
+    builders = {"latch": add_latch, "couple": add_couple, "helix": add_helix}
     for m in mechanisms:
         if m.get("type") not in builders:
             raise ValueError(f"unknown mechanism type {m.get('type')!r}; known: {sorted(builders)}")

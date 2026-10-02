@@ -403,7 +403,7 @@
     "truck",
     "aston",
     "wheelchair",
-    "\u043a\u043e\u043b\u044f\u0441\u043a\u0430"
+    "коляска"
    ],
    "max_dim_m": [
     0.9,
@@ -1201,7 +1201,10 @@
    "source": "vlm",
    "proposed_by": "inbus_screw_bolt",
    "proposed_on": "2026-10-02",
-   "curated_on": "2026-10-02"
+   "curated_on": "2026-10-02",
+   "mechanism_templates": {
+    "thread": {}
+   }
   },
   "micropipette": {
    "keywords": [
