@@ -200,6 +200,12 @@ def draft_articulation(entry: dict) -> str:
                 + (f" — {'; '.join(a['notes'])}" if a["notes"] else "")
                 + " — check hinge side and swing, then Apply")
     prior = _load_priors_fresh().get(cls or "", {})
+    if "pivot" in prior.get("mechanism_templates", {}):
+        from pivot_draft import propose_pivot
+        spec, notes = propose_pivot(stage, asset_root, prior["mechanism_templates"]["pivot"])
+        entry["articulation_draft"] = json.dumps(spec, indent=1)
+        save_queue_entry(entry)
+        return f"pivot draft: {'; '.join(notes)} — check which arm is fixed and the opening, then Apply"
     if "buttons" in prior.get("mechanism_templates", {}):
         from button_draft import propose_buttons
         spec, notes = propose_buttons(stage, asset_root, prior["mechanism_templates"]["buttons"])

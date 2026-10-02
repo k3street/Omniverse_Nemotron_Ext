@@ -294,3 +294,29 @@ def test_buttons_press_into_their_face_and_carry_their_labels():
              for j in spec["joints"] if j["joint_type"] == "fixed"}
     assert fixed["Label"] == "Key2" and fixed["KeyCopy"] == "Key1"
     assert spec["fixed_base"] is False
+
+
+def test_pivot_turns_one_arm_about_the_pin_from_closed_to_open():
+    import math
+
+    from pivot_draft import propose_pivot
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Scissors")
+    _mesh(stage, "/World/Scissors/ArmA", [((-0.05, -0.004, 0.0), (0.10, 0.004, 0.002))])
+    arm_b = _mesh(stage, "/World/Scissors/ArmB", [((-0.05, -0.004, 0.002), (0.10, 0.004, 0.004))])
+    # the second arm modelled 30 degrees open about the pin
+    c, s = math.cos(math.radians(30)), math.sin(math.radians(30))
+    arm_b.GetPointsAttr().Set([Gf.Vec3f(c * p[0] - s * p[1], s * p[0] + c * p[1], p[2])
+                               for p in arm_b.GetPointsAttr().Get()])
+    _mesh(stage, "/World/Scissors/Pin", [((-0.003, -0.003, -0.001), (0.003, 0.003, 0.005))])
+    spec, notes = propose_pivot(stage, "/World/Scissors", {"open_deg": 60})
+    pivot = next(j for j in spec["joints"] if j["name"] == "pivot")
+    assert pivot["axis"] == "Z" and pivot["joint_type"] == "revolute"
+    assert pivot["anchor"] == pytest.approx([0.0, 0.0, 0.002], abs=1e-4)
+    # closed is -30 (arms aligned), open is the class's 60 from closed
+    assert (pivot["lower_limit"], pivot["upper_limit"]) == pytest.approx((-30.0, 30.0), abs=0.5)
+    fixed = {j["child_prim"].rsplit("/", 1)[-1] for j in spec["joints"] if j["joint_type"] == "fixed"}
+    assert fixed == {"Pin"} and spec["fixed_base"] is False
