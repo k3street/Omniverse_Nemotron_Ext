@@ -359,6 +359,35 @@ def refresh_renders(entry: dict) -> None:
     entry["views"] = render_views(entry["file"], entry["asset_id"])
 
 
+SMALL_PART_M = 0.03  # below this, PhysX's default contact offset is a sizeable fraction of the part
+
+
+def _tune_small_colliders(stage, root_path: str) -> int:
+    """Tighter contact and rest offsets for colliders smaller than SMALL_PART_M.
+
+    PhysX's default contact offset scales with the scene, not the shape; on a
+    2 cm ring or a watch pin it is a large fraction of the part, so contacts
+    start early and small parts hover or jitter. Authored as raw
+    PhysxCollisionAPI attributes (PhysxSchema is not in a bare OpenUSD build).
+    """
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    tuned = 0
+    for prim in Usd.PrimRange(stage.GetPrimAtPath(root_path)):
+        if not prim.HasAPI(UsdPhysics.CollisionAPI):
+            continue
+        size = cache.ComputeWorldBound(prim).ComputeAlignedRange().GetSize()
+        if max(size) * UsdGeom.GetStageMetersPerUnit(stage) >= SMALL_PART_M:
+            continue
+        offset = max(0.0005, 0.05 * min(s for s in size if s > 0) * UsdGeom.GetStageMetersPerUnit(stage))
+        prim.AddAppliedSchema("PhysxCollisionAPI")
+        prim.CreateAttribute("physxCollision:contactOffset", Sdf.ValueTypeNames.Float).Set(float(offset))
+        prim.CreateAttribute("physxCollision:restOffset", Sdf.ValueTypeNames.Float).Set(0.0)
+        tuned += 1
+    return tuned
+
+
 def apply_rigid_physics(entry: dict) -> str | None:
     """Author rigid physics on the entry's derivative (deterministic:
     collision + class material + class-plausible mass). Returns a note, or
@@ -416,6 +445,9 @@ def apply_rigid_physics(entry: dict) -> str | None:
                                       "appliance_large", "medical_furniture")
                else "manipulable")
     args = {"prim_path": f"/World/{_camel(entry['asset_id'])}", "profile": profile}
+    if prior.get("collision_approximation"):
+        # a ring's convex hull fills its hole: concave classes say so
+        args["approximation"] = prior["collision_approximation"]
     if mats:
         args["material"] = mats[0]
     if mass_range and profile == "manipulable":
@@ -450,9 +482,12 @@ def apply_rigid_physics(entry: dict) -> str | None:
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         exec(compile(code, "<auto-physics>", "exec"), {"__builtins__": __builtins__})
+    small = _tune_small_colliders(stage, args["prim_path"])
     stage.GetRootLayer().Save()
     del stage
     return (f"auto physics: {profile}, {mats[0] if mats else 'no material (no class)'}"
+            + (f", collider {args['approximation']}" if args.get("approximation") else "")
+            + (f", small-part contact offsets on {small} colliders" if small else "")
             + (f", {args['mass_kg']} kg" if args.get("mass_kg") else " (bbox mass)"))
 
 

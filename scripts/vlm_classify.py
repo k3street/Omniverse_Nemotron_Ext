@@ -183,6 +183,14 @@ def classify_entry(asset_id: str) -> str:
         if new_class:
             result["asset_class"] = new_class
             result["registered_provisional_class"] = True
+    if new_class and result.get("confidence") == "low":
+        # A low-confidence look (an untextured slab, an edge-on view) must not
+        # rescale the asset: today it turned a dog bowl into a can, a remote
+        # into a box and a ring into a 55 cm picture frame. Record it for the
+        # reviewer instead.
+        entry["vlm_suggestion"] = {"asset_class": new_class, "object_name": result.get("object_name"),
+                                   "confidence": "low", "applied": False}
+        new_class = None
     if new_class:
         entry["class_hint"] = new_class
         entry["class_source"] = "vlm"
@@ -215,7 +223,9 @@ def classify_entry(asset_id: str) -> str:
             refresh_renders(entry)
     qf.write_text(json.dumps(entry, indent=1))
     change = (f"{old_class} -> {new_class}" if new_class and new_class != old_class
-              else f"confirmed {old_class}" if new_class else "no class fits")
+              else f"confirmed {old_class}" if new_class
+              else f"suggests {entry['vlm_suggestion']['asset_class']} at low confidence: left for the reviewer"
+              if entry.get("vlm_suggestion", {}).get("applied") is False else "no class fits")
     # a NAMED product can trade the class-prior range for a published spec
     # (dims + mass with source) — the VLM's identification is the query
     import os

@@ -2960,11 +2960,15 @@ else:
     else:
         # longest matching keyword wins per pass: 'bedside' (overbed_table)
         # must beat the generic 'table'
-        for _tokset, _text in ((_file_tokens, _names[0]), (_all_tokens, _blob)):
+        # multi-word keywords match whole words in the name with its
+        # punctuation as spaces: 'apple watch' must match
+        # 'Apple_Watch_Series_7', and 'dog bowl' 'Dog_Bowl'
+        _spaced = lambda _t: ' ' + ' '.join(w for w in _re.split(r'[\\W_]+', _t.lower()) if w) + ' '
+        for _tokset, _text in ((_file_tokens, _spaced(_names[0])), (_all_tokens, _spaced(_blob))):
             _best_kw = ''
             for _k, _v in _priors.items():
                 for _kw in _v['keywords']:
-                    _hit = (_kw in _text) if (' ' in _kw) else (_kw in _tokset)
+                    _hit = (' ' + _kw + ' ' in _text) if (' ' in _kw) else (_kw in _tokset)
                     if _hit and len(_kw) > len(_best_kw):
                         _best_kw, _cls, _prior = _kw, _k, _v
             if _cls:
@@ -3086,7 +3090,10 @@ else:
         result['suggested_materials'] = _prior.get('typical_materials', [])
         _mlo, _mhi = _prior['mass_kg']
         _total = sum(_m['mass_kg'] for _m in mass_prims)
-        if mass_prims and (_total < _mlo or _total > _mhi):
+        # masses are stored as float32: one clamped to the range's end reads
+        # back a hair outside it (0.2000000030), which is not implausible
+        _tol = 1e-6 * max(1.0, _mhi)
+        if mass_prims and (_total < _mlo - _tol or _total > _mhi + _tol):
             _callout('error', 'mass', 'authored total mass ' + format(_total, '.3f')
                      + ' kg implausible for class ' + repr(_cls) + ' (expected '
                      + format(_mlo, 'g') + '-' + format(_mhi, 'g') + ' kg)')

@@ -294,8 +294,8 @@
     "hammer",
     "screwdriver",
     "pliers",
-    "scissors",
-    "wrench"
+    "wrench",
+    "screw driver"
    ],
    "max_dim_m": [
     0.1,
@@ -1064,18 +1064,21 @@
     "wristwatch",
     "watch",
     "smartwatch",
-    "chronograph"
+    "chronograph",
+    "apple watch",
+    "watch face"
    ],
    "max_dim_m": [
     0.05,
     0.26
    ],
    "mass_kg": [
-    0.04,
-    0.12
+    0.03,
+    0.25
    ],
    "articulable": true,
    "typical_materials": [
+    "steel_stainless",
     "plastic_abs"
    ],
    "source": "vlm",
@@ -1124,12 +1127,15 @@
    ],
    "articulable": false,
    "typical_materials": [
+    "gold",
+    "silver",
     "steel_stainless"
    ],
    "source": "vlm",
    "proposed_by": "diamond_ring_day_1_3dinktober2019_ring",
    "proposed_on": "2026-10-02",
-   "curated_on": "2026-10-02"
+   "curated_on": "2026-10-02",
+   "collision_approximation": "convexDecomposition"
   },
   "wall_switch_panel": {
    "keywords": [
@@ -1162,7 +1168,9 @@
     "fastener",
     "hex bolt",
     "socket screw",
-    "inbus"
+    "inbus",
+    "flat washer",
+    "screw and washer"
    ],
    "max_dim_m": [
     0.04,
@@ -1201,6 +1209,219 @@
    "source": "vlm",
    "proposed_by": "mechanical_pipette",
    "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02"
+  },
+  "pet_bowl": {
+   "keywords": [
+    "dog bowl",
+    "cat bowl",
+    "pet bowl",
+    "feeding bowl"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.35
+   ],
+   "mass_kg": [
+    0.1,
+    1.5
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless",
+    "ceramic"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "pet_food_bag": {
+   "keywords": [
+    "dog food",
+    "cat food",
+    "pet food",
+    "kibble"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.9
+   ],
+   "mass_kg": [
+    1.0,
+    20.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "paper_kraft"
+   ],
+   "contents": "granular",
+   "_note": "a flexible bag of loose kibble; simulated as one rigid body until granular contents and soft bags are supported (BACKLOG: granular)",
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "circuit_board": {
+   "keywords": [
+    "raspberry pi",
+    "circuit board",
+    "pcb",
+    "arduino",
+    "hat module",
+    "breakout board"
+   ],
+   "max_dim_m": [
+    0.02,
+    0.3
+   ],
+   "mass_kg": [
+    0.003,
+    0.15
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "pcb_fr4"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "scissors": {
+   "keywords": [
+    "scissor",
+    "scissors",
+    "shears"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.3
+   ],
+   "mass_kg": [
+    0.03,
+    0.25
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "mechanism_templates": {
+    "pivot": {
+     "_doc": "two blades on a revolute pivot at the screw",
+     "open_deg": 60
+    }
+   },
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "key": {
+   "keywords": [
+    "key",
+    "door key",
+    "elevator key",
+    "house key"
+   ],
+   "max_dim_m": [
+    0.03,
+    0.1
+   ],
+   "mass_kg": [
+    0.004,
+    0.03
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "brass"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "elevator_panel": {
+   "keywords": [
+    "elevator panel",
+    "elevator control panel",
+    "lift panel",
+    "call panel",
+    "car operating panel"
+   ],
+   "max_dim_m": [
+    0.2,
+    1.6
+   ],
+   "mass_kg": [
+    0.5,
+    15.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "elevator_car": {
+   "keywords": [
+    "elevator",
+    "lift car",
+    "elevator cabin",
+    "elevator car"
+   ],
+   "max_dim_m": [
+    1.8,
+    3.5
+   ],
+   "mass_kg": [
+    400.0,
+    1500.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "dropper_bottle": {
+   "keywords": [
+    "dropper bottle",
+    "serum bottle",
+    "dropper",
+    "tincture bottle"
+   ],
+   "max_dim_m": [
+    0.06,
+    0.15
+   ],
+   "mass_kg": [
+    0.03,
+    0.2
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "elevator_door": {
+   "keywords": [
+    "elevator door",
+    "lift door",
+    "sliding door"
+   ],
+   "max_dim_m": [
+    1.8,
+    2.6
+   ],
+   "mass_kg": [
+    40.0,
+    200.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "mechanism_templates": {
+    "slide": {
+     "_doc": "leaves slide sideways; bi-parting leaves move apart, coupled"
+    }
+   },
+   "source": "curated",
    "curated_on": "2026-10-02"
   }
  }
