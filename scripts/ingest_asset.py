@@ -37,11 +37,19 @@ def optional_nvidia_validation(file_path: str) -> dict | None:
     mode = os.environ.get("NVIDIA_USD_VALIDATION_ON_INGEST", "auto").lower()
     if mode in {"0", "false", "no", "off"}:
         return None
-    from service.isaac_assist_service.analysis.validators.nvidia_usd_validation import (
-        findings_record,
-        resolve_validator_command,
-        validate_asset,
-    )
+    try:
+        from service.isaac_assist_service.analysis.validators.nvidia_usd_validation import (
+            findings_record,
+            resolve_validator_command,
+            validate_asset,
+        )
+    except ImportError:
+        # The validators package needs the service's dependencies (pydantic),
+        # which a bare OpenUSD interpreter does not have. "auto" means
+        # optional; an explicit request should still fail loudly.
+        if mode == "auto":
+            return None
+        raise
 
     command = resolve_validator_command()
     if not command and mode == "auto":
