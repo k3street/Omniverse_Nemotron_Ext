@@ -794,6 +794,11 @@ ingest  ->  classify  ->  make sim-ready  ->  render  ->  vision judges
                                                     registry (66 assets)
 ```
 
+**How-to:** [Making an asset sim-ready](docs/guides/sim_ready_assets.md) walks a
+download from ingest to the registry. Its worked example is a door with a crash
+bar and latch: segmentation, joint drafting, coupled mechanisms, and headless
+joint animation with measured evidence.
+
 Current state: **2377 assets ingested**, 2326 with a recorded visual-QA verdict,
 **62 machine-approved**, 66 promoted to the sim-ready registry, **32 of those
 independently re-verified in a second physics engine**.
