@@ -140,6 +140,50 @@ def scan_scene_features(file_path: str) -> dict:
     return out
 
 
+BACKDROP_FLATNESS = 0.001  # thinnest / largest: a single quad, not a thin panel (a door)
+BACKDROP_SPREAD = 2.5      # a backdrop dwarfs everything else this many times
+
+
+def find_backdrops(file_path: str) -> list[str]:
+    """Ground planes and backdrops the model was presented on (a Sketchfab
+    scene's floor): flat meshes far wider than everything else, lying at
+    the bottom or back of it. They are not part of the object, and they
+    make it measure as large as the plane."""
+    try:
+        from pxr import Usd, UsdGeom
+    except ImportError:
+        return []
+    stage = Usd.Stage.Open(file_path)
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    boxes = {}
+    for prim in stage.Traverse():
+        if prim.IsA(UsdGeom.Mesh):
+            r = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+            if not r.IsEmpty():
+                boxes[str(prim.GetPath())] = (list(r.GetMin()), list(r.GetMax()))
+    if len(boxes) < 2:
+        return []
+    out = []
+    for path, (lo, hi) in boxes.items():
+        size = [hi[k] - lo[k] for k in range(3)]
+        thin = min(range(3), key=lambda k: size[k])
+        if size[thin] > BACKDROP_FLATNESS * max(size):
+            continue
+        rest = [b for q, b in boxes.items() if q != path and q not in out]
+        if not rest:
+            continue
+        r_lo = [min(b[0][k] for b in rest) for k in range(3)]
+        r_hi = [max(b[1][k] for b in rest) for k in range(3)]
+        r_size = [r_hi[k] - r_lo[k] for k in range(3)]
+        spread = all(size[k] >= BACKDROP_SPREAD * max(r_size[k], 1e-9) for k in range(3) if k != thin)
+        # it sits at one end of the rest along its thin axis, not through the middle
+        tol = 0.05 * max(r_size)
+        at_end = lo[thin] <= r_lo[thin] + tol or hi[thin] >= r_hi[thin] - tol
+        if spread and at_end:
+            out.append(path)
+    return out
+
+
 def _deformable_type(report: dict) -> str | None:
     """Deformable preset/type for the report's class, or None (rigid)."""
     cls = report.get("matched_class")
@@ -223,6 +267,10 @@ def build_wrapper(entry: dict, size_factor: float | None) -> str:
         asset.GetReferences().AddReference(src, str(default.GetPath()))
     else:
         asset.GetReferences().AddReference(src)
+    src_root = str(default.GetPath()) if default else ""
+    for path in entry.get("backdrops", []):
+        if src_root and path.startswith(src_root + "/"):
+            stage.OverridePrim(str(asset.GetPath()) + path[len(src_root):]).SetActive(False)
     xf = UsdGeom.XformCommonAPI(asset)
     if src_up == "Y":
         xf.SetRotate(Gf.Vec3f(90, 0, 0))
@@ -586,13 +634,25 @@ def queue_file(file_path: str, class_hint: str | None = None,
         "status": "pending_review",
         "report": report,
     }
+    backdrops = find_backdrops(file_path)
+    if auto_fix_scale and backdrops:
+        # measure the object without the floor it was shown on
+        entry["backdrops"] = backdrops
+        entry["original_file"] = file_path
+        entry["file"] = build_wrapper(entry, None)
+        entry["applied_fixes"] = [f"backdrop removed: {', '.join(p.rsplit('/', 1)[-1] for p in backdrops)} "
+                                  "(a flat plane far wider than the object)"]
+        report = run_report(entry["file"], class_hint)
+        report.update(features)
+        entry["report"] = report
+        entry["proposed_category"] = propose_category(report)
     factor = report.get("suggested_scale_correction")
     if auto_fix_scale and factor:
-        entry["original_file"] = file_path
+        entry.setdefault("original_file", file_path)
         entry["file"] = build_wrapper(entry, float(factor))
-        entry["applied_fixes"] = [
+        entry.setdefault("applied_fixes", []).append(
             f"auto scale x{factor} (source units x{report.get('meters_per_unit')}, "
-            f"up-axis {report.get('up_axis')} -> Z)"]
+            f"up-axis {report.get('up_axis')} -> Z)")
         entry["report"] = run_report(entry["file"], class_hint)
         entry["report"].update(features)
         entry["proposed_category"] = propose_category(entry["report"])

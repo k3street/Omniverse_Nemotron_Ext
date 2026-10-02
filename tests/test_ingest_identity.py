@@ -100,3 +100,39 @@ def test_small_parts_get_tight_contact_offsets(tmp_path):
     assert _tune_small_colliders(stage, "/Asset") == 1
     offset = stage.GetPrimAtPath("/Asset/Body").GetAttribute("physxCollision:contactOffset").Get()
     assert 0.0005 <= offset <= 0.002
+
+
+def _stage_with(path: Path, boxes: dict):
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    root = UsdGeom.Xform.Define(stage, "/Asset")
+    stage.SetDefaultPrim(root.GetPrim())
+    for name, (lo, hi) in boxes.items():
+        m = UsdGeom.Mesh.Define(stage, f"/Asset/{name}")
+        m.CreatePointsAttr([(x, y, z) for z in (lo[2], hi[2]) for y in (lo[1], hi[1]) for x in (lo[0], hi[0])])
+        m.CreateFaceVertexCountsAttr([4] * 6)
+        m.CreateFaceVertexIndicesAttr([0, 2, 3, 1, 4, 5, 7, 6, 0, 1, 5, 4, 2, 6, 7, 3, 0, 4, 6, 2, 1, 3, 7, 5])
+    stage.GetRootLayer().Save()
+    return path
+
+
+def test_the_floor_a_model_was_shown_on_is_a_backdrop(tmp_path):
+    from ingest_asset import find_backdrops
+
+    f = _stage_with(tmp_path / "screw.usda", {
+        "Screw": ((-0.003, -0.003, 0.0), (0.003, 0.003, 0.009)),
+        "Plane": ((-0.0475, -0.0475, 0.0), (0.0475, 0.0475, 0.0))})
+    assert find_backdrops(str(f)) == ["/Asset/Plane"]
+
+
+@pytest.mark.parametrize("boxes", [
+    # a door panel 16 mm thick beside its handle: thin, but a solid part
+    {"Door": ((0.0, 0.0, 0.0), (0.4, 0.016, 2.0)), "Handle": ((0.37, -0.06, 0.8), (0.4, 0.0, 1.4))},
+    # a sheet of paper under a pen: flat, but not far wider than the pen
+    {"Paper": ((0.0, 0.0, 0.0), (0.21, 0.297, 0.0)), "Pen": ((0.05, 0.05, 0.0), (0.06, 0.19, 0.01))},
+])
+def test_flat_parts_of_the_object_are_not_backdrops(tmp_path, boxes):
+    from ingest_asset import find_backdrops
+
+    assert find_backdrops(str(_stage_with(tmp_path / "a.usda", boxes))) == []
