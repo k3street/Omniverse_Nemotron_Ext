@@ -525,6 +525,27 @@ def add_press_fit(stage, asset_root: str, spec: dict) -> dict:
     return {"joint": str(j.GetPath()), "break_force_n": want}
 
 
+def add_rule(stage, gated_joint: str, actuator_joint: str, engage: float, action: str = "open") -> dict:
+    """A dependency with no physical form, enforced by the tools that drive
+    joints: the gated joint stays where it is until the actuator has moved
+    `engage` (metres or degrees) from rest - an elevator's door and its
+    call button, a drawer and the key that unlocks it. Joints are prim
+    paths, so the two may belong to different assets in one scene.
+
+    The rule is customData simReady:gate on the gated joint, the same record
+    a latch writes, with mechanism "rule"; animate_asset.py keeps the gated
+    joint locked until the actuator engages, then works it ("open": through
+    its range and back).
+    """
+    gated = stage.GetPrimAtPath(gated_joint)
+    actuator = stage.GetPrimAtPath(actuator_joint)
+    if not gated.IsValid() or not actuator.IsValid():
+        raise ValueError(f"rule: joints {gated_joint!r} / {actuator_joint!r} not found")
+    gate = {"mechanism": "rule", "actuator_joint": str(actuator.GetPath()), "engage": float(engage), "action": action}
+    gated.SetCustomDataByKey("simReady:gate", gate)
+    return {"gated": str(gated.GetPath()), **gate}
+
+
 def main() -> int:
     if len(sys.argv) != 4 or sys.argv[2] != "latch":
         print(__doc__)

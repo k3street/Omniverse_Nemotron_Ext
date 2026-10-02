@@ -348,6 +348,7 @@ defaults. Each was verified in PhysX on a real downloaded asset.
 | `pivot` | `pivot_draft.py` | `scissors` | Two arms crossing at a pin; limits from closed to the class's opening | `scissor_1`: 0° to 67.1° of [0°, 68°] |
 | `thread` | `thread_draft.py` | `bolt_fastener` | ISO size and pitch from the shank; a nut on the shank gets a helix; a loose bolt keeps `simReady:thread` | Synthetic M8: 2 turns advance 2.50 mm; no creep hanging in its nut |
 | `plunger` | `pipette_draft.py` | `micropipette` | Two-stop plunger, sprung tip ejector, press-fit tip | `mechanical_pipette`: a 6 N thumb gives 5.98 mm of stroke; stops hold at 12.00 and 3.99 mm; the ejector drops the tip |
+| `watch` | `watch_draft.py` | `wristwatch` | Crown about its radial axis, bezel, hands about the dial centre with the hour hand geared at 1/12 to the longest | `watch`: crown, hands and bezel through full range; hour hand 59.96° for the minute hand's 719.7° |
 
 The mechanisms these tiers use, all in `add_mechanism.py`:
 
@@ -357,6 +358,31 @@ The mechanisms these tiers use, all in `add_mechanism.py`:
 | `helix` | A thread. PhysX has no screw joint, so it is a revolute and a prismatic in series through a light carrier, coupled at `−pitch/360` m/deg. Joint friction plus a damping-only drive (the running torque) stop it from unscrewing under load. |
 | `two_stop` | Two preloaded springs in series through a carrier: a soft stroke to the first stop, then a stiff blow-out. The carrier must weigh what the plunger does (see Troubleshooting). |
 | `press_fit` | A breakable fixed joint outside the articulation. It can also be released by rule: `simReady:releasedBy = {"joint", "travel_m"}`, which the animator honours. |
+
+**Rules between assets.** A dependency with no physical form, such as an
+elevator door that opens on its call button, is a rule. `add_mechanism.add_rule`
+writes `simReady:gate` with `"mechanism": "rule"` on the gated joint, naming the
+actuator by prim path. The two joints can belong to different assets placed in
+one scene by `compose_scene.py`:
+
+```bash
+python3 scripts/compose_scene.py workspace/scenes/elevator_call.usda \
+  --asset elevator_door_metal_8_mb@0,0,0 --asset elevator_control_panel@0.9,0,0.6 \
+  --rule elevator_door_metal_8_mb:door_hinge=elevator_control_panel:button_00@0.004
+python.sh scripts/animate_asset.py workspace/scenes/elevator_call.usda
+```
+
+The animator is the lock. It holds the gated joint at rest and refuses
+commands to it until the actuator has measurably travelled `engage`. The
+summary records the refusals, any movement while locked (0.0° here), and when
+the rule was satisfied (1.23 s).
+
+**Files holding several objects.** When the VLM says a file is a set (a bottle
+with its dropper beside it, a screw with a loose washer), ingest groups the
+meshes into objects. Meshes belong to one object when one's centre lies inside
+the other's box or their surfaces touch. Each object gets its own body. An
+object made of several meshes becomes its own small articulation, which keeps
+it rigid in a fall.
 
 **Ingest also handles three things on the way in.**
 - **Backdrops.** A flat quad far wider than the model (a Sketchfab floor or back
@@ -411,8 +437,9 @@ on every reopen. If it happens, restart Isaac instead of reopening the stage.
 | `scripts/segment_mesh.py` | Split fused meshes, by connectivity or with `--box` |
 | `scripts/articulation_draft.py` | Generic joint drafter (wheels) |
 | `scripts/door_draft.py` | Door drafter (leaf, frame, push bar, hinge, latch) |
-| `scripts/add_mechanism.py` | Latch, couple, helix, two-stop plunger, press fit |
-| `scripts/button_draft.py`, `pivot_draft.py`, `thread_draft.py`, `pipette_draft.py` | Class drafting tiers (§4.1) |
+| `scripts/add_mechanism.py` | Latch, couple, helix, two-stop plunger, press fit, rule |
+| `scripts/button_draft.py`, `pivot_draft.py`, `thread_draft.py`, `pipette_draft.py`, `watch_draft.py` | Class drafting tiers (§4.1) |
+| `scripts/compose_scene.py` | Several assets in one scene, with rules between them |
 | `scripts/animate_asset.py` | Headless video, joint log and gate check |
 | `scripts/asset_review_hub.py` | Review hub, port 8777 (draft, apply, animate, approve) |
 | `scripts/promote_asset.py` | Approved asset → portable library copy |

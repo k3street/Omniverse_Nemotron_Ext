@@ -125,7 +125,14 @@ for prim in stage.Traverse():
         "gate": json.loads(gate) if isinstance(gate, str) else gate,
         "authored": _authored_drive(prim, revolute),
     })
+# a composed scene can hold two assets with a joint of the same name
+_names = [j["name"] for j in joints]
+for j in joints:
+    if _names.count(j["name"]) > 1:
+        parts = j["path"].split("/")
+        j["name"] = f"{parts[2] if len(parts) > 3 else parts[1]}/{j['name']}"
 by_name = {j["name"]: j for j in joints}
+by_name.update({j["path"]: j for j in joints})  # a rule names its actuator by path
 # Releases (customData `simReady:releasedBy` on a fixed joint, written by
 # add_mechanism.add_press_fit): a press-fitted part held until another joint
 # has travelled far enough - a pipette tip until the ejector passes its
@@ -138,8 +145,8 @@ for prim in stage.Traverse():
         rel = json.loads(rel) if isinstance(rel, str) else dict(rel)
         releases.append({"path": str(prim.GetPath()), "name": prim.GetName(), "by": rel["joint"],
                          "travel": float(rel["travel_m"]), "released_at": None})
-actuators = {j["gate"]["actuator_joint"] for j in joints if j["gate"]}
-primaries = [j for j in joints if not j["follower"] and j["name"] not in actuators]
+actuators = {by_name[j["gate"]["actuator_joint"]]["path"] for j in joints if j["gate"]}
+primaries = [j for j in joints if not j["follower"] and j["path"] not in actuators]
 if not joints:
     raise SystemExit(f"{asset_id}: no revolute or prismatic joints to animate")
 
@@ -235,7 +242,24 @@ T = args.seconds_per_joint
 for j in primaries:
     rest = rest_of(j)
     far = j["upper"] if abs(j["upper"] - rest) >= abs(j["lower"] - rest) else j["lower"]
-    if j["gate"]:
+    if j["gate"] and j["gate"].get("mechanism") == "rule":
+        # no physical lock: the tool is the lock. The gated joint is held at
+        # rest (a refused command is logged) until the actuator engages; then
+        # the controller works it, as an elevator opens on its call button.
+        a = by_name[j["gate"]["actuator_joint"]]
+        engage = float(j["gate"]["engage"])
+        segments += [
+            {"seconds": 1.0, "label": f"{j['name']}: commanded with {a['name']} at rest (rule refuses)",
+             "moves": {}, "rule_refused": j["name"]},
+            {"seconds": 0.3, "label": f"{a['name']} pressed", "moves": {a["name"]: (rest_of(a), engage, None)}},
+            {"seconds": 0.3, "label": f"{a['name']} released", "moves": {a["name"]: (engage, rest_of(a), None)},
+             "authored_gains": [a["name"]]},
+            {"seconds": 0.4 * T, "label": f"{j['name']} opens (rule satisfied)", "moves": {j["name"]: (rest, far, None)}},
+            {"seconds": 1.0, "label": "hold open", "moves": {}},
+            {"seconds": 0.4 * T, "label": f"{j['name']} closes", "moves": {j["name"]: (far, rest, None)}},
+            {"seconds": 0.8, "label": "closed", "moves": {}},
+        ]
+    elif j["gate"]:
         a = by_name[j["gate"]["actuator_joint"]]
         engage = float(j["gate"]["engage"])
         try_cap = args.push_torque if j["revolute"] else args.push_force
@@ -388,8 +412,28 @@ steps_per_frame = max(1, round(PHYSICS_HZ / args.fps))
 log_rows, frame_i, elapsed = [], 0, 0.0
 commanded = {j["name"]: rest_of(j) for j in joints}
 gate_results = {}
+# rule gates: the gated joint's commands are refused until its actuator has
+# travelled `engage` from rest (tracked from what PhysX measures, not from
+# what was commanded)
+rules = {j["path"]: {"actuator": by_name[j["gate"]["actuator_joint"]], "engage": float(j["gate"]["engage"]),
+                     "engaged_at": None, "refused": 0, "moved_while_locked": 0.0}
+         for j in joints if j["gate"] and j["gate"].get("mechanism") == "rule"}
+# the controller holds a rule-gated joint shut from the start (a door with
+# no spring of its own would otherwise swing)
+for path in rules:
+    g = by_name[path]
+    set_drive(g, rest_of(g), *gains(g), 1.0e6)
 for seg in segments:
     n = max(1, round(seg["seconds"] * args.fps))
+    for name in list(seg["moves"]):
+        r = rules.get(by_name[name]["path"])
+        if r and r["engaged_at"] is None:
+            r["refused"] += 1
+            seg = dict(seg, moves={k: v for k, v in seg["moves"].items() if k != name},
+                       label=seg["label"] + " - REFUSED, rule not satisfied")
+    if seg.get("rule_refused"):
+        # the command a careless caller would send: it is refused and logged
+        rules[by_name[seg["rule_refused"]]["path"]]["refused"] += 1
     for name, (_, _, cap) in seg["moves"].items():
         jn = by_name[name]
         k, c = jn["authored"] if name in seg.get("authored_gains", ()) and jn["authored"] else gains(jn)
@@ -409,6 +453,14 @@ for seg in segments:
         rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
         Image.fromarray(rgb.get_data()[:, :, :3]).save(frames_dir / f"f{frame_i:05d}.png")
         measured = {j["name"]: measure(j) for j in joints}
+        for path, r in rules.items():
+            a = r["actuator"]
+            if r["engaged_at"] is None:
+                if abs(measured[a["name"]] - rest_of(a)) >= 0.9 * abs(r["engage"]):
+                    r["engaged_at"] = round(frame_i / args.fps, 3)
+                else:
+                    g = by_name[path]
+                    r["moved_while_locked"] = max(r["moved_while_locked"], abs(measured[g["name"]] - rest_of(g)))
         for r in releases:
             if r["released_at"] is None and r["by"] in measured and abs(measured[r["by"]]) >= r["travel"]:
                 with Usd.EditContext(stage, stage.GetSessionLayer()):
@@ -442,6 +494,11 @@ summary = {"asset": asset_id, "usd": usd_path, "frames": frame_i, "fps": args.fp
            "joints": {}, "gates": gate_results,
            "releases": {r["name"]: {"by": r["by"], "at_travel": r["travel"], "released_at_s": r["released_at"]}
                         for r in releases}}
+for path, r in rules.items():
+    summary["gates"][by_name[path]["name"]] = {
+        "mechanism": "rule", "actuator": r["actuator"]["path"], "engage": r["engage"],
+        "refused_commands_before": r["refused"], "moved_while_locked": round(r["moved_while_locked"], 4),
+        "engaged_at_s": r["engaged_at"]}
 for j in joints:
     meas = [r[f"{j['name']}_meas"] for r in log_rows]
     entry = {"type": "revolute" if j["revolute"] else "prismatic", "limits": [j["lower"], j["upper"]],

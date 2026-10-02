@@ -515,3 +515,43 @@ def test_watch_finds_dial_crown_and_hands_and_gears_the_hour_hand():
     assert fixed["Logo"] == "Case" and fixed["Glass"] == "Case"
     twin = {"Minute", "MinuteGold"} - {name(moving["hand_0"]["child_prim"])}
     assert name(next(iter(twin))) in fixed and fixed[next(iter(twin))].startswith("Minute")
+
+
+# --- rules across assets ------------------------------------------------------
+
+def _jointed_asset(path, camel, joint_type, joint_name):
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.Xform.Define(stage, "/World")
+    stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
+    UsdGeom.Xform.Define(stage, f"/World/{camel}")
+    _mesh(stage, f"/World/{camel}/Base", [((0, 0, 0), (0.1, 0.1, 0.1))])
+    _mesh(stage, f"/World/{camel}/Moving", [((0, 0, 0.1), (0.1, 0.1, 0.2))])
+    j = (UsdPhysics.RevoluteJoint if joint_type == "revolute" else UsdPhysics.PrismaticJoint).Define(
+        stage, f"/World/{camel}/Joints/{joint_name}")
+    j.CreateBody0Rel().SetTargets([f"/World/{camel}/Base"])
+    j.CreateBody1Rel().SetTargets([f"/World/{camel}/Moving"])
+    stage.GetRootLayer().Save()
+
+
+def test_a_rule_gates_one_assets_joint_on_anothers_in_a_composed_scene(tmp_path, monkeypatch):
+    import ingest_asset
+    from compose_scene import compose
+
+    monkeypatch.setattr(ingest_asset, "QUEUE_DIR", tmp_path)
+    for aid, camel, kind, name in (("lift_door", "LiftDoor", "revolute", "door_hinge"),
+                                   ("call_panel", "CallPanel", "prismatic", "button_00")):
+        _jointed_asset(tmp_path / f"{aid}.usda", camel, kind, name)
+        (tmp_path / f"{aid}.json").write_text(json.dumps({"asset_id": aid, "file": str(tmp_path / f"{aid}.usda")}))
+    made = compose(str(tmp_path / "scene.usda"), [("lift_door", ()), ("call_panel", (0.9, 0.0, 0.6))],
+                   [("lift_door", "door_hinge", "call_panel", "button_00", 0.004)])
+    scene = Usd.Stage.Open(made["scene"])
+    hinge = scene.GetPrimAtPath(made["rules"][0]["gated"])
+    gate = dict(hinge.GetCustomDataByKey("simReady:gate"))
+    assert gate == {"mechanism": "rule", "actuator_joint": "/World/CallPanel/CallPanel/Joints/button_00",
+                    "engage": 0.004, "action": "open"}
+    # the referenced joints still point at their own asset's bodies
+    button = scene.GetPrimAtPath(gate["actuator_joint"])
+    assert str(UsdPhysics.Joint(button).GetBody1Rel().GetTargets()[0]) == "/World/CallPanel/CallPanel/Moving"
+    assert scene.GetPrimAtPath("/World/CallPanel").GetAttribute("xformOp:translate").Get() == Gf.Vec3d(0.9, 0, 0.6)
