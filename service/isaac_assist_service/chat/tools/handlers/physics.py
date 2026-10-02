@@ -2897,6 +2897,7 @@ async def _handle_ingest_asset_report(args: Dict) -> Dict:
     priors = _load_asset_priors().get("classes", {})
     header = f"""\
 import json
+import math
 from pxr import Usd, UsdGeom, UsdPhysics
 
 _file = {file_path!r}
@@ -2989,13 +2990,23 @@ else:
         if _prior:
             _lo, _hi = _prior['max_dim_m']
             if _max_dim < _lo or _max_dim > _hi:
-                _target = (_lo + _hi) / 2.0
-                result['suggested_scale_correction'] = round(_target / _max_dim, 6)
+                # A wrong size is usually a unit slip (cm or mm authored as
+                # m), so the first choice is a power of ten that lands in
+                # range, nearest the range's middle: exact when it was a
+                # slip, and never further than sqrt(10) from the middle when
+                # it was not. Failing that, the geometric middle (a linear one
+                # puts a screw whose range is 4-200 mm at 10 cm).
+                _mid = (_lo * _hi) ** 0.5
+                _units = [10.0 ** _k for _k in range(-4, 5)]
+                _fits = [_u for _u in _units if _lo <= _max_dim * _u <= _hi]
+                _factor = (min(_fits, key=lambda _u: abs(math.log(_max_dim * _u / _mid))) if _fits
+                           else _mid / _max_dim)
+                result['suggested_scale_correction'] = round(_factor, 6)
                 _callout('error', 'scale',
                          'implausible size for class ' + repr(_cls) + ': max dimension '
                          + format(_max_dim, '.3f') + ' m, expected ' + format(_lo, 'g')
                          + '-' + format(_hi, 'g') + ' m. Suggested uniform scale: '
-                         + format(_target / _max_dim, '.6f'))
+                         + format(_factor, '.6f') + (' (a unit slip)' if _fits else ''))
         else:
             _callout('info', 'scale', 'no class prior matched — scale unverified ('
                      + format(_max_dim, '.3f') + ' m max dimension); provide class_hint '

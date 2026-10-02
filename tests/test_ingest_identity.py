@@ -136,3 +136,11 @@ def test_flat_parts_of_the_object_are_not_backdrops(tmp_path, boxes):
     from ingest_asset import find_backdrops
 
     assert find_backdrops(str(_stage_with(tmp_path / "a.usda", boxes))) == []
+
+
+def test_a_wrong_size_is_corrected_as_a_unit_slip_first(tmp_path):
+    from ingest_asset import run_report
+
+    # a 3 cm screw authored in centimetres as metres: x0.01, not the range's middle
+    r = run_report(str(_box_usd(tmp_path / "Screw.usda", 3.0)), None)
+    assert r["matched_class"] == "bolt_fastener" and r["suggested_scale_correction"] == 0.01
