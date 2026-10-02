@@ -165,8 +165,20 @@ Two things to know before pointing it at OpenAI:
   and only moves when `--provider-base-url` says so.
 
 `--budget-usd` stops the run before the call that would breach it, and prints
-what was spent. It defaults to $25; `0` disables it. Astra runs roughly four to
-five times the cost per call of Gemini, so the cap matters more there.
+what was spent. It defaults to $25; `0` disables it. Per token, Astra costs 10x
+Gemini Robotics-ER 2 ($10/$50 against $1/$5 per million in/out; Google doubles
+ER 2 on 2027-01-01), so the cap matters more there. The one full BlocksInBinTask
+episode sent 659K input tokens and 14K output, and input was 90% of its $7.28:
+each call resends a growing observation history.
+
+**One Isaac process at a time.** Concurrent Kit processes have wedged NVIDIA
+UVM on this DGX Spark, which only a host reboot clears. The launcher therefore
+takes the lock HomeHero's `sim_run_guard.sh` uses (`/tmp/homehero_isaac_sim.lock`,
+override with `ISAAC_LOCK_PATH`) and also waits until no other Kit process is
+running, printing `[isaac-lock] waiting ...` every five minutes and
+`[isaac-lock] acquired ...` when it starts. `ISAAC_LOCK_WAIT_SECONDS` bounds
+the wait (0, the default, waits indefinitely); on giving up it exits 76. The
+evaluation harness starts each episode's timeout at the `acquired` line.
 
 Scene roles default to the banana task's `banana` and `plate_large`; any other
 task needs them bound, e.g. `--movable-object-asset red_block
@@ -191,6 +203,41 @@ On `BlocksInBinTask` (2026-09-27) all five poses solved with joint-limit
 margins of at least 0.185, and Astra went from withholding motion to
 authorizing it. A held-arm experiment showed the probe leaves the end effector
 where it found it to within a nanometre.
+
+## Measuring a pass rate
+
+One passing episode is an anecdote. `scripts/evaluate_planner.py` runs a fixed
+set of seeded scene variations (object and receptacle offsets, object yaw,
+light, background), one Isaac process each, and grades every episode from its
+trace with `scripts/planner_eval_gate.py` rather than trusting the runner's own
+PASS. The report gives the pass rate with a 95% Wilson interval, which failure
+checks fired, model calls and spend.
+
+The thresholds live in an acceptance file, e.g.
+`config/planner_eval/blocks_in_bin_astra_v1.json`, with two seed splits:
+
+* `development` is for iterating on the planner.
+* `final` is refused until the file is frozen (`evaluate_planner.py freeze`,
+  which stamps it with a hash so a later edit is detected) and the working tree
+  is clean. Each final run is appended to a ledger next to the file; running
+  the final seeds again needs `--allow-repeat-final`, and the report says so.
+
+After freezing, a check may only be tightened, with a dated entry in `changes`.
+Each episode gets a fresh artifact directory and the passive critic is off, so
+no lessons carry between episodes; the gate fails any episode that applied
+some. Runs resume where they stopped and halt at `--max-total-usd`.
+
+```bash
+scripts/evaluate_planner.py plan config/planner_eval/blocks_in_bin_astra_v1.json --split development
+scripts/evaluate_planner.py run  config/planner_eval/blocks_in_bin_astra_v1.json \
+  --split development --output runs/eval-dev --max-total-usd 100
+scripts/evaluate_planner.py score runs/eval-dev
+```
+
+To screen a cheaper model on the development split without editing the frozen
+file, pass `--provider`/`--model` (refused on the final split, which always
+measures the model the acceptance file names). The model must have a price in
+`scripts/model_budget.py`, or the run stops rather than metering it at zero.
 
 ## Training episodes versus evaluation traces
 

@@ -194,6 +194,69 @@ costing $7.28. Two runtime changes made that possible:
 The [launch section of the workflow guide](docs/integrations/gemini-robotics-er2-robolab.md#running-it-and-choosing-the-model)
 covers interpreters, endpoints and the budget.
 
+##### Comparing planner models
+
+One success is an anecdote, so `scripts/evaluate_planner.py` measures a pass
+rate. It runs seeded scene variations, one Isaac process each, and grades every
+episode against the acceptance file
+[`config/planner_eval/blocks_in_bin_astra_v1.json`](config/planner_eval/blocks_in_bin_astra_v1.json)
+rather than trusting the runner's own PASS. The common grade reads the final
+state from the per-step recording: the block inside the bin's footprint (2 cm
+inset), resting low, released and still. Episodes lost to infrastructure
+faults, such as a dropped connection or an exhausted API quota, are reported
+but left out of every rate, and failed runs keep their recording under
+`failed_evidence/`.
+
+```bash
+ISAAC_PY=~/Documents/Github/isaacsim/_build/linux-aarch64/release/python.sh
+CONFIG=config/planner_eval/blocks_in_bin_astra_v1.json
+
+# Screen a model on the first three development seeds.
+$ISAAC_PY -u scripts/evaluate_planner.py run $CONFIG --split development --limit 3 \
+  --provider gemini --model gemini-robotics-er-2-preview --max-total-usd 10 \
+  --output runs/dev-gemini
+$ISAAC_PY scripts/evaluate_planner.py score runs/dev-gemini
+
+# Baselines on the same scenes: a scripted oracle that reads true poses, and
+# the free, open-weights pi0.5-DROID checkpoint served locally over OpenPI.
+$ISAAC_PY -u scripts/evaluate_planner.py run $CONFIG --split development --limit 3 \
+  --policy oracle --output runs/dev-oracle
+./launch_openpi_server.sh &   # port 8000; first inference compiles for ~4 s
+$ISAAC_PY -u scripts/evaluate_planner.py run $CONFIG --split development --limit 3 \
+  --policy pi05 --output runs/dev-pi05
+```
+
+The qualification gates are fixed in the acceptance file before any run.
+**Screen** needs 2 of the first 3 development seeds to earn a full development
+run; **development** needs 7/10; **final** needs 24/30. The final split is
+refused until the file is frozen (`evaluate_planner.py freeze`) and the tree is
+clean, and each use of its seeds is logged, so reusing them shows in every
+report.
+
+Development seeds 0–2, as of 2026-09-30:
+
+| Policy | Passes | Spend | Notes |
+| --- | --- | --- | --- |
+| Gemini Robotics-ER 2 | 2/3 | $2.07 | clears the screen gate; $1.03 per success |
+| GPT-6 Astra | 1/3 | $9.74 | |
+| GPT-6 Sol | 0/1 | | 2 episodes excluded: network drop, quota exhausted |
+| Scripted oracle | 3/3 | free | privileged poses; the planner's clearance-aware grasp axis |
+| π0.5-DROID | 0/3 | free | full 150 s from RoboLab's DROID camera; never carried the block |
+
+The oracle passing every scene shows the scenes are solvable, so the models'
+failures are the planner's or the models' limits. The π0.5 baseline sees
+RoboLab's DROID-matched exterior camera; the planners keep their own view,
+which is aimed 13.7° further right.
+
+Only one Isaac/Kit process may run at a time on the DGX Spark, because
+concurrent Kit processes have wedged NVIDIA UVM. Both launchers queue on
+`/tmp/homehero_isaac_sim.lock` (`scripts/isaac_slot.sh`), and the harness
+interrupts a launch that logs nothing for 180 s. If Kit hangs on a stale
+`/dev/shm/sem.carbonite-sharedmemory`, run `scripts/clear_stale_kit_locks.sh`,
+which removes it only when no Kit process is alive. On the GB10 the OpenPI
+launcher disables XLA's Triton GEMMs, which abort with "Unsupported conversion
+from bf16 to f16" under JAX 0.5.3.
+
 Gemini training campaigns can also be planned across task, scene, and robot
 embodiment combinations without silently substituting an unsupported runtime:
 
@@ -794,6 +857,11 @@ ingest  ->  classify  ->  make sim-ready  ->  render  ->  vision judges
                                                     registry (66 assets)
 ```
 
+**How-to:** [Making an asset sim-ready](docs/guides/sim_ready_assets.md) walks a
+download from ingest to the registry. Its worked example is a door with a crash
+bar and latch: segmentation, joint drafting, coupled mechanisms, and headless
+joint animation with measured evidence.
+
 Current state: **2377 assets ingested**, 2326 with a recorded visual-QA verdict,
 **62 machine-approved**, 66 promoted to the sim-ready registry, **32 of those
 independently re-verified in a second physics engine**.
@@ -1109,7 +1177,46 @@ Scene blueprints accept a `characters` list, so chat requests like *"spawn a
 scene with people walking and sitting on furniture"* resolve to clip-bound
 characters on the live stage.
 
-### 10.9 Chat tools
+### 10.9 Doors, latches and joint animation
+
+Some joints only work after another one has moved: a fire door does not open
+until its crash bar is pushed. The pipeline models that physically, not as a
+script. A latch bolt on the leaf is coupled to the crash bar by a PhysX mimic
+joint, and a keeper on the frame stops the door while the bolt is out. A
+robot, a person or a test therefore all meet the same constraint.
+
+[![A steel door held by its latch, opened with the crash bar, and re-latched](docs/media/door-crash-bar-latch-preview.jpg)](docs/media/door-crash-bar-latch.mp4)
+
+*Measured in PhysX, not keyframed. Shoved with 80 N·m while the bar is at
+rest, the door stops at 0.9°. With the bar pushed, the bolt retracts 25 mm and
+the door swings to 90°. With the bar released, the closing door pushes the
+angled bolt in, and the door re-latches at 0.0°. Click the preview for the
+video.*
+
+The door arrived as a single fused mesh. The pipeline built it without hand
+edits:
+- **Parts:** it split the leaf out of the frame and found the crash bar.
+- **Hinge:** it put the hinge on the edge the bar points away from, swinging
+  away from the bar's face.
+- **Latch:** it took the latch, masses and travel from the door class prior.
+
+`animate_asset.py` records a video of any articulated asset. It logs each
+joint's measured position on every frame and checks every gate: a gated joint
+is first pushed with its actuator at rest and must not move.
+
+```bash
+python3 scripts/ingest_asset.py ~/Downloads/door_door_metal.usdz --class-hint door
+python3 scripts/segment_mesh.py door_door_metal
+# hub: Draft articulation spec -> review -> Apply articulation -> Animate joints
+# or animate from the shell, with Isaac's python, waiting for the Isaac slot:
+ISAAC_PY=~/Documents/Github/isaacsim/_build/linux-aarch64/release/python.sh
+( source scripts/isaac_slot.sh && $ISAAC_PY scripts/animate_asset.py door_door_metal )
+```
+
+The full walkthrough, including the spec to review and the failure modes, is
+in [Making an asset sim-ready](docs/guides/sim_ready_assets.md).
+
+### 10.10 Chat tools
 
 | Tool | Purpose |
 |---|---|
@@ -1119,7 +1226,7 @@ characters on the live stage.
 | `create_deformable_mesh` | Author cloth / sponge / rubber / gel deformables. |
 | `critique_render` | Ask the vision judges what is wrong with a render. |
 
-### 10.10 Knowledge files
+### 10.11 Knowledge files
 
 | File | Contents |
 |---|---|

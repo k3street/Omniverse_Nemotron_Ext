@@ -3347,6 +3347,15 @@ if _add_collisions:
 # 3. Joints under <root>/Joints, anchored at the child link origin (or an
 # explicit world-space anchor), expressed in each body's local frame.
 _xf = UsdGeom.XformCache(Usd.TimeCode.Default())
+
+
+def _unit_rot(m):
+    # Rotation of a world transform with its (possibly scaled) axes normalised.
+    _m = Gf.Matrix4d(m)
+    _m.Orthonormalize()
+    return _m.ExtractRotationQuat()
+
+
 _scope = _root_path + '/Joints'
 if not stage.GetPrimAtPath(_scope).IsValid():
     UsdGeom.Scope.Define(stage, Sdf.Path(_scope))
@@ -3371,6 +3380,11 @@ for _j in _joints:
     _lp1 = _child_w.GetInverse().Transform(_anchor)
     _joint.CreateLocalPos0Attr().Set(Gf.Vec3f(_lp0))
     _joint.CreateLocalPos1Attr().Set(Gf.Vec3f(_lp1))
+    # The joint frame is world-aligned, so 'axis' is a WORLD axis (what the
+    # geometry drafter measures) even when a link is rotated, e.g. by a
+    # Y-up -> Z-up wrapper.
+    _joint.CreateLocalRot0Attr().Set(Gf.Quatf(_unit_rot(_parent_w).GetInverse()))
+    _joint.CreateLocalRot1Attr().Set(Gf.Quatf(_unit_rot(_child_w).GetInverse()))
 
     if _j['type'] != 'fixed':
         _joint.CreateAxisAttr().Set(_j['axis'])
@@ -3399,6 +3413,13 @@ if _fixed_base:
     _fb_path = _scope + '/FixedBase'
     _fb = UsdPhysics.FixedJoint.Define(stage, Sdf.Path(_fb_path))
     _fb.CreateBody1Rel().SetTargets([Sdf.Path(_base_link)])
+    # With no body0 the joint's frame 0 is the world: hold the base where it
+    # stands, not at the world origin.
+    _base_w = _xf.GetLocalToWorldTransform(stage.GetPrimAtPath(_base_link))
+    _fb.CreateLocalPos0Attr().Set(Gf.Vec3f(_base_w.ExtractTranslation()))
+    _fb.CreateLocalRot0Attr().Set(Gf.Quatf(_unit_rot(_base_w)))
+    _fb.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
+    _fb.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
     result['fixed_base_joint'] = _fb_path
 
 # 5. A physics scene must exist for anything to simulate.

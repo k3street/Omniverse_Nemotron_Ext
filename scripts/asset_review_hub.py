@@ -177,6 +177,21 @@ def draft_articulation(entry: dict) -> str:
     asset_root = f"/World/{_camel(entry['asset_id'])}"
     # tier 1: geometry-driven proposal (symmetry, wheel detection, link
     # grouping) — falls back to the naive parent-of-mesh listing
+    cls = entry.get("class_hint") or entry.get("report", {}).get("matched_class")
+    if cls == "door":
+        from door_draft import propose_door
+        spec, notes = propose_door(stage, asset_root)
+        stage.GetRootLayer().Save()  # the tier may have split the leaf out
+        if notes:
+            entry.setdefault("applied_fixes", []).extend(f"door draft: {n}" for n in notes)
+        entry["articulation_draft"] = json.dumps(spec, indent=1)
+        save_queue_entry(entry)
+        a = spec["_analysis"]
+        return (f"door draft: leaf {Path(a['leaf']).name}, frame {Path(a['frame']).name}, "
+                f"push bar {Path(a['push_bar']).name if a['push_bar'] else 'NOT FOUND'}, "
+                f"push side {a['push_side']}, hinge at {a['hinge_edge']}"
+                + (f" — {'; '.join(a['notes'])}" if a["notes"] else "")
+                + " — check hinge side and swing, then Apply")
     try:
         from articulation_draft import propose
         spec = propose(stage, asset_root, asset_root)
@@ -242,6 +257,11 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     spec = json.loads(spec_text)
     spec.pop("_instructions", None)
     spec.pop("_analysis", None)
+    # keys articulate_asset does not take: applied after it, on the same stage
+    link_masses = spec.pop("link_masses", {})
+    no_collision = spec.pop("no_collision", [])
+    filtered_pairs = spec.pop("filtered_pairs", [])
+    mechanisms = spec.pop("mechanisms", [])
     if any("|" in str(j.get("joint_type", "")) for j in spec.get("joints", [])):
         return "spec still has placeholder joint_type values — edit before applying"
     stage = Usd.Stage.Open(entry["file"])
@@ -256,13 +276,74 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         exec(compile(code, "<articulate>", "exec"), {"__builtins__": __builtins__})
+    from pxr import Sdf, UsdPhysics
+
+    for path, kg in link_masses.items():
+        UsdPhysics.MassAPI.Apply(stage.GetPrimAtPath(path)).CreateMassAttr().Set(float(kg))
+    for path in no_collision:
+        UsdPhysics.CollisionAPI(stage.GetPrimAtPath(path)).CreateCollisionEnabledAttr().Set(False)
+    for a, b in filtered_pairs:
+        UsdPhysics.FilteredPairsAPI.Apply(stage.GetPrimAtPath(a)).CreateFilteredPairsRel().AddTarget(Sdf.Path(b))
+    made = []
+    for m in mechanisms:
+        if m.get("type") != "latch":
+            raise ValueError(f"unknown mechanism type {m.get('type')!r}")
+        from add_mechanism import add_latch
+        made.append(add_latch(stage, spec["prim_path"], m))
     stage.GetRootLayer().Save()
     entry["articulation_draft"] = spec_text
     entry["applied_fixes"] = entry.get("applied_fixes", []) + [
-        f"articulate_asset: {len(spec.get('joints', []))} joints"]
+        f"articulate_asset: {len(spec.get('joints', []))} joints"
+        + (f", {len(made)} mechanism(s)" if made else "")]
+    if mechanisms:
+        entry["mechanisms"] = mechanisms
     _re_ingest(entry)
     verdict = entry["report"].get("verdict", "")
     return f"articulation applied ({len(spec.get('joints', []))} joints) — re-checked: {verdict}"
+
+
+# ---------------------------------------------------------------------------
+# joint animation (headless Isaac, queued on the machine's single Isaac slot)
+
+ANIM_DIR = REPO / "workspace" / "asset_animations"
+
+
+def animate(entry: dict) -> str:
+    isaac_py = Path(os.environ.get(
+        "ISAAC_PYTHON_SH",
+        Path.home() / "Documents/Github/isaacsim/_build/linux-aarch64/release/python.sh"))
+    if not isaac_py.exists():
+        return f"cannot animate: Isaac python not found at {isaac_py} (set ISAAC_PYTHON_SH)"
+    ANIM_DIR.mkdir(parents=True, exist_ok=True)
+    aid = entry["asset_id"]
+    cmd = (f"source {REPO / 'scripts/isaac_slot.sh'} && "
+           f"exec {isaac_py} {REPO / 'scripts/animate_asset.py'} {aid}")
+    subprocess.Popen(["bash", "-c", cmd], cwd=REPO, start_new_session=True,
+                     stdout=open(ANIM_DIR / f"{aid}.log", "w"), stderr=subprocess.STDOUT)
+    return (f"animating {aid} in headless Isaac (queues for the Isaac slot); "
+            f"refresh in a few minutes — log at workspace/asset_animations/{aid}.log")
+
+
+def animation_html(aid: str) -> str:
+    d = ANIM_DIR / aid
+    mp4, summ = d / f"{aid}.mp4", d / "summary.json"
+    if not mp4.exists():
+        return ""
+    lines = []
+    if summ.exists():
+        s = json.loads(summ.read_text())
+        for name, j in s.get("joints", {}).items():
+            if j.get("follower"):
+                lines.append(f"{name}: follows, range {j['measured_range']}")
+            else:
+                lines.append(f"{name}: range {j['measured_range']} (limits {[round(v, 3) for v in j['limits']]}), "
+                             f"max tracking error {j['max_tracking_error']}")
+        for name, g in s.get("gates", {}).items():
+            lines.append(f"GATE {name}: {'HELD' if g['held'] else 'FAILED'} — pushed toward "
+                         f"{g['tried']}, moved {g['moved']}")
+    return (f'<video controls muted style="width:100%;max-width:640px;margin-top:8px;border-radius:7px" '
+            f'src="/anim/{aid}/{aid}.mp4"></video>'
+            + "".join(f'<p class="meta">{html.escape(l)}</p>' for l in lines))
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +476,8 @@ def render_entry(e: dict) -> str:
         if arti_needed:
             corrective += ('<button name="do" value="draft_arti">Draft articulation '
                            'spec</button>')
+        if any("articulate_asset" in f for f in e.get("applied_fixes", [])):
+            corrective += '<button name="do" value="animate">Animate joints (video)</button>'
         corrective += '<button name="do" value="vlm">Classify visually (VLM)</button>'
         corrective += '<button name="do" value="recheck">Re-run checks</button>'
         gate = ""
@@ -434,7 +517,7 @@ def render_entry(e: dict) -> str:
     return (f'<div class="card">{thumb}<h2>{aid}{badge}</h2>'
             f'<div class="path">{html.escape(e.get("file", ""))}</div>'
             f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{review_note}{actions}'
-            f'{arti_editor}{reclass}'
+            f'{animation_html(aid)}{arti_editor}{reclass}'
             f'<div style="clear:both"></div></div>')
 
 
@@ -569,6 +652,20 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/health"):
             self._send(b"ok")
             return
+        if self.path.startswith("/anim/"):
+            parts = urllib.parse.unquote(self.path[len("/anim/"):]).split("/")
+            f = ANIM_DIR / Path(parts[0]).name / Path(parts[-1]).name if len(parts) == 2 else None
+            types = {".mp4": "video/mp4", ".png": "image/png", ".json": "application/json"}
+            if f is not None and f.exists() and f.suffix in types:
+                data = f.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", types[f.suffix])
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self._send(b"not found", 404)
+            return
         if self.path.startswith("/thumb/"):
             name = Path(urllib.parse.unquote(self.path[len("/thumb/"):])).name
             f = QUEUE_DIR / "thumbs" / name
@@ -636,6 +733,8 @@ class Handler(BaseHTTPRequestHandler):
                 msg = apply_articulation(entry, get("spec"))
             except Exception as ex:
                 msg = f"articulation failed: {ex}"
+        elif action == "animate":
+            msg = animate(entry)
         elif action == "reclass":
             hint = get("class_hint")
             if not hint:

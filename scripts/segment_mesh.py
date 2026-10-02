@@ -20,6 +20,9 @@ and the source mesh's local transform. GeomSubsets are not carried (v1).
 Usage:
     python scripts/segment_mesh.py <queue_asset_id>      # segment entry's fused meshes
     python scripts/segment_mesh.py --file <usd> --mesh </prim/path>
+    python scripts/segment_mesh.py --box <queue_asset_id> <mesh_name> \
+        <xmin ymin zmin> <xmax ymax zmax> <inside_name> <outside_name>
+                                    # split by world box ('-' = open side)
 """
 from __future__ import annotations
 
@@ -136,7 +139,7 @@ def merge_small(components, points, indices, counts, total_faces):
 def split_mesh(stage, mesh_path: str) -> list[str]:
     """Author one Mesh prim per component next to the fused mesh; deactivate
     the original. Returns the new prim paths."""
-    from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade, Vt
+    from pxr import UsdGeom
 
     mesh_prim = stage.GetPrimAtPath(mesh_path)
     mesh = UsdGeom.Mesh(mesh_prim)
@@ -153,6 +156,57 @@ def split_mesh(stage, mesh_path: str) -> list[str]:
     comps = merge_small(comps, points, indices, counts, len(counts))
     if len(comps) < 2:
         return []
+    base_name = mesh_prim.GetName()
+    return _author_parts(stage, mesh_prim, [
+        (f"{base_name}_part{ci:02d}", faces)
+        for ci, faces in enumerate(sorted(comps, key=len, reverse=True))])
+
+
+def split_mesh_by_box(stage, mesh_path: str, box_min, box_max,
+                      inside_name: str, outside_name: str) -> list[str]:
+    """Split a mesh whose parts share vertices, so connectivity cannot
+    separate them (a door leaf modelled into its frame).
+
+    Faces with every vertex inside the world-space box [box_min, box_max]
+    become `inside_name`; the rest become `outside_name`. Use None in a
+    bound for an open side. Returns the new prim paths.
+    """
+    from pxr import Gf, UsdGeom
+
+    mesh_prim = stage.GetPrimAtPath(mesh_path)
+    mesh = UsdGeom.Mesh(mesh_prim)
+    if not mesh:
+        raise RuntimeError(f"not a Mesh: {mesh_path}")
+    points = list(mesh.GetPointsAttr().Get() or [])
+    counts = list(mesh.GetFaceVertexCountsAttr().Get() or [])
+    indices = list(mesh.GetFaceVertexIndicesAttr().Get() or [])
+    to_world = UsdGeom.Xformable(mesh_prim).ComputeLocalToWorldTransform(0)
+    world = [to_world.Transform(Gf.Vec3d(*p)) for p in points]
+
+    def inside(p) -> bool:
+        return all((box_min[k] is None or p[k] >= box_min[k]) and
+                   (box_max[k] is None or p[k] <= box_max[k]) for k in range(3))
+
+    offs = _face_offsets(counts)
+    groups: dict[bool, list[int]] = {True: [], False: []}
+    for f, c in enumerate(counts):
+        groups[all(inside(world[indices[offs[f] + k]]) for k in range(c))].append(f)
+    if not groups[True] or not groups[False]:
+        raise RuntimeError(f"box keeps {len(groups[True])} of {len(counts)} faces — "
+                           "nothing to split")
+    return _author_parts(stage, mesh_prim, [(inside_name, groups[True]),
+                                            (outside_name, groups[False])])
+
+
+def _author_parts(stage, mesh_prim, groups) -> list[str]:
+    """Author one Mesh prim per (name, faces) group next to `mesh_prim`,
+    carrying its attributes; deactivate the original."""
+    from pxr import Gf, Sdf, UsdGeom, UsdShade, Vt
+
+    mesh = UsdGeom.Mesh(mesh_prim)
+    points = list(mesh.GetPointsAttr().Get() or [])
+    counts = list(mesh.GetFaceVertexCountsAttr().Get() or [])
+    indices = list(mesh.GetFaceVertexIndicesAttr().Get() or [])
     offs = _face_offsets(counts)
 
     # primvars to carry
@@ -174,10 +228,9 @@ def split_mesh(stage, mesh_path: str) -> list[str]:
 
     xform_ops = mesh_prim.GetAttribute("xformOpOrder")
     parent_path = mesh_prim.GetParent().GetPath()
-    base_name = mesh_prim.GetName()
     new_paths = []
-    for ci, faces in enumerate(sorted(comps, key=len, reverse=True)):
-        part_path = parent_path.AppendChild(f"{base_name}_part{ci:02d}")
+    for part_name, faces in groups:
+        part_path = parent_path.AppendChild(part_name)
         part = UsdGeom.Mesh.Define(stage, part_path)
         # point remap
         used = []
@@ -294,6 +347,31 @@ def segment_entry(asset_id: str) -> str:
             + f"; asset now has {entry['report'].get('structure', {}).get('meshes')} meshes")
 
 
+def box_split_entry(asset_id: str, mesh_name: str, box_min, box_max,
+                    inside_name: str, outside_name: str) -> str:
+    """Box-split one mesh of a queue entry's derivative, then re-check it."""
+    from pxr import Usd
+
+    from ingest_asset import QUEUE_DIR, propose_category, render_thumbnail, run_report
+
+    qf = QUEUE_DIR / f"{asset_id}.json"
+    entry = json.loads(qf.read_text())
+    stage = Usd.Stage.Open(entry["file"])
+    matches = [p for p in stage.Traverse() if p.GetName() == mesh_name and p.IsActive()]
+    if len(matches) != 1:
+        raise RuntimeError(f"{len(matches)} active prims named {mesh_name!r}")
+    parts = split_mesh_by_box(stage, str(matches[0].GetPath()), box_min, box_max,
+                              inside_name, outside_name)
+    stage.GetRootLayer().Save()
+    entry.setdefault("applied_fixes", []).append(
+        f"box split: {mesh_name} -> {inside_name} + {outside_name}")
+    entry["report"] = run_report(entry["file"], entry.get("class_hint"))
+    entry["proposed_category"] = propose_category(entry["report"])
+    entry["thumbnail"] = render_thumbnail(entry["file"], asset_id)
+    qf.write_text(json.dumps(entry, indent=1))
+    return f"split {mesh_name} into {', '.join(p.rsplit('/', 1)[-1] for p in parts)}"
+
+
 def main() -> int:
     args = sys.argv[1:]
     if not args:
@@ -305,6 +383,12 @@ def main() -> int:
         parts = split_mesh(stage, args[3] if len(args) > 3 else args[2])
         stage.GetRootLayer().Save()
         print(f"{len(parts)} parts: {parts}")
+        return 0
+    if args[0] == "--box":
+        bound = lambda v: None if v == "-" else float(v)  # noqa: E731
+        asset_id, mesh_name = args[1], args[2]
+        lo, hi = [bound(v) for v in args[3:6]], [bound(v) for v in args[6:9]]
+        print(box_split_entry(asset_id, mesh_name, lo, hi, args[9], args[10]))
         return 0
     print(segment_entry(args[0]))
     return 0

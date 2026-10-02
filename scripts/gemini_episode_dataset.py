@@ -4,6 +4,13 @@ The live runner intentionally disables RoboLab's legacy Sim 5 recorder.  This
 collector records the Sim 6 tensors directly and publishes an episode only
 after the physical success checks pass.  Partial/failed runs never appear as
 training HDF5 files.
+
+A failed run can instead be preserved as evidence: the same trajectory and
+video, labelled success=False with the failure reason, under
+``failed_evidence/`` with its own manifest. Every admitted-data reader takes
+only top-level ``run_*.hdf5``, ``episode_*_policy.mp4`` and
+``collection_manifest.jsonl``, so evidence can be watched and learned from
+(for example as negative experience) without ever passing as a success.
 """
 from __future__ import annotations
 
@@ -37,6 +44,7 @@ except ModuleNotFoundError:
 
 
 EPISODE_SCHEMA_VERSION = "robolab-gemini-episode.v1"
+FAILED_EVIDENCE_DIR = "failed_evidence"
 ACTION_SEMANTICS = "absolute_joint_position_target_7_plus_binary_gripper_1"
 
 
@@ -188,31 +196,15 @@ class GeminiEpisodeDatasetRecorder:
             minimum_touch_samples=self.minimum_touch_samples,
         )
 
-    def publish_success(self, *, trace_path: Path) -> dict[str, Any]:
-        """Atomically publish one successful training episode and manifest row."""
-        if self._closed:
-            raise RuntimeError("episode recorder is already closed")
-        if self.sample_count < 41:
-            raise ValueError(
-                "successful episode is too short for GR00T's 40-step action horizon"
-            )
-        contact_summary = self.contact_telemetry_summary()
-        if self.require_contact_telemetry and not contact_summary["passed"]:
-            raise ValueError(
-                "contact telemetry admission gate failed: "
-                f"coverage={contact_summary['coverage']:.3f}, "
-                f"touch_samples={contact_summary['touch_samples']}"
-            )
-        self._close_video()
-        if not self._partial_video_path.is_file():
-            raise FileNotFoundError(
-                f"episode video encoder produced no file: {self._partial_video_path}"
-            )
-        temporary_hdf5 = self.hdf5_path.with_suffix(".hdf5.tmp")
-        with h5py.File(temporary_hdf5, "w") as target:
+    def _write_hdf5(
+        self, path: Path, *, success: bool, extra_attrs: dict[str, str] | None = None
+    ) -> None:
+        with h5py.File(path, "w") as target:
             target.attrs["total"] = 1
             demo = target.create_group("data/demo_0")
-            demo.attrs["success"] = True
+            demo.attrs["success"] = success
+            for key, value in (extra_attrs or {}).items():
+                demo.attrs[key] = value
             demo.attrs["num_samples"] = self.sample_count
             demo.attrs["episode_schema_version"] = EPISODE_SCHEMA_VERSION
             demo.attrs["action_semantics"] = ACTION_SEMANTICS
@@ -253,6 +245,29 @@ class GeminiEpisodeDatasetRecorder:
                 timestamps,
                 source="gemini_supervised_isaac_sim_6",
             )
+
+    def publish_success(self, *, trace_path: Path) -> dict[str, Any]:
+        """Atomically publish one successful training episode and manifest row."""
+        if self._closed:
+            raise RuntimeError("episode recorder is already closed")
+        if self.sample_count < 41:
+            raise ValueError(
+                "successful episode is too short for GR00T's 40-step action horizon"
+            )
+        contact_summary = self.contact_telemetry_summary()
+        if self.require_contact_telemetry and not contact_summary["passed"]:
+            raise ValueError(
+                "contact telemetry admission gate failed: "
+                f"coverage={contact_summary['coverage']:.3f}, "
+                f"touch_samples={contact_summary['touch_samples']}"
+            )
+        self._close_video()
+        if not self._partial_video_path.is_file():
+            raise FileNotFoundError(
+                f"episode video encoder produced no file: {self._partial_video_path}"
+            )
+        temporary_hdf5 = self.hdf5_path.with_suffix(".hdf5.tmp")
+        self._write_hdf5(temporary_hdf5, success=True)
         temporary_hdf5.replace(self.hdf5_path)
         self._partial_video_path.replace(self._final_video_path)
         published_artifacts = {
@@ -288,6 +303,51 @@ class GeminiEpisodeDatasetRecorder:
         with (self.output_dir / "collection_manifest.jsonl").open(
             "a", encoding="utf-8"
         ) as manifest:
+            manifest.write(json.dumps(row, sort_keys=True) + "\n")
+        self._closed = True
+        return row
+
+    def preserve_failure(self, *, reason: str, trace_path: Path | None) -> dict[str, Any] | None:
+        """Keep a failed run as labelled evidence instead of deleting it.
+
+        Writes the trajectory with success=False and the reason, and moves the
+        video, into ``failed_evidence/`` under a name no admitted-data reader
+        matches, then appends to that folder's own manifest. Returns None when
+        nothing was recorded (the run failed before the first step).
+        """
+        if self._closed:
+            return None
+        self._close_video()
+        if self.sample_count == 0:
+            self._partial_video_path.unlink(missing_ok=True)
+            self._closed = True
+            return None
+        evidence = self.output_dir / FAILED_EVIDENCE_DIR
+        evidence.mkdir(parents=True, exist_ok=True)
+        attempt = 0
+        while (evidence / f"run_{self.episode_index}_failed_{attempt}.hdf5").exists():
+            attempt += 1
+        stem = f"run_{self.episode_index}_failed_{attempt}"
+        hdf5 = evidence / f"{stem}.hdf5"
+        temporary = hdf5.with_suffix(".hdf5.tmp")
+        self._write_hdf5(temporary, success=False, extra_attrs={"failure_reason": reason})
+        temporary.replace(hdf5)
+        row: dict[str, Any] = {
+            "episode_index": self.episode_index,
+            "attempt": attempt,
+            "status": "failed",
+            "failure_reason": reason,
+            "hdf5": hdf5.name,
+            "samples": self.sample_count,
+            "trace": str(trace_path) if trace_path is not None else None,
+            "contact_telemetry": self.contact_telemetry_summary(),
+            **self.metadata,
+        }
+        if self._partial_video_path.is_file():
+            video = evidence / f"{stem}.mp4"
+            self._partial_video_path.replace(video)
+            row["video"] = video.name
+        with (evidence / "failed_manifest.jsonl").open("a", encoding="utf-8") as manifest:
             manifest.write(json.dumps(row, sort_keys=True) + "\n")
         self._closed = True
         return row

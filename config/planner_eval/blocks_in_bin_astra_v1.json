@@ -1,0 +1,86 @@
+{
+  "name": "blocks_in_bin_astra_v1",
+  "frozen_utc": null,
+  "frozen_sha256": null,
+  "note": "Freeze with `scripts/evaluate_planner.py freeze` before the final split is run. After freezing, a change may only tighten a check, and needs a dated entry in `changes` saying why.",
+  "launch": {
+    "task": "BlocksInBinTask",
+    "movable_object_asset": "red_block",
+    "target_receptacle_asset": "grey_bin",
+    "provider": "openai",
+    "model": "gpt-6-astra",
+    "per_episode_budget_usd": 25,
+    "episode_timeout_s": 3600
+  },
+  "variation": {
+    "object_xy_m": 0.05,
+    "receptacle_xy_m": 0.03,
+    "object_yaw_deg": 45.0,
+    "light_intensity": [
+      1800.0,
+      8500.0
+    ],
+    "randomize_background": true
+  },
+  "splits": {
+    "development": {
+      "seed": 1,
+      "episodes": 10
+    },
+    "final": {
+      "seed": 2,
+      "episodes": 30
+    }
+  },
+  "checks": {
+    "runner_status": "complete",
+    "object_within_receptacle_inset_m": 0.02,
+    "max_object_height_above_receptacle_m": 0.08,
+    "min_retreat_m": 0.05,
+    "max_object_motion_during_retreat_m": 0.005,
+    "contact_telemetry_passed": true,
+    "physics_steps_are_local": true,
+    "no_critic_memory": true
+  },
+  "final_state": {
+    "note": "Common grade for every policy type, read from each runner's per-step recording. Footprint from RoboLab assets/fixtures/grey_bin.usd (42 x 28 cm, 10.5 cm rim, origin at the base centre).",
+    "object": "red_block",
+    "receptacle": "grey_bin",
+    "receptacle_footprint_m": {
+      "half_x": 0.21,
+      "half_y": 0.14,
+      "rim_height": 0.105
+    },
+    "inset_m": 0.02,
+    "max_object_height_above_receptacle_m": 0.08,
+    "max_object_motion_last_second_m": 0.005
+  },
+  "final_target": {
+    "min_passes": 24,
+    "episodes": 30
+  },
+  "qualification": {
+    "screen": {
+      "episodes": 3,
+      "min_passes": 2,
+      "rule": "The first 3 development seeds. A model must pass at least 2 to earn a full development run."
+    },
+    "development": {
+      "episodes": 10,
+      "min_passes": 7,
+      "rule": "All 10 development seeds. A model must pass at least 7 before it is considered for the final split."
+    },
+    "final": {
+      "episodes": 30,
+      "min_passes": 24,
+      "rule": "The 30 reserved final seeds, run once on a frozen acceptance file and a committed planner."
+    }
+  },
+  "reported_not_gated": [
+    "model_calls",
+    "cost_usd",
+    "wall_s",
+    "runner_final_tests"
+  ],
+  "changes": []
+}

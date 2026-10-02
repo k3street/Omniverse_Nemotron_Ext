@@ -175,7 +175,7 @@ def test_converter_rejects_an_episode_not_marked_successful(tmp_path):
     with h5py.File(path, "w") as target:
         demo = target.create_group("data/demo_0")
         demo.attrs["success"] = False
-    with pytest.raises(ValueError, match="not marked successful"):
+    with pytest.raises(ValueError, match="neither marked successful nor staged"):
         episode_provenance(path, "demo_0")
 
 
@@ -231,3 +231,61 @@ def test_contact_gate_publishes_episode_with_valid_touch(tmp_path):
     row = recorder.publish_success(trace_path=tmp_path / "trace.json")
     assert row["contact_telemetry"]["passed"]
     assert row["contact_telemetry"]["touch_samples"] == 41
+
+
+def new_recorder(tmp_path, index=3):
+    return GeminiEpisodeDatasetRecorder(
+        output_dir=tmp_path,
+        episode_index=index,
+        metadata={"campaign": "screen"},
+        video_writer_factory=FakeVideoWriter,
+        unpack_images=fake_unpack,
+    )
+
+
+def test_a_failed_run_is_kept_as_labelled_evidence_outside_the_admitted_set(tmp_path):
+    recorder = new_recorder(tmp_path)
+    append_samples(recorder, count=5)
+    row = recorder.preserve_failure(reason="Scheduler motion handoff budget exhausted", trace_path=tmp_path / "t.json")
+
+    evidence = tmp_path / "failed_evidence"
+    with h5py.File(evidence / "run_3_failed_0.hdf5") as source:
+        demo = source["data/demo_0"]
+        assert demo.attrs["success"] is False or demo.attrs["success"] == False  # noqa: E712
+        assert demo.attrs["failure_reason"] == "Scheduler motion handoff budget exhausted"
+        assert demo["actions"].shape == (5, 8)
+    assert (evidence / "run_3_failed_0.mp4").read_bytes() == b"fake-mp4"
+    assert row["status"] == "failed" and row["campaign"] == "screen"
+    assert json.loads((evidence / "failed_manifest.jsonl").read_text())["video"] == "run_3_failed_0.mp4"
+    # Nothing an admitted-data reader looks at was created.
+    assert list(tmp_path.glob("run_*.hdf5")) == []
+    assert list(tmp_path.glob("episode_*_policy.mp4")) == []
+    assert not (tmp_path / "collection_manifest.jsonl").exists()
+    assert not (tmp_path / "episode_000003_policy.partial.mp4").exists()
+
+
+def test_repeated_failures_at_one_index_do_not_overwrite_each_other(tmp_path):
+    for _ in range(2):
+        recorder = new_recorder(tmp_path)
+        append_samples(recorder, count=3)
+        recorder.preserve_failure(reason="killed", trace_path=None)
+    names = sorted(p.name for p in (tmp_path / "failed_evidence").glob("*.hdf5"))
+    assert names == ["run_3_failed_0.hdf5", "run_3_failed_1.hdf5"]
+    assert len((tmp_path / "failed_evidence" / "failed_manifest.jsonl").read_text().splitlines()) == 2
+
+
+def test_a_run_with_no_samples_leaves_nothing_behind(tmp_path):
+    recorder = new_recorder(tmp_path)
+    assert recorder.preserve_failure(reason="crashed at startup", trace_path=None) is None
+    assert not (tmp_path / "failed_evidence").exists()
+    assert not (tmp_path / "episode_000003_policy.partial.mp4").exists()
+
+
+def test_preserving_after_a_published_success_does_nothing(tmp_path):
+    recorder = new_recorder(tmp_path)
+    append_samples(recorder)
+    recorder.publish_success(trace_path=tmp_path / "trace.json")
+    assert recorder.preserve_failure(reason="late", trace_path=None) is None
+    assert not (tmp_path / "failed_evidence").exists()
+    with h5py.File(recorder.hdf5_path) as source:
+        assert bool(source["data/demo_0"].attrs["success"]) is True

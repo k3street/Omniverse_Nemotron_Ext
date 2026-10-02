@@ -37,11 +37,19 @@ def optional_nvidia_validation(file_path: str) -> dict | None:
     mode = os.environ.get("NVIDIA_USD_VALIDATION_ON_INGEST", "auto").lower()
     if mode in {"0", "false", "no", "off"}:
         return None
-    from service.isaac_assist_service.analysis.validators.nvidia_usd_validation import (
-        findings_record,
-        resolve_validator_command,
-        validate_asset,
-    )
+    try:
+        from service.isaac_assist_service.analysis.validators.nvidia_usd_validation import (
+            findings_record,
+            resolve_validator_command,
+            validate_asset,
+        )
+    except ImportError:
+        # The validators package needs the service's dependencies (pydantic),
+        # which a bare OpenUSD interpreter does not have. "auto" means
+        # optional; an explicit request should still fail loudly.
+        if mode == "auto":
+            return None
+        raise
 
     command = resolve_validator_command()
     if not command and mode == "auto":
@@ -397,6 +405,11 @@ def apply_rigid_physics(entry: dict) -> str | None:
 
     cls = report.get("matched_class")
     prior = _load_asset_priors().get("classes", {}).get(cls or "", {})
+    if prior.get("multi_body"):
+        note = apply_set_physics(stage, f"/World/{_camel(entry['asset_id'])}", prior)
+        stage.GetRootLayer().Save()
+        del stage
+        return note
     mats = prior.get("typical_materials") or []
     mass_range = prior.get("mass_kg")
     profile = ("furniture" if cls in ("table", "cabinet", "door",
@@ -441,6 +454,75 @@ def apply_rigid_physics(entry: dict) -> str | None:
     del stage
     return (f"auto physics: {profile}, {mats[0] if mats else 'no material (no class)'}"
             + (f", {args['mass_kg']} kg" if args.get("mass_kg") else " (bbox mass)"))
+
+
+def set_members(stage, asset_root: str) -> list:
+    """The separate objects of a set: the children of the meshes' deepest
+    common ancestor that hold meshes (descending through wrapper chains)."""
+    from pxr import Usd, UsdGeom
+
+    paths = [p.GetPath() for p in Usd.PrimRange(stage.GetPrimAtPath(asset_root))
+             if p.IsA(UsdGeom.Mesh) and p.IsActive()]
+    if not paths:
+        return []
+    common = paths[0].GetParentPath()
+    while not all(q.HasPrefix(common) for q in paths):
+        common = common.GetParentPath()
+    while True:
+        members = [c for c in stage.GetPrimAtPath(common).GetChildren()
+                   if any(q.HasPrefix(c.GetPath()) for q in paths)]
+        if len(members) != 1:
+            return members
+        common = members[0].GetPath()
+
+
+def apply_set_physics(stage, asset_root: str, prior: dict) -> str:
+    """One rigid body per member of a set (chess pieces, dominoes), so they
+    move independently; one body over the whole file would weld them."""
+    import contextlib
+    import io
+
+    from pxr import Usd, UsdGeom
+
+    from service.isaac_assist_service.chat.tools.handlers.physics import (
+        _gen_make_sim_ready,
+        _load_asset_priors,
+        _load_physics_materials,
+    )
+
+    mb = prior["multi_body"]
+    classes = _load_asset_priors().get("classes", {})
+    member = classes.get(mb.get("member_class", ""), {})
+    m_mats = member.get("typical_materials") or prior.get("typical_materials") or []
+    s_mats = prior.get("typical_materials") or m_mats
+    m_range = member.get("mass_kg") or [0.01, 1.0]
+    density = _load_physics_materials()["materials"].get(m_mats[0] if m_mats else "", {}).get(
+        "density_kg_m3", 1000.0)
+    mpu = UsdGeom.GetStageMetersPerUnit(stage)
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    members = set_members(stage, asset_root)
+    surfaces, total = 0, 0.0
+    for prim in members:
+        surface = any(k in prim.GetName().lower() for k in mb.get("surface_keywords", []))
+        if surface:
+            mats, mass = s_mats, float(mb.get("surface_mass_kg", 1.0))
+            surfaces += 1
+        else:
+            size = cache.ComputeWorldBound(prim).ComputeAlignedRange().GetSize()
+            vol = abs(size[0] * size[1] * size[2]) * mpu ** 3
+            mass = min(max(vol * density * float(mb.get("member_fill", 0.45)), m_range[0]), m_range[1])
+            mats = m_mats
+        args = {"prim_path": str(prim.GetPath()), "profile": "manipulable", "mass_kg": round(mass, 4)}
+        if surface and mb.get("surface_approximation"):
+            args["approximation"] = mb["surface_approximation"]
+        if mats:
+            args["material"] = mats[0]
+        with contextlib.redirect_stdout(io.StringIO()):
+            exec(compile(_gen_make_sim_ready(args), "<set-physics>", "exec"),
+                 {"__builtins__": __builtins__})
+        total += mass
+    return (f"set physics: {len(members) - surfaces} separate bodies + {surfaces} surface, "
+            f"{round(total, 3)} kg total")
 
 
 def queue_file(file_path: str, class_hint: str | None = None,

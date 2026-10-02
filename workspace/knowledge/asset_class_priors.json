@@ -98,7 +98,25 @@
    "typical_materials": [
     "wood_oak",
     "steel_mild"
-   ]
+   ],
+   "mechanism_templates": {
+    "panic_bar_latch": {
+     "_doc": "A push (panic) bar on one face retracts a latch; the leaf swings away from the bar's face. Used by scripts/door_draft.py; the latch itself is authored by scripts/add_mechanism.py.",
+     "bar_height_m": [
+      0.75,
+      1.3
+     ],
+     "bar_travel_m": 0.02,
+     "bar_spring_n_per_m": 2500,
+     "bar_damping": 50,
+     "swing_deg": 90,
+     "hinge_damping": 0.2,
+     "leaf_kg": 35,
+     "frame_kg": 20,
+     "bar_kg": 2,
+     "small_part_kg": 1.5
+    }
+   }
   },
   "appliance_large": {
    "keywords": [
@@ -1009,6 +1027,37 @@
     "plastic_abs"
    ],
    "cord_exit": "min"
+  },
+  "chess_set": {
+   "keywords": [
+    "chessboard",
+    "chess board",
+    "chess set",
+    "pieces on chessboard"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.7
+   ],
+   "mass_kg": [
+    0.6,
+    4.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "multi_body": {
+    "_doc": "A set of separate objects: every member gets its own rigid body and mass; members named like a surface keyword are the playing surface. Applied at ingest by ingest_asset.apply_set_physics. surface_approximation: a board is a slab, so a box is its exact collider; a convex hull of its square tiles let convex pieces fall straight through it in PhysX 110.",
+    "member_class": "chess_piece",
+    "surface_keywords": [
+     "board"
+    ],
+    "surface_mass_kg": 1.2,
+    "member_fill": 0.45,
+    "surface_approximation": "boundingCube"
+   },
+   "game": "chess"
   }
  }
 }
