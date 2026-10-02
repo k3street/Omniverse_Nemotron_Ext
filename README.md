@@ -1114,7 +1114,46 @@ Scene blueprints accept a `characters` list, so chat requests like *"spawn a
 scene with people walking and sitting on furniture"* resolve to clip-bound
 characters on the live stage.
 
-### 10.9 Chat tools
+### 10.9 Doors, latches and joint animation
+
+Some joints only work after another one has moved: a fire door does not open
+until its crash bar is pushed. The pipeline models that physically, not as a
+script. A latch bolt on the leaf is coupled to the crash bar by a PhysX mimic
+joint, and a keeper on the frame stops the door while the bolt is out. A
+robot, a person or a test therefore all meet the same constraint.
+
+[![A steel door held by its latch, opened with the crash bar, and re-latched](docs/media/door-crash-bar-latch-preview.jpg)](docs/media/door-crash-bar-latch.mp4)
+
+*Measured in PhysX, not keyframed. Shoved with 80 N·m while the bar is at
+rest, the door stops at 0.9°. With the bar pushed, the bolt retracts 25 mm and
+the door swings to 90°. With the bar released, the closing door pushes the
+angled bolt in, and the door re-latches at 0.0°. Click the preview for the
+video.*
+
+The door arrived as a single fused mesh. The pipeline built it without hand
+edits:
+- **Parts:** it split the leaf out of the frame and found the crash bar.
+- **Hinge:** it put the hinge on the edge the bar points away from, swinging
+  away from the bar's face.
+- **Latch:** it took the latch, masses and travel from the door class prior.
+
+`animate_asset.py` records a video of any articulated asset. It logs each
+joint's measured position on every frame and checks every gate: a gated joint
+is first pushed with its actuator at rest and must not move.
+
+```bash
+python3 scripts/ingest_asset.py ~/Downloads/door_door_metal.usdz --class-hint door
+python3 scripts/segment_mesh.py door_door_metal
+# hub: Draft articulation spec -> review -> Apply articulation -> Animate joints
+# or animate from the shell, with Isaac's python, waiting for the Isaac slot:
+ISAAC_PY=~/Documents/Github/isaacsim/_build/linux-aarch64/release/python.sh
+( source scripts/isaac_slot.sh && $ISAAC_PY scripts/animate_asset.py door_door_metal )
+```
+
+The full walkthrough, including the spec to review and the failure modes, is
+in [Making an asset sim-ready](docs/guides/sim_ready_assets.md).
+
+### 10.10 Chat tools
 
 | Tool | Purpose |
 |---|---|
@@ -1124,7 +1163,7 @@ characters on the live stage.
 | `create_deformable_mesh` | Author cloth / sponge / rubber / gel deformables. |
 | `critique_render` | Ask the vision judges what is wrong with a render. |
 
-### 10.10 Knowledge files
+### 10.11 Knowledge files
 
 | File | Contents |
 |---|---|
