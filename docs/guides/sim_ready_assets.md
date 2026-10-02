@@ -333,6 +333,43 @@ belongs in the priors, not in geometry heuristics. The routed-cord feature
 already works this way: which end a cord leaves a device from is stored per
 class (`cord_exit`).
 
+### 4.1 Drafting tiers by class
+
+**Draft articulation** in the hub picks a drafter from the asset's class: doors
+by class name, the rest by a `mechanism_templates` key in the class prior.
+Each one reads the parts' geometry, then fills in what geometry cannot
+measure (forces, travels, pitches) from the template or from real-world
+defaults. Each was verified in PhysX on a real downloaded asset.
+
+| Template key | Drafter | Classes | What it drafts | Verified on |
+|---|---|---|---|---|
+| (class name) | `door_draft.py` | `door`, `elevator_door` | Hinged leaf from its hinge barrels, push bar and latch; or two equal leaves sliding apart, coupled | `elevator_door_metal_8_mb`: 0° to −90°, 0.21° final error |
+| `buttons` | `button_draft.py` | `remote_control`, `keyboard`, `elevator_panel` | One sprung prismatic per part standing proud of a face; labels ride on their button | `tv_remote_2ce4b0`: 46/46 buttons reach full travel within 0.1 mm |
+| `pivot` | `pivot_draft.py` | `scissors` | Two arms crossing at a pin; limits from closed to the class's opening | `scissor_1`: 0° to 67.1° of [0°, 68°] |
+| `thread` | `thread_draft.py` | `bolt_fastener` | ISO size and pitch from the shank; a nut on the shank gets a helix; a loose bolt keeps `simReady:thread` | Synthetic M8: 2 turns advance 2.50 mm; no creep hanging in its nut |
+| `plunger` | `pipette_draft.py` | `micropipette` | Two-stop plunger, sprung tip ejector, press-fit tip | `mechanical_pipette`: a 6 N thumb gives 5.98 mm of stroke; stops hold at 12.00 and 3.99 mm; the ejector drops the tip |
+
+The mechanisms these tiers use, all in `add_mechanism.py`:
+
+| Mechanism | What it authors |
+|---|---|
+| `couple` | A mimic joint: `follower + gearing × leader + offset = 0`. Gearing is in the joints' own USD units (m/deg for a slide following a turn). |
+| `helix` | A thread. PhysX has no screw joint, so it is a revolute and a prismatic in series through a light carrier, coupled at `−pitch/360` m/deg. Joint friction plus a damping-only drive (the running torque) stop it from unscrewing under load. |
+| `two_stop` | Two preloaded springs in series through a carrier: a soft stroke to the first stop, then a stiff blow-out. The carrier must weigh what the plunger does (see Troubleshooting). |
+| `press_fit` | A breakable fixed joint outside the articulation. It can also be released by rule: `simReady:releasedBy = {"joint", "travel_m"}`, which the animator honours. |
+
+**Ingest also handles three things on the way in.**
+- **Backdrops.** A flat quad far wider than the model (a Sketchfab floor or back
+  wall) is deactivated before the size check. Otherwise the object measures as
+  large as the plane.
+- **Unit slips.** A size outside the class range is corrected by the power of ten
+  that lands in range, nearest its middle. Only failing that does it use the
+  range's geometric middle.
+- **What the file actually is.** The VLM sees a lit three-quarter thumbnail plus
+  four orbit views, and reports whether the file is one object, a set, a
+  fragment or a scene. A file named for one class that shows another is flagged
+  as `identity_mismatch` in the hub.
+
 ---
 
 ## 5. Troubleshooting
@@ -351,6 +388,12 @@ silently unless you measure.
 | Video shows nothing, though the joint log looks right | A free-standing asset fell out of shot | The animator adds a ground collider when nothing anchors the asset to the world |
 | A latched door stalls a few degrees short of closed | The drive's push fades as the error shrinks, and the bolt needs force to be pushed past the keeper | The animator aims past closed, like a door closer's preload; the joint limit stops the door |
 | The door won't close, even though the file says the limit is 0° | The Physics Inspector edited a limit in the live session (unsaved) | Reopen the stage, or reset the attribute |
+| Multi-turn joint (a screw) shows huge tracking error | Angles read from poses wrap at ±180° | The animator unwraps them frame to frame; PhysX itself keeps them unwrapped |
+| A plunger's second stage ignores its preload and stop | Two prismatics in series through a carrier much lighter than its load starve the solver | `two_stop` makes the carrier as heavy as the plunger |
+| A press-fitted part drops at a small fraction of its break force | This PhysX build breaks joints at about 1/31 of `physics:breakForce` | `press_fit` scales the authored value and keeps the intended one as `simReady:breakForceN` |
+| A pusher never frees a press-fitted part | A light part on a joint gives way instead of building the break force | Release it by rule with `simReady:releasedBy` |
+| A tall loose asset (a pipette on its end) topples out of shot | Nothing holds it upright | The animator holds its root link still when it is much taller than its footprint (`--hold` forces it) |
+| A probe's applied forces come out 0.7–2.6× too large or small | `apply_force_at_pos` with an `update_simulation` dt different from the scene's step | Load with weight (mass = F/g), or offset a drive's target by F/k |
 | An animation recorded with the timeline stopped shows no motion | The Physics Inspector simulates on its own while the timeline is stopped | Start the timeline before recording; the animator steps PhysX itself |
 
 **Known issue:** Isaac Sim's GUI hung on Play after the latched door was
@@ -368,7 +411,8 @@ on every reopen. If it happens, restart Isaac instead of reopening the stage.
 | `scripts/segment_mesh.py` | Split fused meshes, by connectivity or with `--box` |
 | `scripts/articulation_draft.py` | Generic joint drafter (wheels) |
 | `scripts/door_draft.py` | Door drafter (leaf, frame, push bar, hinge, latch) |
-| `scripts/add_mechanism.py` | Latch: bolt, keeper, mimic coupling, gate |
+| `scripts/add_mechanism.py` | Latch, couple, helix, two-stop plunger, press fit |
+| `scripts/button_draft.py`, `pivot_draft.py`, `thread_draft.py`, `pipette_draft.py` | Class drafting tiers (§4.1) |
 | `scripts/animate_asset.py` | Headless video, joint log and gate check |
 | `scripts/asset_review_hub.py` | Review hub, port 8777 (draft, apply, animate, approve) |
 | `scripts/promote_asset.py` | Approved asset → portable library copy |
