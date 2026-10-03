@@ -210,6 +210,7 @@ def draft_articulation(entry: dict) -> str:
              "clip": ("clip_draft", "propose_clip", "check which end is the jaw"),
              "power_drill": ("drill_draft", "propose_drill", "check the chuck, trigger and battery"),
              "cabinet": ("cabinet_draft", "propose_cabinet", "check drawer travel and door hinge sides"),
+             "temples": ("temples_draft", "propose_temples", "check the hinge points"),
              "buttons": ("button_draft", "propose_buttons", "check travel and press force")}
     for key, (module, fn, check) in tiers.items():
         if key in templates:

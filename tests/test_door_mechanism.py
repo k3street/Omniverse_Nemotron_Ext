@@ -766,3 +766,31 @@ def test_syringe_plunger_slides_into_the_barrel_on_friction():
     # in until the seal (z 0.05) nears the barrel's tip end (z 0): 95% of 50 mm
     assert (p["lower_limit"], p["upper_limit"]) == pytest.approx((-0.0475, 0.0), abs=1e-4)
     assert not spec["mechanisms"]
+
+
+def test_eyeglass_temples_fold_inward_about_the_front_corners():
+    import math
+
+    from temples_draft import propose_temples
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/G")
+    _mesh(stage, "/World/G/Front", [((0.068, -0.075, 0.03), (0.076, 0.075, 0.07))])
+    _mesh(stage, "/World/G/Left", [((-0.077, -0.076, 0.045), (0.068, -0.073, 0.068))])
+    _mesh(stage, "/World/G/Right", [((-0.077, 0.073, 0.045), (0.068, 0.076, 0.068))])
+    _mesh(stage, "/World/G/LeftTip", [((-0.07, -0.0758, 0.05), (-0.04, -0.0732, 0.06))])
+    spec, notes = propose_temples(stage, "/World/G", {"fold_deg": 95})
+    j = {x["name"]: x for x in spec["joints"]}
+    for t in ("temple_0", "temple_1"):
+        hinge = j[t]
+        assert hinge["axis"] == "Z" and hinge["anchor"][0] == pytest.approx(0.068, abs=1e-3)
+        fold = hinge["lower_limit"] or hinge["upper_limit"]
+        y0 = hinge["anchor"][1]
+        a = math.radians(fold)
+        far_y = y0 + (-0.145) * math.sin(a)         # the far end, 0.145 m back along -X, after folding
+        assert abs(far_y) < abs(y0)                 # swung toward the middle
+    riders = {x["child_prim"].rsplit("/", 1)[-1]: x["parent_prim"].rsplit("/", 1)[-1]
+              for x in spec["joints"] if x["joint_type"] == "fixed"}
+    assert riders["LeftTip"] == "Left"
