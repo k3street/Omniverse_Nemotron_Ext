@@ -712,3 +712,57 @@ def test_a_door_sold_without_a_frame_hangs_on_the_edge_away_from_its_handle():
     mount = stage.GetPrimAtPath(hinge["parent_prim"])
     lo = min(p[0] for p in UsdGeom.Mesh(mount).GetPointsAttr().Get())
     assert lo > 0.45                                                # just outside the hinge edge
+
+
+# --- cabinets and syringes -------------------------------------------------------------
+
+def test_cabinet_drawers_slide_out_of_their_face_and_doors_hinge_away_from_the_handle():
+    from cabinet_draft import propose_cabinet
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/C")
+    _mesh(stage, "/World/C/Carcass", [((-0.3, -0.25, 0.0), (0.3, 0.25, 0.9))])
+    # two drawers on the -Y face: wide, thin fronts with boxes behind and handles in front
+    for i, (z0, z1) in enumerate(((0.75, 0.88), (0.6, 0.73))):
+        _mesh(stage, f"/World/C/Front{i}", [((-0.28, -0.27, z0), (0.28, -0.25, z1))])
+        _mesh(stage, f"/World/C/Box{i}", [((-0.26, -0.25, z0 + 0.01), (0.26, 0.2, z1 - 0.01))])
+        _mesh(stage, f"/World/C/Pull{i}", [((-0.05, -0.29, z0 + 0.05), (0.05, -0.27, z0 + 0.07))])
+    # a tall door below, its knob on the +X side
+    _mesh(stage, "/World/C/Door", [((-0.15, -0.27, 0.05), (0.15, -0.25, 0.55))])
+    _mesh(stage, "/World/C/Knob", [((0.1, -0.3, 0.3), (0.13, -0.27, 0.33))])
+    spec, notes = propose_cabinet(stage, "/World/C", {"door_swing_deg": 100})
+    j = {x["name"]: x for x in spec["joints"]}
+    assert j["drawer_00"]["axis"] == "Y" and j["drawer_00"]["lower_limit"] < 0 == j["drawer_00"]["upper_limit"]
+    # out by 80% of the box's depth (0.45 m)
+    assert j["drawer_00"]["lower_limit"] == pytest.approx(-0.36, abs=1e-3)
+    riders = {x["child_prim"].rsplit("/", 1)[-1]: x["parent_prim"].rsplit("/", 1)[-1]
+              for x in spec["joints"] if x["joint_type"] == "fixed"}
+    assert riders["Box0"] == "Front0" and riders["Pull0"] == "Front0" and riders["Pull1"] == "Front1"
+    door = j["door_00"]
+    # hinged on the -X edge, away from the knob; the knob edge swings out toward -Y
+    assert door["axis"] == "Z" and door["anchor"][0] == pytest.approx(-0.15)
+    assert riders["Knob"] == "Door"
+    import math
+    a = math.radians(door["lower_limit"] if door["lower_limit"] else door["upper_limit"])
+    knob_edge_y = -0.27 + 0.3 * math.sin(a)     # the free edge, 0.3 m from the hinge along +X, after the swing
+    assert knob_edge_y < -0.27
+
+
+def test_syringe_plunger_slides_into_the_barrel_on_friction():
+    from pipette_draft import propose_pipette
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/S")
+    _mesh(stage, "/World/S/Barrel", [((-0.006, -0.006, 0.0), (0.006, 0.006, 0.08))])
+    _mesh(stage, "/World/S/Rod", [((-0.004, -0.004, 0.05), (0.004, 0.004, 0.13))])     # half in, half out
+    _mesh(stage, "/World/S/Needle", [((-0.0005, -0.0005, -0.03), (0.0005, 0.0005, 0.0))])
+    spec, notes = propose_pipette(stage, "/World/S", {"single_stage": True})
+    p = next(x for x in spec["joints"] if x["name"] == "plunger")
+    assert p["child_prim"].endswith("Rod") and p["axis"] == "Z" and p["stiffness"] == 0.0
+    # in until the seal (z 0.05) nears the barrel's tip end (z 0): 95% of 50 mm
+    assert (p["lower_limit"], p["upper_limit"]) == pytest.approx((-0.0475, 0.0), abs=1e-4)
+    assert not spec["mechanisms"]

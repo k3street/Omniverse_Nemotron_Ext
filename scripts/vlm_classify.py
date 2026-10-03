@@ -111,9 +111,13 @@ def register_provisional_class(result: dict, asset_id: str) -> str | None:
     # "with", "cap", "head": under longest-keyword matching those capture
     # unrelated files ("Bottle_with_cap" -> bolt_fastener). A human widens
     # the keywords when confirming the class.
+    # ...and not even those one by one: 'blister_pack' gave 'pack', which
+    # then claimed a blood pack ('record', 'robot', 'model' did the same).
+    # A multi-word key is matched as its whole phrase.
     tokens = [t for t in _re.split(r"[\W_]+", key.lower()) if len(t) > 2]
+    phrase = " ".join(t for t in _re.split(r"[\W_]+", key.lower()) if t)
     data["classes"][key] = {
-        "keywords": sorted(set(tokens)),
+        "keywords": [phrase] if len(tokens) > 1 else sorted(set(tokens)),
         "max_dim_m": [float(dims[0]), float(dims[1])],
         "mass_kg": [float(mass[0]), float(mass[1])],
         "articulable": bool(result.get("articulable")),
