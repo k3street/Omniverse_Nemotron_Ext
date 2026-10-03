@@ -233,8 +233,6 @@ def _frames_png(asset_id, frames, pts, pivot, axis):
     """Side views (x-z) of the cup and the water at a few moments. The Newton
     venv has no plotting library: the frames are saved as arrays and drawn by
     the system python's Pillow."""
-    import subprocess
-
     import warp as wp
 
     OUT.mkdir(parents=True, exist_ok=True)
@@ -249,21 +247,34 @@ def _frames_png(asset_id, frames, pts, pivot, axis):
     npz = OUT / f"{asset_id}_pour_frames.npz"
     np.savez(npz, **{f"cup{i}": c for i, c in enumerate(cups)}, **{f"water{i}": w for i, w in enumerate(waters)},
              labels=np.array(labels))
-    png = OUT / f"{asset_id}_pour.png"
+    return draw_frames_png(npz, OUT / f"{asset_id}_pour.png")
+
+
+def draw_frames_png(npz, png, around_cup=False):
+    """Draw saved side-view frames (cup{i}, water{i}, labels) with the system
+    python's Pillow (neither the Newton venv nor Kit's python has a plotting
+    library). around_cup: frame the view on the cup, not on water spread
+    across the floor."""
+    import subprocess
+
     draw = f"""
 import numpy as np
 from PIL import Image, ImageDraw
 d = np.load({str(npz)!r}); labels = list(d["labels"]); n = len(labels)
 W, H = 320, 300
-allp = np.concatenate([d[k] for k in d.files if k != "labels"])
-lo, hi = allp.min(0), allp.max(0); lo[1] = max(lo[1], -0.01)
+allp = np.concatenate([d[k] for k in d.files if k.startswith("cup" if {around_cup!r} else ("cup", "water"))])
+lo, hi = allp.min(0), allp.max(0)
+if {around_cup!r}:
+    m = 0.8 * (hi[1] - lo[1]); lo = lo - [m, 0]; hi = hi + [m, 0]
+lo[1] = max(lo[1], -0.01)
 s = min((W - 20) / (hi[0] - lo[0]), (H - 40) / (hi[1] - lo[1]))
 img = Image.new("RGB", (W * n, H), "white"); g = ImageDraw.Draw(img)
 for i in range(n):
     for key, col in ((f"cup{{i}}", (150, 150, 150)), (f"water{{i}}", (30, 100, 220))):
         for x, z in d[key]:
             u, v = i * W + 10 + (x - lo[0]) * s, H - 10 - (z - lo[1]) * s
-            if 0 <= v < H: g.point((u, v), fill=col)
+            if 0 <= v < H and i * W <= u < (i + 1) * W:
+                g.point((u, v), fill=col)
     g.line([(i * W + 5, H - 10), (i * W + W - 5, H - 10)], fill=(90, 70, 50))
     g.text((i * W + 8, 6), labels[i], fill=(0, 0, 0))
 img.save({str(png)!r})
