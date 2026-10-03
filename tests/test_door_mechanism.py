@@ -673,3 +673,42 @@ def test_drill_chuck_is_the_front_round_part_and_the_trigger_pulls_toward_the_ha
     # the front is -X, so pulling the trigger moves it +X, toward the handle; travel capped at 8 mm (0.4 x 20 mm)
     assert (trig["lower_limit"], trig["upper_limit"]) == pytest.approx((0.0, 0.008))
     assert [name(m["part"]) for m in spec["mechanisms"] if m["type"] == "press_fit"] == ["Battery"]
+
+
+def test_knobs_turn_and_buttons_press_where_the_class_has_knobs():
+    from button_draft import propose_buttons
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Deck")
+    _mesh(stage, "/World/Deck/Body", [((-0.2, -0.12, 0.0), (0.2, 0.12, 0.1))])
+    _mesh(stage, "/World/Deck/Knob", [((0.0, -0.132, 0.024), (0.014, -0.12, 0.038))])     # round, 12 mm proud
+    _mesh(stage, "/World/Deck/Play", [((-0.015, -0.1245, 0.06), (0.008, -0.12, 0.07))])  # flat and wide
+    with_knobs, _ = propose_buttons(stage, "/World/Deck", {"knobs": True, "knob_range_deg": 150})
+    roles = {j["child_prim"].rsplit("/", 1)[-1]: j for j in with_knobs["joints"] if j.get("_role")}
+    assert roles["Knob"]["joint_type"] == "revolute" and roles["Knob"]["axis"] == "Y"
+    assert (roles["Knob"]["lower_limit"], roles["Knob"]["upper_limit"]) == (-150.0, 150.0)
+    assert roles["Play"]["joint_type"] == "prismatic"
+    without, _ = propose_buttons(stage, "/World/Deck", {})
+    assert all(j["joint_type"] != "revolute" for j in without["joints"])   # a remote's tall button stays a button
+
+
+def test_a_door_sold_without_a_frame_hangs_on_the_edge_away_from_its_handle():
+    from door_draft import propose_door
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, ROOT)
+    _mesh(stage, f"{ROOT}/Leaf", [((-0.45, -0.02, 0.0), (0.45, 0.02, 2.0))])
+    _mesh(stage, f"{ROOT}/Handle", [((-0.42, -0.08, 0.95), (-0.3, -0.02, 1.05))])   # near the -X edge
+    spec, notes = propose_door(stage, ROOT)
+    hinge = next(j for j in spec["joints"] if j["name"] == "door_hinge")
+    assert hinge["child_prim"].endswith("Leaf") and hinge["parent_prim"].endswith("HingeMount")
+    assert hinge["anchor"][0] == pytest.approx(0.45, abs=1e-3)    # the +X edge, away from the handle
+    assert spec["fixed_base"] is True and any("frameless" in n for n in notes)
+    mount = stage.GetPrimAtPath(hinge["parent_prim"])
+    lo = min(p[0] for p in UsdGeom.Mesh(mount).GetPointsAttr().Get())
+    assert lo > 0.45                                                # just outside the hinge edge

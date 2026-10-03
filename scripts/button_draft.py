@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 FACE_TOL_M = 0.004       # a button's inner side within this of the body's face
 MAX_BUTTON_FRACTION = 0.4  # a button's face is at most this fraction of the body's face span
+KNOB_PROUD = 0.4           # a round control standing this many diameters proud is a knob
 
 
 def _overlap(a_lo, a_hi, b_lo, b_hi) -> bool:
@@ -99,7 +100,26 @@ def propose_buttons(stage, asset_root: str, template: dict) -> tuple[dict, list[
                 decorations.append((p, b))
                 break
 
+    # knobs: round across the face and standing well proud - they turn
+    def is_knob(b):
+        axis, _ = b["face"]
+        across = [b["size"][k] for k in range(3) if k != axis]
+        return min(across) >= 0.85 * max(across) and b["size"][axis] >= KNOB_PROUD * max(across)
+
+    # only where the class has knobs (audio gear, cameras): a remote's tall
+    # round button is still a button
+    knobs = [b for b in real if is_knob(b)] if template.get("knobs") else []
+    real = [b for b in real if b not in knobs]
+    knob_range = float(template.get("knob_range_deg", 150.0))
     joints = []
+    for n, k in enumerate(sorted(knobs, key=lambda q: (q["face"], q["centroid"][2], q["centroid"][0]))):
+        axis, sign = k["face"]
+        name = f"knob_{n:02d}"
+        k["joint"] = name
+        joints.append({"name": name, "joint_type": "revolute", "parent_prim": body["path"], "child_prim": k["path"],
+                       "axis": "XYZ"[axis], "lower_limit": -knob_range, "upper_limit": knob_range,
+                       "anchor": [round(v, 5) for v in k["centroid"]], "stiffness": 0.0,
+                       "damping": float(template.get("knob_damping", 1e-3)), "max_force": 1.0, "_role": "knob"})
     for n, b in enumerate(sorted(real, key=lambda q: (q["face"], q["centroid"][2], q["centroid"][0]))):
         axis, sign = b["face"]
         depth = b["size"][axis]
@@ -132,14 +152,15 @@ def propose_buttons(stage, asset_root: str, template: dict) -> tuple[dict, list[
         if p is not body and p["path"] not in linked:
             joints.append({"name": f"part_{len(joints):03d}", "joint_type": "fixed",
                            "parent_prim": body["path"], "child_prim": p["path"]})
-    if not real:
+    if not real and not knobs:
         raise RuntimeError("no parts standing proud of the body's faces — nothing to press")
-    notes.append(f"{len(real)} buttons, {len(decorations)} labels/trim riding on them, "
+    notes.append(f"{len(real)} buttons, {len(knobs)} knobs, {len(decorations)} labels/trim riding on them, "
                  f"{len(duplicates)} duplicate parts merged")
     return {
         # a wall panel is fixed where it is mounted; a remote is loose
         "prim_path": asset_root, "fixed_base": bool(template.get("mounted", False)), "approximation": "convexHull",
         "joints": joints, "button_joints": [j["name"] for j in joints if j.get("_role") == "button"],
+        "knob_joints": [j["name"] for j in joints if j.get("_role") == "knob"],
         "_analysis": {"tier": "buttons", "body": body["path"], "buttons": len(real), "notes": notes},
         "_instructions": "Buttons drafted from parts standing proud of the body. CHECK travel and press force.",
     }, notes

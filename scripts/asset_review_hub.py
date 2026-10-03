@@ -282,6 +282,7 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     spec.pop("_instructions", None)
     spec.pop("_analysis", None)
     spec.pop("button_joints", None)
+    spec.pop("knob_joints", None)
     for j in spec.get("joints", []):
         j.pop("_role", None)
     # keys articulate_asset does not take: applied after it, on the same stage

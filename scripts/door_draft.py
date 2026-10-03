@@ -126,6 +126,43 @@ def propose_bi_parting(stage, asset_root, frame, a, b, width_axis, tpl, notes):
     }, notes
 
 
+MOUNT_W_M = 0.04  # the stand-in jamb a frameless leaf hangs from
+
+
+def _mount_frameless(stage, asset_root, leaf, parts, width_axis, thick, notes) -> dict:
+    """A frameless leaf: the handle (a small part proud of a face) marks the
+    latch edge, so the hinge is the far edge; a static mount block just
+    outside it stands in for the jamb the door would hang in."""
+    from pxr import Gf, Usd, UsdGeom
+
+    from add_mechanism import _define_box
+
+    mid_w = leaf["centroid"][width_axis]
+    handles = [p for p in parts if p is not leaf and max(p["size"]) < 0.5 * leaf["size"][2]
+               and (p["max"][thick] > leaf["max"][thick] or p["min"][thick] < leaf["min"][thick])]
+    if handles:
+        h = max(handles, key=lambda p: p["volume"])
+        latch_sign = 1 if h["centroid"][width_axis] > mid_w else -1
+        notes.append(f"frameless leaf: the handle {Path(h['path']).name} marks the latch edge, "
+                     "the hinge is the far edge; swing direction is a GUESS - check it")
+    else:
+        latch_sign = 1
+        notes.append("frameless leaf with no handle: hinge side and swing are GUESSES - check them")
+    hinge_w = leaf["min"][width_axis] if latch_sign > 0 else leaf["max"][width_axis]
+    lo, hi = [0.0] * 3, [0.0] * 3
+    out = -latch_sign  # the mount lies past the hinge edge, away from the latch
+    lo[width_axis], hi[width_axis] = sorted([hinge_w + out * 0.002, hinge_w + out * (0.002 + MOUNT_W_M)])
+    lo[thick], hi[thick] = leaf["min"][thick], leaf["max"][thick]
+    lo[2], hi[2] = leaf["min"][2], leaf["max"][2]
+    xf = UsdGeom.XformCache(Usd.TimeCode.Default())
+    to_local = xf.GetLocalToWorldTransform(stage.GetPrimAtPath(asset_root)).GetInverse()
+    UsdGeom.Scope.Define(stage, f"{asset_root}/Mechanisms")
+    mount = _define_box(stage, f"{asset_root}/Mechanisms/HingeMount", lo, hi, Gf.Vec3f(0.5, 0.5, 0.52), to_local)
+    if not stage.GetRootLayer().anonymous:
+        stage.GetRootLayer().Save()
+    return {"leaf": leaf["path"], "mount": str(mount.GetPath()), "latch_sign": latch_sign}
+
+
 def propose_door(stage, asset_root: str) -> tuple[dict, list[str]]:
     """Returns (spec draft, notes). May split a fused leaf out of its frame."""
     from articulation_draft import collect_parts
@@ -157,15 +194,27 @@ def propose_door(stage, asset_root: str) -> tuple[dict, list[str]]:
         similar = abs(a["size"][width_axis] - b["size"][width_axis]) < 0.15 * max(a["size"][width_axis], 1e-6)
         if similar and not hinge_barrels(parts, a, width_axis, thick) and not hinge_barrels(parts, b, width_axis, thick):
             return propose_bi_parting(stage, asset_root, biggest, a, b, width_axis, tpl, notes)
+    leaf_only = None
     if not others_like_leaf:
         box_lo, box_hi = leaf_slab(stage, biggest["path"], width_axis, thick)
-        split_mesh_by_box(stage, biggest["path"], box_lo, box_hi, "DoorLeaf", "DoorFrame")
-        notes.append("split the leaf out of the frame by its front/back faces")
-        parts = collect_parts(stage, asset_root)
-    leaf = max((p for p in parts if p["path"].endswith("DoorLeaf")), key=lambda p: p["volume"], default=None) \
-        or max(others_like_leaf, key=face)
-    frame = max((p for p in parts if p["path"].endswith("DoorFrame")), key=lambda p: p["volume"], default=None) \
-        or biggest
+        try:
+            split_mesh_by_box(stage, biggest["path"], box_lo, box_hi, "DoorLeaf", "DoorFrame")
+            notes.append("split the leaf out of the frame by its front/back faces")
+            parts = collect_parts(stage, asset_root)
+        except RuntimeError as ex:
+            if "nothing to split" not in str(ex):
+                raise
+            # a leaf with no frame (a door sold on its own): it is all slab
+            leaf_only = _mount_frameless(stage, asset_root, biggest, parts, width_axis, thick, notes)
+            parts = collect_parts(stage, asset_root)
+    if leaf_only:
+        leaf = next(p for p in parts if p["path"] == leaf_only["leaf"])
+        frame = next(p for p in parts if p["path"] == leaf_only["mount"])
+    else:
+        leaf = max((p for p in parts if p["path"].endswith("DoorLeaf")), key=lambda p: p["volume"], default=None) \
+            or max(others_like_leaf, key=face)
+        frame = max((p for p in parts if p["path"].endswith("DoorFrame")), key=lambda p: p["volume"], default=None) \
+            or biggest
     leaf_mid_t = leaf["centroid"][thick]
     leaf_mid_w = leaf["centroid"][width_axis]
 
@@ -181,6 +230,8 @@ def propose_door(stage, asset_root: str) -> tuple[dict, list[str]]:
         push_sign = -1 if bar["centroid"][thick] < leaf_mid_t else 1
         # the bar reaches toward the latch edge
         latch_sign = 1 if (bar["max"][width_axis] - leaf_mid_w) > (leaf_mid_w - bar["min"][width_axis]) else -1
+    elif leaf_only:
+        push_sign, latch_sign = -1, leaf_only["latch_sign"]
     else:
         push_sign, latch_sign = -1, 1
         notes.append("no push bar found: hinge side and swing direction are GUESSES — check them")

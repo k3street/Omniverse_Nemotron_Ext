@@ -917,7 +917,15 @@
    "typical_materials": [
     "plastic_abs",
     "aluminum"
-   ]
+   ],
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 3.0,
+     "max_travel_m": 0.003,
+     "knob_range_deg": 150.0,
+     "knobs": true
+    }
+   }
   },
   "human_character": {
    "keywords": [
@@ -1525,7 +1533,15 @@
    "source": "curated",
    "proposed_by": "canon_at_1_retro_camera",
    "proposed_on": "2026-10-03",
-   "curated_on": "2026-10-03"
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 3.0,
+     "max_travel_m": 0.003,
+     "knob_range_deg": 150.0,
+     "knobs": true
+    }
+   }
   },
   "desktop_computer_case": {
    "keywords": [
@@ -1594,7 +1610,15 @@
    "source": "curated",
    "proposed_by": "cassette_deck_yamaha_kx_202",
    "proposed_on": "2026-10-03",
-   "curated_on": "2026-10-03"
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 3.0,
+     "max_travel_m": 0.003,
+     "knob_range_deg": 150.0,
+     "knobs": true
+    }
+   }
   },
   "game_console_dock": {
    "keywords": [
@@ -1640,7 +1664,15 @@
    "source": "curated",
    "proposed_by": "eumig_film_projector",
    "proposed_on": "2026-10-03",
-   "curated_on": "2026-10-03"
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 3.0,
+     "max_travel_m": 0.003,
+     "knob_range_deg": 150.0,
+     "knobs": true
+    }
+   }
   },
   "sofa": {
    "keywords": [
