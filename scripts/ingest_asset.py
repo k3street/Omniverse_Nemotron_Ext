@@ -919,6 +919,7 @@ def relink_sources(search_dir: str) -> list[str]:
         if p.suffix.lower() in _USD_EXTS and p.is_file():
             by_name.setdefault(p.name, []).append(p)
     report = []
+    by_hash = None
     for qf in sorted(QUEUE_DIR.glob("*.json")):
         e = json.loads(qf.read_text())
         src = e.get("original_file") or e.get("file")
@@ -933,6 +934,16 @@ def relink_sources(search_dir: str) -> list[str]:
                 break
         if match is None and not want and len(candidates) == 1:
             match, how = candidates[0], "name only (no recorded content hash)"
+        if match is None and want:
+            # renamed on the way (a same-named different file was already
+            # there): find it by content alone
+            if by_hash is None:
+                by_hash = {}
+                for paths in by_name.values():
+                    for c in paths:
+                        by_hash.setdefault(_file_sha1(str(c)), c)
+            match = by_hash.get(want)
+            how = "content (renamed)" if match is not None else how
         if match is None:
             report.append(f"{e['asset_id']}: source {src} missing, no match in {root}")
             continue

@@ -80,7 +80,15 @@
    "typical_materials": [
     "wood_oak",
     "steel_mild"
-   ]
+   ],
+   "mechanism_templates": {
+    "cabinet": {
+     "drawer_open_fraction": 0.8,
+     "door_swing_deg": 100
+    }
+   },
+   "source": "curated",
+   "curated_on": "2026-10-03"
   },
   "door": {
    "keywords": [
@@ -438,7 +446,14 @@
    "typical_materials": [
     "plastic_abs",
     "titanium"
-   ]
+   ],
+   "mechanism_templates": {
+    "temples": {
+     "fold_deg": 95
+    }
+   },
+   "source": "curated",
+   "curated_on": "2026-10-03"
   },
   "book": {
    "keywords": [
@@ -1545,9 +1560,7 @@
   },
   "desktop_computer_case": {
    "keywords": [
-    "case",
-    "computer",
-    "desktop"
+    "desktop computer case"
    ],
    "max_dim_m": [
     0.35,
@@ -2047,6 +2060,405 @@
      "battery_hold_n": 40.0
     }
    }
+  },
+  "blister_pack": {
+   "keywords": [
+    "blister pack"
+   ],
+   "max_dim_m": [
+    0.07,
+    0.13
+   ],
+   "mass_kg": [
+    0.005,
+    0.025
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "blister_pack_capsules_free_video_in_comments",
+   "proposed_on": "2026-10-03"
+  },
+  "blood_bag": {
+   "keywords": [
+    "blood bag"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.25
+   ],
+   "mass_kg": [
+    0.03,
+    0.6
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "plastic_nylon"
+   ],
+   "source": "vlm",
+   "proposed_by": "blood_pack_low_poly_pbr",
+   "proposed_on": "2026-10-03"
+  },
+  "funnel": {
+   "keywords": [
+    "funnel"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.2
+   ],
+   "mass_kg": [
+    0.02,
+    0.12
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "cc0_funnel_3",
+   "proposed_on": "2026-10-03"
+  },
+  "crutch": {
+   "keywords": [
+    "crutch",
+    "crutches"
+   ],
+   "max_dim_m": [
+    1.0,
+    1.5
+   ],
+   "mass_kg": [
+    0.4,
+    1.2
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "source": "curated",
+   "proposed_by": "crutches",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "autoinjector_pen": {
+   "keywords": [
+    "autoinjector pen"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.22
+   ],
+   "mass_kg": [
+    0.04,
+    0.15
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "healthshot_injector_model_cs2",
+   "proposed_on": "2026-10-03"
+  },
+  "iv_pole_stand": {
+   "keywords": [
+    "iv pole stand"
+   ],
+   "max_dim_m": [
+    1.4,
+    2.3
+   ],
+   "mass_kg": [
+    6.0,
+    18.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "iv_device_with_stand",
+   "proposed_on": "2026-10-03"
+  },
+  "syringe": {
+   "keywords": [
+    "syringe"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.16
+   ],
+   "mass_kg": [
+    0.005,
+    0.02
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "insulin_syringe",
+   "proposed_on": "2026-10-03",
+   "mechanism_templates": {
+    "plunger": {
+     "single_stage": true,
+     "plunger_damping": 20.0
+    }
+   },
+   "curated_on": "2026-10-03"
+  },
+  "disposable_glove": {
+   "keywords": [
+    "disposable glove",
+    "latex glove",
+    "latex gloves",
+    "exam glove"
+   ],
+   "max_dim_m": [
+    0.22,
+    0.32
+   ],
+   "mass_kg": [
+    0.005,
+    0.02
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "rubber_soft"
+   ],
+   "source": "curated",
+   "proposed_by": "latex_gloves_fallen",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "microscope": {
+   "keywords": [
+    "microscope"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.5
+   ],
+   "mass_kg": [
+    3.0,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "medical_microscope",
+   "proposed_on": "2026-10-03"
+  },
+  "medical_supplies_set": {
+   "keywords": [
+    "medical supplies set"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.7
+   ],
+   "mass_kg": [
+    1.0,
+    4.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "medical_supplies_collection",
+   "proposed_on": "2026-10-03"
+  },
+  "medical_ventilator": {
+   "keywords": [
+    "medical ventilator"
+   ],
+   "max_dim_m": [
+    1.3,
+    1.9
+   ],
+   "mass_kg": [
+    25.0,
+    90.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "medical_ventilator_dfba0f",
+   "proposed_on": "2026-10-03"
+  },
+  "medical_examination_lamp": {
+   "keywords": [
+    "medical examination lamp"
+   ],
+   "max_dim_m": [
+    1.4,
+    1.9
+   ],
+   "mass_kg": [
+    6.0,
+    15.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "medical_examination_lamp",
+   "proposed_on": "2026-10-03"
+  },
+  "mortar_and_pestle": {
+   "keywords": [
+    "mortar and pestle"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.2
+   ],
+   "mass_kg": [
+    0.4,
+    2.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "mortar",
+   "proposed_on": "2026-10-03"
+  },
+  "oxygen_cylinder_cart": {
+   "keywords": [
+    "oxygen cylinder cart"
+   ],
+   "max_dim_m": [
+    1.0,
+    1.6
+   ],
+   "mass_kg": [
+    8.0,
+    35.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "oxygene_medical",
+   "proposed_on": "2026-10-03"
+  },
+  "test_tube_rack": {
+   "keywords": [
+    "test tube rack"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.4
+   ],
+   "mass_kg": [
+    0.15,
+    0.8
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "test_tube_rack",
+   "proposed_on": "2026-10-03"
+  },
+  "medical_privacy_screen": {
+   "keywords": [
+    "privacy screen",
+    "ward screen",
+    "medical screen"
+   ],
+   "max_dim_m": [
+    1.6,
+    2.0
+   ],
+   "mass_kg": [
+    6.0,
+    16.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "curated",
+   "proposed_by": "the_screen_is_medical",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "medical_thermometer": {
+   "keywords": [
+    "medical thermometer"
+   ],
+   "max_dim_m": [
+    0.11,
+    0.15
+   ],
+   "mass_kg": [
+    0.01,
+    0.03
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "thermometer_termometer_medical_devices",
+   "proposed_on": "2026-10-03"
+  },
+  "cpap_machine": {
+   "keywords": [
+    "cpap machine"
+   ],
+   "max_dim_m": [
+    0.5,
+    1.2
+   ],
+   "mass_kg": [
+    1.0,
+    2.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "xt_auto_cpap_machine",
+   "proposed_on": "2026-10-03"
+  },
+  "wall_diagnostic_station": {
+   "keywords": [
+    "wall diagnostic station"
+   ],
+   "max_dim_m": [
+    0.5,
+    0.9
+   ],
+   "mass_kg": [
+    2.0,
+    7.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "wall_tools",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
   }
  }
 }
