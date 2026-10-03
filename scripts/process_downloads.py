@@ -220,6 +220,10 @@ def articulate(asset_id: str, dry: bool) -> str:
     spec = json.loads(e.get("articulation_draft") or "{}")
     if "naive fallback" in draft or any("|" in str(j.get("joint_type", "")) for j in spec.get("joints", [])):
         return "; ".join(notes + ["left for the reviewer (no confident draft)"])
+    if not any(j.get("joint_type") in ("revolute", "prismatic") for j in spec.get("joints", [])):
+        # only fixed joints (the generic drafter found no wheel, hinge or slide)
+        # is no articulation: leave the rigid body as it is
+        return "; ".join(notes + ["no moving joint found: left rigid for the reviewer"])
     try:
         notes.append(apply_articulation(e, e["articulation_draft"]))
     except Exception as ex:  # noqa: BLE001
@@ -259,6 +263,8 @@ def soft_test(asset_id: str) -> str:
     if dtype == "cloth":
         run("scripts/cloth_proxy.py", asset_id)
         out = run("scripts/verify_asset_newton.py", "drape", asset_id).stdout
+    elif dtype == "rope":
+        out = run("scripts/verify_asset_newton.py", "cable", asset_id).stdout
     else:
         out = run("scripts/verify_asset_newton.py", "squish", asset_id).stdout
     lines = [ln for ln in out.splitlines() if ln.startswith(("PASS", "FAIL", "ERROR"))]

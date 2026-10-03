@@ -446,6 +446,15 @@ def proxy_mesh(entry: dict):
 def build(asset_id: str) -> str:
     qf = QUEUE_DIR / f"{asset_id}.json"
     entry = json.loads(qf.read_text())
+    sys.path.insert(0, str(REPO / "scripts"))
+    sys.path.insert(0, str(REPO))
+    from ingest_asset import FIXED_DIR, build_wrapper
+
+    if not str(entry["file"]).startswith(str(FIXED_DIR)):
+        # a soft asset has no derivative yet (rigid physics was skipped):
+        # make one - the proxy is never written into the downloaded source
+        entry.setdefault("original_file", entry["file"])
+        entry["file"] = build_wrapper(entry, None)
     pts, tris = posed_mesh(entry["file"])
     before = {"vertices": int(len(pts)), "triangles": int(len(tris))}
     p, t = make_proxy(pts, tris)

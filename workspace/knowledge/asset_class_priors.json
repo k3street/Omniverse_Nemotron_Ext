@@ -2459,6 +2459,30 @@
    "proposed_by": "wall_tools",
    "proposed_on": "2026-10-03",
    "curated_on": "2026-10-03"
+  },
+  "trash_can": {
+   "keywords": [
+    "trash can",
+    "wastebasket",
+    "litter bin",
+    "waste bin",
+    "garbage can",
+    "bin"
+   ],
+   "max_dim_m": [
+    0.2,
+    1.2
+   ],
+   "mass_kg": [
+    0.3,
+    15.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03"
   }
  }
 }

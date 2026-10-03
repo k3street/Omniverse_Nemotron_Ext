@@ -70,7 +70,9 @@
    "dropper_bottle",
    "food_item",
    "appliance_small",
-   "appliance_large"
+   "appliance_large",
+   "trash_can",
+   "box"
   ],
   "Lab": [
    "funnel",
@@ -90,7 +92,6 @@
    "bandage",
    "blister_pack",
    "blood_bag",
-   "box",
    "cpap_machine",
    "disposable_glove",
    "iv_pole_stand",
@@ -141,6 +142,8 @@
   "pills_linezolid": "Medical",
   "scalpel": "Medical",
   "covid_19_oral_vaccine_inhaler_prototype": "Medical",
-  "medical_forceps_366603": "Medical"
+  "medical_forceps_366603": "Medical",
+  "hospital_sharps_container": "Medical",
+  "box_of_medical_washcloths": "Medical"
  }
 }
