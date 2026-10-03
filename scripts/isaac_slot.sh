@@ -20,7 +20,7 @@ while :; do
             pid="$(awk '/^PPid:/{print $2}' "/proc/$pid/status" 2>/dev/null || true)"
             ancestors+="$pid "
         done
-        other_kit="$(pgrep -af '^(\S*bash )?\S*(kit/python/bin/python3|kit_app|isaac-sim\.sh)( |$)' \
+        other_kit="$(pgrep -af '^(\S*bash )?\S*(kit/python/bin/python3|kit/kit|kit_app|isaac-sim\.sh)( |$)' \
             | grep -v 'omni.telemetry.transmitter' \
             | while read -r kit_pid kit_rest; do
                 [[ "$ancestors" == *" $kit_pid "* ]] || echo "$kit_pid $kit_rest"
