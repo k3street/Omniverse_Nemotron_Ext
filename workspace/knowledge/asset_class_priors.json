@@ -1456,6 +1456,565 @@
    },
    "source": "curated",
    "curated_on": "2026-10-02"
+  },
+  "mobile_robot": {
+   "keywords": [
+    "mobile robot",
+    "service robot",
+    "mobile manipulator",
+    "humanoid robot"
+   ],
+   "max_dim_m": [
+    1.1,
+    1.6
+   ],
+   "mass_kg": [
+    40.0,
+    100.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "amber_v0_2",
+   "proposed_on": "2026-10-03",
+   "notes": "A robot, not a prop: it needs its own articulation (URDF/CAD joints), not a drafted one.",
+   "curated_on": "2026-10-03"
+  },
+  "backpack": {
+   "keywords": [
+    "backpack"
+   ],
+   "max_dim_m": [
+    0.55,
+    0.8
+   ],
+   "mass_kg": [
+    1.2,
+    2.5
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "backpack",
+   "proposed_on": "2026-10-03"
+  },
+  "camera": {
+   "keywords": [
+    "camera",
+    "slr",
+    "dslr",
+    "camcorder"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.22
+   ],
+   "mass_kg": [
+    0.5,
+    1.2
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "canon_at_1_retro_camera",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "desktop_computer_case": {
+   "keywords": [
+    "case",
+    "computer",
+    "desktop"
+   ],
+   "max_dim_m": [
+    0.35,
+    0.5
+   ],
+   "mass_kg": [
+    4.0,
+    10.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "cassette_deck_yamaha_kx_202",
+   "proposed_on": "2026-10-03"
+  },
+  "vinyl_record": {
+   "keywords": [
+    "vinyl record",
+    "vinyl",
+    "lp record",
+    "gramophone record"
+   ],
+   "max_dim_m": [
+    0.17,
+    0.31
+   ],
+   "mass_kg": [
+    0.035,
+    0.18
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "7_vinyl_record",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "cassette_deck": {
+   "keywords": [
+    "cassette deck",
+    "tape deck",
+    "cassette player"
+   ],
+   "max_dim_m": [
+    0.36,
+    0.47
+   ],
+   "mass_kg": [
+    2.5,
+    6.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "curated",
+   "proposed_by": "cassette_deck_yamaha_kx_202",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "game_console_dock": {
+   "keywords": [
+    "console dock",
+    "switch dock",
+    "docking station"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.22
+   ],
+   "mass_kg": [
+    0.25,
+    0.6
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "dock_nintendo_switch_2",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "film_projector": {
+   "keywords": [
+    "film projector",
+    "cine projector",
+    "movie projector"
+   ],
+   "max_dim_m": [
+    0.28,
+    0.45
+   ],
+   "mass_kg": [
+    3.0,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "curated",
+   "proposed_by": "eumig_film_projector",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "sofa": {
+   "keywords": [
+    "sofa",
+    "couch",
+    "sectional",
+    "settee"
+   ],
+   "max_dim_m": [
+    1.8,
+    3.0
+   ],
+   "mass_kg": [
+    40.0,
+    90.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "curated",
+   "proposed_by": "gray_l_shaped_couch",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "musical_keyboard": {
+   "keywords": [
+    "musical keyboard",
+    "synthesizer",
+    "synth",
+    "keytar",
+    "piano keyboard"
+   ],
+   "max_dim_m": [
+    0.28,
+    0.35
+   ],
+   "mass_kg": [
+    0.3,
+    0.8
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "keyboard_casio_vl_tone",
+   "proposed_on": "2026-10-03",
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 0.8,
+     "max_travel_m": 0.004
+    }
+   },
+   "curated_on": "2026-10-03"
+  },
+  "anatomical_organ_model": {
+   "keywords": [
+    "organ",
+    "liver",
+    "heart",
+    "kidney",
+    "lung",
+    "anatomical model"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.32
+   ],
+   "mass_kg": [
+    0.2,
+    2.0
+   ],
+   "articulable": false,
+   "deformable": "gel",
+   "typical_materials": [
+    "rubber_soft"
+   ],
+   "source": "curated",
+   "proposed_by": "liver",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "rc_transmitter": {
+   "keywords": [
+    "rc transmitter",
+    "rc controller",
+    "radio controller",
+    "radio transmitter"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.2
+   ],
+   "mass_kg": [
+    0.15,
+    0.35
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "radiomaster_t8l_rc_controller",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "record_player": {
+   "keywords": [
+    "record player",
+    "turntable",
+    "phonograph",
+    "gramophone"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.55
+   ],
+   "mass_kg": [
+    1.5,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "record_player_philips_gf_623",
+   "proposed_on": "2026-10-03",
+   "mechanism_templates": {
+    "turntable": {
+     "rpm": 33.33
+    }
+   },
+   "curated_on": "2026-10-03"
+  },
+  "vase": {
+   "keywords": [
+    "vase"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.4
+   ],
+   "mass_kg": [
+    0.4,
+    2.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "curated",
+   "proposed_by": "simple_glass_vase",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "clothes_hanger": {
+   "keywords": [
+    "clothes hanger",
+    "coat hanger",
+    "hanger"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.5
+   ],
+   "mass_kg": [
+    0.1,
+    0.3
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "wood_pine"
+   ],
+   "source": "curated",
+   "proposed_by": "wood_clothes_hanger",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "clothespin": {
+   "keywords": [
+    "clothespin",
+    "clothes peg",
+    "clothes pin",
+    "clothespeg"
+   ],
+   "max_dim_m": [
+    0.06,
+    0.09
+   ],
+   "mass_kg": [
+    0.003,
+    0.01
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "wood_pine"
+   ],
+   "source": "curated",
+   "proposed_by": "clothes_peg",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "clip": {
+     "open_deg": 25,
+     "preload_torque_nm": 0.12,
+     "full_torque_nm": 0.35
+    }
+   }
+  },
+  "beam_seating": {
+   "keywords": [
+    "beam seating",
+    "waiting room chairs",
+    "bench seating"
+   ],
+   "max_dim_m": [
+    2.6,
+    3.4
+   ],
+   "mass_kg": [
+    35.0,
+    80.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "chair_hospital",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "hospital_room_scene": {
+   "keywords": [
+    "hospital room",
+    "patient room",
+    "ward"
+   ],
+   "max_dim_m": [
+    5.0,
+    10.0
+   ],
+   "mass_kg": [
+    500.0,
+    3000.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "concrete"
+   ],
+   "source": "curated",
+   "proposed_by": "hospital_stuff",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "utility_cart": {
+   "keywords": [
+    "utility cart",
+    "trolley",
+    "serving cart"
+   ],
+   "max_dim_m": [
+    0.8,
+    1.2
+   ],
+   "mass_kg": [
+    7.0,
+    20.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "curated",
+   "proposed_by": "hospital_trolley",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "bean_bag": {
+   "keywords": [
+    "bean bag",
+    "beanbag"
+   ],
+   "max_dim_m": [
+    0.6,
+    1.2
+   ],
+   "mass_kg": [
+    2.0,
+    8.0
+   ],
+   "articulable": false,
+   "deformable": "sponge",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03",
+   "notes": "A bag of beads: a soft body (sponge preset) until granular filling is modelled."
+  },
+  "cutting_board": {
+   "keywords": [
+    "cutting board",
+    "chopping board",
+    "bread board"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.5
+   ],
+   "mass_kg": [
+    0.2,
+    1.5
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03"
+  },
+  "power_bank": {
+   "keywords": [
+    "power bank",
+    "powerbank",
+    "battery pack"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.18
+   ],
+   "mass_kg": [
+    0.1,
+    0.4
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03"
+  },
+  "power_drill": {
+   "keywords": [
+    "drill",
+    "power drill",
+    "cordless drill",
+    "drill driver",
+    "impact driver"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.35
+   ],
+   "mass_kg": [
+    0.8,
+    2.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "power_drill": {
+     "trigger_travel_m": 0.01,
+     "trigger_force_n": 15.0,
+     "clutch_arc_deg": 300.0,
+     "battery_hold_n": 40.0
+    }
+   }
   }
  }
 }

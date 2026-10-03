@@ -206,6 +206,9 @@ def draft_articulation(entry: dict) -> str:
              "thread": ("thread_draft", "propose_thread", "check the size and pitch"),
              "plunger": ("pipette_draft", "propose_pipette", "check the travels and forces"),
              "watch": ("watch_draft", "propose_watch", "check the crown, bezel and which hand is which"),
+             "turntable": ("turntable_draft", "propose_turntable", "check the tonearm's swing and the lid hinge"),
+             "clip": ("clip_draft", "propose_clip", "check which end is the jaw"),
+             "power_drill": ("drill_draft", "propose_drill", "check the chuck, trigger and battery"),
              "buttons": ("button_draft", "propose_buttons", "check travel and press force")}
     for key, (module, fn, check) in tiers.items():
         if key in templates:
@@ -287,6 +290,7 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     filtered_pairs = spec.pop("filtered_pairs", [])
     mechanisms = spec.pop("mechanisms", [])
     thread = spec.pop("thread", None)
+    turntable = spec.pop("turntable", None)
     if any("|" in str(j.get("joint_type", "")) for j in spec.get("joints", [])):
         return "spec still has placeholder joint_type values — edit before applying"
     stage = Usd.Stage.Open(entry["file"])
@@ -307,6 +311,8 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     if thread:
         # what a mating part needs to know, kept with the asset
         stage.GetPrimAtPath(spec["prim_path"]).SetCustomDataByKey("simReady:thread", thread)
+    if turntable:
+        stage.GetPrimAtPath(spec["prim_path"]).SetCustomDataByKey("simReady:turntable", turntable)
 
     for path, kg in link_masses.items():
         UsdPhysics.MassAPI.Apply(stage.GetPrimAtPath(path)).CreateMassAttr().Set(float(kg))
@@ -322,6 +328,20 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
         if m.get("type") not in builders:
             raise ValueError(f"unknown mechanism type {m.get('type')!r}; known: {sorted(builders)}")
         made.append(builders[m["type"]](stage, spec["prim_path"], m))
+    # masses authored under an earlier class (a drill first seen as any
+    # hand tool) are scaled, in proportion, into this class's range
+    cls = entry.get("class_hint") or entry.get("report", {}).get("matched_class")
+    rng = (_load_priors_fresh().get(cls or "", {}) or {}).get("mass_kg")
+    if rng:
+        from pxr import Usd as _Usd
+        massed = [p for p in _Usd.PrimRange(stage.GetPrimAtPath(spec["prim_path"]))
+                  if p.HasAPI(UsdPhysics.MassAPI) and (p.GetAttribute("physics:mass").Get() or 0) > 0]
+        total = sum(p.GetAttribute("physics:mass").Get() for p in massed)
+        if massed and not rng[0] <= total <= rng[1]:
+            k = (rng[0] * rng[1]) ** 0.5 / total
+            for p in massed:
+                p.GetAttribute("physics:mass").Set(p.GetAttribute("physics:mass").Get() * k)
+            made.append({"mass_rescaled": round(total, 4), "to": round(total * k, 4)})
     stage.GetRootLayer().Save()
     entry["articulation_draft"] = spec_text
     entry["applied_fixes"] = entry.get("applied_fixes", []) + [

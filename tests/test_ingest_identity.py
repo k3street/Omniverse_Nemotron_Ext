@@ -153,10 +153,10 @@ def test_a_file_named_for_one_thing_that_shows_another_is_flagged(tmp_path, queu
     thumb = tmp_path / "t.png"
     thumb.write_bytes(b"png")
     (queue / "elevator_key.json").write_text(json.dumps({
-        "asset_id": "elevator_key", "file": str(tmp_path / "x.usda"), "thumbnail": str(thumb),
+        "asset_id": "elevator_key", "file": str(tmp_path / "Elevator_key.usda"), "thumbnail": str(thumb),
         "class_source": "filename_guess", "report": {"matched_class": "key"}}))
     monkeypatch.setattr(vlm_classify, "QUEUE_DIR", queue)
-    monkeypatch.setattr(vlm_classify, "classify_thumbnail", lambda p, views=(): {
+    monkeypatch.setattr(vlm_classify, "classify_thumbnail", lambda p, views=(), hints=None: {
         "object_name": "elevator call-button panel", "asset_class": "elevator_panel", "confidence": "high",
         "visible_moving_parts": ["buttons"], "content_kind": "single_object"})
     monkeypatch.setattr(vlm_classify, "run_report", lambda f, c: {"matched_class": c})

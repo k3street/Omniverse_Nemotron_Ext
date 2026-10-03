@@ -555,3 +555,121 @@ def test_a_rule_gates_one_assets_joint_on_anothers_in_a_composed_scene(tmp_path,
     button = scene.GetPrimAtPath(gate["actuator_joint"])
     assert str(UsdPhysics.Joint(button).GetBody1Rel().GetTargets()[0]) == "/World/CallPanel/CallPanel/Moving"
     assert scene.GetPrimAtPath("/World/CallPanel").GetAttribute("xformOp:translate").Get() == Gf.Vec3d(0.9, 0, 0.6)
+
+
+# --- turntables ---------------------------------------------------------------
+
+def _turntable_stage():
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/TT")
+    _mesh(stage, "/World/TT/Plinth", [((-0.22, -0.18, 0.0), (0.22, 0.18, 0.08))])
+    # a round platter: an octagonal prism
+    import math
+    m = UsdGeom.Mesh.Define(stage, "/World/TT/Platter")
+    ring = [(-0.04 + 0.15 * math.cos(math.radians(a)), 0.15 * math.sin(math.radians(a))) for a in range(0, 360, 45)]
+    pts = [Gf.Vec3f(x, y, z) for z in (0.08, 0.1) for x, y in ring]
+    m.CreatePointsAttr(pts)
+    m.CreateFaceVertexCountsAttr([8, 8] + [4] * 8)
+    m.CreateFaceVertexIndicesAttr(list(range(8))[::-1] + list(range(8, 16))
+                                  + [i for k in range(8) for i in (k, (k + 1) % 8, 8 + (k + 1) % 8, 8 + k)])
+    # the tonearm parked on its rest beside the platter, its pivot housing a third of the way along
+    _mesh(stage, "/World/TT/Arm", [((0.16, -0.12, 0.1), (0.17, 0.12, 0.11))])
+    _mesh(stage, "/World/TT/Pivot", [((0.15, 0.04, 0.08), (0.18, 0.07, 0.115))])
+    _mesh(stage, "/World/TT/Weight", [((0.155, 0.11, 0.095), (0.175, 0.13, 0.115))])
+    # the dust cover standing open at the back, hinged at its lowest edge
+    _mesh(stage, "/World/TT/Cover", [((-0.21, 0.17, 0.08), (0.21, 0.19, 0.42))])
+    return stage
+
+
+def test_turntable_platter_spins_tonearm_reaches_the_record_and_lid_closes_onto_the_plinth():
+    import math
+
+    from turntable_draft import propose_turntable
+
+    spec, notes = propose_turntable(_turntable_stage(), "/World/TT", {})
+    name = lambda p: p.rsplit("/", 1)[-1]  # noqa: E731
+    j = {x["name"]: x for x in spec["joints"]}
+    assert name(j["platter"]["child_prim"]) == "Platter" and j["platter"]["axis"] == "Z"
+    assert j["platter"]["anchor"][:2] == pytest.approx([-0.04, 0.0], abs=2e-3)
+    arm = j["tonearm"]
+    assert name(arm["child_prim"]) == "Arm" and arm["axis"] == "Z"
+    # pivot at the housing, not the arm's end
+    assert arm["anchor"][:2] == pytest.approx([0.165, 0.055], abs=2e-3)
+    swing = arm["lower_limit"] if abs(arm["lower_limit"]) > abs(arm["upper_limit"]) else arm["upper_limit"]
+    # swinging the stylus end (y = -0.12) by the limit lands it near the lead-out groove
+    a = math.radians(swing)
+    sx, sy = 0.165 + (0.165 - 0.165) * math.cos(a) - (-0.12 - 0.055) * math.sin(a), 0.055 + (-0.12 - 0.055) * math.cos(a)
+    assert math.hypot(sx + 0.04, sy) == pytest.approx(0.35 * 0.15, abs=0.01)
+    fixed = {name(x["child_prim"]): name(x["parent_prim"]) for x in spec["joints"] if x["joint_type"] == "fixed"}
+    assert fixed["Weight"] == "Arm" and fixed["Pivot"] == "Plinth"
+    lid = j["lid"]
+    assert name(lid["child_prim"]) == "Cover" and lid["axis"] == "X"
+    assert max(abs(lid["lower_limit"]), abs(lid["upper_limit"])) == pytest.approx(90.0, abs=1.0)
+
+
+# --- spring clips ---------------------------------------------------------------
+
+def test_clothes_peg_halves_hinge_at_the_spring_and_are_held_shut_by_its_preload():
+    import math
+
+    from clip_draft import propose_clip
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Peg")
+    _mesh(stage, "/World/Peg/Left", [((-0.008, -0.036, 0.0), (0.0, 0.036, 0.007))])
+    _mesh(stage, "/World/Peg/Right", [((0.0, -0.036, 0.0), (0.008, 0.036, 0.007))])
+    _mesh(stage, "/World/Peg/Spring", [((-0.006, -0.012, -0.001), (0.006, 0.008, 0.008))])
+    spec, notes = propose_clip(stage, "/World/Peg", {"open_deg": 25, "preload_torque_nm": 0.12, "full_torque_nm": 0.35})
+    hinge = spec["joints"][0]
+    assert hinge["axis"] == "Z" and hinge["anchor"][:2] == pytest.approx([0.0, -0.002], abs=1e-4)
+    k, target = hinge["stiffness"], hinge["target"]
+    lo, hi = hinge["lower_limit"], hinge["upper_limit"]
+    open_end = lo if abs(lo) > abs(hi) else hi
+    assert abs(open_end) == 25 and 0.0 in (lo, hi)
+    # at rest (closed, 0) the spring presses shut with the preload; fully open with the full torque
+    assert k * abs(target) == pytest.approx(0.12, rel=1e-2)
+    assert k * abs(target - open_end) == pytest.approx(0.35, rel=1e-2)
+    # opening swings the child's +Y end away from the parent, never into it
+    child = "Right" if hinge["child_prim"].endswith("Right") else "Left"
+    side = 1 if child == "Right" else -1
+    a = math.radians(open_end)
+    x_tip = 0.004 * math.cos(a) - (0.036 + 0.002) * math.sin(a)
+    assert x_tip * side > 0.004
+    fixed = {j["child_prim"].rsplit("/", 1)[-1] for j in spec["joints"] if j["joint_type"] == "fixed"}
+    assert fixed == {"Spring"}
+
+
+# --- power drills -------------------------------------------------------------------
+
+def test_drill_chuck_is_the_front_round_part_and_the_trigger_pulls_toward_the_handle():
+    from drill_draft import propose_drill
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/D")
+    _mesh(stage, "/World/D/Body", [((-0.05, -0.03, 0.14), (0.06, 0.03, 0.19)),     # barrel / motor
+                                   ((0.0, -0.02, 0.04), (0.04, 0.02, 0.14))])      # handle
+    _mesh(stage, "/World/D/Collar", [((-0.085, -0.02, 0.145), (-0.05, 0.02, 0.185))])  # clutch: wide, bulky
+    _mesh(stage, "/World/D/Chuck", [((-0.12, -0.016, 0.149), (-0.085, 0.016, 0.181))])
+    _mesh(stage, "/World/D/Bit", [((-0.16, -0.003, 0.162), (-0.12, 0.003, 0.168))])
+    _mesh(stage, "/World/D/Trigger", [((-0.02, -0.006, 0.105), (0.0, 0.006, 0.13))])
+    _mesh(stage, "/World/D/Battery", [((-0.03, -0.04, 0.0), (0.07, 0.04, 0.045))])
+    spec, notes = propose_drill(stage, "/World/D", {"trigger_travel_m": 0.01})
+    name = lambda p: p.rsplit("/", 1)[-1]  # noqa: E731
+    j = {x["name"]: x for x in spec["joints"]}
+    assert name(j["chuck"]["child_prim"]) == "Chuck" and j["chuck"]["axis"] == "X"
+    assert name(j["clutch"]["child_prim"]) == "Collar"
+    fixed = {name(x["child_prim"]): name(x["parent_prim"]) for x in spec["joints"] if x["joint_type"] == "fixed"}
+    assert fixed["Bit"] == "Chuck"
+    trig = j["trigger"]
+    # the front is -X, so pulling the trigger moves it +X, toward the handle; travel capped at 8 mm (0.4 x 20 mm)
+    assert (trig["lower_limit"], trig["upper_limit"]) == pytest.approx((0.0, 0.008))
+    assert [name(m["part"]) for m in spec["mechanisms"] if m["type"] == "press_fit"] == ["Battery"]

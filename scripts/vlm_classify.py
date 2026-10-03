@@ -134,7 +134,25 @@ def register_provisional_class(result: dict, asset_id: str) -> str | None:
     return key
 
 
-def classify_thumbnail(png_path: str, views: list[str] = ()) -> dict:
+def _hint_text(hints: dict | None) -> str:
+    """What the renders cannot show: the file's name and measured size, as
+    evidence only. A render has no scale - a 30 cm vinyl record and a 6 mm
+    washer are the same thin annulus - but names are often wrong (an
+    'elevator key' that is a call panel) and sizes are off by unit slips."""
+    if not hints:
+        return ""
+    out = ["\n\nEvidence beyond the image - weigh it, do not trust it blindly:"]
+    if hints.get("file_name"):
+        out.append(f"- The file is named {hints['file_name']!r}. Names are often wrong or generic; "
+                   "if the image clearly shows something else, say what the image shows.")
+    if hints.get("max_dim_m"):
+        out.append(f"- Its largest dimension measures {hints['max_dim_m']:.3g} m as authored. This can be "
+                   "off by a unit factor (x10, x100, x1000) or have been fitted to a guessed class; "
+                   "use it to tell apart objects of the same shape and very different size.")
+    return "\n".join(out)
+
+
+def classify_thumbnail(png_path: str, views: list[str] = (), hints: dict | None = None) -> dict:
     """One vision call: the thumbnail and the orbit views -> structured
     classification. One view is often edge-on; four from around the object
     are what a person would look at."""
@@ -168,7 +186,7 @@ def classify_thumbnail(png_path: str, views: list[str] = ()) -> dict:
                     "real-world max-dimension and mass ranges, its dominant "
                     "material, and whether it is deformable. Say whether the render shows "
                     "one object, a set of separate objects, a fragment of something larger, "
-                    "or a whole scene:\n\n" + class_list)},
+                    "or a whole scene:\n\n" + class_list + _hint_text(hints))},
             ],
         }],
         output_config={"format": {"type": "json_schema", "schema": _schema()}},
@@ -179,19 +197,70 @@ def classify_thumbnail(png_path: str, views: list[str] = ()) -> dict:
     return json.loads(text)
 
 
+def class_from_name(stem: str) -> str | None:
+    """The class a file's name claims, by ingest's whole-word keyword rule
+    (longest keyword wins), or None."""
+    import re
+
+    words = [w for w in re.split(r"[\W_]+", stem.lower()) if w]
+    text, tokens = " " + " ".join(words) + " ", set(words)
+    best, best_kw = None, ""
+    for key, prior in json.loads(PRIORS_PATH.read_text())["classes"].items():
+        for kw in prior.get("keywords", []):
+            hit = (" " + kw + " " in text) if " " in kw else (kw in tokens)
+            if hit and len(kw) > len(best_kw):
+                best, best_kw = key, kw
+    return best
+
+
+def set_class(asset_id: str, cls: str, why: str) -> str:
+    """Apply a class a reviewer settled on (the file's name was right and the
+    VLM wrong - a cutting board it saw as a plate): re-check, rebuild the
+    derivative at the class's size, re-author rigid physics and re-render.
+    Never touches a derivative with joints."""
+    from ingest_asset import apply_rigid_physics, build_wrapper, refresh_renders
+
+    qf = QUEUE_DIR / f"{asset_id}.json"
+    entry = json.loads(qf.read_text())
+    if entry.get("report", {}).get("structure", {}).get("joints"):
+        return f"{asset_id}: has joints - not rebuilt"
+    entry["class_hint"], entry["class_source"] = cls, "curated"
+    entry["report"] = run_report(entry["file"], cls)
+    factor = entry["report"].get("suggested_scale_correction")
+    entry.setdefault("original_file", entry["file"])
+    entry["file"] = build_wrapper(entry, float(factor) if factor else None)
+    entry["report"] = run_report(entry["file"], cls)
+    fixes = [f"class set to {cls} ({why})" + (f", auto scale x{factor}" if factor else "")]
+    note = apply_rigid_physics(entry)
+    if note:
+        fixes.append(note)
+        entry["report"] = run_report(entry["file"], cls)
+    entry.setdefault("applied_fixes", []).extend(fixes)
+    entry["proposed_category"] = propose_category(entry["report"])
+    entry.pop("identity_mismatch", None)
+    refresh_renders(entry)
+    qf.write_text(json.dumps(entry, indent=1))
+    return f"{asset_id}: {'; '.join(fixes)}; {entry['report'].get('max_dim_m')} m"
+
+
 def classify_entry(asset_id: str) -> str:
     qf = QUEUE_DIR / f"{asset_id}.json"
     entry = json.loads(qf.read_text())
     thumb = entry.get("thumbnail")
     if not thumb or not Path(thumb).exists():
         return f"{asset_id}: no thumbnail — render one first (re-ingest)"
-    result = classify_thumbnail(thumb, entry.get("views") or [])
+    src = entry.get("original_file") or entry["file"]
+    hints = {"file_name": Path(src).stem, "max_dim_m": entry.get("report", {}).get("max_dim_m")}
+    result = classify_thumbnail(thumb, entry.get("views") or [], hints)
     entry["vlm"] = result
     old_class = entry.get("report", {}).get("matched_class")
     # what the file's NAME says, kept from the first look: a later reclass
     # overwrites matched_class, and the disagreement is the evidence
     if "name_class" not in entry:
-        entry["name_class"] = old_class if entry.get("class_source", "filename_guess") == "filename_guess" else None
+        # from the file's NAME alone: ingest also matches prim and material
+        # names ('Glass' on a cassette deck's window), which is no name claim
+        src = entry.get("original_file") or entry["file"]
+        entry["name_class"] = class_from_name(Path(src).stem)
     new_class = result.get("asset_class")
     if (not new_class and result.get("confidence") in ("high", "medium")):
         new_class = register_provisional_class(result, asset_id)

@@ -3240,6 +3240,9 @@ def _gen_articulate_asset(args: Dict) -> str:
             "stiffness": float(j.get("stiffness", _ARTICULATE_DRIVE_DEFAULTS["stiffness"])),
             "damping": float(j.get("damping", _ARTICULATE_DRIVE_DEFAULTS["damping"])),
             "max_force": float(j.get("max_force", _ARTICULATE_DRIVE_DEFAULTS["max_force"])),
+            # a preloaded spring aims past its rest stop (a clothes peg's
+            # torsion spring): degrees for revolute, metres for prismatic
+            "target": float(j.get("target", 0.0)),
         })
 
     # The joint graph must be a tree — PhysX articulations reject loops.
@@ -3418,6 +3421,7 @@ for _j in _joints:
             _drive.CreateStiffnessAttr().Set(_j['stiffness'])
             _drive.CreateDampingAttr().Set(_j['damping'])
             _drive.CreateMaxForceAttr().Set(_j['max_force'])
+            _drive.CreateTargetPositionAttr().Set(_j['target'])
     result['joints'].append({'path': _jpath, 'type': _j['type'],
                              'axis': _j['axis'], 'drive': _j['drive']})
 
