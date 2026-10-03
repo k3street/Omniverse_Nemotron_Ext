@@ -243,6 +243,51 @@ def set_class(asset_id: str, cls: str, why: str) -> str:
     return f"{asset_id}: {'; '.join(fixes)}; {entry['report'].get('max_dim_m')} m"
 
 
+def _fit_factor(size: float, lo: float, hi: float) -> float | None:
+    """Scale that brings `size` into [lo, hi]: a power of ten when one lands
+    in range (a unit slip), else the range's geometric middle; None if in range."""
+    import math
+
+    if lo <= size <= hi or size <= 0:
+        return None
+    mid = (lo * hi) ** 0.5
+    fits = [10.0 ** k for k in range(-4, 5) if lo <= size * 10.0 ** k <= hi]
+    return min(fits, key=lambda u: abs(math.log(size * u / mid))) if fits else mid / size
+
+
+def fit_to_object_size(asset_id: str) -> str | None:
+    """Size the asset to what the VLM says THIS object measures (a ball gown
+    1.1-1.7 m), which is tighter than its class (any garment, 0.3-1.8 m).
+    Only for confident looks; never on a derivative with joints."""
+    from ingest_asset import apply_rigid_physics, build_wrapper, refresh_renders
+
+    qf = QUEUE_DIR / f"{asset_id}.json"
+    entry = json.loads(qf.read_text())
+    v = entry.get("vlm") or {}
+    est, size = v.get("est_max_dim_m"), entry.get("report", {}).get("max_dim_m")
+    if (not est or len(est) != 2 or not size or v.get("confidence") not in ("high", "medium")
+            or entry.get("report", {}).get("structure", {}).get("joints")):
+        return None
+    factor = _fit_factor(float(size), float(min(est)), float(max(est)))
+    if factor is None:
+        return None
+    cls = entry.get("class_hint") or entry["report"].get("matched_class")
+    entry.setdefault("original_file", entry["file"])
+    entry["file"] = build_wrapper(entry, factor)
+    entry["report"] = run_report(entry["file"], cls)
+    fixes = [f"sized to the object x{factor:.4g}: {size} m -> {entry['report'].get('max_dim_m')} m "
+             f"(the VLM puts a {v.get('object_name')} at {est[0]}-{est[1]} m)"]
+    note = apply_rigid_physics(entry)
+    if note:
+        fixes.append(note)
+        entry["report"] = run_report(entry["file"], cls)
+    entry.setdefault("applied_fixes", []).extend(fixes)
+    entry["proposed_category"] = propose_category(entry["report"])
+    refresh_renders(entry)
+    qf.write_text(json.dumps(entry, indent=1))
+    return fixes[0]
+
+
 def classify_entry(asset_id: str) -> str:
     qf = QUEUE_DIR / f"{asset_id}.json"
     entry = json.loads(qf.read_text())
@@ -335,6 +380,9 @@ def classify_entry(asset_id: str) -> str:
             change += "; " + enrich_entry(asset_id)
         except Exception as e:
             change += f"; spec lookup failed: {str(e)[:80]}"
+    sized = fit_to_object_size(asset_id)
+    if sized:
+        change += f"; {sized}"
     kind = result.get("content_kind", "single_object")
     if kind != "single_object":
         change += f"; content is {kind.replace('_', ' ')}, not one object"
