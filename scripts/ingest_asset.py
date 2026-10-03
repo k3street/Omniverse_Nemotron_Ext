@@ -545,7 +545,7 @@ def apply_rigid_physics(entry: dict) -> str | None:
             min(max(est, mass_range[0]), mass_range[1]), 4)
     # the VLM saw several objects in the file: a body each, not one welded lump
     if (entry.get("vlm") or {}).get("content_kind") == "object_set" and profile == "manipulable" \
-            and len(object_groups(stage, args["prim_path"])) > 1:
+            and len(set_members(stage, args["prim_path"])) > 1:
         note = apply_group_physics(stage, args["prim_path"], prior,
                                    args.get("mass_kg") or sum(mass_range or [0.1, 0.1]) / 2)
         stage.GetRootLayer().Save()
@@ -633,11 +633,13 @@ def apply_set_physics(stage, asset_root: str, prior: dict) -> str:
             f"{round(total, 3)} kg total")
 
 
-def object_groups(stage, asset_root: str) -> list[list]:
+def object_groups(stage, asset_root: str, touch: bool = True) -> list[list]:
     """The separate objects in a file that holds several (a bottle and its
     dropper lying beside it; a screw and a loose washer): its members joined
-    when one's centre lies in the other's box or their surfaces touch. A
-    bottle modelled as glass, liquid and label is one object."""
+    when one sits within the other's box (protruding less than half its own
+    size) or their surfaces touch. A
+    bottle modelled as glass, liquid and label is one object; a pestle
+    resting in its mortar is two."""
     import numpy as np
     from pxr import Gf, Usd, UsdGeom
 
@@ -672,8 +674,22 @@ def object_groups(stage, asset_root: str) -> list[list]:
             a, b = boxes[i], boxes[j]
             if a.IsEmpty() or b.IsEmpty():
                 continue
-            joined = a.Contains(b.GetMidpoint()) or b.Contains(a.GetMidpoint())
-            if not joined and not Gf.Range3d.GetIntersection(a, b).IsEmpty() and len(pts[i]) and len(pts[j]):
+            # one sitting within the other is one object (liquid in its
+            # glass, a bulb on its dropper); one resting in it and standing
+            # well out of it is not (a pestle in its mortar, tubes in a rack)
+            def held(inner, outer):
+                if not outer.Contains(inner.GetMidpoint()):
+                    return False
+                lo_i, hi_i, lo_o, hi_o = inner.GetMin(), inner.GetMax(), outer.GetMin(), outer.GetMax()
+                for k in range(3):
+                    ext = max(hi_i[k] - lo_i[k], 1e-12)
+                    out = max(0.0, lo_o[k] - lo_i[k]) + max(0.0, hi_i[k] - hi_o[k])
+                    if out > 0.5 * ext:
+                        return False
+                return True
+
+            joined = held(b, a) or held(a, b)
+            if touch and not joined and not Gf.Range3d.GetIntersection(a, b).IsEmpty() and len(pts[i]) and len(pts[j]):
                 gap = min(float(np.linalg.norm(pts[j] - x, axis=1).min()) for x in pts[i])
                 joined = gap < 0.002 * span
             if joined:
@@ -696,6 +712,15 @@ def apply_group_physics(stage, asset_root: str, prior: dict, total_mass: float) 
     from service.isaac_assist_service.chat.tools.handlers.physics import _gen_make_sim_ready
 
     groups = object_groups(stage, asset_root)
+    if len(groups) == 1 and len(groups[0]) > 1:
+        # the VLM sees separate objects that touch (a pestle resting on its
+        # bowl): contact cannot tell resting from attached, so count only
+        # parts held inside another as one object
+        groups = object_groups(stage, asset_root, touch=False)
+    if len(groups) == 1 and len(groups[0]) > 1:
+        # still one: a pestle lying across its bowl, tubes standing in their
+        # rack. The VLM sees separate objects, so its members are they
+        groups = [[m] for m in groups[0]]
     cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
 
     def vol(prim):
@@ -710,9 +735,11 @@ def apply_group_physics(stage, asset_root: str, prior: dict, total_mass: float) 
     for gi, group in enumerate(groups):
         for m in group:
             args = {"prim_path": str(m.GetPath()), "profile": "manipulable",
-                    "mass_kg": round(max(1e-4, total_mass * vols[str(m.GetPath())] / whole), 5)}
-            if prior.get("collision_approximation"):
-                args["approximation"] = prior["collision_approximation"]
+                    "mass_kg": round(max(1e-4, total_mass * vols[str(m.GetPath())] / whole), 5),
+                    # objects in a set rest in each other (tubes in a rack, a
+                    # pestle in its bowl): a convex hull fills the holes they
+                    # sit in and throws them out at the first step
+                    "approximation": prior.get("collision_approximation") or "convexDecomposition"}
             if mats:
                 args["material"] = mats[0]
             with contextlib.redirect_stdout(io.StringIO()):

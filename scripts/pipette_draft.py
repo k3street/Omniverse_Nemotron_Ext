@@ -35,6 +35,8 @@ def propose_pipette(stage, asset_root: str, template: dict) -> tuple[dict, list[
     parts = [p for p in collect_parts(stage, asset_root) if min(p["size"]) > 1e-5]
     if len(parts) < 2:
         raise RuntimeError("one part only — segment the mesh first")
+    if template.get("single_stage"):
+        return _propose_syringe(parts, asset_root, template)
     lo = np.min([p["min"] for p in parts], axis=0)
     hi = np.max([p["max"] for p in parts], axis=0)
     axis = int(np.argmax(hi - lo))
@@ -66,15 +68,9 @@ def propose_pipette(stage, asset_root: str, template: dict) -> tuple[dict, list[
         """Straddles the axis (a finger rest beside the plunger does not)."""
         return all(p["min"][k] <= c <= p["max"][k] for k, c in zip(other, centre))
 
-    single = bool(template.get("single_stage"))
-    if single:
-        # a syringe: the plunger runs from inside the barrel out past its back
-        plunger = [p for p in parts if p is not body and p is not tip_part and on_axis(p)
-                   and max(s(p["min"][axis]), s(p["max"][axis])) > body_top + 0.02 * length]
-    else:
-        plunger = [p for p in parts if p is not body and p is not tip_part
-                   and min(s(p["min"][axis]), s(p["max"][axis])) >= body_top - TOP_FRACTION * length
-                   and on_axis(p)]
+    plunger = [p for p in parts if p is not body and p is not tip_part
+               and min(s(p["min"][axis]), s(p["max"][axis])) >= body_top - TOP_FRACTION * length
+               and on_axis(p)]
     ejector = next((p for p in sorted(longs, key=lambda p: -p["size"][axis])
                     if p is not body and p not in plunger), None)
     if not plunger:
@@ -95,31 +91,6 @@ def propose_pipette(stage, asset_root: str, template: dict) -> tuple[dict, list[
 
     joints = [{"name": f"plunger_{i:02d}", "joint_type": "fixed", "parent_prim": lead["path"],
                "child_prim": p["path"]} for i, p in enumerate(q for q in plunger if q is not lead)]
-    if single:
-        # in until the plunger's seal nears the barrel's tip end; friction, no spring
-        seal = min(min(s(p["min"][axis]), s(p["max"][axis])) for p in plunger)
-        barrel_tip = min(s(body["min"][axis]), s(body["max"][axis]))
-        stroke = round(0.95 * max(0.0, seal - barrel_tip), 4)
-        joints.append({"name": "plunger", "joint_type": "prismatic", "parent_prim": body["path"],
-                       "child_prim": lead["path"], "axis": a,
-                       "lower_limit": min(0.0, press * stroke), "upper_limit": max(0.0, press * stroke),
-                       "anchor": anchor, "stiffness": 0.0,
-                       "damping": float(template.get("plunger_damping", 20.0)), "max_force": 100.0})
-        mechanisms = []
-        notes = [f"plunger {', '.join(Path(p['path']).name for p in plunger)} slides "
-                 f"{stroke * 1000:.0f} mm into the barrel, held by friction"]
-        if tip_part is not None:
-            joints.append({"name": "needle", "joint_type": "fixed", "parent_prim": body["path"],
-                           "child_prim": tip_part["path"]})
-        taken = {body["path"], *(p["path"] for p in plunger), *(j["child_prim"] for j in joints)}
-        for p in parts:
-            if p["path"] not in taken:
-                joints.append({"name": f"part_{len(joints):02d}", "joint_type": "fixed",
-                               "parent_prim": body["path"], "child_prim": p["path"]})
-        return {"prim_path": asset_root, "fixed_base": False, "approximation": "convexDecomposition",
-                "joints": joints, "mechanisms": mechanisms,
-                "_analysis": {"tier": "plunger", "body": body["path"], "notes": notes},
-                "_instructions": "Syringe drafted from the barrel. CHECK the stroke."}, notes
     # placeholder the two-stop pair replaces
     joints.append({"name": "plunger", "joint_type": "prismatic", "parent_prim": body["path"],
                    "child_prim": lead["path"], "axis": a,
@@ -169,3 +140,60 @@ def propose_pipette(stage, asset_root: str, template: dict) -> tuple[dict, list[
             "joints": joints, "mechanisms": mechanisms,
             "_analysis": {"tier": "plunger", "body": body["path"], "notes": notes},
             "_instructions": "Plunger drafted from the parts along the axis. CHECK the travels and forces."}, notes
+
+
+def _propose_syringe(parts, asset_root: str, template: dict) -> tuple[dict, list[str]]:
+    """A syringe: the barrel is the widest long part; the plunger the other
+    long part on its axis; the BACK is the end where the plunger stands out
+    of the barrel (a syringe may stand tip-up or lie either way). The plunger
+    pushes in until its seal nears the barrel's tip end and pulls out until
+    the seal nears its back, held where it is left by friction. A small part
+    past the tip is the needle."""
+    lo = np.min([p["min"] for p in parts], axis=0)
+    hi = np.max([p["max"] for p in parts], axis=0)
+    axis = int(np.argmax(hi - lo))
+    other = [k for k in range(3) if k != axis]
+    longs = [p for p in parts if p["size"][axis] >= 0.4 * (hi - lo)[axis]]
+    if len(longs) < 2:
+        raise RuntimeError("one long part only — segment the plunger from the barrel")
+    barrel = max(longs, key=lambda p: max(p["size"][k] for k in other))
+    centre = [barrel["centroid"][k] for k in other]
+    on_axis = [p for p in longs if p is not barrel
+               and all(p["min"][k] <= c <= p["max"][k] for k, c in zip(other, centre))]
+    if not on_axis:
+        raise RuntimeError("no long part on the barrel's axis — no plunger")
+    plunger = max(on_axis, key=lambda p: p["size"][axis])
+    out_lo = barrel["min"][axis] - plunger["min"][axis]
+    out_hi = plunger["max"][axis] - barrel["max"][axis]
+    back = -1.0 if out_lo >= out_hi else 1.0            # the plunger stands out this way
+    seal = plunger["max"][axis] if back < 0 else plunger["min"][axis]
+    tip_inner = barrel["max"][axis] if back < 0 else barrel["min"][axis]
+    back_inner = barrel["min"][axis] if back < 0 else barrel["max"][axis]
+    push = round(0.95 * abs(tip_inner - seal), 4)
+    pull = round(0.9 * abs(seal - back_inner), 4)
+    press = -back                                        # pushing moves it toward the tip
+    a = "XYZ"[axis]
+    anchor = [0.0, 0.0, 0.0]
+    for k, c in zip(other, centre):
+        anchor[k] = float(c)
+    anchor[axis] = float(seal)
+    lims = sorted([press * push, -press * pull])
+    joints = [{"name": "plunger", "joint_type": "prismatic", "parent_prim": barrel["path"],
+               "child_prim": plunger["path"], "axis": a, "lower_limit": lims[0], "upper_limit": lims[1],
+               "anchor": [round(v, 6) for v in anchor], "stiffness": 0.0,
+               "damping": float(template.get("plunger_damping", 20.0)), "max_force": 100.0}]
+    for p in parts:
+        if p is barrel or p is plunger:
+            continue
+        beyond_tip = (p["centroid"][axis] - tip_inner) * press > 0
+        inside_plunger = all(plunger["min"][k] - 1e-3 <= p["min"][k] and p["max"][k] <= plunger["max"][k] + 1e-3
+                             for k in range(3))
+        parent = plunger if inside_plunger else barrel
+        joints.append({"name": "needle" if beyond_tip else f"part_{len(joints):02d}", "joint_type": "fixed",
+                       "parent_prim": parent["path"], "child_prim": p["path"]})
+    notes = [f"plunger {Path(plunger['path']).name} pushes {push * 1000:.0f} mm in and pulls "
+             f"{pull * 1000:.0f} mm out of the barrel along {a}, held by friction"]
+    return {"prim_path": asset_root, "fixed_base": False, "approximation": "convexDecomposition",
+            "joints": joints, "mechanisms": [],
+            "_analysis": {"tier": "plunger", "body": barrel["path"], "notes": notes},
+            "_instructions": "Syringe drafted from the barrel. CHECK the stroke."}, notes

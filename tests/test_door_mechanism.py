@@ -763,9 +763,28 @@ def test_syringe_plunger_slides_into_the_barrel_on_friction():
     spec, notes = propose_pipette(stage, "/World/S", {"single_stage": True})
     p = next(x for x in spec["joints"] if x["name"] == "plunger")
     assert p["child_prim"].endswith("Rod") and p["axis"] == "Z" and p["stiffness"] == 0.0
-    # in until the seal (z 0.05) nears the barrel's tip end (z 0): 95% of 50 mm
-    assert (p["lower_limit"], p["upper_limit"]) == pytest.approx((-0.0475, 0.0), abs=1e-4)
+    # in until the seal (z 0.05) nears the barrel's tip end (z 0): 95% of 50 mm; out until it
+    # nears the barrel's back (z 0.08): 90% of 30 mm
+    assert (p["lower_limit"], p["upper_limit"]) == pytest.approx((-0.0475, 0.027), abs=1e-4)
     assert not spec["mechanisms"]
+    fixed = {x["child_prim"].rsplit("/", 1)[-1]: x["name"] for x in spec["joints"] if x["joint_type"] == "fixed"}
+    assert fixed["Needle"] == "needle"
+
+
+def test_a_syringe_standing_tip_up_pushes_its_plunger_upward():
+    from pipette_draft import propose_pipette
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/S")
+    _mesh(stage, "/World/S/Barrel", [((-0.014, -0.025, 0.02), (0.014, 0.025, 0.141))])   # flange makes it widest
+    _mesh(stage, "/World/S/Plunger", [((-0.014, -0.014, 0.0), (0.014, 0.014, 0.128))])  # out the bottom
+    spec, notes = propose_pipette(stage, "/World/S", {"single_stage": True})
+    p = spec["joints"][0]
+    assert p["child_prim"].endswith("Plunger") and p["axis"] == "Z"
+    # push: seal 0.128 up to the tip 0.141 (95% of 13 mm); pull: down toward the back 0.02 (90% of 108 mm)
+    assert (p["lower_limit"], p["upper_limit"]) == pytest.approx((-0.0972, 0.01235), abs=1e-4)
 
 
 def test_eyeglass_temples_fold_inward_about_the_front_corners():

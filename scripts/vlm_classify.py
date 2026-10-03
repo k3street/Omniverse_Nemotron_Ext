@@ -226,8 +226,10 @@ def set_class(asset_id: str, cls: str, why: str) -> str:
 
     qf = QUEUE_DIR / f"{asset_id}.json"
     entry = json.loads(qf.read_text())
-    if entry.get("report", {}).get("structure", {}).get("joints"):
-        return f"{asset_id}: has joints - not rebuilt"
+    # an authored articulation is never rebuilt; the fixed joints set
+    # physics makes inside each object of a set are rebuilt with it
+    if any(f.startswith("articulate_asset") for f in entry.get("applied_fixes", [])):
+        return f"{asset_id}: has an authored articulation - not rebuilt"
     entry["class_hint"], entry["class_source"] = cls, "curated"
     entry["report"] = run_report(entry["file"], cls)
     factor = entry["report"].get("suggested_scale_correction")

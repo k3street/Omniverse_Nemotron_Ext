@@ -214,3 +214,14 @@ def test_each_object_of_a_set_is_its_own_rigid_articulation(tmp_path):
     masses = [stage.GetPrimAtPath(f"/Asset/{n}").GetAttribute("physics:mass").Get()
               for n in ("Glass", "Liquid", "Pipette", "Bulb")]
     assert sum(masses) == pytest.approx(0.1, rel=1e-3)
+
+
+def test_a_pestle_resting_in_its_mortar_is_a_separate_object(tmp_path):
+    from ingest_asset import object_groups
+
+    f = _stage_with(tmp_path / "mortar.usda", {
+        "Bowl": ((-0.06, -0.06, 0.0), (0.06, 0.06, 0.07)),
+        "Pestle": ((-0.01, -0.01, 0.02), (0.01, 0.06, 0.15)),     # in the bowl, standing out of it
+    })
+    stage = Usd.Stage.Open(str(f))
+    assert sorted(sorted(m.GetName() for m in g) for g in object_groups(stage, "/Asset")) == [["Bowl"], ["Pestle"]]

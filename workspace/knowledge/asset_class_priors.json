@@ -2268,7 +2268,7 @@
     1.0,
     4.0
    ],
-   "articulable": true,
+   "articulable": false,
    "typical_materials": [
     "plastic_abs"
    ],
