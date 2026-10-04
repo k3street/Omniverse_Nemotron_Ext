@@ -295,6 +295,15 @@ for j in primaries:
             {"seconds": 0.5, "label": "hold", "moves": {}},
             {"seconds": 0.4 * T, "label": f"{j['name']} back", "moves": {j["name"]: (far, rest, None)}},
         ]
+        # the other way too, where the joint has real travel that way (a pair
+        # of pliers opens AND closes; closing is where the jaws meet)
+        near = j["lower"] if far == j["upper"] else j["upper"]
+        if abs(near - rest) >= max(0.15 * abs(far - rest), 1.0 if j["revolute"] else 0.002):
+            segments += [
+                {"seconds": 0.4 * T, "label": f"{j['name']} to {near:g}", "moves": {j["name"]: (rest, near, None)}},
+                {"seconds": 0.5, "label": "hold", "moves": {}},
+                {"seconds": 0.4 * T, "label": f"{j['name']} back", "moves": {j["name"]: (near, rest, None)}},
+            ]
 
 # --- scene dressing and camera (session layer) --------------------------------
 

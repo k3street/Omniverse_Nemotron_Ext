@@ -922,3 +922,21 @@ def test_joints_past_an_articulations_link_limit_become_maximal(tmp_path, monkey
     out = {p.GetName() for p in stage.Traverse() if p.IsA(UsdPhysics.Joint)
            and p.GetAttribute("physics:excludeFromArticulation").Get()}
     assert out == {f"key_{i:02d}" for i in range(hub.ARTICULATION_MAX_JOINTS, 70)} | {"trim_on_key_69"}
+
+
+def test_pliers_without_a_pin_pivot_where_the_arms_cross_not_mid_handle():
+    from pivot_draft import propose_pivot
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/P")
+    # two arms crossing at the origin: handles 0.15 m out at +-20 deg off -X,
+    # jaws 0.04 m the other way; both run the tool's length, so the middle of
+    # their bounding boxes' overlap is mid-handle (x ~ -0.05)
+    _rotated_bar(stage, "/World/P/ArmA", 0.15, 0.012, 0.0, 160.0, tail=0.04 / 0.15)
+    _rotated_bar(stage, "/World/P/ArmB", 0.15, 0.012, 0.0004, 200.0, tail=0.04 / 0.15)
+    spec, notes = propose_pivot(stage, "/World/P", {"open_deg": 30})
+    pivot = next(j for j in spec["joints"] if j["name"] == "pivot")
+    assert pivot["axis"] == "Z"
+    assert pivot["anchor"][:2] == pytest.approx([0.0, 0.0], abs=0.01)

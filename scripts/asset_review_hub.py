@@ -422,9 +422,9 @@ def unarticulate(entry: dict, why: str) -> str:
     layer.Save()
     entry["applied_fixes"] = entry.get("applied_fixes", []) + [f"unarticulated: {why}"]
     _re_ingest(entry)
-    note = apply_rigid_physics(entry)
+    note = apply_rigid_physics(entry, provisional=True)
     if note:
-        entry["applied_fixes"].append(note)
+        entry["applied_fixes"].append(f"provisional (until articulated): {note}")
     _re_ingest(entry)
     return f"articulation removed ({stripped} prims stripped); {note or 'no rigid physics (class still articulable)'}"
 

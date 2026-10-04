@@ -3052,8 +3052,9 @@
    ],
    "mechanism_templates": {
     "pivot": {
-     "_doc": "two jaw/handle arms on a revolute pivot at the rivet",
-     "open_deg": 30
+     "_doc": "two jaw/handle arms on a revolute pivot at the rivet; closing stops where the jaws meet",
+     "open_deg": 30,
+     "jaws_meet": true
     }
    },
    "source": "curated",

@@ -65,7 +65,9 @@ def _prompt(entry: dict, joint: str, info: dict, value: float) -> str:
         "(other joints at rest; the camera does not move).\n"
         "Judge the MOTION, not the model's looks: is the part that moved the part that moves on the real object, "
         "about (or along) the right axis, the right way, through a plausible range - without passing through "
-        "another part, detaching, or the whole object moving instead? If you cannot see a difference, say so and "
+        "another part, detaching, or the whole object moving instead? Parts joined at the pivot must stay joined "
+        "there: a jaw or head pulling away from its mate means the pivot is in the wrong place. "
+        "If you cannot see a difference, say so and "
         "answer motion_ok false. A red ring marks the joint's pivot where one is drawn: the part turns about it.\n"
         + measured_motion(entry, joint)
     )
@@ -225,17 +227,25 @@ def critique(asset_id: str, which: str = "claude") -> dict:
         if not vals or max(vals) == 0.0:
             verdicts[name] = {"motion_ok": False, "problem": "the joint never moved in the animation"}
             continue
-        far = max(range(min(len(vals), len(frames))), key=lambda i: vals[i])
+        n = min(len(vals), len(frames))
+        signed = [float(rows[i][col]) if rows[i].get(col) not in (None, "") else 0.0 for i in range(n)]
+        # each way the joint went (pliers open AND close), if it went far that way
+        extremes = [max(range(n), key=lambda i: signed[i]), min(range(n), key=lambda i: signed[i])]
+        top = max(abs(signed[i]) for i in extremes)
+        extremes = [i for i in extremes if abs(signed[i]) >= 0.15 * top]
         cam, pivot = summary.get("camera"), summary["joints"][name].get("pivot_world")
-        marks = (project(pivot, cam, 0), project(pivot, cam, far)) if cam and pivot and \
-            summary["joints"][name].get("type") == "revolute" else (None, None)
-        image = _side_by_side(frames[0], frames[far], out_dir / f"{name}.png", marks, cam if marks[0] else None)
-        try:
-            v = judge(image, _prompt(entry, name, summary["joints"][name], float(rows[far][col])), which)
-        except Exception as ex:  # noqa: BLE001 - fail closed
-            v = {"motion_ok": False, "problem": f"judge error: {str(ex)[:160]}"}
-        v["image"] = str(image.relative_to(REPO))
-        verdicts[name] = v
+        for k, far in enumerate(extremes):
+            key = name if k == 0 else f"{name} (other way)"
+            marks = (project(pivot, cam, 0), project(pivot, cam, far)) if cam and pivot and \
+                summary["joints"][name].get("type") == "revolute" else (None, None)
+            image = _side_by_side(frames[0], frames[far], out_dir / f"{name}{'_b' if k else ''}.png", marks,
+                                  cam if marks[0] else None)
+            try:
+                v = judge(image, _prompt(entry, name, summary["joints"][name], signed[far]), which)
+            except Exception as ex:  # noqa: BLE001 - fail closed
+                v = {"motion_ok": False, "problem": f"judge error: {str(ex)[:160]}"}
+            v["image"] = str(image.relative_to(REPO))
+            verdicts[key] = v
     ok = bool(verdicts) and all(v.get("motion_ok") for v in verdicts.values())
     result = {"date": date.today().isoformat(), "judge": which, "pass": ok,
               "joints_judged": len(verdicts), "joints": verdicts}
