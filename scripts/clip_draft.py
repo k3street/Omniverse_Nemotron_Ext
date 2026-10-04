@@ -57,14 +57,29 @@ def propose_clip(stage, asset_root: str, template: dict) -> tuple[dict, list[str
     open_deg = float(template.get("open_deg", 25.0))
     preload = float(template.get("preload_torque_nm", 0.15))
     full = float(template.get("full_torque_nm", 0.4))
-    k = (full - preload) / open_deg                         # N m per degree
     # opening the +length end: b swings away from a there. A turn of +q
     # about the hinge axis moves +length toward +sep when (hinge, length,
     # sep) is a right-handed cycle.
     right_handed = (hinge, length, sep) in ((0, 1, 2), (1, 2, 0), (2, 0, 1))
     away = 1.0 if cb[sep] > ca[sep] else -1.0
     sign = away * (1.0 if right_handed else -1.0)
+    # which end opens: squeezing the handles opens the jaws until the handles
+    # meet; turned the other way the shut jaws run into each other at once.
+    # So the way with more room before the halves meet is the opening, and it
+    # stops there (measured: a peg opened at its handle end, jaws through jaws)
+    from swing_contact import swing_until_contact
+
+    span = float(max(max(sa), max(sb)))
+    room = {d: swing_until_contact(stage, [a["path"]], [b["path"]], fulcrum, hinge, d, span) for d in (1.0, -1.0)}
+    roomy = {d: (v if v is not None else float("inf")) for d, v in room.items()}
+    if roomy[-sign] > roomy[sign]:
+        sign = -sign
+    if room[sign] is not None:
+        if room[sign] < 2.0:
+            raise RuntimeError(f"the halves meet within {room[sign]:g} deg either way: no room to open")
+        open_deg = min(open_deg, room[sign])
     lims = sorted([0.0, sign * open_deg])
+    k = (full - preload) / open_deg                         # N m per degree
     joints = [{"name": "clip_hinge", "joint_type": "revolute", "parent_prim": a["path"], "child_prim": b["path"],
                "axis": names[hinge], "lower_limit": round(lims[0], 2), "upper_limit": round(lims[1], 2),
                "anchor": [round(float(v), 6) for v in fulcrum],
@@ -75,7 +90,8 @@ def propose_clip(stage, asset_root: str, template: dict) -> tuple[dict, list[str
         joints.append({"name": f"spring_{len(joints):02d}" if p in between else f"part_{len(joints):02d}",
                        "joint_type": "fixed", "parent_prim": a["path"], "child_prim": p["path"]})
     notes = [f"halves {Path(a['path']).name} and {Path(b['path']).name} hinge about {names[hinge]} at the spring; "
-             f"shut until {preload:g} N m, {open_deg:g} deg open at {full:g} N m (opening the +{names[length]} end: CHECK)"]
+             f"shut until {preload:g} N m, {open_deg:g} deg open at {full:g} N m - the way with room before "
+             f"the halves meet (CHECK which end is the jaw)"]
     return {"prim_path": asset_root, "fixed_base": False, "approximation": "convexHull", "joints": joints,
             "_analysis": {"tier": "clip", "notes": notes},
             "_instructions": "Clip drafted from its halves and spring. CHECK which end is the jaw."}, notes

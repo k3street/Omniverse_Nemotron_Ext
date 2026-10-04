@@ -113,6 +113,42 @@ def measured_motion(entry: dict, joint: str) -> str:
     return f"Measured from the joint (not from the image): the part slides {what}.{where}"
 
 
+def overtravel(entry: dict, joint: str) -> str | None:
+    """A measured check the judge cannot be fooled on: does the joint's limit
+    turn the child past where it first runs into its parent? PhysX never
+    collides two links joined by a joint, so a limit past contact puts them
+    through each other (scissors' rings, a peg's jaws). Returns the problem,
+    or None."""
+    try:
+        spec = json.loads(entry.get("articulation_draft") or "{}")
+        j = next(x for x in spec.get("joints", []) if x["name"] == joint)
+    except (StopIteration, ValueError):
+        return None
+    if j.get("joint_type") != "revolute" or not j.get("anchor"):
+        return None
+    from pxr import Usd
+
+    from swing_contact import swing_until_contact
+
+    def side(root):  # a link and the parts fixed to it as its own (a grip on its arm)
+        return [root] + [x["child_prim"] for x in spec["joints"] if x["joint_type"] == "fixed"
+                         and x["parent_prim"] == root and x["name"].startswith(("half_part", "arm_part"))]
+
+    stage = Usd.Stage.Open(entry["file"])
+    span = float(entry.get("report", {}).get("max_dim_m") or 0.2)
+    axis = "XYZ".index(j["axis"])
+    out = []
+    for d, lim in ((1.0, j["upper_limit"]), (-1.0, j["lower_limit"])):
+        if d * lim <= 0.5:
+            continue
+        meet = swing_until_contact(stage, side(j["parent_prim"]), side(j["child_prim"]), j["anchor"], axis, d, span,
+                                   max_deg=abs(lim) + 5)
+        if meet is not None and abs(lim) > meet + 2.0:
+            out.append(f"the limit {lim:g} deg turns it {abs(lim) - meet:.1f} deg past where it meets its mate "
+                       f"({d * meet:g} deg): the parts pass through each other")
+    return "; ".join(out) or None
+
+
 def _frames(asset_id: str):
     d = ANIM_DIR / asset_id
     summary = json.loads((d / "summary.json").read_text())
@@ -246,6 +282,10 @@ def critique(asset_id: str, which: str = "claude") -> dict:
                 v = {"motion_ok": False, "problem": f"judge error: {str(ex)[:160]}"}
             v["image"] = str(image.relative_to(REPO))
             verdicts[key] = v
+    for name in _pick_joints(summary):
+        problem = overtravel(entry, name)
+        if problem:
+            verdicts[f"{name} (measured)"] = {"motion_ok": False, "problem": problem}
     ok = bool(verdicts) and all(v.get("motion_ok") for v in verdicts.values())
     result = {"date": date.today().isoformat(), "judge": which, "pass": ok,
               "joints_judged": len(verdicts), "joints": verdicts}

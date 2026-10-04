@@ -622,8 +622,13 @@ def test_clothes_peg_halves_hinge_at_the_spring_and_are_held_shut_by_its_preload
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
     UsdGeom.Xform.Define(stage, "/World")
     UsdGeom.Xform.Define(stage, "/World/Peg")
-    _mesh(stage, "/World/Peg/Left", [((-0.008, -0.036, 0.0), (0.0, 0.036, 0.007))])
-    _mesh(stage, "/World/Peg/Right", [((0.0, -0.036, 0.0), (0.008, 0.036, 0.007))])
+    # jaws (+Y) shut against each other; the handles (-Y) 6 mm apart, so
+    # squeezing them opens the jaws until they meet, ~10 deg - short of the
+    # class's 25 (opening further would put them through each other)
+    _mesh(stage, "/World/Peg/Left", [((-0.008, 0.0, 0.0), (0.0, 0.036, 0.007)),
+                                     ((-0.008, -0.036, 0.0), (-0.003, 0.0, 0.007))])
+    _mesh(stage, "/World/Peg/Right", [((0.0, 0.0, 0.0), (0.008, 0.036, 0.007)),
+                                      ((0.003, -0.036, 0.0), (0.008, 0.0, 0.007))])
     _mesh(stage, "/World/Peg/Spring", [((-0.006, -0.012, -0.001), (0.006, 0.008, 0.008))])
     spec, notes = propose_clip(stage, "/World/Peg", {"open_deg": 25, "preload_torque_nm": 0.12, "full_torque_nm": 0.35})
     hinge = spec["joints"][0]
@@ -631,7 +636,7 @@ def test_clothes_peg_halves_hinge_at_the_spring_and_are_held_shut_by_its_preload
     k, target = hinge["stiffness"], hinge["target"]
     lo, hi = hinge["lower_limit"], hinge["upper_limit"]
     open_end = lo if abs(lo) > abs(hi) else hi
-    assert abs(open_end) == 25 and 0.0 in (lo, hi)
+    assert 7.0 <= abs(open_end) <= 12.0 and 0.0 in (lo, hi)
     # at rest (closed, 0) the spring presses shut with the preload; fully open with the full torque
     assert k * abs(target) == pytest.approx(0.12, rel=1e-2)
     assert k * abs(target - open_end) == pytest.approx(0.35, rel=1e-2)
@@ -940,3 +945,34 @@ def test_pliers_without_a_pin_pivot_where_the_arms_cross_not_mid_handle():
     pivot = next(j for j in spec["joints"] if j["name"] == "pivot")
     assert pivot["axis"] == "Z"
     assert pivot["anchor"][:2] == pytest.approx([0.0, 0.0], abs=0.01)
+
+
+# --- where a turning part meets its mate (PhysX never collides joined links) ---
+
+def _blades(stacked: bool):
+    """Two bars 4 mm wide and 3 mm thick reaching from 30 mm to 100 mm out
+    from a pin at the origin, 20 deg apart (clear of each other at rest): a
+    layer apart (scissor blades) or in one layer (pliers' jaws). In one layer
+    they meet when 2*asin(0.002/0.03) ~ 7.6 deg apart, after ~12 deg."""
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/S")
+    _mesh(stage, "/World/S/A", [((0.03, -0.002, 0.0), (0.1, 0.002, 0.003))])
+    b = _mesh(stage, "/World/S/B", [((0.03, -0.002, 0.003 if stacked else 0.0), (0.1, 0.002, 0.006 if stacked else 0.003))])
+    import math
+    c, s = math.cos(math.radians(20)), math.sin(math.radians(20))
+    b.GetPointsAttr().Set([Gf.Vec3f(c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]) for p in b.GetPointsAttr().Get()])
+    return stage
+
+
+def test_a_turning_part_meets_its_mate_in_one_layer_and_slides_past_it_a_layer_apart():
+    from swing_contact import swing_until_contact
+
+    # B lies 20 deg counter-clockwise of A; turning it clockwise (-) closes on A
+    one_layer = swing_until_contact(_blades(False), ["/World/S/A"], ["/World/S/B"], (0, 0, 0.0015), 2, -1.0, 0.11)
+    assert one_layer is not None and 9.0 <= one_layer <= 15.0
+    assert swing_until_contact(_blades(False), ["/World/S/A"], ["/World/S/B"], (0, 0, 0.0015), 2, 1.0, 0.11,
+                               max_deg=90) is None
+    stacked = swing_until_contact(_blades(True), ["/World/S/A"], ["/World/S/B"], (0, 0, 0.003), 2, -1.0, 0.11)
+    assert stacked is None

@@ -160,10 +160,7 @@ def propose_pivot(stage, asset_root: str, template: dict) -> tuple[dict, list[st
     normal = np.linalg.svd(both_pts - both_pts.mean(0), full_matrices=False)[2][2]
     axis = int(np.argmax(np.abs(normal)))
     plane = [k for k in range(3) if k != axis]
-    if pins:
-        pin = min(pins, key=lambda p: math.dist(p["centroid"], (np.array(a["centroid"]) + b["centroid"]) / 2))
-        pivot = np.array(pin["centroid"])
-    else:
+    if True:
         # no pin modelled: where the arms lie over each other. Not the middle
         # of their bounding boxes' overlap - two arms of a pair of pliers both
         # run the tool's length, so that is mid-handle, and an arm turning
@@ -217,6 +214,19 @@ def propose_pivot(stage, asset_root: str, template: dict) -> tuple[dict, list[st
             else:
                 best = min(inner, key=lambda q: np.linalg.norm(q.mean(0) - cross))
             pivot[plane] = best.mean(0)
+        # a small part there is the pin (a bolt, a rivet); one elsewhere is not
+        # (a secateurs' spring rivet sat nearer the arms' middle than its bolt)
+        stack = np.vstack(patches) if shared else np.zeros((0, 2))
+
+        def on_stack(p):
+            c = np.array(p["centroid"])[plane]
+            return math.dist(c, pivot[plane]) <= 0.08 * span or (
+                len(stack) and np.min(np.linalg.norm(stack - c, axis=1)) <= 1.5 * cell)
+
+        near = [p for p in pins if on_stack(p)]
+        if near:
+            pin = min(near, key=lambda p: math.dist(np.array(p["centroid"])[plane], pivot[plane]))
+            pivot = np.array(pin["centroid"])
 
     def long_axis(part):
         pts = _half_points(stage, part)[:, plane]
@@ -241,21 +251,24 @@ def propose_pivot(stage, asset_root: str, template: dict) -> tuple[dict, list[st
     open_deg = max(float(template.get("open_deg", 60)), abs(theta))
     # the joint measures b relative to a: closed is -theta, open is s*open-theta
     lims = sorted([round(-theta, 2), round(s * open_deg - theta, 2)])
-    contact = None
-    if template.get("jaws_meet"):
-        # pliers close until the jaws meet (the handles still apart), not to
-        # the arms' long axes lining up (bent arms make that angle meaningless).
-        # Closing the jaws closes the handles too, so closing is the way b
-        # lands on a soonest, away from the rivet; opening is the other way.
-        both = {d: _closing_contact(stage, a, b, pivot, plane, axis, span, d) for d in (1.0, -1.0)}
-        hit = [d for d in both if both[d] is not None]
-        if hit:
-            d = min(hit, key=lambda k: both[k])
-            contact = both[d]
-            far = float(template.get("open_deg", 60))
-            if both[-d] is not None:
-                far = min(far, max(0.0, both[-d]))
-            lims = sorted([round(d * contact, 2), round(-d * far, 2)])
+    # each way, the halves turn until they meet - PhysX never collides two
+    # links joined by a joint, so the limit is the contact: pliers' jaws,
+    # scissors' finger rings (blades slide past a layer apart, not inside each
+    # other). Where they never meet, the class's opening (at least as modelled).
+    from swing_contact import swing_until_contact
+
+    reach = {d: swing_until_contact(stage, a["paths"], b["paths"], pivot, axis, d, span) for d in (1.0, -1.0)}
+    contact = min((v for v in reach.values() if v is not None), default=None)
+    if contact is not None:
+        # closing is the way they meet soonest; opening is the class's travel
+        # counted from closed (bent arms make the modelled angle unreliable),
+        # unless they meet sooner that way too
+        shut = min((d for d in reach if reach[d] is not None), key=lambda d: reach[d])
+        travel = float(template.get("open_deg", 60))
+        wide = max(0.0, travel - reach[shut])
+        if reach[-shut] is not None:
+            wide = min(wide, reach[-shut])
+        lims = sorted([round(shut * reach[shut], 2), round(-shut * wide, 2)])
     names = "XYZ"
     joints = [{"name": "pivot", "joint_type": "revolute", "parent_prim": a["path"], "child_prim": b["path"],
                "axis": names[axis], "lower_limit": lims[0], "upper_limit": lims[1],
@@ -275,7 +288,8 @@ def propose_pivot(stage, asset_root: str, template: dict) -> tuple[dict, list[st
     notes = [f"arms {Path(a['path']).name} and {Path(b['path']).name}, "
              f"pivot about {names[axis]} at {'the pin ' + Path(pin['path']).name if pin else 'their overlap'}; "
              f"modelled {abs(theta):.0f} deg open"
-             + (f", jaws meet after closing {contact:.1f} deg" if contact is not None else "")]
+             + (f", the halves meet after {contact:.1f} deg (limits {lims[0]:g}..{lims[1]:g})"
+                if contact is not None else "")]
     return {"prim_path": asset_root, "fixed_base": False, "approximation": "convexDecomposition",
             "joints": joints,
             "_analysis": {"tier": "pivot", "modelled_open_deg": round(theta, 1), "notes": notes},
