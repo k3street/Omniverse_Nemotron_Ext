@@ -1039,3 +1039,40 @@ def test_articulate_asset_warns_when_a_limit_runs_past_where_the_parts_meet(caps
         _articulate(stage, spec)
         result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
         assert bool(result.get("over_travel")) is flagged, result.get("warnings")
+
+
+def test_a_caster_is_a_fork_that_swivels_with_its_wheel_spinning_in_it_and_rims_ride_their_wheels():
+    """The geometric drafter took a caster's fork (taller than wide) for its
+    wheel and welded the real wheel to it; a push rim on a drive wheel's axle
+    was left on the frame (wheelchair_01)."""
+    from behaviors import draft_wheeled_base
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/C")
+    _mesh(stage, "/World/C/Frame", [((-0.3, -0.5, 0.25), (0.3, 0.3, 0.6))])
+    for side, x in (("L", -0.33), ("R", 0.33)):
+        _mesh(stage, f"/World/C/Drive{side}", [((x - 0.02, -0.15, 0.0), (x + 0.02, 0.15, 0.3))])     # r = 0.15
+        _mesh(stage, f"/World/C/Rim{side}", [((x - 0.05, -0.14, 0.01), (x - 0.04 if x < 0 else x + 0.05, 0.14, 0.29))])
+        _mesh(stage, f"/World/C/Fork{side}", [((x / 1.2 - 0.02, -0.62, 0.02), (x / 1.2 + 0.02, -0.56, 0.2))])
+        _mesh(stage, f"/World/C/Caster{side}", [((x / 1.2 - 0.015, -0.64, 0.0), (x / 1.2 + 0.015, -0.54, 0.1))])
+    # the drafter's view: forks as the caster "wheels", real wheels welded to them, rims on the frame
+    spec = {"prim_path": "/World/C", "joints": [
+        {"name": "wheel_L_0", "joint_type": "revolute", "axis": "X", "parent_prim": "/World/C/Frame", "child_prim": "/World/C/DriveL"},
+        {"name": "wheel_R_0", "joint_type": "revolute", "axis": "X", "parent_prim": "/World/C/Frame", "child_prim": "/World/C/DriveR"},
+        {"name": "wheel_L_1", "joint_type": "revolute", "axis": "X", "parent_prim": "/World/C/Frame", "child_prim": "/World/C/ForkL"},
+        {"name": "wheel_R_1", "joint_type": "revolute", "axis": "X", "parent_prim": "/World/C/Frame", "child_prim": "/World/C/ForkR"},
+        {"name": "m0", "joint_type": "fixed", "parent_prim": "/World/C/ForkL", "child_prim": "/World/C/CasterL"},
+        {"name": "m1", "joint_type": "fixed", "parent_prim": "/World/C/ForkR", "child_prim": "/World/C/CasterR"},
+        {"name": "f0", "joint_type": "fixed", "parent_prim": "/World/C/Frame", "child_prim": "/World/C/RimL"},
+        {"name": "f1", "joint_type": "fixed", "parent_prim": "/World/C/Frame", "child_prim": "/World/C/RimR"}]}
+    b, notes = draft_wheeled_base(stage, spec)
+    name = lambda p: p.rsplit("/", 1)[-1]  # noqa: E731
+    casters = {name(m["fork"]): name(m["wheel"]) for m in b["mechanisms"]}
+    assert casters == {"ForkL": "CasterL", "ForkR": "CasterR"}
+    for m in b["mechanisms"]:
+        assert m["pivot"][2] == pytest.approx(0.2, abs=1e-3)          # the top of the fork's stem
+    parent = {name(j["child_prim"]): name(j["parent_prim"]) for j in spec["joints"]}
+    assert parent["RimL"] == "DriveL" and parent["RimR"] == "DriveR"
+    assert sorted(b["drive_left"] + b["drive_right"]) == ["wheel_L_0", "wheel_R_0"]

@@ -151,6 +151,8 @@ def overtravel(entry: dict, joint: str) -> str | None:
 
 
 def _reached(v: dict) -> bool:
+    if v.get("unlimited"):            # no stops: it turned a sweep each way
+        return v["measured_range"][0] <= 0.9 * v["limits"][0] and v["measured_range"][1] >= 0.9 * v["limits"][1]
     far = v["limits"][1] if abs(v["limits"][1]) >= abs(v["limits"][0]) else v["limits"][0]
     got = v["measured_range"][1] if far > 0 else v["measured_range"][0]
     return abs(got - far) <= 0.1 * abs(far) + 1e-4

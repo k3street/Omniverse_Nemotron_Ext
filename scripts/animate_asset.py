@@ -107,7 +107,8 @@ for prim in stage.Traverse():
     revolute = prim.IsA(UsdPhysics.RevoluteJoint)
     lower = prim.GetAttribute("physics:lowerLimit").Get()
     upper = prim.GetAttribute("physics:upperLimit").Get()
-    if lower is None or upper is None or not math.isfinite(lower) or not math.isfinite(upper):
+    unlimited = lower is None or upper is None or not math.isfinite(lower) or not math.isfinite(upper)
+    if unlimited:                       # a spindle, a wheel, a caster: swept a turn each way
         lower, upper = (-180.0, 180.0) if revolute else (-0.1, 0.1)
     gate = prim.GetCustomDataByKey("simReady:gate")
     w0, w1 = xf.GetLocalToWorldTransform(stage.GetPrimAtPath(b0[0])), xf.GetLocalToWorldTransform(stage.GetPrimAtPath(b1[0]))
@@ -124,6 +125,7 @@ for prim in stage.Traverse():
         "follower": any(s.startswith("PhysxMimicJointAPI") for s in prim.GetAppliedSchemas()),
         "gate": json.loads(gate) if isinstance(gate, str) else gate,
         "authored": _authored_drive(prim, revolute),
+        "unlimited": unlimited,
     })
 # a composed scene can hold two assets with a joint of the same name
 _names = [j["name"] for j in joints]
@@ -434,7 +436,10 @@ with Usd.EditContext(stage, stage.GetSessionLayer()):
         bbox.ComputeWorldBound(stage.GetPrimAtPath(root_links[0])).ComputeAlignedRange().GetMin()[2] \
         > lo[2] + 0.3 * size[2]
     rolls = any(b.get("type") == "wheeled_base" for b in behaviors)   # it must be free to drive
-    if not anchored and not rolls and (args.hold or size[2] > 1.5 * max(size[0], size[1]) or root_floats):
+    # a power tool is run in a hand: loose on the floor, a chuck spun to 2250
+    # deg/s flings the body by reaction (electric_drill_1 left the scene)
+    in_hand = any(b.get("type") == "motor" for b in behaviors)
+    if not anchored and not rolls and (args.hold or in_hand or size[2] > 1.5 * max(size[0], size[1]) or root_floats):
         if root_links:
             UsdPhysics.FixedJoint.Define(stage, "/AnimView/Hold").CreateBody1Rel().SetTargets([root_links[0]])
             anchored = True
@@ -691,6 +696,7 @@ for path, r in rules.items():
 for j in joints:
     meas = [r[f"{j['name']}_meas"] for r in log_rows]
     entry = {"type": "revolute" if j["revolute"] else "prismatic", "limits": [j["lower"], j["upper"]],
+             "unlimited": j["unlimited"],
              "measured_range": [round(min(meas), 4), round(max(meas), 4)], "follower": j["follower"]}
     if not j["follower"]:
         # tracking error outside gate checks, where the joint is meant to be stopped

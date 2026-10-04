@@ -124,15 +124,43 @@ def draft_wheeled_base(stage, spec: dict, up: int = 2) -> tuple[dict | None, lis
     if len(wheels) < 2:
         return None, ["no wheel joints (wheel_L_*, wheel_R_*) to drive"]
     parts = {p["path"]: p for p in collect_parts(stage, spec["prim_path"])}
+    def round_across(p, ax):
+        a, b = (p["size"][k] for k in range(3) if k != ax)
+        return min(a, b) >= 0.85 * max(a, b) > 0
+
     info = []
+    drafted = {j["child_prim"] for j in wheels}
     for j in wheels:
         p = parts.get(j["child_prim"])
         if p is None:
             continue
         ax = "XYZ".index(j["axis"])
+        fork = None
+        if not round_across(p, ax):
+            # not round about its axle: a caster's fork (taller than wide), the
+            # wheel is the round part beside it (wheelchair_01's fork spun about
+            # the axle with its wheel welded on)
+            near = [q for q in parts.values() if q["path"] not in drafted and round_across(q, ax)
+                    and np.linalg.norm(np.array(q["centroid"]) - p["centroid"]) < 1.5 * max(p["size"])]
+            if near:
+                fork, p = p, min(near, key=lambda q: np.linalg.norm(np.array(q["centroid"]) - p["centroid"]))
         across = [p["size"][k] for k in range(3) if k != ax]
-        info.append({"j": j, "ax": ax, "r": 0.5 * max(across), "c": np.array(p["centroid"]),
-                     "side": "drive_left" if j["name"].startswith("wheel_L") else "drive_right"})
+        info.append({"j": j, "ax": ax, "r": 0.5 * max(across), "c": np.array(p["centroid"]), "part": p,
+                     "fork": fork, "side": "drive_left" if j["name"].startswith("wheel_L") else "drive_right"})
+    # what turns with a wheel: round parts on its axle (a tyre, a push rim)
+    # left fixed to the frame (wheelchair_01's left push rim stood still)
+    for w in info:
+        axis = np.eye(3)[w["ax"]]
+        for jj in spec["joints"]:
+            q = parts.get(jj["child_prim"])
+            if jj["joint_type"] != "fixed" or q is None or q is w["part"] or jj["child_prim"] in drafted:
+                continue
+            off = np.array(q["centroid"]) - w["c"]
+            if (np.linalg.norm(off - (off @ axis) * axis) < 0.1 * w["r"] and round_across(q, w["ax"])
+                    and 0.5 * max(q["size"]) >= 0.5 * w["r"] and abs(off @ axis) < 0.6 * w["r"]
+                    and jj["parent_prim"] != w["part"]["path"]):
+                jj["parent_prim"] = w["part"]["path"]
+                jj["name"] = f"{w['j']['name']}_rides_{len(spec['joints'])}"
     if not info:
         return None, ["wheel parts not found"]
     rmax = max(w["r"] for w in info)
@@ -189,11 +217,19 @@ def draft_wheeled_base(stage, spec: dict, up: int = 2) -> tuple[dict | None, lis
     frame = next((j["parent_prim"] for j in wheels), None)
     mechs = []
     for w in casters:
-        mechs.append({"type": "caster", "frame": w["j"]["parent_prim"], "wheel": w["j"]["child_prim"],
-                      "spin_joint": w["j"]["name"], "axle": w["j"]["axis"],
-                      "centre": [round(float(v), 5) for v in w["c"]],
-                      "forward": [round(float(v), 4) for v in f], "trail_m": round(0.4 * w["r"], 4),
-                      "up": "XYZ"[up], "carrier_kg": 0.5})
+        m = {"type": "caster", "frame": w["j"]["parent_prim"], "wheel": w["part"]["path"],
+             "spin_joint": w["j"]["name"], "axle": w["j"]["axis"],
+             "centre": [round(float(v), 5) for v in w["c"]],
+             "forward": [round(float(v), 4) for v in f], "trail_m": round(0.4 * w["r"], 4),
+             "up": "XYZ"[up], "carrier_kg": 0.5}
+        if w["fork"] is not None:
+            # the fork is the swivelling body: it turns about its stem (the top
+            # of the fork, over the wheel's leading side), the wheel spins in it
+            fk = w["fork"]
+            stem = np.array(fk["centroid"], float)
+            stem[up] = fk["max"][up]
+            m.update({"fork": fk["path"], "pivot": [round(float(v), 5) for v in stem]})
+        mechs.append(m)
     b["mechanisms"] = mechs
     notes.append(f"wheeled base: {len(drive)} drive wheels r={b['radius_m'] * 1000:.0f} mm, track "
                  f"{track * 1000:.0f} mm, {len(casters)} swivel casters")

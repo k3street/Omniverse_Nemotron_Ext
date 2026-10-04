@@ -231,6 +231,16 @@ def draft_articulation(entry: dict) -> str:
                 cm = b.pop("mechanisms", [])
                 gone = {m["spin_joint"] for m in cm}
                 spec["joints"] = [j for j in spec["joints"] if j["name"] not in gone]
+                # a modelled fork becomes a caster's swivelling body (add_caster):
+                # its drafted mount to the wheel goes, and anything else hung on
+                # it waits on the frame (the fork is not a link until then)
+                for m in cm:
+                    if m.get("fork"):
+                        spec["joints"] = [j for j in spec["joints"]
+                                          if {j["parent_prim"], j["child_prim"]} != {m["fork"], m["wheel"]}]
+                        for j in spec["joints"]:
+                            if j["parent_prim"] == m["fork"]:
+                                j["parent_prim"] = m["frame"]
                 spec.setdefault("mechanisms", []).extend(cm)
                 spec.setdefault("behaviors", []).append(b)
             spec.setdefault("_analysis", {})["behavior_notes"] = bnotes

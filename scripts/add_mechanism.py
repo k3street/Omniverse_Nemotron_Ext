@@ -431,9 +431,24 @@ def add_caster(stage, asset_root: str, spec: dict) -> dict:
             mc.CreateApproximationAttr().Set("convexHull")
     c = Gf.Vec3d(*spec["centre"])
     f = Gf.Vec3d(*spec["forward"])
-    pivot = c + f * float(spec.get("trail_m", 0.03))
     name = spec.get("spin_joint") or f"{Path(wheel).name}_spin"
-    cp = _carrier(stage, asset_root, f"{name}_caster", list(pivot), float(spec.get("carrier_kg", 0.5)))
+    if spec.get("fork"):
+        # a modelled fork swivels itself: no invisible carrier
+        fork = spec["fork"]
+        _remove_joints_between(stage, joints, frame, fork)
+        _remove_joints_between(stage, joints, fork, wheel)
+        fp = stage.GetPrimAtPath(fork)
+        UsdPhysics.RigidBodyAPI.Apply(fp)
+        UsdPhysics.CollisionAPI.Apply(fp)
+        if fp.IsA(UsdGeom.Mesh):
+            mc = UsdPhysics.MeshCollisionAPI.Apply(fp)
+            if mc.GetApproximationAttr().Get() in (None, "none", "meshSimplification"):
+                mc.CreateApproximationAttr().Set("convexHull")
+        pivot = Gf.Vec3d(*spec["pivot"]) if spec.get("pivot") else c + f * float(spec.get("trail_m", 0.03))
+        cp = fp
+    else:
+        pivot = c + f * float(spec.get("trail_m", 0.03))
+        cp = _carrier(stage, asset_root, f"{name}_caster", list(pivot), float(spec.get("carrier_kg", 0.5)))
     xf = UsdGeom.XformCache(Usd.TimeCode.Default())
     carrier_w = xf.GetLocalToWorldTransform(cp)
     swivel = UsdPhysics.RevoluteJoint.Define(stage, f"{joints}/caster_swivel_{name}")
@@ -451,7 +466,8 @@ def add_caster(stage, asset_root: str, spec: dict) -> dict:
         d.CreateTypeAttr().Set("force")
         d.CreateStiffnessAttr().Set(0.0)
         d.CreateDampingAttr().Set(damp)
-    return {"swivel": str(swivel.GetPath()), "spin": str(spin.GetPath()), "carrier": str(cp.GetPath())}
+    return {"swivel": str(swivel.GetPath()), "spin": str(spin.GetPath()), "carrier": str(cp.GetPath()),
+            "fork": spec.get("fork")}
 
 
 def _remove_joints_between(stage, joints, a, b):
