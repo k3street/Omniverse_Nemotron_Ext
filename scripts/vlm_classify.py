@@ -405,6 +405,8 @@ def classify_entry(asset_id: str) -> str:
                                       "confidence": result.get("confidence")}
     else:
         entry.pop("identity_mismatch", None)
+    from processing import record
+    record(entry, "classify", object_name=result.get("object_name"), asset_class=result.get("asset_class"))
     qf.write_text(json.dumps(entry, indent=1))
     change = (f"{old_class} -> {new_class}" if new_class and new_class != old_class
               else f"confirmed {old_class}" if new_class

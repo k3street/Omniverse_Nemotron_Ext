@@ -191,6 +191,13 @@ def file_assets(asset_ids: list[str], library_root: Path, dry: bool) -> list[str
             shutil.move(str(src), str(target))
     if not dry and log:
         log += relink_sources(str(library_root))
+    if not dry:
+        from asset_review_hub import save_queue_entry
+        from processing import record
+        for a in asset_ids:                     # after the relink, which rewrites entries
+            e = entry_of(a)
+            record(e, "file", folder=folder_for(e))
+            save_queue_entry(e)
     return log
 
 
@@ -298,6 +305,11 @@ def animate(asset_id: str) -> str:
     moving = {k: v for k, v in joints.items() if not v.get("follower")}
     ok = sum(1 for v in moving.values() if reached(v))
     note = f"{ok}/{len(moving)} joints reached their travel in PhysX"
+    from asset_review_hub import save_queue_entry
+    from processing import record
+    e = entry_of(asset_id)
+    record(e, "verify", joints_reached=f"{ok}/{len(moving)}")
+    save_queue_entry(e)
     beh = json.loads(summary.read_text()).get("behaviors") or {}
     runs = [(k, s, r) for k, v in beh.items() for s, r in v.items()]
     if runs:
@@ -333,7 +345,13 @@ def soft_test(asset_id: str) -> str:
     else:
         out = run("scripts/verify_asset_newton.py", "squish", asset_id).stdout
     lines = [ln for ln in out.splitlines() if ln.startswith(("PASS", "FAIL", "ERROR"))]
-    return lines[-1] if lines else "no verdict"
+    verdict = lines[-1] if lines else "no verdict"
+    from asset_review_hub import save_queue_entry
+    from processing import record
+    e = entry_of(asset_id)
+    record(e, "soft", kind=dtype, verdict=verdict[:120])
+    save_queue_entry(e)
+    return verdict
 
 
 # --- the run ---------------------------------------------------------------------
@@ -425,6 +443,8 @@ def process(staged: list[Path], library_root: Path, args, report: dict, incoming
         if bc:
             e["behavior_check"] = bc
             from asset_review_hub import save_queue_entry
+            from processing import record
+            record(e, "behaviors", ok=all(v.get("ok") for v in bc.values()))
             save_queue_entry(e)
             report["assets"][a]["behaviors"] = bc
             short = {k: v["missing"] for k, v in bc.items() if not v["ok"]}

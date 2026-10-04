@@ -386,6 +386,7 @@ ISAAC_SIM_TOOLS = [
             },
         },
     },
+    {"type": "function", "function": {"name": "reprocess_assets", "description": "Re-run the processing stages a fix made stale, on every asset it touches - in the background. Each asset records when each stage (ingest, classify, file, articulate, behaviors, verify, critic, soft) last ran, from which code revision, under which version of that stage's rules (articulation per drafting tier: a pliers fix re-drafts pliers, not drills); assets processed under older rules, or before the ledger existed, are stale. Defaults to a DRY RUN listing what is stale; set dry_run=false to re-run. Default stages: articulate, behaviors, verify, critic (ingest rebuilds derivatives and classify calls the VLM per asset: opt in). Returns a job_id: poll get_asset_job.", "parameters": {"type": "object", "properties": {"dry_run": {"type": "boolean", "description": "Only list what is stale. Default true"}, "stages": {"type": "array", "items": {"type": "string", "enum": ["ingest", "classify", "file", "articulate", "behaviors", "verify", "critic", "soft"]}, "description": "Stages to re-run where stale. Default articulate, behaviors, verify, critic"}, "assets": {"type": "array", "items": {"type": "string"}, "description": "Only these asset ids"}, "classes": {"type": "array", "items": {"type": "string"}, "description": "Only assets of these classes"}, "limit": {"type": "integer", "description": "At most this many assets"}}, "required": []}}},
     {
         "type": "function",
         "function": {

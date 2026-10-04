@@ -78,6 +78,12 @@ def verify(asset_id: str, critic: bool, judge: str, log) -> dict:
     runs = [r for v in out["behaviors"].values() for r in v.values()]
     if runs:
         out["behaviors_ok"] = f"{sum(1 for r in runs if r.get('ok'))}/{len(runs)}"
+    sys.path.insert(0, str(REPO / "scripts"))
+    from processing import record
+    qf = REPO / "workspace" / "review_queue" / f"{asset_id}.json"
+    e = json.loads(qf.read_text())
+    record(e, "verify", joints_reached=out["joints_reached"], behaviors_ok=out.get("behaviors_ok"))
+    qf.write_text(json.dumps(e, indent=1))
     if critic:
         sys.path.insert(0, str(REPO / "scripts"))
         os.environ.update({k: v for k, v in _env().items() if k not in os.environ})
@@ -104,6 +110,26 @@ def downloads(flags: list[str], log) -> dict:
         for a, v in rep.get("assets", {}).items()}}
 
 
+def reprocess(flags: list[str], log) -> dict:
+    """scripts/reprocess.py with the OpenUSD environment process_downloads.sh sets."""
+    env = _env()
+    usd = env.get("USD_INSTALL", "/home/kimate/Documents/Github/openusd_build")
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (f"{usd}/lib/python", str(REPO), env.get("PYTHONPATH", "")) if p)
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(p for p in (f"{usd}/lib", env.get("LD_LIBRARY_PATH", "")) if p)
+    out = subprocess.run(["/usr/bin/python3", str(REPO / "scripts" / "reprocess.py"), *flags], cwd=REPO,
+                         capture_output=True, text=True, env=env)
+    log.write(out.stdout + out.stderr)
+    rep = [ln[7:] for ln in out.stdout.splitlines() if ln.startswith("REPORT ")]
+    if not rep:
+        raise RuntimeError("reprocess wrote no report (see the log)")
+    r = json.loads(Path(rep[-1]).read_text())
+    return {"report": rep[-1], "stages": r.get("stages"), "dry_run": r.get("dry_run"),
+            "assets": len(r.get("assets", {})), "summary": (out.stdout.splitlines() or [""])[0],
+            "failed": {a: {s: v for s, v in d.items() if str(v).startswith("FAILED")}
+                       for a, d in r.get("assets", {}).items()
+                       if any(str(v).startswith("FAILED") for v in d.values())}}
+
+
 def main() -> int:
     job_id, kind, rest = sys.argv[1], sys.argv[2], sys.argv[3:]
     job = {"job_id": job_id, "kind": kind, "args": rest, "status": "running", "started": time.time(),
@@ -116,6 +142,8 @@ def main() -> int:
                                        rest[rest.index("--judge") + 1] if "--judge" in rest else "claude", log)
             elif kind == "downloads":
                 job["result"] = downloads(rest, log)
+            elif kind == "reprocess":
+                job["result"] = reprocess(rest, log)
             else:
                 raise ValueError(f"unknown job kind {kind!r}")
             job["status"] = "done"

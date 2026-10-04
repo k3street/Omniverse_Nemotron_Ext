@@ -340,6 +340,8 @@ def critique(asset_id: str, which: str = "claude") -> dict:
     result = {"date": date.today().isoformat(), "judge": which, "pass": ok,
               "joints_judged": len(verdicts), "joints": verdicts}
     entry["motion_qa"] = result
+    from processing import record
+    record(entry, "critic", judge=which, passed=ok)
     (QUEUE_DIR / f"{asset_id}.json").write_text(json.dumps(entry, indent=1))
     return result
 

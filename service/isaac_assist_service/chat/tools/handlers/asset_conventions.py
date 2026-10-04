@@ -124,6 +124,20 @@ async def _handle_process_downloads(args: Dict) -> Dict:
     return await _run("start_job", {"kind": "downloads", "args": flags}, timeout=60)
 
 
+async def _handle_reprocess_assets(args: Dict) -> Dict:
+    args = args or {}
+    flags = []
+    if args.get("dry_run", True):
+        flags.append("--dry-run")
+    for key, flag in (("stages", "--stages"), ("assets", "--assets"), ("classes", "--classes")):
+        v = args.get(key)
+        if v:
+            flags += [flag, ",".join(v) if isinstance(v, list) else str(v)]
+    if args.get("limit"):
+        flags += ["--limit", str(int(args["limit"]))]
+    return await _run("start_job", {"kind": "reprocess", "args": flags}, timeout=60)
+
+
 async def _handle_get_asset_job(args: Dict) -> Dict:
     try:
         return await _run("job", {"job_id": _need(args, "job_id")}, timeout=60)
@@ -139,3 +153,4 @@ def register(data: Dict, codegen: Dict) -> None:
     data["verify_asset_motion"] = _handle_verify_asset_motion
     data["process_downloads"] = _handle_process_downloads
     data["get_asset_job"] = _handle_get_asset_job
+    data["reprocess_assets"] = _handle_reprocess_assets

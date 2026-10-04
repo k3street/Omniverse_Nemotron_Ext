@@ -412,6 +412,9 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
         + (f", {len(made)} mechanism(s)" if made else "")]
     if mechanisms:
         entry["mechanisms"] = mechanisms
+    from processing import record
+    record(entry, "articulate", tier=(json.loads(spec_text).get("_analysis") or {}).get("tier") or "generic",
+           joints=len(spec.get("joints", [])), mechanisms=len(made))
     _re_ingest(entry)
     verdict = entry["report"].get("verdict", "")
     return f"articulation applied ({len(spec.get('joints', []))} joints) — re-checked: {verdict}"
@@ -460,6 +463,8 @@ def unarticulate(entry: dict, why: str) -> str:
     strip(root)
     layer.Save()
     entry["applied_fixes"] = entry.get("applied_fixes", []) + [f"unarticulated: {why}"]
+    from processing import record
+    record(entry, "articulate", tier="none", undone=why)
     _re_ingest(entry)
     note = apply_rigid_physics(entry, provisional=True)
     if note:

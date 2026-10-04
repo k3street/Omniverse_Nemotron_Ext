@@ -12,7 +12,7 @@ one code path and the service needs no pxr of its own.
     asset_tools.py apply        '{"asset_id": "drill_1", "spec": {...}?, "replace": false}'
     asset_tools.py unarticulate '{"asset_id": "drill_1", "reason": "..."}'
     asset_tools.py behaviors    '{"asset_id": "drill_1"}'
-    asset_tools.py start_job    '{"kind": "verify"|"downloads", "args": [...]}'
+    asset_tools.py start_job    '{"kind": "verify"|"downloads"|"reprocess", "args": [...]}'
     asset_tools.py job          '{"job_id": "..."}'
 
 The last line of output is the JSON result: {"ok": true, ...} or
@@ -98,7 +98,7 @@ def behaviors_(a: dict) -> dict:
 
 def start_job(a: dict) -> dict:
     kind = a["kind"]
-    if kind not in ("verify", "downloads"):
+    if kind not in ("verify", "downloads", "reprocess"):
         raise ValueError(f"unknown job kind {kind!r}")
     if kind == "verify":
         _entry(a["args"][0])

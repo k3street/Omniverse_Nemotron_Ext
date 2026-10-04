@@ -851,6 +851,8 @@ def queue_file(file_path: str, class_hint: str | None = None,
     # looks at the object itself
     entry["class_source"] = "hint" if class_hint else "filename_guess"
     refresh_renders(entry)
+    from processing import record
+    record(entry, "ingest", verdict=entry["report"].get("verdict"))
     QUEUE_DIR.mkdir(parents=True, exist_ok=True)
     (QUEUE_DIR / f"{asset_id}.json").write_text(json.dumps(entry, indent=1))
     return entry
