@@ -3321,6 +3321,7 @@ _approx = {approximation!r}
 _link_mass = {link_mass!r}
 _self_collisions = {bool(args.get("self_collisions", False))!r}
 _static_warnings = {static_warnings!r}
+_scripts_dir = {str(Path(__file__).resolve().parents[5] / "scripts")!r}
 """
     body = """\
 root = stage.GetPrimAtPath(_root_path)
@@ -3458,6 +3459,39 @@ if _fixed_base:
 if not any(_p.IsA(UsdPhysics.Scene) for _p in stage.Traverse()):
     UsdPhysics.Scene.Define(stage, Sdf.Path('/PhysicsScene'))
     result['created_physics_scene'] = '/PhysicsScene'
+
+# 5b. A revolute limit past where its two parts meet puts them through each
+# other: PhysX never collides two links joined by a joint, so the limit is the
+# only stop (scissors' rings, a peg's jaws, pliers closing past their jaws).
+# Measured from geometry (scripts/swing_contact.py); a warning, not a change.
+try:
+    import sys as _sys
+    if _scripts_dir not in _sys.path:
+        _sys.path.insert(0, _scripts_dir)
+    from swing_contact import swing_until_contact as _swing
+    _rng = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]
+                             ).ComputeWorldBound(root).ComputeAlignedRange()
+    _span = max(_rng.GetSize()) if not _rng.IsEmpty() else 0.0
+    _over = []
+    for _j in _joints:
+        if (_j['type'] != 'revolute' or _j['lower'] is None or _j['upper'] is None
+                or _j['upper'] - _j['lower'] >= 300.0 or _j['axis'] not in ('X', 'Y', 'Z') or _span <= 0):
+            continue
+        _a = _j['anchor'] if _j['anchor'] is not None else list(
+            _xf.GetLocalToWorldTransform(stage.GetPrimAtPath(_j['child'])).ExtractTranslation())
+        for _d, _lim in ((1.0, _j['upper']), (-1.0, _j['lower'])):
+            if _d * _lim <= 0.5:
+                continue
+            _meet = _swing(stage, [_j['parent']], [_j['child']], _a, 'XYZ'.index(_j['axis']), _d, _span,
+                           max_deg=abs(_lim) + 5.0)
+            if _meet is not None and abs(_lim) > _meet + 2.0:
+                _over.append(f"joint '{_j['name']}': limit {_lim:g} deg runs {abs(_lim) - _meet:.1f} deg past "
+                             f"where its parts meet ({_d * _meet:g} deg) - they will pass through each other")
+    if _over:
+        result['over_travel'] = _over
+        result.setdefault('warnings', []).extend(_over)
+except Exception as _e:  # the check is advisory
+    result.setdefault('warnings', []).append('contact check skipped: ' + str(_e)[:120])
 
 # 6. Verify before reporting success.
 if not _art_prim.HasAPI(UsdPhysics.ArticulationRootAPI):
