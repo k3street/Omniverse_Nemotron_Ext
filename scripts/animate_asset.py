@@ -382,12 +382,18 @@ def place_camera(u: float):
     az = math.radians(AZ0 - 10 + 20 * u)  # a gentle orbit: before/after frames stay comparable
     target = Gf.Vec3d(center[0], center[1], lo[2] + 0.5 * size[2])
     eye = target + Gf.Vec3d(DIST * math.cos(ELEV) * math.cos(az), DIST * math.cos(ELEV) * math.sin(az), DIST * math.sin(ELEV))
+    CAM[:] = [list(eye), list(target)]
     with Usd.EditContext(stage, stage.GetSessionLayer()):
         cam_xf.ClearXformOpOrder()
         cam_xf.AddTransformOp().Set(Gf.Matrix4d().SetLookAt(eye, target, Gf.Vec3d(0, 0, 1)).GetInverse())
 
 
+CAM: list = []          # the camera of the frame being rendered: [eye, target]
+CAMS: list = []         # one a saved frame, for critics that mark points on the frames
 place_camera(0.0)
+# each joint's pivot at rest, in world space (motion_critic marks it on the frames)
+PIVOTS = {j["name"]: list(xf.GetLocalToWorldTransform(stage.GetPrimAtPath(j["body0"])).Transform(j["lp0"]))
+          for j in joints}
 render_product = rep.create.render_product("/AnimView/Camera", (args.width, args.height))
 rgb = rep.AnnotatorRegistry.get_annotator("rgb")
 rgb.attach([render_product])
@@ -452,6 +458,7 @@ for seg in segments:
         place_camera(min(1.0, (elapsed + i / args.fps) / total))
         rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
         Image.fromarray(rgb.get_data()[:, :, :3]).save(frames_dir / f"f{frame_i:05d}.png")
+        CAMS.append([list(CAM[0]), list(CAM[1])])
         measured = {j["name"]: measure(j) for j in joints}
         for path, r in rules.items():
             a = r["actuator"]
@@ -512,6 +519,11 @@ for j in joints:
         entry["max_tracking_error"] = round(max(errs), 4)
         entry["final_error"] = round(errs[-1], 4)
     summary["joints"][j["name"]] = entry
+summary["camera"] = {"hfov_deg": math.degrees(hfov), "width": args.width, "height": args.height, "up": [0, 0, 1],
+                     "frames": CAMS}
+for name, p in PIVOTS.items():
+    if name in summary["joints"]:
+        summary["joints"][name]["pivot_world"] = p
 (out_dir / "summary.json").write_text(json.dumps(summary, indent=1))
 
 mp4 = out_dir / f"{asset_id}.mp4"

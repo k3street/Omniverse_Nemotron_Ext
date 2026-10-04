@@ -813,3 +813,112 @@ def test_eyeglass_temples_fold_inward_about_the_front_corners():
     riders = {x["child_prim"].rsplit("/", 1)[-1]: x["parent_prim"].rsplit("/", 1)[-1]
               for x in spec["joints"] if x["joint_type"] == "fixed"}
     assert riders["LeftTip"] == "Left"
+
+
+# --- multirotor propellers ------------------------------------------------------
+
+def test_drone_rotors_spin_over_their_motors_and_the_motors_stay_on_the_frame():
+    from rotor_draft import propose_rotors
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Q")
+    _mesh(stage, "/World/Q/Frame", [((-0.04, -0.04, 0.0), (0.04, 0.04, 0.03))])
+    stations = [(0.09, 0.09), (-0.09, 0.09), (-0.09, -0.09), (0.09, -0.09)]
+    for i, (x, y) in enumerate(stations):
+        _mesh(stage, f"/World/Q/Arm{i}", [((min(0, x), y - 0.004, 0.01), (max(0, x), y + 0.004, 0.016))])
+        _mesh(stage, f"/World/Q/Motor{i}", [((x - 0.015, y - 0.015, 0.0), (x + 0.015, y + 0.015, 0.03))])
+        _mesh(stage, f"/World/Q/Bell{i}", [((x - 0.012, y - 0.012, 0.03), (x + 0.012, y + 0.012, 0.036))])
+        _mesh(stage, f"/World/Q/Prop{i}", [((x - 0.06, y - 0.006, 0.036), (x + 0.06, y + 0.006, 0.039))])
+    _mesh(stage, "/World/Q/Spinner0", [((0.085, 0.085, 0.039), (0.095, 0.095, 0.045))])
+    spec, notes = propose_rotors(stage, "/World/Q", {"rpm": 5000})
+    name = lambda p: p.rsplit("/", 1)[-1]  # noqa: E731
+    rotors = [j for j in spec["joints"] if j["joint_type"] == "revolute"]
+    assert len(rotors) == 4 and all(j["axis"] == "Z" for j in rotors)
+    assert sorted(name(j["child_prim"]) for j in rotors) == ["Prop0", "Prop1", "Prop2", "Prop3"]
+    for j in rotors:
+        x, y = stations[int(name(j["child_prim"])[-1])]
+        assert j["anchor"][:2] == pytest.approx([x, y], abs=2e-3)
+    parent = {name(j["child_prim"]): name(j["parent_prim"]) for j in spec["joints"]}
+    assert parent["Spinner0"] == "Prop0"                       # the cap turns with its prop
+    assert all(parent[f"Motor{i}"] == "Frame" for i in range(4))
+    assert len(parent) == 4 * 4 + 1                             # every part but the frame is jointed
+
+
+# --- keyboards: keys fused into one mesh, keys sitting in a deck ----------------
+
+def _keyboard_stage(fused: bool):
+    """A body with a raised back edge (taller than the keys) and 3 x 4 keys
+    sitting on the lower deck, each with a legend on top."""
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/K")
+    _mesh(stage, "/World/K/Body", [((-0.12, -0.05, 0.0), (0.12, 0.05, 0.01)),       # the deck
+                                   ((-0.12, 0.05, 0.0), (0.12, 0.06, 0.025))])      # raised back edge
+    keys = []
+    for r in range(3):
+        for c in range(4):
+            x, y = -0.06 + 0.04 * c, -0.03 + 0.03 * r
+            keys.append(((x - 0.009, y - 0.009, 0.008), (x + 0.009, y + 0.009, 0.016)))
+            keys.append(((x - 0.003, y - 0.003, 0.016), (x + 0.003, y + 0.003, 0.0165)))  # legend
+    if fused:
+        _mesh(stage, "/World/K/Keys", keys)
+    else:
+        for i in range(0, len(keys), 2):
+            _mesh(stage, f"/World/K/Key{i // 2:02d}", [keys[i]])
+            _mesh(stage, f"/World/K/Legend{i // 2:02d}", [keys[i + 1]])
+    return stage
+
+
+def test_key_split_makes_one_part_a_key_with_its_legend():
+    from segment_mesh import split_keys
+
+    stage = _keyboard_stage(fused=True)
+    parts = split_keys(stage, "/World/K/Keys")
+    assert len(parts) == 12
+    assert not stage.GetPrimAtPath("/World/K/Keys").IsActive()
+    for p in parts:                                   # cap + legend: 2 boxes, 12 faces
+        assert len(UsdGeom.Mesh(stage.GetPrimAtPath(p)).GetFaceVertexCountsAttr().Get()) == 12
+
+
+def test_keys_below_a_raised_back_edge_press_into_the_deck_they_sit_on():
+    from button_draft import propose_buttons
+
+    spec, notes = propose_buttons(_keyboard_stage(fused=False), "/World/K", {"max_travel_m": 0.003})
+    buttons = [j for j in spec["joints"] if j.get("_role") == "button"]
+    assert len(buttons) == 12 and all(j["axis"] == "Z" for j in buttons)
+    riders = {j["child_prim"].rsplit("/", 1)[-1]: j["parent_prim"].rsplit("/", 1)[-1]
+              for j in spec["joints"] if j["joint_type"] == "fixed"}
+    assert riders["Legend05"] == "Key05"
+
+
+def test_joints_past_an_articulations_link_limit_become_maximal(tmp_path, monkeypatch):
+    import asset_review_hub as hub
+
+    stage = Usd.Stage.CreateNew(str(tmp_path / "kb.usda"))
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Kb")
+    _mesh(stage, "/World/Kb/Body", [((-0.3, -0.1, 0.0), (0.3, 0.1, 0.01))])
+    joints = []
+    for i in range(70):
+        x = -0.28 + 0.008 * i
+        _mesh(stage, f"/World/Kb/Key{i:02d}", [((x, -0.003, 0.01), (x + 0.006, 0.003, 0.014))])
+        joints.append({"name": f"key_{i:02d}", "joint_type": "prismatic", "parent_prim": "/World/Kb/Body",
+                       "child_prim": f"/World/Kb/Key{i:02d}", "axis": "Z", "lower_limit": -0.003,
+                       "upper_limit": 0.0})
+    _mesh(stage, "/World/Kb/Legend", [((0.27, -0.001, 0.014), (0.273, 0.001, 0.0145))])
+    joints.append({"name": "trim_on_key_69", "joint_type": "fixed", "parent_prim": "/World/Kb/Key69",
+                   "child_prim": "/World/Kb/Legend"})
+    stage.GetRootLayer().Save()
+    monkeypatch.setattr(hub, "_re_ingest", lambda entry: entry.setdefault("report", {"verdict": "ok"}))
+    entry = {"asset_id": "kb", "file": str(tmp_path / "kb.usda")}
+    spec = {"prim_path": "/World/Kb", "fixed_base": False, "approximation": "convexHull", "joints": joints}
+    hub.apply_articulation(entry, json.dumps(spec))
+    stage = Usd.Stage.Open(str(tmp_path / "kb.usda"))
+    out = {p.GetName() for p in stage.Traverse() if p.IsA(UsdPhysics.Joint)
+           and p.GetAttribute("physics:excludeFromArticulation").Get()}
+    assert out == {f"key_{i:02d}" for i in range(hub.ARTICULATION_MAX_JOINTS, 70)} | {"trim_on_key_69"}

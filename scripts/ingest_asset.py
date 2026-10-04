@@ -453,11 +453,13 @@ def _tune_small_colliders(stage, root_path: str) -> int:
     return tuned
 
 
-def apply_rigid_physics(entry: dict) -> str | None:
+def apply_rigid_physics(entry: dict, provisional: bool = False) -> str | None:
     """Author rigid physics on the entry's derivative (deterministic:
     collision + class material + class-plausible mass). Returns a note, or
-    None when not applicable. Never applied to articulable assets — their
-    joints must be authored first."""
+    None when not applicable. Not applied to articulable assets — their
+    joints come first — unless provisional: one rigid body until a reviewer
+    articulates it (articulate_asset re-authors the bodies), so the asset
+    simulates as a solid object meanwhile instead of not at all."""
     import contextlib
     import io
     import types
@@ -466,7 +468,7 @@ def apply_rigid_physics(entry: dict) -> str | None:
     if report.get("skeleton"):
         return ("rigged character (UsdSkel): kinematic animated collider — "
                 "no dynamic rigid body authored")
-    if needs_articulation(report):
+    if needs_articulation(report) and not provisional:
         return None
     dtype = _deformable_type(report)
     if dtype:

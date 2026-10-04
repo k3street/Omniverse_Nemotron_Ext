@@ -11,7 +11,8 @@
    "camera",
    "headphones",
    "television",
-   "speaker"
+   "speaker",
+   "television_with_stand"
   ],
   "Electronics": [
    "game_console_dock",
@@ -26,14 +27,23 @@
    "computer_mouse",
    "laptop",
    "smartphone",
-   "desktop_computer_case"
+   "desktop_computer_case",
+   "multimeter",
+   "power_strip"
   ],
   "Tools": [
    "hand_tool",
    "power_drill",
    "bolt_fastener",
    "screwdriver",
-   "pliers"
+   "pliers",
+   "scissors",
+   "tweezers",
+   "garden_rake",
+   "lawn_mower",
+   "paint_brush",
+   "magnifying_glass",
+   "tool_board"
   ],
   "Garments_Textiles": [
    "clothing_garment",
@@ -46,7 +56,8 @@
    "clothespin",
    "clothes_hanger",
    "washing_machine",
-   "clothes_dryer"
+   "clothes_dryer",
+   "laundry_hamper"
   ],
   "Furniture": [
    "sofa",
@@ -72,7 +83,16 @@
    "appliance_small",
    "appliance_large",
    "trash_can",
-   "box"
+   "box",
+   "pan",
+   "ashtray",
+   "candle_jar",
+   "glassware_collection",
+   "hourglass",
+   "weighing_scale",
+   "bathroom_accessory_set",
+   "bathroom_sink",
+   "toothbrush"
   ],
   "Lab": [
    "funnel",
@@ -81,7 +101,9 @@
    "mortar_and_pestle",
    "microscope",
    "vial",
-   "beaker"
+   "beaker",
+   "lab_glassware_set",
+   "lab_retort_stand"
   ],
   "Medical": [
    "anatomical_organ_model",
@@ -103,7 +125,10 @@
    "oxygen_cylinder_cart",
    "wall_diagnostic_station",
    "micropipette",
-   "face_mask"
+   "face_mask",
+   "dental_handpiece",
+   "dental_scaler",
+   "scrub_sink"
   ],
   "Mobility": [
    "vehicle",
@@ -115,7 +140,8 @@
    "glasses_wearable",
    "wristwatch",
    "ring",
-   "jewelry"
+   "jewelry",
+   "nail_clipper"
   ],
   "Doors": [
    "door",
@@ -128,11 +154,15 @@
   ],
   "Robots": [
    "mobile_robot",
-   "robot_arm"
+   "robot_arm",
+   "quadcopter_drone"
   ],
   "Games": [
    "chess_set",
-   "board_game"
+   "board_game",
+   "rubiks_cube",
+   "chess_piece",
+   "toy_building_brick"
   ]
  },
  "scenes": "Scenes",
@@ -144,6 +174,7 @@
   "covid_19_oral_vaccine_inhaler_prototype": "Medical",
   "medical_forceps_366603": "Medical",
   "hospital_sharps_container": "Medical",
-  "box_of_medical_washcloths": "Medical"
+  "box_of_medical_washcloths": "Medical",
+  "simple_lab_conical_flask": "Lab"
  }
 }

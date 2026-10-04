@@ -2987,7 +2987,9 @@ else:
         _sz = _bbox.GetSize()
         _max_dim = max(_sz[0], _sz[1], _sz[2]) * mpu
         result['max_dim_m'] = round(_max_dim, 4)
-        if _prior:
+        if _max_dim <= 0:
+            _callout('error', 'scale', 'zero-size bounding box — geometry without extent')
+        elif _prior:
             _lo, _hi = _prior['max_dim_m']
             if _max_dim < _lo or _max_dim > _hi:
                 # A wrong size is usually a unit slip (cm or mm authored as

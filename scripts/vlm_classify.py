@@ -120,7 +120,8 @@ def register_provisional_class(result: dict, asset_id: str) -> str | None:
         "keywords": [phrase] if len(tokens) > 1 else sorted(set(tokens)),
         "max_dim_m": [float(dims[0]), float(dims[1])],
         "mass_kg": [float(mass[0]), float(mass[1])],
-        "articulable": bool(result.get("articulable")),
+        # a soft body is simulated as one deformable, never jointed
+        "articulable": bool(result.get("articulable")) and not result.get("deformable_type"),
         **({"deformable": result["deformable_type"]}
            if result.get("deformable_type") else {}),
         "typical_materials": ([result["primary_material"]]
@@ -228,7 +229,10 @@ def set_class(asset_id: str, cls: str, why: str) -> str:
     entry = json.loads(qf.read_text())
     # an authored articulation is never rebuilt; the fixed joints set
     # physics makes inside each object of a set are rebuilt with it
-    if any(f.startswith("articulate_asset") for f in entry.get("applied_fixes", [])):
+    fixes = entry.get("applied_fixes", [])
+    done = [i for i, f in enumerate(fixes) if f.startswith("articulate_asset")]
+    undone = [i for i, f in enumerate(fixes) if f.startswith("unarticulated")]
+    if done and not (undone and undone[-1] > done[-1]):
         return f"{asset_id}: has an authored articulation - not rebuilt"
     entry["class_hint"], entry["class_source"] = cls, "curated"
     entry["report"] = run_report(entry["file"], cls)

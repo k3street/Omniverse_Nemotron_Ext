@@ -201,7 +201,7 @@ def split_mesh_by_box(stage, mesh_path: str, box_min, box_max,
 def _author_parts(stage, mesh_prim, groups) -> list[str]:
     """Author one Mesh prim per (name, faces) group next to `mesh_prim`,
     carrying its attributes; deactivate the original."""
-    from pxr import Gf, Sdf, UsdGeom, UsdShade, Vt
+    from pxr import Gf, Sdf, UsdGeom, UsdShade, UsdSkel, Vt
 
     mesh = UsdGeom.Mesh(mesh_prim)
     points = list(mesh.GetPointsAttr().Get() or [])
@@ -249,6 +249,9 @@ def _author_parts(stage, mesh_prim, groups) -> list[str]:
                     used.append(pi)
                 new_indices.append(seen[pi])
         part.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*points[i]) for i in used]))
+        # an extent: under a SkelRoot, a part without one bounds to a point
+        # (the whole asset measured 0 m)
+        part.CreateExtentAttr(UsdGeom.PointBased.ComputeExtent(part.GetPointsAttr().Get()))
         part.CreateFaceVertexCountsAttr(Vt.IntArray(new_counts))
         part.CreateFaceVertexIndicesAttr(Vt.IntArray(new_indices))
         # normals
@@ -284,6 +287,11 @@ def _author_parts(stage, mesh_prim, groups) -> list[str]:
                     npv.Set([vals[i] for i in fv_sel if i < len(vals)])
                 elif interp == UsdGeom.Tokens.vertex and len(vals) == len(points):
                     npv.Set([vals[i] for i in used])
+                elif interp == UsdGeom.Tokens.vertex and len(vals) == len(points) * pv.GetElementSize():
+                    # several values a point (skinning's joint indices and weights)
+                    es = pv.GetElementSize()
+                    npv.Set([vals[i * es + k] for i in used for k in range(es)])
+                    npv.SetElementSize(es)
                 elif interp == UsdGeom.Tokens.uniform and len(vals) == len(counts):
                     npv.Set([vals[f] for f in faces])
                 else:  # constant or unknown layout — copy as-is
@@ -292,6 +300,16 @@ def _author_parts(stage, mesh_prim, groups) -> list[str]:
                 continue
         if material:
             UsdShade.MaterialBindingAPI.Apply(part.GetPrim()).Bind(material)
+        # a skinned mesh's binding to its skeleton (without it the part is not
+        # skinned, and a SkelRoot bounds over skinned meshes only)
+        if mesh_prim.HasAPI(UsdSkel.BindingAPI):
+            src, dst = UsdSkel.BindingAPI(mesh_prim), UsdSkel.BindingAPI.Apply(part.GetPrim())
+            if src.GetGeomBindTransformAttr().HasAuthoredValue():
+                dst.CreateGeomBindTransformAttr(src.GetGeomBindTransformAttr().Get())
+            if src.GetJointsAttr().HasAuthoredValue():
+                dst.CreateJointsAttr(src.GetJointsAttr().Get())
+            if src.GetSkeletonRel().GetTargets():
+                dst.CreateSkeletonRel().SetTargets(src.GetSkeletonRel().GetTargets())
         # carry the source mesh's local transform
         if xform_ops and xform_ops.Get():
             for op_name in xform_ops.Get():
@@ -304,6 +322,124 @@ def _author_parts(stage, mesh_prim, groups) -> list[str]:
         new_paths.append(str(part_path))
     mesh_prim.SetActive(False)
     return new_paths
+
+
+def split_keys(stage, mesh_path: str, up: int = 2) -> list[str]:
+    """Split a mesh holding a keyboard's (or a panel's) keys into one part a key.
+
+    Each key is several islands - the cap and its legend - stacked over one
+    footprint; split_mesh's merging would weld them all back together. The
+    islands are grouped by footprint (looking down the up axis, one inside
+    the other), and the split is kept only when it finds keys: at least 8
+    groups, most of them a similar size. Returns the new prim paths."""
+    from pxr import Gf, UsdGeom
+
+    mesh_prim = stage.GetPrimAtPath(mesh_path)
+    mesh = UsdGeom.Mesh(mesh_prim)
+    points = list(mesh.GetPointsAttr().Get() or [])
+    counts = list(mesh.GetFaceVertexCountsAttr().Get() or [])
+    indices = list(mesh.GetFaceVertexIndicesAttr().Get() or [])
+    if not counts:
+        return []
+    comps = mesh_components(counts, indices, points)
+    if len(comps) < 8:
+        return []
+    m = UsdGeom.Xformable(mesh_prim).ComputeLocalToWorldTransform(0)
+    world = [m.Transform(Gf.Vec3d(*p)) for p in points]
+    offs = _face_offsets(counts)
+    plane = [k for k in range(3) if k != up]
+    boxes = []
+    for c in comps:
+        vs = [world[indices[offs[f] + k]] for f in c for k in range(counts[f])]
+        boxes.append([(min(v[k] for v in vs), max(v[k] for v in vs)) for k in plane])
+
+    def inside(a, b):
+        """a's centre within b's footprint."""
+        return all(b[i][0] <= 0.5 * (a[i][0] + a[i][1]) <= b[i][1] for i in range(2))
+
+    area = [(b[0][1] - b[0][0]) * (b[1][1] - b[1][0]) for b in boxes]
+    order = sorted(range(len(comps)), key=lambda i: -area[i])
+    owner = {}
+    keys = []
+    for i in order:                       # largest footprints first: they are the caps
+        host = next((k for k in keys if inside(boxes[i], boxes[k[0]])), None)
+        if host is None:
+            keys.append([i])
+        else:
+            host.append(i)
+        owner[i] = host
+    if not 8 <= len(keys) <= 160:          # a full keyboard has ~105 keys; a scan's islands run to hundreds
+        return []
+    import statistics
+    med = statistics.median(area[k[0]] for k in keys)
+    similar = sum(1 for k in keys if 0.2 * med <= area[k[0]] <= 8 * med)
+    if similar < 0.6 * len(keys):
+        return []
+    base_name = mesh_prim.GetName()
+    groups = [(f"{base_name}_key{ki:03d}", [f for i in k for f in comps[i]]) for ki, k in enumerate(keys)]
+    return _author_parts(stage, mesh_prim, groups)
+
+
+def unsegment(stage) -> int:
+    """Undo segmentation in a derivative: remove every authored part
+    (*_partNN, *_keyNNN) and reactivate the meshes they came from. Returns
+    the number of parts removed."""
+    import re
+
+    from pxr import Sdf
+
+    layer = stage.GetRootLayer()
+    gone = 0
+
+    def walk(spec):
+        nonlocal gone
+        for c in list(spec.nameChildren):
+            if re.search(r"_(part\d+|key\d+)$", c.name):
+                del spec.nameChildren[c.name]
+                gone += 1
+            else:
+                if c.HasInfo("active") and not c.GetInfo("active"):
+                    c.ClearInfo("active")
+                walk(c)
+
+    for root in list(layer.rootPrims):
+        walk(root)
+    _ = Sdf
+    return gone
+
+
+def key_split_entry(asset_id: str) -> str:
+    """Split the key meshes of a queue entry's derivative (undoing an earlier
+    generic segmentation that merged them), then re-check it."""
+    from pxr import Usd, UsdGeom
+
+    from ingest_asset import QUEUE_DIR, build_wrapper, propose_category, run_report
+
+    qf = QUEUE_DIR / f"{asset_id}.json"
+    entry = json.loads(qf.read_text())
+    if "original_file" not in entry or not str(entry["file"]).endswith(".usda"):
+        entry.setdefault("original_file", entry["file"])
+        entry["file"] = build_wrapper(entry, None)
+    stage = Usd.Stage.Open(entry["file"])
+    undone = unsegment(stage)
+    stage.GetRootLayer().Save()
+    stage = Usd.Stage.Open(entry["file"])
+    results = {}
+    for prim in list(stage.Traverse()):
+        if prim.IsA(UsdGeom.Mesh) and prim.IsActive():
+            parts = split_keys(stage, str(prim.GetPath()))
+            if parts:
+                results[prim.GetName()] = len(parts)
+    stage.GetRootLayer().Save()
+    entry.setdefault("applied_fixes", []).append(
+        "key split: " + (", ".join(f"{k} -> {v} keys" for k, v in results.items()) or "no key meshes found")
+        + (f" (undid {undone} segmented parts)" if undone else ""))
+    entry["report"] = run_report(entry["file"], entry.get("class_hint"))
+    entry["proposed_category"] = propose_category(entry["report"])
+    qf.write_text(json.dumps(entry, indent=1))
+    if not results:
+        return "no key meshes found"
+    return "split " + ", ".join(f"{k} into {v} keys" for k, v in results.items())
 
 
 def segment_entry(asset_id: str) -> str:

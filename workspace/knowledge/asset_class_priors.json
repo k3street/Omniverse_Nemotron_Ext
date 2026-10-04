@@ -2483,6 +2483,605 @@
    ],
    "source": "curated",
    "curated_on": "2026-10-03"
+  },
+  "bathroom_accessory_set": {
+   "keywords": [
+    "bathroom accessory set"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.45
+   ],
+   "mass_kg": [
+    0.6,
+    2.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "bathroom_accesories",
+   "proposed_on": "2026-10-03"
+  },
+  "spouted_pouch": {
+   "keywords": [
+    "spouted pouch"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.25
+   ],
+   "mass_kg": [
+    0.02,
+    0.6
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "plastic_nylon"
+   ],
+   "source": "vlm",
+   "proposed_by": "blood_bag",
+   "proposed_on": "2026-10-03"
+  },
+  "candle_jar": {
+   "keywords": [
+    "candle jar"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.18
+   ],
+   "mass_kg": [
+    0.3,
+    0.9
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "candle_in_a_glass",
+   "proposed_on": "2026-10-03"
+  },
+  "toy_building_brick": {
+   "keywords": [
+    "toy building brick"
+   ],
+   "max_dim_m": [
+    0.03,
+    0.26
+   ],
+   "mass_kg": [
+    0.005,
+    0.05
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "chinese_chess",
+   "proposed_on": "2026-10-03"
+  },
+  "laundry_hamper": {
+   "keywords": [
+    "laundry hamper"
+   ],
+   "max_dim_m": [
+    0.6,
+    0.95
+   ],
+   "mass_kg": [
+    1.5,
+    5.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "curated",
+   "proposed_by": "clothes_hamper",
+   "proposed_on": "2026-10-03",
+   "_doc": "a fabric bag on a rigid folding frame: simulated as a rigid container",
+   "curated_on": "2026-10-03"
+  },
+  "lawn_mower": {
+   "keywords": [
+    "lawn mower"
+   ],
+   "max_dim_m": [
+    1.3,
+    1.8
+   ],
+   "mass_kg": [
+    20.0,
+    40.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "craftsman_lawnmower",
+   "proposed_on": "2026-10-03"
+  },
+  "quadcopter_drone": {
+   "keywords": [
+    "quadcopter drone",
+    "quadcopter",
+    "drone",
+    "multirotor",
+    "hexacopter"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.4
+   ],
+   "mass_kg": [
+    0.2,
+    0.7
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_on": "2026-10-03",
+   "mechanism_templates": {
+    "rotors": {
+     "_doc": "each propeller spins on its motor",
+     "rpm": 6000
+    }
+   },
+   "curated_on": "2026-10-03"
+  },
+  "dental_handpiece": {
+   "keywords": [
+    "dental handpiece"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.21
+   ],
+   "mass_kg": [
+    0.04,
+    0.12
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "dental_drill",
+   "proposed_on": "2026-10-03"
+  },
+  "weighing_scale": {
+   "keywords": [
+    "weighing scale"
+   ],
+   "max_dim_m": [
+    0.18,
+    0.33
+   ],
+   "mass_kg": [
+    0.4,
+    2.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "electronic_scale",
+   "proposed_on": "2026-10-03"
+  },
+  "garden_rake": {
+   "keywords": [
+    "garden rake"
+   ],
+   "max_dim_m": [
+    1.4,
+    1.9
+   ],
+   "mass_kg": [
+    0.5,
+    1.6
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "gardeners_rake",
+   "proposed_on": "2026-10-03"
+  },
+  "ashtray": {
+   "keywords": [
+    "ashtray"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.18
+   ],
+   "mass_kg": [
+    0.2,
+    0.7
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "glass_ashtray",
+   "proposed_on": "2026-10-03"
+  },
+  "hourglass": {
+   "keywords": [
+    "hourglass"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.25
+   ],
+   "mass_kg": [
+    0.15,
+    0.6
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "hour_glass",
+   "proposed_on": "2026-10-03"
+  },
+  "lab_retort_stand": {
+   "keywords": [
+    "lab retort stand"
+   ],
+   "max_dim_m": [
+    0.35,
+    0.8
+   ],
+   "mass_kg": [
+    1.0,
+    3.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "iron_stand_with_base_and_clamp_arrangement",
+   "proposed_on": "2026-10-03"
+  },
+  "lab_glassware_set": {
+   "keywords": [
+    "lab glassware set"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.5
+   ],
+   "mass_kg": [
+    0.5,
+    2.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "lab_glassware",
+   "proposed_on": "2026-10-03"
+  },
+  "magnifying_glass": {
+   "keywords": [
+    "magnifying glass"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.3
+   ],
+   "mass_kg": [
+    0.05,
+    0.25
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "magnifying_glass",
+   "proposed_on": "2026-10-03"
+  },
+  "room_interior_shell": {
+   "keywords": [
+    "room interior shell"
+   ],
+   "max_dim_m": [
+    3.0,
+    8.0
+   ],
+   "mass_kg": [
+    2000.0,
+    20000.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "concrete"
+   ],
+   "source": "vlm",
+   "proposed_by": "modern_bathroom",
+   "proposed_on": "2026-10-03"
+  },
+  "multimeter": {
+   "keywords": [
+    "multimeter"
+   ],
+   "max_dim_m": [
+    0.13,
+    0.2
+   ],
+   "mass_kg": [
+    0.15,
+    0.45
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "multimeter_free",
+   "proposed_on": "2026-10-03"
+  },
+  "nail_clipper": {
+   "keywords": [
+    "nail clipper"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.09
+   ],
+   "mass_kg": [
+    0.01,
+    0.035
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "curated",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03",
+   "_doc": "the lever swivels on the pin at the jaw end and presses about a horizontal fulcrum - not a scissor pivot (the pivot tier swung it flat about the wrong end); rigid until a lever tier exists"
+  },
+  "paint_brush": {
+   "keywords": [
+    "paint brush"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.32
+   ],
+   "mass_kg": [
+    0.01,
+    0.03
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_pine"
+   ],
+   "source": "vlm",
+   "proposed_by": "paint_brushes",
+   "proposed_on": "2026-10-03"
+  },
+  "tweezers": {
+   "keywords": [
+    "tweezers",
+    "tweezer"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.14
+   ],
+   "mass_kg": [
+    0.01,
+    0.03
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "curated",
+   "proposed_by": "realistic_tweezers",
+   "proposed_on": "2026-10-03",
+   "_doc": "the arms flex at the root - a compliant mechanism, no pin: rigid until flex bodies",
+   "curated_on": "2026-10-03"
+  },
+  "rubiks_cube": {
+   "keywords": [
+    "rubiks cube",
+    "rubik",
+    "twisty puzzle",
+    "rubix"
+   ],
+   "max_dim_m": [
+    0.035,
+    0.07
+   ],
+   "mass_kg": [
+    0.04,
+    0.12
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "rubix_cube_1",
+   "proposed_on": "2026-10-03",
+   "_doc": "the layers turn, but a cube's twist is a puzzle mechanic (rule-gated face rotation), not modelled: rigid",
+   "curated_on": "2026-10-03"
+  },
+  "scrub_sink": {
+   "keywords": [
+    "scrub sink"
+   ],
+   "max_dim_m": [
+    1.2,
+    1.9
+   ],
+   "mass_kg": [
+    45.0,
+    120.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "scrubbing_sink",
+   "proposed_on": "2026-10-03"
+  },
+  "television_with_stand": {
+   "keywords": [
+    "television with stand"
+   ],
+   "max_dim_m": [
+    1.2,
+    1.9
+   ],
+   "mass_kg": [
+    25.0,
+    60.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "tv_glass_table_sketchfab",
+   "proposed_on": "2026-10-03"
+  },
+  "glassware_collection": {
+   "keywords": [
+    "glassware collection"
+   ],
+   "max_dim_m": [
+    0.6,
+    1.2
+   ],
+   "mass_kg": [
+    8.0,
+    20.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "the_ultimate_glass_pack_cups_and_bottles",
+   "proposed_on": "2026-10-03"
+  },
+  "bathroom_sink": {
+   "keywords": [
+    "bathroom sink"
+   ],
+   "max_dim_m": [
+    0.4,
+    0.7
+   ],
+   "mass_kg": [
+    8.0,
+    20.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "bathroom_sink",
+   "proposed_on": "2026-10-03"
+  },
+  "dental_scaler": {
+   "keywords": [
+    "dental scaler"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.19
+   ],
+   "mass_kg": [
+    0.012,
+    0.035
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "dental_pick",
+   "proposed_on": "2026-10-03"
+  },
+  "pliers": {
+   "keywords": [
+    "pliers",
+    "plier",
+    "pincers",
+    "crimper",
+    "crimping tool",
+    "locking pliers",
+    "groove-joint",
+    "wire stripper"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.4
+   ],
+   "mass_kg": [
+    0.08,
+    0.6
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild",
+    "rubber_natural"
+   ],
+   "mechanism_templates": {
+    "pivot": {
+     "_doc": "two jaw/handle arms on a revolute pivot at the rivet",
+     "open_deg": 30
+    }
+   },
+   "source": "curated",
+   "curated_on": "2026-10-03"
+  },
+  "tool_board": {
+   "keywords": [
+    "tool board",
+    "shadow board",
+    "pegboard"
+   ],
+   "max_dim_m": [
+    0.3,
+    1.5
+   ],
+   "mass_kg": [
+    1.0,
+    15.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_pine",
+    "steel_mild"
+   ],
+   "_doc": "a wall board holding a set of tools: each tool its own body",
+   "multi_body": false,
+   "source": "curated",
+   "curated_on": "2026-10-03"
   }
  }
 }

@@ -211,7 +211,8 @@ def draft_articulation(entry: dict) -> str:
              "power_drill": ("drill_draft", "propose_drill", "check the chuck, trigger and battery"),
              "cabinet": ("cabinet_draft", "propose_cabinet", "check drawer travel and door hinge sides"),
              "temples": ("temples_draft", "propose_temples", "check the hinge points"),
-             "buttons": ("button_draft", "propose_buttons", "check travel and press force")}
+             "buttons": ("button_draft", "propose_buttons", "check travel and press force"),
+             "rotors": ("rotor_draft", "propose_rotors", "check which parts spin with each rotor")}
     for key, (module, fn, check) in tiers.items():
         if key in templates:
             spec, notes = getattr(__import__(module), fn)(stage, asset_root, templates[key])
@@ -268,6 +269,9 @@ def draft_articulation(entry: dict) -> str:
             "edit the spec, then Apply")
 
 
+ARTICULATION_MAX_JOINTS = 60   # PhysX: 64 links an articulation, the root among them
+
+
 def apply_articulation(entry: dict, spec_text: str) -> str:
     """Run articulate_asset with the reviewer-edited spec on the derivative."""
     import contextlib
@@ -310,6 +314,24 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
         with contextlib.redirect_stdout(out):
             exec(compile(code, "<articulate>", "exec"), {"__builtins__": __builtins__})
     from pxr import Sdf, UsdPhysics
+
+    # a PhysX articulation holds at most 64 links: past that (a full keyboard
+    # is 100+ keys) the first joints stay in it and the rest become maximal
+    # joints between rigid bodies, as do joints hung on a body that left it
+    names = [j["name"] for j in spec.get("joints", [])]
+    if len(names) > ARTICULATION_MAX_JOINTS:
+        by_name = {p.GetName(): p for p in stage.Traverse() if p.IsA(UsdPhysics.Joint)}
+        out = set(names[ARTICULATION_MAX_JOINTS:])
+        while True:
+            left = {str(t) for n in out if n in by_name for t in UsdPhysics.Joint(by_name[n]).GetBody1Rel().GetTargets()}
+            more = {n for n in names if n not in out and n in by_name
+                    and any(str(t) in left for t in UsdPhysics.Joint(by_name[n]).GetBody0Rel().GetTargets())}
+            if not more:
+                break
+            out |= more
+        for n in out:
+            if n in by_name:
+                by_name[n].CreateAttribute("physics:excludeFromArticulation", Sdf.ValueTypeNames.Bool).Set(True)
 
     if thread:
         # what a mating part needs to know, kept with the asset
@@ -355,6 +377,56 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     _re_ingest(entry)
     verdict = entry["report"].get("verdict", "")
     return f"articulation applied ({len(spec.get('joints', []))} joints) — re-checked: {verdict}"
+
+
+PHYSICS_SCHEMAS = ("PhysicsArticulationRootAPI", "PhysxArticulationAPI", "PhysicsRigidBodyAPI",
+                   "PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", "PhysicsMassAPI",
+                   "PhysicsFilteredPairsAPI", "PhysxCollisionAPI", "PhysxRigidBodyAPI")
+
+
+def unarticulate(entry: dict, why: str) -> str:
+    """Undo an applied articulation: strip from the derivative every joint and
+    physics API it authored (the source file is never touched), then give the
+    asset the rigid physics ingest gives a rigid object."""
+    from pxr import Sdf
+
+    from ingest_asset import apply_rigid_physics
+
+    layer = Sdf.Layer.FindOrOpen(entry["file"])
+    root = layer.GetPrimAtPath(f"/World/{_camel(entry['asset_id'])}")
+    if root is None:
+        return f"no /World/{_camel(entry['asset_id'])} in {entry['file']}"
+    if "Joints" in root.nameChildren:
+        del root.nameChildren["Joints"]
+    stripped = 0
+
+    def strip(spec):
+        nonlocal stripped
+        info = spec.GetInfo("apiSchemas") if spec.HasInfo("apiSchemas") else None
+        if info is not None:
+            items = [i for i in info.prependedItems if i.split(":")[0] not in PHYSICS_SCHEMAS]
+            if len(items) != len(info.prependedItems):
+                stripped += 1
+                if items:
+                    info.prependedItems = items
+                    spec.SetInfo("apiSchemas", info)
+                else:
+                    spec.ClearInfo("apiSchemas")
+        for prop in list(spec.properties):
+            if prop.name.startswith(("physics:", "physx", "drive:", "physxArticulation:")):
+                spec.RemoveProperty(prop)
+        for child in list(spec.nameChildren):
+            strip(child)
+
+    strip(root)
+    layer.Save()
+    entry["applied_fixes"] = entry.get("applied_fixes", []) + [f"unarticulated: {why}"]
+    _re_ingest(entry)
+    note = apply_rigid_physics(entry)
+    if note:
+        entry["applied_fixes"].append(note)
+    _re_ingest(entry)
+    return f"articulation removed ({stripped} prims stripped); {note or 'no rigid physics (class still articulable)'}"
 
 
 # ---------------------------------------------------------------------------

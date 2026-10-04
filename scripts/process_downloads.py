@@ -195,13 +195,37 @@ def file_assets(asset_ids: list[str], library_root: Path, dry: bool) -> list[str
 
 
 def articulate(asset_id: str, dry: bool) -> str:
-    """Segment if fused, draft, and apply a real proposal."""
+    """Segment if fused, draft, and apply a real proposal; an articulable
+    asset left unjointed gets a provisional rigid body."""
+    note = _articulate(asset_id, dry)
+    if dry or "articulation applied" in note or note.startswith(("rigid:", "already")):
+        return note
+    from ingest_asset import apply_rigid_physics
+
+    e = entry_of(asset_id)
+    fixes = " | ".join(e.get("applied_fixes", []))
+    if "physics:" in fixes and fixes.rfind("physics:") > max(fixes.rfind("unarticulated"), fixes.rfind("segmentation"),
+                                                              fixes.rfind("key split")):
+        return note
+    rigid = apply_rigid_physics(e, provisional=True)
+    if rigid:
+        e["applied_fixes"] = e.get("applied_fixes", []) + [f"provisional (until articulated): {rigid}"]
+        from asset_review_hub import save_queue_entry
+        save_queue_entry(e)
+        note += f"; provisional rigid body until articulated ({rigid})"
+    return note
+
+
+def _articulate(asset_id: str, dry: bool) -> str:
     from asset_review_hub import _load_priors_fresh, apply_articulation, draft_articulation
     from ingest_asset import needs_articulation
     from segment_mesh import segment_entry
 
     e = entry_of(asset_id)
-    if any(f.startswith("articulate_asset") for f in e.get("applied_fixes", [])):
+    fixes = e.get("applied_fixes", [])
+    done = [i for i, f in enumerate(fixes) if f.startswith("articulate_asset")]
+    undone = [i for i, f in enumerate(fixes) if f.startswith("unarticulated")]
+    if done and not (undone and undone[-1] > done[-1]):
         return "already articulated"
     prior = _load_priors_fresh().get(class_of(e) or "", {})
     if not (needs_articulation(e.get("report", {})) or prior.get("mechanism_templates")) or prior.get("deformable"):
@@ -214,12 +238,29 @@ def articulate(asset_id: str, dry: bool) -> str:
     try:
         draft = draft_articulation(entry_of(asset_id))
     except Exception as ex:  # noqa: BLE001 - a drafter's refusal is a finding
-        return "; ".join(notes + [f"draft failed: {str(ex)[:160]}"])
+        # a refusal that a split answers is retried once: keys merged into one
+        # mesh (a keyboard), or parts fused into one (a drone's props)
+        from segment_mesh import key_split_entry
+        split = (key_split_entry if "nothing to press" in str(ex)
+                 else segment_entry if "segment the mesh first" in str(ex) and not notes else None)
+        if split is None:
+            return "; ".join(notes + [f"draft failed: {str(ex)[:160]}"])
+        notes.append(split(asset_id))
+        try:
+            draft = draft_articulation(entry_of(asset_id))
+        except Exception as ex2:  # noqa: BLE001
+            return "; ".join(notes + [f"draft failed: {str(ex2)[:160]}"])
     notes.append(draft[:200])
     e = entry_of(asset_id)
     spec = json.loads(e.get("articulation_draft") or "{}")
     if "naive fallback" in draft or any("|" in str(j.get("joint_type", "")) for j in spec.get("joints", [])):
         return "; ".join(notes + ["left for the reviewer (no confident draft)"])
+    tier = (spec.get("_analysis") or {}).get("tier")
+    seen = " ".join((e.get("vlm") or {}).get("visible_moving_parts") or []).lower()
+    if not tier and not any(w in seen for w in ("wheel", "caster", "castor", "roller")):
+        # the generic drafter's joints are wheels; it found "wheels" on a Rubik's
+        # cube and a wrench board. Applied only where the VLM saw wheels too.
+        return "; ".join(notes + ["generic draft, and the VLM saw no wheels: left for the reviewer"])
     if not any(j.get("joint_type") in ("revolute", "prismatic") for j in spec.get("joints", [])):
         # only fixed joints (the generic drafter found no wheel, hinge or slide)
         # is no articulation: leave the rigid body as it is
@@ -250,7 +291,19 @@ def animate(asset_id: str) -> str:
 
     moving = {k: v for k, v in joints.items() if not v.get("follower")}
     ok = sum(1 for v in moving.values() if reached(v))
-    return f"{ok}/{len(moving)} joints reached their travel in PhysX"
+    note = f"{ok}/{len(moving)} joints reached their travel in PhysX"
+    # reaching the travel is not moving right: a vision judge looks at the motion
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        from motion_critic import critique
+
+        try:
+            r = critique(asset_id)
+            bad = [k for k, v in r["joints"].items() if not v.get("motion_ok")]
+            note += ("; motion critic: PASS" if r["pass"] else
+                     f"; motion critic: FAIL on {', '.join(bad[:4])} ({r['joints'][bad[0]].get('problem', '')[:120]})")
+        except Exception as ex:  # noqa: BLE001
+            note += f"; motion critic: not run ({str(ex)[:80]})"
+    return note
 
 
 def soft_test(asset_id: str) -> str:
