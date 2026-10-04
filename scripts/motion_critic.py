@@ -124,8 +124,9 @@ def overtravel(entry: dict, joint: str) -> str | None:
         j = next(x for x in spec.get("joints", []) if x["name"] == joint)
     except (StopIteration, ValueError):
         return None
-    if j.get("joint_type") != "revolute" or not j.get("anchor"):
-        return None
+    if j.get("joint_type") != "revolute" or not j.get("anchor") \
+            or j.get("lower_limit") is None or j.get("upper_limit") is None:
+        return None                                # a spindle or a caster: no stops to run past
     from pxr import Usd
 
     from swing_contact import swing_until_contact
@@ -147,6 +148,49 @@ def overtravel(entry: dict, joint: str) -> str | None:
             out.append(f"the limit {lim:g} deg turns it {abs(lim) - meet:.1f} deg past where it meets its mate "
                        f"({d * meet:g} deg): the parts pass through each other")
     return "; ".join(out) or None
+
+
+def _reached(v: dict) -> bool:
+    far = v["limits"][1] if abs(v["limits"][1]) >= abs(v["limits"][0]) else v["limits"][0]
+    got = v["measured_range"][1] if far > 0 else v["measured_range"][0]
+    return abs(got - far) <= 0.1 * abs(far) + 1e-4
+
+
+def _measured_only(entry: dict, summary: dict) -> dict:
+    """Joints a picture cannot judge, with their verdict from measurement:
+    a slide too short to see (under 6% of the object: a trigger's 10 mm, a switch's 3 mm on a 30 cm
+    drill) or a turn under a few degrees is judged by whether PhysX drove it
+    through its travel; a wheel or caster of a base that drives off under the
+    camera (the whole asset moves) by its behavior's scenarios."""
+    out = {}
+    size = float((entry.get("report") or {}).get("max_dim_m") or 0.0)
+    rolls = {}
+    spec = json.loads(entry.get("articulation_draft") or "{}")
+    beh = summary.get("behaviors") or {}
+    for b in spec.get("behaviors", []):
+        if b.get("type") == "wheeled_base":
+            runs = [r for k, v in beh.items() if k.startswith("wheeled_base") for r in v.values()]
+            ok = bool(runs) and all(r.get("ok") for r in runs)
+            why = "; ".join(f"{k} {'ok' if r.get('ok') else 'FAILED'}" for v in beh.values() for k, r in v.items()
+                            if "moved_m" in r or "yaw_deg" in r)
+            for j in b.get("drive_left", []) + b.get("drive_right", []) + b.get("casters", []):
+                for name in (j, f"caster_swivel_{j}"):
+                    rolls[name] = {"motion_ok": ok, "measured": True,
+                                   "problem": "" if ok else f"the wheeled base did not drive as its law says: {why}"}
+    for name, v in summary.get("joints", {}).items():
+        if v.get("follower"):
+            continue
+        if name in rolls:
+            out[name] = rolls[name]
+            continue
+        travel = max(abs(v["limits"][0]), abs(v["limits"][1]))
+        small = (v.get("type") == "prismatic" and size and travel < 0.06 * size) or \
+                (v.get("type") == "revolute" and travel < 3.0)
+        if small:
+            ok = _reached(v)
+            out[name] = {"motion_ok": ok, "measured": True,
+                         "problem": "" if ok else f"driven {v['measured_range']} of {v['limits']}: short of its travel"}
+    return out
 
 
 def _frames(asset_id: str):
@@ -257,9 +301,13 @@ def critique(asset_id: str, which: str = "claude") -> dict:
     out_dir = ANIM_DIR / asset_id / "motion_qa"
     out_dir.mkdir(exist_ok=True)
     verdicts = {}
+    unseen = _measured_only(entry, summary)
     for name in _pick_joints(summary):
         col = f"{name}_meas"
         vals = [abs(float(r[col])) if r.get(col) not in (None, "") else 0.0 for r in rows]
+        if name in unseen:
+            verdicts[name] = unseen[name]
+            continue
         if not vals or max(vals) == 0.0:
             verdicts[name] = {"motion_ok": False, "problem": "the joint never moved in the animation"}
             continue

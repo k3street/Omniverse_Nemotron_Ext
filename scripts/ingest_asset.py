@@ -219,6 +219,13 @@ def _asset_id_for(file_path: str) -> str:
 
 def _camel(s: str) -> str:
     name = "".join(w.capitalize() for w in s.split("_")) or "Asset"
+    # only characters USD takes in a prim name: Python's \w lets through '²'
+    # ("..._4096px².usdz"), which USD refuses - and that refusal ended a run
+    try:
+        from pxr import Sdf
+        name = "".join(c for c in name if Sdf.Path.IsValidIdentifier("A" + c)) or "Asset"
+    except ImportError:
+        name = re.sub(r"[^0-9A-Za-z_]", "", name) or "Asset"
     # USD prim names cannot start with a digit (e.g. asset '2011_aston_...')
     return name if name[0].isalpha() else f"Asset_{name}"
 

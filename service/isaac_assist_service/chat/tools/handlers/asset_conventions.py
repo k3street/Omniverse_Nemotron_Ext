@@ -114,7 +114,8 @@ async def _handle_process_downloads(args: Dict) -> Dict:
     args = args or {}
     flags = []
     for key, flag in (("dry_run", "--dry-run"), ("delete_duplicates", "--delete-duplicates"),
-                      ("animate", "--animate"), ("soft", "--soft"), ("refile", "--refile")):
+                      ("animate", "--animate"), ("soft", "--soft"), ("refile", "--refile"),
+                      ("resume", "--resume")):
         if args.get(key):
             flags.append(flag)
     for key, flag in (("downloads", "--downloads"), ("library", "--library")):

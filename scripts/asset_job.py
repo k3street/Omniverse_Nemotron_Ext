@@ -52,12 +52,15 @@ def _env() -> dict:
 
 
 def verify(asset_id: str, critic: bool, judge: str, log) -> dict:
+    summary = REPO / "workspace" / "asset_animations" / asset_id / "summary.json"
+    # an earlier run's summary must not pass for this one's (a run that died
+    # in Kit left the old file, and stale results were reported)
+    summary.unlink(missing_ok=True)
     cmd = (f"source {REPO}/scripts/isaac_slot.sh >/dev/null; "
            f"timeout 1200 {ISAAC_PYTHON} {REPO}/scripts/animate_asset.py {asset_id} --seconds-per-joint 3")
-    subprocess.run(["bash", "-c", cmd], cwd=REPO, stdout=log, stderr=subprocess.STDOUT, env=_env())
-    summary = REPO / "workspace" / "asset_animations" / asset_id / "summary.json"
+    rc = subprocess.run(["bash", "-c", cmd], cwd=REPO, stdout=log, stderr=subprocess.STDOUT, env=_env()).returncode
     if not summary.exists():
-        raise RuntimeError("the animation did not finish (see the log)")
+        raise RuntimeError(f"the animation did not finish (exit {rc}; see the log)")
     s = json.loads(summary.read_text())
 
     def reached(v):

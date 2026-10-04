@@ -281,7 +281,11 @@ def draft_articulation(entry: dict) -> str:
             "edit the spec, then Apply")
 
 
-ARTICULATION_MAX_JOINTS = 60   # PhysX: 64 links an articulation, the root among them
+# Past this many joints, the rest leave the articulation as maximal joints.
+# PhysX 4's 64-link limit is not this build's: electric_drill_1 animated with
+# 75 joints in one articulation, and moving its extras out made them collide
+# with the body they sit in (it blew up). Kept as a switch, off.
+ARTICULATION_MAX_JOINTS = 100000
 
 
 def apply_articulation(entry: dict, spec_text: str) -> str:

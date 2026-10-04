@@ -11,7 +11,7 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-10-04T19:39:03+00:00
+Generated: 2026-10-04T20:11:34+00:00
 Tool count: 458
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
@@ -207,6 +207,7 @@ class ProcessDownloadsArgs(BaseModel):
     animate: Optional[bool] = Field(None, description="Animate articulated assets in PhysX. Default false")
     soft: Optional[bool] = Field(None, description="Cloth drape / soft-body squish tests. Default false")
     refile: Optional[bool] = Field(None, description="Instead: re-file library assets by the class folder map")
+    resume: Optional[bool] = Field(None, description="Instead: finish a run that stopped - process every file left in the library's _incoming folder")
     downloads: Optional[str] = Field(None, description="Downloads folder. Default ~/Downloads")
     library: Optional[str] = Field(None, description="Library root. Default ~/Desktop/assets/SketchFab_Assets")
 

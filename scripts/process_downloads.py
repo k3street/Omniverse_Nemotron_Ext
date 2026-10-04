@@ -279,12 +279,13 @@ def _articulate(asset_id: str, dry: bool) -> str:
 
 def animate(asset_id: str) -> str:
     """One Kit at a time: queue on the machine's Isaac slot."""
+    summary = REPO / "workspace" / "asset_animations" / asset_id / "summary.json"
+    summary.unlink(missing_ok=True)          # an earlier run's results must not pass for this one's
     cmd = (f"source {REPO}/scripts/isaac_slot.sh >/dev/null; "
            f"timeout 900 {ISAAC_PYTHON} {REPO}/scripts/animate_asset.py {asset_id} --seconds-per-joint 3")
-    subprocess.run(["bash", "-c", cmd], cwd=REPO, capture_output=True, text=True)
-    summary = REPO / "workspace" / "asset_animations" / asset_id / "summary.json"
+    rc = subprocess.run(["bash", "-c", cmd], cwd=REPO, capture_output=True, text=True).returncode
     if not summary.exists():
-        return "animation failed"
+        return f"animation failed (exit {rc})"
     joints = json.loads(summary.read_text())["joints"]
 
     def reached(v):
@@ -375,7 +376,10 @@ def process(staged: list[Path], library_root: Path, args, report: dict, incoming
     # 4. ingest
     ids = []
     for path in staged:
-        asset_id, verdict = ingest(path)
+        try:
+            asset_id, verdict = ingest(path)
+        except Exception as ex:  # noqa: BLE001 - one bad file is a finding, not the end of the run
+            asset_id, verdict = None, f"ingest failed: {type(ex).__name__}: {str(ex)[:200]}"
         print(f"ingest     {path.name}: {asset_id or 'skipped'} {verdict}")
         if asset_id:
             ids.append(asset_id)
@@ -465,6 +469,21 @@ def unprocessed(library_root: Path) -> list[Path]:
     return out
 
 
+def resume(args) -> dict:
+    """Finish a run that stopped: every USD file still in <library>/_incoming
+    goes through steps 4-8 (one already ingested from there is re-ingested)."""
+    library_root = Path(args.library).expanduser()
+    incoming = library_root / "_incoming"
+    todo = sorted(p for p in incoming.glob("*") if p.suffix.lower() in (".usd", ".usda", ".usdc", ".usdz")
+                  and is_usd(p)) if incoming.exists() else []
+    report = {"started": datetime.now().isoformat(timespec="seconds"), "mode": "resume",
+              "library": str(library_root), "dry_run": args.dry_run, "files": [str(p) for p in todo], "assets": {}}
+    print(f"{len(todo)} file(s) left in {incoming}")
+    if not args.dry_run and todo:
+        process(todo, library_root, args, report, incoming)
+    return report
+
+
 def backfill(args) -> dict:
     library_root = Path(args.library).expanduser()
     todo = unprocessed(library_root)
@@ -507,6 +526,8 @@ def main() -> int:
     ap.add_argument("--animate", action="store_true", help="verify articulated assets in PhysX (slow)")
     ap.add_argument("--soft", action="store_true", help="drape/squish soft assets in Newton")
     ap.add_argument("--refile", action="store_true", help="re-file library assets by the folder map")
+    ap.add_argument("--resume", action="store_true",
+                    help="finish a run that stopped: process every USD file left in <library>/_incoming")
     ap.add_argument("--backfill", action="store_true",
                     help="process library files that have no sim-ready entry yet (in place)")
     ap.add_argument("--limit", type=int, default=0, help="with --backfill: at most this many")
@@ -518,7 +539,7 @@ def main() -> int:
         return 1
     if args.refile:
         return refile(args)
-    report = backfill(args) if args.backfill else run(args)
+    report = backfill(args) if args.backfill else resume(args) if args.resume else run(args)
     runs = REPO / "workspace" / "review_queue" / "_runs"
     runs.mkdir(parents=True, exist_ok=True)
     out = runs / f"downloads_{datetime.now():%Y%m%d_%H%M%S}.json"

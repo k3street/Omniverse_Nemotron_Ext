@@ -903,6 +903,8 @@ def test_keys_below_a_raised_back_edge_press_into_the_deck_they_sit_on():
 def test_joints_past_an_articulations_link_limit_become_maximal(tmp_path, monkeypatch):
     import asset_review_hub as hub
 
+    monkeypatch.setattr(hub, "ARTICULATION_MAX_JOINTS", 60)   # the switch is off by default
+
     stage = Usd.Stage.CreateNew(str(tmp_path / "kb.usda"))
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
