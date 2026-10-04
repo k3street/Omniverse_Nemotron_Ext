@@ -228,7 +228,10 @@ def _articulate(asset_id: str, dry: bool) -> str:
     if done and not (undone and undone[-1] > done[-1]):
         return "already articulated"
     prior = _load_priors_fresh().get(class_of(e) or "", {})
-    if not (needs_articulation(e.get("report", {})) or prior.get("mechanism_templates")) or prior.get("deformable"):
+    # what it should do needs joints too: a class with behaviors (a wheelchair
+    # drives its wheels) is drafted like one with mechanism templates
+    if not (needs_articulation(e.get("report", {})) or prior.get("mechanism_templates") or prior.get("behaviors")) \
+            or prior.get("deformable"):
         return "rigid: nothing to articulate"
     if dry:
         return "would draft"
@@ -292,6 +295,12 @@ def animate(asset_id: str) -> str:
     moving = {k: v for k, v in joints.items() if not v.get("follower")}
     ok = sum(1 for v in moving.values() if reached(v))
     note = f"{ok}/{len(moving)} joints reached their travel in PhysX"
+    beh = json.loads(summary.read_text()).get("behaviors") or {}
+    runs = [(k, s, r) for k, v in beh.items() for s, r in v.items()]
+    if runs:
+        good = sum(1 for _, _, r in runs if r.get("ok"))
+        note += f"; behaviors {good}/{len(runs)} scenarios as the law says" + "".join(
+            f" ({k} {s} FAILED)" for k, s, r in runs if not r.get("ok"))
     # reaching the travel is not moving right: a vision judge looks at the motion
     if os.environ.get("ANTHROPIC_API_KEY"):
         from motion_critic import critique
@@ -400,6 +409,21 @@ def process(staged: list[Path], library_root: Path, args, report: dict, incoming
             note = articulate(a, dry=False)
             report["assets"][a]["articulation"] = note
             print(f"articulate {a}: {note[:200]}")
+    # 7b. what it should do: its class's behaviors and the functions the VLM
+    # saw, against what the draft can do (behaviors.check) - like scale and
+    # materials, a finding for the reviewer when it falls short
+    from behaviors import check as behavior_check
+    for a in ids:
+        e = entry_of(a)
+        bc = behavior_check(e)
+        if bc:
+            e["behavior_check"] = bc
+            from asset_review_hub import save_queue_entry
+            save_queue_entry(e)
+            report["assets"][a]["behaviors"] = bc
+            short = {k: v["missing"] for k, v in bc.items() if not v["ok"]}
+            print(f"behaviors  {a}: " + ("all met" if not short else "; ".join(
+                f"{k} lacks {', '.join(m) or 'a draft'}" for k, m in short.items())))
     # 8. verify
     for a in ids:
         e = entry_of(a)

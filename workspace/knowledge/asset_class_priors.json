@@ -409,9 +409,7 @@
    "keywords": [
     "car",
     "truck",
-    "aston",
-    "wheelchair",
-    "коляска"
+    "aston"
    ],
    "max_dim_m": [
     0.9,
@@ -426,6 +424,9 @@
     "steel_mild",
     "aluminum",
     "rubber_natural"
+   ],
+   "behaviors": [
+    "wheeled_base"
    ]
   },
   "glasses_wearable": {
@@ -2059,7 +2060,10 @@
      "clutch_arc_deg": 300.0,
      "battery_hold_n": 40.0
     }
-   }
+   },
+   "behaviors": [
+    "motor"
+   ]
   },
   "blister_pack": {
    "keywords": [
@@ -3083,6 +3087,60 @@
    "multi_body": false,
    "source": "curated",
    "curated_on": "2026-10-03"
+  },
+  "wheelchair": {
+   "keywords": [
+    "wheelchair",
+    "коляска"
+   ],
+   "max_dim_m": [
+    0.8,
+    1.4
+   ],
+   "mass_kg": [
+    12.0,
+    30.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum",
+    "steel_mild",
+    "rubber_natural"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "_doc": "a manual wheelchair: big drive (push) wheels and swivel casters (behaviors.wheeled_base)",
+   "source": "curated",
+   "curated_on": "2026-10-04"
+  },
+  "power_wheelchair": {
+   "keywords": [
+    "electric wheelchair",
+    "power wheelchair",
+    "power chair",
+    "powered wheelchair"
+   ],
+   "max_dim_m": [
+    0.8,
+    1.4
+   ],
+   "mass_kg": [
+    50.0,
+    150.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild",
+    "plastic_abs",
+    "rubber_natural"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "_doc": "motor-driven wheels steered by a joystick, swivel casters (behaviors.wheeled_base)",
+   "source": "curated",
+   "curated_on": "2026-10-04"
   }
  }
 }

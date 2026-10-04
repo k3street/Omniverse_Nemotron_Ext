@@ -145,6 +145,14 @@ for prim in stage.Traverse():
         rel = json.loads(rel) if isinstance(rel, str) else dict(rel)
         releases.append({"path": str(prim.GetPath()), "name": prim.GetName(), "by": rel["joint"],
                          "travel": float(rel["travel_m"]), "released_at": None})
+# Behaviors (customData `simReady:behaviors` on the asset root, written by a
+# drafting tier through the hub): control laws in scripts/behaviors.py that
+# work the asset - a drill's trigger runs its chuck the way its switch says
+behaviors = []
+for prim in stage.Traverse():
+    bh = prim.GetCustomDataByKey("simReady:behaviors")
+    if bh:
+        behaviors += json.loads(bh) if isinstance(bh, str) else list(bh)
 actuators = {by_name[j["gate"]["actuator_joint"]]["path"] for j in joints if j["gate"]}
 primaries = [j for j in joints if not j["follower"] and j["path"] not in actuators]
 if not joints:
@@ -219,6 +227,32 @@ def set_drive(j, target, stiffness=None, damping=None, max_force=None):
             d.CreateDampingAttr().Set(float(damping))
         if max_force is not None:
             d.CreateMaxForceAttr().Set(float(max_force))
+
+
+def base_root():
+    """The wheeled base's root link: a parent in the joint tree, never a child."""
+    parents = {j["body0"] for j in joints}
+    children = {j["body1"] for j in joints}
+    return sorted(parents - children)[0]
+
+
+def base_pose(path):
+    """(position, yaw deg about Z) of a body from PhysX."""
+    r = px.get_rigidbody_transformation(path)
+    x, y, z, w = r["rotation"]
+    yaw = math.degrees(math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)))
+    return (list(r["position"]), yaw)
+
+
+def set_velocity(j, velocity, damping=5.0, max_force=50.0):
+    """A velocity drive (a motor): no spring, damping toward the speed."""
+    with Usd.EditContext(stage, stage.GetSessionLayer()):
+        prim = stage.GetPrimAtPath(j["path"])
+        d = UsdPhysics.DriveAPI.Apply(prim, "angular" if j["revolute"] else "linear")
+        d.CreateStiffnessAttr().Set(0.0)
+        d.CreateDampingAttr().Set(float(damping))
+        d.CreateMaxForceAttr().Set(float(max_force))
+        d.CreateTargetVelocityAttr().Set(float(velocity))
 
 
 def gains(j):
@@ -305,6 +339,59 @@ for j in primaries:
                 {"seconds": 0.4 * T, "label": f"{j['name']} back", "moves": {j["name"]: (near, rest, None)}},
             ]
 
+# the behaviors, worked as a user would: each scenario sets the inputs, the
+# law drives the output from the inputs PhysX measures, and the output's
+# speed is checked against the law (sign and size)
+for bi, b in enumerate(behaviors):
+    if b.get("type") != "motor" or b.get("output") not in by_name or b.get("throttle") not in by_name:
+        continue
+    t_full = 0.25 * float(b["throttle_full"])          # a quarter squeeze: speed follows the trigger
+    d_name, d_fwd = b.get("direction"), float(b.get("direction_forward") or 0.0)
+    if d_name not in by_name:
+        d_name = None
+
+    def scenario(name, switch_to, battery_off=False):
+        segs = []
+        if d_name:
+            segs.append({"seconds": 0.4, "label": f"motor: switch to {name}",
+                         "moves": {d_name: (0.0, switch_to, None)}, "behavior": {"i": bi, "scenario": name}})
+        segs += [
+            {"seconds": 0.3, "label": f"motor ({name}): battery off" if battery_off else f"motor ({name})",
+             "moves": {}, "behavior": {"i": bi, "scenario": name, "battery_off": battery_off}},
+            {"seconds": 0.5, "label": f"motor ({name}): trigger squeezed",
+             "moves": {b["throttle"]: (0.0, t_full, None)}, "behavior": {"i": bi, "scenario": name}},
+            {"seconds": 1.0, "label": f"motor ({name}): running", "moves": {},
+             "behavior": {"i": bi, "scenario": name, "measure": True}},
+            {"seconds": 0.4, "label": f"motor ({name}): trigger released",
+             "moves": {b["throttle"]: (t_full, 0.0, None)}, "behavior": {"i": bi, "scenario": name}},
+        ]
+        if d_name:
+            segs.append({"seconds": 0.3, "label": f"motor ({name}): switch centred",
+                         "moves": {d_name: (switch_to, 0.0, None)}, "behavior": {"i": bi, "scenario": name}})
+        return segs
+
+    segments += scenario("forward", d_fwd)
+    if d_name:
+        segments += scenario("reverse", -d_fwd)
+        segments += scenario("locked", 0.0)
+    if b.get("power"):
+        segments += scenario("unpowered", d_fwd, battery_off=True)
+
+
+# a wheeled base: driven forward, then turned on the spot; the base's own
+# motion (not the wheels') is what is checked
+for bi, b in enumerate(behaviors):
+    if b.get("type") != "wheeled_base":
+        continue
+    for name, v, w in (("forward", 0.3, 0.0), ("turn_left", 0.0, 0.5)):
+        segments += [
+            {"seconds": 2.0, "label": f"wheeled base: {name}", "moves": {},
+             "behavior": {"i": bi, "scenario": name, "drive": [v, w], "measure": True}},
+            {"seconds": 0.8, "label": f"wheeled base: stop", "moves": {},
+             "behavior": {"i": bi, "scenario": name + "_stop", "drive": [0.0, 0.0]}},
+        ]
+
+
 # --- scene dressing and camera (session layer) --------------------------------
 
 bbox = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
@@ -346,7 +433,8 @@ with Usd.EditContext(stage, stage.GetSessionLayer()):
     root_floats = bool(root_links) and \
         bbox.ComputeWorldBound(stage.GetPrimAtPath(root_links[0])).ComputeAlignedRange().GetMin()[2] \
         > lo[2] + 0.3 * size[2]
-    if not anchored and (args.hold or size[2] > 1.5 * max(size[0], size[1]) or root_floats):
+    rolls = any(b.get("type") == "wheeled_base" for b in behaviors)   # it must be free to drive
+    if not anchored and not rolls and (args.hold or size[2] > 1.5 * max(size[0], size[1]) or root_floats):
         if root_links:
             UsdPhysics.FixedJoint.Define(stage, "/AnimView/Hold").CreateBody1Rel().SetTargets([root_links[0]])
             anchored = True
@@ -427,6 +515,8 @@ steps_per_frame = max(1, round(PHYSICS_HZ / args.fps))
 log_rows, frame_i, elapsed = [], 0, 0.0
 commanded = {j["name"]: rest_of(j) for j in joints}
 gate_results = {}
+behavior_results, powered_state, beh_track = {}, {}, None
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 # rule gates: the gated joint's commands are refused until its actuator has
 # travelled `engage` from rest (tracked from what PhysX measures, not from
 # what was commanded)
@@ -453,12 +543,52 @@ for seg in segments:
         jn = by_name[name]
         k, c = jn["authored"] if name in seg.get("authored_gains", ()) and jn["authored"] else gains(jn)
         set_drive(jn, commanded[name], k, c, cap if cap is not None else 1.0e6)
+    beh = seg.get("behavior")
+    if beh:
+        bdef = behaviors[beh["i"]]
+        res = behavior_results.setdefault(f"{bdef['type']}:{bdef.get('output', 'base')}", {})
+        if beh.get("battery_off") and bdef.get("power"):
+            # the battery pulled off: its press-fit lets go, the tool is unpowered
+            pf = next((p for p in stage.Traverse() if p.GetName() == bdef["power"]), None)
+            if pf is not None:
+                with Usd.EditContext(stage, stage.GetSessionLayer()):
+                    pf.GetAttribute("physics:jointEnabled").Set(False)
+            powered_state[beh["i"]] = False
+        if bdef["type"] == "wheeled_base":
+            from behaviors import wheeled_base as _wb
+            v, w = beh["drive"]
+            for jn, vel in _wb(bdef, v, w).items():
+                if jn in by_name:
+                    set_velocity(by_name[jn], vel, damping=50.0, max_force=1.0e4)
+            for jn in bdef.get("casters", []):
+                # casters roll and swivel free: the joint sweep left position
+                # drives on them, which held them straight (they scrubbed)
+                for k in (jn, f"caster_swivel_{jn}"):
+                    if k in by_name:
+                        set_velocity(by_name[k], 0.0, damping=0.0, max_force=0.0)
+            if beh.get("measure"):
+                root = base_root()
+                beh_track = {"scenario": beh["scenario"], "root": root, "p0": base_pose(root), "t0": clock}
+        elif beh.get("measure"):
+            out_j = by_name[bdef["output"]]
+            beh_track = {"scenario": beh["scenario"], "start": measure(out_j), "t0": clock,
+                         "trigger_cmd": commanded[bdef["throttle"]]}
     peak = 0.0
     for i in range(n):
         u = (i + 1) / n
         for name, (a, b, _) in seg["moves"].items():
             commanded[name] = ease(a, b, u)
             set_drive(by_name[name], commanded[name])
+        if beh and behaviors[beh["i"]]["type"] == "motor":
+            from behaviors import motor as _motor
+            bdef = behaviors[beh["i"]]
+            q = {k: measure(by_name[k]) for k in (bdef["throttle"], bdef.get("direction")) if k in by_name}
+            cmd = _motor(bdef, q, powered_state.get(beh["i"], True))
+            if bdef.get("direction") in by_name and cmd["_state"]["direction"] == 0.0:
+                # centred: the switch locks the trigger - the squeeze is refused
+                commanded[bdef["throttle"]] = 0.0
+                set_drive(by_name[bdef["throttle"]], 0.0)
+            set_velocity(by_name[bdef["output"]], cmd[bdef["output"]])
         for _ in range(steps_per_frame):
             px.update_simulation(DT, clock)
             clock += DT
@@ -489,6 +619,49 @@ for seg in segments:
                          **{f"{n}_cmd": round(commanded[n], 4) for n in commanded},
                          **{f"{n}_meas": round(v, 4) for n, v in measured.items()}})
         frame_i += 1
+    if beh and beh.get("measure") and behaviors[beh["i"]]["type"] == "wheeled_base":
+        bdef = behaviors[beh["i"]]
+        res = behavior_results.setdefault("wheeled_base", {})
+        p0, p1 = beh_track["p0"], base_pose(beh_track["root"])
+        dt_run = clock - beh_track["t0"]
+        fwd = [float(x) for x in bdef.get("forward", [1, 0, 0])]
+        moved = sum((p1[0][k] - p0[0][k]) * fwd[k] for k in range(3))
+        side = math.hypot(p1[0][0] - p0[0][0], p1[0][1] - p0[0][1])
+        yaw = (p1[1] - p0[1] + 180.0) % 360.0 - 180.0
+        v, w = beh["drive"]
+        if beh["scenario"] == "forward":
+            want = v * dt_run
+            ok = 0.6 * want <= moved <= 1.4 * want and abs(yaw) < 15.0
+            res["forward"] = {"moved_m": round(moved, 3), "want_m": round(want, 3), "yaw_deg": round(yaw, 1),
+                              "ok": bool(ok)}
+        else:
+            want = math.degrees(w * dt_run)
+            ok = 0.5 * want <= yaw <= 1.5 * want and side < 0.25
+            res[beh["scenario"]] = {"yaw_deg": round(yaw, 1), "want_deg": round(want, 1),
+                                    "drift_m": round(side, 3), "ok": bool(ok)}
+    elif beh and beh.get("measure"):
+        from behaviors import motor as _motor
+        bdef = behaviors[beh["i"]]
+        out_j = by_name[bdef["output"]]
+        dt_run = clock - beh_track["t0"]
+        got = (measure(out_j) - beh_track["start"]) / max(dt_run, 1e-6)
+        trig = measure(by_name[bdef["throttle"]])
+        q = {bdef["throttle"]: trig}
+        if bdef.get("direction") in by_name:
+            q[bdef["direction"]] = measure(by_name[bdef["direction"]])
+        want = _motor(bdef, q, powered_state.get(beh["i"], True))[bdef["output"]]
+        squeeze = 0.25 * float(bdef["throttle_full"])
+        scen = beh["scenario"]
+        if scen in ("forward", "reverse"):
+            sign = (1.0 if scen == "forward" else -1.0) * float(bdef.get("forward_sign", 1.0))
+            ok = got * sign > 0 and 0.5 * abs(want) <= abs(got) <= 1.5 * abs(want) and abs(want) > 0
+        else:
+            ok = abs(got) < 0.05 * float(bdef.get("max_rpm", 1500.0)) * 6.0 * 0.25
+        res[scen] = {"chuck_deg_s": round(got, 1), "law_deg_s": round(want, 1),
+                     "trigger_travel": round(trig, 5), "trigger_asked": round(squeeze, 5), "ok": bool(ok)}
+        if scen == "locked":
+            res[scen]["trigger_blocked"] = abs(trig) < 0.2 * abs(squeeze)
+            res[scen]["ok"] = bool(ok and res[scen]["trigger_blocked"])
     if seg.get("gate_check"):
         g = by_name[seg["gate_check"]]
         tried = abs(seg["moves"][g["name"]][1] - rest_of(g))
@@ -528,6 +701,7 @@ for j in joints:
         entry["max_tracking_error"] = round(max(errs), 4)
         entry["final_error"] = round(errs[-1], 4)
     summary["joints"][j["name"]] = entry
+summary["behaviors"] = behavior_results
 summary["camera"] = {"hfov_deg": math.degrees(hfov), "width": args.width, "height": args.height, "up": [0, 0, 1],
                      "frames": CAMS}
 for name, p in PIVOTS.items():

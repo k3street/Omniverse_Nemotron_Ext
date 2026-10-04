@@ -222,6 +222,18 @@ def draft_articulation(entry: dict) -> str:
     try:
         from articulation_draft import propose
         spec = propose(stage, asset_root, asset_root)
+        # what it should do (behaviors.expected): a wheeled base drives its wheels
+        from behaviors import draft_wheeled_base, expected
+        if "wheeled_base" in expected(entry):
+            b, bnotes = draft_wheeled_base(stage, spec)
+            if b:
+                # the casters' swivels are mechanisms; their spin joints move into them
+                cm = b.pop("mechanisms", [])
+                gone = {m["spin_joint"] for m in cm}
+                spec["joints"] = [j for j in spec["joints"] if j["name"] not in gone]
+                spec.setdefault("mechanisms", []).extend(cm)
+                spec.setdefault("behaviors", []).append(b)
+            spec.setdefault("_analysis", {})["behavior_notes"] = bnotes
         entry["articulation_draft"] = json.dumps(spec, indent=1)
         save_queue_entry(entry)
         a = spec.get("_analysis", {})
@@ -297,10 +309,19 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     filtered_pairs = spec.pop("filtered_pairs", [])
     mechanisms = spec.pop("mechanisms", [])
     thread = spec.pop("thread", None)
+    behaviors = spec.pop("behaviors", [])
     turntable = spec.pop("turntable", None)
     if any("|" in str(j.get("joint_type", "")) for j in spec.get("joints", [])):
         return "spec still has placeholder joint_type values — edit before applying"
     stage = Usd.Stage.Open(entry["file"])
+    # a provisional rigid body on the root (an asset left unjointed) would swallow
+    # every link under it: PhysX does not nest rigid bodies
+    from pxr import UsdPhysics as _UP
+    _root = stage.GetPrimAtPath(spec["prim_path"])
+    if _root and _root.HasAPI(_UP.RigidBodyAPI):
+        _root.RemoveAPI(_UP.RigidBodyAPI)
+        if _root.HasAPI(_UP.MassAPI):
+            _root.RemoveAPI(_UP.MassAPI)
     omni = types.ModuleType("omni")
     omni_usd = types.ModuleType("omni.usd")
     ctx = type("Ctx", (), {"get_stage": lambda self: stage})()
@@ -338,6 +359,9 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
         stage.GetPrimAtPath(spec["prim_path"]).SetCustomDataByKey("simReady:thread", thread)
     if turntable:
         stage.GetPrimAtPath(spec["prim_path"]).SetCustomDataByKey("simReady:turntable", turntable)
+    if behaviors:
+        # the control laws (behaviors.py) the asset's joints are worked by
+        stage.GetPrimAtPath(spec["prim_path"]).SetCustomDataByKey("simReady:behaviors", json.dumps(behaviors))
 
     for path, kg in link_masses.items():
         UsdPhysics.MassAPI.Apply(stage.GetPrimAtPath(path)).CreateMassAttr().Set(float(kg))
@@ -346,9 +370,9 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     for a, b in filtered_pairs:
         UsdPhysics.FilteredPairsAPI.Apply(stage.GetPrimAtPath(a)).CreateFilteredPairsRel().AddTarget(Sdf.Path(b))
     made = []
-    from add_mechanism import add_couple, add_helix, add_latch, add_press_fit, add_two_stop
+    from add_mechanism import add_caster, add_couple, add_helix, add_latch, add_press_fit, add_two_stop
     builders = {"latch": add_latch, "couple": add_couple, "helix": add_helix,
-                "two_stop": add_two_stop, "press_fit": add_press_fit}
+                "two_stop": add_two_stop, "press_fit": add_press_fit, "caster": add_caster}
     for m in mechanisms:
         if m.get("type") not in builders:
             raise ValueError(f"unknown mechanism type {m.get('type')!r}; known: {sorted(builders)}")
@@ -396,8 +420,9 @@ def unarticulate(entry: dict, why: str) -> str:
     root = layer.GetPrimAtPath(f"/World/{_camel(entry['asset_id'])}")
     if root is None:
         return f"no /World/{_camel(entry['asset_id'])} in {entry['file']}"
-    if "Joints" in root.nameChildren:
-        del root.nameChildren["Joints"]
+    for scope in ("Joints", "Mechanisms"):        # mechanisms' carriers (a thread, a caster) too
+        if scope in root.nameChildren:
+            del root.nameChildren[scope]
     stripped = 0
 
     def strip(spec):

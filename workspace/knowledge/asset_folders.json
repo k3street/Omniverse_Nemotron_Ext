@@ -134,7 +134,8 @@
    "vehicle",
    "crutch",
    "wheelchair",
-   "walker"
+   "walker",
+   "power_wheelchair"
   ],
   "Personal": [
    "glasses_wearable",

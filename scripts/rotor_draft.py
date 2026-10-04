@@ -137,7 +137,7 @@ def propose_rotors(stage, asset_root: str, template: dict) -> tuple[dict, list[s
         on = blades + caps
         hub = max(blades, key=lambda p: max(p["size"][:2]))
         joints.append({"name": f"rotor_{i}", "joint_type": "revolute", "parent_prim": frame["path"],
-                       "child_prim": hub["path"], "axis": "Z", "lower_limit": -720.0, "upper_limit": 720.0,
+                       "child_prim": hub["path"], "axis": "Z", "lower_limit": None, "upper_limit": None,
                        "anchor": [round(float(s["xy"][0]), 6), round(float(s["xy"][1]), 6), round(float(z_b), 6)],
                        "stiffness": 0.0, "damping": 1e-4, "max_force": 1.0, "_role": "rotor"})
         for p in on:

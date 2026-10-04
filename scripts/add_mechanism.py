@@ -402,6 +402,58 @@ def _carrier(stage, asset_root, name, anchor, mass):
     return cp
 
 
+def add_caster(stage, asset_root: str, spec: dict) -> dict:
+    """A swivel caster from a wheel that only spins: a wheelchair's front
+    wheel modelled in one piece with its fork cannot steer, and four wheels
+    fixed in direction scrub instead of turning. The wheel gets a carrier
+    that swivels freely about the vertical through a point a little ahead of
+    the wheel (the trail: the wheel follows behind it, so it turns to follow
+    the travel) and spins on the carrier as before.
+
+    Spec (world, metres): {"frame": <prim>, "wheel": <prim>, "spin_joint":
+    <its joint's name>, "axle": "Y", "centre": [x, y, z], "forward": [fx, fy,
+    0], "trail_m": 0.03, "up": "Z", "carrier_kg": 0.5} - the carrier is about
+    as heavy as the wheel (a light carrier between two joints fails in PhysX).
+    """
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    joints = f"{asset_root}/Joints"
+    frame, wheel = spec["frame"], spec["wheel"]
+    _remove_joints_between(stage, joints, frame, wheel)
+    # the wheel is a link of its own (drafted as a caster, it was never one of
+    # articulate_asset's links): a body that collides, as a convex hull
+    wp = stage.GetPrimAtPath(wheel)
+    UsdPhysics.RigidBodyAPI.Apply(wp)
+    UsdPhysics.CollisionAPI.Apply(wp)
+    if wp.IsA(UsdGeom.Mesh):
+        mc = UsdPhysics.MeshCollisionAPI.Apply(wp)
+        if mc.GetApproximationAttr().Get() in (None, "none", "meshSimplification"):
+            mc.CreateApproximationAttr().Set("convexHull")
+    c = Gf.Vec3d(*spec["centre"])
+    f = Gf.Vec3d(*spec["forward"])
+    pivot = c + f * float(spec.get("trail_m", 0.03))
+    name = spec.get("spin_joint") or f"{Path(wheel).name}_spin"
+    cp = _carrier(stage, asset_root, f"{name}_caster", list(pivot), float(spec.get("carrier_kg", 0.5)))
+    xf = UsdGeom.XformCache(Usd.TimeCode.Default())
+    carrier_w = xf.GetLocalToWorldTransform(cp)
+    swivel = UsdPhysics.RevoluteJoint.Define(stage, f"{joints}/caster_swivel_{name}")
+    swivel.CreateBody0Rel().SetTargets([frame])
+    swivel.CreateBody1Rel().SetTargets([cp.GetPath()])
+    swivel.CreateAxisAttr().Set(spec.get("up", "Z"))
+    _joint_frames(swivel, xf.GetLocalToWorldTransform(stage.GetPrimAtPath(frame)), carrier_w, pivot)
+    spin = UsdPhysics.RevoluteJoint.Define(stage, f"{joints}/{name}")
+    spin.CreateBody0Rel().SetTargets([cp.GetPath()])
+    spin.CreateBody1Rel().SetTargets([wheel])
+    spin.CreateAxisAttr().Set(spec["axle"])
+    _joint_frames(spin, carrier_w, xf.GetLocalToWorldTransform(stage.GetPrimAtPath(wheel)), c)
+    for jp, damp in ((swivel.GetPrim(), 0.002), (spin.GetPrim(), 0.0005)):
+        d = UsdPhysics.DriveAPI.Apply(jp, "angular")
+        d.CreateTypeAttr().Set("force")
+        d.CreateStiffnessAttr().Set(0.0)
+        d.CreateDampingAttr().Set(damp)
+    return {"swivel": str(swivel.GetPath()), "spin": str(spin.GetPath()), "carrier": str(cp.GetPath())}
+
+
 def _remove_joints_between(stage, joints, a, b):
     scope = stage.GetPrimAtPath(joints)
     for j in list(scope.GetChildren()) if scope else []:

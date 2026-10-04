@@ -6,6 +6,7 @@ The physics itself (the latch holding, camming shut) is verified in Isaac by
 scripts/animate_asset.py; these tests pin down what gets authored.
 """
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -976,3 +977,63 @@ def test_a_turning_part_meets_its_mate_in_one_layer_and_slides_past_it_a_layer_a
                                max_deg=90) is None
     stacked = swing_until_contact(_blades(True), ["/World/S/A"], ["/World/S/B"], (0, 0, 0.003), 2, -1.0, 0.11)
     assert stacked is None
+
+
+# --- behaviors: what an object does when worked ------------------------------------
+
+def test_a_drill_motor_runs_by_trigger_switch_and_battery():
+    from behaviors import motor
+
+    b = {"output": "chuck", "throttle": "trigger", "throttle_full": -0.01, "direction": "direction",
+         "direction_forward": 0.003, "max_rpm": 1500.0, "forward_sign": -1.0}
+    run = lambda trig, sw, powered=True: motor(b, {"trigger": trig, "direction": sw}, powered)["chuck"]  # noqa: E731
+    assert run(-0.01, 0.003) == pytest.approx(-9000.0)          # full squeeze, forward: clockwise from behind
+    assert run(-0.0025, 0.003) == pytest.approx(-2250.0)        # speed follows the trigger
+    assert run(-0.01, -0.003) == pytest.approx(9000.0)          # reverse
+    assert run(-0.01, 0.0) == 0.0                               # centred: locked
+    assert run(-0.01, 0.003, powered=False) == 0.0              # battery off
+    assert run(0.002, 0.003) == 0.0                             # pushed the wrong way: nothing
+
+
+def test_a_wheeled_base_turns_its_sides_apart_to_turn():
+    from behaviors import wheeled_base
+
+    b = {"drive_left": ["wl"], "drive_right": ["wr"], "radius_m": 0.3, "track_m": 0.6,
+         "forward_sign": {"wl": 1.0, "wr": -1.0}}
+    straight = wheeled_base(b, 0.3, 0.0)
+    assert straight["wl"] == pytest.approx(math.degrees(1.0)) and straight["wr"] == pytest.approx(-math.degrees(1.0))
+    turn = wheeled_base(b, 0.0, 1.0)                            # left: left side back, right side forward
+    assert turn["wl"] == pytest.approx(-math.degrees(1.0)) and turn["wr"] == pytest.approx(-math.degrees(1.0))
+
+
+def test_what_an_object_should_do_comes_from_its_class_and_what_the_vlm_saw(monkeypatch, tmp_path):
+    import behaviors
+
+    priors = tmp_path / "priors.json"
+    priors.write_text(json.dumps({"classes": {"power_drill": {"behaviors": ["motor"]}, "box": {}}}))
+    monkeypatch.setattr(behaviors, "PRIORS_PATH", priors)
+    drill = {"class_hint": "power_drill", "articulation_draft": json.dumps({
+        "joints": [{"name": "chuck"}, {"name": "trigger"}],
+        "behaviors": [{"type": "motor", "output": "chuck", "throttle": "trigger"}]})}
+    assert behaviors.check(drill)["motor"]["ok"]
+    no_trigger = dict(drill, articulation_draft=json.dumps({"joints": [{"name": "chuck"}]}))
+    r = behaviors.check(no_trigger)["motor"]
+    assert not r["ok"] and not r["present"]
+    seen = {"class_hint": "box", "vlm": {"functions": [{"does": "opens once the key turns", "kind": "gate"}]}}
+    r = behaviors.check(seen)
+    assert set(r) == {"gate"} and r["gate"]["why"].startswith("seen") and not r["gate"]["ok"]
+
+
+def test_articulate_asset_warns_when_a_limit_runs_past_where_the_parts_meet(capsys):
+    """Through the plain tool (and MCP): a hand-written limit that closes two
+    same-layer bars 18 deg when they meet after ~12 is flagged, not applied
+    silently; the same limit on bars a layer apart is not."""
+    for stacked, flagged in ((False, True), (True, False)):
+        stage = _blades(stacked)
+        spec = {"prim_path": "/World/S", "fixed_base": False, "joints": [
+            {"name": "pivot", "joint_type": "revolute", "parent_prim": "/World/S/A", "child_prim": "/World/S/B",
+             "axis": "Z", "lower_limit": -18.0, "upper_limit": 0.0, "anchor": [0.0, 0.0, 0.003]}]}
+        capsys.readouterr()
+        _articulate(stage, spec)
+        result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+        assert bool(result.get("over_travel")) is flagged, result.get("warnings")

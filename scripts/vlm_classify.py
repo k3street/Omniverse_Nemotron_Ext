@@ -74,6 +74,31 @@ def _schema() -> dict:
                              "description": "One object; several separate objects (a chess set, a screw and a "
                                             "loose washer); part of a larger thing (one wall of an elevator "
                                             "car, a lone drawer); or a whole scene or room"},
+            "functions": {
+                "type": "array",
+                "description": "What the real object DOES when used - one entry per function: a drill "
+                               "spins its chuck (trigger sets speed, direction switch sets which way, needs "
+                               "its battery); a powered wheelchair drives on its wheels (joystick, needs "
+                               "power) with front casters swivelling; a crash-bar door opens only once the "
+                               "bar is pushed. Empty for an object that does nothing by itself (a mug).",
+                "items": {"type": "object", "properties": {
+                    "does": {"type": "string", "description": "the function, in a few words"},
+                    "moving_part": {"type": "string", "description": "the part that moves"},
+                    "controls": {"type": "array", "items": {"type": "string"},
+                                 "description": "the parts a user works to make it happen"},
+                    "requires": {"type": "array", "items": {"type": "string"},
+                                 "description": "conditions: power, a battery, a key, another part first"},
+                    "kind": {"type": "string",
+                             "enum": ["manual", "motor", "wheeled_base", "gate", "spring_return",
+                                      "detachable", "other"],
+                             "description": "manual: a part moved by hand (a lid, a drawer); motor: a powered "
+                                            "part whose speed/direction the controls set; wheeled_base: wheels "
+                                            "that drive/roll the object, with steering or swivelling casters; "
+                                            "gate: one part moves only after another (a latch, a lock); "
+                                            "spring_return: snaps back when released (a button, a trigger); "
+                                            "detachable: comes off (a cap, a battery)"}},
+                    "required": ["does", "moving_part", "controls", "requires", "kind"],
+                    "additionalProperties": False}},
             "deformable_type": {"anyOf": [{"type": "string",
                                            "enum": ["cloth", "sponge",
                                                     "rubber", "gel", "rope"]},
@@ -83,7 +108,7 @@ def _schema() -> dict:
         "required": ["object_name", "asset_class", "confidence", "articulable",
                      "visible_moving_parts", "notes", "proposed_class_key",
                      "est_max_dim_m", "est_mass_kg", "primary_material",
-                     "content_kind", "deformable_type"],
+                     "content_kind", "deformable_type", "functions"],
         "additionalProperties": False,
     }
 
@@ -126,6 +151,11 @@ def register_provisional_class(result: dict, asset_id: str) -> str | None:
            if result.get("deformable_type") else {}),
         "typical_materials": ([result["primary_material"]]
                               if result.get("primary_material") else []),
+        # what it does: the behavior conventions the class carries (behaviors.py)
+        **({"behaviors": sorted({f["kind"] for f in result.get("functions") or []
+                                 if f.get("kind") in ("motor", "wheeled_base", "gate")})}
+           if any(f.get("kind") in ("motor", "wheeled_base", "gate") for f in result.get("functions") or [])
+           else {}),
         "source": "vlm",
         "proposed_by": asset_id,
         "proposed_on": _date.today().isoformat(),
