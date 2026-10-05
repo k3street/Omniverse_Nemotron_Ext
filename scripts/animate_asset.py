@@ -76,6 +76,9 @@ for _ in range(20):
     app.update()
 stage = omni.usd.get_context().get_stage()
 px = omni.physx.get_physx_interface()
+pxsim = omni.physx.get_physx_simulation_interface()
+import carb  # noqa: E402
+PUSH: dict = {}         # a push on a pushed base: force on the root link each step
 PHYSICS_HZ = 60
 DT = 1.0 / PHYSICS_HZ
 
@@ -402,6 +405,14 @@ for bi, b in enumerate(behaviors):
 for bi, b in enumerate(behaviors):
     if b.get("type") != "wheeled_base":
         continue
+    if b.get("pushed"):
+        segments += [
+            {"seconds": 2.0, "label": "pushed base: pushed forward", "moves": {},
+             "behavior": {"i": bi, "scenario": "pushed", "drive": [0.0, 0.0], "measure": True, "push": 0.5}},
+            {"seconds": 1.0, "label": "pushed base: let go", "moves": {},
+             "behavior": {"i": bi, "scenario": "pushed_stop", "drive": [0.0, 0.0]}},
+        ]
+        continue
     for name, v, w in (("forward", 0.3, 0.0), ("turn_left", 0.0, 0.5)):
         segments += [
             {"seconds": 2.0, "label": f"wheeled base: {name}", "moves": {},
@@ -599,9 +610,21 @@ for seg in segments:
                 for k in (jn, f"caster_swivel_{jn}"):
                     if k in by_name:
                         set_velocity(by_name[k], 0.0, damping=0.0, max_force=0.0)
+            PUSH.clear()
+            if beh.get("push"):
+                # a hand on the frame: a force for push m/s^2 on the whole
+                # asset's mass, at the root link's middle, along forward
+                root = base_root()
+                total = sum(float(UsdPhysics.MassAPI(q).GetMassAttr().Get() or 0.0) for q in stage.Traverse()
+                            if q.HasAPI(UsdPhysics.MassAPI)) or 50.0
+                f = [beh["push"] * total * float(x) for x in bdef.get("forward", [1, 0, 0])]
+                from pxr import PhysicsSchemaTools
+                PUSH.update(path=PhysicsSchemaTools.sdfPathToInt(root), force=carb.Float3(*f),
+                            stage=omni.usd.get_context().get_stage_id())
             if beh.get("measure"):
                 root = base_root()
-                beh_track = {"scenario": beh["scenario"], "root": root, "p0": base_pose(root), "t0": clock}
+                beh_track = {"scenario": beh["scenario"], "root": root, "p0": base_pose(root), "t0": clock,
+                             "up0": _rot3(root)[:, 2].copy()}
         elif beh.get("measure"):
             out_j = by_name[bdef["output"]]
             beh_track = {"scenario": beh["scenario"], "start": measure(out_j), "t0": clock,
@@ -623,6 +646,9 @@ for seg in segments:
                 set_drive(by_name[bdef["throttle"]], 0.0)
             set_velocity(by_name[bdef["output"]], cmd[bdef["output"]])
         for _ in range(steps_per_frame):
+            if PUSH:
+                c = base_pose(base_root())[0]
+                pxsim.apply_force_at_pos(PUSH["stage"], PUSH["path"], PUSH["force"], carb.Float3(*c), "Force")
             px.update_simulation(DT, clock)
             clock += DT
         # stepping PhysX directly does not publish poses to the renderer
@@ -669,7 +695,15 @@ for seg in segments:
         side = math.hypot(p1[0][0] - p0[0][0], p1[0][1] - p0[0][1])
         yaw = (p1[1] - p0[1] + 180.0) % 360.0 - 180.0
         v, w = beh["drive"]
-        if beh["scenario"] == "forward":
+        if beh["scenario"] == "pushed":
+            # rolls when pushed, without tipping or spinning away
+            import numpy as np
+            tilt = math.degrees(math.acos(max(-1.0, min(1.0, float(np.dot(beh_track["up0"],
+                                                                          _rot3(beh_track["root"])[:, 2]))))))
+            ok = moved >= 0.15 and abs(yaw) < 25.0 and tilt < 15.0
+            res["pushed"] = {"moved_m": round(moved, 3), "yaw_deg": round(yaw, 1), "tilt_deg": round(tilt, 1),
+                             "ok": bool(ok)}
+        elif beh["scenario"] == "forward":
             want = v * dt_run
             ok = 0.6 * want <= moved <= 1.4 * want and abs(yaw) < 15.0
             res["forward"] = {"moved_m": round(moved, 3), "want_m": round(want, 3), "yaw_deg": round(yaw, 1),

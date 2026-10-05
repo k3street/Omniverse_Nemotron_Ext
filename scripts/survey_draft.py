@@ -41,6 +41,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 UP = 2
+FORK = re.compile(r"\b(fork|yoke|swivel (bracket|housing|plate|mount))\b", re.I)
 FASTENER = re.compile(r"\b(screw|bolt|rivet|nut|washer|pin)s?\b", re.I)
 
 
@@ -66,6 +67,53 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
     lo = np.min([g["min"] for g in geo.values()], axis=0)
     hi = np.max([g["max"] for g in geo.values()], axis=0)
     span = float(max(hi - lo))
+    # a wheel is round about its axle, a fork is not: labels read off colours
+    # swap them (the engine crane's box-shaped forks were its "caster wheels")
+    def _round(q):
+        sz = sorted(q["size_m"])
+        return sz[2] > 0 and abs(sz[2] - sz[1]) <= 0.15 * sz[2] and sz[0] < 0.8 * sz[1]
+    for w in list(sparts.values()):
+        if w.get("motion") != "spin" or not re.search(r"wheel|caster|castor|roller", w.get("role") or "", re.I) \
+                or FORK.search(w.get("role") or "") or _round(w):
+            continue
+        f = next((q for q in sparts.values() if q is not w and FORK.search(q.get("role") or "") and _round(q)
+                  and (q["id"] == w.get("relative_to") or q.get("relative_to") == w["id"])), None)
+        if f is None:
+            continue
+        keys = ("role", "motion", "axis", "pivot", "range", "pivot_toward", "reference_part")
+        wv, fv = {k: w.get(k) for k in keys}, {k: f.get(k) for k in keys}
+        rel_w, rel_f = w.get("relative_to"), f.get("relative_to")
+        w.update(fv)
+        f.update(wv)
+        # who hangs on whom flips with the names: the wheel hangs on the fork
+        w["relative_to"], f["relative_to"] = (f["id"] if rel_f == w["id"] else rel_f), \
+                                              (rel_w if rel_w != f["id"] else w["relative_to"])
+        if rel_w == f["id"]:
+            w["relative_to"], f["relative_to"] = rel_f, w["id"]
+
+    # copies of one part (part_survey: identical meshes) each move on their
+    # own: a part per copy, with what was folded in going to its nearest copy
+    siblings: dict = {}
+    for p in [q for q in sparts.values() if len(q.get("copies") or []) > 1]:
+        copies = [c for c in p["copies"] if c in geo]
+        if len(copies) < 2:
+            continue
+        folded = [m for m in p["members"] if m not in p["copies"]]
+        near = {c: [] for c in copies}
+        for m in folded:
+            mc = np.array(geo[m]["centroid"]) if m in geo else np.array(p["centroid"])
+            near[min(copies, key=lambda c: np.linalg.norm(np.array(geo[c]["centroid"]) - mc))].append(m)
+        ids = []
+        for i, c in enumerate(copies):
+            g = geo[c]
+            nid = p["id"] if c == p["path"] else p["id"] * 100 + i
+            sparts[nid] = {**p, "id": nid, "path": c, "members": [c] + near[c], "copies": [],
+                           "size_m": [float(v) for v in np.array(g["max"]) - np.array(g["min"])],
+                           "centroid": [float(v) for v in g["centroid"]], "copy_of": p["id"]}
+            ids.append(nid)
+        if p["path"] not in copies:          # the numbered mesh itself was not a copy (should not happen)
+            sparts.pop(p["id"], None)
+        siblings[p["id"]] = ids
     horiz = sorted((0, 1), key=lambda k: -(hi - lo)[k])            # object's long, short horizontal
     # the body is what the other parts move against - not merely the biggest box:
     # a multimeter's test-lead cable outspans its housing, and hanging the meter
@@ -73,7 +121,12 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
     from collections import Counter
     named = Counter(p.get("relative_to") for p in sparts.values() if p.get("relative_to") in sparts)
     rigid = [p for p in sparts.values() if p.get("motion") != "flex"] or list(sparts.values())
-    body = max(rigid, key=lambda p: (named.get(p["id"], 0), np.prod(p["size_m"])))
+    # and a substantial part that stays put: six wheels name their forks, and
+    # an engine crane hung off a caster fork
+    big = max(np.prod(p["size_m"]) for p in rigid)
+    still = [p for p in rigid if p.get("motion") in (None, "none") and not FORK.search(p.get("role") or "")
+             and np.prod(p["size_m"]) >= 0.1 * big] or rigid
+    body = max(still, key=lambda p: (named.get(p["id"], 0), np.prod(p["size_m"])))
     # a set (two coffee makers in one file): each object has its own body, and a
     # part with no parent named moves against its own object's body
     from ingest_asset import set_members
@@ -89,6 +142,9 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
 
     held_back = []
 
+    _surf: dict = {}
+    forks: set = set()
+
     def contained(p) -> float:
         """Box volume of the other parts whose middles are inside p's box, over
         p's: a housing holds the machine (the K-Slim shell held its
@@ -98,13 +154,49 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
             return 0.0
         gmin, gmax = np.array(g["min"]), np.array(g["max"])
         pad = 0.05 * (gmax - gmin)
-        inside = sum(np.prod(q["size_m"]) for q in sparts.values() if q is not p
-                     and np.all(np.array(q["centroid"]) > gmin + pad) and np.all(np.array(q["centroid"]) < gmax - pad))
+        # what rides on p is p's own (a boom's chain and extension, a leg's
+        # caster): only parts hung elsewhere count as enclosed
+        cands = [q for q in sparts.values() if q is not p and q.get("relative_to") != p["id"]
+                 and np.all(np.array(q["centroid"]) > gmin + pad) and np.all(np.array(q["centroid"]) < gmax - pad)]
+        if not cands:
+            return 0.0
+        # inside its box is not inside it: an engine crane's boom lies on a
+        # diagonal whose box holds half the crane. A housing's surface is on
+        # both sides of what it holds, along every axis.
+        from swing_contact import surface_points
+        cell = 0.02 * float(max(gmax - gmin))
+        if p["id"] not in _surf:
+            _surf[p["id"]] = surface_points(stage, p["members"], cell)
+        sp = _surf[p["id"]]
+        if not len(sp):
+            return 0.0
+
+        def enclosed(c):
+            # both sides along two axes of three: a shell modelled open at the
+            # bottom (or the back) still holds what is in it
+            sides = 0
+            for k in range(3):
+                o = [i for i in range(3) if i != k]
+                ray = sp[np.all(np.abs(sp[:, o] - c[o]) < 3 * cell, axis=1), k]
+                sides += bool(len(ray)) and ray.min() < c[k] < ray.max()
+            return sides >= 2
+
+        inside = sum(np.prod(q["size_m"]) for q in cands if enclosed(np.array(q["centroid"], float)))
         return float(inside / max(np.prod(gmax - gmin), 1e-12))
 
+    def full_height(p) -> bool:
+        """As tall as the asset and as long one way, and not a thin leaf: a
+        shell (a K-Slim's outer skin with its lid moulded in, which the survey
+        called the lid). A cabinet door spans height and width but is thin."""
+        frac = np.array(p["size_m"], float) / np.maximum(hi - lo, 1e-9)
+        h = [k for k in range(3) if k != UP]
+        return bool(frac[UP] >= 0.85 and max(frac[h[0]], frac[h[1]]) >= 0.85
+                    and min(frac[h[0]], frac[h[1]]) >= 0.2)
+
     def housing(p) -> bool:
-        own = obj_body.get(p["id"], body)
-        return bool(np.prod(p["size_m"]) > 0.5 * np.prod(own["size_m"]) or contained(p) > 0.35
+        # most of the asset (half its box), not of the body: the body is what
+        # parts hang on, and on an engine crane that is a small foot plate
+        return bool(np.prod(p["size_m"]) > 0.5 * obj_size or contained(p) > 0.35 or full_height(p)
                     or re.search(r"\b(shell|body|housing|base)\b.*\band\b|\band\b.*\b(shell|body|housing)\b",
                                  p["role"] or "", re.I))
 
@@ -120,7 +212,8 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
         if not riders:
             continue
         leaf = max(riders, key=lambda q: np.prod(q["size_m"]))
-        sparts[leaf["id"]] = leaf = {**leaf, **{k: p.get(k) for k in ("motion", "axis", "pivot", "range")},
+        sparts[leaf["id"]] = leaf = {**leaf, **{k: p.get(k) for k in ("motion", "axis", "pivot", "range",
+                                                                      "pivot_toward", "reference_part")},
                                      "relative_to": p.get("relative_to"),
                                      "role": f"{leaf['role']} (moves as #{p['id']} {p['role']})"}
         for q in riders:
@@ -144,11 +237,39 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
             return False
         if FASTENER.search(p["role"] or "") and p["motion"] != "detach":
             return False                                           # a screw head turns only for a screwdriver
+        if p["motion"] == "spin" and FORK.search(p["role"] or ""):
+            # a caster's fork swivels about its stem, not the axle: the wheeled
+            # base makes it the caster's swivelling body (the crane's six forks
+            # were drafted as six more wheels)
+            forks.add(p["path"])
+            return False
         return True
+
+    def gap(a, b) -> float:
+        """Distance between two parts' boxes (0 when they touch or overlap)."""
+        ga, gb = geo.get(a["path"]), geo.get(b["path"])
+        if not ga or not gb:
+            return 0.0
+        d = np.maximum(0.0, np.maximum(np.array(ga["min"]) - gb["max"], np.array(gb["min"]) - ga["max"]))
+        return float(np.linalg.norm(d))
 
     def parent_of(p):
         q = sparts.get(p.get("relative_to"))
-        return q if q is not None and q is not p else obj_body.get(p["id"], body)
+        q = q if q is not None and q is not p else obj_body.get(p["id"], body)
+        if q["id"] in siblings:
+            # hung on a part with copies: on the copy it touches
+            q = min((sparts[i] for i in siblings[q["id"]] if i in sparts and sparts[i] is not p),
+                    key=lambda r: gap(p, r), default=q)
+        # a part moves against what it touches: the survey hung an engine
+        # crane's wheel on the far leg (its mirror twin's), 0.7 m away
+        reach = max(0.01, 0.25 * max(p["size_m"]))
+        if gap(p, q) > reach:
+            mine = {p["id"], p.get("copy_of")} - {None}       # what hangs on p (or on its copy group)
+            near = [r for r in sparts.values() if r is not p and r.get("motion") not in ("flex",)
+                    and r.get("relative_to") not in mine and gap(p, r) <= reach]
+            if near:
+                q = min(near, key=lambda r: (gap(p, r), -np.prod(r["size_m"])))
+        return q
 
     # one control in several parts (a lever arm and its end knob, a knob and
     # its shaft): moving parts with the same motion and axis that touch move
@@ -203,7 +324,49 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
                     # the part lies within its parent's box (a lid in a housing):
                     # "where they meet" is all of it - a hinge pins an edge
                     piv = "end_near_parent"
-        if piv == "top":
+        tw = sparts.get(p.get("pivot_toward")) if p["motion"] == "hinge" else None
+        if tw is not None and tw is not p:
+            # the edge facing a named part (a K-Mini lid's rear edge faces its
+            # reservoir): of the box's two directions across the hinge axis,
+            # the one the part lies most along, its face on that part's side
+            d = np.array(tw["centroid"], float) - np.array(p["centroid"], float)
+            ext = pmax - pmin
+            # which side faces it, over all three directions: the axis word
+            # (read off the views) must not rule the facing side out (a K-Mini
+            # lid's "part_short" was front-to-back, and its pin went on the front)
+            srt = sorted(range(3), key=lambda i: ext[i])
+            # an edge, not a face: never the thin direction of a flat part
+            k = max((i for i in range(3) if i != srt[0]), key=lambda i: abs(d[i]) / max(ext[i], 1e-9))
+            if ext[srt[2]] >= 3 * ext[srt[1]]:
+                # a long part (a leg, a boom, a ram) is pinned at an END: its
+                # narrow side faced the crane's foot plate, and the leg folded
+                # about its own length
+                k = srt[2]
+            pivot[k] = pmax[k] if d[k] > 0 else pmin[k]
+            piv = f"edge toward #{tw['id']}"
+            # the pin runs along that edge, so across k. The axis words are
+            # read off views and a whole file (a pair of K-Slims made
+            # "horizontal_short" front-to-back): geometry decides between the two
+            # directions left. A leaf (lid, door, leg) turns about the one in
+            # its plane, not its thickness; a beam (boom, ram, handle) about a
+            # horizontal one - the one other hinges here use, as linkages do.
+            allowed = [i for i in range(3) if i != k]
+            ext_o = sorted(range(3), key=lambda i: ext[i])
+            beam = ext[ext_o[1]] < 2.5 * ext[ext_o[0]] and ext[ext_o[2]] > 3 * ext[ext_o[1]]
+            if beam:
+                horiz_ok = [i for i in allowed if i != UP] or allowed
+                used = [names.index(j["axis"]) for j in joints if j.get("joint_type") == "revolute"
+                        and j.get("lower_limit") is not None and names.index(j["axis"]) in horiz_ok]
+                new_ax = max(set(used), key=used.count) if used else (ax if ax in horiz_ok else horiz_ok[0])
+            else:
+                thin_i = ext_o[0]
+                cand = [i for i in allowed if i != thin_i] or allowed
+                new_ax = ax if ax in cand else cand[0]
+            if new_ax != ax:
+                ax = new_ax
+                a_vec = np.eye(3)[ax]
+                vt = np.array([vt[0], np.eye(3)[ax], vt[2]])
+        elif piv == "top":
             pivot[UP] = pmax[UP]
         elif piv == "bottom":
             pivot[UP] = pmin[UP]
@@ -320,18 +483,25 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
             if host is None and p["id"] in rides_on:
                 host = sparts[rides_on[p["id"]]]["path"]           # part of the same control
             if host is None:
-                rel = sparts.get(p.get("relative_to"))
+                # the copy it touches, as for moving parts (a fork on the leg
+                # beside it, not on the leg the survey's number names)
+                rel = parent_of(p) if p.get("relative_to") in sparts else None
                 host = rel["path"] if rel and rel["path"] in moving_paths else body["path"]
             joints.append({"name": f"part_{len(joints):03d}", "joint_type": "fixed", "parent_prim": host,
                            "child_prim": member})
     notes += held_back
+    for u in survey.get("unmatched_reference") or []:
+        # the manual says it moves, the model has it fused into another part
+        notes.append(f"reference: {u['part']} moves on the real product but is "
+                     + (f"modelled into #{u['merged_into']} - split it out to articulate it"
+                        if u.get("merged_into") else "not in the model"))
     if not any(j["joint_type"] != "fixed" for j in joints) and not mechanisms:
         raise RuntimeError("the survey found no moving part" + (f" it can move alone ({'; '.join(held_back)})"
                                                                if held_back else ""))
     spec = {"prim_path": asset_root, "fixed_base": bool(template.get("mounted", False)),
             "approximation": "convexDecomposition", "joints": joints, "mechanisms": mechanisms,
             "button_joints": [j["name"] for j in joints if j.get("_role") == "button"],
-            "_analysis": {"tier": "survey", "body": body["path"], "notes": notes},
+            "_analysis": {"tier": "survey", "body": body["path"], "notes": notes, "forks": sorted(forks)},
             "_instructions": "Drafted from the part survey (a vision model's reading of each part). "
                              "CHECK each moving part's axis, pivot and range."}
     return spec, notes

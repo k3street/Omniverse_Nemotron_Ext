@@ -1,0 +1,189 @@
+{
+ "_doc": "Web-sourced moving parts of named products, used by the part survey and the motion critic. Cached; delete a key to look it up again.",
+ "products": {
+  "keurig k slim single serve pod coffee maker": {
+   "product_name": "Keurig K-Slim single-serve K-Cup pod coffee maker (K-Slim, model K900 / K-Slim family)",
+   "moving_parts": [
+    {
+     "part": "Handle (brewer handle / pod housing lid)",
+     "motion": "hinge",
+     "how": "Grip the moulded handle on the top front of the brew head and lift up and back; the handle is rigidly joined to the K-Cup pod assembly housing lid, so raising it swings the whole brew head lid open rearward and exposes the K-Cup pod holder and funnel opening. A pod drops in; lowering the handle closes the lid, drives the entrance needle down through the pod foil and latches the head shut ready to brew. Lifting and lowering it also wakes/powers the brewer on.",
+     "axis": "across its width (left-right horizontal pin at the back of the brew head), lid swings in the front-to-back vertical plane",
+     "pivot": "horizontal hinge pin at the rear top edge of the K-Cup pod assembly housing, behind the pod holder",
+     "range": 55
+    },
+    {
+     "part": "Water reservoir lid",
+     "motion": "detach",
+     "how": "A loose (non-hinged) cap sitting on top of the 46 oz reservoir at the rear/left of the brewer; lift it straight up off the reservoir mouth to expose the fill opening, then set it back down flat. The manual's first step is 'Remove the water reservoir lid, then lift the reservoir straight up to remove it\u2026 Replace lid.'",
+     "axis": "vertical (straight up off the tank mouth)",
+     "pivot": "no pin \u2014 lifts off the rim of the reservoir opening",
+     "range": null
+    },
+    {
+     "part": "Water reservoir (46 oz removable tank)",
+     "motion": "detach",
+     "how": "With the lid off, lift the tank straight up out of its cradle on the side/rear of the brewer body to carry it to the sink for filling to the MAX FILL line; to refit, lower it straight down until the lock tabs on the tank engage the brewer. Removing it exposes the reservoir well and the water outlet port in the brewer base.",
+     "axis": "vertical (straight up, parallel to the brewer's height)",
+     "pivot": "comes off its seat in the reservoir well; located by lock tabs that engage the brewer body",
+     "range": null
+    },
+    {
+     "part": "Drip tray assembly (drip tray plate + drip tray + drip tray base)",
+     "motion": "slide",
+     "how": "Grasp the tray at the front and slide it horizontally toward you out of the guide slot under the brew spout, keeping it level so the up-to-8 oz of collected overflow does not spill; it comes free at the end of the track. Removing it reveals the recessed base and the tall mug platform, giving clearance for travel mugs up to about 7 in tall.",
+     "axis": "front to back (pulled forward along the brewer's depth axis)",
+     "pivot": "no pin \u2014 runs on the horizontal rails/slot in the brewer base, pulls off the front",
+     "range": 70
+    },
+    {
+     "part": "Drip tray plate (grid the mug stands on)",
+     "motion": "detach",
+     "how": "Once the tray is out, the perforated plate lifts straight up off the top of the drip tray reservoir for emptying and washing, exposing the catch basin below.",
+     "axis": "vertical (lifts off the top face of the tray)",
+     "pivot": "no pin \u2014 rests in the lip of the drip tray",
+     "range": null
+    },
+    {
+     "part": "K-Cup pod holder (pod holder assembly)",
+     "motion": "detach",
+     "how": "Cleaning only: unplug the brewer, remove the drip tray, lift the handle fully, then push up from underneath the holder with a finger through the opening in the base of the pod housing and lift the holder out of the top. Mind the exit needle underneath. It refits by pressing straight down into the housing until it clicks.",
+     "axis": "vertical (pushed up and out of the brew head)",
+     "pivot": "no pin \u2014 snaps out of the K-Cup pod assembly housing",
+     "range": null
+    },
+    {
+     "part": "Funnel (part of the pod holder assembly)",
+     "motion": "detach",
+     "how": "Cleaning only: with the pod holder removed, grip the holder and twist/pull the funnel apart from the top of the holder; it snaps back on by pushing it straight back over the holder rim. Separating them exposes the exit needle in the holder base for rinsing.",
+     "axis": "along the part (pulled off along the holder's vertical axis, with a slight twist about that axis)",
+     "pivot": "no pin \u2014 friction/snap fit on the top of the K-Cup pod holder",
+     "range": null
+    },
+    {
+     "part": "Power button",
+     "motion": "press",
+     "how": "Momentary illuminated button on the front control panel; press in horizontally (toward the back of the brewer) to switch the brewer on, and press again to switch it off. The brewer also auto-offs 5 minutes after the last brew and restarts from this button.",
+     "axis": "front to back (pressed into the face of the control panel)",
+     "pivot": "no pin \u2014 returns on its own spring/membrane",
+     "range": 1
+    },
+    {
+     "part": "8 oz brew-size button",
+     "motion": "press",
+     "how": "Momentary illuminated button on the front control panel; pressed in to select an 8 oz cup size. Held together with the 12 oz button for 3 seconds (brewer plugged in but off) it enters Descale Mode; held with the brew button it toggles High Altitude Brewing Mode.",
+     "axis": "front to back (pressed into the face of the control panel)",
+     "pivot": "no pin \u2014 spring/membrane return",
+     "range": 1
+    },
+    {
+     "part": "10 oz brew-size button",
+     "motion": "press",
+     "how": "Momentary illuminated button on the front control panel; pressed in to select a 10 oz cup size.",
+     "axis": "front to back (pressed into the face of the control panel)",
+     "pivot": "no pin \u2014 spring/membrane return",
+     "range": 1
+    },
+    {
+     "part": "12 oz brew-size button",
+     "motion": "press",
+     "how": "Momentary illuminated button on the front control panel; pressed in to select a 12 oz cup size, and used with the 8 oz button to enter Descale Mode.",
+     "axis": "front to back (pressed into the face of the control panel)",
+     "pivot": "no pin \u2014 spring/membrane return",
+     "range": 1
+    },
+    {
+     "part": "Brew button (illuminated 'K' button)",
+     "motion": "press",
+     "how": "Large momentary illuminated button on the front control panel; pressed in to start the brew (and to start each descale/rinse cycle). It pulses when the brewer is ready and stays lit while brewing.",
+     "axis": "front to back (pressed into the face of the control panel)",
+     "pivot": "no pin \u2014 spring/membrane return",
+     "range": 1
+    }
+   ],
+   "source": "Keurig K-Slim Use & Care Guide / Quick Start (manualslib copies: https://www.manualslib.com/manual/2398150/Keurig-K-Slim.html , https://www.manualslib.com/manual/2261260/Keurig-K-Slim.html , https://www.manualslib.com/manual/3490697/Keurig-K-Slim-K900.html , https://www.manualslib.com/guide/2924318/keurig-k-slim-single-serve-coffee-maker-manual.html) \u2014 labelled parts A Handle, B/C K-Cup Pod Holder Assembly, C Funnel, D K-Cup Pod Assembly Housing, E Drip Tray Plate, F Drip Tray, G Drip Tray Base, H Water Reservoir Lid, I Water Reservoir; Keurig support descaling page https://www.keurig.com/hub/support/how-to-descale-your-keurig-coffee-maker (8oz+12oz hold, brew button); Walmart listing https://www.walmart.com/ip/990248036 (46 oz removable reservoir, 8/10/12 oz sizes, removable drip tray for 7.0 in travel mugs); pod-holder removal procedure for the Keurig Slim: https://hollicoffee.com/how-to-remove-keurig-pod-holder/",
+   "notes": "The K-Slim has no doors, knobs, dials, wheels or separate latches \u2014 the handle is the only latch mechanism, and it both opens the brew head and closes/pierces the pod. Angles and travels are estimates from photos and geometry, not printed specs: the handle's useful swing is roughly 50\u201360\u00b0 from closed to its rear stop; button travel on the flat front panel is about 1 mm (the panel is a low-travel backlit membrane-style set, so treat 1 mm as an upper bound); the drip tray slides roughly 60\u201380 mm forward before it clears its rails. The water reservoir lid on the K-Slim is a lift-off cap, not a hinged flap. The pod holder and funnel are cleaning-only removals (classed as detach), as is the drip tray plate; the drip tray itself is classed as a slide because the manual explicitly says to slide it toward you to remove it. The exit needle (in the pod holder base) and entrance needle (in the brew-head lid) move only as part of their carriers \u2014 the user does not actuate them directly, though the manual has the user poke them with a paperclip to clear them. The K-Slim + ICED variant shares this architecture but adds an ICED button to the control panel; the plain K-Slim does not have one.",
+   "looked_up": "2026-10-05"
+  },
+  "keurig k mini single serve pod coffee maker": {
+   "product_name": "Keurig K-Mini single-serve K-Cup pod coffee maker (K-Mini, model K15-series successor; base model without the Plus/Go removable reservoir)",
+   "moving_parts": [
+    {
+     "part": "Handle (A) / pod assembly housing lid",
+     "motion": "hinge",
+     "how": "Grip the front lip of the handle and swing it up and back; the handle is the lever that lifts the top of the K-Cup pod assembly housing, opening the brew head and exposing the K-Cup pod holder, the funnel rim and the entrance needle underneath the lid. Lowering it closes and clamps the housing and drives the entrance needle through the pod foil. Manual: 'Lift the handle and place a K-Cup pod in the K-Cup pod holder. Lower the handle completely to close the lid.' Note: when the handle is up the reservoir drains into the brewer, so it must be down before filling.",
+     "axis": "across the width (left-right horizontal axis), rotating in the front-to-back vertical plane",
+     "pivot": "hinge pin at the rear top of the K-Cup pod assembly housing, behind the pod opening",
+     "range": 55
+    },
+    {
+     "part": "Water reservoir lid (G)",
+     "motion": "hinge",
+     "how": "Flat lid over the fill opening on the top rear of the brewer; the user lifts the front edge of the lid and it swings up and rearward, revealing the reservoir mouth with the MIN and MAX fill lines. Lowered back down flat to close before brewing. Manual: 'Lift the water reservoir lid and pour the water into the reservoir... Lower the lid.' The underside of the lid is wiped for cleaning.",
+     "axis": "across the width (left-right horizontal axis), opening toward the rear",
+     "pivot": "rear edge of the reservoir opening, at the top rear of the body",
+     "range": 95
+    },
+    {
+     "part": "Drip tray (F)",
+     "motion": "slide",
+     "how": "The tray sits on the drip tray base (M) on horizontal guides; the user pulls it straight toward themselves, keeping it level, until it comes free of the base. Manual: 'To remove, slide it toward you, keeping it level to avoid spilling.' Removing it reveals the drip tray base and gives clearance for a travel mug up to 7 in (178 mm) tall; it also empties the overflow reservoir (holds up to ~8-10 oz).",
+     "axis": "front to back (pulled forward out of the base)",
+     "pivot": "no pivot - horizontal rails/ledges in the drip tray base; disengages fully at the end of travel",
+     "range": 60
+    },
+    {
+     "part": "Drip tray plate (E)",
+     "motion": "detach",
+     "how": "The slotted plate the mug stands on simply lifts straight up and out of the drip tray for rinsing; dropped back in to locate on the tray rim.",
+     "axis": "vertical (lifted up off the tray)",
+     "pivot": "comes off the top of the drip tray - no hinge, it just rests in the tray",
+     "range": null
+    },
+    {
+     "part": "K-Cup pod holder (B)",
+     "motion": "detach",
+     "how": "With the handle lifted, grasp the top of the pod holder with one hand and push up on its underside from beneath the brewer with the other until it releases, then lift it out upward through the pod opening. To refit, align it with the opening using the two front ribs as a guide and snap it back in from the top. Removing it exposes the exit needle in the bottom of the housing.",
+     "axis": "vertical (pushed/pulled up out of the housing)",
+     "pivot": "snap-fit in the pod opening of the K-Cup pod assembly housing",
+     "range": null
+    },
+    {
+     "part": "Funnel (C)",
+     "motion": "detach",
+     "how": "The conical funnel ring sits on top of the removed pod holder; it is pulled straight off until it pops free of its friction/snap fit, and snapped back on the same way for refitting (done with the pod holder assembly out of the brewer).",
+     "axis": "vertical, along the pod holder's own axis",
+     "pivot": "snap/interference fit on the upper rim of the K-Cup pod holder",
+     "range": null
+    },
+    {
+     "part": "BREW button (I)",
+     "motion": "press",
+     "how": "Round momentary push button on the top front of the brewer (illuminated, acts as the LED brew indicator); pressed straight down to start heating/brewing and it springs back. Lights solid/pulsing red or blue to show state.",
+     "axis": "through the button's face (vertical, down into the top panel)",
+     "pivot": "flat, spring-return membrane/dome switch under the button face",
+     "range": 2
+    },
+    {
+     "part": "Power button (K)",
+     "motion": "press",
+     "how": "Small momentary push button on the brewer housing used to switch the brewer on and off; pressed straight in and springs back. It does not illuminate - the add-water/brew indicator flashing blue tells you it is on.",
+     "axis": "through the button's face, perpendicular to the panel it sits in",
+     "pivot": "flat, spring-return switch behind the button face",
+     "range": 2
+    },
+    {
+     "part": "Power cord (L) / cord storage",
+     "motion": "flex",
+     "how": "The cord is flexible and is tucked/wrapped into the cord-storage recess in the back/underside of the brewer for travel and storage, and pulled back out for use. No rigid joint - it bends only.",
+     "axis": "along the cord",
+     "pivot": "exit grommet at the rear of the brewer body",
+     "range": null
+    }
+   ],
+   "source": "Keurig K-Mini Use & Care Guide (official PDF): https://dam.keurig.com/content/dam/public-assets/support/kcom/pdf/KMini_UCG.pdf ; Keurig K-Mini UCG mirror: https://www.keurig.com/medias/1984-KMINI-UCG.pdf ; ManualsLib Keurig K-MINI Use & Care Manual (parts list A-M, cleaning steps): https://www.manualslib.com/manual/3956399/Keurig-K-Mini.html and https://www.manualslib.com/guide/4427745/keurig-k-mini-brewer-use-and-care-guide.html ; cleaning/removal Q&A: https://www.manualslib.com/answers/4444829/how-to-clean-keurig-k-mini-coffee-maker.html ; K-Mini Go UCG for contrast on the removable reservoir: https://dam.keurig.com/content/dam/public-assets/kcom_support/K-Mini_Go_Use_and_Care_Guide.pdf",
+   "notes": "Manual part labels: A Handle, B K-Cup pod holder, C Funnel, D K-Cup pod assembly housing, E Drip tray plate, F Drip tray, G Water reservoir lid, H Water reservoir, I Brew button, J LED indicator, K Power button, L Power cord, M Drip tray base. Important for the 3D model: on the base K-Mini the water reservoir (H) is NOT removable - it is integral to the body and is cleaned in place by wiping; only the K-Mini Plus and K-Mini Go have a reservoir that lifts straight up out of the base (and on the Go the lid lifts off rather than hinging). The base K-Mini also has no STRONG button (that is the K-Mini Plus/Go). Degree and millimetre figures are engineering estimates from photos and the illustrated manual steps, not published specifications: handle swing is roughly 45-60 degrees, the reservoir lid opens roughly 90-100 degrees to clear the fill mouth, drip tray slide-off travel is roughly 50-70 mm, button travel roughly 1-2 mm. The exact placement of the power button (rear face vs. side of the housing) varies with production run, and on some units the water reservoir lid can be lifted clear off its hinge posts for washing; treat those two as the least certain items. Non-user-moved internals (entrance needle above the pod, exit needle in the bottom of the holder, internal pump/valve) are excluded, as are consumables (the K-Cup pod and the mug).",
+   "looked_up": "2026-10-05"
+  }
+ }
+}

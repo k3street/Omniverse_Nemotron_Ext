@@ -69,8 +69,31 @@ def _prompt(entry: dict, joint: str, info: dict, value: float) -> str:
         "there: a jaw or head pulling away from its mate means the pivot is in the wrong place. "
         "If you cannot see a difference, say so and "
         "answer motion_ok false. A red ring marks the joint's pivot where one is drawn: the part turns about it.\n"
-        + measured_motion(entry, joint)
+        + measured_motion(entry, joint) + _reference(entry, joint)
     )
+
+
+def _reference(entry: dict, joint: str) -> str:
+    """The named product's manual says how its parts move (product_lookup):
+    judge against that, not a guess about what such an object does."""
+    m = entry.get("product_mechanics")
+    if not m:
+        return ""
+    ref = None
+    try:
+        spec = json.loads(entry.get("articulation_draft") or "{}")
+        child = next(j["child_prim"] for j in spec.get("joints", []) if j["name"] == joint)
+        part = next((p for p in (entry.get("part_survey") or {}).get("parts", []) if p["path"] == child), None)
+        ref = (part or {}).get("reference_part")
+    except (StopIteration, ValueError, KeyError):
+        pass
+    lines = "\n".join(f"- {q['part']}: {q['motion']}; {q['how']} Pivot: {q['pivot']}."
+                      + (f" Range {q['range']:g}." if q.get("range") is not None else "")
+                      for q in m["moving_parts"])
+    return (f"\nThis is a known product, {m['product_name']}. Its manual says its parts move like this:\n{lines}\n"
+            + (f"This joint was drafted as the reference's '{ref}': it must move as that line says. "
+               if ref else "This joint matches none of these: it should not move unless you can see it plainly does. ")
+            + "A motion the manual contradicts is motion_ok false.")
 
 
 def measured_motion(entry: dict, joint: str) -> str:
@@ -94,6 +117,26 @@ def measured_motion(entry: dict, joint: str) -> str:
         r = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]).ComputeWorldBound(
             st.GetPseudoRoot()).ComputeAlignedRange()
         dims, lo = list(r.GetSize()), list(r.GetMin())
+        # a file of several units (a pair of K-Slims side by side): the
+        # directions of the unit the joint is on, not of the row - "across the
+        # object's length" sent a drip tray that slid out the front sideways
+        if j.get("anchor"):
+            cache = UsdGeom.BBoxCache(0, [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+            whole = dims[0] * dims[1] * dims[2]
+            for part in (entry.get("part_survey") or {}).get("parts", []):
+                for c in part.get("copies") or []:
+                    prim = st.GetPrimAtPath(c)
+                    if not prim:
+                        continue
+                    u = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+                    us, um = list(u.GetSize()), list(u.GetMin())
+                    inside = all(um[k] - 0.01 <= j["anchor"][k] <= um[k] + us[k] + 0.01 for k in range(3))
+                    if inside and us[0] * us[1] * us[2] >= 0.2 * whole and us[0] * us[1] * us[2] < 0.9 * whole:
+                        dims, lo = us, um
+                        break
+                else:
+                    continue
+                break
     long_axis = max((0, 1), key=lambda k: dims[k])         # the length, lying on the ground
     where = ""
     if j.get("anchor") and lo is not None:

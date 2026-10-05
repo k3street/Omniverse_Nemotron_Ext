@@ -155,3 +155,37 @@ def test_set_bodies_above_articulated_links_are_taken_off():
     assert not st.GetPrimAtPath("/W/A").HasAPI(UsdPhysics.ArticulationRootAPI)
     assert not st.GetPrimAtPath("/W/Joints/object0_A")
     assert st.GetPrimAtPath("/W/B").HasAPI(UsdPhysics.RigidBodyAPI)     # nothing articulated under it
+
+
+def test_a_mirroring_transform_is_baked_into_points_with_the_world_unchanged():
+    pytest.importorskip("pxr")
+    from pxr import Gf, Usd, UsdGeom
+
+    sys.path.insert(0, str(REPO / "scripts"))
+    from unmirror import unmirror
+
+    st = Usd.Stage.CreateInMemory()
+    UsdGeom.Xform.Define(st, "/W")
+    m = UsdGeom.Xform.Define(st, "/W/Mirror")
+    m.AddTransformOp().Set(Gf.Matrix4d(1.0).SetScale(Gf.Vec3d(1, 1, -1)) * Gf.Matrix4d(1.0).SetTranslate((0.3, 0, 0)))
+    c = UsdGeom.Xform.Define(st, "/W/Mirror/C")
+    c.AddRotateXYZOp().Set(Gf.Vec3f(30, 10, 0))
+    c.AddScaleOp().Set(Gf.Vec3f(2, 1, 1))
+    mesh = UsdGeom.Mesh.Define(st, "/W/Mirror/C/M")
+    pts = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)]
+    mesh.CreatePointsAttr(pts)
+    mesh.CreateFaceVertexCountsAttr([3, 3])
+    mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 0, 2, 3])
+
+    def world():
+        w = UsdGeom.XformCache().GetLocalToWorldTransform(mesh.GetPrim())
+        return [w.Transform(Gf.Vec3d(p)) for p in mesh.GetPointsAttr().Get()], w
+
+    before, w0 = world()
+    assert w0.ExtractRotationMatrix().GetDeterminant() < 0
+    assert unmirror(st, "/W") == 1
+    after, w1 = world()
+    assert w1.ExtractRotationMatrix().GetDeterminant() > 0
+    assert all((a - b).GetLength() < 1e-6 for a, b in zip(before, after))
+    assert mesh.GetOrientationAttr().Get() == UsdGeom.Tokens.leftHanded
+    assert unmirror(st, "/W") == 0                       # idempotent

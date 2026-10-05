@@ -237,7 +237,14 @@ def draft_articulation(entry: dict) -> str:
         # what it should do (behaviors.expected): a wheeled base drives its wheels
         from behaviors import draft_wheeled_base, expected
         if "wheeled_base" in expected(entry):
-            b, bnotes = draft_wheeled_base(stage, spec)
+            # every wheel a caster (the survey's word for it): nothing drives it
+            roles = {c: p.get("role") or "" for p in (entry.get("part_survey") or {}).get("parts", [])
+                     for c in (p.get("copies") or [p["path"]])}
+            wheel_roles = [roles.get(j["child_prim"], "") for j in spec.get("joints", [])
+                           if j["name"].startswith(("wheel_L", "wheel_R"))]
+            pushed = bool(wheel_roles) and all(re.search(r"cast(e|o)r", r, re.I) for r in wheel_roles)
+            b, bnotes = draft_wheeled_base(stage, spec, pushed=pushed,
+                                           forks=(spec.get("_analysis") or {}).get("forks"))
             if b:
                 # the casters' swivels are mechanisms; their spin joints move into them
                 cm = b.pop("mechanisms", [])
@@ -248,8 +255,11 @@ def draft_articulation(entry: dict) -> str:
                 # it waits on the frame (the fork is not a link until then)
                 for m in cm:
                     if m.get("fork"):
+                        # the caster mounts the fork on its frame: its drafted
+                        # mounts (to the wheel, to the frame) go
                         spec["joints"] = [j for j in spec["joints"]
-                                          if {j["parent_prim"], j["child_prim"]} != {m["fork"], m["wheel"]}]
+                                          if {j["parent_prim"], j["child_prim"]} not in
+                                          ({m["fork"], m["wheel"]}, {m["fork"], m["frame"]})]
                         for j in spec["joints"]:
                             if j["parent_prim"] == m["fork"]:
                                 j["parent_prim"] = m["frame"]
@@ -257,6 +267,10 @@ def draft_articulation(entry: dict) -> str:
                 spec.setdefault("behaviors", []).append(b)
             spec.setdefault("_analysis", {})["behavior_notes"] = bnotes
         entry["articulation_draft"] = json.dumps(spec, indent=1)
+        # a new draft: what the critic took out of the last one is history
+        for k in ("pruned_joints", "critic_flags"):
+            if k in entry:
+                entry.setdefault("history", []).append({k: entry.pop(k)})
         save_queue_entry(entry)
         a = spec.get("_analysis", {})
         if a.get("tier") == "survey":
@@ -386,6 +400,10 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
         if _root.HasAPI(_UP.MassAPI):
             _root.RemoveAPI(_UP.MassAPI)
     _strip_set_bodies(stage, {**spec, "mechanisms": mechanisms})
+    # PhysX takes no negative scale on bodies or colliders (a mirrored crane
+    # leg tore the crane apart): reflections go into the points first
+    from unmirror import unmirror
+    unmirror(stage, spec["prim_path"])
     omni = types.ModuleType("omni")
     omni_usd = types.ModuleType("omni.usd")
     ctx = type("Ctx", (), {"get_stage": lambda self: stage})()

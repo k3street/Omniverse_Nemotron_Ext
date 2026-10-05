@@ -33,13 +33,13 @@ RULES = {
     "ingest": "2026-10-04",      # prim names keep only characters USD takes
     "classify": "2026-10-04",    # the VLM reports what the object does (functions)
     "file": "2026-10-04",        # wheelchair / power_wheelchair classes, Mobility
-    "articulate": "2026-10-05c",  # see TIERS; set ingest bodies off above the links; press-fits (and what rides them) filtered
-    "behaviors": "2026-10-05",   # motor, wheeled_base, gate; functions seen, not internal ones
-    "verify": "2026-10-05",      # framed on the asset (reach only for swinging leaves); integrity
-    "critic": "2026-10-05",      # integrity first; hinges far short of their intended range fail
+    "articulate": "2026-10-05d",  # see TIERS; set bodies off; press-fits filtered; mirrored meshes unmirrored
+    "behaviors": "2026-10-05c",  # motor, wheeled_base (driven, or pushed on casters with forks; split wheels one body), gate; not internal ones
+    "verify": "2026-10-05b",     # framed on the asset; integrity; a pushed base is pushed
+    "critic": "2026-10-05c",     # unit directions in a set; integrity first; short hinges fail; a named product judged by its manual
     "soft": "2026-10-03",        # cloth proxy drape, squish, cable
     "rig": "2026-10-04",         # character rigs: detected, or a humanoid autorig + pose check
-    "survey": "2026-10-05",      # numbers on each part's visible pixels; hidden parts stay still
+    "survey": "2026-10-05c",     # unmirrored, normals blocked; copies one number; visible pixels; manual; pivot_toward
     "materials": "2026-10-04",   # physics materials per part from the survey
 }
 
@@ -51,7 +51,7 @@ TIERS = {
     "rotors": "2026-10-04",       # rotors are spindles
     "buttons": "2026-10-03",      # keys on the deck they sit in; key split
     "generic": "2026-10-04",      # wheeled base: forks swivel, rims ride, casters
-    "survey": "2026-10-05b",      # + housings hand motion to the leaf on them; pin on a face, recessed lids open away, housings held back; body = what parts move against; spin about the symmetry axis; slides out the near side; merged movers held back; sets
+    "survey": "2026-10-05g",      # + wheels round, forks not (swapped by shape); body a substantial still part; riders on what they touch; long parts pinned at an end, edges not faces; edge hinges: axis from geometry (leaf plane, beam horizontal); housings by enclosure; forks swivel; copies jointed each; pin toward a named part; parents touch their parts; housings hand motion to the leaf on them; pin on a face, recessed lids open away, housings held back; body = what parts move against; spin about the symmetry axis; slides out the near side; merged movers held back; sets
     "door": "2026-10-02", "watch": "2026-10-02", "turntable": "2026-10-02", "cabinet": "2026-10-02",
     "temples": "2026-10-02", "thread": "2026-10-02", "plunger": "2026-10-02",
 }
@@ -151,6 +151,9 @@ def stale(entry: dict, stages: list[str] | None = None) -> list[tuple[str, str]]
         else:
             want = rules_for(st, rec.get("tier"))
             why = f"rules {rec.get('rules')} -> {want}" if rec.get("rules") != want else None
+            if why is None and rec.get("undone"):
+                # taken off (unarticulate) and not put back: no current result
+                why = f"undone ({str(rec['undone'])[:60]})"
         if why is None and upstream:
             why = f"after {upstream}"
         if why is None and rec and latest[1] and rec.get("at", "") < latest[0]:

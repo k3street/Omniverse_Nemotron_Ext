@@ -62,12 +62,37 @@ def labelled_parts(stage, root: str, max_parts: int):
     from articulation_draft import collect_parts
 
     parts = sorted([p for p in collect_parts(stage, root) if max(p["size"]) > 0], key=lambda p: -p["volume"])
+    # identical meshes apart from each other are copies of one part (an engine
+    # crane's six casters, the two units of a pair): one number, each copy
+    # its own joint later. Folded by nearest centre, five of the crane's
+    # casters had joined unrelated parts.
+    groups: list[list] = []
+    for p in parts:
+        key = sorted(p["size"])
+        for g in groups:
+            q = g[0]
+            def apart(a, b):          # boxes overlapping by under a fifth: two things, not one twice
+                inter = np.prod(np.clip(np.minimum(a["max"], b["max"]) - np.maximum(a["min"], b["min"]), 0, None))
+                return inter < 0.2 * min(np.prod(np.array(a["max"]) - a["min"]), np.prod(np.array(b["max"]) - b["min"]))
+            if all(abs(a - b) <= 0.02 * max(b, 1e-6) for a, b in zip(key, sorted(q["size"]))) and all(
+                    apart(p, r) for r in g):
+                g.append(p)
+                break
+        else:
+            groups.append([p])
+    parts = []
+    for g in groups:
+        g[0]["copies"] = [r["path"] for r in g] if len(g) > 1 else []
+        g[0]["copy_parts"] = g if len(g) > 1 else []
+        parts.append(g[0])
     keep, rest = parts[:max_parts], parts[max_parts:]
     for i, p in enumerate(keep):
-        p["id"], p["members"] = i + 1, [p["path"]]
+        p["id"], p["members"] = i + 1, [p["path"]] + [c for c in p["copies"] if c != p["path"]]
     for q in rest:
-        host = min(keep, key=lambda p: np.linalg.norm(np.array(p["centroid"]) - q["centroid"]))
-        host["members"].append(q["path"])
+        for r in (q.get("copy_parts") or [q]):
+            host = min(keep, key=lambda p: min(np.linalg.norm(np.array(c["centroid"]) - r["centroid"])
+                                               for c in (p.get("copy_parts") or [p])))
+            host["members"].append(r["path"])
     return keep
 
 
@@ -107,6 +132,13 @@ def coloured_layer(entry: dict, parts: list, root: str) -> Path:
                         mat, bindingStrength=UsdShade.Tokens.strongerThanDescendants)
                 if prim.IsA(UsdGeom.Mesh):
                     UsdGeom.Mesh(prim).CreateDisplayColorAttr([col])
+                    # a flat colour needs no authored normals, and a mirrored
+                    # half's point inward: lit from behind, the engine crane's
+                    # right leg rendered black on black and was called hidden
+                    UsdGeom.Mesh(prim).GetNormalsAttr().Block()
+                    nv = UsdGeom.PrimvarsAPI(prim).GetPrimvar("normals")
+                    if nv:
+                        nv.GetAttr().Block()
     layer.Save()
     return out
 
@@ -235,8 +267,10 @@ def render(entry: dict, parts: list, root: str) -> list[str]:
         y = 5 + 22 * i
         g.rectangle((8, y, 30, y + 16), fill=PALETTE[(p["id"] - 1) % len(PALETTE)], outline="black")
         s = " x ".join(f"{v * 1000:.0f}" for v in p["size"])
-        g.text((40, y + 2), f"#{p['id']}  {s} mm" + (f"  (+{len(p['members']) - 1} small parts)"
-                                                    if len(p["members"]) > 1 else "")
+        extra = len(p["members"]) - max(1, len(p.get("copies") or []))
+        g.text((40, y + 2), f"#{p['id']}  {s} mm" + (f"  x{len(p['copies'])} identical copies"
+                                                    if p.get("copies") else "")
+               + (f"  (+{extra} small parts)" if extra > 0 else "")
                + ("" if p["id"] in seen else "  - hidden inside, not seen in any view"), fill=(0, 0, 0))
     for p in parts:
         p["seen"] = p["id"] in seen
@@ -258,8 +292,22 @@ def _schema(materials: list[str], n: int) -> dict:
             "pivot": {"anyOf": [{"type": "string", "enum": PIVOTS}, {"type": "null"}]},
             "range": {"anyOf": [{"type": "number"}, {"type": "null"}],
                       "description": "travel: degrees for hinge, millimetres for slide/press; null if none"},
-        }, "required": ["id", "role", "material", "motion", "relative_to", "axis", "pivot", "range"],
-        "additionalProperties": False}}}, "required": ["parts"], "additionalProperties": False}
+            "pivot_toward": {"anyOf": [{"type": "integer"}, {"type": "null"}],
+                             "description": "for a hinge pinned at an edge: the numbered part that edge "
+                                            "faces (a lid hinged at its rear: a part at the rear)"},
+            "reference_part": {"anyOf": [{"type": "string"}, {"type": "null"}],
+                               "description": "the product reference's part this is, if any"},
+        }, "required": ["id", "role", "material", "motion", "relative_to", "axis", "pivot", "range",
+                        "pivot_toward", "reference_part"],
+        "additionalProperties": False}},
+        "unmatched_reference": {"type": "array", "description": (
+            "reference moving parts that are NOT a separate numbered part (modelled into another part, "
+            "or absent)"), "items": {"type": "object", "properties": {
+                "part": {"type": "string"},
+                "merged_into": {"anyOf": [{"type": "integer"}, {"type": "null"}],
+                                "description": "the numbered part it is modelled into, or null if absent"}},
+                "required": ["part", "merged_into"], "additionalProperties": False}}},
+        "required": ["parts", "unmatched_reference"], "additionalProperties": False}
 
 
 def _prompt(entry: dict, parts: list) -> str:
@@ -270,7 +318,8 @@ def _prompt(entry: dict, parts: list) -> str:
         f"(class {entry.get('class_hint') or (entry.get('report') or {}).get('matched_class')}). "
         f"What it does, as seen before: {fns or 'nothing listed'}.\n"
         "The first three images are the same asset from three sides with every part flat-coloured and "
-        "numbered on its own visible surface (a part not seen from a side has no number there; check a "
+        "numbered on its own visible surface (identical copies - six casters, two units - share one "
+        "number and colour: describe one, each copy moves the same way; a part not seen from a side has no number there; check a "
         "number against its colour in the legend); the last image is "
         "the legend: each number's colour and size in millimetres, and which parts are hidden inside. The image after the legend, if any, "
         "is the asset as modelled.\n"
@@ -285,8 +334,29 @@ def _prompt(entry: dict, parts: list) -> str:
         "vertical / horizontal_long / horizontal_short (the object's directions as it stands in the "
         "images) only for a motion tied to gravity that no part direction gives. Then the pivot (where a hinge turns: center, end_near_parent, end_far_from_parent, top, "
         "bottom, contact_with_parent) and the range (degrees for a hinge, millimetres for a slide or "
-        "press). Parts that are only paint or labels on another part: motion none, relative_to that "
-        "part.")
+        "press). For a hinge pinned at an edge, also give pivot_toward: the numbered part that edge faces "
+        "(a lid hinged at its rear edge: a part at the rear, such as the reservoir) - it places the pin "
+        "however the model is turned; otherwise null. Parts that are only paint or labels on another part: motion none, relative_to that "
+        "part." + _reference_text(entry))
+
+
+def _reference_text(entry: dict) -> str:
+    """The named product's moving parts, from its manual (product_lookup):
+    the survey maps them onto the numbered parts instead of guessing."""
+    m = entry.get("product_mechanics")
+    if not m:
+        return "\nNo product reference: set reference_part null and unmatched_reference []."
+    lines = [f"- {q['part']}: {q['motion']}; {q['how']} Axis: {q['axis']}. Pivot: {q['pivot']}."
+             + (f" Range {q['range']:g}." if q.get("range") is not None else "") for q in m["moving_parts"]]
+    return ("\n\nTHIS IS A KNOWN PRODUCT: " + m["product_name"] + ". How its parts really move, from its "
+            "manual and listings (" + m["source"][:300] + "):\n" + "\n".join(lines) + "\n"
+            "Use this as ground truth. Find each of these parts among the numbered parts and give it "
+            "THIS motion, pivot and range (translate the axis into the axis words above using the "
+            "images: a pin across the product's width is horizontal_short or horizontal_long, whichever "
+            "is the width here). Name it in reference_part. A numbered part not in the list is motion "
+            "none unless you can see it plainly moves. A file may hold several units: map each unit. "
+            "A reference part that is not a separate numbered part (modelled into the housing) goes in "
+            "unmatched_reference, with the part it is merged into - do NOT give the housing its motion.")
 
 
 def survey(asset_id: str, max_parts: int = 24) -> dict:
@@ -309,6 +379,13 @@ def survey(asset_id: str, max_parts: int = 24) -> dict:
     content = [{"type": "image", "source": {"type": "base64", "media_type": "image/png",
                                             "data": base64.b64encode(Path(i).read_bytes()).decode()}}
                for i in images]
+    try:
+        from product_lookup import mechanics_for
+        mech = mechanics_for(entry)
+    except Exception as ex:  # noqa: BLE001 - the survey goes on without a reference
+        mech, entry["product_mechanics_error"] = None, str(ex)[:200]
+    if mech:
+        entry["product_mechanics"] = mech
     content.append({"type": "text", "text": _prompt(entry, parts)})
     resp = anthropic.Anthropic().messages.create(
         model="claude-opus-5", max_tokens=16000, messages=[{"role": "user", "content": content}],
@@ -327,11 +404,16 @@ def survey(asset_id: str, max_parts: int = 24) -> dict:
             # spin): nothing outside moves it, nor would a viewer see it move
             a = {**a, "motion": "none", "hidden_motion": a["motion"]}
         out.append({**a, "path": p["path"], "members": p["members"], "seen": p.get("seen", True),
+                    "copies": p.get("copies") or [],
                     "size_m": [round(v, 4) for v in p["size"]], "centroid": [round(v, 5) for v in p["centroid"]]})
     result = {"date": date.today().isoformat(), "root": root, "parts": out,
+              "reference": (mech or {}).get("product_name"),
+              "unmatched_reference": ans.get("unmatched_reference") or [],
               "images": [str(Path(i).relative_to(REPO)) for i in images if str(i).startswith(str(REPO))]}
     entry = json.loads(qf.read_text())
     entry["part_survey"] = result
+    if mech:
+        entry["product_mechanics"] = mech
     qf.write_text(json.dumps(entry, indent=1))
     return result
 

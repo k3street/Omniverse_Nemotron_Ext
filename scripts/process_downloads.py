@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -230,6 +231,12 @@ def part_stages(asset_id: str) -> list[tuple[str, str]]:
     if wants_survey(e):
         try:
             from part_survey import survey
+            from unmirror import unmirror_asset
+            # mirrored halves render as nothing (and PhysX takes no negative
+            # scale): bake the reflections into points before anyone looks
+            note = unmirror_asset(asset_id)
+            if not note.endswith(": 0 mirroring transform(s) baked into points"):
+                out.append(("unmirror", note))
             if (e.get("report") or {}).get("structure", {}).get("meshes", 0) < 2:
                 from segment_mesh import segment_entry
                 out.append(("segment", segment_entry(asset_id)))
@@ -280,7 +287,8 @@ def class_gaps(ids: list[str]) -> dict:
                               "tier": next((t for t in tiers if t in ((priors.get(c) or {}).get("mechanism_templates")
                                                                        or {})), None),
                               "moving_parts_seen": 0, "articulated": 0, "by_survey": 0, "behaviors_unmet": 0,
-                              "multi_material": 0, "rigged": 0, "articulation_failed": 0})
+                              "multi_material": 0, "rigged": 0, "articulation_failed": 0,
+                              "known_product": 0, "parts_to_split": []})
         g["assets"] += 1
         moving = [f for f in (e.get("vlm") or {}).get("functions") or [] if f.get("kind") not in ("other",)]
         g["moving_parts_seen"] += bool(moving)
@@ -294,8 +302,11 @@ def class_gaps(ids: list[str]) -> dict:
         g["behaviors_unmet"] += any(not v.get("ok") for v in behavior_check(e).values())
         g["multi_material"] += len((e.get("part_materials") or {}).get("materials", [])) > 1
         g["rigged"] += bool(e.get("character_rig"))
+        g["known_product"] += bool(e.get("product_mechanics"))
+        g["parts_to_split"] += [f"{a}: {u['part']}" for u in (e.get("part_survey") or {}).get(
+            "unmatched_reference", []) if u.get("merged_into")]
     gaps = {c: g for c, g in by.items()
-            if g["articulation_failed"] or g["behaviors_unmet"] or (g["source"] == "vlm")
+            if g["articulation_failed"] or g["behaviors_unmet"] or g["parts_to_split"] or (g["source"] == "vlm")
             or (c == "human_character" and g["rigged"] < g["assets"])}
     return {"classes": by, "gaps": gaps}
 
@@ -371,7 +382,8 @@ def _articulate(asset_id: str, dry: bool) -> str:
         # the generic drafter's joints are wheels; it found "wheels" on a Rubik's
         # cube and a wrench board. Applied only where the VLM saw wheels too.
         return "; ".join(notes + ["generic draft, and the VLM saw no wheels: left for the reviewer"])
-    if not any(j.get("joint_type") in ("revolute", "prismatic") for j in spec.get("joints", [])):
+    if not any(j.get("joint_type") in ("revolute", "prismatic") for j in spec.get("joints", [])) \
+            and not spec.get("mechanisms"):
         # only fixed joints (the generic drafter found no wheel, hinge or slide)
         # is no articulation: leave the rigid body as it is
         return "; ".join(notes + ["no moving joint found: left rigid for the reviewer"])
@@ -441,6 +453,43 @@ GENERIC_TIERS = ("survey", "generic", None)
 _REPAIRING: dict = {}
 
 
+WRONG_END = re.compile(r"wrong (end|edge|side)|opposite (end|edge)|reverse|front (lip|edge)|"
+                       r"instead of (at )?the rear|at the front", re.I)
+
+
+def _flip_wrong_end(entry: dict, spec: dict, failed: dict) -> list[str]:
+    """Hinges the critic failed for their pin's end, not yet flipped: their
+    anchor mirrored to the child's opposite edge, limits reversed. In place."""
+    from pxr import Usd, UsdGeom
+
+    done = set(entry.get("flipped_joints") or [])
+    names = [n for n, why in failed.items() if WRONG_END.search(why or "") and n not in done]
+    if not names:
+        return []
+    st = Usd.Stage.Open(entry["file"])
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    out = []
+    for j in spec.get("joints", []):
+        if j["name"] not in names or j.get("joint_type") != "revolute" or j.get("lower_limit") is None:
+            continue
+        prim = st.GetPrimAtPath(j["child_prim"])
+        if not prim:
+            continue
+        r = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+        lo, hi = list(r.GetMin()), list(r.GetMax())
+        ax = "XYZ".index(j["axis"])
+        a = list(j["anchor"])
+        # the edge it is on: the direction across the axis where the pin sits
+        # nearest a face of the child's box
+        k = min((i for i in range(3) if i != ax),
+                key=lambda i: min(abs(a[i] - lo[i]), abs(a[i] - hi[i])) / max(hi[i] - lo[i], 1e-9))
+        a[k] = lo[k] + hi[k] - a[k]
+        j["anchor"] = [round(v, 6) for v in a]
+        j["lower_limit"], j["upper_limit"] = -j["upper_limit"], -j["lower_limit"]
+        out.append(j["name"])
+    return out
+
+
 def repair_after_critic(asset_id: str, result: dict, again: bool = True) -> str:
     """A joint the critic failed does not stay: where the draft was generic (the
     part survey's or the geometric proposal's), the failed joints become fixed
@@ -466,6 +515,24 @@ def repair_after_critic(asset_id: str, result: dict, again: bool = True) -> str:
         e["critic_flags"] = failed
         save_queue_entry(e)
         return f"flagged for review ({tier} tier): {', '.join(failed)}"
+    # a hinge at the wrong end (the judge: "hinged at the front lip, not the
+    # rear pin") is not a wrong joint: its pin goes to the opposite edge and it
+    # is verified again, once, before anything is taken out
+    flipped = _flip_wrong_end(e, spec, failed)
+    if flipped:
+        e.setdefault("flipped_joints", []).extend(flipped)
+        save_queue_entry(e)
+        unarticulate(e, f"critic: {', '.join(flipped)} hinged at the wrong end: pin moved to the other edge")
+        e = entry_of(asset_id)
+        e["articulation_draft"] = json.dumps(spec, indent=1)
+        save_queue_entry(e)
+        apply_articulation(e, e["articulation_draft"])
+        failed = {k: v for k, v in failed.items() if k not in flipped}
+        if not failed:
+            return (f"moved {', '.join(flipped)} to the other edge" +
+                    ("" if not again else f"; re-verified: {animate(asset_id)}"))
+        e = entry_of(asset_id)
+        spec = json.loads(e["articulation_draft"])
     moving = [j for j in spec.get("joints", []) if j["joint_type"] != "fixed"]
     keep = [j for j in moving if j["name"] not in failed]
     for j in spec["joints"]:
