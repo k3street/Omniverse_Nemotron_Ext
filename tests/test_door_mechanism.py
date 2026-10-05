@@ -1076,3 +1076,96 @@ def test_a_caster_is_a_fork_that_swivels_with_its_wheel_spinning_in_it_and_rims_
     parent = {name(j["child_prim"]): name(j["parent_prim"]) for j in spec["joints"]}
     assert parent["RimL"] == "DriveL" and parent["RimR"] == "DriveR"
     assert sorted(b["drive_left"] + b["drive_right"]) == ["wheel_L_0", "wheel_R_0"]
+
+
+# --- the part survey's words resolved by geometry; materials; a humanoid rig -------
+
+def _switch_stage():
+    """A wall switch standing in the YZ plane (facing +X): a plate, a paddle
+    proud of it, a screw."""
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Sw")
+    _mesh(stage, "/World/Sw/Plate", [((0.0, -0.035, -0.06), (0.006, 0.035, 0.06))])
+    _mesh(stage, "/World/Sw/Paddle", [((0.006, -0.015, -0.03), (0.012, 0.015, 0.03))])
+    _mesh(stage, "/World/Sw/Screw", [((0.006, -0.003, 0.045), (0.008, 0.003, 0.051))])
+    return stage
+
+
+def _survey(parts):
+    return {"root": "/World/Sw", "parts": [
+        {"id": i + 1, "path": f"/World/Sw/{n}", "members": [f"/World/Sw/{n}"], "role": role, "material": m,
+         "motion": mo, "relative_to": rel, "axis": ax, "pivot": pv, "range": rg, "size_m": sz, "centroid": c}
+        for i, (n, role, m, mo, rel, ax, pv, rg, sz, c) in enumerate(parts)]}
+
+
+def test_the_survey_tier_rocks_a_paddle_about_its_short_axis_and_leaves_screws_alone():
+    from survey_draft import propose_survey
+
+    stage = _switch_stage()
+    sv = _survey([
+        ("Plate", "wall plate", "plastic_abs", "none", None, None, None, None, [0.006, 0.07, 0.12], [0.003, 0, 0]),
+        ("Paddle", "rocker paddle", "plastic_abs", "hinge", 1, "part_short", "center", 12,
+         [0.006, 0.03, 0.06], [0.009, 0, 0]),
+        ("Screw", "mounting screw head", "steel_stainless", "spin", 1, "part_face_normal", "center", None,
+         [0.002, 0.006, 0.006], [0.007, 0, 0.048])])
+    spec, notes = propose_survey(stage, "/World/Sw", sv)
+    moving = [j for j in spec["joints"] if j["joint_type"] != "fixed"]
+    assert len(moving) == 1                                  # the screw stays put
+    j = moving[0]
+    assert j["child_prim"].endswith("Paddle") and j["axis"] == "Y"   # across the paddle: it rocks top/bottom
+    assert (j["lower_limit"], j["upper_limit"]) == (-6.0, 6.0)
+    fixed = {x["child_prim"].rsplit("/", 1)[-1]: x["parent_prim"].rsplit("/", 1)[-1]
+             for x in spec["joints"] if x["joint_type"] == "fixed"}
+    assert fixed["Screw"] == "Plate"
+
+
+def test_each_part_gets_its_own_physics_material(tmp_path, monkeypatch):
+    import part_materials
+
+    stage = _switch_stage()
+    f = tmp_path / "sw.usda"
+    stage.GetRootLayer().Export(str(f))
+    q = tmp_path / "queue"
+    q.mkdir()
+    sv = _survey([
+        ("Plate", "wall plate", "plastic_abs", "none", None, None, None, None, [0, 0, 0], [0, 0, 0]),
+        ("Paddle", "rocker paddle", "plastic_abs", "hinge", 1, "part_short", "center", 12, [0, 0, 0], [0, 0, 0]),
+        ("Screw", "screw", "steel_stainless", "none", 1, None, None, None, [0, 0, 0], [0, 0, 0])])
+    (q / "sw.json").write_text(json.dumps({"asset_id": "sw", "file": str(f), "part_survey": sv}))
+    monkeypatch.setattr(part_materials, "QUEUE", q)
+    r = part_materials.apply("sw")
+    assert r["materials"] == ["plastic_abs", "steel_stainless"]
+    from pxr import UsdShade
+    st = Usd.Stage.Open(str(f))
+    m, _ = UsdShade.MaterialBindingAPI(st.GetPrimAtPath("/World/Sw/Screw")).ComputeBoundMaterial("physics")
+    assert m and m.GetPrim().GetName() == "steel_stainless"
+    assert UsdPhysics.MaterialAPI(m.GetPrim()).GetDensityAttr().Get() > 7000
+
+
+def test_a_humanoids_landmarks_and_skin_weights():
+    """A box figure in T-pose, 1.8 m, facing -Y: hips at about half height, hands
+    at the arms' ends, a left-hand vertex bound to the left arm only."""
+    import numpy as np
+
+    from character_rig import JOINTS, landmarks, weights
+
+    rng = np.random.default_rng(0)
+
+    def box(lo, hi, n):
+        return rng.uniform(lo, hi, size=(n, 3))
+    P = np.vstack([box((-0.15, -0.1, 0.9), (0.15, 0.1, 1.55), 3000),      # torso
+                   box((-0.1, -0.1, 1.55), (0.1, 0.1, 1.8), 600),         # head
+                   box((-0.85, -0.05, 1.42), (-0.15, 0.05, 1.5), 900),    # right arm (-X)
+                   box((0.15, -0.05, 1.42), (0.85, 0.05, 1.5), 900),      # left arm (+X)
+                   box((-0.15, -0.06, 0.0), (-0.03, 0.06, 0.9), 900),     # right leg
+                   box((0.03, -0.06, 0.0), (0.15, 0.06, 0.9), 900)])      # left leg
+    J = landmarks(P)
+    assert J["Hips"][2] == pytest.approx(0.95, abs=0.05)
+    assert J["LeftHand"][0] > 0.6 and J["RightHand"][0] < -0.6
+    assert J["LeftFoot"][2] < 0.1 and J["LeftFoot"][0] > 0
+    idx, w = weights(np.array([[0.8, 0.0, 1.46]]), J, 0.0, 1.8)
+    names = [n for n, _ in JOINTS]
+    bones = {names[i] for i, x in zip(idx[0], w[0]) if x > 0.05}
+    assert bones and all(b.startswith("Left") for b in bones)

@@ -220,8 +220,17 @@ def draft_articulation(entry: dict) -> str:
             save_queue_entry(entry)
             return f"{key} draft: {'; '.join(notes)} — {check}, then Apply"
     try:
-        from articulation_draft import propose
-        spec = propose(stage, asset_root, asset_root)
+        # no tier knows this kind of object: the part survey's reading of each
+        # part (what moves, against what, how) drafts it; else the geometric
+        # proposal (wheels, symmetry)
+        survey = entry.get("part_survey") or {}
+        if any(p.get("motion") not in (None, "none", "flex") for p in survey.get("parts", [])):
+            from survey_draft import propose_survey
+            spec, notes = propose_survey(stage, survey.get("root") or asset_root, survey, templates.get("survey"))
+            spec["prim_path"] = asset_root
+        else:
+            from articulation_draft import propose
+            spec = propose(stage, asset_root, asset_root)
         # what it should do (behaviors.expected): a wheeled base drives its wheels
         from behaviors import draft_wheeled_base, expected
         if "wheeled_base" in expected(entry):
@@ -247,6 +256,8 @@ def draft_articulation(entry: dict) -> str:
         entry["articulation_draft"] = json.dumps(spec, indent=1)
         save_queue_entry(entry)
         a = spec.get("_analysis", {})
+        if a.get("tier") == "survey":
+            return f"survey draft: {'; '.join(a.get('notes', []))} — check each axis, pivot and range, then Apply"
         return (f"draft proposed from geometry: {a.get('parts')} parts, "
                 f"symmetry axis {a.get('symmetry_axis')}, "
                 f"{a.get('wheels_detected')} wheels detected, base "

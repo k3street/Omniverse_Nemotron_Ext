@@ -61,6 +61,9 @@ def run_stage(stage: str, a: str, library_root: Path) -> str:
         src = e.get("original_file") or e["file"]
         e = queue_file(src, e.get("class_hint"), a)
         return e["report"].get("verdict", "")
+    if stage in ("survey", "materials", "rig"):
+        notes = dict(pd.part_stages(a))
+        return notes.get(stage) or f"{stage}: not applicable"
     if stage == "classify":
         from vlm_classify import classify_entry
         return classify_entry(a)

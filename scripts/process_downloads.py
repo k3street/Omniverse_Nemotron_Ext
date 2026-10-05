@@ -201,6 +201,88 @@ def file_assets(asset_ids: list[str], library_root: Path, dry: bool) -> list[str
     return log
 
 
+def wants_survey(e: dict) -> bool:
+    """A part survey for multi-part rigid objects (not a cloth, a scene or a
+    character): their parts' materials and motions."""
+    from processing import _prior
+    if e.get("deformable") or _prior(e).get("deformable"):
+        return False
+    if (e.get("vlm") or {}).get("content_kind") in ("scene", "scene_fragment"):
+        return False
+    if class_of(e) == "human_character":
+        return False
+    return (e.get("report") or {}).get("structure", {}).get("meshes", 0) >= 2
+
+
+def wants_rig(e: dict) -> bool:
+    return class_of(e) == "human_character" or bool((e.get("report") or {}).get("skeleton"))
+
+
+def part_stages(asset_id: str) -> list[tuple[str, str]]:
+    """6b and 6c for one asset; a failure is a finding, not the end of the run."""
+    out = []
+    e = entry_of(asset_id)
+    if wants_survey(e):
+        try:
+            from part_survey import survey
+            r = survey(asset_id)
+            moving = [p for p in r["parts"] if p["motion"] not in ("none", "flex")]
+            out.append(("survey", f"{len(r['parts'])} parts, {len(moving)} moving: " + ", ".join(
+                f"{p['role']} ({p['motion']})" for p in moving[:6])))
+            from part_materials import apply as apply_materials
+            m = apply_materials(asset_id)
+            out.append(("materials", ", ".join(f"{k} x{v}" for k, v in m["meshes_bound"].items())))
+        except Exception as ex:  # noqa: BLE001
+            out.append(("survey", f"FAILED: {type(ex).__name__}: {str(ex)[:160]}"))
+    if wants_rig(e):
+        try:
+            from character_rig import rig_entry
+            r = rig_entry(asset_id)
+            pc = r.get("pose_check") or {}
+            out.append(("rig", f"{r['kind']}: {r.get('joints')} joints"
+                        + (f", pose check {'PASS' if pc.get('rig_ok') else 'FAIL'}" if pc else "")))
+        except Exception as ex:  # noqa: BLE001
+            out.append(("rig", f"FAILED: {type(ex).__name__}: {str(ex)[:160]}"))
+    return out
+
+
+def class_gaps(ids: list[str]) -> dict:
+    """Per class in the run: what the conventions cover and what is missing -
+    the capability gaps a new kind of object opens."""
+    from asset_review_hub import _load_priors_fresh
+    from behaviors import check as behavior_check
+
+    tiers = ("pivot", "thread", "plunger", "watch", "turntable", "clip", "power_drill", "cabinet", "temples",
+             "buttons", "rotors")
+    priors = _load_priors_fresh()
+    by = {}
+    for a in ids:
+        e = entry_of(a)
+        c = class_of(e) or "(none)"
+        g = by.setdefault(c, {"assets": 0, "source": (priors.get(c) or {}).get("source", "?"),
+                              "tier": next((t for t in tiers if t in ((priors.get(c) or {}).get("mechanism_templates")
+                                                                       or {})), None),
+                              "moving_parts_seen": 0, "articulated": 0, "by_survey": 0, "behaviors_unmet": 0,
+                              "multi_material": 0, "rigged": 0, "articulation_failed": 0})
+        g["assets"] += 1
+        moving = [f for f in (e.get("vlm") or {}).get("functions") or [] if f.get("kind") not in ("other",)]
+        g["moving_parts_seen"] += bool(moving)
+        from processing import articulated
+        art = articulated(e)
+        g["articulated"] += art
+        g["by_survey"] += art and (json.loads(e.get("articulation_draft") or "{}").get("_analysis") or {}).get(
+            "tier") == "survey"
+        g["articulation_failed"] += bool(moving) and not art and any(
+            f.get("kind") in ("manual", "spring_return", "motor", "gate", "wheeled_base") for f in moving)
+        g["behaviors_unmet"] += any(not v.get("ok") for v in behavior_check(e).values())
+        g["multi_material"] += len((e.get("part_materials") or {}).get("materials", [])) > 1
+        g["rigged"] += bool(e.get("character_rig"))
+    gaps = {c: g for c, g in by.items()
+            if g["articulation_failed"] or g["behaviors_unmet"] or (g["source"] == "vlm")
+            or (c == "human_character" and g["rigged"] < g["assets"])}
+    return {"classes": by, "gaps": gaps}
+
+
 def articulate(asset_id: str, dry: bool) -> str:
     """Segment if fused, draft, and apply a real proposal; an articulable
     asset left unjointed gets a provisional rigid body."""
@@ -427,6 +509,13 @@ def process(staged: list[Path], library_root: Path, args, report: dict, incoming
     for a in ids:
         e = entry_of(a)
         report["assets"][a].update({"class": class_of(e), "file": e.get("original_file") or e["file"]})
+    # 6b. what each part is, is made of and does (part_survey) -> a physics
+    # material per part; 6c. characters get a rig (character_rig)
+    if not args.no_vlm:
+        for a in ids:
+            for stage, note in part_stages(a):
+                report["assets"][a][stage] = note
+                print(f"{stage:10s} {a}: {note[:160]}")
     # 7. articulate
     if not args.no_articulate:
         for a in ids:
@@ -450,6 +539,15 @@ def process(staged: list[Path], library_root: Path, args, report: dict, incoming
             short = {k: v["missing"] for k, v in bc.items() if not v["ok"]}
             print(f"behaviors  {a}: " + ("all met" if not short else "; ".join(
                 f"{k} lacks {', '.join(m) or 'a draft'}" for k, m in short.items())))
+    # 7c. capability gaps: per class, what the conventions do not yet cover
+    gaps = class_gaps(ids)
+    report["class_coverage"] = gaps["classes"]
+    report["gaps"] = gaps["gaps"]
+    for c, g in sorted(gaps["gaps"].items(), key=lambda kv: -kv[1]["assets"]):
+        print(f"gap        {c}: {g['assets']} assets, tier {g['tier'] or 'none'} ({g['source']} class); "
+              f"moving parts seen in {g['moving_parts_seen']}, articulated {g['articulated']} "
+              f"({g['by_survey']} by survey), not articulated though moving {g['articulation_failed']}, "
+              f"behaviors unmet {g['behaviors_unmet']}, multi-material {g['multi_material']}, rigged {g['rigged']}")
     # 8. verify
     for a in ids:
         e = entry_of(a)

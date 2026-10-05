@@ -38,6 +38,9 @@ RULES = {
     "verify": "2026-10-04",      # behavior scenarios; tools held; spindles swept
     "critic": "2026-10-04",      # pivot ring, measured over-travel, unseeable joints by measurement
     "soft": "2026-10-03",        # cloth proxy drape, squish, cable
+    "rig": "2026-10-04",         # character rigs: detected, or a humanoid autorig + pose check
+    "survey": "2026-10-04",      # the part survey: role, material, motion per part
+    "materials": "2026-10-04",   # physics materials per part from the survey
 }
 
 # drafting tier -> version of its rules ("generic": the geometric proposal)
@@ -48,11 +51,13 @@ TIERS = {
     "rotors": "2026-10-04",       # rotors are spindles
     "buttons": "2026-10-03",      # keys on the deck they sit in; key split
     "generic": "2026-10-04",      # wheeled base: forks swivel, rims ride, casters
+    "survey": "2026-10-04",       # joints from the part survey (a vision model's reading of each part)
     "door": "2026-10-02", "watch": "2026-10-02", "turntable": "2026-10-02", "cabinet": "2026-10-02",
     "temples": "2026-10-02", "thread": "2026-10-02", "plunger": "2026-10-02",
 }
 
-ORDER = ["ingest", "classify", "file", "articulate", "behaviors", "verify", "critic", "soft"]
+ORDER = ["ingest", "classify", "survey", "file", "materials", "rig", "articulate", "behaviors", "verify",
+         "critic", "soft"]
 
 
 @functools.lru_cache(maxsize=1)
@@ -105,6 +110,12 @@ def applicable(entry: dict) -> list[str]:
     """The stages that apply to this asset."""
     prior = _prior(entry)
     stages = ["ingest", "classify", "file"]
+    meshes = (entry.get("report") or {}).get("structure", {}).get("meshes", 0)
+    cls = entry.get("class_hint") or (entry.get("report") or {}).get("matched_class")
+    if meshes >= 2 and not (entry.get("deformable") or prior.get("deformable")) and cls != "human_character":
+        stages += ["survey", "materials"]
+    if cls == "human_character" or (entry.get("report") or {}).get("skeleton"):
+        stages.append("rig")
     if articulated(entry) or prior.get("mechanism_templates") or prior.get("behaviors") \
             or (prior.get("articulable") and not prior.get("deformable")):
         stages.append("articulate")
