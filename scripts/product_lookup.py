@@ -110,6 +110,99 @@ def lookup(query: str, refresh: bool = False) -> dict | None:
     return spec
 
 
+MECH_PATH = REPO / "workspace" / "knowledge" / "product_mechanics.json"
+
+MECH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "is_known_product": {"type": "boolean",
+                             "description": "True only for a specific real product (a brand and model), "
+                                            "not a generic kind of object"},
+        "product_name": {"type": "string"},
+        "moving_parts": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "part": {"type": "string", "description": "the part as the manual names it"},
+                "motion": {"type": "string", "enum": ["hinge", "slide", "spin", "press", "detach", "flex"]},
+                "how": {"type": "string", "description": "how it moves, in words a person could check on "
+                                                        "a 3D model: where the pin or track is, which way "
+                                                        "it opens, what it reveals"},
+                "axis": {"type": "string", "description": "the axis in the product's own directions: "
+                                                         "across its width, front to back, vertical, "
+                                                         "through the part's face, along the part"},
+                "pivot": {"type": "string", "description": "where the hinge pin is (rear top edge, "
+                                                          "bottom edge, centre...), or where it comes off"},
+                "range": {"anyOf": [{"type": "number"}, {"type": "null"}],
+                          "description": "degrees for a hinge, millimetres for a slide or press"},
+            },
+            "required": ["part", "motion", "how", "axis", "pivot", "range"],
+            "additionalProperties": False}},
+        "source": {"type": "string", "description": "URLs or citations (manual, listing, review)"},
+        "notes": {"type": "string"},
+    },
+    "required": ["is_known_product", "product_name", "moving_parts", "source", "notes"],
+    "additionalProperties": False,
+}
+
+
+def named_product(name: str) -> bool:
+    """Whether a VLM identification names a product rather than a kind of
+    object: a capitalised word after the first ("Keurig K-Slim") or a model
+    code ("XR-200"). "Handheld digital multimeter" is a kind."""
+    words = re.findall(r"[\w-]+", re.sub(r"\(.*?\)", "", name or ""))
+    return any(w[0].isupper() for w in words[1:]) or any(
+        re.search(r"[A-Za-z]-?\d|\d-?[A-Za-z]", w) for w in words) or any(
+        a[0].isupper() and b.isdigit() and len(b) >= 2 for a, b in zip(words, words[1:]))
+
+
+def lookup_mechanics(query: str, refresh: bool = False) -> dict | None:
+    """How a named product's parts move, from its manual and listings:
+    the ground truth the part survey maps onto meshes and the motion critic
+    judges against (a Keurig's lid is hinged at its rear top edge and lifts
+    up; its reservoir lifts off). None for a generic object. Cached."""
+    key = _norm(query)
+    cache = json.loads(MECH_PATH.read_text()) if MECH_PATH.exists() else {
+        "_doc": "Web-sourced moving parts of named products, used by the part survey and the "
+                "motion critic. Cached; delete a key to look it up again.", "products": {}}
+    if not refresh and key in cache["products"]:
+        return cache["products"][key] or None
+    import anthropic
+
+    response = anthropic.Anthropic().messages.create(
+        model="claude-opus-5", max_tokens=16000,
+        tools=[{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}],
+        messages=[{"role": "user", "content": (
+            f"A 3D model in a robotics-simulation pipeline was identified as {query!r}. If that is a "
+            "specific real product (a brand and model), look up how it works physically - its user "
+            "manual, product listings, reviews or teardown photos - and list EVERY part a user moves: "
+            "lids, handles, doors, trays, reservoirs, buttons, knobs, dials, wheels, latches. For each "
+            "say the motion, how it moves (where the hinge pin or track is, which way it opens, what "
+            "it reveals), the axis in the product's own directions, the pivot, and the range. Parts "
+            "that only come off for cleaning are detach. If it is generic or you cannot find the "
+            "product, set is_known_product=false rather than guessing.")}],
+        output_config={"format": {"type": "json_schema", "schema": MECH_SCHEMA}})
+    if response.stop_reason == "refusal":
+        raise RuntimeError("model declined the lookup")
+    result = json.loads(next(b.text for b in response.content if b.type == "text"))
+    mech = None
+    if result.get("is_known_product") and result.get("moving_parts"):
+        mech = {**result, "looked_up": date.today().isoformat()}
+        mech.pop("is_known_product", None)
+    cache["products"][key] = mech
+    MECH_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MECH_PATH.write_text(json.dumps(cache, indent=1))
+    return mech
+
+
+def mechanics_for(entry: dict, refresh: bool = False) -> dict | None:
+    """The product mechanics for a queue entry whose VLM identification
+    names a product (else None), recorded on the entry by the caller."""
+    name = (entry.get("vlm") or {}).get("object_name") or ""
+    if not named_product(name):
+        return None
+    return lookup_mechanics(re.sub(r"\s*\(.*?\)", "", name).strip(), refresh=refresh)
+
+
 def enrich_entry(asset_id: str, refresh: bool = False) -> str:
     """Attach a product spec to a queue entry and act on it: rescale the
     derivative to spec dims (>15% off) and author the spec mass. The

@@ -16,6 +16,7 @@ from typing import Any, Awaitable, Callable, Dict
 
 from . import (
     animation,
+    asset_conventions,
     arena,
     compliance,
     contact_sequence,
@@ -65,6 +66,7 @@ _THEME_MODULES = (
     compliance,
     contact_sequence,
     workflow,
+    asset_conventions,
     resolve,
 )
 

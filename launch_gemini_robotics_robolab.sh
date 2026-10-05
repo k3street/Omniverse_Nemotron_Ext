@@ -47,6 +47,9 @@ for arg in "$@"; do
     esac
 done
 
+# Wait for the machine's single Isaac slot (see scripts/isaac_slot.sh).
+source "$ROOT/scripts/isaac_slot.sh"
+
 critic_marker="$(mktemp /tmp/robot-sequence-critic.XXXXXX)"
 set +e
 "$ISAAC_SIM_ROOT/python.sh" "$ROOT/scripts/run_gemini_robotics_robolab.py" "${viewer_args[@]}" "$@"

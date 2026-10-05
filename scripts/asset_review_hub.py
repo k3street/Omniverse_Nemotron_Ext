@@ -22,6 +22,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -163,6 +164,10 @@ def fix_scale(entry: dict) -> str:
                 for c in entry["report"]["callouts"]) else "scale still flagged"))
 
 
+def _load_priors_fresh() -> dict:
+    return json.loads((REPO / "workspace" / "knowledge" / "asset_class_priors.json").read_text())["classes"]
+
+
 def draft_articulation(entry: dict) -> str:
     """Propose a joint-spec draft from the asset's part structure. The
     reviewer edits it (types, axes, limits are judgment) and applies."""
@@ -177,12 +182,99 @@ def draft_articulation(entry: dict) -> str:
     asset_root = f"/World/{_camel(entry['asset_id'])}"
     # tier 1: geometry-driven proposal (symmetry, wheel detection, link
     # grouping) — falls back to the naive parent-of-mesh listing
-    try:
-        from articulation_draft import propose
-        spec = propose(stage, asset_root, asset_root)
+    cls = entry.get("class_hint") or entry.get("report", {}).get("matched_class")
+    if cls in ("door", "elevator_door"):
+        from door_draft import propose_door
+        spec, notes = propose_door(stage, asset_root)
+        stage.GetRootLayer().Save()  # the tier may have split the leaf out
+        if notes:
+            entry.setdefault("applied_fixes", []).extend(f"door draft: {n}" for n in notes)
         entry["articulation_draft"] = json.dumps(spec, indent=1)
         save_queue_entry(entry)
+        a = spec["_analysis"]
+        if a.get("kind") == "bi_parting_sliding":
+            return ("door draft: bi-parting sliding door, leaves "
+                    + ", ".join(Path(x).name for x in a["leaves"]) + " — check travel and coupling, then Apply")
+        return (f"door draft: leaf {Path(a['leaf']).name}, frame {Path(a['frame']).name}, "
+                f"push bar {Path(a['push_bar']).name if a['push_bar'] else 'NOT FOUND'}, "
+                f"push side {a['push_side']}, hinge at {a['hinge_edge']}"
+                + (f" — {'; '.join(a['notes'])}" if a["notes"] else "")
+                + " — check hinge side and swing, then Apply")
+    prior = _load_priors_fresh().get(cls or "", {})
+    templates = prior.get("mechanism_templates", {})
+    # template key -> (module, drafter, what the reviewer should check)
+    tiers = {"pivot": ("pivot_draft", "propose_pivot", "check which arm is fixed and the opening"),
+             "thread": ("thread_draft", "propose_thread", "check the size and pitch"),
+             "plunger": ("pipette_draft", "propose_pipette", "check the travels and forces"),
+             "watch": ("watch_draft", "propose_watch", "check the crown, bezel and which hand is which"),
+             "turntable": ("turntable_draft", "propose_turntable", "check the tonearm's swing and the lid hinge"),
+             "clip": ("clip_draft", "propose_clip", "check which end is the jaw"),
+             "power_drill": ("drill_draft", "propose_drill", "check the chuck, trigger and battery"),
+             "cabinet": ("cabinet_draft", "propose_cabinet", "check drawer travel and door hinge sides"),
+             "temples": ("temples_draft", "propose_temples", "check the hinge points"),
+             "buttons": ("button_draft", "propose_buttons", "check travel and press force"),
+             "rotors": ("rotor_draft", "propose_rotors", "check which parts spin with each rotor")}
+    for key, (module, fn, check) in tiers.items():
+        if key in templates:
+            spec, notes = getattr(__import__(module), fn)(stage, asset_root, templates[key])
+            entry["articulation_draft"] = json.dumps(spec, indent=1)
+            save_queue_entry(entry)
+            return f"{key} draft: {'; '.join(notes)} — {check}, then Apply"
+    try:
+        # no tier knows this kind of object: the part survey's reading of each
+        # part (what moves, against what, how) drafts it; else the geometric
+        # proposal (wheels, symmetry)
+        survey = entry.get("part_survey") or {}
+        if any(p.get("motion") not in (None, "none", "flex") for p in survey.get("parts", [])):
+            from survey_draft import propose_survey
+            tmpl = dict(templates.get("survey") or {})
+            tmpl["set"] = (entry.get("vlm") or {}).get("content_kind") == "object_set"
+            spec, notes = propose_survey(stage, survey.get("root") or asset_root, survey, tmpl)
+            spec["prim_path"] = asset_root
+        else:
+            from articulation_draft import propose
+            spec = propose(stage, asset_root, asset_root)
+        # what it should do (behaviors.expected): a wheeled base drives its wheels
+        from behaviors import draft_wheeled_base, expected
+        if "wheeled_base" in expected(entry):
+            # every wheel a caster (the survey's word for it): nothing drives it
+            roles = {c: p.get("role") or "" for p in (entry.get("part_survey") or {}).get("parts", [])
+                     for c in (p.get("copies") or [p["path"]])}
+            wheel_roles = [roles.get(j["child_prim"], "") for j in spec.get("joints", [])
+                           if j["name"].startswith(("wheel_L", "wheel_R"))]
+            pushed = bool(wheel_roles) and all(re.search(r"cast(e|o)r", r, re.I) for r in wheel_roles)
+            b, bnotes = draft_wheeled_base(stage, spec, pushed=pushed,
+                                           forks=(spec.get("_analysis") or {}).get("forks"))
+            if b:
+                # the casters' swivels are mechanisms; their spin joints move into them
+                cm = b.pop("mechanisms", [])
+                gone = {m["spin_joint"] for m in cm}
+                spec["joints"] = [j for j in spec["joints"] if j["name"] not in gone]
+                # a modelled fork becomes a caster's swivelling body (add_caster):
+                # its drafted mount to the wheel goes, and anything else hung on
+                # it waits on the frame (the fork is not a link until then)
+                for m in cm:
+                    if m.get("fork"):
+                        # the caster mounts the fork on its frame: its drafted
+                        # mounts (to the wheel, to the frame) go
+                        spec["joints"] = [j for j in spec["joints"]
+                                          if {j["parent_prim"], j["child_prim"]} not in
+                                          ({m["fork"], m["wheel"]}, {m["fork"], m["frame"]})]
+                        for j in spec["joints"]:
+                            if j["parent_prim"] == m["fork"]:
+                                j["parent_prim"] = m["frame"]
+                spec.setdefault("mechanisms", []).extend(cm)
+                spec.setdefault("behaviors", []).append(b)
+            spec.setdefault("_analysis", {})["behavior_notes"] = bnotes
+        entry["articulation_draft"] = json.dumps(spec, indent=1)
+        # a new draft: what the critic took out of the last one is history
+        for k in ("pruned_joints", "critic_flags"):
+            if k in entry:
+                entry.setdefault("history", []).append({k: entry.pop(k)})
+        save_queue_entry(entry)
         a = spec.get("_analysis", {})
+        if a.get("tier") == "survey":
+            return f"survey draft: {'; '.join(a.get('notes', []))} — check each axis, pivot and range, then Apply"
         return (f"draft proposed from geometry: {a.get('parts')} parts, "
                 f"symmetry axis {a.get('symmetry_axis')}, "
                 f"{a.get('wheels_detected')} wheels detected, base "
@@ -227,6 +319,48 @@ def draft_articulation(entry: dict) -> str:
             "edit the spec, then Apply")
 
 
+# Past this many joints, the rest leave the articulation as maximal joints.
+# PhysX 4's 64-link limit is not this build's: electric_drill_1 animated with
+# 75 joints in one articulation, and moving its extras out made them collide
+# with the body they sit in (it blew up). Kept as a switch, off.
+ARTICULATION_MAX_JOINTS = 100000
+
+
+def _strip_set_bodies(stage, spec: dict) -> int:
+    """Take off the bodies an object set got at ingest (a body, articulation
+    and object<i>_ joints per member) above the links the spec joints: a
+    rigid body under a rigid body fights it, and the K-Slim pair flew apart
+    at the first step with both layers on."""
+    from pxr import Sdf, UsdPhysics
+
+    links = {Sdf.Path(j[k]) for j in spec.get("joints", []) for k in ("parent_prim", "child_prim") if j.get(k)}
+    links |= {Sdf.Path(m[k]) for m in spec.get("mechanisms", []) for k in ("holder", "part") if m.get(k)}
+    root = Sdf.Path(spec["prim_path"])
+    above = set()
+    for l in links:
+        q = l.GetParentPath()
+        while q.HasPrefix(root) and q != root:
+            above.add(q)
+            q = q.GetParentPath()
+    stripped = set()
+    for q in above - links:
+        prim = stage.GetPrimAtPath(q)
+        if not prim:
+            continue
+        for api in (UsdPhysics.RigidBodyAPI, UsdPhysics.MassAPI, UsdPhysics.ArticulationRootAPI):
+            if prim.HasAPI(api):
+                prim.RemoveAPI(api)
+                stripped.add(q)
+        if "PhysxArticulationAPI" in prim.GetAppliedSchemas():
+            prim.RemoveAppliedSchema("PhysxArticulationAPI")
+    for prim in list(stage.Traverse()):
+        if prim.IsA(UsdPhysics.FixedJoint) and re.match(r"object\d+_", prim.GetName()):
+            j = UsdPhysics.Joint(prim)
+            if {*j.GetBody0Rel().GetTargets(), *j.GetBody1Rel().GetTargets()} & stripped:
+                stage.RemovePrim(prim.GetPath())
+    return len(stripped)
+
+
 def apply_articulation(entry: dict, spec_text: str) -> str:
     """Run articulate_asset with the reviewer-edited spec on the derivative."""
     import contextlib
@@ -242,9 +376,34 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     spec = json.loads(spec_text)
     spec.pop("_instructions", None)
     spec.pop("_analysis", None)
+    spec.pop("button_joints", None)
+    spec.pop("knob_joints", None)
+    for j in spec.get("joints", []):
+        j.pop("_role", None)
+    # keys articulate_asset does not take: applied after it, on the same stage
+    link_masses = spec.pop("link_masses", {})
+    no_collision = spec.pop("no_collision", [])
+    filtered_pairs = spec.pop("filtered_pairs", [])
+    mechanisms = spec.pop("mechanisms", [])
+    thread = spec.pop("thread", None)
+    behaviors = spec.pop("behaviors", [])
+    turntable = spec.pop("turntable", None)
     if any("|" in str(j.get("joint_type", "")) for j in spec.get("joints", [])):
         return "spec still has placeholder joint_type values — edit before applying"
     stage = Usd.Stage.Open(entry["file"])
+    # a provisional rigid body on the root (an asset left unjointed) would swallow
+    # every link under it: PhysX does not nest rigid bodies
+    from pxr import UsdPhysics as _UP
+    _root = stage.GetPrimAtPath(spec["prim_path"])
+    if _root and _root.HasAPI(_UP.RigidBodyAPI):
+        _root.RemoveAPI(_UP.RigidBodyAPI)
+        if _root.HasAPI(_UP.MassAPI):
+            _root.RemoveAPI(_UP.MassAPI)
+    _strip_set_bodies(stage, {**spec, "mechanisms": mechanisms})
+    # PhysX takes no negative scale on bodies or colliders (a mirrored crane
+    # leg tore the crane apart): reflections go into the points first
+    from unmirror import unmirror
+    unmirror(stage, spec["prim_path"])
     omni = types.ModuleType("omni")
     omni_usd = types.ModuleType("omni.usd")
     ctx = type("Ctx", (), {"get_stage": lambda self: stage})()
@@ -252,17 +411,178 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
     omni.usd = omni_usd
     sys.modules["omni"] = omni
     sys.modules["omni.usd"] = omni_usd
-    code = _gen_articulate_asset(spec)
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        exec(compile(code, "<articulate>", "exec"), {"__builtins__": __builtins__})
+    if spec.get("joints"):
+        code = _gen_articulate_asset(spec)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            exec(compile(code, "<articulate>", "exec"), {"__builtins__": __builtins__})
+    from pxr import Sdf, UsdPhysics
+
+    # a PhysX articulation holds at most 64 links: past that (a full keyboard
+    # is 100+ keys) the first joints stay in it and the rest become maximal
+    # joints between rigid bodies, as do joints hung on a body that left it
+    names = [j["name"] for j in spec.get("joints", [])]
+    if len(names) > ARTICULATION_MAX_JOINTS:
+        by_name = {p.GetName(): p for p in stage.Traverse() if p.IsA(UsdPhysics.Joint)}
+        out = set(names[ARTICULATION_MAX_JOINTS:])
+        while True:
+            left = {str(t) for n in out if n in by_name for t in UsdPhysics.Joint(by_name[n]).GetBody1Rel().GetTargets()}
+            more = {n for n in names if n not in out and n in by_name
+                    and any(str(t) in left for t in UsdPhysics.Joint(by_name[n]).GetBody0Rel().GetTargets())}
+            if not more:
+                break
+            out |= more
+        for n in out:
+            if n in by_name:
+                by_name[n].CreateAttribute("physics:excludeFromArticulation", Sdf.ValueTypeNames.Bool).Set(True)
+
+    if thread:
+        # what a mating part needs to know, kept with the asset
+        stage.GetPrimAtPath(spec["prim_path"]).SetCustomDataByKey("simReady:thread", thread)
+    if turntable:
+        stage.GetPrimAtPath(spec["prim_path"]).SetCustomDataByKey("simReady:turntable", turntable)
+    if behaviors:
+        # the control laws (behaviors.py) the asset's joints are worked by
+        stage.GetPrimAtPath(spec["prim_path"]).SetCustomDataByKey("simReady:behaviors", json.dumps(behaviors))
+
+    for path, kg in link_masses.items():
+        UsdPhysics.MassAPI.Apply(stage.GetPrimAtPath(path)).CreateMassAttr().Set(float(kg))
+    for path in no_collision:
+        UsdPhysics.CollisionAPI(stage.GetPrimAtPath(path)).CreateCollisionEnabledAttr().Set(False)
+    for a, b in filtered_pairs:
+        UsdPhysics.FilteredPairsAPI.Apply(stage.GetPrimAtPath(a)).CreateFilteredPairsRel().AddTarget(Sdf.Path(b))
+    made = []
+    from add_mechanism import add_caster, add_couple, add_helix, add_latch, add_press_fit, add_two_stop
+    builders = {"latch": add_latch, "couple": add_couple, "helix": add_helix,
+                "two_stop": add_two_stop, "press_fit": add_press_fit, "caster": add_caster}
+    for m in mechanisms:
+        if m.get("type") not in builders:
+            raise ValueError(f"unknown mechanism type {m.get('type')!r}; known: {sorted(builders)}")
+        made.append(builders[m["type"]](stage, spec["prim_path"], m))
+    # masses authored under an earlier class (a drill first seen as any
+    # hand tool) are scaled, in proportion, into this class's range
+    cls = entry.get("class_hint") or entry.get("report", {}).get("matched_class")
+    rng = (_load_priors_fresh().get(cls or "", {}) or {}).get("mass_kg")
+    if rng:
+        from pxr import Usd as _Usd
+        massed = [p for p in _Usd.PrimRange(stage.GetPrimAtPath(spec["prim_path"]))
+                  if p.HasAPI(UsdPhysics.MassAPI) and (p.GetAttribute("physics:mass").Get() or 0) > 0]
+        total = sum(p.GetAttribute("physics:mass").Get() for p in massed)
+        if massed and not rng[0] <= total <= rng[1]:
+            k = (rng[0] * rng[1]) ** 0.5 / total
+            for p in massed:
+                p.GetAttribute("physics:mass").Set(p.GetAttribute("physics:mass").Get() * k)
+            made.append({"mass_rescaled": round(total, 4), "to": round(total * k, 4)})
     stage.GetRootLayer().Save()
     entry["articulation_draft"] = spec_text
     entry["applied_fixes"] = entry.get("applied_fixes", []) + [
-        f"articulate_asset: {len(spec.get('joints', []))} joints"]
+        f"articulate_asset: {len(spec.get('joints', []))} joints"
+        + (f", {len(made)} mechanism(s)" if made else "")]
+    if mechanisms:
+        entry["mechanisms"] = mechanisms
+    from processing import record
+    record(entry, "articulate", tier=(json.loads(spec_text).get("_analysis") or {}).get("tier") or "generic",
+           joints=len(spec.get("joints", [])), mechanisms=len(made))
     _re_ingest(entry)
     verdict = entry["report"].get("verdict", "")
     return f"articulation applied ({len(spec.get('joints', []))} joints) — re-checked: {verdict}"
+
+
+PHYSICS_SCHEMAS = ("PhysicsArticulationRootAPI", "PhysxArticulationAPI", "PhysicsRigidBodyAPI",
+                   "PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", "PhysicsMassAPI",
+                   "PhysicsFilteredPairsAPI", "PhysxCollisionAPI", "PhysxRigidBodyAPI")
+
+
+def unarticulate(entry: dict, why: str) -> str:
+    """Undo an applied articulation: strip from the derivative every joint and
+    physics API it authored (the source file is never touched), then give the
+    asset the rigid physics ingest gives a rigid object."""
+    from pxr import Sdf
+
+    from ingest_asset import apply_rigid_physics
+
+    layer = Sdf.Layer.FindOrOpen(entry["file"])
+    root = layer.GetPrimAtPath(f"/World/{_camel(entry['asset_id'])}")
+    if root is None:
+        return f"no /World/{_camel(entry['asset_id'])} in {entry['file']}"
+    for scope in ("Joints", "Mechanisms"):        # mechanisms' carriers (a thread, a caster) too
+        if scope in root.nameChildren:
+            del root.nameChildren[scope]
+    stripped = 0
+
+    def strip(spec):
+        nonlocal stripped
+        info = spec.GetInfo("apiSchemas") if spec.HasInfo("apiSchemas") else None
+        if info is not None:
+            items = [i for i in info.prependedItems if i.split(":")[0] not in PHYSICS_SCHEMAS]
+            if len(items) != len(info.prependedItems):
+                stripped += 1
+                if items:
+                    info.prependedItems = items
+                    spec.SetInfo("apiSchemas", info)
+                else:
+                    spec.ClearInfo("apiSchemas")
+        for prop in list(spec.properties):
+            if prop.name.startswith(("physics:", "physx", "drive:", "physxArticulation:")):
+                spec.RemoveProperty(prop)
+        for child in list(spec.nameChildren):
+            strip(child)
+
+    strip(root)
+    layer.Save()
+    entry["applied_fixes"] = entry.get("applied_fixes", []) + [f"unarticulated: {why}"]
+    from processing import record
+    record(entry, "articulate", tier="none", undone=why)
+    _re_ingest(entry)
+    note = apply_rigid_physics(entry, provisional=True)
+    if note:
+        entry["applied_fixes"].append(f"provisional (until articulated): {note}")
+    _re_ingest(entry)
+    return f"articulation removed ({stripped} prims stripped); {note or 'no rigid physics (class still articulable)'}"
+
+
+# ---------------------------------------------------------------------------
+# joint animation (headless Isaac, queued on the machine's single Isaac slot)
+
+ANIM_DIR = REPO / "workspace" / "asset_animations"
+
+
+def animate(entry: dict) -> str:
+    isaac_py = Path(os.environ.get(
+        "ISAAC_PYTHON_SH",
+        Path.home() / "Documents/Github/isaacsim/_build/linux-aarch64/release/python.sh"))
+    if not isaac_py.exists():
+        return f"cannot animate: Isaac python not found at {isaac_py} (set ISAAC_PYTHON_SH)"
+    ANIM_DIR.mkdir(parents=True, exist_ok=True)
+    aid = entry["asset_id"]
+    cmd = (f"source {REPO / 'scripts/isaac_slot.sh'} && "
+           f"exec {isaac_py} {REPO / 'scripts/animate_asset.py'} {aid}")
+    subprocess.Popen(["bash", "-c", cmd], cwd=REPO, start_new_session=True,
+                     stdout=open(ANIM_DIR / f"{aid}.log", "w"), stderr=subprocess.STDOUT)
+    return (f"animating {aid} in headless Isaac (queues for the Isaac slot); "
+            f"refresh in a few minutes — log at workspace/asset_animations/{aid}.log")
+
+
+def animation_html(aid: str) -> str:
+    d = ANIM_DIR / aid
+    mp4, summ = d / f"{aid}.mp4", d / "summary.json"
+    if not mp4.exists():
+        return ""
+    lines = []
+    if summ.exists():
+        s = json.loads(summ.read_text())
+        for name, j in s.get("joints", {}).items():
+            if j.get("follower"):
+                lines.append(f"{name}: follows, range {j['measured_range']}")
+            else:
+                lines.append(f"{name}: range {j['measured_range']} (limits {[round(v, 3) for v in j['limits']]}), "
+                             f"max tracking error {j['max_tracking_error']}")
+        for name, g in s.get("gates", {}).items():
+            lines.append(f"GATE {name}: {'HELD' if g['held'] else 'FAILED'} — pushed toward "
+                         f"{g['tried']}, moved {g['moved']}")
+    return (f'<video controls muted style="width:100%;max-width:640px;margin-top:8px;border-radius:7px" '
+            f'src="/anim/{aid}/{aid}.mp4"></video>'
+            + "".join(f'<p class="meta">{html.escape(l)}</p>' for l in lines))
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +701,26 @@ def render_entry(e: dict) -> str:
     if e.get("applied_fixes"):
         fixes = ('<p class="meta">applied fixes: '
                  + " · ".join(html.escape(f) for f in e["applied_fixes"]) + "</p>")
+    seen = ""
+    v = e.get("vlm") or {}
+    if v:
+        kind = v.get("content_kind", "single_object")
+        seen = (f'<p class="meta">VLM sees <b>{html.escape(str(v.get("object_name")))}</b> '
+                f'({html.escape(str(v.get("confidence")))} confidence)'
+                + (f' · <span style="color:#ffb86b">{html.escape(kind.replace("_", " "))}, not one object</span>'
+                   if kind != "single_object" else "") + "</p>")
+    if e.get("vlm_suggestion", {}).get("applied") is False:
+        sg = e["vlm_suggestion"]
+        seen += (f'<p class="meta">VLM suggests class <code>{html.escape(str(sg.get("asset_class")))}</code> '
+                 f'at low confidence — not applied; set it as the class hint if it is right</p>')
+    if e.get("identity_mismatch"):
+        mm = e["identity_mismatch"]
+        seen += (f'<p class="meta" style="color:#ff8f8f">'
+                 f'{"possible " if mm.get("confidence") == "low" else ""}name/content mismatch: the file is named as '
+                 f'<code>{html.escape(str(mm["name_says"]))}</code> but shows '
+                 f'<code>{html.escape(str(mm["content_is"]))}</code> '
+                 f'({html.escape(str(mm.get("object_name")))})</p>')
+    fixes += seen
     actions = ""
     if status not in ("approved", "rejected"):
         # judgment actions only — mechanical fixes run automatically at
@@ -395,6 +735,8 @@ def render_entry(e: dict) -> str:
         if arti_needed:
             corrective += ('<button name="do" value="draft_arti">Draft articulation '
                            'spec</button>')
+        if any("articulate_asset" in f for f in e.get("applied_fixes", [])):
+            corrective += '<button name="do" value="animate">Animate joints (video)</button>'
         corrective += '<button name="do" value="vlm">Classify visually (VLM)</button>'
         corrective += '<button name="do" value="recheck">Re-run checks</button>'
         gate = ""
@@ -434,7 +776,7 @@ def render_entry(e: dict) -> str:
     return (f'<div class="card">{thumb}<h2>{aid}{badge}</h2>'
             f'<div class="path">{html.escape(e.get("file", ""))}</div>'
             f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{review_note}{actions}'
-            f'{arti_editor}{reclass}'
+            f'{animation_html(aid)}{arti_editor}{reclass}'
             f'<div style="clear:both"></div></div>')
 
 
@@ -569,6 +911,20 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/health"):
             self._send(b"ok")
             return
+        if self.path.startswith("/anim/"):
+            parts = urllib.parse.unquote(self.path[len("/anim/"):]).split("/")
+            f = ANIM_DIR / Path(parts[0]).name / Path(parts[-1]).name if len(parts) == 2 else None
+            types = {".mp4": "video/mp4", ".png": "image/png", ".json": "application/json"}
+            if f is not None and f.exists() and f.suffix in types:
+                data = f.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", types[f.suffix])
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self._send(b"not found", 404)
+            return
         if self.path.startswith("/thumb/"):
             name = Path(urllib.parse.unquote(self.path[len("/thumb/"):])).name
             f = QUEUE_DIR / "thumbs" / name
@@ -636,6 +992,8 @@ class Handler(BaseHTTPRequestHandler):
                 msg = apply_articulation(entry, get("spec"))
             except Exception as ex:
                 msg = f"articulation failed: {ex}"
+        elif action == "animate":
+            msg = animate(entry)
         elif action == "reclass":
             hint = get("class_hint")
             if not hint:

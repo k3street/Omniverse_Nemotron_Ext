@@ -202,6 +202,17 @@ if ! [[ -e "${TORCH_LIB:-/nonexistent}/../nvidia/nvshmem/lib/libnvshmem_host.so.
         export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}${NVSHMEM_DIR}"
     fi
 fi
+KIT_PYTHON_ARGS=()
+# Extensions here import psutil (omni.kit.test) and PIL, which this build's
+# omni.kit.pip_archive does not ship; without them omni.kit.commands and
+# omni.usd fail in turn and Kit segfaults in UsdContext::getName a few seconds
+# in. Give the GUI the Kit kernel's site-packages, as python.sh gives
+# standalone scripts. Kit's embedded Python ignores PYTHONPATH; extraPaths is
+# appended to sys.path.
+KIT_SITE_PACKAGES=$(ls -d "$ISAAC_SIM_PATH"/kit/python/lib/python3.*/site-packages 2>/dev/null | head -1)
+if [[ -n "$KIT_SITE_PACKAGES" ]]; then
+    KIT_PYTHON_ARGS=("--/app/python/extraPaths/0=$KIT_SITE_PACKAGES")
+fi
 if [[ -d "$ROS2_CORE_BASE/rclpy" ]]; then
     export PYTHONPATH="${ROS2_CORE_BASE}/rclpy${PYTHONPATH:+:${PYTHONPATH}}"
 elif [[ -d "$BRIDGE_BASE/rclpy" ]]; then
@@ -311,6 +322,7 @@ PYEOF3
         --ext-folder "$EXT_FOLDER" \
         --enable omni.isaac.assist \
         --exec "$STARTUP_SCRIPT" \
+        "${KIT_PYTHON_ARGS[@]}" \
         "$@"
 else
     echo "Starting Isaac Sim (empty scene)..."
@@ -320,5 +332,6 @@ else
         --/app/file/ignoreUnsavedOnExit=true \
         --ext-folder "$EXT_FOLDER" \
         --enable omni.isaac.assist \
+        "${KIT_PYTHON_ARGS[@]}" \
         "$@"
 fi

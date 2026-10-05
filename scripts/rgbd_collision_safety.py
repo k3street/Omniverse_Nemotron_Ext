@@ -82,6 +82,103 @@ def oriented_footprint_geometry(
     }
 
 
+def _signed_distance_to_box_xy(
+    points: np.ndarray, low: Sequence[float], high: Sequence[float]
+) -> np.ndarray:
+    """XY distance from each point to a box; negative inside, by depth."""
+    low_xy = np.asarray(low[:2], dtype=np.float64)
+    high_xy = np.asarray(high[:2], dtype=np.float64)
+    outside = np.maximum(np.maximum(low_xy - points, points - high_xy), 0.0)
+    distance = np.linalg.norm(outside, axis=1)
+    depth = np.min(np.minimum(points - low_xy, high_xy - points), axis=1)
+    return np.where(depth > 0.0, -depth, distance)
+
+
+def grasp_axis_finger_clearance(
+    *,
+    scene_geometry: Mapping[str, object],
+    actuator_geometry: Mapping[str, object],
+    object_runtime_id: str,
+    support_margin_m: float = 0.01,
+) -> list[dict[str, object]] | None:
+    """Room for the open fingers if the jaws close along each footprint axis.
+
+    Places both finger footprints (from the runtime's live contact-body
+    bounds) beside the object's visible centre along each oriented footprint
+    axis and measures the signed XY clearance to every other visible object
+    tall enough to meet a fingertip. Negative means a neighbour's visible box
+    overlaps the finger by that much. Visible boxes over-cover sparse shapes,
+    so this is conservative, and it compares axes rather than certifying one.
+    """
+    geometries = scene_geometry.get("geometries")
+    bounds = actuator_geometry.get("contact_body_bounds_local_m")
+    if not isinstance(geometries, Sequence) or not isinstance(bounds, Mapping) or not bounds:
+        return None
+    target = next(
+        (
+            item
+            for item in geometries
+            if isinstance(item, Mapping) and item.get("runtime_id") == object_runtime_id
+        ),
+        None,
+    )
+    if target is None:
+        return None
+    axes = target.get("oriented_footprint_axes_base")
+    centre = target.get("center_base_m")
+    object_low = target.get("visible_aabb_min_base_m")
+    if not isinstance(axes, Sequence) or centre is None or object_low is None:
+        return None
+    # Finger extent along the local closing axis (y) and across it (z).
+    inner = min(min(abs(b["min_m"][1]), abs(b["max_m"][1])) for b in bounds.values())
+    outer = max(max(abs(b["min_m"][1]), abs(b["max_m"][1])) for b in bounds.values())
+    half_width = max((b["max_m"][2] - b["min_m"][2]) / 2.0 for b in bounds.values())
+    neighbours = [
+        item
+        for item in geometries
+        if isinstance(item, Mapping)
+        and item.get("runtime_id") != object_runtime_id
+        and item.get("visible_aabb_min_base_m") is not None
+        and item.get("visible_aabb_max_base_m") is not None
+        and float(item["visible_aabb_max_base_m"][2]) > float(object_low[2]) + support_margin_m
+    ]
+    centre_xy = np.asarray(centre[:2], dtype=np.float64)
+    along = np.linspace(inner, outer, 5)
+    across = np.linspace(-half_width, half_width, 3)
+    results: list[dict[str, object]] = []
+    for index, raw_axis in enumerate(axes):
+        axis = np.asarray(raw_axis[:2], dtype=np.float64)
+        axis /= np.linalg.norm(axis)
+        normal = np.array([-axis[1], axis[0]])
+        points = np.array(
+            [
+                centre_xy + side * t * axis + u * normal
+                for side in (1.0, -1.0)
+                for t in along
+                for u in across
+            ]
+        )
+        clearance, obstruction = float("inf"), None
+        for item in neighbours:
+            value = float(
+                np.min(
+                    _signed_distance_to_box_xy(
+                        points, item["visible_aabb_min_base_m"], item["visible_aabb_max_base_m"]
+                    )
+                )
+            )
+            if value < clearance:
+                clearance, obstruction = value, item.get("runtime_id")
+        results.append(
+            {
+                "object_axis_index": index,
+                "finger_clearance_m": clearance if np.isfinite(clearance) else None,
+                "nearest_obstruction": obstruction,
+            }
+        )
+    return results
+
+
 def pregrasp_axis_alignment_observation(
     *,
     scene_geometry: Mapping[str, object],
@@ -173,7 +270,31 @@ def pregrasp_axis_alignment_observation(
         )
     best = min(comparisons, key=lambda item: float(item["axis_error_deg"]))
     minimum_error_deg = float(best["axis_error_deg"])
+    # Being aligned with an axis is not enough if a neighbour sits where a
+    # finger must go: say how much room each axis leaves, so the nearer axis is
+    # not chosen into a collision when the other one is clear.
+    try:
+        clearances = grasp_axis_finger_clearance(
+            scene_geometry=scene_geometry,
+            actuator_geometry=actuator_geometry,
+            object_runtime_id=object_runtime_id,
+        )
+    except (KeyError, TypeError, IndexError, ValueError):
+        clearances = None  # malformed bounds: report alignment without clearance
+    clearest_index = None
+    if clearances is not None:
+        for comparison, clearance in zip(comparisons, clearances):
+            comparison["finger_clearance_m"] = clearance["finger_clearance_m"]
+            comparison["nearest_obstruction"] = clearance["nearest_obstruction"]
+        known = [c for c in clearances if c["finger_clearance_m"] is not None]
+        if known:
+            clearest_index = max(known, key=lambda c: c["finger_clearance_m"])["object_axis_index"]
     return {
+        "finger_clearance_source": (
+            "visible RGB-D neighbour boxes vs live finger bounds; conservative, "
+            "negative = overlap depth"
+        ),
+        "clearest_object_axis_index": clearest_index,
         "available": True,
         "source": "rgbd_oriented_footprint_plus_runtime_contact_geometry",
         "frame": "robot_root_support_plane",

@@ -305,6 +305,91 @@ ISAAC_SIM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "draft_asset_articulation",
+            "description": "Draft an ingested asset's joints BY CONVENTION for its class, without applying: the class's drafting tier (pivot for scissors/pliers - halves found and limits where the parts meet; clip for clothes pegs; power_drill - chuck, clutch, trigger, forward/reverse switch, press-fit battery; rotors for drones; buttons/keys for remotes and keyboards; doors with crash bars; turntables, watches, cabinets ...) or the geometric proposal, plus mechanisms (latches, press-fits, caster swivels) and behaviors (a drill's motor law, a wheelchair's wheeled base). Returns the spec, notes and the behavior check. Prefer this over hand-writing an articulate_asset joint list for an ingested asset; then apply_asset_articulation.",
+            "parameters": {
+                "type": "object",
+                "properties": {"asset_id": {"type": "string", "description": "Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')"}},
+                "required": ["asset_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_asset_articulation",
+            "description": "Apply a joint spec to an ingested asset with every convention safeguard: a provisional rigid body on the root is removed first (PhysX does not nest bodies), joints past PhysX's 64-link articulation limit become maximal joints, mechanisms are authored (latch, couple, helix, two_stop, press_fit, caster), behaviors are written onto the asset (customData simReady:behaviors), masses are scaled into the class range, and the asset is re-checked. With no spec, applies the entry's draft (draft_asset_articulation). replace=true undoes an existing articulation first.",
+            "parameters": {
+                "type": "object",
+                "properties": {"asset_id": {"type": "string", "description": "Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')"}, "spec": {"type": "object", "description": "Optional spec ({prim_path, joints, mechanisms?, behaviors?, filtered_pairs?, ...}) - default: the entry's draft"}, "replace": {"type": "boolean", "description": "Undo an articulation already applied before applying this one. Default false"}, "reason": {"type": "string", "description": "Why it is replaced (kept with the asset's fixes)"}},
+                "required": ["asset_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "unarticulate_asset",
+            "description": "Undo an asset's applied articulation: strips the joints, mechanism carriers and physics it authored from the derivative (the source file is never touched) and leaves a provisional rigid body so it still simulates as one solid object.",
+            "parameters": {
+                "type": "object",
+                "properties": {"asset_id": {"type": "string", "description": "Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')"}, "reason": {"type": "string", "description": "Why (kept with the asset's fixes)"}},
+                "required": ["asset_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_asset_behaviors",
+            "description": "What an ingested asset SHOULD DO and whether it can: the behaviors its class carries (power_drill: motor; wheelchair: wheeled_base ...) and the functions the classifying VLM saw it perform (kind motor / wheeled_base / gate / manual / spring_return / detachable, with controls and requirements), checked against its draft - e.g. a drill with no direction switch, a wheelchair whose casters do not swivel, a door with no latch. Also lists hand-worked functions seen (a reclining backrest) for review.",
+            "parameters": {
+                "type": "object",
+                "properties": {"asset_id": {"type": "string", "description": "Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')"}},
+                "required": ["asset_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "verify_asset_motion",
+            "description": "Verify an articulated asset in PhysX, in the background (the machine has one Isaac slot; a minute or more per asset): every joint driven through its travel (both ways where it has travel both ways), every behavior's scenarios (a drill: forward, reverse, switch centred locks the trigger, battery off; a wheeled base: drives forward, turns on the spot), then the motion critic - a vision judge on rest-vs-extreme frames with the pivot marked, plus a measured check that no revolute limit runs past where its parts meet. Returns a job_id: poll get_asset_job.",
+            "parameters": {
+                "type": "object",
+                "properties": {"asset_id": {"type": "string", "description": "Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')"}, "critic": {"type": "boolean", "description": "Run the motion critic after the animation. Default true"}, "judge": {"type": "string", "enum": ["claude", "cosmos", "gemma"], "description": "The critic's vision judge. Default claude"}},
+                "required": ["asset_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "process_downloads",
+            "description": "Process a downloads folder into the sim-ready asset library, in the background: survey USD files by content (never by name), delete byte-identical duplicates, stage, ingest (scale, up axis, backdrop), classify with a VLM (class, size, materials, set/scene, and what the object does), file into the library's class folders, draft and apply articulation by convention, check behaviors, and optionally animate in PhysX and soft-body test. Returns a job_id: poll get_asset_job for the per-asset report.",
+            "parameters": {
+                "type": "object",
+                "properties": {"dry_run": {"type": "boolean", "description": "Report what would happen; move nothing. Default false"}, "delete_duplicates": {"type": "boolean", "description": "Delete downloads byte-identical to library files. Default false"}, "animate": {"type": "boolean", "description": "Animate articulated assets in PhysX. Default false"}, "soft": {"type": "boolean", "description": "Cloth drape / soft-body squish tests. Default false"}, "refile": {"type": "boolean", "description": "Instead: re-file library assets by the class folder map"}, "resume": {"type": "boolean", "description": "Instead: finish a run that stopped - process every file left in the library's _incoming folder"}, "downloads": {"type": "string", "description": "Downloads folder. Default ~/Downloads"}, "library": {"type": "string", "description": "Library root. Default ~/Desktop/assets/SketchFab_Assets"}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_asset_job",
+            "description": "Status and result of a background asset job (verify_asset_motion, process_downloads): running / done / failed, the result (joint reach, behavior scenarios, motion critic verdicts; or the downloads report), and the log's tail while it runs or when it failed.",
+            "parameters": {
+                "type": "object",
+                "properties": {"job_id": {"type": "string", "description": "The job_id a verify_asset_motion or process_downloads call returned"}},
+                "required": ["job_id"],
+            },
+        },
+    },
+    {"type": "function", "function": {"name": "reprocess_assets", "description": "Re-run the processing stages a fix made stale, on every asset it touches - in the background. Each asset records when each stage (ingest, classify, file, articulate, behaviors, verify, critic, soft) last ran, from which code revision, under which version of that stage's rules (articulation per drafting tier: a pliers fix re-drafts pliers, not drills); assets processed under older rules, or before the ledger existed, are stale. Defaults to a DRY RUN listing what is stale; set dry_run=false to re-run. Default stages: articulate, behaviors, verify, critic (ingest rebuilds derivatives and classify calls the VLM per asset: opt in). Returns a job_id: poll get_asset_job.", "parameters": {"type": "object", "properties": {"dry_run": {"type": "boolean", "description": "Only list what is stale. Default true"}, "stages": {"type": "array", "items": {"type": "string", "enum": ["ingest", "classify", "file", "articulate", "behaviors", "verify", "critic", "soft"]}, "description": "Stages to re-run where stale. Default articulate, behaviors, verify, critic"}, "assets": {"type": "array", "items": {"type": "string"}, "description": "Only these asset ids"}, "classes": {"type": "array", "items": {"type": "string"}, "description": "Only assets of these classes"}, "limit": {"type": "integer", "description": "At most this many assets"}}, "required": []}}},
+    {
+        "type": "function",
+        "function": {
             "name": "anchor_robot",
             "description": "Anchor a STATIONARY robot (e.g., Franka arm) to the world or a surface. Sets PhysxArticulationAPI.fixedBase=True and deletes the rootJoint. Do NOT use for wheeled/mobile robots (Nova Carter, Jetbot) — they need to remain mobile. For mobile robots, just delete rootJoint and add physics without fixedBase.",
             "parameters": {

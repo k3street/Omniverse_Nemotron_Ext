@@ -411,7 +411,7 @@ class TestUnknownClassification:
         cls = json.loads(pp.read_text())["classes"]["watering_can"]
         assert cls["source"] == "vlm"
         assert cls["proposed_by"] == "asset_x"
-        assert "watering" in cls["keywords"]
+        assert cls["keywords"] == ["watering can"]  # the phrase: "can" alone would claim a soda can
         assert cls["typical_materials"] == ["plastic_abs"]
         # second registration reuses, never duplicates
         assert vlm_classify.register_provisional_class(result, "y") == "watering_can"

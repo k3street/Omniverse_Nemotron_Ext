@@ -1,0 +1,181 @@
+{
+ "_doc": "Where scripts/process_downloads.py files a downloaded asset in the library, by its class (after the VLM look). Folders are under the library root (default ~/Desktop/assets/SketchFab_Assets). A class not listed goes to 'default'. A scene or a fragment of one (the VLM's content_kind) goes to 'scenes'. 'by_asset' pins a reviewer's choice for one asset over its class.",
+ "default": "Misc",
+ "folders": {
+  "Audio_Video": [
+   "vinyl_record",
+   "record_player",
+   "portable_audio",
+   "cassette_deck",
+   "film_projector",
+   "camera",
+   "headphones",
+   "television",
+   "speaker",
+   "television_with_stand"
+  ],
+  "Electronics": [
+   "game_console_dock",
+   "rc_transmitter",
+   "power_bank",
+   "power_plug",
+   "musical_keyboard",
+   "keyboard",
+   "remote_control",
+   "circuit_board",
+   "elevator_panel",
+   "computer_mouse",
+   "laptop",
+   "smartphone",
+   "desktop_computer_case",
+   "multimeter",
+   "power_strip"
+  ],
+  "Tools": [
+   "hand_tool",
+   "power_drill",
+   "bolt_fastener",
+   "screwdriver",
+   "pliers",
+   "scissors",
+   "tweezers",
+   "garden_rake",
+   "lawn_mower",
+   "paint_brush",
+   "magnifying_glass",
+   "tool_board"
+  ],
+  "Garments_Textiles": [
+   "clothing_garment",
+   "backpack",
+   "towel",
+   "blanket",
+   "curtain"
+  ],
+  "Laundry": [
+   "clothespin",
+   "clothes_hanger",
+   "washing_machine",
+   "clothes_dryer",
+   "laundry_hamper"
+  ],
+  "Furniture": [
+   "sofa",
+   "chair",
+   "bean_bag",
+   "beam_seating",
+   "table",
+   "cabinet",
+   "bed",
+   "stool",
+   "shelf"
+  ],
+  "Kitchen_Home": [
+   "mug",
+   "cutting_board",
+   "vase",
+   "plate",
+   "bowl",
+   "pet_bowl",
+   "bottle",
+   "dropper_bottle",
+   "food_item",
+   "appliance_small",
+   "appliance_large",
+   "trash_can",
+   "box",
+   "pan",
+   "ashtray",
+   "candle_jar",
+   "glassware_collection",
+   "hourglass",
+   "weighing_scale",
+   "bathroom_accessory_set",
+   "bathroom_sink",
+   "toothbrush"
+  ],
+  "Lab": [
+   "funnel",
+   "glass",
+   "test_tube_rack",
+   "mortar_and_pestle",
+   "microscope",
+   "vial",
+   "beaker",
+   "lab_glassware_set",
+   "lab_retort_stand"
+  ],
+  "Medical": [
+   "anatomical_organ_model",
+   "medical_furniture",
+   "utility_cart",
+   "syringe",
+   "autoinjector_pen",
+   "bandage",
+   "blister_pack",
+   "blood_bag",
+   "cpap_machine",
+   "disposable_glove",
+   "iv_pole_stand",
+   "medical_examination_lamp",
+   "medical_privacy_screen",
+   "medical_supplies_set",
+   "medical_thermometer",
+   "medical_ventilator",
+   "oxygen_cylinder_cart",
+   "wall_diagnostic_station",
+   "micropipette",
+   "face_mask",
+   "dental_handpiece",
+   "dental_scaler",
+   "scrub_sink"
+  ],
+  "Mobility": [
+   "vehicle",
+   "crutch",
+   "wheelchair",
+   "walker",
+   "power_wheelchair"
+  ],
+  "Personal": [
+   "glasses_wearable",
+   "wristwatch",
+   "ring",
+   "jewelry",
+   "nail_clipper"
+  ],
+  "Doors": [
+   "door",
+   "elevator_door"
+  ],
+  "Scenes": [
+   "hospital_room_scene",
+   "elevator_car",
+   "room_scene"
+  ],
+  "Robots": [
+   "mobile_robot",
+   "robot_arm",
+   "quadcopter_drone"
+  ],
+  "Games": [
+   "chess_set",
+   "board_game",
+   "rubiks_cube",
+   "chess_piece",
+   "toy_building_brick"
+  ]
+ },
+ "scenes": "Scenes",
+ "by_asset": {
+  "modern_clothes_dryer": "Laundry",
+  "free_conical_flask_laboratory_low_poly": "Lab",
+  "pills_linezolid": "Medical",
+  "scalpel": "Medical",
+  "covid_19_oral_vaccine_inhaler_prototype": "Medical",
+  "medical_forceps_366603": "Medical",
+  "hospital_sharps_container": "Medical",
+  "box_of_medical_washcloths": "Medical",
+  "simple_lab_conical_flask": "Lab"
+ }
+}

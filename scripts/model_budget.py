@@ -18,24 +18,32 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# USD per million tokens, as published for direct API access.
-# gpt-6-astra: prompts over 272K input tokens are billed at 2x input and
-# 1.5x output for the whole request.
+# USD per million tokens, standard tier, as published for direct API access
+# (checked 2026-09-28 against developers.openai.com/api/docs/pricing and
+# ai.google.dev/gemini-api/docs/pricing). Uncached input is metered throughout.
+#
+# gemini-robotics-er-2-preview was listed here at 0.30/2.50, which is Gemini
+# 3.5 Flash-Lite's price; the real rate was 3.3x the input and 2x the output,
+# so Gemini runs were under-reported and the cap stopped them late. Google
+# doubles it to 2.00/10.00 on 2027-01-01. ER 1.6 was dropped: it is no longer
+# on the price list, and an unpriced model must raise, not guess.
 PRICES: dict[str, tuple[float, float]] = {
     "gpt-6-astra": (10.0, 50.0),
+    "gpt-6-sol": (2.0, 10.0),
+    "gpt-6-luna": (0.10, 0.50),
     "gpt-5.1": (1.25, 10.0),
-    "gemini-robotics-er-2-preview": (0.30, 2.50),
-    "gemini-robotics-er-1.6-preview": (0.30, 2.50),
+    "gemini-robotics-er-2-preview": (1.00, 5.00),
+    "gemini-3.5-flash-lite": (0.30, 2.50),
 }
 
 # The long-context surcharge is a per-model pricing rule, not a general one:
-# gpt-6-astra bills a request with more than 272K input tokens at 2x input and
-# 1.5x output for the whole request. Applying it to every model overcharged
+# the GPT-6 family bills a request with more than 272K input tokens at 2x input
+# and 1.5x output for the whole request. Applying it to every model overcharged
 # them, and applying it to caller-supplied rates overrode the caller.
 LONG_CONTEXT_TOKENS = 272_000
 LONG_CONTEXT_INPUT_MULTIPLIER = 2.0
 LONG_CONTEXT_OUTPUT_MULTIPLIER = 1.5
-LONG_CONTEXT_MODELS = ("gpt-6-astra",)
+LONG_CONTEXT_MODELS = ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna")
 
 
 class BudgetExceeded(RuntimeError):

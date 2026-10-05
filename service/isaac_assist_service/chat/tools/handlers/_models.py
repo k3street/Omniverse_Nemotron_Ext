@@ -11,8 +11,8 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-08-23T16:06:26+00:00
-Tool count: 451
+Generated: 2026-10-04T20:40:35+00:00
+Tool count: 459
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
 """
@@ -155,6 +155,79 @@ class ArticulateAssetArgs(BaseModel):
     add_collisions: Optional[bool] = Field(None, description="Apply CollisionAPI (+ approximation on meshes) to link geometry. Default: true")
     approximation: Optional[str] = Field(None, description="Collision approximation for link meshes. Default: 'convexHull'")
     link_mass_kg: Optional[float] = Field(None, description="Mass applied to every link via MassAPI. Omit to let PhysX derive mass from geometry.")
+
+
+class DraftAssetArticulationArgs(BaseModel):
+    """Draft an ingested asset's joints BY CONVENTION for its class, without applying: the class's drafting tier (pivot for scissors/pliers - halves found and limits where the parts meet; clip for clothes pe"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    asset_id: str = Field(..., description="Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')")
+
+
+class ApplyAssetArticulationArgs(BaseModel):
+    """Apply a joint spec to an ingested asset with every convention safeguard: a provisional rigid body on the root is removed first (PhysX does not nest bodies), joints past PhysX's 64-link articulation li"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    asset_id: str = Field(..., description="Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')")
+    spec: Optional[Dict[str, Any]] = Field(None, description="Optional spec ({prim_path, joints, mechanisms?, behaviors?, filtered_pairs?, ...}) - default: the entry's draft")
+    replace: Optional[bool] = Field(None, description="Undo an articulation already applied before applying this one. Default false")
+    reason: Optional[str] = Field(None, description="Why it is replaced (kept with the asset's fixes)")
+
+
+class UnarticulateAssetArgs(BaseModel):
+    """Undo an asset's applied articulation: strips the joints, mechanism carriers and physics it authored from the derivative (the source file is never touched) and leaves a provisional rigid body so it sti"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    asset_id: str = Field(..., description="Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')")
+    reason: Optional[str] = Field(None, description="Why (kept with the asset's fixes)")
+
+
+class CheckAssetBehaviorsArgs(BaseModel):
+    """What an ingested asset SHOULD DO and whether it can: the behaviors its class carries (power_drill: motor; wheelchair: wheeled_base ...) and the functions the classifying VLM saw it perform (kind motor"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    asset_id: str = Field(..., description="Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')")
+
+
+class VerifyAssetMotionArgs(BaseModel):
+    """Verify an articulated asset in PhysX, in the background (the machine has one Isaac slot; a minute or more per asset): every joint driven through its travel (both ways where it has travel both ways), e"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    asset_id: str = Field(..., description="Review-queue asset id (as process_downloads or ingest named it, e.g. 'drill_1')")
+    critic: Optional[bool] = Field(None, description="Run the motion critic after the animation. Default true")
+    judge: Optional[str] = Field(None, description="The critic's vision judge. Default claude")
+
+
+class ProcessDownloadsArgs(BaseModel):
+    """Process a downloads folder into the sim-ready asset library, in the background: survey USD files by content (never by name), delete byte-identical duplicates, stage, ingest (scale, up axis, backdrop),"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    dry_run: Optional[bool] = Field(None, description="Report what would happen; move nothing. Default false")
+    delete_duplicates: Optional[bool] = Field(None, description="Delete downloads byte-identical to library files. Default false")
+    animate: Optional[bool] = Field(None, description="Animate articulated assets in PhysX. Default false")
+    soft: Optional[bool] = Field(None, description="Cloth drape / soft-body squish tests. Default false")
+    refile: Optional[bool] = Field(None, description="Instead: re-file library assets by the class folder map")
+    resume: Optional[bool] = Field(None, description="Instead: finish a run that stopped - process every file left in the library's _incoming folder")
+    downloads: Optional[str] = Field(None, description="Downloads folder. Default ~/Downloads")
+    library: Optional[str] = Field(None, description="Library root. Default ~/Desktop/assets/SketchFab_Assets")
+
+
+class GetAssetJobArgs(BaseModel):
+    """Status and result of a background asset job (verify_asset_motion, process_downloads): running / done / failed, the result (joint reach, behavior scenarios, motion critic verdicts; or the downloads rep"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    job_id: str = Field(..., description="The job_id a verify_asset_motion or process_downloads call returned")
+
+
+class ReprocessAssetsArgs(BaseModel):
+    """Re-run the processing stages a fix made stale, on every asset it touches - in the background. Each asset records when each stage (ingest, classify, file, articulate, behaviors, verify, critic, soft) l"""
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+    dry_run: Optional[bool] = Field(None, description="Only list what is stale. Default true")
+    stages: Optional[List[str]] = Field(None, description="Stages to re-run where stale. Default articulate, behaviors, verify, critic")
+    assets: Optional[List[str]] = Field(None, description="Only these asset ids")
+    classes: Optional[List[str]] = Field(None, description="Only assets of these classes")
+    limit: Optional[int] = Field(None, description="At most this many assets")
 
 
 class AnchorRobotArgs(BaseModel):
@@ -4127,6 +4200,14 @@ MODEL_REGISTRY = {
     "list_sim_ready_assets": ListSimReadyAssetsArgs,
     "ingest_asset_report": IngestAssetReportArgs,
     "articulate_asset": ArticulateAssetArgs,
+    "draft_asset_articulation": DraftAssetArticulationArgs,
+    "apply_asset_articulation": ApplyAssetArticulationArgs,
+    "unarticulate_asset": UnarticulateAssetArgs,
+    "check_asset_behaviors": CheckAssetBehaviorsArgs,
+    "verify_asset_motion": VerifyAssetMotionArgs,
+    "process_downloads": ProcessDownloadsArgs,
+    "get_asset_job": GetAssetJobArgs,
+    "reprocess_assets": ReprocessAssetsArgs,
     "anchor_robot": AnchorRobotArgs,
     "create_omnigraph": CreateOmnigraphArgs,
     "add_sensor_to_prim": AddSensorToPrimArgs,

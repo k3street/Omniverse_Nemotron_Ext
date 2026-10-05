@@ -1,255 +1,323 @@
 {
-  "materials": {
-    "steel_mild": {
-      "density_kg_m3": 7850,
-      "static_friction": 0.74,
-      "dynamic_friction": 0.57,
-      "restitution": 0.25,
-      "source": "Engineering Toolbox + Rabinowicz (1995)"
-    },
-    "steel_stainless": {
-      "density_kg_m3": 8000,
-      "static_friction": 0.75,
-      "dynamic_friction": 0.58,
-      "restitution": 0.25,
-      "source": "Engineering Toolbox"
-    },
-    "aluminum": {
-      "density_kg_m3": 2700,
-      "static_friction": 1.05,
-      "dynamic_friction": 0.40,
-      "restitution": 0.30,
-      "source": "Engineering Toolbox"
-    },
-    "rubber_natural": {
-      "density_kg_m3": 920,
-      "static_friction": 1.0,
-      "dynamic_friction": 0.80,
-      "restitution": 0.75,
-      "source": "Blau (2008)"
-    },
-    "plastic_abs": {
-      "density_kg_m3": 1050,
-      "static_friction": 0.35,
-      "dynamic_friction": 0.30,
-      "restitution": 0.40,
-      "source": "Engineering Toolbox"
-    },
-    "plastic_nylon": {
-      "density_kg_m3": 1150,
-      "static_friction": 0.40,
-      "dynamic_friction": 0.35,
-      "restitution": 0.35,
-      "source": "Engineering Toolbox"
-    },
-    "wood_oak": {
-      "density_kg_m3": 750,
-      "static_friction": 0.62,
-      "dynamic_friction": 0.48,
-      "restitution": 0.20,
-      "source": "Engineering Toolbox"
-    },
-    "wood_pine": {
-      "density_kg_m3": 510,
-      "static_friction": 0.55,
-      "dynamic_friction": 0.42,
-      "restitution": 0.20,
-      "source": "Engineering Toolbox"
-    },
-    "concrete": {
-      "density_kg_m3": 2300,
-      "static_friction": 0.80,
-      "dynamic_friction": 0.65,
-      "restitution": 0.15,
-      "source": "Engineering Toolbox"
-    },
-    "glass": {
-      "density_kg_m3": 2500,
-      "static_friction": 0.95,
-      "dynamic_friction": 0.40,
-      "restitution": 0.65,
-      "source": "Engineering Toolbox"
-    },
-    "cardboard": {
-      "density_kg_m3": 200,
-      "static_friction": 0.50,
-      "dynamic_friction": 0.40,
-      "restitution": 0.10,
-      "source": "Engineering Toolbox"
-    },
-    "ceramic": {
-      "density_kg_m3": 2400,
-      "static_friction": 0.40,
-      "dynamic_friction": 0.30,
-      "restitution": 0.55,
-      "source": "Engineering Toolbox"
-    },
-    "copper": {
-      "density_kg_m3": 8960,
-      "static_friction": 1.05,
-      "dynamic_friction": 0.29,
-      "restitution": 0.22,
-      "source": "Engineering Toolbox + Rabinowicz (1995)"
-    },
-    "teflon": {
-      "density_kg_m3": 2200,
-      "static_friction": 0.04,
-      "dynamic_friction": 0.04,
-      "restitution": 0.30,
-      "source": "DuPont Technical Reference"
-    },
-    "foam_polyurethane": {
-      "density_kg_m3": 50,
-      "static_friction": 0.70,
-      "dynamic_friction": 0.55,
-      "restitution": 0.60,
-      "source": "Engineering Toolbox"
-    },
-    "titanium": {
-      "density_kg_m3": 4500,
-      "static_friction": 0.36,
-      "dynamic_friction": 0.30,
-      "restitution": 0.28,
-      "source": "Engineering Toolbox"
-    }
+ "materials": {
+  "steel_mild": {
+   "density_kg_m3": 7850,
+   "static_friction": 0.74,
+   "dynamic_friction": 0.57,
+   "restitution": 0.25,
+   "source": "Engineering Toolbox + Rabinowicz (1995)"
   },
-  "pairs": {
-    "steel_mild:steel_mild": {
-      "static_friction": 0.74,
-      "dynamic_friction": 0.57,
-      "restitution": 0.25,
-      "source": "Engineering Toolbox + Rabinowicz (1995)"
-    },
-    "steel_mild:rubber_natural": {
-      "static_friction": 0.80,
-      "dynamic_friction": 0.65,
-      "restitution": 0.30,
-      "source": "Measured, RoyMech tables",
-      "note": "Gripper pad on metal part — common in manipulation"
-    },
-    "steel_mild:aluminum": {
-      "static_friction": 0.61,
-      "dynamic_friction": 0.47,
-      "restitution": 0.30,
-      "source": "Engineering Toolbox"
-    },
-    "steel_mild:plastic_abs": {
-      "static_friction": 0.35,
-      "dynamic_friction": 0.30,
-      "restitution": 0.40,
-      "source": "Engineering Toolbox"
-    },
-    "rubber_natural:concrete": {
-      "static_friction": 0.90,
-      "dynamic_friction": 0.75,
-      "restitution": 0.15,
-      "source": "Engineering Toolbox"
-    },
-    "rubber_natural:glass": {
-      "static_friction": 0.75,
-      "dynamic_friction": 0.60,
-      "restitution": 0.35,
-      "source": "Engineering Toolbox"
-    },
-    "aluminum:aluminum": {
-      "static_friction": 1.05,
-      "dynamic_friction": 0.40,
-      "restitution": 0.30,
-      "source": "Engineering Toolbox"
-    },
-    "plastic_abs:plastic_abs": {
-      "static_friction": 0.35,
-      "dynamic_friction": 0.30,
-      "restitution": 0.50,
-      "source": "Engineering Toolbox"
-    },
-    "rubber_natural:wood_oak": {
-      "static_friction": 0.70,
-      "dynamic_friction": 0.55,
-      "restitution": 0.20,
-      "source": "Engineering Toolbox"
-    },
-    "steel_mild:cardboard": {
-      "static_friction": 0.50,
-      "dynamic_friction": 0.40,
-      "restitution": 0.10,
-      "source": "Engineering Toolbox"
-    },
-    "steel_mild:concrete": {
-      "static_friction": 0.57,
-      "dynamic_friction": 0.45,
-      "restitution": 0.20,
-      "source": "Engineering Toolbox"
-    },
-    "steel_mild:wood_oak": {
-      "static_friction": 0.50,
-      "dynamic_friction": 0.40,
-      "restitution": 0.22,
-      "source": "Engineering Toolbox"
-    },
-    "steel_mild:glass": {
-      "static_friction": 0.50,
-      "dynamic_friction": 0.35,
-      "restitution": 0.45,
-      "source": "Engineering Toolbox"
-    },
-    "aluminum:plastic_abs": {
-      "static_friction": 0.30,
-      "dynamic_friction": 0.25,
-      "restitution": 0.35,
-      "source": "Engineering Toolbox"
-    },
-    "rubber_natural:rubber_natural": {
-      "static_friction": 1.15,
-      "dynamic_friction": 0.90,
-      "restitution": 0.80,
-      "source": "Blau (2008)"
-    },
-    "steel_mild:teflon": {
-      "static_friction": 0.04,
-      "dynamic_friction": 0.04,
-      "restitution": 0.28,
-      "source": "DuPont Technical Reference"
-    },
-    "aluminum:rubber_natural": {
-      "static_friction": 0.75,
-      "dynamic_friction": 0.60,
-      "restitution": 0.35,
-      "source": "Engineering Toolbox"
-    },
-    "wood_oak:wood_oak": {
-      "static_friction": 0.62,
-      "dynamic_friction": 0.48,
-      "restitution": 0.20,
-      "source": "Engineering Toolbox"
-    },
-    "steel_mild:ceramic": {
-      "static_friction": 0.40,
-      "dynamic_friction": 0.30,
-      "restitution": 0.45,
-      "source": "Engineering Toolbox"
-    },
-    "rubber_natural:plastic_abs": {
-      "static_friction": 0.60,
-      "dynamic_friction": 0.50,
-      "restitution": 0.45,
-      "source": "Engineering Toolbox"
-    }
+  "steel_stainless": {
+   "density_kg_m3": 8000,
+   "static_friction": 0.75,
+   "dynamic_friction": 0.58,
+   "restitution": 0.25,
+   "source": "Engineering Toolbox"
   },
-  "aliases": {
-    "steel": "steel_mild",
-    "stainless": "steel_stainless",
-    "stainless_steel": "steel_stainless",
-    "rubber": "rubber_natural",
-    "plastic": "plastic_abs",
-    "abs": "plastic_abs",
-    "nylon": "plastic_nylon",
-    "wood": "wood_oak",
-    "oak": "wood_oak",
-    "pine": "wood_pine",
-    "metal": "steel_mild",
-    "iron": "steel_mild",
-    "foam": "foam_polyurethane",
-    "polyurethane": "foam_polyurethane"
+  "aluminum": {
+   "density_kg_m3": 2700,
+   "static_friction": 1.05,
+   "dynamic_friction": 0.4,
+   "restitution": 0.3,
+   "source": "Engineering Toolbox"
+  },
+  "rubber_natural": {
+   "density_kg_m3": 920,
+   "static_friction": 1.0,
+   "dynamic_friction": 0.8,
+   "restitution": 0.75,
+   "source": "Blau (2008)"
+  },
+  "plastic_abs": {
+   "density_kg_m3": 1050,
+   "static_friction": 0.35,
+   "dynamic_friction": 0.3,
+   "restitution": 0.4,
+   "source": "Engineering Toolbox"
+  },
+  "plastic_nylon": {
+   "density_kg_m3": 1150,
+   "static_friction": 0.4,
+   "dynamic_friction": 0.35,
+   "restitution": 0.35,
+   "source": "Engineering Toolbox"
+  },
+  "wood_oak": {
+   "density_kg_m3": 750,
+   "static_friction": 0.62,
+   "dynamic_friction": 0.48,
+   "restitution": 0.2,
+   "source": "Engineering Toolbox"
+  },
+  "wood_pine": {
+   "density_kg_m3": 510,
+   "static_friction": 0.55,
+   "dynamic_friction": 0.42,
+   "restitution": 0.2,
+   "source": "Engineering Toolbox"
+  },
+  "concrete": {
+   "density_kg_m3": 2300,
+   "static_friction": 0.8,
+   "dynamic_friction": 0.65,
+   "restitution": 0.15,
+   "source": "Engineering Toolbox"
+  },
+  "glass": {
+   "density_kg_m3": 2500,
+   "static_friction": 0.95,
+   "dynamic_friction": 0.4,
+   "restitution": 0.65,
+   "source": "Engineering Toolbox"
+  },
+  "cardboard": {
+   "density_kg_m3": 200,
+   "static_friction": 0.5,
+   "dynamic_friction": 0.4,
+   "restitution": 0.1,
+   "source": "Engineering Toolbox"
+  },
+  "ceramic": {
+   "density_kg_m3": 2400,
+   "static_friction": 0.4,
+   "dynamic_friction": 0.3,
+   "restitution": 0.55,
+   "source": "Engineering Toolbox"
+  },
+  "copper": {
+   "density_kg_m3": 8960,
+   "static_friction": 1.05,
+   "dynamic_friction": 0.29,
+   "restitution": 0.22,
+   "source": "Engineering Toolbox + Rabinowicz (1995)"
+  },
+  "teflon": {
+   "density_kg_m3": 2200,
+   "static_friction": 0.04,
+   "dynamic_friction": 0.04,
+   "restitution": 0.3,
+   "source": "DuPont Technical Reference"
+  },
+  "foam_polyurethane": {
+   "density_kg_m3": 50,
+   "static_friction": 0.7,
+   "dynamic_friction": 0.55,
+   "restitution": 0.6,
+   "source": "Engineering Toolbox"
+  },
+  "titanium": {
+   "density_kg_m3": 4500,
+   "static_friction": 0.36,
+   "dynamic_friction": 0.3,
+   "restitution": 0.28,
+   "source": "Engineering Toolbox"
+  },
+  "rubber_soft": {
+   "density_kg_m3": 1100,
+   "static_friction": 0.9,
+   "dynamic_friction": 0.75,
+   "restitution": 0.5,
+   "source": "Engineering Toolbox (rubber density 920-1200; rubber on dry surfaces mu 0.8-1.0)"
+  },
+  "gold": {
+   "density_kg_m3": 19300,
+   "static_friction": 0.5,
+   "dynamic_friction": 0.4,
+   "restitution": 0.2,
+   "source": "Engineering Toolbox (density); friction/restitution approximate: no single published pair value"
+  },
+  "silver": {
+   "density_kg_m3": 10490,
+   "static_friction": 0.5,
+   "dynamic_friction": 0.4,
+   "restitution": 0.25,
+   "source": "Engineering Toolbox (density); friction/restitution approximate: no single published pair value"
+  },
+  "brass": {
+   "density_kg_m3": 8500,
+   "static_friction": 0.51,
+   "dynamic_friction": 0.44,
+   "restitution": 0.3,
+   "source": "Engineering Toolbox (brass on steel, dry)"
+  },
+  "leather": {
+   "density_kg_m3": 860,
+   "static_friction": 0.6,
+   "dynamic_friction": 0.5,
+   "restitution": 0.1,
+   "source": "Engineering Toolbox (leather density 860-960; leather on metal dry mu 0.6)"
+  },
+  "fabric_cotton": {
+   "density_kg_m3": 500,
+   "static_friction": 0.5,
+   "dynamic_friction": 0.4,
+   "restitution": 0.05,
+   "source": "bulk woven cotton (fibre 1540 kg/m3, ~1/3 packing); friction/restitution approximate: no single published pair value"
+  },
+  "pcb_fr4": {
+   "density_kg_m3": 1850,
+   "static_friction": 0.4,
+   "dynamic_friction": 0.33,
+   "restitution": 0.3,
+   "source": "FR-4 datasheets (density 1.85 g/cm3); friction/restitution approximate: no single published pair value"
+  },
+  "paper_kraft": {
+   "density_kg_m3": 800,
+   "static_friction": 0.45,
+   "dynamic_friction": 0.35,
+   "restitution": 0.1,
+   "source": "Engineering Toolbox (paper density 700-1150; paper on paper mu 0.4-0.5)"
+  },
+  "resin_epoxy": {
+   "density_kg_m3": 1200,
+   "static_friction": 0.4,
+   "dynamic_friction": 0.35,
+   "restitution": 0.35,
+   "source": "Engineering Toolbox (epoxy 1110-1400); friction/restitution approximate: no single published pair value"
   }
+ },
+ "pairs": {
+  "steel_mild:steel_mild": {
+   "static_friction": 0.74,
+   "dynamic_friction": 0.57,
+   "restitution": 0.25,
+   "source": "Engineering Toolbox + Rabinowicz (1995)"
+  },
+  "steel_mild:rubber_natural": {
+   "static_friction": 0.8,
+   "dynamic_friction": 0.65,
+   "restitution": 0.3,
+   "source": "Measured, RoyMech tables",
+   "note": "Gripper pad on metal part \u2014 common in manipulation"
+  },
+  "steel_mild:aluminum": {
+   "static_friction": 0.61,
+   "dynamic_friction": 0.47,
+   "restitution": 0.3,
+   "source": "Engineering Toolbox"
+  },
+  "steel_mild:plastic_abs": {
+   "static_friction": 0.35,
+   "dynamic_friction": 0.3,
+   "restitution": 0.4,
+   "source": "Engineering Toolbox"
+  },
+  "rubber_natural:concrete": {
+   "static_friction": 0.9,
+   "dynamic_friction": 0.75,
+   "restitution": 0.15,
+   "source": "Engineering Toolbox"
+  },
+  "rubber_natural:glass": {
+   "static_friction": 0.75,
+   "dynamic_friction": 0.6,
+   "restitution": 0.35,
+   "source": "Engineering Toolbox"
+  },
+  "aluminum:aluminum": {
+   "static_friction": 1.05,
+   "dynamic_friction": 0.4,
+   "restitution": 0.3,
+   "source": "Engineering Toolbox"
+  },
+  "plastic_abs:plastic_abs": {
+   "static_friction": 0.35,
+   "dynamic_friction": 0.3,
+   "restitution": 0.5,
+   "source": "Engineering Toolbox"
+  },
+  "rubber_natural:wood_oak": {
+   "static_friction": 0.7,
+   "dynamic_friction": 0.55,
+   "restitution": 0.2,
+   "source": "Engineering Toolbox"
+  },
+  "steel_mild:cardboard": {
+   "static_friction": 0.5,
+   "dynamic_friction": 0.4,
+   "restitution": 0.1,
+   "source": "Engineering Toolbox"
+  },
+  "steel_mild:concrete": {
+   "static_friction": 0.57,
+   "dynamic_friction": 0.45,
+   "restitution": 0.2,
+   "source": "Engineering Toolbox"
+  },
+  "steel_mild:wood_oak": {
+   "static_friction": 0.5,
+   "dynamic_friction": 0.4,
+   "restitution": 0.22,
+   "source": "Engineering Toolbox"
+  },
+  "steel_mild:glass": {
+   "static_friction": 0.5,
+   "dynamic_friction": 0.35,
+   "restitution": 0.45,
+   "source": "Engineering Toolbox"
+  },
+  "aluminum:plastic_abs": {
+   "static_friction": 0.3,
+   "dynamic_friction": 0.25,
+   "restitution": 0.35,
+   "source": "Engineering Toolbox"
+  },
+  "rubber_natural:rubber_natural": {
+   "static_friction": 1.15,
+   "dynamic_friction": 0.9,
+   "restitution": 0.8,
+   "source": "Blau (2008)"
+  },
+  "steel_mild:teflon": {
+   "static_friction": 0.04,
+   "dynamic_friction": 0.04,
+   "restitution": 0.28,
+   "source": "DuPont Technical Reference"
+  },
+  "aluminum:rubber_natural": {
+   "static_friction": 0.75,
+   "dynamic_friction": 0.6,
+   "restitution": 0.35,
+   "source": "Engineering Toolbox"
+  },
+  "wood_oak:wood_oak": {
+   "static_friction": 0.62,
+   "dynamic_friction": 0.48,
+   "restitution": 0.2,
+   "source": "Engineering Toolbox"
+  },
+  "steel_mild:ceramic": {
+   "static_friction": 0.4,
+   "dynamic_friction": 0.3,
+   "restitution": 0.45,
+   "source": "Engineering Toolbox"
+  },
+  "rubber_natural:plastic_abs": {
+   "static_friction": 0.6,
+   "dynamic_friction": 0.5,
+   "restitution": 0.45,
+   "source": "Engineering Toolbox"
+  }
+ },
+ "aliases": {
+  "steel": "steel_mild",
+  "stainless": "steel_stainless",
+  "stainless_steel": "steel_stainless",
+  "rubber": "rubber_natural",
+  "plastic": "plastic_abs",
+  "abs": "plastic_abs",
+  "nylon": "plastic_nylon",
+  "wood": "wood_oak",
+  "oak": "wood_oak",
+  "pine": "wood_pine",
+  "metal": "steel_mild",
+  "iron": "steel_mild",
+  "foam": "foam_polyurethane",
+  "polyurethane": "foam_polyurethane",
+  "pcb": "pcb_fr4",
+  "fr4": "pcb_fr4",
+  "kraft": "paper_kraft",
+  "epoxy": "resin_epoxy",
+  "cotton": "fabric_cotton"
+ }
 }

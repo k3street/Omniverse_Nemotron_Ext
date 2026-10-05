@@ -280,11 +280,19 @@ def drape(asset_id: str) -> str:
     entry = json.loads(qf.read_text())
     if not entry.get("deformable"):
         return f"{asset_id}: not a deformable entry"
-    points, tris = _world_mesh(entry["file"])
+    # a garment's simulation proxy when it has one (scripts/cloth_proxy.py):
+    # the render mesh is too dense and uneven for the solver
+    from cloth_proxy import proxy_mesh
+    proxy = proxy_mesh(entry)
+    if proxy is not None:
+        points, tris = proxy[0], [int(i) for i in proxy[1].reshape(-1)]
+    else:
+        points, tris = _world_mesh(entry["file"])
     if points is None:
         return f"{asset_id}: no mesh found"
     if len(points) > 50000:
-        return f"{asset_id}: {len(points)} vertices — too dense for drape test"
+        return (f"{asset_id}: {len(points)} vertices — too dense for drape test "
+                "(build a cloth proxy: scripts/cloth_proxy.py)")
 
     points = points - points.mean(axis=0)
     extents = points.max(axis=0) - points.min(axis=0)
@@ -297,7 +305,13 @@ def drape(asset_id: str) -> str:
     extents = points.max(axis=0) - points.min(axis=0)
     size = float(max(extents))
     planar = float(max(extents[0], extents[1]))  # == 1.0
-    drop_h = 0.75 * size
+    # start just above the ground: a fall of most of its own size meets the
+    # ground at a speed VBD cannot integrate at 20 substeps (a garment
+    # proxy NaN'd on impact at t=0.7 s); the question is how it settles
+    drop_h = -float(points[:, 2].min()) + 0.02
+    # a garment or bag is a 3D shell, not a sheet: it slumps rather than
+    # lies flat, so it is judged by how far it collapses
+    shell = z_extent0 > 0.5 * planar
 
     builder = newton.ModelBuilder()
     # default particle radius (0.1) would float the cloth 10 cm above the
@@ -312,7 +326,8 @@ def drape(asset_id: str) -> str:
         vel=wp.vec3(0.0, 0.0, 0.0),
         density=0.2,
         tri_ke=5.0e1, tri_ka=5.0e1, tri_kd=1.0e-1,
-        edge_ke=1.0e1, edge_kd=1.0e0,
+        # fabric barely resists bending; a stiff shell holds its shape like an egg
+        edge_ke=1.0 if shell else 1.0e1, edge_kd=1.0e-1 if shell else 1.0e0,
     )
     builder.color(include_bending=True)
     builder.add_ground_plane()
@@ -328,7 +343,7 @@ def drape(asset_id: str) -> str:
         model, iterations=10, particle_enable_self_contact=False)
     state0, state1 = model.state(), model.state()
     control = model.control()
-    substeps = 20
+    substeps = 40
     dt = FRAME_DT / substeps
     for _ in range(int(3.0 / FRAME_DT)):
         for _ in range(substeps):
@@ -362,7 +377,8 @@ def drape(asset_id: str) -> str:
     # size, resting on the ground. (Initial z-extent is useless for
     # already-flat objects like a mask.)
     flatness = z_extent / planar if planar > 1e-6 else 1.0
-    draped = on_ground and flatness < 0.35
+    collapse = z_extent / z_extent0 if z_extent0 > 1e-6 else 1.0
+    draped = on_ground and (collapse < 0.6 if shell else flatness < 0.35)
     evidence = {
         "date": date.today().isoformat(),
         "method": "headless_newton_drape_test",
@@ -374,12 +390,14 @@ def drape(asset_id: str) -> str:
         "initial_z_extent_norm": round(z_extent0, 4),
         "final_z_extent_norm": round(z_extent, 4),
         "final_flatness": round(flatness, 3),
+        "shape": "shell" if shell else "sheet",
+        "collapse_ratio": round(collapse, 3),
         "rests_on_ground": on_ground,
         "drapes_like_cloth": draped,
     }
     entry["drape_test_newton_1_5"] = evidence
     qf.write_text(json.dumps(entry, indent=1))
-    return (f"{'PASS' if draped else 'FAIL'} {asset_id}: final flatness "
+    return (f"{'PASS' if draped else 'FAIL'} {asset_id}: {'shell collapsed to ' + format(collapse, '.2f') + ' of its height, ' if shell else ''}final flatness "
             f"{flatness:.3f} (z {z_extent0:.3f} -> {z_extent:.3f} m over "
             f"{planar:.3f} m), on_ground={on_ground}, {len(pq)} particles")
 

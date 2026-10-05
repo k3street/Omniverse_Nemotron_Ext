@@ -2897,6 +2897,7 @@ async def _handle_ingest_asset_report(args: Dict) -> Dict:
     priors = _load_asset_priors().get("classes", {})
     header = f"""\
 import json
+import math
 from pxr import Usd, UsdGeom, UsdPhysics
 
 _file = {file_path!r}
@@ -2960,11 +2961,15 @@ else:
     else:
         # longest matching keyword wins per pass: 'bedside' (overbed_table)
         # must beat the generic 'table'
-        for _tokset, _text in ((_file_tokens, _names[0]), (_all_tokens, _blob)):
+        # multi-word keywords match whole words in the name with its
+        # punctuation as spaces: 'apple watch' must match
+        # 'Apple_Watch_Series_7', and 'dog bowl' 'Dog_Bowl'
+        _spaced = lambda _t: ' ' + ' '.join(w for w in _re.split(r'[\\W_]+', _t.lower()) if w) + ' '
+        for _tokset, _text in ((_file_tokens, _spaced(_names[0])), (_all_tokens, _spaced(_blob))):
             _best_kw = ''
             for _k, _v in _priors.items():
                 for _kw in _v['keywords']:
-                    _hit = (_kw in _text) if (' ' in _kw) else (_kw in _tokset)
+                    _hit = (' ' + _kw + ' ' in _text) if (' ' in _kw) else (_kw in _tokset)
                     if _hit and len(_kw) > len(_best_kw):
                         _best_kw, _cls, _prior = _kw, _k, _v
             if _cls:
@@ -2982,16 +2987,28 @@ else:
         _sz = _bbox.GetSize()
         _max_dim = max(_sz[0], _sz[1], _sz[2]) * mpu
         result['max_dim_m'] = round(_max_dim, 4)
-        if _prior:
+        if _max_dim <= 0:
+            _callout('error', 'scale', 'zero-size bounding box — geometry without extent')
+        elif _prior:
             _lo, _hi = _prior['max_dim_m']
             if _max_dim < _lo or _max_dim > _hi:
-                _target = (_lo + _hi) / 2.0
-                result['suggested_scale_correction'] = round(_target / _max_dim, 6)
+                # A wrong size is usually a unit slip (cm or mm authored as
+                # m), so the first choice is a power of ten that lands in
+                # range, nearest the range's middle: exact when it was a
+                # slip, and never further than sqrt(10) from the middle when
+                # it was not. Failing that, the geometric middle (a linear one
+                # puts a screw whose range is 4-200 mm at 10 cm).
+                _mid = (_lo * _hi) ** 0.5
+                _units = [10.0 ** _k for _k in range(-4, 5)]
+                _fits = [_u for _u in _units if _lo <= _max_dim * _u <= _hi]
+                _factor = (min(_fits, key=lambda _u: abs(math.log(_max_dim * _u / _mid))) if _fits
+                           else _mid / _max_dim)
+                result['suggested_scale_correction'] = round(_factor, 6)
                 _callout('error', 'scale',
                          'implausible size for class ' + repr(_cls) + ': max dimension '
                          + format(_max_dim, '.3f') + ' m, expected ' + format(_lo, 'g')
                          + '-' + format(_hi, 'g') + ' m. Suggested uniform scale: '
-                         + format(_target / _max_dim, '.6f'))
+                         + format(_factor, '.6f') + (' (a unit slip)' if _fits else ''))
         else:
             _callout('info', 'scale', 'no class prior matched — scale unverified ('
                      + format(_max_dim, '.3f') + ' m max dimension); provide class_hint '
@@ -3086,7 +3103,10 @@ else:
         result['suggested_materials'] = _prior.get('typical_materials', [])
         _mlo, _mhi = _prior['mass_kg']
         _total = sum(_m['mass_kg'] for _m in mass_prims)
-        if mass_prims and (_total < _mlo or _total > _mhi):
+        # masses are stored as float32: one clamped to the range's end reads
+        # back a hair outside it (0.2000000030), which is not implausible
+        _tol = 1e-6 * max(1.0, _mhi)
+        if mass_prims and (_total < _mlo - _tol or _total > _mhi + _tol):
             _callout('error', 'mass', 'authored total mass ' + format(_total, '.3f')
                      + ' kg implausible for class ' + repr(_cls) + ' (expected '
                      + format(_mlo, 'g') + '-' + format(_mhi, 'g') + ' kg)')
@@ -3222,6 +3242,9 @@ def _gen_articulate_asset(args: Dict) -> str:
             "stiffness": float(j.get("stiffness", _ARTICULATE_DRIVE_DEFAULTS["stiffness"])),
             "damping": float(j.get("damping", _ARTICULATE_DRIVE_DEFAULTS["damping"])),
             "max_force": float(j.get("max_force", _ARTICULATE_DRIVE_DEFAULTS["max_force"])),
+            # a preloaded spring aims past its rest stop (a clothes peg's
+            # torsion spring): degrees for revolute, metres for prismatic
+            "target": float(j.get("target", 0.0)),
         })
 
     # The joint graph must be a tree — PhysX articulations reject loops.
@@ -3296,7 +3319,9 @@ _fixed_base = {fixed_base!r}
 _add_collisions = {add_collisions!r}
 _approx = {approximation!r}
 _link_mass = {link_mass!r}
+_self_collisions = {bool(args.get("self_collisions", False))!r}
 _static_warnings = {static_warnings!r}
+_scripts_dir = {str(Path(__file__).resolve().parents[5] / "scripts")!r}
 """
     body = """\
 root = stage.GetPrimAtPath(_root_path)
@@ -3347,6 +3372,15 @@ if _add_collisions:
 # 3. Joints under <root>/Joints, anchored at the child link origin (or an
 # explicit world-space anchor), expressed in each body's local frame.
 _xf = UsdGeom.XformCache(Usd.TimeCode.Default())
+
+
+def _unit_rot(m):
+    # Rotation of a world transform with its (possibly scaled) axes normalised.
+    _m = Gf.Matrix4d(m)
+    _m.Orthonormalize()
+    return _m.ExtractRotationQuat()
+
+
 _scope = _root_path + '/Joints'
 if not stage.GetPrimAtPath(_scope).IsValid():
     UsdGeom.Scope.Define(stage, Sdf.Path(_scope))
@@ -3371,6 +3405,11 @@ for _j in _joints:
     _lp1 = _child_w.GetInverse().Transform(_anchor)
     _joint.CreateLocalPos0Attr().Set(Gf.Vec3f(_lp0))
     _joint.CreateLocalPos1Attr().Set(Gf.Vec3f(_lp1))
+    # The joint frame is world-aligned, so 'axis' is a WORLD axis (what the
+    # geometry drafter measures) even when a link is rotated, e.g. by a
+    # Y-up -> Z-up wrapper.
+    _joint.CreateLocalRot0Attr().Set(Gf.Quatf(_unit_rot(_parent_w).GetInverse()))
+    _joint.CreateLocalRot1Attr().Set(Gf.Quatf(_unit_rot(_child_w).GetInverse()))
 
     if _j['type'] != 'fixed':
         _joint.CreateAxisAttr().Set(_j['axis'])
@@ -3385,6 +3424,7 @@ for _j in _joints:
             _drive.CreateStiffnessAttr().Set(_j['stiffness'])
             _drive.CreateDampingAttr().Set(_j['damping'])
             _drive.CreateMaxForceAttr().Set(_j['max_force'])
+            _drive.CreateTargetPositionAttr().Set(_j['target'])
     result['joints'].append({'path': _jpath, 'type': _j['type'],
                              'axis': _j['axis'], 'drive': _j['drive']})
 
@@ -3395,16 +3435,63 @@ if not _art_prim or not _art_prim.IsValid():
 if not _art_prim.HasAPI(UsdPhysics.ArticulationRootAPI):
     UsdPhysics.ArticulationRootAPI.Apply(_art_prim)
 result['articulation_root'] = _art_root
+# Parts of one mechanism start in contact by design (interleaved hinge
+# barrels, a leaf in its frame): left colliding, PhysX forces them apart at
+# the first step. Joint limits, not contacts, bound the motion; anything
+# outside the articulation (a latch keeper, the floor) still collides.
+_art_prim.AddAppliedSchema('PhysxArticulationAPI')
+_art_prim.CreateAttribute('physxArticulation:enabledSelfCollisions', Sdf.ValueTypeNames.Bool).Set(_self_collisions)
+result['self_collisions'] = _self_collisions
 if _fixed_base:
     _fb_path = _scope + '/FixedBase'
     _fb = UsdPhysics.FixedJoint.Define(stage, Sdf.Path(_fb_path))
     _fb.CreateBody1Rel().SetTargets([Sdf.Path(_base_link)])
+    # With no body0 the joint's frame 0 is the world: hold the base where it
+    # stands, not at the world origin.
+    _base_w = _xf.GetLocalToWorldTransform(stage.GetPrimAtPath(_base_link))
+    _fb.CreateLocalPos0Attr().Set(Gf.Vec3f(_base_w.ExtractTranslation()))
+    _fb.CreateLocalRot0Attr().Set(Gf.Quatf(_unit_rot(_base_w)))
+    _fb.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
+    _fb.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
     result['fixed_base_joint'] = _fb_path
 
 # 5. A physics scene must exist for anything to simulate.
 if not any(_p.IsA(UsdPhysics.Scene) for _p in stage.Traverse()):
     UsdPhysics.Scene.Define(stage, Sdf.Path('/PhysicsScene'))
     result['created_physics_scene'] = '/PhysicsScene'
+
+# 5b. A revolute limit past where its two parts meet puts them through each
+# other: PhysX never collides two links joined by a joint, so the limit is the
+# only stop (scissors' rings, a peg's jaws, pliers closing past their jaws).
+# Measured from geometry (scripts/swing_contact.py); a warning, not a change.
+try:
+    import sys as _sys
+    if _scripts_dir not in _sys.path:
+        _sys.path.insert(0, _scripts_dir)
+    from swing_contact import swing_until_contact as _swing
+    _rng = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]
+                             ).ComputeWorldBound(root).ComputeAlignedRange()
+    _span = max(_rng.GetSize()) if not _rng.IsEmpty() else 0.0
+    _over = []
+    for _j in _joints:
+        if (_j['type'] != 'revolute' or _j['lower'] is None or _j['upper'] is None
+                or _j['upper'] - _j['lower'] >= 300.0 or _j['axis'] not in ('X', 'Y', 'Z') or _span <= 0):
+            continue
+        _a = _j['anchor'] if _j['anchor'] is not None else list(
+            _xf.GetLocalToWorldTransform(stage.GetPrimAtPath(_j['child'])).ExtractTranslation())
+        for _d, _lim in ((1.0, _j['upper']), (-1.0, _j['lower'])):
+            if _d * _lim <= 0.5:
+                continue
+            _meet = _swing(stage, [_j['parent']], [_j['child']], _a, 'XYZ'.index(_j['axis']), _d, _span,
+                           max_deg=abs(_lim) + 5.0)
+            if _meet is not None and abs(_lim) > _meet + 2.0:
+                _over.append(f"joint '{_j['name']}': limit {_lim:g} deg runs {abs(_lim) - _meet:.1f} deg past "
+                             f"where its parts meet ({_d * _meet:g} deg) - they will pass through each other")
+    if _over:
+        result['over_travel'] = _over
+        result.setdefault('warnings', []).extend(_over)
+except Exception as _e:  # the check is advisory
+    result.setdefault('warnings', []).append('contact check skipped: ' + str(_e)[:120])
 
 # 6. Verify before reporting success.
 if not _art_prim.HasAPI(UsdPhysics.ArticulationRootAPI):

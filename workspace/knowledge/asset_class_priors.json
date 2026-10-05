@@ -80,7 +80,15 @@
    "typical_materials": [
     "wood_oak",
     "steel_mild"
-   ]
+   ],
+   "mechanism_templates": {
+    "cabinet": {
+     "drawer_open_fraction": 0.8,
+     "door_swing_deg": 100
+    }
+   },
+   "source": "curated",
+   "curated_on": "2026-10-03"
   },
   "door": {
    "keywords": [
@@ -98,7 +106,25 @@
    "typical_materials": [
     "wood_oak",
     "steel_mild"
-   ]
+   ],
+   "mechanism_templates": {
+    "panic_bar_latch": {
+     "_doc": "A push (panic) bar on one face retracts a latch; the leaf swings away from the bar's face. Used by scripts/door_draft.py; the latch itself is authored by scripts/add_mechanism.py.",
+     "bar_height_m": [
+      0.75,
+      1.3
+     ],
+     "bar_travel_m": 0.02,
+     "bar_spring_n_per_m": 2500,
+     "bar_damping": 50,
+     "swing_deg": 90,
+     "hinge_damping": 0.2,
+     "leaf_kg": 35,
+     "frame_kg": 20,
+     "bar_kg": 2,
+     "small_part_kg": 1.5
+    }
+   }
   },
   "appliance_large": {
    "keywords": [
@@ -276,8 +302,8 @@
     "hammer",
     "screwdriver",
     "pliers",
-    "scissors",
-    "wrench"
+    "wrench",
+    "screw driver"
    ],
    "max_dim_m": [
     0.1,
@@ -383,9 +409,7 @@
    "keywords": [
     "car",
     "truck",
-    "aston",
-    "wheelchair",
-    "\u043a\u043e\u043b\u044f\u0441\u043a\u0430"
+    "aston"
    ],
    "max_dim_m": [
     0.9,
@@ -400,6 +424,9 @@
     "steel_mild",
     "aluminum",
     "rubber_natural"
+   ],
+   "behaviors": [
+    "wheeled_base"
    ]
   },
   "glasses_wearable": {
@@ -420,7 +447,14 @@
    "typical_materials": [
     "plastic_abs",
     "titanium"
-   ]
+   ],
+   "mechanism_templates": {
+    "temples": {
+     "fold_deg": 95
+    }
+   },
+   "source": "curated",
+   "curated_on": "2026-10-03"
   },
   "book": {
    "keywords": [
@@ -638,7 +672,7 @@
    ],
    "max_dim_m": [
     0.3,
-    1.2
+    1.8
    ],
    "mass_kg": [
     0.15,
@@ -806,10 +840,17 @@
     0.05,
     0.25
    ],
-   "articulable": false,
+   "articulable": true,
    "typical_materials": [
     "plastic_abs"
-   ]
+   ],
+   "mechanism_templates": {
+    "buttons": {
+     "_doc": "small parts standing proud of the body press in, sprung",
+     "press_force_n": 2.0,
+     "max_travel_m": 0.0015
+    }
+   }
   },
   "keyboard": {
    "keywords": [
@@ -823,11 +864,18 @@
     0.4,
     1.2
    ],
-   "articulable": false,
+   "articulable": true,
    "typical_materials": [
     "plastic_abs"
    ],
-   "cord_exit": "min"
+   "cord_exit": "min",
+   "mechanism_templates": {
+    "buttons": {
+     "_doc": "small parts standing proud of the body press in, sprung",
+     "press_force_n": 0.6,
+     "max_travel_m": 0.004
+    }
+   }
   },
   "toothbrush": {
    "keywords": [
@@ -885,7 +933,15 @@
    "typical_materials": [
     "plastic_abs",
     "aluminum"
-   ]
+   ],
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 3.0,
+     "max_travel_m": 0.003,
+     "knob_range_deg": 150.0,
+     "knobs": true
+    }
+   }
   },
   "human_character": {
    "keywords": [
@@ -1009,6 +1065,2774 @@
     "plastic_abs"
    ],
    "cord_exit": "min"
+  },
+  "chess_set": {
+   "keywords": [
+    "chessboard",
+    "chess board",
+    "chess set",
+    "pieces on chessboard"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.7
+   ],
+   "mass_kg": [
+    0.6,
+    4.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "multi_body": {
+    "_doc": "A set of separate objects: every member gets its own rigid body and mass; members named like a surface keyword are the playing surface. Applied at ingest by ingest_asset.apply_set_physics. surface_approximation: a board is a slab, so a box is its exact collider; a convex hull of its square tiles let convex pieces fall straight through it in PhysX 110.",
+    "member_class": "chess_piece",
+    "surface_keywords": [
+     "board"
+    ],
+    "surface_mass_kg": 1.2,
+    "member_fill": 0.45,
+    "surface_approximation": "boundingCube"
+   },
+   "game": "chess"
+  },
+  "wristwatch": {
+   "keywords": [
+    "wristwatch",
+    "watch",
+    "smartwatch",
+    "chronograph",
+    "apple watch",
+    "watch face"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.26
+   ],
+   "mass_kg": [
+    0.03,
+    0.25
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless",
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "chronograph_watch_mudmaster",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02",
+   "mechanism_templates": {
+    "watch": {
+     "crown_turns": 2
+    }
+   }
+  },
+  "picture_frame": {
+   "keywords": [
+    "picture frame",
+    "photo frame",
+    "mirror frame"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.8
+   ],
+   "mass_kg": [
+    0.8,
+    5.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "source": "vlm",
+   "proposed_by": "543_ring",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02"
+  },
+  "ring_jewelry": {
+   "keywords": [
+    "ring",
+    "jewelry",
+    "jewellery",
+    "engagement ring",
+    "wedding ring"
+   ],
+   "max_dim_m": [
+    0.018,
+    0.028
+   ],
+   "mass_kg": [
+    0.002,
+    0.01
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "gold",
+    "silver",
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "diamond_ring_day_1_3dinktober2019_ring",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02",
+   "collision_approximation": "convexDecomposition"
+  },
+  "wall_switch_panel": {
+   "keywords": [
+    "switch panel",
+    "light switch",
+    "wall switch",
+    "socket strip"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.9
+   ],
+   "mass_kg": [
+    0.2,
+    1.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "elevator_control_panel",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02"
+  },
+  "bolt_fastener": {
+   "keywords": [
+    "bolt",
+    "screw",
+    "fastener",
+    "hex bolt",
+    "socket screw",
+    "inbus",
+    "flat washer",
+    "screw and washer"
+   ],
+   "max_dim_m": [
+    0.004,
+    0.2
+   ],
+   "mass_kg": [
+    0.0003,
+    0.6
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "inbus_screw_bolt",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02",
+   "mechanism_templates": {
+    "thread": {}
+   }
+  },
+  "micropipette": {
+   "keywords": [
+    "micropipette",
+    "pipette"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.28
+   ],
+   "mass_kg": [
+    0.06,
+    0.15
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "mechanical_pipette",
+   "proposed_on": "2026-10-02",
+   "curated_on": "2026-10-02",
+   "mechanism_templates": {
+    "plunger": {}
+   }
+  },
+  "pet_bowl": {
+   "keywords": [
+    "dog bowl",
+    "cat bowl",
+    "pet bowl",
+    "feeding bowl"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.35
+   ],
+   "mass_kg": [
+    0.1,
+    1.5
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless",
+    "ceramic"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "pet_food_bag": {
+   "keywords": [
+    "dog food",
+    "cat food",
+    "pet food",
+    "kibble"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.9
+   ],
+   "mass_kg": [
+    1.0,
+    20.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "paper_kraft"
+   ],
+   "contents": "granular",
+   "_note": "a flexible bag of loose kibble; simulated as one rigid body until granular contents and soft bags are supported (BACKLOG: granular)",
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "circuit_board": {
+   "keywords": [
+    "raspberry pi",
+    "circuit board",
+    "pcb",
+    "arduino",
+    "hat module",
+    "breakout board"
+   ],
+   "max_dim_m": [
+    0.02,
+    0.3
+   ],
+   "mass_kg": [
+    0.003,
+    0.15
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "pcb_fr4"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "scissors": {
+   "keywords": [
+    "scissor",
+    "scissors",
+    "shears"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.3
+   ],
+   "mass_kg": [
+    0.03,
+    0.25
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "mechanism_templates": {
+    "pivot": {
+     "_doc": "two blades on a revolute pivot at the screw",
+     "open_deg": 60
+    }
+   },
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "key": {
+   "keywords": [
+    "key",
+    "door key",
+    "elevator key",
+    "house key"
+   ],
+   "max_dim_m": [
+    0.03,
+    0.1
+   ],
+   "mass_kg": [
+    0.004,
+    0.03
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "brass"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "elevator_panel": {
+   "keywords": [
+    "elevator panel",
+    "elevator control panel",
+    "lift panel",
+    "call panel",
+    "car operating panel"
+   ],
+   "max_dim_m": [
+    0.2,
+    1.6
+   ],
+   "mass_kg": [
+    0.5,
+    15.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02",
+   "mechanism_templates": {
+    "buttons": {
+     "_doc": "small parts standing proud of the body press in, sprung",
+     "press_force_n": 5.0,
+     "max_travel_m": 0.005,
+     "mounted": true
+    }
+   }
+  },
+  "elevator_car": {
+   "keywords": [
+    "elevator",
+    "lift car",
+    "elevator cabin",
+    "elevator car"
+   ],
+   "max_dim_m": [
+    1.8,
+    3.5
+   ],
+   "mass_kg": [
+    400.0,
+    1500.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "dropper_bottle": {
+   "keywords": [
+    "dropper bottle",
+    "serum bottle",
+    "dropper",
+    "tincture bottle"
+   ],
+   "max_dim_m": [
+    0.06,
+    0.15
+   ],
+   "mass_kg": [
+    0.03,
+    0.2
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "elevator_door": {
+   "keywords": [
+    "elevator door",
+    "lift door",
+    "sliding door"
+   ],
+   "max_dim_m": [
+    1.8,
+    2.6
+   ],
+   "mass_kg": [
+    40.0,
+    200.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "mechanism_templates": {
+    "slide": {
+     "_doc": "leaves slide sideways; bi-parting leaves move apart, coupled"
+    }
+   },
+   "source": "curated",
+   "curated_on": "2026-10-02"
+  },
+  "mobile_robot": {
+   "keywords": [
+    "mobile robot",
+    "service robot",
+    "mobile manipulator",
+    "humanoid robot"
+   ],
+   "max_dim_m": [
+    1.1,
+    1.6
+   ],
+   "mass_kg": [
+    40.0,
+    100.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "amber_v0_2",
+   "proposed_on": "2026-10-03",
+   "notes": "A robot, not a prop: it needs its own articulation (URDF/CAD joints), not a drafted one.",
+   "curated_on": "2026-10-03"
+  },
+  "backpack": {
+   "keywords": [
+    "backpack"
+   ],
+   "max_dim_m": [
+    0.55,
+    0.8
+   ],
+   "mass_kg": [
+    1.2,
+    2.5
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "backpack",
+   "proposed_on": "2026-10-03"
+  },
+  "camera": {
+   "keywords": [
+    "camera",
+    "slr",
+    "dslr",
+    "camcorder"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.22
+   ],
+   "mass_kg": [
+    0.5,
+    1.2
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "canon_at_1_retro_camera",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 3.0,
+     "max_travel_m": 0.003,
+     "knob_range_deg": 150.0,
+     "knobs": true
+    }
+   }
+  },
+  "desktop_computer_case": {
+   "keywords": [
+    "desktop computer case"
+   ],
+   "max_dim_m": [
+    0.35,
+    0.5
+   ],
+   "mass_kg": [
+    4.0,
+    10.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "cassette_deck_yamaha_kx_202",
+   "proposed_on": "2026-10-03"
+  },
+  "vinyl_record": {
+   "keywords": [
+    "vinyl record",
+    "vinyl",
+    "lp record",
+    "gramophone record"
+   ],
+   "max_dim_m": [
+    0.17,
+    0.31
+   ],
+   "mass_kg": [
+    0.035,
+    0.18
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "7_vinyl_record",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "cassette_deck": {
+   "keywords": [
+    "cassette deck",
+    "tape deck",
+    "cassette player"
+   ],
+   "max_dim_m": [
+    0.36,
+    0.47
+   ],
+   "mass_kg": [
+    2.5,
+    6.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "curated",
+   "proposed_by": "cassette_deck_yamaha_kx_202",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 3.0,
+     "max_travel_m": 0.003,
+     "knob_range_deg": 150.0,
+     "knobs": true
+    }
+   }
+  },
+  "game_console_dock": {
+   "keywords": [
+    "console dock",
+    "switch dock",
+    "docking station"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.22
+   ],
+   "mass_kg": [
+    0.25,
+    0.6
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "dock_nintendo_switch_2",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "film_projector": {
+   "keywords": [
+    "film projector",
+    "cine projector",
+    "movie projector"
+   ],
+   "max_dim_m": [
+    0.28,
+    0.45
+   ],
+   "mass_kg": [
+    3.0,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "curated",
+   "proposed_by": "eumig_film_projector",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 3.0,
+     "max_travel_m": 0.003,
+     "knob_range_deg": 150.0,
+     "knobs": true
+    }
+   }
+  },
+  "sofa": {
+   "keywords": [
+    "sofa",
+    "couch",
+    "sectional",
+    "settee"
+   ],
+   "max_dim_m": [
+    1.8,
+    3.0
+   ],
+   "mass_kg": [
+    40.0,
+    90.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "curated",
+   "proposed_by": "gray_l_shaped_couch",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "musical_keyboard": {
+   "keywords": [
+    "musical keyboard",
+    "synthesizer",
+    "synth",
+    "keytar",
+    "piano keyboard"
+   ],
+   "max_dim_m": [
+    0.28,
+    0.35
+   ],
+   "mass_kg": [
+    0.3,
+    0.8
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "keyboard_casio_vl_tone",
+   "proposed_on": "2026-10-03",
+   "mechanism_templates": {
+    "buttons": {
+     "press_force_n": 0.8,
+     "max_travel_m": 0.004
+    }
+   },
+   "curated_on": "2026-10-03"
+  },
+  "anatomical_organ_model": {
+   "keywords": [
+    "organ",
+    "liver",
+    "heart",
+    "kidney",
+    "lung",
+    "anatomical model"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.32
+   ],
+   "mass_kg": [
+    0.2,
+    2.0
+   ],
+   "articulable": false,
+   "deformable": "gel",
+   "typical_materials": [
+    "rubber_soft"
+   ],
+   "source": "curated",
+   "proposed_by": "liver",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "rc_transmitter": {
+   "keywords": [
+    "rc transmitter",
+    "rc controller",
+    "radio controller",
+    "radio transmitter"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.2
+   ],
+   "mass_kg": [
+    0.15,
+    0.35
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "radiomaster_t8l_rc_controller",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "record_player": {
+   "keywords": [
+    "record player",
+    "turntable",
+    "phonograph",
+    "gramophone"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.55
+   ],
+   "mass_kg": [
+    1.5,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "record_player_philips_gf_623",
+   "proposed_on": "2026-10-03",
+   "mechanism_templates": {
+    "turntable": {
+     "rpm": 33.33
+    }
+   },
+   "curated_on": "2026-10-03"
+  },
+  "vase": {
+   "keywords": [
+    "vase"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.4
+   ],
+   "mass_kg": [
+    0.4,
+    2.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "curated",
+   "proposed_by": "simple_glass_vase",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "clothes_hanger": {
+   "keywords": [
+    "clothes hanger",
+    "coat hanger",
+    "hanger"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.5
+   ],
+   "mass_kg": [
+    0.1,
+    0.3
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "wood_pine"
+   ],
+   "source": "curated",
+   "proposed_by": "wood_clothes_hanger",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "clothespin": {
+   "keywords": [
+    "clothespin",
+    "clothes peg",
+    "clothes pin",
+    "clothespeg"
+   ],
+   "max_dim_m": [
+    0.06,
+    0.09
+   ],
+   "mass_kg": [
+    0.003,
+    0.01
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "wood_pine"
+   ],
+   "source": "curated",
+   "proposed_by": "clothes_peg",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "clip": {
+     "open_deg": 25,
+     "preload_torque_nm": 0.12,
+     "full_torque_nm": 0.35
+    }
+   }
+  },
+  "beam_seating": {
+   "keywords": [
+    "beam seating",
+    "waiting room chairs",
+    "bench seating"
+   ],
+   "max_dim_m": [
+    2.6,
+    3.4
+   ],
+   "mass_kg": [
+    35.0,
+    80.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "chair_hospital",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "hospital_room_scene": {
+   "keywords": [
+    "hospital room",
+    "patient room",
+    "ward"
+   ],
+   "max_dim_m": [
+    5.0,
+    10.0
+   ],
+   "mass_kg": [
+    500.0,
+    3000.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "concrete"
+   ],
+   "source": "curated",
+   "proposed_by": "hospital_stuff",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "utility_cart": {
+   "keywords": [
+    "utility cart",
+    "trolley",
+    "serving cart"
+   ],
+   "max_dim_m": [
+    0.8,
+    1.2
+   ],
+   "mass_kg": [
+    7.0,
+    20.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "curated",
+   "proposed_by": "hospital_trolley",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "bean_bag": {
+   "keywords": [
+    "bean bag",
+    "beanbag"
+   ],
+   "max_dim_m": [
+    0.6,
+    1.2
+   ],
+   "mass_kg": [
+    2.0,
+    8.0
+   ],
+   "articulable": false,
+   "deformable": "sponge",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03",
+   "notes": "A bag of beads: a soft body (sponge preset) until granular filling is modelled."
+  },
+  "cutting_board": {
+   "keywords": [
+    "cutting board",
+    "chopping board",
+    "bread board"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.5
+   ],
+   "mass_kg": [
+    0.2,
+    1.5
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03"
+  },
+  "power_bank": {
+   "keywords": [
+    "power bank",
+    "powerbank",
+    "battery pack"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.18
+   ],
+   "mass_kg": [
+    0.1,
+    0.4
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03"
+  },
+  "power_drill": {
+   "keywords": [
+    "drill",
+    "power drill",
+    "cordless drill",
+    "drill driver",
+    "impact driver"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.35
+   ],
+   "mass_kg": [
+    0.8,
+    2.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03",
+   "mechanism_templates": {
+    "power_drill": {
+     "trigger_travel_m": 0.01,
+     "trigger_force_n": 15.0,
+     "clutch_arc_deg": 300.0,
+     "battery_hold_n": 40.0
+    }
+   },
+   "behaviors": [
+    "motor"
+   ]
+  },
+  "blister_pack": {
+   "keywords": [
+    "blister pack"
+   ],
+   "max_dim_m": [
+    0.07,
+    0.13
+   ],
+   "mass_kg": [
+    0.005,
+    0.025
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "blister_pack_capsules_free_video_in_comments",
+   "proposed_on": "2026-10-03"
+  },
+  "blood_bag": {
+   "keywords": [
+    "blood bag"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.25
+   ],
+   "mass_kg": [
+    0.03,
+    0.6
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "plastic_nylon"
+   ],
+   "source": "vlm",
+   "proposed_by": "blood_pack_low_poly_pbr",
+   "proposed_on": "2026-10-03"
+  },
+  "funnel": {
+   "keywords": [
+    "funnel"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.2
+   ],
+   "mass_kg": [
+    0.02,
+    0.12
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "cc0_funnel_3",
+   "proposed_on": "2026-10-03"
+  },
+  "crutch": {
+   "keywords": [
+    "crutch",
+    "crutches"
+   ],
+   "max_dim_m": [
+    1.0,
+    1.5
+   ],
+   "mass_kg": [
+    0.4,
+    1.2
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "source": "curated",
+   "proposed_by": "crutches",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "autoinjector_pen": {
+   "keywords": [
+    "autoinjector pen"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.22
+   ],
+   "mass_kg": [
+    0.04,
+    0.15
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "healthshot_injector_model_cs2",
+   "proposed_on": "2026-10-03"
+  },
+  "iv_pole_stand": {
+   "keywords": [
+    "iv pole stand"
+   ],
+   "max_dim_m": [
+    1.4,
+    2.3
+   ],
+   "mass_kg": [
+    6.0,
+    18.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "iv_device_with_stand",
+   "proposed_on": "2026-10-03"
+  },
+  "syringe": {
+   "keywords": [
+    "syringe"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.16
+   ],
+   "mass_kg": [
+    0.005,
+    0.02
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "insulin_syringe",
+   "proposed_on": "2026-10-03",
+   "mechanism_templates": {
+    "plunger": {
+     "single_stage": true,
+     "plunger_damping": 20.0
+    }
+   },
+   "curated_on": "2026-10-03"
+  },
+  "disposable_glove": {
+   "keywords": [
+    "disposable glove",
+    "latex glove",
+    "latex gloves",
+    "exam glove"
+   ],
+   "max_dim_m": [
+    0.22,
+    0.32
+   ],
+   "mass_kg": [
+    0.005,
+    0.02
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "rubber_soft"
+   ],
+   "source": "curated",
+   "proposed_by": "latex_gloves_fallen",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "microscope": {
+   "keywords": [
+    "microscope"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.5
+   ],
+   "mass_kg": [
+    3.0,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "medical_microscope",
+   "proposed_on": "2026-10-03"
+  },
+  "medical_supplies_set": {
+   "keywords": [
+    "medical supplies set"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.7
+   ],
+   "mass_kg": [
+    1.0,
+    4.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "medical_supplies_collection",
+   "proposed_on": "2026-10-03"
+  },
+  "medical_ventilator": {
+   "keywords": [
+    "medical ventilator"
+   ],
+   "max_dim_m": [
+    1.3,
+    1.9
+   ],
+   "mass_kg": [
+    25.0,
+    90.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "medical_ventilator_dfba0f",
+   "proposed_on": "2026-10-03"
+  },
+  "medical_examination_lamp": {
+   "keywords": [
+    "medical examination lamp"
+   ],
+   "max_dim_m": [
+    1.4,
+    1.9
+   ],
+   "mass_kg": [
+    6.0,
+    15.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "medical_examination_lamp",
+   "proposed_on": "2026-10-03"
+  },
+  "mortar_and_pestle": {
+   "keywords": [
+    "mortar and pestle"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.2
+   ],
+   "mass_kg": [
+    0.4,
+    2.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "mortar",
+   "proposed_on": "2026-10-03"
+  },
+  "oxygen_cylinder_cart": {
+   "keywords": [
+    "oxygen cylinder cart"
+   ],
+   "max_dim_m": [
+    1.0,
+    1.6
+   ],
+   "mass_kg": [
+    8.0,
+    35.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "oxygene_medical",
+   "proposed_on": "2026-10-03"
+  },
+  "test_tube_rack": {
+   "keywords": [
+    "test tube rack"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.4
+   ],
+   "mass_kg": [
+    0.15,
+    0.8
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "test_tube_rack",
+   "proposed_on": "2026-10-03"
+  },
+  "medical_privacy_screen": {
+   "keywords": [
+    "privacy screen",
+    "ward screen",
+    "medical screen"
+   ],
+   "max_dim_m": [
+    1.6,
+    2.0
+   ],
+   "mass_kg": [
+    6.0,
+    16.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "curated",
+   "proposed_by": "the_screen_is_medical",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "medical_thermometer": {
+   "keywords": [
+    "medical thermometer"
+   ],
+   "max_dim_m": [
+    0.11,
+    0.15
+   ],
+   "mass_kg": [
+    0.01,
+    0.03
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "thermometer_termometer_medical_devices",
+   "proposed_on": "2026-10-03"
+  },
+  "cpap_machine": {
+   "keywords": [
+    "cpap machine"
+   ],
+   "max_dim_m": [
+    0.5,
+    1.2
+   ],
+   "mass_kg": [
+    1.0,
+    2.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "xt_auto_cpap_machine",
+   "proposed_on": "2026-10-03"
+  },
+  "wall_diagnostic_station": {
+   "keywords": [
+    "wall diagnostic station"
+   ],
+   "max_dim_m": [
+    0.5,
+    0.9
+   ],
+   "mass_kg": [
+    2.0,
+    7.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "wall_tools",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03"
+  },
+  "trash_can": {
+   "keywords": [
+    "trash can",
+    "wastebasket",
+    "litter bin",
+    "waste bin",
+    "garbage can",
+    "bin"
+   ],
+   "max_dim_m": [
+    0.2,
+    1.2
+   ],
+   "mass_kg": [
+    0.3,
+    15.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "curated_on": "2026-10-03"
+  },
+  "bathroom_accessory_set": {
+   "keywords": [
+    "bathroom accessory set"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.45
+   ],
+   "mass_kg": [
+    0.6,
+    2.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "bathroom_accesories",
+   "proposed_on": "2026-10-03"
+  },
+  "spouted_pouch": {
+   "keywords": [
+    "spouted pouch"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.25
+   ],
+   "mass_kg": [
+    0.02,
+    0.6
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "plastic_nylon"
+   ],
+   "source": "vlm",
+   "proposed_by": "blood_bag",
+   "proposed_on": "2026-10-03"
+  },
+  "candle_jar": {
+   "keywords": [
+    "candle jar"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.18
+   ],
+   "mass_kg": [
+    0.3,
+    0.9
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "candle_in_a_glass",
+   "proposed_on": "2026-10-03"
+  },
+  "toy_building_brick": {
+   "keywords": [
+    "toy building brick"
+   ],
+   "max_dim_m": [
+    0.03,
+    0.26
+   ],
+   "mass_kg": [
+    0.005,
+    0.05
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "chinese_chess",
+   "proposed_on": "2026-10-03"
+  },
+  "laundry_hamper": {
+   "keywords": [
+    "laundry hamper"
+   ],
+   "max_dim_m": [
+    0.6,
+    0.95
+   ],
+   "mass_kg": [
+    1.5,
+    5.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "curated",
+   "proposed_by": "clothes_hamper",
+   "proposed_on": "2026-10-03",
+   "_doc": "a fabric bag on a rigid folding frame: simulated as a rigid container",
+   "curated_on": "2026-10-03"
+  },
+  "lawn_mower": {
+   "keywords": [
+    "lawn mower"
+   ],
+   "max_dim_m": [
+    1.3,
+    1.8
+   ],
+   "mass_kg": [
+    20.0,
+    40.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "craftsman_lawnmower",
+   "proposed_on": "2026-10-03"
+  },
+  "quadcopter_drone": {
+   "keywords": [
+    "quadcopter drone",
+    "quadcopter",
+    "drone",
+    "multirotor",
+    "hexacopter"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.4
+   ],
+   "mass_kg": [
+    0.2,
+    0.7
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_on": "2026-10-03",
+   "mechanism_templates": {
+    "rotors": {
+     "_doc": "each propeller spins on its motor",
+     "rpm": 6000
+    }
+   },
+   "curated_on": "2026-10-03"
+  },
+  "dental_handpiece": {
+   "keywords": [
+    "dental handpiece"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.21
+   ],
+   "mass_kg": [
+    0.04,
+    0.12
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "dental_drill",
+   "proposed_on": "2026-10-03"
+  },
+  "weighing_scale": {
+   "keywords": [
+    "weighing scale"
+   ],
+   "max_dim_m": [
+    0.18,
+    0.33
+   ],
+   "mass_kg": [
+    0.4,
+    2.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "electronic_scale",
+   "proposed_on": "2026-10-03"
+  },
+  "garden_rake": {
+   "keywords": [
+    "garden rake"
+   ],
+   "max_dim_m": [
+    1.4,
+    1.9
+   ],
+   "mass_kg": [
+    0.5,
+    1.6
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "gardeners_rake",
+   "proposed_on": "2026-10-03"
+  },
+  "ashtray": {
+   "keywords": [
+    "ashtray"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.18
+   ],
+   "mass_kg": [
+    0.2,
+    0.7
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "glass_ashtray",
+   "proposed_on": "2026-10-03"
+  },
+  "hourglass": {
+   "keywords": [
+    "hourglass"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.25
+   ],
+   "mass_kg": [
+    0.15,
+    0.6
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "hour_glass",
+   "proposed_on": "2026-10-03"
+  },
+  "lab_retort_stand": {
+   "keywords": [
+    "lab retort stand"
+   ],
+   "max_dim_m": [
+    0.35,
+    0.8
+   ],
+   "mass_kg": [
+    1.0,
+    3.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "iron_stand_with_base_and_clamp_arrangement",
+   "proposed_on": "2026-10-03"
+  },
+  "lab_glassware_set": {
+   "keywords": [
+    "lab glassware set"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.5
+   ],
+   "mass_kg": [
+    0.5,
+    2.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "lab_glassware",
+   "proposed_on": "2026-10-03"
+  },
+  "magnifying_glass": {
+   "keywords": [
+    "magnifying glass"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.3
+   ],
+   "mass_kg": [
+    0.05,
+    0.25
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "magnifying_glass",
+   "proposed_on": "2026-10-03"
+  },
+  "room_interior_shell": {
+   "keywords": [
+    "room interior shell"
+   ],
+   "max_dim_m": [
+    3.0,
+    8.0
+   ],
+   "mass_kg": [
+    2000.0,
+    20000.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "concrete"
+   ],
+   "source": "vlm",
+   "proposed_by": "modern_bathroom",
+   "proposed_on": "2026-10-03"
+  },
+  "multimeter": {
+   "keywords": [
+    "multimeter"
+   ],
+   "max_dim_m": [
+    0.13,
+    0.2
+   ],
+   "mass_kg": [
+    0.15,
+    0.45
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "multimeter_free",
+   "proposed_on": "2026-10-03"
+  },
+  "nail_clipper": {
+   "keywords": [
+    "nail clipper"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.09
+   ],
+   "mass_kg": [
+    0.01,
+    0.035
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "curated",
+   "proposed_on": "2026-10-03",
+   "curated_on": "2026-10-03",
+   "_doc": "the lever swivels on the pin at the jaw end and presses about a horizontal fulcrum - not a scissor pivot (the pivot tier swung it flat about the wrong end); rigid until a lever tier exists"
+  },
+  "paint_brush": {
+   "keywords": [
+    "paint brush"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.32
+   ],
+   "mass_kg": [
+    0.01,
+    0.03
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_pine"
+   ],
+   "source": "vlm",
+   "proposed_by": "paint_brushes",
+   "proposed_on": "2026-10-03"
+  },
+  "tweezers": {
+   "keywords": [
+    "tweezers",
+    "tweezer"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.14
+   ],
+   "mass_kg": [
+    0.01,
+    0.03
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "curated",
+   "proposed_by": "realistic_tweezers",
+   "proposed_on": "2026-10-03",
+   "_doc": "the arms flex at the root - a compliant mechanism, no pin: rigid until flex bodies",
+   "curated_on": "2026-10-03"
+  },
+  "rubiks_cube": {
+   "keywords": [
+    "rubiks cube",
+    "rubik",
+    "twisty puzzle",
+    "rubix"
+   ],
+   "max_dim_m": [
+    0.035,
+    0.07
+   ],
+   "mass_kg": [
+    0.04,
+    0.12
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "proposed_by": "rubix_cube_1",
+   "proposed_on": "2026-10-03",
+   "_doc": "the layers turn, but a cube's twist is a puzzle mechanic (rule-gated face rotation), not modelled: rigid",
+   "curated_on": "2026-10-03"
+  },
+  "scrub_sink": {
+   "keywords": [
+    "scrub sink"
+   ],
+   "max_dim_m": [
+    1.2,
+    1.9
+   ],
+   "mass_kg": [
+    45.0,
+    120.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "scrubbing_sink",
+   "proposed_on": "2026-10-03"
+  },
+  "television_with_stand": {
+   "keywords": [
+    "television with stand"
+   ],
+   "max_dim_m": [
+    1.2,
+    1.9
+   ],
+   "mass_kg": [
+    25.0,
+    60.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "tv_glass_table_sketchfab",
+   "proposed_on": "2026-10-03"
+  },
+  "glassware_collection": {
+   "keywords": [
+    "glassware collection"
+   ],
+   "max_dim_m": [
+    0.6,
+    1.2
+   ],
+   "mass_kg": [
+    8.0,
+    20.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "the_ultimate_glass_pack_cups_and_bottles",
+   "proposed_on": "2026-10-03"
+  },
+  "bathroom_sink": {
+   "keywords": [
+    "bathroom sink"
+   ],
+   "max_dim_m": [
+    0.4,
+    0.7
+   ],
+   "mass_kg": [
+    8.0,
+    20.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "bathroom_sink",
+   "proposed_on": "2026-10-03"
+  },
+  "dental_scaler": {
+   "keywords": [
+    "dental scaler"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.19
+   ],
+   "mass_kg": [
+    0.012,
+    0.035
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "dental_pick",
+   "proposed_on": "2026-10-03"
+  },
+  "pliers": {
+   "keywords": [
+    "pliers",
+    "plier",
+    "pincers",
+    "crimper",
+    "crimping tool",
+    "locking pliers",
+    "groove-joint",
+    "wire stripper"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.4
+   ],
+   "mass_kg": [
+    0.08,
+    0.6
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild",
+    "rubber_natural"
+   ],
+   "mechanism_templates": {
+    "pivot": {
+     "_doc": "two jaw/handle arms on a revolute pivot at the rivet: closed where the jaws meet, open_deg of travel from closed",
+     "open_deg": 45,
+     "jaws_meet": true
+    }
+   },
+   "source": "curated",
+   "curated_on": "2026-10-03"
+  },
+  "tool_board": {
+   "keywords": [
+    "tool board",
+    "shadow board",
+    "pegboard"
+   ],
+   "max_dim_m": [
+    0.3,
+    1.5
+   ],
+   "mass_kg": [
+    1.0,
+    15.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_pine",
+    "steel_mild"
+   ],
+   "_doc": "a wall board holding a set of tools: each tool its own body",
+   "multi_body": false,
+   "source": "curated",
+   "curated_on": "2026-10-03"
+  },
+  "wheelchair": {
+   "keywords": [
+    "wheelchair",
+    "\u043a\u043e\u043b\u044f\u0441\u043a\u0430"
+   ],
+   "max_dim_m": [
+    0.8,
+    1.4
+   ],
+   "mass_kg": [
+    12.0,
+    30.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum",
+    "steel_mild",
+    "rubber_natural"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "_doc": "a manual wheelchair: big drive (push) wheels and swivel casters (behaviors.wheeled_base)",
+   "source": "curated",
+   "curated_on": "2026-10-04"
+  },
+  "power_wheelchair": {
+   "keywords": [
+    "electric wheelchair",
+    "power wheelchair",
+    "power chair",
+    "powered wheelchair"
+   ],
+   "max_dim_m": [
+    0.8,
+    1.4
+   ],
+   "mass_kg": [
+    50.0,
+    150.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild",
+    "plastic_abs",
+    "rubber_natural"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "_doc": "motor-driven wheels steered by a joystick, swivel casters (behaviors.wheeled_base)",
+   "source": "curated",
+   "curated_on": "2026-10-04"
+  },
+  "game_console": {
+   "keywords": [
+    "game console"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.9
+   ],
+   "mass_kg": [
+    1.2,
+    3.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "atari_2600",
+   "proposed_on": "2026-10-04"
+  },
+  "bed": {
+   "keywords": [
+    "bed"
+   ],
+   "max_dim_m": [
+    1.9,
+    2.3
+   ],
+   "mass_kg": [
+    40.0,
+    90.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "wood_pine"
+   ],
+   "source": "vlm",
+   "proposed_by": "bedroom_corner",
+   "proposed_on": "2026-10-04"
+  },
+  "plastic_bag": {
+   "keywords": [
+    "plastic bag"
+   ],
+   "max_dim_m": [
+    0.35,
+    0.6
+   ],
+   "mass_kg": [
+    0.01,
+    3.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "plastic_nylon"
+   ],
+   "source": "vlm",
+   "proposed_by": "blue_plastic_bag",
+   "proposed_on": "2026-10-04"
+  },
+  "bolt_cutter": {
+   "keywords": [
+    "bolt cutter"
+   ],
+   "max_dim_m": [
+    0.45,
+    1.1
+   ],
+   "mass_kg": [
+    2.5,
+    6.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "boltcutter",
+   "proposed_on": "2026-10-04"
+  },
+  "vernier_caliper": {
+   "keywords": [
+    "vernier caliper"
+   ],
+   "max_dim_m": [
+    0.18,
+    0.35
+   ],
+   "mass_kg": [
+    0.12,
+    0.45
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "calipers",
+   "proposed_on": "2026-10-04"
+  },
+  "baseball_cap": {
+   "keywords": [
+    "baseball cap"
+   ],
+   "max_dim_m": [
+    0.22,
+    0.3
+   ],
+   "mass_kg": [
+    0.05,
+    0.15
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "cap_5_mb",
+   "proposed_on": "2026-10-04"
+  },
+  "hair_comb": {
+   "keywords": [
+    "hair comb"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.22
+   ],
+   "mass_kg": [
+    0.01,
+    0.04
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "comb",
+   "proposed_on": "2026-10-04"
+  },
+  "sock": {
+   "keywords": [
+    "sock"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.32
+   ],
+   "mass_kg": [
+    0.02,
+    0.08
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "dirty_socks",
+   "proposed_on": "2026-10-04"
+  },
+  "bladeless_fan_heater": {
+   "keywords": [
+    "bladeless fan heater"
+   ],
+   "max_dim_m": [
+    0.55,
+    1.0
+   ],
+   "mass_kg": [
+    2.0,
+    4.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "dyson_hotcool_fan",
+   "proposed_on": "2026-10-04"
+  },
+  "engine_crane": {
+   "keywords": [
+    "engine crane"
+   ],
+   "max_dim_m": [
+    1.4,
+    2.6
+   ],
+   "mass_kg": [
+    60.0,
+    120.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "engine_crane",
+   "proposed_on": "2026-10-04"
+  },
+  "hair_dryer": {
+   "keywords": [
+    "hair dryer"
+   ],
+   "max_dim_m": [
+    0.22,
+    0.3
+   ],
+   "mass_kg": [
+    0.35,
+    0.8
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "hairdryer_hair_dryer",
+   "proposed_on": "2026-10-04"
+  },
+  "hand_truck": {
+   "keywords": [
+    "hand truck"
+   ],
+   "max_dim_m": [
+    1.1,
+    1.4
+   ],
+   "mass_kg": [
+    5.0,
+    15.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "hand_truck_cart",
+   "proposed_on": "2026-10-04"
+  },
+  "bench_grinder": {
+   "keywords": [
+    "bench grinder"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.55
+   ],
+   "mass_kg": [
+    8.0,
+    25.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "industrial_grinding_machine",
+   "proposed_on": "2026-10-04"
+  },
+  "light_bulb": {
+   "keywords": [
+    "light bulb"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.14
+   ],
+   "mass_kg": [
+    0.02,
+    0.06
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "lightbulb",
+   "proposed_on": "2026-10-04"
+  },
+  "makeup_brush": {
+   "keywords": [
+    "makeup brush"
+   ],
+   "max_dim_m": [
+    0.13,
+    0.21
+   ],
+   "mass_kg": [
+    0.02,
+    0.08
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "makeup_brush_with_pin_0628152349_texture",
+   "proposed_on": "2026-10-04"
+  },
+  "handheld_microphone": {
+   "keywords": [
+    "handheld microphone"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.25
+   ],
+   "mass_kg": [
+    0.15,
+    0.4
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "microphone",
+   "proposed_on": "2026-10-04"
+  },
+  "pallet_jack": {
+   "keywords": [
+    "pallet jack"
+   ],
+   "max_dim_m": [
+    1.2,
+    1.9
+   ],
+   "mass_kg": [
+    45.0,
+    90.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "mini_pallet_truck",
+   "proposed_on": "2026-10-04"
+  },
+  "pile_of_clothes": {
+   "keywords": [
+    "pile of clothes"
+   ],
+   "max_dim_m": [
+    0.6,
+    1.8
+   ],
+   "mass_kg": [
+    1.5,
+    10.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "pile_of_clothes_1",
+   "proposed_on": "2026-10-04"
+  },
+  "pen_holder": {
+   "keywords": [
+    "pen holder"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.2
+   ],
+   "mass_kg": [
+    0.08,
+    0.3
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "pen_holder",
+   "proposed_on": "2026-10-04"
+  },
+  "storage_basket_with_linens": {
+   "keywords": [
+    "storage basket with linens"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.6
+   ],
+   "mass_kg": [
+    1.0,
+    3.5
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "pillows_in_a_basket",
+   "proposed_on": "2026-10-04"
+  },
+  "handheld_radio_transceiver": {
+   "keywords": [
+    "handheld radio transceiver"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.28
+   ],
+   "mass_kg": [
+    0.2,
+    0.9
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "radio_yaesu_vx_8",
+   "proposed_on": "2026-10-04"
+  },
+  "robot_vacuum": {
+   "keywords": [
+    "robot vacuum"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.38
+   ],
+   "mass_kg": [
+    2.0,
+    4.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "robot_vacuum_cleaner",
+   "proposed_on": "2026-10-04"
+  },
+  "stand_up_pouch": {
+   "keywords": [
+    "stand up pouch"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.28
+   ],
+   "mass_kg": [
+    0.05,
+    0.6
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "plastic_nylon"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "sealed_food_pouch",
+   "proposed_on": "2026-10-04"
+  },
+  "hobby_servo": {
+   "keywords": [
+    "hobby servo"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.2
+   ],
+   "mass_kg": [
+    0.009,
+    0.06
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "servo_sg90",
+   "proposed_on": "2026-10-04"
+  },
+  "sports_ball": {
+   "keywords": [
+    "sports ball"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.23
+   ],
+   "mass_kg": [
+    0.4,
+    0.46
+   ],
+   "articulable": false,
+   "deformable": "rubber",
+   "typical_materials": [
+    "rubber_natural"
+   ],
+   "source": "vlm",
+   "proposed_by": "soccer_ball",
+   "proposed_on": "2026-10-04"
+  },
+  "step_ladder": {
+   "keywords": [
+    "step ladder"
+   ],
+   "max_dim_m": [
+    0.7,
+    1.2
+   ],
+   "mass_kg": [
+    3.0,
+    7.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "step_ladder",
+   "proposed_on": "2026-10-04"
+  },
+  "thermo_hygrometer": {
+   "keywords": [
+    "thermo hygrometer"
+   ],
+   "max_dim_m": [
+    0.04,
+    0.09
+   ],
+   "mass_kg": [
+    0.03,
+    0.12
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "thermometer_humidity_sensor_weather_station",
+   "proposed_on": "2026-10-04"
+  },
+  "upright_vacuum_cleaner": {
+   "keywords": [
+    "upright vacuum cleaner"
+   ],
+   "max_dim_m": [
+    1.0,
+    1.3
+   ],
+   "mass_kg": [
+    4.0,
+    9.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "gate",
+    "motor",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "upright_dyson_vacuum_cleaner",
+   "proposed_on": "2026-10-04"
+  },
+  "canister_vacuum_cleaner": {
+   "keywords": [
+    "canister vacuum cleaner"
+   ],
+   "max_dim_m": [
+    1.0,
+    1.4
+   ],
+   "mass_kg": [
+    4.0,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "vacuum_cleaner_c6c926",
+   "proposed_on": "2026-10-04"
+  },
+  "ceiling_light_fixture": {
+   "keywords": [
+    "ceiling light fixture"
+   ],
+   "max_dim_m": [
+    0.4,
+    1.5
+   ],
+   "mass_kg": [
+    0.8,
+    4.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "ceiling_lamp_10mb",
+   "proposed_on": "2026-10-04"
+  },
+  "fire_extinguisher": {
+   "keywords": [
+    "fire extinguisher"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.7
+   ],
+   "mass_kg": [
+    2.0,
+    10.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "fire_extinguisher",
+   "proposed_on": "2026-10-04"
+  },
+  "floor_lamp": {
+   "keywords": [
+    "floor lamp"
+   ],
+   "max_dim_m": [
+    1.2,
+    1.8
+   ],
+   "mass_kg": [
+    2.5,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "floor_lamp",
+   "proposed_on": "2026-10-04"
   }
  }
 }

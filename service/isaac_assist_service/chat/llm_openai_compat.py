@@ -1,3 +1,4 @@
+import asyncio
 import aiohttp
 import logging
 import json
@@ -179,6 +180,28 @@ def parse_responses_body(data: Dict) -> tuple:
     )
 
 
+# Transient failures worth retrying on the Responses path: rate limits, server
+# errors and dropped connections. A GPT-6 Sol screening episode that had
+# already put the block in the bin was lost to one HTTP 429, and another to a
+# connection reset; neither measured the model. The planner bounds each call
+# to 120 s, so waits stay short: 4, 8, 16 s, or a Retry-After up to 30 s.
+RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+RETRY_ATTEMPTS = 4
+RETRY_FIRST_BACKOFF_S = 4.0
+RETRY_MAX_WAIT_S = 30.0
+# 429s that mean "out of credits" rather than "slow down".
+QUOTA_EXHAUSTED_MARKERS = frozenset({"insufficient_quota", "credit_balance_exhausted"})
+
+
+def retry_wait_s(backoff_s: float, retry_after: Optional[str]) -> float:
+    """The backoff, lengthened (never shortened) to a sane Retry-After in seconds."""
+    try:
+        requested = float(retry_after) if retry_after else 0.0
+    except ValueError:
+        requested = 0.0
+    return max(backoff_s, min(requested, RETRY_MAX_WAIT_S))
+
+
 class OpenAICompatProvider:
     """
     Generic OpenAI-compatible chat completion provider.
@@ -196,21 +219,46 @@ class OpenAICompatProvider:
     ) -> LLMResponse:
         payload = build_responses_payload(self.model, messages, context)
         url = responses_url(self.base_url)
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(
-                        f"API Error ({response.status}) from {url}: {error_text}"
-                    )
-                    # Raise rather than return the error as if it were a reply.
-                    # A caller metering spend sees only a response with no
-                    # usage on it, and reports a usage-parsing problem while
-                    # the API's actual complaint goes unread.
-                    raise RuntimeError(
-                        f"{url} returned HTTP {response.status}: {error_text[:800]}"
-                    )
-                data = await response.json()
+        backoff = RETRY_FIRST_BACKOFF_S
+        for attempt in range(1, RETRY_ATTEMPTS + 1):
+            last = attempt == RETRY_ATTEMPTS
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            break
+                        error_text = await response.text()
+                        # A 429 can also mean the account is out of credits,
+                        # which no wait will fix: stop and say so plainly.
+                        if response.status == 429 and QUOTA_EXHAUSTED_MARKERS.intersection(
+                            error_text.replace('"', " ").split()
+                        ):
+                            raise RuntimeError(
+                                "OpenAI account has no credits remaining (insufficient_quota); "
+                                f"add credits at platform.openai.com/settings/organization/billing: {error_text[:300]}"
+                            )
+                        if response.status in RETRY_STATUSES and not last:
+                            wait = retry_wait_s(backoff, response.headers.get("retry-after"))
+                            logger.warning(
+                                f"HTTP {response.status} from {url}; retry {attempt}/{RETRY_ATTEMPTS - 1} in {wait:.0f}s"
+                            )
+                        else:
+                            logger.error(f"API Error ({response.status}) from {url}: {error_text}")
+                            # Raise rather than return the error as if it were a
+                            # reply. A caller metering spend sees only a response
+                            # with no usage on it, and reports a usage-parsing
+                            # problem while the API's actual complaint goes unread.
+                            raise RuntimeError(
+                                f"{url} returned HTTP {response.status}: {error_text[:800]}"
+                            )
+            except aiohttp.ClientConnectionError as error:
+                if last:
+                    raise
+                wait = backoff
+                logger.warning(f"{type(error).__name__} from {url}; retry {attempt}/{RETRY_ATTEMPTS - 1} in {wait:.0f}s")
+            await asyncio.sleep(wait)
+            backoff *= 2
         text, tool_calls, usage = parse_responses_body(data)
         return LLMResponse(
             text=text,
