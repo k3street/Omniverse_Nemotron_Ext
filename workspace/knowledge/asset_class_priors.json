@@ -3091,7 +3091,7 @@
   "wheelchair": {
    "keywords": [
     "wheelchair",
-    "коляска"
+    "\u043a\u043e\u043b\u044f\u0441\u043a\u0430"
    ],
    "max_dim_m": [
     0.8,
@@ -3141,6 +3141,698 @@
    "_doc": "motor-driven wheels steered by a joystick, swivel casters (behaviors.wheeled_base)",
    "source": "curated",
    "curated_on": "2026-10-04"
+  },
+  "game_console": {
+   "keywords": [
+    "game console"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.9
+   ],
+   "mass_kg": [
+    1.2,
+    3.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "atari_2600",
+   "proposed_on": "2026-10-04"
+  },
+  "bed": {
+   "keywords": [
+    "bed"
+   ],
+   "max_dim_m": [
+    1.9,
+    2.3
+   ],
+   "mass_kg": [
+    40.0,
+    90.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "wood_pine"
+   ],
+   "source": "vlm",
+   "proposed_by": "bedroom_corner",
+   "proposed_on": "2026-10-04"
+  },
+  "plastic_bag": {
+   "keywords": [
+    "plastic bag"
+   ],
+   "max_dim_m": [
+    0.35,
+    0.6
+   ],
+   "mass_kg": [
+    0.01,
+    3.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "plastic_nylon"
+   ],
+   "source": "vlm",
+   "proposed_by": "blue_plastic_bag",
+   "proposed_on": "2026-10-04"
+  },
+  "bolt_cutter": {
+   "keywords": [
+    "bolt cutter"
+   ],
+   "max_dim_m": [
+    0.45,
+    1.1
+   ],
+   "mass_kg": [
+    2.5,
+    6.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "boltcutter",
+   "proposed_on": "2026-10-04"
+  },
+  "vernier_caliper": {
+   "keywords": [
+    "vernier caliper"
+   ],
+   "max_dim_m": [
+    0.18,
+    0.35
+   ],
+   "mass_kg": [
+    0.12,
+    0.45
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "calipers",
+   "proposed_on": "2026-10-04"
+  },
+  "baseball_cap": {
+   "keywords": [
+    "baseball cap"
+   ],
+   "max_dim_m": [
+    0.22,
+    0.3
+   ],
+   "mass_kg": [
+    0.05,
+    0.15
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "cap_5_mb",
+   "proposed_on": "2026-10-04"
+  },
+  "hair_comb": {
+   "keywords": [
+    "hair comb"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.22
+   ],
+   "mass_kg": [
+    0.01,
+    0.04
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "comb",
+   "proposed_on": "2026-10-04"
+  },
+  "sock": {
+   "keywords": [
+    "sock"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.32
+   ],
+   "mass_kg": [
+    0.02,
+    0.08
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "dirty_socks",
+   "proposed_on": "2026-10-04"
+  },
+  "bladeless_fan_heater": {
+   "keywords": [
+    "bladeless fan heater"
+   ],
+   "max_dim_m": [
+    0.55,
+    1.0
+   ],
+   "mass_kg": [
+    2.0,
+    4.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "dyson_hotcool_fan",
+   "proposed_on": "2026-10-04"
+  },
+  "engine_crane": {
+   "keywords": [
+    "engine crane"
+   ],
+   "max_dim_m": [
+    1.4,
+    2.6
+   ],
+   "mass_kg": [
+    60.0,
+    120.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "engine_crane",
+   "proposed_on": "2026-10-04"
+  },
+  "hair_dryer": {
+   "keywords": [
+    "hair dryer"
+   ],
+   "max_dim_m": [
+    0.22,
+    0.3
+   ],
+   "mass_kg": [
+    0.35,
+    0.8
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "hairdryer_hair_dryer",
+   "proposed_on": "2026-10-04"
+  },
+  "hand_truck": {
+   "keywords": [
+    "hand truck"
+   ],
+   "max_dim_m": [
+    1.1,
+    1.4
+   ],
+   "mass_kg": [
+    5.0,
+    15.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "hand_truck_cart",
+   "proposed_on": "2026-10-04"
+  },
+  "bench_grinder": {
+   "keywords": [
+    "bench grinder"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.55
+   ],
+   "mass_kg": [
+    8.0,
+    25.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "industrial_grinding_machine",
+   "proposed_on": "2026-10-04"
+  },
+  "light_bulb": {
+   "keywords": [
+    "light bulb"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.14
+   ],
+   "mass_kg": [
+    0.02,
+    0.06
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "lightbulb",
+   "proposed_on": "2026-10-04"
+  },
+  "makeup_brush": {
+   "keywords": [
+    "makeup brush"
+   ],
+   "max_dim_m": [
+    0.13,
+    0.21
+   ],
+   "mass_kg": [
+    0.02,
+    0.08
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "makeup_brush_with_pin_0628152349_texture",
+   "proposed_on": "2026-10-04"
+  },
+  "handheld_microphone": {
+   "keywords": [
+    "handheld microphone"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.25
+   ],
+   "mass_kg": [
+    0.15,
+    0.4
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "microphone",
+   "proposed_on": "2026-10-04"
+  },
+  "pallet_jack": {
+   "keywords": [
+    "pallet jack"
+   ],
+   "max_dim_m": [
+    1.2,
+    1.9
+   ],
+   "mass_kg": [
+    45.0,
+    90.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "mini_pallet_truck",
+   "proposed_on": "2026-10-04"
+  },
+  "pile_of_clothes": {
+   "keywords": [
+    "pile of clothes"
+   ],
+   "max_dim_m": [
+    0.6,
+    1.8
+   ],
+   "mass_kg": [
+    1.5,
+    10.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "pile_of_clothes_1",
+   "proposed_on": "2026-10-04"
+  },
+  "pen_holder": {
+   "keywords": [
+    "pen holder"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.2
+   ],
+   "mass_kg": [
+    0.08,
+    0.3
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "pen_holder",
+   "proposed_on": "2026-10-04"
+  },
+  "storage_basket_with_linens": {
+   "keywords": [
+    "storage basket with linens"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.6
+   ],
+   "mass_kg": [
+    1.0,
+    3.5
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "fabric_cotton"
+   ],
+   "source": "vlm",
+   "proposed_by": "pillows_in_a_basket",
+   "proposed_on": "2026-10-04"
+  },
+  "handheld_radio_transceiver": {
+   "keywords": [
+    "handheld radio transceiver"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.28
+   ],
+   "mass_kg": [
+    0.2,
+    0.9
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "radio_yaesu_vx_8",
+   "proposed_on": "2026-10-04"
+  },
+  "robot_vacuum": {
+   "keywords": [
+    "robot vacuum"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.38
+   ],
+   "mass_kg": [
+    2.0,
+    4.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "robot_vacuum_cleaner",
+   "proposed_on": "2026-10-04"
+  },
+  "stand_up_pouch": {
+   "keywords": [
+    "stand up pouch"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.28
+   ],
+   "mass_kg": [
+    0.05,
+    0.6
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "plastic_nylon"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "sealed_food_pouch",
+   "proposed_on": "2026-10-04"
+  },
+  "hobby_servo": {
+   "keywords": [
+    "hobby servo"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.2
+   ],
+   "mass_kg": [
+    0.009,
+    0.06
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "servo_sg90",
+   "proposed_on": "2026-10-04"
+  },
+  "sports_ball": {
+   "keywords": [
+    "sports ball"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.23
+   ],
+   "mass_kg": [
+    0.4,
+    0.46
+   ],
+   "articulable": false,
+   "deformable": "rubber",
+   "typical_materials": [
+    "rubber_natural"
+   ],
+   "source": "vlm",
+   "proposed_by": "soccer_ball",
+   "proposed_on": "2026-10-04"
+  },
+  "step_ladder": {
+   "keywords": [
+    "step ladder"
+   ],
+   "max_dim_m": [
+    0.7,
+    1.2
+   ],
+   "mass_kg": [
+    3.0,
+    7.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "step_ladder",
+   "proposed_on": "2026-10-04"
+  },
+  "thermo_hygrometer": {
+   "keywords": [
+    "thermo hygrometer"
+   ],
+   "max_dim_m": [
+    0.04,
+    0.09
+   ],
+   "mass_kg": [
+    0.03,
+    0.12
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "thermometer_humidity_sensor_weather_station",
+   "proposed_on": "2026-10-04"
+  },
+  "upright_vacuum_cleaner": {
+   "keywords": [
+    "upright vacuum cleaner"
+   ],
+   "max_dim_m": [
+    1.0,
+    1.3
+   ],
+   "mass_kg": [
+    4.0,
+    9.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "gate",
+    "motor",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "upright_dyson_vacuum_cleaner",
+   "proposed_on": "2026-10-04"
+  },
+  "canister_vacuum_cleaner": {
+   "keywords": [
+    "canister vacuum cleaner"
+   ],
+   "max_dim_m": [
+    1.0,
+    1.4
+   ],
+   "mass_kg": [
+    4.0,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "vacuum_cleaner_c6c926",
+   "proposed_on": "2026-10-04"
+  },
+  "ceiling_light_fixture": {
+   "keywords": [
+    "ceiling light fixture"
+   ],
+   "max_dim_m": [
+    0.4,
+    1.5
+   ],
+   "mass_kg": [
+    0.8,
+    4.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "ceiling_lamp_10mb",
+   "proposed_on": "2026-10-04"
+  },
+  "fire_extinguisher": {
+   "keywords": [
+    "fire extinguisher"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.7
+   ],
+   "mass_kg": [
+    2.0,
+    10.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "fire_extinguisher",
+   "proposed_on": "2026-10-04"
+  },
+  "floor_lamp": {
+   "keywords": [
+    "floor lamp"
+   ],
+   "max_dim_m": [
+    1.2,
+    1.8
+   ],
+   "mass_kg": [
+    2.5,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "floor_lamp",
+   "proposed_on": "2026-10-04"
   }
  }
 }
