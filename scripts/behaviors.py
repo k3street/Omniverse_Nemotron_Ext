@@ -27,6 +27,7 @@ a wheelchair whose casters do not swivel.
 from __future__ import annotations
 
 import json
+import re
 import math
 import sys
 from pathlib import Path
@@ -51,6 +52,9 @@ KIND_ROLES = {
 PRIORS_PATH = REPO / "workspace" / "knowledge" / "asset_class_priors.json"
 
 
+INTERNAL = re.compile(r"\b(internal|hidden|inside the (body|housing|case))\b|no (external|visible) (motion|moving)", re.I)
+
+
 def expected(entry: dict) -> dict:
     """The behaviors the asset should have: its class's (priors), and what the
     classifying VLM saw it do (its functions). kind -> where that came from."""
@@ -58,6 +62,9 @@ def expected(entry: dict) -> dict:
     prior = json.loads(PRIORS_PATH.read_text())["classes"].get(cls or "", {})
     out = {k: f"class {cls}" for k in prior.get("behaviors", []) if k in KIND_ROLES}
     for f in (entry.get("vlm") or {}).get("functions") or []:
+        # a coffee maker's pump is a motor nothing outside shows: no part to drive
+        if INTERNAL.search(f.get("moving_part") or ""):
+            continue
         if f.get("kind") in KIND_ROLES:
             out.setdefault(f["kind"], f"seen: {f.get('does')}")
     return out

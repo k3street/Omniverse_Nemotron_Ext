@@ -590,7 +590,36 @@ def add_press_fit(stage, asset_root: str, spec: dict) -> dict:
         # {"joint": name, "travel_m": x}: a pusher releases it by rule
         j.GetPrim().SetCustomDataByKey("simReady:releasedBy", dict(spec["released_by"]))
     j.CreateExcludeFromArticulationAttr().Set(True)
-    return {"joint": str(j.GetPath()), "break_force_n": want}
+    # outside the articulation, the part collides with every link - and a
+    # plug in its jack, a probe on its cable, overlap them at rest by design:
+    # the compact multimeter's plugs were thrown out and took the meter 255 m.
+    # It keeps colliding with everything it does not already sit in.
+    # So does what rides on it (a probe's handle on its tip): it left the
+    # articulation with it.
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    fixed = [UsdPhysics.Joint(q) for q in Usd.PrimRange(stage.GetPrimAtPath(asset_root))
+             if q.IsA(UsdPhysics.FixedJoint) and q.GetPath() != j.GetPath()]
+    group, grew = {pp.GetPath()}, True
+    while grew:
+        grew = False
+        for fj in fixed:
+            b0, b1 = fj.GetBody0Rel().GetTargets(), fj.GetBody1Rel().GetTargets()
+            if b0 and b1 and b0[0] in group and b1[0] not in group:
+                group.add(b1[0])
+                grew = True
+    bodies = [q for q in Usd.PrimRange(stage.GetPrimAtPath(asset_root)) if q.HasAPI(UsdPhysics.RigidBodyAPI)]
+    filtered = 0
+    for g in group:
+        gp = stage.GetPrimAtPath(g)
+        box = cache.ComputeWorldBound(gp).ComputeAlignedRange()
+        fp = UsdPhysics.FilteredPairsAPI.Apply(gp)
+        for q in bodies:
+            if q.GetPath() in group:
+                continue
+            if not Gf.Range3d.GetIntersection(box, cache.ComputeWorldBound(q).ComputeAlignedRange()).IsEmpty():
+                fp.CreateFilteredPairsRel().AddTarget(q.GetPath())
+                filtered += 1
+    return {"joint": str(j.GetPath()), "break_force_n": want, "filtered_against": filtered}
 
 
 def add_rule(stage, gated_joint: str, actuator_joint: str, engage: float, action: str = "open") -> dict:

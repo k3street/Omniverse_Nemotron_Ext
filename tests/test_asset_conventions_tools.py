@@ -94,3 +94,64 @@ def test_reprocess_defaults_to_a_dry_run():
         ac._run = ac_run
     assert calls["args"]["kind"] == "reprocess" and "--dry-run" in calls["args"]["args"]
     assert calls["args"]["args"][-2:] == ["--classes", "pliers"]
+
+
+def test_a_stage_that_ran_before_an_earlier_stage_reran_is_stale(monkeypatch):
+    sys.path.insert(0, str(REPO / "scripts"))
+    import processing
+
+    monkeypatch.setattr(processing, "_prior", lambda e: {"articulable": True})
+    e = {"asset_id": "x", "applied_fixes": ["articulate_asset: 2 joints"]}
+    for st in processing.ORDER:
+        processing.record(e, st, tier="pivot" if st == "articulate" else None)
+    e["processing"]["verify"]["at"] = "2000-01-01T00:00:00"     # verified before the re-articulation
+    e["processing"]["critic"]["at"] = "2000-01-01T00:00:00"
+    st = dict(processing.stale(e, ["articulate", "verify", "critic"]))
+    assert "articulate" not in st and st["verify"].startswith("older than")
+
+
+def test_a_part_is_numbered_on_its_own_pixels_not_on_what_hides_it():
+    np = pytest.importorskip("numpy")
+    sys.path.insert(0, str(REPO / "scripts"))
+    import part_survey
+
+    img = np.zeros((60, 80, 3), np.uint8)
+    green = np.array([44, 160, 44], float) / 255     # part 3's colour, lit and washed toward white
+    img[10:50, 5:35] = np.round((0.7 * green + 0.3) * 255)
+    red = np.array([214, 39, 40], float) / 255       # part 4
+    img[10:50, 45:75] = np.round((0.9 * red + 0.05) * 255)
+    spots = part_survey.visible_spots(img, [{"id": 3}, {"id": 4}, {"id": 13}])
+    assert 5 <= spots[3][0] < 35 and 45 <= spots[4][0] < 75
+    assert 13 not in spots and 13 in spots["_chroma"]    # light green: not in view, so no number
+
+
+def test_an_internal_motor_is_not_an_expected_behavior():
+    sys.path.insert(0, str(REPO / "scripts"))
+    import behaviors
+
+    e = {"class_hint": "no_such_class", "vlm": {"functions": [
+        {"does": "brews", "moving_part": "internal pump (no external motion)", "kind": "motor"}]}}
+    assert behaviors.expected(e) == {}
+
+
+def test_set_bodies_above_articulated_links_are_taken_off():
+    pytest.importorskip("pxr")
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    sys.path.insert(0, str(REPO / "scripts"))
+    from asset_review_hub import _strip_set_bodies
+
+    st = Usd.Stage.CreateInMemory()
+    for p in ("/W/A", "/W/A/shell", "/W/A/lid", "/W/B", "/W/B/m"):
+        UsdGeom.Xform.Define(st, p)
+    for p in ("/W/A", "/W/B"):
+        UsdPhysics.RigidBodyAPI.Apply(st.GetPrimAtPath(p))
+    UsdPhysics.ArticulationRootAPI.Apply(st.GetPrimAtPath("/W/A"))
+    j = UsdPhysics.FixedJoint.Define(st, "/W/Joints/object0_A")
+    j.CreateBody0Rel().SetTargets(["/W/A"])
+    spec = {"prim_path": "/W", "joints": [{"parent_prim": "/W/A/shell", "child_prim": "/W/A/lid"}]}
+    assert _strip_set_bodies(st, spec) == 1
+    assert not st.GetPrimAtPath("/W/A").HasAPI(UsdPhysics.RigidBodyAPI)
+    assert not st.GetPrimAtPath("/W/A").HasAPI(UsdPhysics.ArticulationRootAPI)
+    assert not st.GetPrimAtPath("/W/Joints/object0_A")
+    assert st.GetPrimAtPath("/W/B").HasAPI(UsdPhysics.RigidBodyAPI)     # nothing articulated under it

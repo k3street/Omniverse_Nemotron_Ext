@@ -142,6 +142,55 @@ def _project(points, center, radius, az_deg, z_up, width):
     return out, (width, int(round(height)))
 
 
+def visible_spots(img, parts, min_px: int = 40) -> dict:
+    """Where each part's number goes in a part-coloured view: the deepest
+    point of the pixels in its own colour. A number at the projected centroid
+    lands on whatever is in front of the part (the K-Slim's back water tank
+    was numbered on the pod lid, and read as the lid). Parts are matched by
+    colour direction (diffuse shading scales a flat colour); near-grey
+    colours cannot be told from shading and keep the centroid. "_chroma":
+    the parts told by colour (one missing from the spots is not in view)."""
+    px = img.reshape(-1, 3).astype(float) / 255.0
+    cols = {p["id"]: np.array(_rgb(PALETTE[(p["id"] - 1) % len(PALETTE)])) for p in parts}
+    chroma = {i: c for i, c in cols.items() if c.max() - c.min() > 0.25}
+    if not chroma:
+        return {}
+    ids = list(chroma)
+    # a lit flat colour renders as s * colour + w * white (the dome washes it
+    # toward white): fit s, w >= 0 per pixel and colour; the part is the
+    # colour that fits best
+    err = np.full((len(px), len(ids)), np.inf)
+    for k, i in enumerate(ids):
+        A = np.stack([chroma[i], np.ones(3)], 1)
+        sw = px @ np.linalg.pinv(A).T
+        sw = np.maximum(sw, 0.0)
+        fit = sw @ A.T
+        e = np.linalg.norm(px - fit, axis=1)
+        e[sw[:, 0] < 0.25] = np.inf          # mostly white or dark: not this colour
+        err[:, k] = e
+    best = err.argmin(1)
+    ok = err.min(1) < 0.035
+    h, w = img.shape[:2]
+    spots = {"_chroma": set(ids)}
+    for k, i in enumerate(ids):
+        m = (ok & (best == k)).reshape(h, w)
+        if m.sum() < min_px:
+            continue
+        # erode until one more step would empty it: the part's thickest place
+        core = m
+        while True:
+            e = core.copy()
+            e[1:] &= core[:-1]; e[:-1] &= core[1:]; e[:, 1:] &= core[:, :-1]; e[:, :-1] &= core[:, 1:]
+            if e.sum() < 4:
+                break
+            core = e
+        ys, xs = np.nonzero(core)
+        cy, cx = ys.mean(), xs.mean()
+        n = int(np.argmin((ys - cy) ** 2 + (xs - cx) ** 2))
+        spots[i] = (float(xs[n]), float(ys[n]))
+    return spots
+
+
 def render(entry: dict, parts: list, root: str) -> list[str]:
     """Three part-coloured views with each part's number at its centre, and a
     legend: number, colour, size."""
@@ -160,12 +209,18 @@ def render(entry: dict, parts: list, root: str) -> list[str]:
                             ).ComputeWorldBound(st.GetPseudoRoot()).ComputeAlignedRange()
     center, radius = list(rng.GetMidpoint()), 0.5 * rng.GetSize().GetLength() or 0.5
     z_up = str(UsdGeom.GetStageUpAxis(st)).upper() == "Z"
-    out = []
+    out, seen = [], set()
     for f, az in zip(frames, azs):
         img = Image.open(f).convert("RGB")
         xy, _ = _project([p["centroid"] for p in parts], center, radius, az, z_up, img.width)
+        spots = visible_spots(np.asarray(img), parts)
         g = ImageDraw.Draw(img)
         for p, (x, y) in zip(parts, xy):
+            if p["id"] in spots:
+                x, y = spots[p["id"]]
+            elif p["id"] in spots.get("_chroma", ()):
+                continue        # not seen from this side: no number on whatever is in front of it
+            seen.add(p["id"])
             t = str(p["id"])
             for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1)):
                 g.text((x - 4 + dx, y - 6 + dy), t, fill=(255, 255, 255))
@@ -181,7 +236,10 @@ def render(entry: dict, parts: list, root: str) -> list[str]:
         g.rectangle((8, y, 30, y + 16), fill=PALETTE[(p["id"] - 1) % len(PALETTE)], outline="black")
         s = " x ".join(f"{v * 1000:.0f}" for v in p["size"])
         g.text((40, y + 2), f"#{p['id']}  {s} mm" + (f"  (+{len(p['members']) - 1} small parts)"
-                                                    if len(p["members"]) > 1 else ""), fill=(0, 0, 0))
+                                                    if len(p["members"]) > 1 else "")
+               + ("" if p["id"] in seen else "  - hidden inside, not seen in any view"), fill=(0, 0, 0))
+    for p in parts:
+        p["seen"] = p["id"] in seen
     lf = QUEUE / "thumbs" / f"{entry['asset_id']}__parts_legend.png"
     leg.save(lf)
     return out + [str(lf)]
@@ -212,8 +270,9 @@ def _prompt(entry: dict, parts: list) -> str:
         f"(class {entry.get('class_hint') or (entry.get('report') or {}).get('matched_class')}). "
         f"What it does, as seen before: {fns or 'nothing listed'}.\n"
         "The first three images are the same asset from three sides with every part flat-coloured and "
-        "numbered at its centre (a number may sit on top of the part in front of it); the last image is "
-        "the legend: each number's colour and size in millimetres. The image after the legend, if any, "
+        "numbered on its own visible surface (a part not seen from a side has no number there; check a "
+        "number against its colour in the legend); the last image is "
+        "the legend: each number's colour and size in millimetres, and which parts are hidden inside. The image after the legend, if any, "
         "is the asset as modelled.\n"
         "For EVERY numbered part say what it is, its physics material (an object is usually several: a "
         "steel blade and a rubber grip), and how it moves in the real object: none (fixed to its "
@@ -263,7 +322,11 @@ def survey(asset_id: str, max_parts: int = 24) -> dict:
         p = by_id.get(a["id"])
         if not p:
             continue
-        out.append({**a, "path": p["path"], "members": p["members"],
+        if not p.get("seen", True) and a.get("motion") not in (None, "none"):
+            # inside the shell, seen from no side (the K-Slim's pump was given a
+            # spin): nothing outside moves it, nor would a viewer see it move
+            a = {**a, "motion": "none", "hidden_motion": a["motion"]}
+        out.append({**a, "path": p["path"], "members": p["members"], "seen": p.get("seen", True),
                     "size_m": [round(v, 4) for v in p["size"]], "centroid": [round(v, 5) for v in p["centroid"]]})
     result = {"date": date.today().isoformat(), "root": root, "parts": out,
               "images": [str(Path(i).relative_to(REPO)) for i in images if str(i).startswith(str(REPO))]}

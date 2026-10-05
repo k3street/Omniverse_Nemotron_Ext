@@ -179,15 +179,50 @@ def _measured_only(entry: dict, summary: dict) -> dict:
                 for name in (j, f"caster_swivel_{j}"):
                     rolls[name] = {"motion_ok": ok, "measured": True,
                                    "problem": "" if ok else f"the wheeled base did not drive as its law says: {why}"}
+    # a round part turning about its own axis of symmetry (a dial, a knob, a
+    # wheel) looks the same at every angle - a picture cannot judge it, and the
+    # axis is right by construction: judged by measurement
+    round_spins = set()
+    intended = {j["name"]: float(j["_intended_deg"]) for j in spec.get("joints", []) if j.get("_intended_deg")}
+    try:
+        from pxr import Usd, UsdGeom
+        st = Usd.Stage.Open(entry["file"])
+        cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+        for j in spec.get("joints", []):
+            if j.get("joint_type") != "revolute" or j.get("lower_limit") is not None or j.get("axis") not in "XYZ":
+                continue
+            prim = st.GetPrimAtPath(j["child_prim"])
+            if not prim:
+                continue
+            s = cache.ComputeWorldBound(prim).ComputeAlignedRange().GetSize()
+            k = "XYZ".index(j["axis"])
+            a, b = s[(k + 1) % 3], s[(k + 2) % 3]
+            if max(a, b) > 0 and abs(a - b) <= 0.15 * max(a, b):
+                round_spins.add(j["name"])
+    except Exception:  # noqa: BLE001 - without pxr, the picture judges
+        pass
     for name, v in summary.get("joints", {}).items():
         if v.get("follower"):
             continue
         if name in rolls:
             out[name] = rolls[name]
             continue
+        if name in round_spins:
+            ok = _reached(v)
+            out[name] = {"motion_ok": ok, "measured": True,
+                         "problem": "" if ok else f"driven {v['measured_range']}: it did not turn a sweep each way"}
+            continue
         travel = max(abs(v["limits"][0]), abs(v["limits"][1]))
         small = (v.get("type") == "prismatic" and size and travel < 0.06 * size) or \
                 (v.get("type") == "revolute" and travel < 3.0)
+        meant = intended.get(name)
+        if v.get("type") == "revolute" and meant and travel < 0.5 * meant:
+            # stopped far short of what it is for: a lid limited to 0.5 deg of
+            # its 90 reached its 0.5 and read as a "small turn" that passed
+            out[name] = {"motion_ok": False, "measured": True,
+                         "problem": f"limited to {travel:g} deg of the {meant:g} it should open: "
+                                    "its pivot or its parent is wrong"}
+            continue
         if small:
             ok = _reached(v)
             out[name] = {"motion_ok": ok, "measured": True,
@@ -303,6 +338,20 @@ def critique(asset_id: str, which: str = "claude") -> dict:
     out_dir = ANIM_DIR / asset_id / "motion_qa"
     out_dir.mkdir(exist_ok=True)
     verdicts = {}
+    integ = summary.get("integrity") or {}
+    if integ and not integ.get("ok", True):
+        # the asset came apart or was thrown: its frames show the floor, and no
+        # joint can be judged from them (nor blamed for it)
+        problem = (f"the asset did not hold together in PhysX: joint {integ.get('worst_joint')} came "
+                   f"{integ.get('max_joint_separation_m')} m apart, the root moved {integ.get('root_moved_m')} m "
+                   "(colliders overlapping across bodies, or bodies nested in bodies)")
+        result = {"date": date.today().isoformat(), "judge": "measured", "pass": False, "joints_judged": 0,
+                  "joints": {}, "integrity": integ, "problem": problem}
+        entry["motion_qa"] = result
+        from processing import record
+        record(entry, "critic", judge="measured", passed=False)
+        (QUEUE_DIR / f"{asset_id}.json").write_text(json.dumps(entry, indent=1))
+        return result
     unseen = _measured_only(entry, summary)
     for name in _pick_joints(summary):
         col = f"{name}_meas"
@@ -354,6 +403,8 @@ def main() -> int:
     for a in args.assets:
         r = critique(a, args.judge)
         bad = {k: v.get("problem") or v.get("expected_motion") for k, v in r["joints"].items() if not v.get("motion_ok")}
+        if r.get("integrity"):
+            bad["(whole asset)"] = r["problem"]
         print(f"{a}: {'PASS' if r['pass'] else 'FAIL'} ({r['joints_judged']} joints judged)"
               + "".join(f"\n   {k}: {p}" for k, p in bad.items()))
     return 0

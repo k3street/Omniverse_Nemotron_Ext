@@ -33,13 +33,13 @@ RULES = {
     "ingest": "2026-10-04",      # prim names keep only characters USD takes
     "classify": "2026-10-04",    # the VLM reports what the object does (functions)
     "file": "2026-10-04",        # wheelchair / power_wheelchair classes, Mobility
-    "articulate": "2026-10-04",  # see TIERS
-    "behaviors": "2026-10-04",   # motor, wheeled_base, gate; functions seen
-    "verify": "2026-10-04",      # behavior scenarios; tools held; spindles swept
-    "critic": "2026-10-04",      # pivot ring, measured over-travel, unseeable joints by measurement
+    "articulate": "2026-10-05c",  # see TIERS; set ingest bodies off above the links; press-fits (and what rides them) filtered
+    "behaviors": "2026-10-05",   # motor, wheeled_base, gate; functions seen, not internal ones
+    "verify": "2026-10-05",      # framed on the asset (reach only for swinging leaves); integrity
+    "critic": "2026-10-05",      # integrity first; hinges far short of their intended range fail
     "soft": "2026-10-03",        # cloth proxy drape, squish, cable
     "rig": "2026-10-04",         # character rigs: detected, or a humanoid autorig + pose check
-    "survey": "2026-10-04",      # the part survey: role, material, motion per part
+    "survey": "2026-10-05",      # numbers on each part's visible pixels; hidden parts stay still
     "materials": "2026-10-04",   # physics materials per part from the survey
 }
 
@@ -51,7 +51,7 @@ TIERS = {
     "rotors": "2026-10-04",       # rotors are spindles
     "buttons": "2026-10-03",      # keys on the deck they sit in; key split
     "generic": "2026-10-04",      # wheeled base: forks swivel, rims ride, casters
-    "survey": "2026-10-04",       # joints from the part survey (a vision model's reading of each part)
+    "survey": "2026-10-05b",      # + housings hand motion to the leaf on them; pin on a face, recessed lids open away, housings held back; body = what parts move against; spin about the symmetry axis; slides out the near side; merged movers held back; sets
     "door": "2026-10-02", "watch": "2026-10-02", "turntable": "2026-10-02", "cabinet": "2026-10-02",
     "temples": "2026-10-02", "thread": "2026-10-02", "plunger": "2026-10-02",
 }
@@ -74,7 +74,9 @@ def code_rev() -> str:
 
 def rules_for(stage: str, tier: str | None = None) -> str:
     if stage == "articulate" and tier:
-        return TIERS.get(tier, RULES["articulate"])
+        # the tier drafts, the shared apply step writes: a fix to either
+        # (a set's ingest bodies taken off, press-fits filtered) re-runs it
+        return f"{TIERS.get(tier, RULES['articulate'])}+{RULES['articulate']}"
     return RULES[stage]
 
 
@@ -112,7 +114,10 @@ def applicable(entry: dict) -> list[str]:
     stages = ["ingest", "classify", "file"]
     meshes = (entry.get("report") or {}).get("structure", {}).get("meshes", 0)
     cls = entry.get("class_hint") or (entry.get("report") or {}).get("matched_class")
-    if meshes >= 2 and not (entry.get("deformable") or prior.get("deformable")) and cls != "human_character":
+    seen_moving = any(f.get("kind") in ("manual", "spring_return", "motor", "gate", "wheeled_base", "detachable")
+                      for f in (entry.get("vlm") or {}).get("functions") or [])
+    if (meshes >= 2 or seen_moving) and not (entry.get("deformable") or prior.get("deformable")) \
+            and cls != "human_character":
         stages += ["survey", "materials"]
     if cls == "human_character" or (entry.get("report") or {}).get("skeleton"):
         stages.append("rig")
@@ -135,6 +140,7 @@ def stale(entry: dict, stages: list[str] | None = None) -> list[tuple[str, str]]
     selected (re-classifying ~2900 assets is a VLM bill) does not cascade."""
     led = entry.get("processing") or {}
     out, upstream = [], None
+    latest = ("", None)                       # the newest run of an earlier stage
     for st in ORDER:
         if st not in applicable(entry):
             continue
@@ -147,6 +153,10 @@ def stale(entry: dict, stages: list[str] | None = None) -> list[tuple[str, str]]
             why = f"rules {rec.get('rules')} -> {want}" if rec.get("rules") != want else None
         if why is None and upstream:
             why = f"after {upstream}"
+        if why is None and rec and latest[1] and rec.get("at", "") < latest[0]:
+            why = f"older than {latest[1]}"   # an earlier stage re-ran since (a re-articulated asset's verify)
+        if rec and rec.get("at", "") > latest[0]:
+            latest = (rec["at"], st)
         if why and selected:
             upstream = upstream or st
             out.append((st, why))

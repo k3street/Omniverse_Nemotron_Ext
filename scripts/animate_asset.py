@@ -216,6 +216,23 @@ def measure(j) -> float:
     return Gf.Dot(a1 - a0, axis_w)
 
 
+def separation(j) -> float:
+    """How far a joint's two halves have come apart (m): its anchor seen from
+    each body. A joint holds to millimetres; centimetres mean the asset is
+    flying apart (colliders fighting the joints), and its frames show the
+    floor while the parts tumble out of view."""
+    b0, b1 = body_pose(j["body0"]), body_pose(j["body1"])
+    if not b0 or not b1:
+        return 0.0
+    a0 = b0[0] + b0[1].TransformDir(Gf.CompMult(j["lp0"], Gf.Vec3d(*j["scale0"])))
+    a1 = b1[0] + b1[1].TransformDir(Gf.CompMult(j["lp1"], Gf.Vec3d(*j["scale1"])))
+    d = a1 - a0
+    if not j["revolute"]:
+        axis_w = (j["lr0"] * b0[1]).TransformDir(Gf.Vec3d(*[1.0 if k == j["axis"] else 0.0 for k in range(3)]))
+        d = d - axis_w * Gf.Dot(d, axis_w)
+    return d.GetLength()
+
+
 # --- drives (session layer only: the asset file is never changed) --------------
 
 def set_drive(j, target, stiffness=None, damping=None, max_force=None):
@@ -402,15 +419,22 @@ lo, hi = rng.GetMin(), rng.GetMax()
 center = (lo + hi) * 0.5
 size = hi - lo
 radius = 0.5 * size.GetLength()
-# Room for the moving parts: a door swings out by its own width.
-reach = max(size[0], size[1])
+# Room for the moving parts: a door swings out by its own width. Only a leaf
+# that swings does: the whole footprint as reach framed a multimeter whose
+# dial turns in place at twice the distance, its dial a few pixels wide.
+reach = 0.0
+for _j in primaries:
+    if _j["revolute"] and not _j["unlimited"] and max(abs(_j["lower"]), abs(_j["upper"])) >= 30.0:
+        _r = bbox.ComputeWorldBound(stage.GetPrimAtPath(_j["body1"])).ComputeAlignedRange().GetSize()
+        reach = max(reach, max(_r[0], _r[1], _r[2]))
+reach = min(reach, max(size[0], size[1], size[2]))
 with Usd.EditContext(stage, stage.GetSessionLayer()):
     UsdLux.DomeLight.Define(stage, "/AnimView/Dome").CreateIntensityAttr(1200)
     key = UsdLux.DistantLight.Define(stage, "/AnimView/Key")
     key.CreateIntensityAttr(2500)
     UsdGeom.XformCommonAPI(key.GetPrim()).SetRotate(Gf.Vec3f(-45, 0, -35))
     floor = UsdGeom.Mesh.Define(stage, "/AnimView/Floor")  # visual only: no collider
-    f = 4.0 * (radius + reach)
+    f = 4.0 * (radius + max(size[0], size[1]))  # room to drive off on
     z0 = lo[2] - 0.001
     floor.CreatePointsAttr([(center[0] - f, center[1] - f, z0), (center[0] + f, center[1] - f, z0),
                             (center[0] + f, center[1] + f, z0), (center[0] - f, center[1] + f, z0)])
@@ -476,7 +500,9 @@ def view_azimuth() -> float:
 
 AZ0 = view_azimuth()
 hfov = 2 * math.atan(20.955 / (2 * 18.0))
-DIST = 1.6 * (radius + 0.5 * reach) / math.tan(hfov / 2)
+# fit the sphere around the asset and its swing to the frame's shorter side
+vfov = 2 * math.atan(math.tan(hfov / 2) * args.height / args.width)
+DIST = 1.2 * (radius + 0.5 * reach) / math.tan(min(hfov, vfov) / 2)
 ELEV = math.radians(50)  # high enough that swings read from above, not edge-on
 
 
@@ -490,6 +516,8 @@ def place_camera(u: float):
         cam_xf.AddTransformOp().Set(Gf.Matrix4d().SetLookAt(eye, target, Gf.Vec3d(0, 0, 1)).GetInverse())
 
 
+# whether the asset holds together and stays where the camera looks
+INTEGRITY = {"sep": {}, "root": (sorted({j["body0"] for j in joints} - {j["body1"] for j in joints}) or [None])[0]}
 CAM: list = []          # the camera of the frame being rendered: [eye, target]
 CAMS: list = []         # one a saved frame, for critics that mark points on the frames
 place_camera(0.0)
@@ -604,6 +632,13 @@ for seg in segments:
         Image.fromarray(rgb.get_data()[:, :, :3]).save(frames_dir / f"f{frame_i:05d}.png")
         CAMS.append([list(CAM[0]), list(CAM[1])])
         measured = {j["name"]: measure(j) for j in joints}
+        for j in joints:
+            INTEGRITY["sep"][j["name"]] = max(INTEGRITY["sep"].get(j["name"], 0.0), separation(j))
+        if INTEGRITY["root"]:
+            pr = body_pose(INTEGRITY["root"])
+            if pr:
+                INTEGRITY.setdefault("p0", pr[0])
+                INTEGRITY["moved"] = max(INTEGRITY.get("moved", 0.0), (pr[0] - INTEGRITY["p0"]).GetLength())
         for path, r in rules.items():
             a = r["actuator"]
             if r["engaged_at"] is None:
@@ -708,6 +743,15 @@ for j in joints:
         entry["final_error"] = round(errs[-1], 4)
     summary["joints"][j["name"]] = entry
 summary["behaviors"] = behavior_results
+_worst = max(INTEGRITY["sep"].items(), key=lambda kv: kv[1], default=(None, 0.0))
+_moved = INTEGRITY.get("moved", 0.0)
+# a wheeled base drives off on purpose; anything else that travels more than
+# its own size (or 10 cm) has been thrown, and its frames miss it
+_away = 0.0 if any(b.get("type") == "wheeled_base" for b in behaviors) else _moved
+summary["integrity"] = {
+    "max_joint_separation_m": round(_worst[1], 4), "worst_joint": _worst[0],
+    "root_moved_m": round(_moved, 4),
+    "ok": bool(_worst[1] < max(0.01, 0.05 * radius) and _away < max(0.1, 2 * radius))}
 summary["camera"] = {"hfov_deg": math.degrees(hfov), "width": args.width, "height": args.height, "up": [0, 0, 1],
                      "frames": CAMS}
 for name, p in PIVOTS.items():

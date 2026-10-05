@@ -1169,3 +1169,17 @@ def test_a_humanoids_landmarks_and_skin_weights():
     names = [n for n, _ in JOINTS]
     bones = {names[i] for i, x in zip(idx[0], w[0]) if x > 0.05}
     assert bones and all(b.startswith("Left") for b in bones)
+
+
+def test_the_survey_body_is_what_parts_move_against_not_the_biggest_cable():
+    from survey_draft import propose_survey
+
+    stage = _switch_stage()
+    _mesh(stage, "/World/Sw/Cable", [((0.012, -0.2, -0.2), (0.02, 0.2, 0.2))])        # bigger box than the plate
+    sv = _survey([
+        ("Plate", "housing", "plastic_abs", "none", None, None, None, None, [0.006, 0.07, 0.12], [0.003, 0, 0]),
+        ("Paddle", "selector", "plastic_abs", "spin", 1, "part_face_normal", "center", None,
+         [0.006, 0.03, 0.06], [0.009, 0, 0]),
+        ("Cable", "test lead cable", "pvc", "flex", 1, None, None, None, [0.008, 0.4, 0.4], [0.016, 0, 0])])
+    spec, _ = propose_survey(stage, "/World/Sw", sv)
+    assert spec["_analysis"]["body"].endswith("Plate")

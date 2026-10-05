@@ -211,7 +211,12 @@ def wants_survey(e: dict) -> bool:
         return False
     if class_of(e) == "human_character":
         return False
-    return (e.get("report") or {}).get("structure", {}).get("meshes", 0) >= 2
+    if (e.get("report") or {}).get("structure", {}).get("meshes", 0) >= 2:
+        return True
+    # one fused mesh that the classifier saw move (a multimeter's dial): split it
+    # into its pieces first (part_stages), then survey them
+    return any(f.get("kind") in ("manual", "spring_return", "motor", "gate", "wheeled_base", "detachable")
+               for f in (e.get("vlm") or {}).get("functions") or [])
 
 
 def wants_rig(e: dict) -> bool:
@@ -225,13 +230,25 @@ def part_stages(asset_id: str) -> list[tuple[str, str]]:
     if wants_survey(e):
         try:
             from part_survey import survey
-            r = survey(asset_id)
+            if (e.get("report") or {}).get("structure", {}).get("meshes", 0) < 2:
+                from segment_mesh import segment_entry
+                out.append(("segment", segment_entry(asset_id)))
+                e = entry_of(asset_id)
+                if (e.get("report") or {}).get("structure", {}).get("meshes", 0) < 2:
+                    out.append(("survey", "one piece that does not split: nothing to survey"))
+                    raise StopIteration
+            try:
+                r = survey(asset_id)
+            except ValueError:                 # a malformed answer: ask once more
+                r = survey(asset_id)
             moving = [p for p in r["parts"] if p["motion"] not in ("none", "flex")]
             out.append(("survey", f"{len(r['parts'])} parts, {len(moving)} moving: " + ", ".join(
                 f"{p['role']} ({p['motion']})" for p in moving[:6])))
             from part_materials import apply as apply_materials
             m = apply_materials(asset_id)
             out.append(("materials", ", ".join(f"{k} x{v}" for k, v in m["meshes_bound"].items())))
+        except StopIteration:
+            pass
         except Exception as ex:  # noqa: BLE001
             out.append(("survey", f"FAILED: {type(ex).__name__}: {str(ex)[:160]}"))
     if wants_rig(e):
@@ -319,8 +336,9 @@ def _articulate(asset_id: str, dry: bool) -> str:
     prior = _load_priors_fresh().get(class_of(e) or "", {})
     # what it should do needs joints too: a class with behaviors (a wheelchair
     # drives its wheels) is drafted like one with mechanism templates
-    if not (needs_articulation(e.get("report", {})) or prior.get("mechanism_templates") or prior.get("behaviors")) \
-            or prior.get("deformable"):
+    surveyed = any(p.get("motion") not in (None, "none", "flex") for p in (e.get("part_survey") or {}).get("parts", []))
+    if not (needs_articulation(e.get("report", {})) or prior.get("mechanism_templates") or prior.get("behaviors")
+            or surveyed) or prior.get("deformable"):
         return "rigid: nothing to articulate"
     if dry:
         return "would draft"
@@ -406,10 +424,66 @@ def animate(asset_id: str) -> str:
             r = critique(asset_id)
             bad = [k for k, v in r["joints"].items() if not v.get("motion_ok")]
             note += ("; motion critic: PASS" if r["pass"] else
+                     f"; motion critic: FAIL ({r.get('problem', '')[:160]})" if not bad else
                      f"; motion critic: FAIL on {', '.join(bad[:4])} ({r['joints'][bad[0]].get('problem', '')[:120]})")
+            if not r["pass"] and not _REPAIRING.get(asset_id):
+                _REPAIRING[asset_id] = True
+                try:
+                    note += "; " + repair_after_critic(asset_id, r)
+                finally:
+                    _REPAIRING.pop(asset_id, None)
         except Exception as ex:  # noqa: BLE001
             note += f"; motion critic: not run ({str(ex)[:80]})"
     return note
+
+
+GENERIC_TIERS = ("survey", "generic", None)
+_REPAIRING: dict = {}
+
+
+def repair_after_critic(asset_id: str, result: dict, again: bool = True) -> str:
+    """A joint the critic failed does not stay: where the draft was generic (the
+    part survey's or the geometric proposal's), the failed joints become fixed
+    attachments, the rest is re-applied and verified once more - the asset keeps
+    the motions that pass, and what was taken out is on the entry for review
+    (with the critic's reason). A curated tier's failure is only flagged: the
+    tier is what needs fixing."""
+    from asset_review_hub import apply_articulation, save_queue_entry, unarticulate
+
+    e = entry_of(asset_id)
+    if result.get("integrity"):
+        # the whole asset came apart: no one joint is to blame, so none is taken out
+        e.setdefault("critic_flags", {})["_integrity"] = result.get("problem", "")
+        save_queue_entry(e)
+        return f"flagged for review: {result.get('problem', 'the asset came apart in PhysX')}"
+    spec = json.loads(e.get("articulation_draft") or "{}")
+    tier = (spec.get("_analysis") or {}).get("tier")
+    failed = {}
+    for k, v in result["joints"].items():
+        if not v.get("motion_ok"):
+            failed.setdefault(k.split(" (")[0], v.get("problem") or v.get("expected_motion") or "")
+    if tier not in GENERIC_TIERS:
+        e["critic_flags"] = failed
+        save_queue_entry(e)
+        return f"flagged for review ({tier} tier): {', '.join(failed)}"
+    moving = [j for j in spec.get("joints", []) if j["joint_type"] != "fixed"]
+    keep = [j for j in moving if j["name"] not in failed]
+    for j in spec["joints"]:
+        if j["name"] in failed:
+            j["joint_type"] = "fixed"
+            for k in ("axis", "lower_limit", "upper_limit", "stiffness", "damping", "max_force", "_role"):
+                j.pop(k, None)
+    e.setdefault("pruned_joints", {}).update(failed)
+    save_queue_entry(e)
+    unarticulate(e, f"critic failed {', '.join(failed)}: taken out, the rest re-applied")
+    e = entry_of(asset_id)
+    if not keep and not spec.get("mechanisms"):
+        return f"all moving joints failed the critic: left rigid for review ({', '.join(failed)})"
+    apply_articulation(e, json.dumps(spec))
+    if not again:
+        return f"took out {', '.join(failed)}; re-applied {len(keep)} moving joint(s)"
+    note = animate(asset_id)
+    return f"took out {', '.join(failed)}; re-verified: {note}"
 
 
 def soft_test(asset_id: str) -> str:

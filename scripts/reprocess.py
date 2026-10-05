@@ -20,6 +20,7 @@ Newton venv and run one asset at a time.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import sys
 from collections import Counter
@@ -89,12 +90,33 @@ def run_stage(stage: str, a: str, library_root: Path) -> str:
     if stage == "verify":
         return pd.animate(a)
     if stage == "critic":
-        from motion_critic import critique
+        from motion_critic import ANIM_DIR, critique
+        if not (ANIM_DIR / a / "summary.json").exists():
+            # a repair earlier in this run left nothing to move (or verify
+            # never ran): nothing for the critic to watch
+            return "skipped: no animation (not articulated, or verify did not run)"
         r = critique(a)
-        return "PASS" if r["pass"] else "FAIL: " + ", ".join(k for k, v in r["joints"].items() if not v.get("motion_ok"))
+        if r["pass"]:
+            return "PASS"
+        if r.get("integrity"):
+            return "FAIL: " + pd.repair_after_critic(a, r)
+        return ("FAIL: " + ", ".join(k for k, v in r["joints"].items() if not v.get("motion_ok"))
+                + "; " + pd.repair_after_critic(a, r))
     if stage == "soft":
         return pd.soft_test(a)
     raise ValueError(f"unknown stage {stage!r}")
+
+
+def _load_env():
+    """ANTHROPIC_API_KEY and the like from the repo's .env, as
+    process_downloads.sh does: the survey, critic and rig judge need them."""
+    f = REPO / ".env"
+    if not f.exists():
+        return
+    for line in f.read_text().splitlines():
+        k, sep, v = line.strip().partition("=")
+        if sep and k and not k.startswith("#"):
+            os.environ.setdefault(k.removeprefix("export ").strip(), v.strip().strip("'\""))
 
 
 def main() -> int:
@@ -106,8 +128,11 @@ def main() -> int:
     ap.add_argument("--classes", help="comma list of classes")
     ap.add_argument("--limit", type=int, default=0, help="at most this many assets")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="re-run the selected stages whether or not the ledger says they are stale")
     ap.add_argument("--library", default=str(Path.home() / "Desktop/assets/SketchFab_Assets"))
     args = ap.parse_args()
+    _load_env()
     stages = [s.strip() for s in args.stages.split(",") if s.strip()]
     bad = [s for s in stages if s not in ORDER]
     if bad:
@@ -116,6 +141,9 @@ def main() -> int:
     for e in entries(args.assets.split(",") if args.assets else None,
                      args.classes.split(",") if args.classes else None):
         st = stale(e, stages)
+        if args.force:
+            from processing import applicable
+            st = [(s, "forced") for s in ORDER if s in stages and s in applicable(e)]
         if st:
             todo.append((e["asset_id"], st))
     if args.limit:
@@ -135,6 +163,8 @@ def main() -> int:
             # re-read: a stage re-run changes what follows (an asset articulated
             # now has a verify and a critic to run that it had not before)
             now = dict(stale(pd.entry_of(a), stages))
+            if args.force and s in dict(st):
+                now.setdefault(s, "forced")
             if s not in now or s in done:
                 continue
             try:
@@ -142,6 +172,11 @@ def main() -> int:
             except Exception as ex:  # noqa: BLE001 - one asset's failure is a finding
                 done[s] = f"FAILED: {type(ex).__name__}: {str(ex)[:200]}"
             print(f"   {s}: {done[s][:160]}")
+            if done[s].startswith("FAILED"):
+                # what follows would build on the old result of this stage
+                # (a failed survey re-drafted the joints the critic had taken out)
+                print("   (the rest of this asset's stages wait for that one)")
+                break
         report["assets"][a] = done
     out = QUEUE / "_runs" / f"reprocess_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -226,7 +227,9 @@ def draft_articulation(entry: dict) -> str:
         survey = entry.get("part_survey") or {}
         if any(p.get("motion") not in (None, "none", "flex") for p in survey.get("parts", [])):
             from survey_draft import propose_survey
-            spec, notes = propose_survey(stage, survey.get("root") or asset_root, survey, templates.get("survey"))
+            tmpl = dict(templates.get("survey") or {})
+            tmpl["set"] = (entry.get("vlm") or {}).get("content_kind") == "object_set"
+            spec, notes = propose_survey(stage, survey.get("root") or asset_root, survey, tmpl)
             spec["prim_path"] = asset_root
         else:
             from articulation_draft import propose
@@ -309,6 +312,41 @@ def draft_articulation(entry: dict) -> str:
 ARTICULATION_MAX_JOINTS = 100000
 
 
+def _strip_set_bodies(stage, spec: dict) -> int:
+    """Take off the bodies an object set got at ingest (a body, articulation
+    and object<i>_ joints per member) above the links the spec joints: a
+    rigid body under a rigid body fights it, and the K-Slim pair flew apart
+    at the first step with both layers on."""
+    from pxr import Sdf, UsdPhysics
+
+    links = {Sdf.Path(j[k]) for j in spec.get("joints", []) for k in ("parent_prim", "child_prim") if j.get(k)}
+    links |= {Sdf.Path(m[k]) for m in spec.get("mechanisms", []) for k in ("holder", "part") if m.get(k)}
+    root = Sdf.Path(spec["prim_path"])
+    above = set()
+    for l in links:
+        q = l.GetParentPath()
+        while q.HasPrefix(root) and q != root:
+            above.add(q)
+            q = q.GetParentPath()
+    stripped = set()
+    for q in above - links:
+        prim = stage.GetPrimAtPath(q)
+        if not prim:
+            continue
+        for api in (UsdPhysics.RigidBodyAPI, UsdPhysics.MassAPI, UsdPhysics.ArticulationRootAPI):
+            if prim.HasAPI(api):
+                prim.RemoveAPI(api)
+                stripped.add(q)
+        if "PhysxArticulationAPI" in prim.GetAppliedSchemas():
+            prim.RemoveAppliedSchema("PhysxArticulationAPI")
+    for prim in list(stage.Traverse()):
+        if prim.IsA(UsdPhysics.FixedJoint) and re.match(r"object\d+_", prim.GetName()):
+            j = UsdPhysics.Joint(prim)
+            if {*j.GetBody0Rel().GetTargets(), *j.GetBody1Rel().GetTargets()} & stripped:
+                stage.RemovePrim(prim.GetPath())
+    return len(stripped)
+
+
 def apply_articulation(entry: dict, spec_text: str) -> str:
     """Run articulate_asset with the reviewer-edited spec on the derivative."""
     import contextlib
@@ -347,6 +385,7 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
         _root.RemoveAPI(_UP.RigidBodyAPI)
         if _root.HasAPI(_UP.MassAPI):
             _root.RemoveAPI(_UP.MassAPI)
+    _strip_set_bodies(stage, {**spec, "mechanisms": mechanisms})
     omni = types.ModuleType("omni")
     omni_usd = types.ModuleType("omni.usd")
     ctx = type("Ctx", (), {"get_stage": lambda self: stage})()
