@@ -1,10 +1,12 @@
 import math
 
 import pytest
-import torch
 
-from scripts.adaptive_pick_place import choose_grasp_yaw, yaw_quaternion_wxyz
-from scripts.rgbd_collision_safety import (
+torch = pytest.importorskip("torch")      # the grasp code is torch throughout
+pytest.importorskip("numpy")
+
+from scripts.adaptive_pick_place import choose_grasp_yaw, yaw_quaternion_wxyz  # noqa: E402
+from scripts.rgbd_collision_safety import (  # noqa: E402
     grasp_axis_finger_clearance,
     pregrasp_axis_alignment_observation,
 )

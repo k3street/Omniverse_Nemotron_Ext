@@ -125,15 +125,16 @@ def test_wilson_interval_is_wide_for_one_success():
 
 
 # --- final-state grade, common to every policy type ---
-import h5py
-import numpy as np
-
 from scripts.planner_eval_gate import check_final_state, outcome_from_episode_hdf5, outcome_from_trace
 
 BIN_POSE = [0.467, -0.191, 0.003, 1.0, 0.0, 0.0, 0.0]
 
 
 def recording(tmp_path, block_xyz, *, bin_pose=BIN_POSE, gripper=0.0, drift=0.0, steps=30):
+    # only the recordings need these: without them, the tests that write one
+    # skip and the rest of the gate's tests still run
+    h5py = pytest.importorskip("h5py")
+    np = pytest.importorskip("numpy")
     path = tmp_path / "run_0.hdf5"
     with h5py.File(path, "w") as target:
         demo = target.create_group("data/demo_0")
