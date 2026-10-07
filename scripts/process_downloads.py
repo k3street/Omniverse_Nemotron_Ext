@@ -248,6 +248,15 @@ def part_stages(asset_id: str) -> list[tuple[str, str]]:
                 r = survey(asset_id)
             except ValueError:                 # a malformed answer: ask once more
                 r = survey(asset_id)
+            # a moving part moulded into a fixed one (a caliper's sliding jaw in
+            # its beam mesh): split that mesh along its islands, survey again
+            from segment_mesh import merged_targets, split_targets_entry
+            targets = merged_targets(r)
+            if targets:
+                note = split_targets_entry(asset_id, targets)
+                if note:
+                    out.append(("segment", note))
+                    r = survey(asset_id)
             moving = [p for p in r["parts"] if p["motion"] not in ("none", "flex")]
             out.append(("survey", f"{len(r['parts'])} parts, {len(moving)} moving: " + ", ".join(
                 f"{p['role']} ({p['motion']})" for p in moving[:6])))
@@ -434,8 +443,9 @@ def animate(asset_id: str) -> str:
 
         try:
             r = critique(asset_id)
-            bad = [k for k, v in r["joints"].items() if not v.get("motion_ok")]
+            bad = [k for k, v in r["joints"].items() if not v.get("motion_ok") and not v.get("not_judged")]
             note += ("; motion critic: PASS" if r["pass"] else
+                     "; motion critic: incomplete (judge unavailable)" if r.get("incomplete") and not bad else
                      f"; motion critic: FAIL ({r.get('problem', '')[:160]})" if not bad else
                      f"; motion critic: FAIL on {', '.join(bad[:4])} ({r['joints'][bad[0]].get('problem', '')[:120]})")
             if not r["pass"] and not _REPAIRING.get(asset_id):
@@ -491,12 +501,11 @@ def _flip_wrong_end(entry: dict, spec: dict, failed: dict) -> list[str]:
 
 
 def repair_after_critic(asset_id: str, result: dict, again: bool = True) -> str:
-    """A joint the critic failed does not stay: where the draft was generic (the
-    part survey's or the geometric proposal's), the failed joints become fixed
-    attachments, the rest is re-applied and verified once more - the asset keeps
-    the motions that pass, and what was taken out is on the entry for review
-    (with the critic's reason). A curated tier's failure is only flagged: the
-    tier is what needs fixing."""
+    """What follows a critic's fail. A generic draft's hinge pinned at the
+    wrong end has its pin moved to the other edge and is verified again, once.
+    Everything else is flagged for a person with the critic's reason; no joint
+    is taken out on the critic's word (it agrees with a careful reviewer only
+    part of the time - see scripts/critic_gold.py)."""
     from asset_review_hub import apply_articulation, save_queue_entry, unarticulate
 
     e = entry_of(asset_id)
@@ -507,12 +516,23 @@ def repair_after_critic(asset_id: str, result: dict, again: bool = True) -> str:
         return f"flagged for review: {result.get('problem', 'the asset came apart in PhysX')}"
     spec = json.loads(e.get("articulation_draft") or "{}")
     tier = (spec.get("_analysis") or {}).get("tier")
+    if result.get("incomplete") and not any(
+            not v.get("motion_ok") and not v.get("not_judged") for v in result["joints"].values()):
+        return "critic incomplete (the judge could not be reached): nothing changed; it runs again next reprocess"
     failed = {}
     for k, v in result["joints"].items():
+        if v.get("not_judged") or v.get("whole_asset"):
+            continue                       # never seen, or not one joint's fault
         if not v.get("motion_ok"):
             failed.setdefault(k.split(" (")[0], v.get("problem") or v.get("expected_motion") or "")
+    whole = {k: v.get("problem", "") for k, v in result["joints"].items() if v.get("whole_asset") and not v.get("motion_ok")}
+    if whole:
+        e.setdefault("critic_flags", {}).update(whole)
+    if not failed:
+        save_queue_entry(e)
+        return "flagged for review: " + "; ".join(f"{k} {v[:100]}" for k, v in whole.items()) if whole else "nothing to repair"
     if tier not in GENERIC_TIERS:
-        e["critic_flags"] = failed
+        e["critic_flags"] = {**e.get("critic_flags", {}), **failed}
         save_queue_entry(e)
         return f"flagged for review ({tier} tier): {', '.join(failed)}"
     # a hinge at the wrong end (the judge: "hinged at the front lip, not the
@@ -533,30 +553,51 @@ def repair_after_critic(asset_id: str, result: dict, again: bool = True) -> str:
                     ("" if not again else f"; re-verified: {animate(asset_id)}"))
         e = entry_of(asset_id)
         spec = json.loads(e["articulation_draft"])
-    moving = [j for j in spec.get("joints", []) if j["joint_type"] != "fixed"]
-    keep = [j for j in moving if j["name"] not in failed]
-    for j in spec["joints"]:
-        if j["name"] in failed:
-            j["joint_type"] = "fixed"
-            for k in ("axis", "lower_limit", "upper_limit", "stiffness", "damping", "max_force", "_role"):
-                j.pop(k, None)
-    e.setdefault("pruned_joints", {}).update(failed)
-    save_queue_entry(e)
-    unarticulate(e, f"critic failed {', '.join(failed)}: taken out, the rest re-applied")
+    # anything else is flagged for a person, never taken out: the critic agrees
+    # with a careful reviewer only part of the time, and removing joints on its
+    # word turned a K-Mini's correct lid into a fixed part
     e = entry_of(asset_id)
-    if not keep and not spec.get("mechanisms"):
-        return f"all moving joints failed the critic: left rigid for review ({', '.join(failed)})"
-    apply_articulation(e, json.dumps(spec))
-    if not again:
-        return f"took out {', '.join(failed)}; re-applied {len(keep)} moving joint(s)"
-    note = animate(asset_id)
-    return f"took out {', '.join(failed)}; re-verified: {note}"
+    e["critic_flags"] = {**e.get("critic_flags", {}), **failed}
+    save_queue_entry(e)
+    return f"flagged for review: {', '.join(failed)}"
+
+
+def mixed_body_test(asset_id: str) -> str:
+    """A rigid part with soft parts on it: author per-part deformables
+    (soft_body_parts), then drop it in PhysX (verify_mixed_body)."""
+    from asset_review_hub import save_queue_entry
+    from processing import record
+    from soft_body_parts import apply as soft_apply
+
+    try:
+        rec = soft_apply(asset_id)
+    except RuntimeError as ex:
+        e = entry_of(asset_id)
+        record(e, "soft", kind="mixed", verdict=f"not authored: {str(ex)[:100]}")
+        save_queue_entry(e)
+        return f"mixed body not authored: {ex}"
+    summary = REPO / "workspace" / "asset_animations" / asset_id / "mixed" / "summary.json"
+    summary.unlink(missing_ok=True)
+    cmd = (f"source {REPO}/scripts/isaac_slot.sh >/dev/null; "
+           f"timeout 1500 {ISAAC_PYTHON} {REPO}/scripts/verify_mixed_body.py {asset_id}")
+    out = subprocess.run(["bash", "-c", cmd], cwd=REPO, capture_output=True, text=True)
+    line = next((ln for ln in out.stdout.splitlines() if ln.startswith("MIXED ")), None)
+    verdict = line or f"MIXED FAIL {asset_id}: the drop test produced no verdict (exit {out.returncode})"
+    e = entry_of(asset_id)
+    record(e, "soft", kind="mixed", verdict=verdict[:160], soft=len(rec["soft"]), rigid=len(rec["rigid"]))
+    e["mixed_body"] = {"verdict": verdict[:300], "pass": verdict.startswith("MIXED PASS"),
+                       "summary": str(summary.relative_to(REPO)) if summary.exists() else None}
+    save_queue_entry(e)
+    return verdict
 
 
 def soft_test(asset_id: str) -> str:
     e = entry_of(asset_id)
     dtype = e.get("deformable")
     if not dtype:
+        from processing import soft_parts
+        if soft_parts(e)["kind"]:
+            return mixed_body_test(asset_id)       # a soft part on a rigid one
         return "not soft"
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "LD_LIBRARY_PATH")}
     run = lambda *a: subprocess.run([NEWTON_PYTHON, *a], cwd=REPO, capture_output=True, text=True, env=env)  # noqa: E731
@@ -695,9 +736,20 @@ def process(staged: list[Path], library_root: Path, args, report: dict, incoming
         if args.animate and any(f.startswith("articulate_asset") for f in e.get("applied_fixes", [])):
             report["assets"][a]["physx"] = animate(a)
             print(f"animate    {a}: {report['assets'][a]['physx']}")
-        if args.soft and e.get("deformable"):
+        from processing import soft_parts as _soft_parts
+        if args.soft and (e.get("deformable") or _soft_parts(e)["kind"]):
             report["assets"][a]["soft"] = soft_test(a)
             print(f"soft       {a}: {report['assets'][a]['soft']}")
+    # 9. approve: measured gates, then the visual critic; the rest go to a person
+    if not getattr(args, "no_approve", False):
+        from auto_approve import approve
+        for a in ids:
+            try:
+                r = approve(a)
+                report["assets"][a]["approval"] = {k: r[k] for k in ("outcome", "failed", "category")}
+                print(f"approve    {a}: {r['outcome']}" + (f" ({', '.join(r['failed'])})" if r["failed"] else ""))
+            except Exception as ex:  # noqa: BLE001 - one asset's failure is a finding
+                print(f"approve    {a}: not assessed ({type(ex).__name__}: {str(ex)[:100]})")
 
 
 def unprocessed(library_root: Path) -> list[Path]:
@@ -787,6 +839,7 @@ def main() -> int:
     ap.add_argument("--animate", action="store_true", help="verify articulated assets in PhysX (slow)")
     ap.add_argument("--soft", action="store_true", help="drape/squish soft assets in Newton")
     ap.add_argument("--refile", action="store_true", help="re-file library assets by the folder map")
+    ap.add_argument("--no-approve", action="store_true", help="skip the auto-approval stage")
     ap.add_argument("--resume", action="store_true",
                     help="finish a run that stopped: process every USD file left in <library>/_incoming")
     ap.add_argument("--backfill", action="store_true",

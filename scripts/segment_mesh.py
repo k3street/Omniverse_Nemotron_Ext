@@ -483,6 +483,70 @@ def segment_entry(asset_id: str) -> str:
             + f"; asset now has {entry['report'].get('structure', {}).get('meshes')} meshes")
 
 
+MERGED_MOVER = None
+
+
+def merged_targets(survey: dict) -> list[str]:
+    """Meshes the survey says hold a moving part moulded into another: a
+    reference part modelled into #n, or a role naming a moving piece along with
+    the fixed one ("main beam with fixed jaw and sliding jaw")."""
+    import re
+
+    global MERGED_MOVER
+    if MERGED_MOVER is None:
+        MERGED_MOVER = re.compile(
+            r"\b(and|with|plus)\b.*\b(sliding|moving|hinged|rotating|removable|folding|swivel\w*|lid|door|"
+            r"flap|jaw|trigger|button|knob|dial|wheel|drawer|tray|handle|lever|cap|cover)\b", re.I)
+    by_id = {p["id"]: p for p in survey.get("parts", [])}
+    ids = {u["merged_into"] for u in survey.get("unmatched_reference") or [] if u.get("merged_into")}
+    ids |= {p["id"] for p in survey.get("parts", []) if p.get("motion") in (None, "none")
+            and MERGED_MOVER.search(p.get("role") or "")}
+    out = []
+    for i in sorted(ids):
+        p = by_id.get(i)
+        if not p:
+            continue
+        for m in [p["path"]] + (p.get("copies") or []):
+            if p and m not in out:
+                out.append(m)
+    return out
+
+
+def split_targets_entry(asset_id: str, paths: list[str]) -> str:
+    """Split just these meshes into their connected parts (each kept only when
+    it has more than one sizeable island). Returns '' when nothing split."""
+    from pxr import Usd
+
+    from ingest_asset import QUEUE_DIR, run_report
+
+    qf = QUEUE_DIR / f"{asset_id}.json"
+    entry = json.loads(qf.read_text())
+    from processing import owned
+    if not owned(entry["file"]):
+        return ""
+    stage = Usd.Stage.Open(entry["file"])
+    done = {}
+    for path in paths:
+        prim = stage.GetPrimAtPath(path)
+        if not prim or not prim.IsActive() or not prim.GetAttribute("faceVertexCounts").Get():
+            continue
+        try:
+            parts = split_mesh(stage, path)
+        except Exception:  # noqa: BLE001 - one mesh that will not split is not the end
+            continue
+        if parts:
+            done[prim.GetName()] = len(parts)
+    if not done:
+        return ""
+    stage.GetRootLayer().Save()
+    entry = json.loads(qf.read_text())
+    entry.setdefault("applied_fixes", []).append(
+        "targeted segmentation (a moving part moulded in): " + ", ".join(f"{k} -> {v} parts" for k, v in done.items()))
+    entry["report"] = run_report(entry["file"], entry.get("class_hint"))
+    qf.write_text(json.dumps(entry, indent=1))
+    return "split " + ", ".join(f"{k} into {v}" for k, v in done.items())
+
+
 def box_split_entry(asset_id: str, mesh_name: str, box_min, box_max,
                     inside_name: str, outside_name: str) -> str:
     """Box-split one mesh of a queue entry's derivative, then re-check it."""

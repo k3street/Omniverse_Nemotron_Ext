@@ -403,7 +403,13 @@
    "articulable": false,
    "typical_materials": [
     "rubber_soft"
-   ]
+   ],
+   "soft_parts": [
+    "upper",
+    "laces",
+    "tongue"
+   ],
+   "soft_kind": "cloth"
   },
   "vehicle": {
    "keywords": [
@@ -1305,7 +1311,8 @@
    "contents": "granular",
    "_note": "a flexible bag of loose kibble; simulated as one rigid body until granular contents and soft bags are supported (BACKLOG: granular)",
    "source": "curated",
-   "curated_on": "2026-10-02"
+   "curated_on": "2026-10-02",
+   "deformable": "cloth"
   },
   "circuit_board": {
    "keywords": [
@@ -1710,7 +1717,12 @@
    "source": "curated",
    "proposed_by": "gray_l_shaped_couch",
    "proposed_on": "2026-10-03",
-   "curated_on": "2026-10-03"
+   "curated_on": "2026-10-03",
+   "soft_parts": [
+    "cushions",
+    "upholstery"
+   ],
+   "soft_kind": "sponge"
   },
   "musical_keyboard": {
    "keywords": [
@@ -2589,7 +2601,10 @@
    "proposed_by": "clothes_hamper",
    "proposed_on": "2026-10-03",
    "_doc": "a fabric bag on a rigid folding frame: simulated as a rigid container",
-   "curated_on": "2026-10-03"
+   "curated_on": "2026-10-03",
+   "soft_parts": [
+    "fabric body"
+   ]
   },
   "lawn_mower": {
    "keywords": [
@@ -3833,6 +3848,1522 @@
    "source": "vlm",
    "proposed_by": "floor_lamp",
    "proposed_on": "2026-10-04"
+  },
+  "typewriter": {
+   "keywords": [
+    "typewriter"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.45
+   ],
+   "mass_kg": [
+    4.0,
+    12.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "1930s_style_typewriter_wo_branding",
+   "proposed_on": "2026-10-05"
+  },
+  "3d_printer": {
+   "keywords": [
+    "printer"
+   ],
+   "max_dim_m": [
+    0.35,
+    0.7
+   ],
+   "mass_kg": [
+    12.0,
+    35.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "3d_printer_model",
+   "proposed_on": "2026-10-05"
+  },
+  "drum_kit": {
+   "keywords": [
+    "drum kit"
+   ],
+   "max_dim_m": [
+    1.8,
+    2.6
+   ],
+   "mass_kg": [
+    35.0,
+    70.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "6_piece_drum_set",
+   "proposed_on": "2026-10-05"
+  },
+  "wifi_router": {
+   "keywords": [
+    "wifi router"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.4
+   ],
+   "mass_kg": [
+    0.25,
+    0.8
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "action_intelbras_modem",
+   "proposed_on": "2026-10-05"
+  },
+  "bicycle": {
+   "keywords": [
+    "bicycle"
+   ],
+   "max_dim_m": [
+    1.6,
+    1.95
+   ],
+   "mass_kg": [
+    13.0,
+    20.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "afterburner_downhill_mountainbike",
+   "proposed_on": "2026-10-05"
+  },
+  "laptop": {
+   "keywords": [
+    "laptop"
+   ],
+   "max_dim_m": [
+    0.28,
+    0.36
+   ],
+   "mass_kg": [
+    1.0,
+    2.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "source": "vlm",
+   "proposed_by": "apple_macbook_pro_a1708",
+   "proposed_on": "2026-10-05"
+  },
+  "skateboard": {
+   "keywords": [
+    "skateboard"
+   ],
+   "max_dim_m": [
+    0.85,
+    1.3
+   ],
+   "mass_kg": [
+    2.0,
+    4.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "arcadia_longboard",
+   "proposed_on": "2026-10-05"
+  },
+  "deodorant_stick": {
+   "keywords": [
+    "deodorant stick"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.17
+   ],
+   "mass_kg": [
+    0.04,
+    0.12
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "axe",
+   "proposed_on": "2026-10-05"
+  },
+  "baseball_glove": {
+   "keywords": [
+    "baseball glove"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.35
+   ],
+   "mass_kg": [
+    0.4,
+    0.75
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "leather"
+   ],
+   "source": "vlm",
+   "proposed_by": "baseball_glove",
+   "proposed_on": "2026-10-05"
+  },
+  "bicycle_u_lock": {
+   "keywords": [
+    "bicycle u lock"
+   ],
+   "max_dim_m": [
+    0.18,
+    0.35
+   ],
+   "mass_kg": [
+    0.7,
+    1.8
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "bicycle_d_lock",
+   "proposed_on": "2026-10-05"
+  },
+  "boxing_headgear": {
+   "keywords": [
+    "boxing headgear"
+   ],
+   "max_dim_m": [
+    0.22,
+    0.32
+   ],
+   "mass_kg": [
+    0.3,
+    0.7
+   ],
+   "articulable": false,
+   "deformable": "sponge",
+   "typical_materials": [
+    "foam_polyurethane"
+   ],
+   "source": "vlm",
+   "proposed_by": "boxing_helmet",
+   "proposed_on": "2026-10-05"
+  },
+  "tape_roll": {
+   "keywords": [
+    "tape roll"
+   ],
+   "max_dim_m": [
+    0.07,
+    0.15
+   ],
+   "mass_kg": [
+    0.1,
+    0.6
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "brown_tape",
+   "proposed_on": "2026-10-05"
+  },
+  "bucket": {
+   "keywords": [
+    "bucket"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.35
+   ],
+   "mass_kg": [
+    0.3,
+    0.8
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "cc0_bucket_3",
+   "proposed_on": "2026-10-05"
+  },
+  "crayon_box": {
+   "keywords": [
+    "crayon box"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.2
+   ],
+   "mass_kg": [
+    0.04,
+    0.2
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "paper_kraft"
+   ],
+   "source": "vlm",
+   "proposed_by": "cc0_crayons",
+   "proposed_on": "2026-10-05"
+  },
+  "toilet_paper_roll": {
+   "keywords": [
+    "toilet paper roll"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.13
+   ],
+   "mass_kg": [
+    0.08,
+    0.25
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "paper_kraft"
+   ],
+   "source": "vlm",
+   "proposed_by": "cc0_toilet_paper_roll",
+   "proposed_on": "2026-10-05"
+  },
+  "balm_tin": {
+   "keywords": [
+    "balm tin"
+   ],
+   "max_dim_m": [
+    0.025,
+    0.055
+   ],
+   "mass_kg": [
+    0.008,
+    0.035
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "source": "vlm",
+   "proposed_by": "cao_sao_v\u00e0ng_golden_star_aromatic_balm",
+   "proposed_on": "2026-10-05"
+  },
+  "carabiner": {
+   "keywords": [
+    "carabiner"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.16
+   ],
+   "mass_kg": [
+    0.045,
+    0.12
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "carabiner",
+   "proposed_on": "2026-10-05"
+  },
+  "light_aircraft": {
+   "keywords": [
+    "light aircraft"
+   ],
+   "max_dim_m": [
+    10.0,
+    11.5
+   ],
+   "mass_kg": [
+    800.0,
+    1400.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "behaviors": [
+    "gate",
+    "motor",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "cessna_182_skylane",
+   "proposed_on": "2026-10-05"
+  },
+  "coffee_pot": {
+   "keywords": [
+    "coffee pot"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.33
+   ],
+   "mass_kg": [
+    0.5,
+    1.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "coffee_pot_12e7dd",
+   "proposed_on": "2026-10-05"
+  },
+  "padlock": {
+   "keywords": [
+    "padlock"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.12
+   ],
+   "mass_kg": [
+    0.08,
+    0.35
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "combination_lock_10_mb",
+   "proposed_on": "2026-10-05"
+  },
+  "corkscrew": {
+   "keywords": [
+    "corkscrew"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.22
+   ],
+   "mass_kg": [
+    0.15,
+    0.4
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "corckscrew_openner",
+   "proposed_on": "2026-10-05"
+  },
+  "cosmetic_container_set": {
+   "keywords": [
+    "cosmetic container set"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.25
+   ],
+   "mass_kg": [
+    0.2,
+    0.8
+   ],
+   "articulable": false,
+   "deformable": "rubber",
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "cosmetic_pack",
+   "proposed_on": "2026-10-05"
+  },
+  "dish_rack": {
+   "keywords": [
+    "dish rack"
+   ],
+   "max_dim_m": [
+    0.35,
+    0.5
+   ],
+   "mass_kg": [
+    1.0,
+    3.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "dish_rack_with_dishes",
+   "proposed_on": "2026-10-05"
+  },
+  "ev_charging_station": {
+   "keywords": [
+    "ev charging station"
+   ],
+   "max_dim_m": [
+    1.4,
+    2.1
+   ],
+   "mass_kg": [
+    80.0,
+    300.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "ev_charging_station",
+   "proposed_on": "2026-10-05"
+  },
+  "electric_guitar": {
+   "keywords": [
+    "electric guitar"
+   ],
+   "max_dim_m": [
+    0.95,
+    1.05
+   ],
+   "mass_kg": [
+    2.8,
+    4.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "source": "vlm",
+   "proposed_by": "electric_guitar_jackson_soloist_sl2q",
+   "proposed_on": "2026-10-05"
+  },
+  "aerosol_spray_can": {
+   "keywords": [
+    "aerosol spray can"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.25
+   ],
+   "mass_kg": [
+    0.25,
+    0.6
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "source": "vlm",
+   "proposed_by": "fmb_paint_can_01",
+   "proposed_on": "2026-10-05"
+  },
+  "potted_plant": {
+   "keywords": [
+    "potted plant"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.55
+   ],
+   "mass_kg": [
+    1.0,
+    4.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "free_pilea_peperomioides_terracotta_pot",
+   "proposed_on": "2026-10-05"
+  },
+  "kitchen_faucet": {
+   "keywords": [
+    "kitchen faucet"
+   ],
+   "max_dim_m": [
+    0.45,
+    0.7
+   ],
+   "mass_kg": [
+    1.5,
+    5.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "faucet",
+   "proposed_on": "2026-10-05"
+  },
+  "figurine": {
+   "keywords": [
+    "figurine"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.45
+   ],
+   "mass_kg": [
+    0.2,
+    1.5
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "godzilla_1989_figurine_3d_scan",
+   "proposed_on": "2026-10-05"
+  },
+  "grand_piano": {
+   "keywords": [
+    "grand piano"
+   ],
+   "max_dim_m": [
+    1.4,
+    3.0
+   ],
+   "mass_kg": [
+    220.0,
+    500.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "grand_piano",
+   "proposed_on": "2026-10-05"
+  },
+  "toy_train_track_set": {
+   "keywords": [
+    "toy train track set"
+   ],
+   "max_dim_m": [
+    0.7,
+    1.2
+   ],
+   "mass_kg": [
+    0.4,
+    1.5
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_pine"
+   ],
+   "source": "vlm",
+   "proposed_by": "ikea_lillabo_basic_train_set",
+   "proposed_on": "2026-10-05"
+  },
+  "beverage_cooler_jug": {
+   "keywords": [
+    "beverage cooler jug"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.55
+   ],
+   "mass_kg": [
+    1.2,
+    4.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "igloo_cooler_gatorade_football_training",
+   "proposed_on": "2026-10-05"
+  },
+  "kitchen_sink": {
+   "keywords": [
+    "kitchen sink"
+   ],
+   "max_dim_m": [
+    0.7,
+    0.95
+   ],
+   "mass_kg": [
+    8.0,
+    30.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "kitchen_sink_b3a6dc",
+   "proposed_on": "2026-10-05"
+  },
+  "kitchen_tableware_set": {
+   "keywords": [
+    "kitchen tableware set"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.5
+   ],
+   "mass_kg": [
+    0.6,
+    2.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "wood_oak"
+   ],
+   "source": "vlm",
+   "proposed_by": "kitchen_set_02",
+   "proposed_on": "2026-10-05"
+  },
+  "toy_spaceship": {
+   "keywords": [
+    "toy spaceship"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.3
+   ],
+   "mass_kg": [
+    0.05,
+    0.3
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "lego_space_dart_i",
+   "proposed_on": "2026-10-05"
+  },
+  "duffel_bag": {
+   "keywords": [
+    "duffel bag"
+   ],
+   "max_dim_m": [
+    0.4,
+    0.7
+   ],
+   "mass_kg": [
+    1.0,
+    3.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "leather"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "leather_bag_v2_pbr_material",
+   "proposed_on": "2026-10-05"
+  },
+  "lipstick": {
+   "keywords": [
+    "lipstick"
+   ],
+   "max_dim_m": [
+    0.06,
+    0.1
+   ],
+   "mass_kg": [
+    0.015,
+    0.05
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "lipstick_1",
+   "proposed_on": "2026-10-05"
+  },
+  "tricycle": {
+   "keywords": [
+    "tricycle"
+   ],
+   "max_dim_m": [
+    0.65,
+    0.95
+   ],
+   "mass_kg": [
+    3.0,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "low_poly_kids_tricycle",
+   "proposed_on": "2026-10-05"
+  },
+  "vanity_mirror": {
+   "keywords": [
+    "vanity mirror"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.4
+   ],
+   "mass_kg": [
+    0.5,
+    1.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "mirror_ikea_trensum",
+   "proposed_on": "2026-10-05"
+  },
+  "graphics_card": {
+   "keywords": [
+    "graphics card"
+   ],
+   "max_dim_m": [
+    0.28,
+    0.36
+   ],
+   "mass_kg": [
+    1.2,
+    2.2
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "msi_geforce_rtx_3080_gaming_x_trio_now_free",
+   "proposed_on": "2026-10-05"
+  },
+  "building_architectural_model": {
+   "keywords": [
+    "building architectural model"
+   ],
+   "max_dim_m": [
+    12.0,
+    28.0
+   ],
+   "mass_kg": [
+    80000.0,
+    400000.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "concrete"
+   ],
+   "source": "vlm",
+   "proposed_by": "modern_luxury_villa_house_building_home",
+   "proposed_on": "2026-10-05"
+  },
+  "toy_dart_blaster": {
+   "keywords": [
+    "toy dart blaster"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.25
+   ],
+   "mass_kg": [
+    0.08,
+    0.35
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "nerf_jolt_pistol",
+   "proposed_on": "2026-10-05"
+  },
+  "game_controller": {
+   "keywords": [
+    "game controller"
+   ],
+   "max_dim_m": [
+    0.14,
+    0.17
+   ],
+   "mass_kg": [
+    0.18,
+    0.3
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "nintendo_switch_pro_controller",
+   "proposed_on": "2026-10-05"
+  },
+  "self_balancing_one_wheel_board": {
+   "keywords": [
+    "self balancing one wheel board"
+   ],
+   "max_dim_m": [
+    0.68,
+    0.8
+   ],
+   "mass_kg": [
+    9.0,
+    13.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "behaviors": [
+    "motor",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "onewheel_pint",
+   "proposed_on": "2026-10-05"
+  },
+  "origami_figure": {
+   "keywords": [
+    "origami figure"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.3
+   ],
+   "mass_kg": [
+    0.002,
+    0.01
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "paper_kraft"
+   ],
+   "source": "vlm",
+   "proposed_by": "origami_crane",
+   "proposed_on": "2026-10-05"
+  },
+  "drafting_compass": {
+   "keywords": [
+    "drafting compass"
+   ],
+   "max_dim_m": [
+    0.12,
+    0.18
+   ],
+   "mass_kg": [
+    0.03,
+    0.12
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "pbr_compass",
+   "proposed_on": "2026-10-05"
+  },
+  "multifunction_printer": {
+   "keywords": [
+    "multifunction printer"
+   ],
+   "max_dim_m": [
+    0.38,
+    0.55
+   ],
+   "mass_kg": [
+    3.5,
+    8.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "printer_copy_machine_and_scanner_in_one",
+   "proposed_on": "2026-10-05"
+  },
+  "barbecue_grill": {
+   "keywords": [
+    "barbecue grill"
+   ],
+   "max_dim_m": [
+    1.3,
+    1.9
+   ],
+   "mass_kg": [
+    40.0,
+    100.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "royal_gourmet_3_grill",
+   "proposed_on": "2026-10-05"
+  },
+  "door_knob": {
+   "keywords": [
+    "door knob"
+   ],
+   "max_dim_m": [
+    0.06,
+    0.12
+   ],
+   "mass_kg": [
+    0.2,
+    0.7
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "rusty_door_knob",
+   "proposed_on": "2026-10-05"
+  },
+  "whisk": {
+   "keywords": [
+    "whisk"
+   ],
+   "max_dim_m": [
+    0.2,
+    0.35
+   ],
+   "mass_kg": [
+    0.06,
+    0.2
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "steel_stainless"
+   ],
+   "source": "vlm",
+   "proposed_by": "r\u00f6sle_stainless_steel_balloon_egg_whisk",
+   "proposed_on": "2026-10-05"
+  },
+  "memory_card": {
+   "keywords": [
+    "memory card"
+   ],
+   "max_dim_m": [
+    0.011,
+    0.032
+   ],
+   "mass_kg": [
+    0.0004,
+    0.003
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "sd_card_samsung_sd_cards",
+   "proposed_on": "2026-10-05"
+  },
+  "beverage_carton": {
+   "keywords": [
+    "beverage carton"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.16
+   ],
+   "mass_kg": [
+    0.02,
+    0.26
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "cardboard"
+   ],
+   "source": "vlm",
+   "proposed_by": "scan_milk_box_freepoly",
+   "proposed_on": "2026-10-05"
+  },
+  "sewing_machine": {
+   "keywords": [
+    "sewing machine"
+   ],
+   "max_dim_m": [
+    0.3,
+    0.45
+   ],
+   "mass_kg": [
+    4.0,
+    9.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "sewing_machine",
+   "proposed_on": "2026-10-05"
+  },
+  "toilet_plunger": {
+   "keywords": [
+    "toilet plunger"
+   ],
+   "max_dim_m": [
+    0.4,
+    0.6
+   ],
+   "mass_kg": [
+    0.2,
+    0.6
+   ],
+   "articulable": false,
+   "deformable": "rubber",
+   "typical_materials": [
+    "rubber_natural"
+   ],
+   "source": "vlm",
+   "proposed_by": "simple_plunger",
+   "proposed_on": "2026-10-05"
+  },
+  "rc_helicopter": {
+   "keywords": [
+    "helicopter"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.6
+   ],
+   "mass_kg": [
+    0.08,
+    0.5
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "simulus_rc_helicopter_nx_1065_675",
+   "proposed_on": "2026-10-05"
+  },
+  "trigger_sprayer_head": {
+   "keywords": [
+    "trigger sprayer head"
+   ],
+   "max_dim_m": [
+    0.08,
+    0.12
+   ],
+   "mass_kg": [
+    0.02,
+    0.06
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "spray_caps",
+   "proposed_on": "2026-10-05"
+  },
+  "exercise_bike": {
+   "keywords": [
+    "exercise bike"
+   ],
+   "max_dim_m": [
+    1.0,
+    1.4
+   ],
+   "mass_kg": [
+    12.0,
+    30.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "stationary_bike",
+   "proposed_on": "2026-10-05"
+  },
+  "computer_storage_drive_set": {
+   "keywords": [
+    "computer storage drive set"
+   ],
+   "max_dim_m": [
+    0.15,
+    0.35
+   ],
+   "mass_kg": [
+    0.6,
+    1.0
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "behaviors": [
+    "motor"
+   ],
+   "source": "vlm",
+   "proposed_by": "storage_ssd_hdd_m",
+   "proposed_on": "2026-10-05"
+  },
+  "sugar_bowl": {
+   "keywords": [
+    "sugar bowl"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.16
+   ],
+   "mass_kg": [
+    0.2,
+    0.6
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "glass"
+   ],
+   "source": "vlm",
+   "proposed_by": "sucrier",
+   "proposed_on": "2026-10-05"
+  },
+  "toilet": {
+   "keywords": [
+    "toilet"
+   ],
+   "max_dim_m": [
+    0.65,
+    0.85
+   ],
+   "mass_kg": [
+    20.0,
+    50.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "toilet",
+   "proposed_on": "2026-10-05"
+  },
+  "toy_construction_vehicle": {
+   "keywords": [
+    "toy construction vehicle"
+   ],
+   "max_dim_m": [
+    0.1,
+    0.3
+   ],
+   "mass_kg": [
+    0.15,
+    0.8
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "toy_bulldozer",
+   "proposed_on": "2026-10-05"
+  },
+  "usb_flash_drive": {
+   "keywords": [
+    "usb flash drive"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.08
+   ],
+   "mass_kg": [
+    0.008,
+    0.025
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "usb_stick",
+   "proposed_on": "2026-10-05"
+  },
+  "vhs_tape": {
+   "keywords": [
+    "vhs tape"
+   ],
+   "max_dim_m": [
+    0.185,
+    0.19
+   ],
+   "mass_kg": [
+    0.18,
+    0.3
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "vhs_tape",
+   "proposed_on": "2026-10-05"
+  },
+  "water_gun": {
+   "keywords": [
+    "water gun"
+   ],
+   "max_dim_m": [
+    0.4,
+    0.8
+   ],
+   "mass_kg": [
+    0.3,
+    1.2
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "vlm",
+   "proposed_by": "water_gun",
+   "proposed_on": "2026-10-05"
+  },
+  "whipped_cream_dispenser": {
+   "keywords": [
+    "whipped cream dispenser"
+   ],
+   "max_dim_m": [
+    0.25,
+    0.35
+   ],
+   "mass_kg": [
+    0.45,
+    0.9
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "aluminum"
+   ],
+   "source": "vlm",
+   "proposed_by": "whip_maker",
+   "proposed_on": "2026-10-05"
+  },
+  "mobile_whiteboard": {
+   "keywords": [
+    "mobile whiteboard"
+   ],
+   "max_dim_m": [
+    1.1,
+    1.9
+   ],
+   "mass_kg": [
+    12.0,
+    30.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "whiteboard_short_circuit_line_graph",
+   "proposed_on": "2026-10-05"
+  },
+  "ironing_board": {
+   "keywords": [
+    "ironing board"
+   ],
+   "max_dim_m": [
+    1.2,
+    1.6
+   ],
+   "mass_kg": [
+    3.0,
+    8.0
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate"
+   ],
+   "source": "vlm",
+   "proposed_by": "ironing_board",
+   "proposed_on": "2026-10-05"
+  },
+  "baby_stroller": {
+   "keywords": [
+    "baby stroller"
+   ],
+   "max_dim_m": [
+    0.9,
+    1.2
+   ],
+   "mass_kg": [
+    6.0,
+    13.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "steel_mild"
+   ],
+   "behaviors": [
+    "gate",
+    "wheeled_base"
+   ],
+   "source": "vlm",
+   "proposed_by": "parambulator_v_013",
+   "proposed_on": "2026-10-05"
+  },
+  "instant_noodle_cup": {
+   "keywords": [
+    "instant noodle cup"
+   ],
+   "max_dim_m": [
+    0.09,
+    0.14
+   ],
+   "mass_kg": [
+    0.06,
+    0.13
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "paper_kraft"
+   ],
+   "source": "vlm",
+   "proposed_by": "shin_ramyun_\uc2e0\ub77c\uba74",
+   "proposed_on": "2026-10-05"
+  },
+  "urinal": {
+   "keywords": [
+    "urinal"
+   ],
+   "max_dim_m": [
+    0.6,
+    0.95
+   ],
+   "mass_kg": [
+    12.0,
+    25.0
+   ],
+   "articulable": true,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "vlm",
+   "proposed_by": "urinal",
+   "proposed_on": "2026-10-05"
+  },
+  "tape_measure_sewing": {
+   "keywords": [
+    "tape measure sewing"
+   ],
+   "max_dim_m": [
+    1.5,
+    1.6
+   ],
+   "mass_kg": [
+    0.008,
+    0.04
+   ],
+   "articulable": false,
+   "deformable": "cloth",
+   "typical_materials": [
+    "plastic_nylon"
+   ],
+   "source": "vlm",
+   "proposed_by": "\u043c\u0435\u0440\u0430_\u043f\u043e\u0440\u0442\u043d\u043e\u0432\u0441\u043a\u0430\u044f_\u0441_\u0440\u0435\u043b\u044c\u0435\u0444\u043d\u044b\u043c\u0438_\u0434\u0435\u043b\u0435\u043d\u0438\u044f\u043c\u0438",
+   "proposed_on": "2026-10-05"
   }
  }
 }

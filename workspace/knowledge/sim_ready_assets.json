@@ -321,1508 +321,6 @@
    }
   },
   {
-   "asset_id": "beer_bottle",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/beer_bottle/beer_bottle.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Beer_Bottle.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1004,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-08",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "chess_piece_king",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_piece_king/chess_piece_king.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Chess_Piece_King.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-08",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0014,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0003,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "bottle_of_champagne",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/bottle_of_champagne/bottle_of_champagne.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Bottle_of_Champagne.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ],
-    "audit_sampled": true
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1007,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-08",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.0997,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0002,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "champagne_glass",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/champagne_glass/champagne_glass.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Champagne_glass.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1002,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-08",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.0832,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "chess_piece_queen",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_piece_queen/chess_piece_queen.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Chess_Piece_Queen.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-08",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0017,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "decorated_plate",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/decorated_plate/decorated_plate.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Decorated_plate.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1002,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1001,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0007,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "fork",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/fork/fork.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Fork.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.2306,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0,
-     "note": "reoriented while settling (tipped); rests on ground"
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.2342,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0002,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.2302,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0002,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "frying_pan",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/frying_pan/frying_pan.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Frying_pan.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ],
-    "audit_sampled": true
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.101,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0005,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "cross_engine_ok": false,
-     "drop": {
-      "drop_measured_m": 0.0953,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": false,
-      "final_vz": 0.0045,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "kitchen_knife",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/kitchen_knife/kitchen_knife.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Knife.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ],
-    "audit_sampled": true
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.072,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.0929,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0017,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.0929,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "plate",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/plate/plate.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Plate.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1001,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "plate_1",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/plate_1/plate_1.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Plate(1).usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ],
-    "audit_sampled": true
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "red_wine_glass",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/red_wine_glass/red_wine_glass.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Red_Wine_Glass.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0004,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0001,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "simple_pill_bottle",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/simple_pill_bottle/simple_pill_bottle.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Simple_Pill_Bottle.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "claude-opus-5",
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1922,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0,
-     "note": "reoriented while settling (tipped); rests on ground"
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.0655,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0003,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.0655,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "spoon",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/spoon/spoon.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Spoon.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1014,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    }
-   }
-  },
-  {
-   "asset_id": "stanley_mug",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/stanley_mug/stanley_mug.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Stanley_Mug.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0002,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "tablespoon_dessert_spoon_teaspoon",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/tablespoon_dessert_spoon_teaspoon/tablespoon_dessert_spoon_teaspoon.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Tablespoon__dessert_spoon__teaspoon.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1004,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.0981,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0043,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.0981,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "utility_knife",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/utility_knife/utility_knife.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Utility_Knife.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1069,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    }
-   }
-  },
-  {
-   "asset_id": "wine_bottle",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wine_bottle/wine_bottle.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Wine_Bottle.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1059,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    }
-   }
-  },
-  {
-   "asset_id": "wine_glass",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wine_glass/wine_glass.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Wine_Glass.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.0991,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0001,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0002,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "wooden_spoon",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wooden_spoon/wooden_spoon.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Wooden_spoon.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ],
-    "audit_sampled": true
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1018,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1017,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0003,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1017,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "zwiesel_schott_champagne_glass",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/zwiesel_schott_champagne_glass/zwiesel_schott_champagne_glass.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Zwiesel_Schott_Champagne_Glass.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0014,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "metal_fork_high_res",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/metal_fork_high_res/metal_fork_high_res.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Metal_Fork_-_High_Res.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1005,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    }
-   }
-  },
-  {
-   "asset_id": "basic_bottle",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/basic_bottle/basic_bottle.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Basic_bottle.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ],
-    "audit_sampled": true
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0001,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "kidney_tray",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/kidney_tray/kidney_tray.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kidney_Tray.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "dropper_bottle",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/dropper_bottle/dropper_bottle.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Dropper_Bottle.usdz",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.0917,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1002,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1002,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0001,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "006_mustard_bottle",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/006_mustard_bottle/006_mustard_bottle.usda",
-   "source_file": "/home/kimate/Desktop/assets/YCB_Objects/006_mustard_bottle.usd",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1019,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.0729,
-      "drop_predicted_m": 0.1,
-      "rest_speed": 0.0003,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.102,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "024_bowl",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/024_bowl/024_bowl.usda",
-   "source_file": "/home/kimate/Desktop/assets/YCB_Objects/024_bowl.usd",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1535,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0,
-     "note": "reoriented while settling (tipped); rests on ground"
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1534,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0008,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1533,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
-   "asset_id": "025_mug",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/025_mug/025_mug.usda",
-   "source_file": "/home/kimate/Desktop/assets/YCB_Objects/025_mug.usd",
-   "category": "rigid_verified",
-   "audit": {
-    "ready": true,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ],
-    "audit_sampled": true
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1109,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.0639,
-      "drop_predicted_m": 0.1,
-      "rest_speed": 0.0019,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1105,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0001,
-      "rests_after_s": 4.0
-     }
-    }
-   }
-  },
-  {
    "asset_id": "apple_tv_remote",
    "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/apple_tv_remote/apple_tv_remote.usda",
    "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Apple_TV_remote.usdz",
@@ -1881,68 +379,47 @@
    }
   },
   {
-   "asset_id": "planter_round_02_inst_base",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/planter_round_02_inst_base/planter_round_02_inst_base.usda",
-   "source_file": "/home/kimate/Desktop/assets/Collected_Environments/planter_round_02_inst_base.usd",
-   "category": "rigid_verified",
+   "asset_id": "raspberry_pi_zero",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/raspberry_pi_zero/raspberry_pi_zero.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/Raspberry_Pi_Zero.usdz",
+   "category": "rigid_unverified",
    "audit": {
-    "ready": true,
+    "ready": false,
     "simulable": true
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "claude-opus-5",
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   },
-   "verification": {
-    "date": "2026-08-07",
-    "method": "live_physx_drop_test",
-    "simulator": "Isaac Sim 6.0 source build (linux-aarch64), PhysX via timeline play",
-    "drop": {
-     "drop_measured_m": 0.1,
-     "drop_predicted_m": 0.1,
-     "rests_after_s": 5.0
-    },
-    "newton": {
-     "date": "2026-08-07",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "cross_engine_ok": false,
-     "drop": {
-      "drop_measured_m": 0.0005,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": false,
-      "final_vz": 0.0001,
-      "rests_after_s": 4.0
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small rectangular green PCB with gold-plated corner mounting holes, surface-mount chips (SoC/RAM package, regulator, oscillator), mini connectors along the edges, a Raspberry Pi logo silkscreen, and a row of 40 male pin header posts along one long edge \ninterpreted as a Raspberry Pi Zero single-board computer.",
+      "confidence": 0.76
      }
     }
    }
   },
   {
-   "asset_id": "simple_pill_bottle_2",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/simple_pill_bottle_2/simple_pill_bottle_2.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Simple_Pill_Bottle (2).usdz",
+   "asset_id": "4wd_hat_module_for_the_raspberry_pi",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/4wd_hat_module_for_the_raspberry_pi/4wd_hat_module_for_the_raspberry_pi.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/4wd_Hat_module_for_the_Raspberry_Pi.usdz",
    "category": "rigid_unverified",
    "audit": {
     "ready": false,
@@ -1950,84 +427,76 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "prescription_pill_bottle",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/prescription_pill_bottle/prescription_pill_bottle.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Prescription_Pill_Bottle.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "multivitamins_bottle_realistic_3d_model",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/multivitamins_bottle_realistic_3d_model/multivitamins_bottle_realistic_3d_model.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Multivitamins_Bottle__Realistic_3D_Model.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "sanitizer_bottle",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/sanitizer_bottle/sanitizer_bottle.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Sanitizer_Bottle.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-07",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
+     "claude-opus-5 (visual critic)"
     ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A Raspberry Pi HAT-format add-on PCB: a dark green/black rectangular circuit board with mounting holes at the corners, a row of pin headers, several white plug/JST-style connectors, red/yellow screw-terminal-like blocks, small ICs, a push button and a black GPIO socket block protruding from the underside (as on a real HAT).",
+      "confidence": 0.78
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "arduino_nano_servo_shield",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/arduino_nano_servo_shield/arduino_nano_servo_shield.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/Arduino_Nano_Servo_Shield.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A red printed circuit board expansion/servo shield sized for an Arduino Nano: FR4 PCB with a central dual-row female socket for the Nano, many 3-pin male servo headers along both sides, a black barrel DC jack at one edge, an electrolytic capacitor, a small regulator/IC and some SMD passives, plus corner mounting holes.",
+      "confidence": 0.78
+     }
+    },
     "audit_sampled": true
    }
   },
   {
-   "asset_id": "hand_sanitizer",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/hand_sanitizer/hand_sanitizer.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Hand-sanitizer.usdz",
+   "asset_id": "arduino_nno_33_iot",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/arduino_nno_33_iot/arduino_nno_33_iot.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/Arduino_Nno_33_IoT.usdz",
    "category": "rigid_unverified",
    "audit": {
     "ready": false,
@@ -2035,99 +504,1796 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "kohler_undermount_double_bowl_kitchen_sink",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/kohler_undermount_double_bowl_kitchen_sink/kohler_undermount_double_bowl_kitchen_sink.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/KOHLER_Undermount_Double-Bowl_Kitchen_Sink.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "spray_bottle",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/spray_bottle/spray_bottle.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Spray_Bottle.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "spray_bottle_mdi",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/spray_bottle_mdi/spray_bottle_mdi.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Spray_Bottle_mdi.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "spray_bottle_1",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/spray_bottle_1/spray_bottle_1.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Spray_Bottle(1).usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
+     "claude-opus-5 (visual critic)"
     ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small rectangular printed-circuit board with a double row of pin headers along both long edges, a micro-USB connector at one end, a shielded RF/radio module can, a square microcontroller QFN package, and assorted small SMD components \"\u2014 consistent with an Arduino Nano-class development board.",
+      "confidence": 0.78
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "boring_blue_ballpoint_pen",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/boring_blue_ballpoint_pen/boring_blue_ballpoint_pen.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/Boring_blue_ballpoint_pen.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A slim ballpoint pen (stick-type) with a white/light gray barrel, a blue tapered nib/grip section and a small blue end plug, shown in four orientations including an end-on view.",
+      "confidence": 0.8
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "brush_30057d",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/brush_30057d/brush_30057d.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Brush.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "An oval, cushioned-pad hairbrush (paddle/oval brush) with a rounded plastic handle and a dense field of bristles on the oval head.",
+      "confidence": 0.78
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "canned_fish_freepoly",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/canned_fish_freepoly/canned_fish_freepoly.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/Canned_fish-Freepoly.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A cylindrical tin can with a vintage red \"Argonaut Brand Alaska Salmon\" paper label, photographed/scanned from four angles.",
+      "confidence": 0.72
+     }
+    },
     "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "cola_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/cola_bottle/cola_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Cola_Bottle.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A classic contour (Coca-Cola style) soft-drink bottle with fluted body, tapered shoulder, long neck and crown-cap finish, rendered in untextured light grey from four viewpoints.",
+      "confidence": 0.72
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "corded_mouse",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/corded_mouse/corded_mouse.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Computer_mouse.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A low-profile computer mouse with a two-button shell, a central seam, and a scroll wheel visible in the top-down views; a tiny nub at the rear suggests a cable stub but no actual cord is modeled.",
+      "confidence": 0.8
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "crystal_glass_decanter",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/crystal_glass_decanter/crystal_glass_decanter.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Crystal_glass_decanter.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A tall square-sectioned glass decanter with a narrow neck and a faceted crystal stopper, containing a dark amber/brown liquid, with a small gold laurel-wreath 'N' emblem on one face.",
+      "confidence": 0.72
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "dji_remote",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/dji_remote/dji_remote.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/DJI_Remote.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A DJI-branded folding handheld drone remote controller (RC-N1 style transmitter): grey plastic body with two control sticks, power button, LED battery indicators, folding antennas on top and a folding phone-clamp/grips on the back.",
+      "confidence": 0.76
+     }
+    },
+    "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "frying_pan_with_fried_eggs",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/frying_pan_with_fried_eggs/frying_pan_with_fried_eggs.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Frying_pan_with_fried_eggs.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A dark (nonstick/cast-iron-look) frying pan with a long straight handle, containing three fried eggs (whites with orange-yellow yolks) in the bowl.",
+      "confidence": 0.72
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "glass_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/glass_bottle/glass_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Glass_Bottle.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A tall, dark green glass bottle with a tapered shoulder, long neck, and a wire-bail swing-top (flip-top) closure with a white/ceramic stopper, shown from four orbital views.",
+      "confidence": 0.78
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "glass_bowl",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/glass_bowl/glass_bowl.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Glass_Bowl.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small, deep hemispherical bowl with a smooth rounded underside and an open top; shiny grey/white glazed appearance, shown from four nearly identical angles (it is rotationally symmetric).",
+      "confidence": 0.68
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "glass_carafe_flagon_with_cork",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/glass_carafe_flagon_with_cork/glass_carafe_flagon_with_cork.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Glass_carafe_flagon_with_cork.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small dark-tinted glass bottle/carafe (onion- or teardrop-shaped body, long tapering neck) capped with a brown cork stopper.",
+      "confidence": 0.62
+     }
+    },
+    "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "hand_sanitizer_759439",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/hand_sanitizer_759439/hand_sanitizer_759439.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Hand_Sanitizer.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A pump-top dispenser bottle: a cylindrical translucent (frosted glass/plastic-looking) bottle with a ribbed collar and a white lotion/soap pump head with a curved nozzle; the internal dip tube is visible through the body.",
+      "confidence": 0.78
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "hitman___fatal_poision_vial_mk2",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/hitman___fatal_poision_vial_mk2/hitman___fatal_poision_vial_mk2.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Hitman_-_Fatal_Poision_Vial_MK2.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small pharmaceutical injection vial: a dark tinted glass bottle with a crimped aluminum/rubber cap and a white wrap-around label reading 'FataLIDOMIDE Injection, USP' with a red skull-and-crossbones poison warning and barcode.",
+      "confidence": 0.8
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "hitman___sedative_poision_vial",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/hitman___sedative_poision_vial/hitman___sedative_poision_vial.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Hitman_-_Sedative_Poision_Vial.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small pharmaceutical injection vial: dark (amber/black) glass body with a wrap-around white/blue printed label reading 'ResTYNZINE Injection, USP', an aluminum crimp seal and a blue-grey rubber stopper top.",
+      "confidence": 0.78
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "hitman_fatal_poision_vial_mk2",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/hitman_fatal_poision_vial_mk2/hitman_fatal_poision_vial_mk2.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Hitman_-_Fatal_Poision_Vial_MK2.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small pharmaceutical injection vial (glass, ~10 mL) with a crimped aluminum cap and gray rubber stopper, bearing a white/red label reading 'FataLIDOMIDE Injection, USP' with a skull-and-crossbones poison symbol and a barcode.",
+      "confidence": 0.84
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "hitman_sedative_poision_vial",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/hitman_sedative_poision_vial/hitman_sedative_poision_vial.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Hitman_-_Sedative_Poision_Vial.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small pharmaceutical injection vial \u2014 dark/amber glass body with a wrap-around white-and-blue label reading \"ResTYNZINE Injection, USP\" and a blue-grey flip-off crimp cap on an aluminum seal.",
+      "confidence": 0.72
+     }
+    },
+    "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "logitech_m310_mouse",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/logitech_m310_mouse/logitech_m310_mouse.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/Logitech_M310_Mouse.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small dark-gray/black wireless computer mouse with two main buttons, a scroll wheel, and a 'logitech' logo on the rear shell.",
+      "confidence": 0.78
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "low_poly_3d_model_of_small_black_powerbank",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/low_poly_3d_model_of_small_black_powerbank/low_poly_3d_model_of_small_black_powerbank.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/Low_Poly_3D_Model_of_Small_Black_Powerbank.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A thin black rectangular slab with rounded/chamfered edges and a port cluster (two blue USB-A ports flanking a USB-C port) on one short-ish end face \u2014 clearly a portable battery pack / power bank.",
+      "confidence": 0.72
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "monster_energy_drink",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/monster_energy_drink/monster_energy_drink.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/Monster_Energy_Drink.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A tall slim aluminum beverage can with Monster Energy branding (green claw logo, 'TAURINE GINSENG' band at the top, supplement facts panel on the back), shown from four orbiting angles.",
+      "confidence": 0.7
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "pc_mouse_type_r",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/pc_mouse_type_r/pc_mouse_type_r.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/PC_Mouse_type-R.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A black ergonomic wireless computer mouse with textured side grips, a scroll wheel, DPI/side buttons, and a glowing green logo on the top shell, shown from four orbit angles.",
+      "confidence": 0.73
+     }
+    },
+    "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "pencil",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/pencil/pencil.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/Pencil.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A single sharpened wooden pencil, hexagonal/round yellow-orange barrel with a metal ferrule and pink eraser at the top and an exposed graphite tip at the bottom.",
+      "confidence": 0.74
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "plug_f9fa13",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/plug_f9fa13/plug_f9fa13.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/PLUG.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small black two-blade (NEMA 1-15) AC power plug: a molded wedge-shaped body with two flat parallel prongs (with tip holes) on one face and a short tapered cable strain-relief boot on the opposite side.",
+      "confidence": 0.72
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "power_plug_european",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/power_plug_european/power_plug_european.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/power_plug_european.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A European-style (CEE 7/4 \"Schuko\" / angled) mains power plug: a rounded rectangular molded body with two round pins on the front face, earth contact slots on the rim, and an angled cord-exit / strain-relief stub at the bottom.",
+      "confidence": 0.65
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "ppe_visor",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/ppe_visor/ppe_visor.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/PPE_VISOR.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A protective face shield / PPE visor: blue molded plastic crown cap with a gray ratchet headband harness and a dark tinted transparent visor hanging down over the face area.",
+      "confidence": 0.6
+     }
+    },
+    "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "radiomaster_tx12_rc_radio_controller",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/radiomaster_tx12_rc_radio_controller/radiomaster_tx12_rc_radio_controller.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/Radiomaster_TX12_rc_radio_controller.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A handheld RC radio transmitter with two gimbal sticks, trim switches, side sliders, a rectangular LCD screen, a folding carry handle, battery/module bay on the back, and a single telescoping antenna \u2014 consistent with a RadioMaster TX12-style radio.",
+      "confidence": 0.72
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "sensor_ultrasonik_3d",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/sensor_ultrasonik_3d/sensor_ultrasonik_3d.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/Sensor_Ultrasonik_3D.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A blue PCB ultrasonic rangefinder module in the HC-SR04 form factor: rectangular board with two cylindrical metal-mesh transducer cans on the front, a crystal and ICs plus silkscreen text on the back, and a 4-pin male header protruding from the bottom edge.",
+      "confidence": 0.8
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "simple_glass_vase",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/simple_glass_vase/simple_glass_vase.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Simple_Glass_Vase.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A tall, slender ceramic/glass vase with a bulbous upper shoulder, a short constricted neck and a flared lip, tapering down to a narrow foot. Four identical views of the same single object.",
+      "confidence": 0.74
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "simple_tweezers",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/simple_tweezers/simple_tweezers.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Tools/Simple_tweezers.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A slender pair of tweezers (precision/forceps style) with a bent, angled tip, rendered in a light gray metallic shade; shown from four viewpoints.",
+      "confidence": 0.79
+     }
+    },
+    "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "socket_on_scale",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/socket_on_scale/socket_on_scale.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Electronics/Socket_on_scale.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A square white plastic wall-socket faceplate with a round recessed Schuko receptacle (two round contact holes plus earth clips) on the front, and short cylindrical contact pins/terminals projecting from the rear body, plus a small brass-colored contact element.",
+      "confidence": 0.74
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "soldering_iron",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/soldering_iron/soldering_iron.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Soldering_Iron.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A pencil-style soldering iron: a tapered cylindrical handle with a collar/ferrule, a slim conical tip extending from one end, and a flexible power cord ending in a two-prong plug looping from the rear.",
+      "confidence": 0.75
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "taco_bell_crispy_chicken_wing",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/taco_bell_crispy_chicken_wing/taco_bell_crispy_chicken_wing.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Taco_Bell_Crispy_Chicken_Wing.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A single piece of breaded, deep-fried chicken (a wing/drumette-style piece) with a crisp, golden-orange crust and some darker browned patches.",
+      "confidence": 0.72
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "the_pen",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/the_pen/the_pen.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/The_Pen.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A slim writing instrument \ns a ballpoint pen / stylus: dark (near-black) cylindrical barrel, blue ribbed rubber grip section, blue rounded end cap, and a tapered metal cone tip with a small writing point.",
+      "confidence": 0.63
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "trash_can_1_e5f3af",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/trash_can_1_e5f3af/trash_can_1_e5f3af.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Trash_can(1).usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A green post/frame-mounted outdoor litter bin with a sloped top containing a dark swing-flap opening, a white recycling symbol on the front, and a galvanized steel tubular frame with two legs extending below the body.",
+      "confidence": 0.68
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "vial",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/vial/vial.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Vial.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small pharmaceutical injection vial (Beovu / brolucizumab single-dose vial) with a glass body, white printed wrap label, metal collar and a purple-magenta flip-off cap.",
+      "confidence": 0.76
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "vial_of_covid_19_vaccine",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/vial_of_covid_19_vaccine/vial_of_covid_19_vaccine.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Vial_of_Covid-19_Vaccine.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A small pharmaceutical vial with a dark grey rubber/aluminum crimp cap and a white label reading 'COVID-19 CORONAVIRUS VACCINE', filled with a pale off-white suspension; shown from four rotations.",
+      "confidence": 0.86
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "wall_lamp",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wall_lamp/wall_lamp.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/Wall_Lamp.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A black outdoor wall-mounted lantern sconce: a hexagonal/tapered lantern body with clear glass panels and a visible warm bulb, a domed cap with finial and a bottom finial, attached by a curved arm to an oval wall mounting plate.",
+      "confidence": 0.72
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "wrench_xyz",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wrench_xyz/wrench_xyz.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Tools/Wrench_XYZ.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "An adjustable monkey/pipe wrench with a serrated steel jaw head, a blue-painted adjusting collar, and a tapered wooden handle, shown from four angles.",
+      "confidence": 0.78
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "wrenches_and_shelf",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wrenches_and_shelf/wrenches_and_shelf.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Tools/Wrenches_and_shelf.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A thin vertical rectangular pegboard panel (blue, perforated with a grid of holes) with a set of combination wrenches arranged in low relief across its upper-left area \ndash i.e. a wall-mounted shadow/tool board.",
+      "confidence": 0.74
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "champagne_glass",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/champagne_glass/champagne_glass.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Champagne_glass.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A stemmed drinking glass with a tall, narrow tulip-shaped bowl, slender stem and round flared foot \u2014 i.e. a champagne flute.",
+      "confidence": 0.8
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "decorated_plate",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/decorated_plate/decorated_plate.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Decorated_plate.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A round, shallow dinner/serving plate with a wide rim decorated in a crackle/mosaic pattern and a smooth white well in the center.",
+      "confidence": 0.82
+     }
+    },
+    "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "frying_pan",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/frying_pan/frying_pan.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Frying_pan.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A round frying pan / skillet with a dark cast-iron or carbon-steel body and a light wooden handle, shown from four orbit angles.",
+      "confidence": 0.8
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "plate_1",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/plate_1/plate_1.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Plate(1).usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A round, shallow white ceramic plate (dinner plate/shallow serving dish) with thin blue concentric stripes on the rim.",
+      "confidence": 0.8
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "red_wine_glass",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/red_wine_glass/red_wine_glass.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Red_Wine_Glass.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A stemmed wine glass (large-bowl red-wine glass), rendered transparent against a black background; faint reddish tint visible in the lower bowl suggesting a hint of wine or red-tinted glass.",
+      "confidence": 0.62
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "wine_glass",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wine_glass/wine_glass.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Wine_Glass.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A stemmed drinking glass \u2014 a tall, tulip-shaped bowl on a thin stem with a round flat foot, i.e. a wine/champagne glass, rendered in flat untextured gray with a faintly visible inner bowl wall.",
+      "confidence": 0.68
+     }
+    }
+   }
+  },
+  {
+   "asset_id": "zwiesel_schott_champagne_glass",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/zwiesel_schott_champagne_glass/zwiesel_schott_champagne_glass.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Zwiesel_Schott_Champagne_Glass.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A tall stemmed champagne flute: a narrow elongated cylindrical/tapered bowl, a thin stem, and a round disc foot, rendered in a plain light-grey matte material.",
+      "confidence": 0.78
+     }
+    },
+    "audit_sampled": true
+   }
+  },
+  {
+   "asset_id": "basic_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/basic_bottle/basic_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Basic_bottle.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A rectangular-bodied pump-dispenser bottle (lotion/soap dispenser) with a translucent body and a lighter collar, pump stem and angled nozzle head; the dip tube is visible through the translucent wall.",
+      "confidence": 0.68
+     }
+    }
    }
   },
   {
@@ -2141,41 +2307,30 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
+     "claude-opus-5 (visual critic)"
     ],
-    "audit_sampled": true
-   },
-   "verification": {
-    "newton": {
-     "date": "2026-08-08",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.1,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A tall (pint/500 ml style) aluminum beverage can with a pull-tab lid, wrapped label reading \"SKARWING WEST \u2014 DRAFT, AMERICAN LAGER, ALC 4.6%\" \u2014 i.e., a beer can.",
+      "confidence": 0.76
      }
     }
    }
@@ -2191,66 +2346,32 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "claude-opus-5",
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
+     "claude-opus-5 (visual critic)"
     ],
-    "audit_sampled": true
-   },
-   "verification": {
-    "newton": {
-     "date": "2026-08-08",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton (warp) SolverXPBD, headless on NVIDIA GB10",
-     "drop": {
-      "drop_measured_m": 0.0565,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.0,
-      "rests_after_s": 4.0
-     }
-    },
-    "newton_1_5": {
-     "date": "2026-08-14",
-     "method": "headless_newton_drop_test",
-     "engine": "Newton 1.5.0 / Warp 1.16.0 \u2014 SolverXPBD, headless on NVIDIA GB10",
-     "newton_version": "1.5.0",
-     "warp_version": "1.16.0",
-     "drop": {
-      "drop_measured_m": 0.0565,
-      "drop_predicted_m": 0.1,
-      "settled_last_second": true,
-      "final_vz": 0.007,
-      "rests_after_s": 4.0
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A pair of over-ear wireless headphones with a padded headband, swiveling earcups with white/grey cushions and a dark maroon-to-rose-gold metallic finish \u2014 consistent with a Bose QuietComfort 35 style model.",
+      "confidence": 0.8
      }
     }
-   }
-  },
-  {
-   "asset_id": "computer_mouse",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/computer_mouse/computer_mouse.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Computer_mouse.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "claude-opus-5",
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
    }
   },
   {
@@ -2264,15 +2385,32 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "claude-opus-5",
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A David Clark-style aviation/pilot headset: black padded headband, two ear cups (one dark, one pale green-gray) and a boom microphone on a flexible arm, with a coiled connecting cable between the cups.",
+      "confidence": 0.72
+     }
+    }
    }
   },
   {
@@ -2286,14 +2424,33 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A pair of over-ear (gaming/lifestyle) headphones: a curved padded headband with sliding arms and two round ear cups, dark black/grey plastic body with red accent trim on the arms and cup edges.",
+      "confidence": 0.7
+     }
+    },
+    "audit_sampled": true
    }
   },
   {
@@ -2307,78 +2464,32 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "claude-opus-5",
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "keyboard_1",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/keyboard_1/keyboard_1.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Keyboard(1).usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "red_bull_energy_drink_can",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/red_bull_energy_drink_can/red_bull_energy_drink_can.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/RED_BULL_ENERGY_DRINK_CAN.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "samsung_tv_remote_control",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/samsung_tv_remote_control/samsung_tv_remote_control.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Samsung_TV_Remote_Control.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A low-poly computer mouse (gaming/wireless style) in dark gray matte plastic with blue accent lines along the side skirt and a blue-lit scroll wheel; two main buttons, side buttons and a DPI/top button are modeled.",
+      "confidence": 0.84
+     }
+    }
    }
   },
   {
@@ -2392,59 +2503,32 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
+     "claude-opus-5 (visual critic)"
     ],
-    "audit_sampled": true
-   }
-  },
-  {
-   "asset_id": "soda_can",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/soda_can/soda_can.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Soda_Can.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ],
-    "audit_sampled": true
-   }
-  },
-  {
-   "asset_id": "soda_can_1",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/soda_can_1/soda_can_1.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Soda_Can(1).usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ],
-    "audit_sampled": true
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A cylindrical aluminum beverage can with red Coca-Cola / Coke branding, white script logo, ingredient text and a barcode, with a stay-tab top lid.",
+      "confidence": 0.82
+     }
+    }
    }
   },
   {
@@ -2458,21 +2542,38 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
+     "claude-opus-5 (visual critic)"
     ],
-    "audit_sampled": true
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A slim electric (Sonicare-style) toothbrush: tapered plastic handle with button/indicator graphics, narrow neck, and a small bristled brush head at the top.",
+      "confidence": 0.72
+     }
+    }
    }
   },
   {
-   "asset_id": "sony_walkman_tps_l2_1979",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/sony_walkman_tps_l2_1979/sony_walkman_tps_l2_1979.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/SONY_Walkman_TPS-L2_1979.usdz",
+   "asset_id": "wine_bottle_and_glass",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wine_bottle_and_glass/wine_bottle_and_glass.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Kitchen_Home/Wine_Bottle_and_Glass.usdz",
    "category": "rigid_unverified",
    "audit": {
     "ready": false,
@@ -2480,21 +2581,38 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
+     "claude-opus-5 (visual critic)"
     ],
-    "audit_sampled": true
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A dark-glass wine bottle with a red foil capsule and a white front label, paired with an empty stemmed wine/champagne glass standing beside it.",
+      "confidence": 0.68
+     }
+    }
    }
   },
   {
-   "asset_id": "faber_castell_ballpoint_pen",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/faber_castell_ballpoint_pen/faber_castell_ballpoint_pen.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Faber_Castell_Ballpoint_Pen.usdz",
+   "asset_id": "beer_bottle",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/beer_bottle/beer_bottle.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Beer_Bottle.usdz",
    "category": "rigid_unverified",
    "audit": {
     "ready": false,
@@ -2502,57 +2620,32 @@
    },
    "review": {
     "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, nothing_missing",
     "reviewer_type": "machine",
     "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "simple_pen_2",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/simple_pen_2/simple_pen_2.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Simple_Pen_2.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-08",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "gemma4",
-     "nvidia/Cosmos-Reason2-2B"
-    ]
-   }
-  },
-  {
-   "asset_id": "hiwisci_fi_radio_extreme",
-   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/hiwisci_fi_radio_extreme/hiwisci_fi_radio_extreme.usda",
-   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/HiWiSci-Fi_Radio_Extreme.usdz",
-   "category": "rigid_unverified",
-   "audit": {
-    "ready": false,
-    "simulable": true
-   },
-   "review": {
-    "approved": true,
-    "reviewer": "visual-qa-v1",
-    "date": "2026-08-09",
-    "notes": "machine approval on 4 views; checks: judges_healthy, identity_agreement, integrity, scale_in_prior, physics_ready, no_error_callouts, prior_confirmed, rigid_scope",
-    "reviewer_type": "machine",
-    "models": [
-     "claude-opus-5",
-     "gemma4"
+     "claude-opus-5 (visual critic)"
     ],
-    "audit_sampled": true
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A tall, narrow long-neck bottle with a crown cap, rendered in olive/green glass tones \u2014 clearly a beer bottle.",
+      "confidence": 0.78
+     }
+    }
    }
   }
  ]

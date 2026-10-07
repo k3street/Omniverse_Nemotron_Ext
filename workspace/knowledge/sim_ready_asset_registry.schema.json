@@ -54,9 +54,11 @@
       "rigid_only_baked",
       "deformable_unverified",
       "deformable_verified",
-      "character_rigged"
+      "character_rigged",
+      "mixed_body_verified",
+      "mixed_body_unverified"
      ],
-     "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class \u2014 sim-ready is unattainable from this file. deformable_unverified: soft-body class routed past rigid authoring (deformable APIs are PhysX-only; create_deformable_mesh applies the preset live at scene build/verification). deformable_verified: live soft-body evidence (drape/settle) within tolerance. character_rigged: UsdSkel rigged character \u2014 kinematic animated collider for navigation/interaction sims, never a dynamic rigid body; requires the skeleton record."
+     "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class \u2014 sim-ready is unattainable from this file. deformable_unverified: soft-body class routed past rigid authoring (deformable APIs are PhysX-only; create_deformable_mesh applies the preset live at scene build/verification). deformable_verified: live soft-body evidence (drape/settle) within tolerance. character_rigged: UsdSkel rigged character \u2014 kinematic animated collider for navigation/interaction sims, never a dynamic rigid body; requires the skeleton record. mixed_body_verified: a rigid part with soft parts authored as PhysX deformables and attached to it, dropped in PhysX with the soft parts deforming and staying attached (soft_parts records which). mixed_body_unverified: authored, not yet dropped."
     },
     "scale_correction": {
      "type": "number",
@@ -123,6 +125,10 @@
        "description": "Headless rig check passed: bind/rest transforms consistent, weights normalized, animation moves joints"
       }
      }
+    },
+    "soft_parts": {
+     "type": "object",
+     "description": "Mixed bodies: the rigid base and parts, and each soft part (its source mesh, material, deformable kind, trims riding on it, the rigid part it is attached to)."
     }
    },
    "allOf": [
@@ -227,7 +233,9 @@
        "category": {
         "enum": [
          "rigid_verified",
-         "rigid_unverified"
+         "rigid_unverified",
+         "articulated_verified",
+         "mixed_body_verified"
         ]
        },
        "review": {
@@ -291,6 +299,23 @@
        "skeleton"
       ]
      }
+    },
+    {
+     "if": {
+      "properties": {
+       "category": {
+        "enum": [
+         "mixed_body_verified",
+         "mixed_body_unverified"
+        ]
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "soft_parts"
+      ]
+     }
     }
    ]
   },
@@ -301,7 +326,7 @@
     "reviewer",
     "date"
    ],
-   "description": "Sign-off. Humans may approve any category. Machines (reviewer_type=machine) may approve RIGID assets only, and only on unanimous multi-model visual QA (the models list is the evidence trail); articulated assets and any judge disagreement always route to a human. audit_sampled marks machine approvals pulled into the hub for human spot-check. Verified categories require approved=true.",
+   "description": "Sign-off. Humans may approve any category. Machines (reviewer_type=machine) may approve rigid assets, and articulated assets only as articulated_verified with live PhysX drive-test evidence; every machine approval passed measured gates (size, mass, physics, integrity, behaviours, completeness) and a visual critic, listed in models and evidence. audit_sampled marks machine approvals pulled into the hub for human spot-check. Verified categories require approved=true.",
    "properties": {
     "approved": {
      "type": "boolean"
@@ -329,12 +354,16 @@
      "items": {
       "type": "string"
      },
-     "minItems": 2,
-     "description": "Vision judges behind a machine approval."
+     "minItems": 1,
+     "description": "Model judges behind a machine approval (visual critic, motion critic)."
     },
     "audit_sampled": {
      "type": "boolean",
      "description": "This machine approval was sampled for human audit."
+    },
+    "evidence": {
+     "type": "object",
+     "description": "The checks a machine approval passed, and the visual critic's reading."
     }
    }
   },

@@ -100,6 +100,10 @@ def unmirror_asset(asset_id: str) -> str:
 
     qf = QUEUE / f"{asset_id}.json"
     entry = json.loads(qf.read_text())
+    sys.path.insert(0, str(REPO / "scripts"))
+    from processing import owned
+    if not owned(entry["file"]):
+        return f"{asset_id}: 0 mirroring transform(s) baked into points (a source file: not ours to write)"
     stage = Usd.Stage.Open(entry["file"])
     root = str(stage.GetDefaultPrim().GetPath()) if stage.GetDefaultPrim() else "/"
     n = unmirror(stage, root)

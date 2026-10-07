@@ -11,7 +11,7 @@ and tighten over time"). Unknown property shapes fall back to `Any`;
 mixed-type unions (anyOf/oneOf) collapse to `Any`; `extra="allow"`
 on every model so unrecognised keys do not 400.
 
-Generated: 2026-10-04T20:40:35+00:00
+Generated: 2026-10-06T17:37:25+00:00
 Tool count: 459
 
 Per spec/IA_FULL_SPEC_2026-05-10.md Phase 10.
@@ -220,11 +220,11 @@ class GetAssetJobArgs(BaseModel):
 
 
 class ReprocessAssetsArgs(BaseModel):
-    """Re-run the processing stages a fix made stale, on every asset it touches - in the background. Each asset records when each stage (ingest, classify, file, articulate, behaviors, verify, critic, soft) l"""
+    """Re-run the processing stages a fix made stale, on every asset it touches - in the background. Each asset records when each stage (ingest, classify, survey, file, materials, rig, articulate, behaviors,"""
     model_config = ConfigDict(populate_by_name=True, extra='allow')
 
     dry_run: Optional[bool] = Field(None, description="Only list what is stale. Default true")
-    stages: Optional[List[str]] = Field(None, description="Stages to re-run where stale. Default articulate, behaviors, verify, critic")
+    stages: Optional[List[str]] = Field(None, description="Stages to re-run where stale. Default articulate, behaviors, verify, critic. 'approve' is the auto-approval: measured gates (size, mass, physics materials, integrity, behaviours, completeness), then a")
     assets: Optional[List[str]] = Field(None, description="Only these asset ids")
     classes: Optional[List[str]] = Field(None, description="Only assets of these classes")
     limit: Optional[int] = Field(None, description="At most this many assets")

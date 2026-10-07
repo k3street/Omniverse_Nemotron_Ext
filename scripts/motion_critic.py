@@ -42,6 +42,8 @@ def _schema() -> dict:
     return {
         "type": "object",
         "properties": {
+            "part_visible": {"type": "boolean", "description": "can you see a part move between the panels? "
+                                                              "false when nothing visibly changes"},
             "moving_part": {"type": "string", "description": "which part of the object moves between the frames"},
             "motion_seen": {"type": "string", "description": "how it moves: about/along what, which way"},
             "motion_ok": {"type": "boolean", "description": "is that how this part of this object really moves?"},
@@ -49,7 +51,8 @@ def _schema() -> dict:
             "expected_motion": {"type": "string", "description": "how this part should move on the real object"},
             "confidence": {"type": "number", "description": "0..1"},
         },
-        "required": ["moving_part", "motion_seen", "motion_ok", "problem", "expected_motion", "confidence"],
+        "required": ["part_visible", "moving_part", "motion_seen", "motion_ok", "problem", "expected_motion",
+                     "confidence"],
         "additionalProperties": False,
     }
 
@@ -58,17 +61,19 @@ def _prompt(entry: dict, joint: str, info: dict, value: float) -> str:
     vlm = entry.get("vlm") or {}
     unit = "deg" if info.get("type") == "revolute" else "m"
     return (
-        f"These two frames are from a physics simulation of a 3D asset: {vlm.get('object_name') or entry['asset_id']}"
+        f"These panels are from a physics simulation of a 3D asset: {vlm.get('object_name') or entry['asset_id']}"
         f" (class {entry.get('class_hint') or entry.get('report', {}).get('matched_class')}). "
         f"Parts a classifier expected to move: {', '.join(vlm.get('visible_moving_parts') or []) or 'none listed'}.\n"
-        f"Frame 1: the asset at rest. Frame 2: its {info.get('type')} joint '{joint}' driven to {value:.3g} {unit} "
-        "(other joints at rest; the camera does not move).\n"
+        f"Left to right: its {info.get('type')} joint '{joint}' at rest, a third of the way, two thirds, and "
+        f"driven to {value:.3g} {unit} (other joints at rest). Where the panels are close-ups, the camera is framed "
+        "on the moving part. First say whether you can see a part move at all (part_visible); if you cannot, "
+        "do not guess the rest.\n"
         "Judge the MOTION, not the model's looks: is the part that moved the part that moves on the real object, "
         "about (or along) the right axis, the right way, through a plausible range - without passing through "
         "another part, detaching, or the whole object moving instead? Parts joined at the pivot must stay joined "
         "there: a jaw or head pulling away from its mate means the pivot is in the wrong place. "
-        "If you cannot see a difference, say so and "
-        "answer motion_ok false. A red ring marks the joint's pivot where one is drawn: the part turns about it.\n"
+        "If you cannot see a difference, set part_visible false and "
+        "motion_ok false. A red ring marks the joint's pivot where one is drawn: the part turns about it.\n"
         + measured_motion(entry, joint) + _reference(entry, joint)
     )
 
@@ -344,6 +349,153 @@ def _side_by_side(a: Path, b: Path, out: Path, marks=(None, None), cam=None) -> 
     return out
 
 
+def _strip(paths: list, out: Path, marks: list | None = None, cam=None, width: int = 640) -> Path:
+    """Panels side by side, each scaled to `width`, the pivot ring on each."""
+    from PIL import Image
+
+    tiles = []
+    for k, pth in enumerate(paths):
+        im = Image.open(pth).convert("RGB")
+        if cam and marks and marks[k]:
+            im = _mark(im, marks[k], (im.width / cam["width"], im.height / cam["height"]))
+        h = round(im.height * width / im.width)
+        tiles.append(im.resize((width, h)))
+    img = Image.new("RGB", (width * len(tiles), max(t.height for t in tiles)), "white")
+    for k, t in enumerate(tiles):
+        img.paste(t, (k * width, 0))
+    img.save(out)
+    return out
+
+
+def _focus_frames(summary: dict, name: str, n: int) -> list[int]:
+    """The frames the camera spent framed on this joint (animate_asset logs it)."""
+    f = (summary.get("camera") or {}).get("focus") or []
+    return [i for i in range(min(len(f), n)) if f[i] == name]
+
+
+def completeness(entry: dict) -> dict:
+    """Whether every part that moves on the real object moves in the draft.
+    A BMX passed with a seat post as its only joint: each joint was judged,
+    nobody asked what was missing. The survey (with the manual, where there is
+    one) says what moves; a part counts as moving when it is a joint's child,
+    a mechanism's part, or fixed onto one of those."""
+    survey = entry.get("part_survey") or {}
+    spec = json.loads(entry.get("articulation_draft") or "{}")
+    if not survey.get("parts") or not spec:
+        return {"ok": True, "missing": [], "not_separable": [], "checked": False}
+    moving = {j["child_prim"] for j in spec.get("joints", []) if j.get("joint_type") not in (None, "fixed")}
+    for m in spec.get("mechanisms", []):
+        moving |= {m.get(k) for k in ("part", "wheel", "fork") if m.get(k)}
+    up = {j["child_prim"]: j["parent_prim"] for j in spec.get("joints", []) if j.get("joint_type") == "fixed"}
+
+    def moves(path):
+        for _ in range(32):
+            if path in moving:
+                return True
+            if path not in up:
+                return False
+            path = up[path]
+        return False
+
+    import re as _re
+    notes = " ".join((spec.get("_analysis") or {}).get("notes", []))
+    held = {int(i) for i in _re.findall(r"#(\d+) [^#]*?(?:merged with fixed parts|a housing;)", notes)}
+    forks = set((spec.get("_analysis") or {}).get("forks") or [])
+    missing, not_separable = [], []
+    for p in survey["parts"]:
+        if p.get("motion") in (None, "none", "flex") or p.get("seen") is False:
+            continue
+        if _re.search(r"\b(internal|hidden)\b", p.get("role") or "", _re.I):
+            continue
+        paths = [c for c in (p.get("copies") or [p["path"]])]
+        if any(moves(x) or x in forks for x in paths):
+            continue
+        (not_separable if p["id"] in held else missing).append(f"#{p['id']} {p.get('role')} ({p.get('motion')})")
+    for u in survey.get("unmatched_reference") or []:
+        if u.get("merged_into"):
+            not_separable.append(f"{u['part']} (modelled into #{u['merged_into']})")
+    # what the classification saw move, against what is jointed: one survey run
+    # called a floor lamp's head fixed while classification said it tilts, and
+    # a 3 mm collar press passed as the lamp's whole motion
+    stop = {"with", "from", "part", "parts", "joint", "pivot", "its", "the", "and", "that", "into", "onto",
+            "clearly", "modelled", "not", "inline", "main", "body", "unit"}
+
+    def words(t):
+        return {w.rstrip("s") for w in _re.findall(r"[a-z]{4,}", (t or "").lower())} - stop
+
+    jointed_words = set()
+    for p in survey["parts"]:
+        if any(moves(x) or x in forks for x in (p.get("copies") or [p["path"]])):
+            jointed_words |= words(p.get("role"))
+    for f in (entry.get("vlm") or {}).get("functions") or []:
+        if f.get("kind") not in ("manual", "spring_return", "motor", "gate", "wheeled_base"):
+            continue
+        mp = f.get("moving_part") or ""
+        if _re.search(r"\b(internal|hidden|not (clearly )?modell?ed|no external)\b", mp, _re.I):
+            continue
+        if not (words(mp) & jointed_words):
+            missing.append(f"{f.get('does')} ({mp}) - seen by classification, nothing jointed matches")
+    return {"ok": not missing, "missing": missing, "not_separable": not_separable, "checked": True}
+
+
+def _video_schema() -> dict:
+    return {"type": "object", "properties": {
+        "detached_or_floating": {"type": "boolean", "description": "a part comes off, drops away, flies off or "
+                                                                     "floats free of what holds it"},
+        "passes_through": {"type": "boolean", "description": "a moving part passes through another part"},
+        "whole_object_moves": {"type": "boolean", "description": "the whole object tips, slides, jumps or spins "
+                                                                 "when only a part should move"},
+        "broken_geometry": {"type": "boolean", "description": "missing, black, inside-out or flickering surfaces"},
+        "physically_plausible": {"type": "boolean", "description": "overall: does this look like the real object "
+                                                                   "being worked under real physics?"},
+        "problems": {"type": "string", "description": "what is wrong, panel by panel, or empty"},
+        "confidence": {"type": "number"}},
+        "required": ["detached_or_floating", "passes_through", "whole_object_moves", "broken_geometry",
+                     "physically_plausible", "problems", "confidence"], "additionalProperties": False}
+
+
+def whole_video(entry: dict, summary: dict, frames: list, out_dir: Path, n: int = 8) -> dict:
+    """Frames from across the whole run, in order: the failures between joints
+    (a knob dropping off a radio, grips leaving a handlebar) that no single
+    joint's before-and-after shows."""
+    import anthropic
+    from PIL import Image
+
+    import visual_qa as vq
+
+    if len(frames) < 2:
+        return {"physically_plausible": False, "problems": "no frames", "not_judged": True}
+    picks = [frames[round(k * (len(frames) - 1) / (n - 1))] for k in range(n)]
+    tiles = [Image.open(p).convert("RGB").resize((480, 270)) for p in picks]
+    grid = Image.new("RGB", (480 * 4, 270 * ((n + 3) // 4)), "white")
+    for k, t in enumerate(tiles):
+        grid.paste(t, ((k % 4) * 480, (k // 4) * 270))
+    path = out_dir / "whole_video.png"
+    grid.save(path)
+    vlm = entry.get("vlm") or {}
+    beh = [b.get("type") for b in json.loads(entry.get("articulation_draft") or "{}").get("behaviors", [])]
+    prompt = (f"Eight frames, in order left to right then top to bottom, from a physics simulation of "
+              f"{vlm.get('object_name') or entry['asset_id']}. Its joints are worked one at a time; some frames "
+              "are close-ups of the part being moved."
+              + (" It is a wheeled base: driving or being pushed across the floor is meant to happen."
+                 if "wheeled_base" in beh else "")
+              + " Look for what a physics engine gets wrong: parts that come off or float, parts passing through "
+              "each other, the whole object tipping or sliding when only a part should move, broken surfaces. "
+              "Judge only what you can see.")
+    r = anthropic.Anthropic().messages.create(
+        model="claude-opus-5", max_tokens=8000,
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": vq._b64(str(path))}},
+            {"type": "text", "text": prompt}]}],
+        output_config={"format": {"type": "json_schema", "schema": _video_schema()}})
+    v = json.loads(next(b.text for b in r.content if b.type == "text"))
+    allowed_move = "wheeled_base" in beh
+    v["ok"] = bool(v["physically_plausible"] and not v["detached_or_floating"] and not v["passes_through"]
+                   and not v["broken_geometry"] and (allowed_move or not v["whole_object_moves"]))
+    v["image"] = str(path.relative_to(REPO))
+    return v
+
+
 def judge(image: Path, prompt: str, which: str) -> dict:
     import visual_qa as vq
 
@@ -385,9 +537,16 @@ def critique(asset_id: str, which: str = "claude") -> dict:
     if integ and not integ.get("ok", True):
         # the asset came apart or was thrown: its frames show the floor, and no
         # joint can be judged from them (nor blamed for it)
-        problem = (f"the asset did not hold together in PhysX: joint {integ.get('worst_joint')} came "
-                   f"{integ.get('max_joint_separation_m')} m apart, the root moved {integ.get('root_moved_m')} m "
-                   "(colliders overlapping across bodies, or bodies nested in bodies)")
+        bits = [f"joint {integ.get('worst_joint')} came {integ.get('max_joint_separation_m')} m apart",
+                f"the root moved {integ.get('root_moved_m')} m"]
+        if integ.get("fixed_came_apart"):
+            bits.append("fixed parts came apart: " + ", ".join(integ["fixed_came_apart"][:6]))
+        if integ.get("press_fits_let_go"):
+            bits.append("press fits let go by themselves: " + ", ".join(integ["press_fits_let_go"][:6]))
+        if integ.get("loose_bodies"):
+            bits.append("parts held by nothing drifted off: " + ", ".join(integ["loose_bodies"][:6]))
+        problem = ("the asset did not hold together in PhysX: " + "; ".join(bits)
+                   + " (colliders overlapping across bodies, bodies nested in bodies, or parts never jointed)")
         result = {"date": date.today().isoformat(), "judge": "measured", "pass": False, "joints_judged": 0,
                   "joints": {}, "integrity": integ, "problem": problem}
         entry["motion_qa"] = result
@@ -407,33 +566,72 @@ def critique(asset_id: str, which: str = "claude") -> dict:
             continue
         n = min(len(vals), len(frames))
         signed = [float(rows[i][col]) if rows[i].get(col) not in (None, "") else 0.0 for i in range(n)]
+        # the frames framed on this joint, where the animation logged them: a
+        # close-up of the part, not the whole asset with the part a few pixels
+        cand = _focus_frames(summary, name, n) or list(range(n))
+        rest_i = cand[0]
         # each way the joint went (pliers open AND close), if it went far that way
-        extremes = [max(range(n), key=lambda i: signed[i]), min(range(n), key=lambda i: signed[i])]
-        top = max(abs(signed[i]) for i in extremes)
-        extremes = [i for i in extremes if abs(signed[i]) >= 0.15 * top]
+        extremes = [max(cand, key=lambda i: signed[i]), min(cand, key=lambda i: signed[i])]
+        top = max(abs(signed[i] - signed[rest_i]) for i in extremes)
+        extremes = [i for i in extremes if abs(signed[i] - signed[rest_i]) >= 0.15 * top and top > 0]
         cam, pivot = summary.get("camera"), summary["joints"][name].get("pivot_world")
         for k, far in enumerate(extremes):
             key = name if k == 0 else f"{name} (other way)"
-            marks = (project(pivot, cam, 0), project(pivot, cam, far)) if cam and pivot and \
-                summary["joints"][name].get("type") == "revolute" else (None, None)
-            image = _side_by_side(frames[0], frames[far], out_dir / f"{name}{'_b' if k else ''}.png", marks,
-                                  cam if marks[0] else None)
-            try:
-                v = judge(image, _prompt(entry, name, summary["joints"][name], signed[far]), which)
-            except Exception as ex:  # noqa: BLE001 - fail closed
-                v = {"motion_ok": False, "problem": f"judge error: {str(ex)[:160]}"}
+            # rest, a third, two thirds, the end: the motion, not two snapshots
+            span = [i for i in cand if min(rest_i, far) <= i <= max(rest_i, far)] or [rest_i, far]
+            d = signed[far] - signed[rest_i]
+            mids = [min(span, key=lambda i: abs(signed[i] - (signed[rest_i] + f * d))) for f in (1 / 3, 2 / 3)]
+            picks = [rest_i, *mids, far]
+            rev = summary["joints"][name].get("type") == "revolute"
+            marks = [project(pivot, cam, i) for i in picks] if cam and pivot and rev else None
+            image = _strip([frames[i] for i in picks], out_dir / f"{name}{'_b' if k else ''}.png", marks,
+                           cam if marks else None)
+            v = None
+            for attempt in range(2):            # a dropped connection is retried once
+                try:
+                    v = judge(image, _prompt(entry, name, summary["joints"][name], signed[far]), which)
+                    break
+                except Exception as ex:  # noqa: BLE001
+                    err = str(ex)[:160]
+            if v is None:
+                # not judged is not failed: the repair must not take out a joint
+                # the judge never saw (a connection error pruned 25 joints on 15
+                # assets, a BMX's pedals and front wheel among them)
+                v = {"motion_ok": None, "not_judged": True, "problem": f"judge error: {err}"}
+            elif v.get("part_visible") is False:
+                # unseen is not seen right: a floor lamp and a game console
+                # passed with nothing visibly moving
+                v.update(motion_ok=None, not_judged=True,
+                         problem="no part visibly moves in the close-up: " + (v.get("problem") or ""))
             v["image"] = str(image.relative_to(REPO))
             verdicts[key] = v
     for name in _pick_joints(summary):
         problem = overtravel(entry, name)
         if problem:
             verdicts[f"{name} (measured)"] = {"motion_ok": False, "problem": problem}
-    ok = bool(verdicts) and all(v.get("motion_ok") for v in verdicts.values())
+    # what is missing: the real object's moving parts the draft left fixed
+    comp = completeness(entry)
+    if not comp["ok"]:
+        verdicts["(completeness)"] = {"motion_ok": False, "whole_asset": True,
+                                      "problem": "moves on the real object but is not jointed: "
+                                                 + "; ".join(comp["missing"][:8])}
+    # what happens between the joints: parts dropping off, passing through
+    if which == "claude" and frames:
+        try:
+            wv = whole_video(entry, summary, frames, out_dir)
+            verdicts["(whole video)"] = {"motion_ok": wv["ok"], "whole_asset": True,
+                                         "problem": "" if wv["ok"] else wv.get("problems", ""), **wv}
+        except Exception as ex:  # noqa: BLE001 - not judged, not failed
+            verdicts["(whole video)"] = {"motion_ok": None, "not_judged": True, "whole_asset": True,
+                                         "problem": f"judge error: {str(ex)[:160]}"}
+    incomplete = any(v.get("not_judged") for v in verdicts.values())
+    ok = bool(verdicts) and not incomplete and all(v.get("motion_ok") for v in verdicts.values())
     result = {"date": date.today().isoformat(), "judge": which, "pass": ok,
-              "joints_judged": len(verdicts), "joints": verdicts}
+              "joints_judged": sum(1 for v in verdicts.values() if not v.get("not_judged")),
+              "joints": verdicts, "completeness": comp, **({"incomplete": True} if incomplete else {})}
     entry["motion_qa"] = result
     from processing import record
-    record(entry, "critic", judge=which, passed=ok)
+    record(entry, "critic", judge=which, passed=ok, **({"incomplete": True} if incomplete else {}))
     (QUEUE_DIR / f"{asset_id}.json").write_text(json.dumps(entry, indent=1))
     return result
 

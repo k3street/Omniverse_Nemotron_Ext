@@ -188,8 +188,13 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
         """As tall as the asset and as long one way, and not a thin leaf: a
         shell (a K-Slim's outer skin with its lid moulded in, which the survey
         called the lid). A cabinet door spans height and width but is thin."""
-        frac = np.array(p["size_m"], float) / np.maximum(hi - lo, 1e-9)
+        ext = hi - lo
+        frac = np.array(p["size_m"], float) / np.maximum(ext, 1e-9)
         h = [k for k in range(3) if k != UP]
+        # only for an object that stands: lying flat (a caliper), every part
+        # spans its thickness, and its sliding jaw read as a housing
+        if ext[UP] < 0.3 * max(ext):
+            return False
         return bool(frac[UP] >= 0.85 and max(frac[h[0]], frac[h[1]]) >= 0.85
                     and min(frac[h[0]], frac[h[1]]) >= 0.2)
 
@@ -443,7 +448,38 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
             r = float(rng or (3.0 if p["motion"] == "press" else 20.0)) / 1000.0
             toward = float(np.sign((pc - pivot) @ np.eye(3)[ax])) or -1.0
             gp = geo.get(par["path"])
-            if p["motion"] == "slide" and gp and (p.get("axis") or "").startswith("horizontal"):
+            rail = False
+            if p["motion"] == "slide" and gp:
+                # where a slide runs, by shape before words (the axis word put a
+                # caliper's jaw across its beam and its depth rod sideways):
+                # a long thin part (a rod, a seat post) runs along its own
+                # length; a part that wraps a rail (a caliper's slider) runs
+                # along the rail.
+                gext = np.array(gp["max"]) - np.array(gp["min"])
+                psz = np.array(p["size_m"], float)
+                ps = sorted(range(3), key=lambda i: psz[i])
+                gs = sorted(range(3), key=lambda i: gext[i])
+                long_k = None
+                if psz[ps[2]] >= 3 * psz[ps[1]]:
+                    long_k = ps[2]
+                elif gext[gs[2]] >= 2 * gext[gs[1]] and psz[gs[2]] < 0.6 * gext[gs[2]] and any(
+                        psz[i] >= 0.9 * gext[i] for i in range(3) if i != gs[2]):
+                    long_k = gs[2]
+                if long_k is not None:
+                    rail = True
+                    ax = long_k
+                    j["axis"] = names[ax]
+                    ahead = gp["max"][long_k] - pmax[long_k]
+                    behind = pmin[long_k] - gp["min"][long_k]
+                    if max(ahead, behind) > 0.2 * psz[long_k]:
+                        toward = 1.0 if ahead >= behind else -1.0     # into the room the rail leaves
+                        r = min(r, max(ahead, behind))
+                    else:
+                        # sticking out of its parent (a depth rod, a seat post):
+                        # it runs further out, the way it points out
+                        out_dir = float(np.sign((np.array(p["centroid"]) - np.array(gp["centroid"]))[long_k])) or 1.0
+                        toward = out_dir
+            if p["motion"] == "slide" and gp and not rail and (p.get("axis") or "").startswith("horizontal"):
                 # a tray, a drawer, a reservoir slides out the way it is nearest
                 # to leaving its parent (the K-Mini's drip tray went sideways)
                 gap = {}

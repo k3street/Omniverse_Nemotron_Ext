@@ -59,7 +59,8 @@ _watch_status = {"last": "watcher not running", "queued_total": 0}
 
 CATEGORIES = ["deformable_verified", "deformable_unverified",
               "articulated_verified", "articulated_unverified",
-              "rigid_verified", "rigid_unverified", "rigid_only_baked"]
+              "rigid_verified", "rigid_unverified", "rigid_only_baked", "mixed_body_verified",
+              "mixed_body_unverified"]
 
 SEV_COLOR = {"error": "#e5484d", "warning": "#f5a524", "info": "#3e97ff"}
 
@@ -648,6 +649,45 @@ def page(body: str) -> bytes:
 <main>{body}</main></body></html>""".encode()
 
 
+def mixed_body_html(e: dict) -> str:
+    """A mixed body: which parts are deformables on which rigid part, and
+    how the PhysX drop went."""
+    sbp, mb = e.get("soft_body_parts"), e.get("mixed_body") or {}
+    if not sbp:
+        return ""
+    parts = "; ".join(f"{x['role'][:40]} ({x['material']}, {len(x.get('riders') or [])} trims) on "
+                      f"{x['attached_to'].split('/')[-1]}" for x in sbp.get("soft", []))
+    verdict = mb.get("verdict") or "drop test not run"
+    colour = "#3fb950" if mb.get("pass") else "#f85149" if mb else "#8b949e"
+    sheet = REPO / "workspace" / "asset_animations" / e["asset_id"] / "mixed" / "contact_sheet.png"
+    img = (f'<br><img src="/anim/{e["asset_id"]}/mixed/contact_sheet.png" style="max-width:100%;border-radius:6px">'
+           if sheet.exists() else "")
+    return (f'<details style="margin:8px 0"><summary class="meta">Mixed body: <b style="color:{colour}">'
+            f'{html.escape(verdict[:90])}</b></summary><p class="meta">soft parts: {html.escape(parts)}</p>'
+            f'<p class="meta">{html.escape("; ".join(sbp.get("notes", [])))}</p>{img}</details>')
+
+
+def approval_html(e: dict) -> str:
+    """Why the machine did or did not approve: the checks it failed, with
+    their evidence, and the visual critic's reading."""
+    a = e.get("auto_approval")
+    if not a:
+        return ""
+    head = {"approved": "approved by the machine", "withdrawn": "machine approval withdrawn",
+            "human_review": "needs a person"}.get(a.get("outcome"), a.get("outcome", ""))
+    rows = "".join(
+        f'<tr><td class="sev" style="color:{"#3fb950" if c["ok"] else "#f85149"}">{"ok" if c["ok"] else "no"}</td>'
+        f'<td>{html.escape(c["check"])}</td><td>{html.escape(str(c.get("evidence", ""))[:220])}</td></tr>'
+        for c in a.get("checks", []))
+    v = a.get("visual") or {}
+    vis = (f'<p class="meta">visual critic: {"approve" if v.get("ok") else "no"} · sees '
+           f'{html.escape(str(v.get("what_it_is", "")))} · {html.escape(str(v.get("reasons", ""))[:300])}</p>'
+           if v else "")
+    return (f'<details style="margin:8px 0"><summary class="meta">Auto approval ({a.get("date", "")[:10]}): '
+            f'<b>{html.escape(head)}</b>{" - " + html.escape(", ".join(a.get("failed", []))) if a.get("failed") else ""}'
+            f'</summary><table>{rows}</table>{vis}</details>')
+
+
 def render_entry(e: dict) -> str:
     r = e.get("report", {})
     ok = r.get("ingest_ok")
@@ -775,7 +815,7 @@ def render_entry(e: dict) -> str:
 </form>"""
     return (f'<div class="card">{thumb}<h2>{aid}{badge}</h2>'
             f'<div class="path">{html.escape(e.get("file", ""))}</div>'
-            f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{review_note}{actions}'
+            f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{mixed_body_html(e)}{approval_html(e)}{review_note}{actions}'
             f'{animation_html(aid)}{arti_editor}{reclass}'
             f'<div style="clear:both"></div></div>')
 
@@ -821,7 +861,8 @@ def render_index(msg: str = "") -> bytes:
 # actions
 
 def do_approve(entry: dict, category: str, reviewer: str, notes: str,
-               review_extra: dict | None = None) -> str:
+               review_extra: dict | None = None, verification: dict | None = None,
+               soft_parts: dict | None = None) -> str:
     """Sign + promote. review_extra carries machine-reviewer metadata
     (reviewer_type/models/audit_sampled) — schema enforces that machine
     reviews can only land on rigid categories."""
@@ -855,6 +896,10 @@ def do_approve(entry: dict, category: str, reviewer: str, notes: str,
                    **({"notes": notes} if notes else {}),
                    **(review_extra or {})},
     }
+    if verification:
+        new["verification"] = verification       # measured evidence (a PhysX drive test)
+    if soft_parts:
+        new["soft_parts"] = soft_parts           # which parts are deformables, on which rigid part
     if category == "rigid_only_baked":
         new["audit"] = {"ready": False, "simulable": True}
     reg["assets"].append(new)
@@ -912,8 +957,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(b"ok")
             return
         if self.path.startswith("/anim/"):
-            parts = urllib.parse.unquote(self.path[len("/anim/"):]).split("/")
-            f = ANIM_DIR / Path(parts[0]).name / Path(parts[-1]).name if len(parts) == 2 else None
+            parts = [Path(x).name for x in urllib.parse.unquote(self.path[len("/anim/"):]).split("/") if x]
+            # <id>/<file>, or <id>/<run>/<file> (a mixed body's drop test): each
+            # part a bare name, so nothing climbs out of the animations folder
+            f = ANIM_DIR.joinpath(*parts) if 2 <= len(parts) <= 3 and all(p not in ("..", "") for p in parts) else None
             types = {".mp4": "video/mp4", ".png": "image/png", ".json": "application/json"}
             if f is not None and f.exists() and f.suffix in types:
                 data = f.read_bytes()

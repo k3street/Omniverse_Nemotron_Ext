@@ -33,6 +33,9 @@ def apply(asset_id: str) -> dict:
 
     qf = QUEUE / f"{asset_id}.json"
     entry = json.loads(qf.read_text())
+    from processing import owned
+    if not owned(entry["file"]):
+        raise RuntimeError("not ours to write (a source file): build its derivative first")
     survey = entry.get("part_survey")
     if not survey:
         raise RuntimeError("no part survey (run part_survey.py first)")
@@ -70,6 +73,53 @@ def apply(asset_id: str) -> dict:
     record(entry, "materials", materials=sorted(made))
     qf.write_text(json.dumps(entry, indent=1))
     return entry["part_materials"]
+
+
+def ensure_physics(asset_id: str) -> str:
+    """Every collider gets a physics material PhysX will use. A collider whose
+    only binding is its look material (an older ingest, a single-mesh asset
+    with no part survey) falls back to PhysX's default friction: bind the
+    class's typical material to it, with the physics purpose."""
+    from pxr import Usd, UsdPhysics, UsdShade
+
+    qf = QUEUE / f"{asset_id}.json"
+    entry = json.loads(qf.read_text())
+    from processing import owned
+    if not owned(entry["file"]):
+        return "not ours to write (a source file): build its derivative first"
+    db = json.loads(DB.read_text())["materials"]
+    from processing import _prior
+    mats = [m for m in (_prior(entry).get("typical_materials") or []) if m in db]
+    if not mats:
+        return "no class material to bind"
+    key = mats[0]
+    stage = Usd.Stage.Open(entry["file"])
+    root = stage.GetDefaultPrim() or next(iter(stage.GetPseudoRoot().GetChildren()))
+    asset_root = next((c for c in root.GetChildren() if c.GetName() not in ("Looks", "Materials")), root)
+
+    def has_physics(p):
+        m, _ = UsdShade.MaterialBindingAPI(p).ComputeBoundMaterial(materialPurpose="physics")
+        return bool(m) and m.GetPrim().HasAPI(UsdPhysics.MaterialAPI)
+
+    bare = [p for p in Usd.PrimRange(asset_root) if p.HasAPI(UsdPhysics.CollisionAPI) and not has_physics(p)]
+    if not bare:
+        return "every collider has a physics material"
+    m = UsdShade.Material.Define(stage, f"{asset_root.GetPath()}/PhysicsMaterials/{key}")
+    api = UsdPhysics.MaterialAPI.Apply(m.GetPrim())
+    api.CreateStaticFrictionAttr(float(db[key]["static_friction"]))
+    api.CreateDynamicFrictionAttr(float(db[key]["dynamic_friction"]))
+    api.CreateRestitutionAttr(float(db[key]["restitution"]))
+    api.CreateDensityAttr(float(db[key]["density_kg_m3"]))
+    for p in bare:
+        UsdShade.MaterialBindingAPI.Apply(p).Bind(m, bindingStrength=UsdShade.Tokens.strongerThanDescendants,
+                                                  materialPurpose="physics")
+    stage.GetRootLayer().Save()
+    entry = json.loads(qf.read_text())
+    entry.setdefault("applied_fixes", []).append(f"physics material {key} bound to {len(bare)} bare collider(s)")
+    from processing import record
+    record(entry, "materials", materials=[key], fallback="class")
+    qf.write_text(json.dumps(entry, indent=1))
+    return f"{key} bound to {len(bare)} collider(s) that had none"
 
 
 if __name__ == "__main__":

@@ -64,6 +64,10 @@ def run_stage(stage: str, a: str, library_root: Path) -> str:
         return e["report"].get("verdict", "")
     if stage in ("survey", "materials", "rig"):
         notes = dict(pd.part_stages(a))
+        if stage == "materials":
+            # whatever the survey covered, no collider is left on PhysX's default
+            from part_materials import ensure_physics
+            return "; ".join(x for x in (notes.get("materials"), ensure_physics(a)) if x)
         return notes.get(stage) or f"{stage}: not applicable"
     if stage == "classify":
         from vlm_classify import classify_entry
@@ -100,10 +104,19 @@ def run_stage(stage: str, a: str, library_root: Path) -> str:
             return "PASS"
         if r.get("integrity"):
             return "FAIL: " + pd.repair_after_critic(a, r)
-        return ("FAIL: " + ", ".join(k for k, v in r["joints"].items() if not v.get("motion_ok"))
+        if r.get("incomplete") and not any(not v.get("motion_ok") and not v.get("not_judged")
+                                           for v in r["joints"].values()):
+            return "INCOMPLETE: the judge could not be reached; nothing changed"
+        return ("FAIL: " + ", ".join(k for k, v in r["joints"].items()
+                                     if not v.get("motion_ok") and not v.get("not_judged"))
                 + "; " + pd.repair_after_critic(a, r))
     if stage == "soft":
         return pd.soft_test(a)
+    if stage == "approve":
+        from auto_approve import approve
+        r = approve(a)
+        return r["outcome"] + (f" ({', '.join(r['failed'])})" if r["failed"] else "") \
+            + (f": {r['message'][:120]}" if r.get("message") else "")
     raise ValueError(f"unknown stage {stage!r}")
 
 

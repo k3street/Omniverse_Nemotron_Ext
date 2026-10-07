@@ -130,6 +130,30 @@ for prim in stage.Traverse():
         "authored": _authored_drive(prim, revolute),
         "unlimited": unlimited,
     })
+# fixed joints and press fits: what should NOT move. A knob that drops off a
+# radio, a grip that leaves its handlebar, a press fit that lets go by itself
+# move nothing a revolute or prismatic joint measures (the critic passed them).
+fixed_links = []
+for prim in stage.Traverse():
+    if not prim.IsA(UsdPhysics.FixedJoint):
+        continue
+    fj = UsdPhysics.Joint(prim)
+    b0, b1 = fj.GetBody0Rel().GetTargets(), fj.GetBody1Rel().GetTargets()
+    if not b0 or not b1:
+        continue
+    w0 = xf.GetLocalToWorldTransform(stage.GetPrimAtPath(b0[0]))
+    w1 = xf.GetLocalToWorldTransform(stage.GetPrimAtPath(b1[0]))
+    bf = prim.GetAttribute("physics:breakForce").Get()
+    fixed_links.append({
+        "name": prim.GetName(), "path": str(prim.GetPath()), "revolute": True, "axis": 0,
+        "body0": str(b0[0]), "body1": str(b1[0]),
+        "scale0": [Gf.Vec3d(*w0.GetRow3(k)).GetLength() for k in range(3)],
+        "scale1": [Gf.Vec3d(*w1.GetRow3(k)).GetLength() for k in range(3)],
+        "lp0": Gf.Vec3d(fj.GetLocalPos0Attr().Get()), "lp1": Gf.Vec3d(fj.GetLocalPos1Attr().Get()),
+        "lr0": Gf.Rotation(Gf.Quatd(fj.GetLocalRot0Attr().Get())),
+        "press_fit": bf is not None and math.isfinite(bf),
+    })
+_jointed = {l["body1"] for l in fixed_links} | {l["body0"] for l in fixed_links}
 # a composed scene can hold two assets with a joint of the same name
 _names = [j["name"] for j in joints]
 for j in joints:
@@ -217,6 +241,18 @@ def measure(j) -> float:
     a1 = p1 + r1.TransformDir(Gf.CompMult(j["lp1"], Gf.Vec3d(*j["scale1"])))
     axis_w = f0.TransformDir(Gf.Vec3d(*[1.0 if k == j["axis"] else 0.0 for k in range(3)]))
     return Gf.Dot(a1 - a0, axis_w)
+
+
+def turn_since_start(j) -> float:
+    """Degrees two bodies held by a fixed joint have turned relative to each
+    other since the first frame."""
+    import numpy as np
+
+    C = _rot3(j["body0"]).T @ _rot3(j["body1"])
+    if "_C0" not in j:
+        j["_C0"] = C
+    D = C @ j["_C0"].T
+    return math.degrees(math.acos(max(-1.0, min(1.0, 0.5 * (float(np.trace(D)) - 1.0)))))
 
 
 def separation(j) -> float:
@@ -422,6 +458,25 @@ for bi, b in enumerate(behaviors):
         ]
 
 
+# which joint each segment shows: its camera closes in on that part (a radio's
+# knob, a console's tray were a few pixels in the wide view, and judged unseen)
+_prim_names = {j["name"] for j in primaries}
+_focus = None
+for seg in segments:
+    names = list(seg.get("moves") or {})
+    head = next((n for n in _prim_names if seg["label"].startswith(n + ":") or seg["label"].startswith(n + " ")),
+                None)
+    if len(names) == 1 and names[0] in _prim_names:
+        _focus = names[0]
+    elif head:
+        _focus = head
+    elif not names and seg["label"] in ("hold", "hold open", "closed"):
+        pass                                   # keeps the joint it follows
+    else:
+        _focus = None
+    seg["focus"] = _focus
+
+
 # --- scene dressing and camera (session layer) --------------------------------
 
 bbox = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
@@ -517,10 +572,16 @@ DIST = 1.2 * (radius + 0.5 * reach) / math.tan(min(hfov, vfov) / 2)
 ELEV = math.radians(50)  # high enough that swings read from above, not edge-on
 
 
-def place_camera(u: float):
+FOCUS_BOX: dict = {}    # joint -> (target, distance): framed on its moving part
+
+
+def place_camera(u: float, focus: str | None = None):
     az = math.radians(AZ0 - 10 + 20 * u)  # a gentle orbit: before/after frames stay comparable
     target = Gf.Vec3d(center[0], center[1], lo[2] + 0.5 * size[2])
-    eye = target + Gf.Vec3d(DIST * math.cos(ELEV) * math.cos(az), DIST * math.cos(ELEV) * math.sin(az), DIST * math.sin(ELEV))
+    dist = DIST
+    if focus in FOCUS_BOX:
+        target, dist = FOCUS_BOX[focus]
+    eye = target + Gf.Vec3d(dist * math.cos(ELEV) * math.cos(az), dist * math.cos(ELEV) * math.sin(az), dist * math.sin(ELEV))
     CAM[:] = [list(eye), list(target)]
     with Usd.EditContext(stage, stage.GetSessionLayer()):
         cam_xf.ClearXformOpOrder()
@@ -528,13 +589,38 @@ def place_camera(u: float):
 
 
 # whether the asset holds together and stays where the camera looks
-INTEGRITY = {"sep": {}, "root": (sorted({j["body0"] for j in joints} - {j["body1"] for j in joints}) or [None])[0]}
+INTEGRITY = {"sep": {}, "fixed": {}, "loose": {}, "free0": {},
+             "root": (sorted({j["body0"] for j in joints} - {j["body1"] for j in joints}) or [None])[0]}
+# bodies held by no joint at all ride loose: measured against the root
+INTEGRITY["free"] = sorted(str(p.GetPath()) for p in stage.Traverse() if p.HasAPI(UsdPhysics.RigidBodyAPI)
+                           and str(p.GetPath()) not in _jointed | {j["body0"] for j in joints}
+                           | {j["body1"] for j in joints})
+_released_paths: set = set()
 CAM: list = []          # the camera of the frame being rendered: [eye, target]
 CAMS: list = []         # one a saved frame, for critics that mark points on the frames
+FOCUS_LOG: list = []    # per saved frame: the joint the camera is framed on, or None
 place_camera(0.0)
 # each joint's pivot at rest, in world space (motion_critic marks it on the frames)
 PIVOTS = {j["name"]: list(xf.GetLocalToWorldTransform(stage.GetPrimAtPath(j["body0"])).Transform(j["lp0"]))
           for j in joints}
+# each joint's close-up, from its part at rest: the part, its pivot and its
+# travel in frame, with some of what it moves against for context
+for j in primaries:
+    r = bbox.ComputeWorldBound(stage.GetPrimAtPath(j["body1"])).ComputeAlignedRange()
+    if r.IsEmpty():
+        continue
+    c = r.GetMidpoint()
+    pv = Gf.Vec3d(*PIVOTS.get(j["name"], list(c)))
+    half = 0.5 * r.GetSize().GetLength()
+    if j["revolute"]:
+        mid = (c + pv) * 0.5
+        rad = max(half, (pv - c).GetLength() + half * 0.5) * 1.25
+    else:
+        mid = c
+        rad = (half + 0.5 * max(abs(j["lower"]), abs(j["upper"]))) * 1.25
+    rad = max(rad, 0.15 * radius, 0.02)
+    if rad < 0.8 * (radius + 0.5 * reach):        # a close-up only where it is closer
+        FOCUS_BOX[j["name"]] = (mid, 1.2 * rad / math.tan(min(hfov, vfov) / 2))
 render_product = rep.create.render_product("/AnimView/Camera", (args.width, args.height))
 rgb = rep.AnnotatorRegistry.get_annotator("rgb")
 rgb.attach([render_product])
@@ -653,13 +739,29 @@ for seg in segments:
             clock += DT
         # stepping PhysX directly does not publish poses to the renderer
         px.update_transformations(False, True, False, False)
-        place_camera(min(1.0, (elapsed + i / args.fps) / total))
+        place_camera(min(1.0, (elapsed + i / args.fps) / total), seg.get("focus"))
         rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
         Image.fromarray(rgb.get_data()[:, :, :3]).save(frames_dir / f"f{frame_i:05d}.png")
         CAMS.append([list(CAM[0]), list(CAM[1])])
+        FOCUS_LOG.append(seg.get("focus") if seg.get("focus") in FOCUS_BOX else None)
         measured = {j["name"]: measure(j) for j in joints}
         for j in joints:
             INTEGRITY["sep"][j["name"]] = max(INTEGRITY["sep"].get(j["name"], 0.0), separation(j))
+        for l in fixed_links:
+            if l["path"] in _released_paths:
+                continue                          # let go by rule, on purpose
+            sep, turn = separation(l), turn_since_start(l)
+            rec = INTEGRITY["fixed"].setdefault(l["name"], [0.0, 0.0, l["press_fit"], l["body1"]])
+            rec[0], rec[1] = max(rec[0], sep), max(rec[1], turn)
+        if INTEGRITY["root"]:
+            pr = body_pose(INTEGRITY["root"])
+            for b in INTEGRITY["free"]:
+                pb = body_pose(b)
+                if pr and pb:
+                    rel = pr[1].GetInverse().TransformDir(pb[0] - pr[0])
+                    INTEGRITY["free0"].setdefault(b, rel)
+                    INTEGRITY["loose"][b] = max(INTEGRITY["loose"].get(b, 0.0),
+                                                (rel - INTEGRITY["free0"][b]).GetLength())
         if INTEGRITY["root"]:
             pr = body_pose(INTEGRITY["root"])
             if pr:
@@ -678,6 +780,7 @@ for seg in segments:
                 with Usd.EditContext(stage, stage.GetSessionLayer()):
                     stage.GetPrimAtPath(r["path"]).GetAttribute("physics:jointEnabled").Set(False)
                 r["released_at"] = round(frame_i / args.fps, 3)
+                _released_paths.add(r["path"])
         if seg.get("gate_check"):
             g = by_name[seg["gate_check"]]
             peak = max(peak, abs(measured[g["name"]] - rest_of(g)))
@@ -782,12 +885,23 @@ _moved = INTEGRITY.get("moved", 0.0)
 # a wheeled base drives off on purpose; anything else that travels more than
 # its own size (or 10 cm) has been thrown, and its frames miss it
 _away = 0.0 if any(b.get("type") == "wheeled_base" for b in behaviors) else _moved
+# what should not have moved: a fixed joint that came apart or turned, a press
+# fit that let go by itself, a body held by nothing drifting off
+_tol = max(0.005, 0.02 * radius)
+_came_apart = sorted(n for n, (sep, turn, pf, _b) in INTEGRITY["fixed"].items()
+                     if not pf and (sep > _tol or turn > 5.0))
+_let_go = sorted(n for n, (sep, turn, pf, _b) in INTEGRITY["fixed"].items() if pf and sep > _tol)
+_loose = sorted(b for b, d in INTEGRITY["loose"].items() if d > max(0.02, 0.05 * radius))
 summary["integrity"] = {
     "max_joint_separation_m": round(_worst[1], 4), "worst_joint": _worst[0],
     "root_moved_m": round(_moved, 4),
-    "ok": bool(_worst[1] < max(0.01, 0.05 * radius) and _away < max(0.1, 2 * radius))}
+    "fixed_came_apart": _came_apart, "press_fits_let_go": _let_go,
+    "loose_bodies": [b.split("/")[-1] for b in _loose],
+    "fixed_checked": len(INTEGRITY["fixed"]), "free_bodies": len(INTEGRITY["free"]),
+    "ok": bool(_worst[1] < max(0.01, 0.05 * radius) and _away < max(0.1, 2 * radius)
+               and not _came_apart and not _let_go and not _loose)}
 summary["camera"] = {"hfov_deg": math.degrees(hfov), "width": args.width, "height": args.height, "up": [0, 0, 1],
-                     "frames": CAMS}
+                     "frames": CAMS, "focus": FOCUS_LOG}
 for name, p in PIVOTS.items():
     if name in summary["joints"]:
         summary["joints"][name]["pivot_world"] = p

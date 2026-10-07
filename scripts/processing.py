@@ -35,12 +35,13 @@ RULES = {
     "file": "2026-10-04",        # wheelchair / power_wheelchair classes, Mobility
     "articulate": "2026-10-05d",  # see TIERS; set bodies off; press-fits filtered; mirrored meshes unmirrored
     "behaviors": "2026-10-05c",  # motor, wheeled_base (driven, or pushed on casters with forks; split wheels one body), gate; not internal ones
-    "verify": "2026-10-05b",     # framed on the asset; integrity; a pushed base is pushed
-    "critic": "2026-10-05c",     # unit directions in a set; integrity first; short hinges fail; a named product judged by its manual
-    "soft": "2026-10-03",        # cloth proxy drape, squish, cable
+    "verify": "2026-10-06",      # close-up per joint; integrity of every part (fixed joints, press fits, loose bodies)
+    "critic": "2026-10-06",      # four-frame close-ups, unseen is not judged, completeness, whole-video check; judge errors never prune
+    "soft": "2026-10-07",        # cloth proxy drape, squish, cable; mixed bodies: per-part deformables, drop test
     "rig": "2026-10-04",         # character rigs: detected, or a humanoid autorig + pose check
-    "survey": "2026-10-05c",     # unmirrored, normals blocked; copies one number; visible pixels; manual; pivot_toward
-    "materials": "2026-10-04",   # physics materials per part from the survey
+    "survey": "2026-10-06",      # moulded-in movers split and surveyed again; unmirrored, normals blocked; manual; pivot_toward
+    "approve": "2026-10-06",     # evidence gates, then a visual critic; machine approvals withdrawn when they stop passing
+    "materials": "2026-10-06",   # physics materials per part from the survey; the class's on any bare collider
 }
 
 # drafting tier -> version of its rules ("generic": the geometric proposal)
@@ -57,7 +58,7 @@ TIERS = {
 }
 
 ORDER = ["ingest", "classify", "survey", "file", "materials", "rig", "articulate", "behaviors", "verify",
-         "critic", "soft"]
+         "critic", "soft", "approve"]
 
 
 @functools.lru_cache(maxsize=1)
@@ -103,6 +104,54 @@ def _prior(entry: dict) -> dict:
         return {}
 
 
+SOFT_MATERIALS = {"fabric_cotton", "foam_polyurethane", "leather", "paper_kraft"}
+
+
+def soft_parts(entry: dict) -> dict:
+    """The soft parts of an asset the class prior calls rigid: what the
+    classifier read as deformable (a shoe's knit upper, dropped because the
+    shoe class is not a deformable class) and the parts the survey said flex
+    or made of a soft material (laces, fur, a ribbon, a cushion). A shoe is a
+    rubber sole with a soft upper: neither a rigid body nor one cloth.
+    {"kind": cloth|sponge|rope|None, "parts": [roles], "whole": bool}."""
+    if entry.get("deformable"):
+        return {"kind": entry["deformable"], "parts": [], "accessories": [], "whole": True}
+    vlm = entry.get("vlm") or {}
+    kind = vlm.get("deformable_type")
+    parts, accessories = [], []
+    prior = _prior(entry)
+    if prior.get("soft_parts"):
+        # the class knows (a shoe is always a soft upper on a sole), whether or
+        # not this asset was surveyed or the classifier said so
+        kind = kind or prior.get("soft_kind", "cloth")
+        parts += list(prior["soft_parts"])
+    for p in (entry.get("part_survey") or {}).get("parts") or []:
+        role = p.get("role") or p["path"].split("/")[-1]
+        if p.get("material") in SOFT_MATERIALS:
+            parts.append(role)                   # a soft body: an upper, a cushion, a strap
+        elif p.get("motion") == "flex":
+            # a cable, a cord, a hose on a rigid object: wrong as a rigid rod,
+            # but not what makes the object soft; recorded, not a block
+            accessories.append(role)
+    if not kind and parts:
+        kind = "cloth"
+    return {"kind": kind, "parts": parts, "accessories": accessories, "whole": False}
+
+
+def owned(path: str) -> bool:
+    """Whether a file is ours to write: a derivative under workspace/ (the
+    assets_fixed copies, the library). A downloaded or vendor source never is."""
+    import tempfile
+
+    for base in (REPO / "workspace", Path(tempfile.gettempdir())):   # and scratch files (tests)
+        try:
+            Path(path).resolve().relative_to(base.resolve())
+            return True
+        except ValueError:
+            pass
+    return False
+
+
 def articulated(entry: dict) -> bool:
     fx = [f for f in entry.get("applied_fixes", []) if f.startswith(("articulate_asset", "unarticulated"))]
     return bool(fx) and fx[-1].startswith("articulate_asset")
@@ -116,9 +165,11 @@ def applicable(entry: dict) -> list[str]:
     cls = entry.get("class_hint") or (entry.get("report") or {}).get("matched_class")
     seen_moving = any(f.get("kind") in ("manual", "spring_return", "motor", "gate", "wheeled_base", "detachable")
                       for f in (entry.get("vlm") or {}).get("functions") or [])
-    if (meshes >= 2 or seen_moving) and not (entry.get("deformable") or prior.get("deformable")) \
-            and cls != "human_character":
+    soft_or_person = entry.get("deformable") or prior.get("deformable") or cls == "human_character"
+    if (meshes >= 2 or seen_moving) and not soft_or_person:
         stages += ["survey", "materials"]
+    elif not soft_or_person:
+        stages.append("materials")            # a physics material on every collider, at least the class's
     if cls == "human_character" or (entry.get("report") or {}).get("skeleton"):
         stages.append("rig")
     if articulated(entry) or prior.get("mechanism_templates") or prior.get("behaviors") \
@@ -128,8 +179,9 @@ def applicable(entry: dict) -> list[str]:
         stages.append("behaviors")
     if articulated(entry):
         stages += ["verify", "critic"]
-    if entry.get("deformable") or prior.get("deformable"):
-        stages.append("soft")
+    if entry.get("deformable") or prior.get("deformable") or soft_parts(entry)["kind"]:
+        stages.append("soft")                 # a whole soft body, or soft parts on a rigid one
+    stages.append("approve")                  # last: on everything the stages before measured
     return stages
 
 
@@ -151,6 +203,8 @@ def stale(entry: dict, stages: list[str] | None = None) -> list[tuple[str, str]]
         else:
             want = rules_for(st, rec.get("tier"))
             why = f"rules {rec.get('rules')} -> {want}" if rec.get("rules") != want else None
+            if why is None and rec.get("incomplete"):
+                why = "incomplete (a judge could not be reached)"
             if why is None and rec.get("undone"):
                 # taken off (unarticulate) and not put back: no current result
                 why = f"undone ({str(rec['undone'])[:60]})"

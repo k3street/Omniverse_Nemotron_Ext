@@ -1,0 +1,65 @@
+{
+ "_doc": "Hand labels of asset animations, to score the motion critic. 'good' = the joints are the real object's and move as it does, nothing comes apart; 'bad' = something a reviewer would reject. Labels are of the articulation, so they hold across re-renders until the asset is re-drafted (then re-label). Labelled from the contact sheets and critic frames on the dates given. Relabelled 2026-10-06 from close-ups: two 'good' labels had judged only the joints that existed.",
+ "labels": {
+  "pipe_wrench_gap_tool_assignment": {
+   "label": "good",
+   "why": "handles open and close about the pivot",
+   "date": "2026-10-06"
+  },
+  "industrial_grinding_machine": {
+   "label": "bad",
+   "why": "the grinding wheels never spin; only the eye shields move",
+   "date": "2026-10-06"
+  },
+  "keurigk_minisingleservecoffeemaker_3": {
+   "label": "bad",
+   "why": "only the lid's outer rim loop lifts; the lid top stays down (the real handle and lid rise as one); the brew button does not press",
+   "date": "2026-10-06"
+  },
+  "multimeter": {
+   "label": "good",
+   "why": "dial turns, buttons press",
+   "date": "2026-10-05"
+  },
+  "compact_multimeter_lowpoly": {
+   "label": "bad",
+   "why": "the test probes hover in mid-air the whole run (cables held rigid)",
+   "date": "2026-10-06"
+  },
+  "floor_lamp": {
+   "label": "bad",
+   "why": "nothing visibly moves; the head should tilt",
+   "date": "2026-10-06"
+  },
+  "sony_playstation_3": {
+   "label": "bad",
+   "why": "nothing visibly moves",
+   "date": "2026-10-06"
+  },
+  "upright_dyson_vacuum_cleaner": {
+   "label": "bad",
+   "why": "a part flips off the handle mid-run",
+   "date": "2026-10-06"
+  },
+  "radio_yaesu_vx_8": {
+   "label": "bad",
+   "why": "a knob detaches and dangles",
+   "date": "2026-10-06"
+  },
+  "bmx": {
+   "label": "bad",
+   "why": "only the seat post moves; wheels, fork and cranks fixed; grips come apart",
+   "date": "2026-10-06"
+  },
+  "bmx_1": {
+   "label": "bad",
+   "why": "wheels spin but nothing steers and the cranks do not turn",
+   "date": "2026-10-06"
+  },
+  "calipers": {
+   "label": "bad",
+   "why": "the slider moves across the beam instead of along it",
+   "date": "2026-10-06"
+  }
+ }
+}
