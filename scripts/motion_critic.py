@@ -50,9 +50,30 @@ def _schema() -> dict:
             "problem": {"type": "string", "description": "what is wrong, or empty"},
             "expected_motion": {"type": "string", "description": "how this part should move on the real object"},
             "confidence": {"type": "number", "description": "0..1"},
+            "correction": {
+                "type": "object",
+                "description": "when motion_ok is false: the ONE change to this joint that would make the motion "
+                               "right, in terms a drafter can apply. kind 'none' when the motion is right or the "
+                               "fault is not this joint's (wrong part moving, model broken).",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["none", "axis", "pivot", "wrong_part", "direction", "range"]},
+                    "axis": {"type": "string",
+                             "enum": ["none", "horizontal", "vertical", "along_part_length", "across_part_width",
+                                      "through_part_face", "along_pin"],
+                             "description": "what the part should turn about: a world direction, or one of the "
+                                            "part's own (its length, its width, through its flat face), or the "
+                                            "pin/rivet that joins it"},
+                    "pivot": {"type": "string",
+                              "enum": ["none", "other_end", "part_centre", "where_it_meets_parent", "on_pin"],
+                              "description": "where the pivot should sit"},
+                    "note": {"type": "string", "description": "one line for a person"},
+                },
+                "required": ["kind", "axis", "pivot", "note"],
+                "additionalProperties": False,
+            },
         },
         "required": ["part_visible", "moving_part", "motion_seen", "motion_ok", "problem", "expected_motion",
-                     "confidence"],
+                     "confidence", "correction"],
         "additionalProperties": False,
     }
 
@@ -74,6 +95,10 @@ def _prompt(entry: dict, joint: str, info: dict, value: float) -> str:
         "there: a jaw or head pulling away from its mate means the pivot is in the wrong place. "
         "If you cannot see a difference, set part_visible false and "
         "motion_ok false. A red ring marks the joint's pivot where one is drawn: the part turns about it.\n"
+        "When the motion is wrong, fill `correction` with the one change that would put it right - which axis "
+        "the part should turn about (in the part's own terms, or the pin that joins it) and where the pivot "
+        "belongs - so the joint can be drafted again; kind 'wrong_part' when a different part should be the one "
+        "moving, 'none' when no change to this joint would help.\n"
         + measured_motion(entry, joint) + _reference(entry, joint)
     )
 
@@ -401,11 +426,17 @@ def completeness(entry: dict) -> dict:
     notes = " ".join((spec.get("_analysis") or {}).get("notes", []))
     held = {int(i) for i in _re.findall(r"#(\d+) [^#]*?(?:merged with fixed parts|a housing;)", notes)}
     forks = set((spec.get("_analysis") or {}).get("forks") or [])
+    # a pin or rivet a hinge turns about is that hinge's axis, not a mover of
+    # its own (a corkscrew's wing rivets were wanted as spin joints)
+    pins = {int(i) for i in _re.findall(r"hinges about pin #(\d+)", notes)}
     missing, not_separable = [], []
     for p in survey["parts"]:
         if p.get("motion") in (None, "none", "flex") or p.get("seen") is False:
             continue
         if _re.search(r"\b(internal|hidden)\b", p.get("role") or "", _re.I):
+            continue
+        if p["id"] in pins or (p.get("motion") == "spin" and _re.search(r"\b(pin|rivet|axle)s?\b", p.get("role") or "", _re.I)
+                               and _re.search(r"hinge|pivot|join|connect", p.get("role") or "", _re.I)):
             continue
         paths = [c for c in (p.get("copies") or [p["path"]])]
         if any(moves(x) or x in forks for x in paths):
@@ -433,6 +464,8 @@ def completeness(entry: dict) -> dict:
         mp = f.get("moving_part") or ""
         if _re.search(r"\b(internal|hidden|not (clearly )?modell?ed|no external)\b", mp, _re.I):
             continue
+        if _re.search(r"\bwhole (tool|object|body|unit|assembly|thing|device)\b", mp, _re.I):
+            continue                           # the tool used as a lever: a use of the rigid whole, not a joint
         if not (words(mp) & jointed_words):
             missing.append(f"{f.get('does')} ({mp}) - seen by classification, nothing jointed matches")
     return {"ok": not missing, "missing": missing, "not_separable": not_separable, "checked": True}
@@ -454,7 +487,7 @@ def _video_schema() -> dict:
                      "physically_plausible", "problems", "confidence"], "additionalProperties": False}
 
 
-def whole_video(entry: dict, summary: dict, frames: list, out_dir: Path, n: int = 8) -> dict:
+def whole_video(entry: dict, summary: dict, frames: list, out_dir: Path, n: int = 8, rows: list | None = None) -> dict:
     """Frames from across the whole run, in order: the failures between joints
     (a knob dropping off a radio, grips leaving a handlebar) that no single
     joint's before-and-after shows."""
@@ -465,8 +498,18 @@ def whole_video(entry: dict, summary: dict, frames: list, out_dir: Path, n: int 
 
     if len(frames) < 2:
         return {"physically_plausible": False, "problems": "no frames", "not_judged": True}
-    picks = [frames[round(k * (len(frames) - 1) / (n - 1))] for k in range(n)]
-    tiles = [Image.open(p).convert("RGB").resize((480, 270)) for p in picks]
+    # wide frames only: a close-up framed on a padlock's dials cuts its
+    # shackle at the top edge, and the judge read a shackle "rising beyond
+    # its length"; the close-ups have their own judge
+    wide_dir = out_dir.parent / "frames_wide"      # the run's own wide view of the whole run
+    wide = sorted(wide_dir.glob("f*.png")) if wide_dir.is_dir() else []
+    if len(wide) < n:
+        wide = _wide_frames(summary, frames) or frames
+    picks = _picks(wide, summary, n, rows)
+    # cropped to where the object is: at full frame a corkscrew was a
+    # thumbnail and the judge, by its own account, could not see it
+    box = _object_box([Image.open(p).convert("RGB") for p in picks])
+    tiles = [_crop_tile(Image.open(p).convert("RGB"), box, (480, 270)) for p in picks]
     grid = Image.new("RGB", (480 * 4, 270 * ((n + 3) // 4)), "white")
     for k, t in enumerate(tiles):
         grid.paste(t, ((k % 4) * 480, (k // 4) * 270))
@@ -479,9 +522,13 @@ def whole_video(entry: dict, summary: dict, frames: list, out_dir: Path, n: int 
               "are close-ups of the part being moved."
               + (" It is a wheeled base: driving or being pushed across the floor is meant to happen."
                  if "wheeled_base" in beh else "")
-              + " Look for what a physics engine gets wrong: parts that come off or float, parts passing through "
+              + " The camera is not fixed: panels come from different cameras (wide and close-up), so the "
+              "object's place, size and angle in the panel change without the object moving; judge the whole "
+              "object moving only from its relation to the floor and its shadow."
+              " Look for what a physics engine gets wrong: parts that come off or float, parts passing through "
               "each other, the whole object tipping or sliding when only a part should move, broken surfaces. "
-              "Judge only what you can see.")
+              "Judge only what you can see: when the object is too small or the frames too alike to tell, say so "
+              "and give a confidence below 0.5 rather than inferring a fault.")
     r = anthropic.Anthropic().messages.create(
         model="claude-opus-5", max_tokens=8000,
         messages=[{"role": "user", "content": [
@@ -490,10 +537,145 @@ def whole_video(entry: dict, summary: dict, frames: list, out_dir: Path, n: int 
         output_config={"format": {"type": "json_schema", "schema": _video_schema()}})
     v = json.loads(next(b.text for b in r.content if b.type == "text"))
     allowed_move = "wheeled_base" in beh
+    moved = (summary.get("integrity") or {}).get("root_moved_m")
+    if v["whole_object_moves"] and moved is not None and float(moved) < 0.02:
+        # the panels' cameras differ; the run measured the root: it stayed
+        # (a pipe wrench "drifting and rotating" between panels moved 0 m)
+        v["whole_object_moves"] = False
+        v["camera_not_object"] = f"the root moved {moved} m by measurement; the panels' cameras differ"
+        if not any(v[k] for k in ("detached_or_floating", "passes_through", "broken_geometry")):
+            v["physically_plausible"] = True
     v["ok"] = bool(v["physically_plausible"] and not v["detached_or_floating"] and not v["passes_through"]
                    and not v["broken_geometry"] and (allowed_move or not v["whole_object_moves"]))
+    if not v["ok"] and float(v.get("confidence") or 0) < 0.5:
+        # an unsure fault still counts: on the gold set the judge saw a
+        # multimeter's probes hover and a radio's knob dangle at confidence
+        # 0.45, and the measured integrity run catches neither (rigid cables,
+        # a knob still on its joint). A small render is answered by the crop
+        # above, not by waving the verdict through.
+        v["uncertain"] = True
     v["image"] = str(path.relative_to(REPO))
     return v
+
+
+def _picks(wide: list, summary: dict, n: int, rows: list | None = None) -> list:
+    """n wide frames: the start, each joint at its furthest (the frame its
+    command peaks in joints.csv - a drive returns to rest by its end, and
+    eight evenly spaced frames missed a shackle driven in the first three
+    seconds), the end; the rest spread evenly."""
+    import re as _re
+
+    idx = {int(m.group(1)): p for p in wide for m in [_re.search(r"f(\d+)", p.name)] if m}
+    if not idx:
+        return [wide[round(k * (len(wide) - 1) / (n - 1))] for k in range(n)]
+    peaks = []
+    for name, v in (summary.get("joints") or {}).items():
+        if v.get("follower") or not rows:
+            continue
+        col = f"{name}_cmd" if f"{name}_cmd" in rows[0] else f"{name}_meas" if f"{name}_meas" in rows[0] else None
+        if col is None:
+            continue
+        vals = [abs(float(r.get(col) or 0.0)) for r in rows]
+        peaks.append(max(range(len(vals)), key=lambda i: vals[i]))
+    keys = sorted(idx)
+    chosen = []
+    for e in [0] + sorted(peaks) + [len(rows) - 1 if rows else keys[-1]]:
+        near = min(keys, key=lambda k: abs(k - e))
+        if idx[near] not in chosen:
+            chosen.append(idx[near])
+    if len(chosen) > n:
+        step = (len(chosen) - 1) / (n - 1)
+        chosen = [chosen[round(k * step)] for k in range(n)]
+    for p in wide:
+        if len(chosen) >= n:
+            break
+        if p not in chosen:
+            chosen.append(p)
+    return sorted(chosen, key=lambda p: p.name)[:n]
+
+
+def _wide_frames(summary: dict, frames: list) -> list:
+    """The frames shot from the wide camera: the run records every frame's
+    camera (eye, target); a close-up stands much nearer its target. Without
+    a record, frames whose object sits clear of every edge."""
+    import math
+
+    from PIL import Image
+
+    rec = (summary.get("camera") or {}).get("frames") or []
+    if len(rec) == len(frames) and all(isinstance(f, list) and len(f) >= 2 for f in rec):
+        d = [math.dist(f[0], f[1]) for f in rec]
+        far = max(d)
+        return [p for p, x in zip(frames, d) if x >= 0.9 * far]
+    return [p for p in frames if _whole_in_frame(Image.open(p).convert("RGB"))]
+
+
+def _whole_in_frame(im) -> bool:
+    """Whether the object sits wholly inside the frame (its colour or
+    contrast core clear of every edge): a wide shot, not a close-up."""
+    import numpy as np
+
+    a = np.asarray(im, dtype=np.int16)
+    h, w = a.shape[:2]
+    bg = np.median(a.reshape(-1, 3), axis=0)
+    # the whole object, pale parts too (a grey shackle over a brass body)
+    core = ((a.max(axis=2) - a.min(axis=2)) > 30) | (np.abs(a - bg).max(axis=2) > 50)
+    ys, xs = np.nonzero(core)
+    if len(xs) < 20:
+        return False
+    m = 0.02
+    return xs.min() > m * w and xs.max() < (1 - m) * w and ys.min() > m * h and ys.max() < (1 - m) * h
+
+
+def _object_box(images) -> tuple:
+    """The box, in pixels, that holds the object in all of these frames: the
+    pixels that differ from the flat background (the floor's grey), with a
+    margin. Falls back to the whole frame."""
+    import numpy as np
+
+    w, h = images[0].size
+    lo, hi = [w, h], [0, 0]
+    for im in images:
+        a = np.asarray(im, dtype=np.int16)
+        bg = np.median(a.reshape(-1, 3), axis=0)                    # the object is small: the median is floor
+        diff = np.abs(a - bg).max(axis=2)
+        sat = a.max(axis=2) - a.min(axis=2)
+        # the object's core: colour, or strong contrast; a shadow and the
+        # render's vignette are grey and mild. Pale parts (a translucent
+        # handle) are caught by the margin around the core.
+        # colour, or contrast against the floor: a brass body and its grey
+        # shackle both; a mild shadow may widen the box, which is harmless,
+        # a cut-off shackle is not (the judge read it as flying off)
+        core = (sat > 30) | (diff > 70)       # 70: a grey shackle, not the floor's soft shadow
+        ys, xs = np.nonzero(core)
+        if len(xs) < 20:
+            continue
+        lo = [min(lo[0], int(xs.min())), min(lo[1], int(ys.min()))]
+        hi = [max(hi[0], int(xs.max())), max(hi[1], int(ys.max()))]
+    if hi[0] <= lo[0] or hi[1] <= lo[1]:
+        return (0, 0, w, h)
+    mx, my = 0.35 * (hi[0] - lo[0]) + 30, 0.35 * (hi[1] - lo[1]) + 30
+    return (max(0, int(lo[0] - mx)), max(0, int(lo[1] - my)), min(w, int(hi[0] + mx)), min(h, int(hi[1] + my)))
+
+
+def _crop_tile(im, box, size):
+    """The box cut out at the tile's aspect (widened or heightened to fit,
+    inside the frame where it can be) and scaled to the tile."""
+    w, h = im.size
+    x0, y0, x1, y1 = box
+    bw, bh = max(1, x1 - x0), max(1, y1 - y0)
+    tw, th = size
+    if bw / bh < tw / th:
+        need = bh * tw / th
+        cx = (x0 + x1) / 2
+        x0, x1 = cx - need / 2, cx + need / 2
+    else:
+        need = bw * th / tw
+        cy = (y0 + y1) / 2
+        y0, y1 = cy - need / 2, cy + need / 2
+    x0, x1 = max(0, x0), min(w, x1)
+    y0, y1 = max(0, y0), min(h, y1)
+    return im.crop((int(x0), int(y0), int(x1), int(y1))).resize(size)
 
 
 def judge(image: Path, prompt: str, which: str) -> dict:
@@ -618,7 +800,7 @@ def critique(asset_id: str, which: str = "claude") -> dict:
     # what happens between the joints: parts dropping off, passing through
     if which == "claude" and frames:
         try:
-            wv = whole_video(entry, summary, frames, out_dir)
+            wv = whole_video(entry, summary, frames, out_dir, rows=rows)
             verdicts["(whole video)"] = {"motion_ok": wv["ok"], "whole_asset": True,
                                          "problem": "" if wv["ok"] else wv.get("problems", ""), **wv}
         except Exception as ex:  # noqa: BLE001 - not judged, not failed

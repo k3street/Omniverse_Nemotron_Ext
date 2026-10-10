@@ -279,6 +279,52 @@ def part_stages(asset_id: str) -> list[tuple[str, str]]:
     return out
 
 
+def chess_convention(asset_id: str) -> str | None:
+    """A chess set is playable, not just a pile of bodies: the board's grid in
+    world space and every piece's type, colour and starting square
+    (chess_board.py), authored as customData for a simulator or a planner to
+    read. Returns a note, or None when the asset is not a chess set."""
+    e = entry_of(asset_id)
+    if class_of(e) != "chess_set":
+        return None
+    from pxr import Usd
+
+    from asset_review_hub import save_queue_entry
+    from chess_board import annotate
+    from processing import owned, record
+
+    if not owned(e["file"]):
+        return "chess: not ours to write (a source file)"
+    stage = Usd.Stage.Open(e["file"])
+    world = stage.GetPrimAtPath("/World")
+    root = next((c for c in world.GetChildren() if c.GetName() not in ("Looks", "Materials", "PhysicsScene")), None)
+    try:
+        rep = annotate(stage, str(root.GetPath()), e.get("part_survey"), repair=True)
+        stage.GetRootLayer().Save()
+    except Exception as ex:  # noqa: BLE001 - a set the convention cannot read is a finding
+        rep = {"error": f"{type(ex).__name__}: {str(ex)[:160]}"}
+    del stage
+    ok = bool(not rep.get("error") and rep.get("pieces") == 32 and rep.get("standard_start")
+              and rep.get("board", {}).get("a1_is_dark") is not False
+              and (rep.get("max_offset_from_square_m") or 1.0) < 0.3 * rep["board"]["square_m"])
+    e = entry_of(asset_id)
+    e["chess"] = {**rep, "ok": ok}
+    if rep.get("repaired"):
+        # a king and queen the modeller set the other way round, put right
+        e.setdefault("applied_fixes", []).append("chess: repaired: " + "; ".join(rep["repaired"]))
+    record(e, "behaviors", chess_ok=ok)
+    save_queue_entry(e)
+    if rep.get("error"):
+        return f"chess: {rep['error']}"
+    return (f"chess: {rep['pieces']} pieces, {'standard' if rep['standard_start'] else 'NOT the standard'} start, "
+            f"a1 {'dark' if rep['board']['a1_is_dark'] else 'LIGHT (board mis-coloured)' if rep['board']['a1_is_dark'] is False else 'colour unknown'}, "
+            f"pieces off their squares by up to {rep['max_offset_from_square_m']} m (grid from the {rep['board'].get('grid_from')})"
+            + (f"; kinds from {rep.get('kinds_from')}, colours from {rep.get('colours_from')}")
+            + ("; white's side assumed" if rep.get("white_side_assumed") else "")
+            + (f"; repaired {rep['repaired']}" if rep.get("repaired") else "")
+            + (f"; faults {rep['faults']}" if (rep.get("faults") or {}).get("swapped") or (rep.get("faults") or {}).get("other") else ""))
+
+
 def class_gaps(ids: list[str]) -> dict:
     """Per class in the run: what the conventions cover and what is missing -
     the capability gaps a new kind of object opens."""
@@ -324,15 +370,38 @@ def articulate(asset_id: str, dry: bool) -> str:
     """Segment if fused, draft, and apply a real proposal; an articulable
     asset left unjointed gets a provisional rigid body."""
     note = _articulate(asset_id, dry)
-    if dry or "articulation applied" in note or note.startswith(("rigid:", "already")):
+    if not dry and note.startswith("rigid: a set of free bodies"):
+        note += "; " + set_bodies(asset_id)
+    if not dry and note.startswith(("rigid:", "split:")):
+        # a current result for the ledger: nothing to joint under these rules
+        from asset_review_hub import save_queue_entry
+        from processing import record
+        e = entry_of(asset_id)
+        if note.startswith("rigid:") and not (e.get("report") or {}).get("structure", {}).get("rigid_bodies"):
+            # an articulable class gets no physics at ingest (its joints were
+            # to come first); when none come, it is a rigid body after all -
+            # ninety-one assets sat with no body and no mass
+            from ingest_asset import apply_rigid_physics
+            rigid = apply_rigid_physics(e, provisional=True)
+            if rigid:
+                e["applied_fixes"] = e.get("applied_fixes", []) + [f"rigid after all: {rigid}"]
+                from asset_review_hub import _re_ingest
+                _re_ingest(e)
+                note += f"; rigid body authored ({rigid[:80]})"
+        record(e, "articulate", tier="none", rigid=note[:160])
+        save_queue_entry(e)
+    if dry or "articulation applied" in note or note.startswith(("rigid:", "split:", "already")):
         return note
     from ingest_asset import apply_rigid_physics
 
     e = entry_of(asset_id)
     fixes = " | ".join(e.get("applied_fixes", []))
-    if "physics:" in fixes and fixes.rfind("physics:") > max(fixes.rfind("unarticulated"), fixes.rfind("segmentation"),
-                                                              fixes.rfind("key split")):
+    has_bodies = bool((e.get("report") or {}).get("structure", {}).get("rigid_bodies"))
+    if has_bodies and "physics:" in fixes and fixes.rfind("physics:") > max(
+            fixes.rfind("unarticulated"), fixes.rfind("segmentation"), fixes.rfind("key split")):
         return note
+    # the file decides, not the history: a reclass rebuilt and stripped the
+    # physics of 86 assets whose notes still said "auto physics"
     rigid = apply_rigid_physics(e, provisional=True)
     if rigid:
         e["applied_fixes"] = e.get("applied_fixes", []) + [f"provisional (until articulated): {rigid}"]
@@ -340,6 +409,52 @@ def articulate(asset_id: str, dry: bool) -> str:
         save_queue_entry(e)
         note += f"; provisional rigid body until articulated ({rigid})"
     return note
+
+
+def set_bodies(asset_id: str) -> str:
+    """A set's bodies re-authored from its survey (set_bodies.apply): one per
+    object the survey names, the board as one. Once per survey."""
+    from pxr import Usd
+
+    from asset_review_hub import _camel, _re_ingest, save_queue_entry
+    from processing import _prior, owned
+
+    e = entry_of(asset_id)
+    if not owned(e["file"]):
+        return "set bodies: a source file, not ours to write"
+    survey = e.get("part_survey") or {}
+    if not survey.get("parts"):
+        return "set bodies: no survey, ingest's bodies stand"
+    done = e.get("set_bodies") or {}
+    if not SET_BODIES_REDO and done.get("survey") == survey.get("date") and done.get("rules") == SET_BODIES_RULES:
+        return f"set bodies: {done.get('pieces')} pieces as surveyed"
+    from set_bodies import apply as set_bodies_apply
+    stage = Usd.Stage.Open(e["file"])
+    try:
+        note = set_bodies_apply(stage, f"/World/{_camel(asset_id)}", e, _prior(e))
+    except Exception as ex:  # noqa: BLE001 - a set the survey does not describe keeps ingest's bodies
+        return f"set bodies: not re-authored: {type(ex).__name__}: {str(ex)[:120]}"
+    stage.GetRootLayer().Save()
+    del stage
+    e["set_bodies"]["rules"] = SET_BODIES_RULES
+    e.setdefault("applied_fixes", []).append(note)
+    save_queue_entry(e)
+    # new prims, new colliders: the survey's materials on each, the class's
+    # on any left bare (a look binding on the mesh outranks the body's)
+    from part_materials import apply as bind_materials, ensure_physics
+    try:
+        bound = bind_materials(asset_id)
+        note += f"; materials: {bound.get('meshes_bound')}"[:160] if isinstance(bound, dict) else ""
+    except Exception as ex:  # noqa: BLE001 - the class material still goes on
+        note += f"; materials: {type(ex).__name__}: {str(ex)[:80]}"
+    note += "; " + ensure_physics(asset_id)
+    e = entry_of(asset_id)
+    _re_ingest(e)
+    return note
+
+
+SET_BODIES_REDO = False           # a forced re-run authors the bodies again
+SET_BODIES_RULES = "2026-10-08b"  # bodies from the survey: pieces by grouping and containment, alike rows split, board at the slab, survey materials
 
 
 def _articulate(asset_id: str, dry: bool) -> str:
@@ -356,7 +471,22 @@ def _articulate(asset_id: str, dry: bool) -> str:
     prior = _load_priors_fresh().get(class_of(e) or "", {})
     # what it should do needs joints too: a class with behaviors (a wheelchair
     # drives its wheels) is drafted like one with mechanism templates
-    surveyed = any(p.get("motion") not in (None, "none", "flex") for p in (e.get("part_survey") or {}).get("parts", []))
+    parts = (e.get("part_survey") or {}).get("parts", [])
+    surveyed = any(p.get("motion") not in (None, "none", "flex") for p in parts)
+    if (e.get("vlm") or {}).get("content_kind") == "object_set" and parts and not dry:
+        # several copies of an object that moves (a pair of padlocks): one
+        # asset per copy, each jointed on its own (split_set)
+        from split_set import split_entry, splittable
+        if splittable(e):
+            kids = split_entry(asset_id)
+            if kids:
+                return f"split: into {len(kids)} assets, one per object ({', '.join(kids)}); each is jointed on its own"
+    if ((e.get("vlm") or {}).get("content_kind") == "object_set" or prior.get("multi_body")) and parts and all(
+            p.get("motion") in (None, "none", "flex", "detach") for p in parts):
+        # a set of free bodies (chess pieces on a board, bottles in a rack):
+        # each member has its body from ingest; "detach" here means picked
+        # up, not pressed on, and a press fit would glue them together
+        return "rigid: a set of free bodies, nothing to articulate"
     if not (needs_articulation(e.get("report", {})) or prior.get("mechanism_templates") or prior.get("behaviors")
             or surveyed) or prior.get("deformable"):
         return "rigid: nothing to articulate"
@@ -407,13 +537,32 @@ def _articulate(asset_id: str, dry: bool) -> str:
 
 def animate(asset_id: str) -> str:
     """One Kit at a time: queue on the machine's Isaac slot."""
+    from asset_review_hub import save_queue_entry
+    from processing import record
+
+    e = entry_of(asset_id)
+    kinds = {j.get("type") for j in (e.get("report") or {}).get("structure", {}).get("joints") or []}
+    if kinds and not kinds & {"PhysicsRevoluteJoint", "PhysicsPrismaticJoint"}:
+        # fixed joints only (press fits, a part pinned to its body): nothing
+        # to drive, and no Kit to launch for it - eleven launches in one
+        # sweep shut down nine seconds in
+        record(e, "verify", joints_reached="0/0", note="fixed joints only: nothing to drive")
+        save_queue_entry(e)
+        return "nothing to drive: fixed joints only (no Kit run)"
     summary = REPO / "workspace" / "asset_animations" / asset_id / "summary.json"
     summary.unlink(missing_ok=True)          # an earlier run's results must not pass for this one's
     cmd = (f"source {REPO}/scripts/isaac_slot.sh >/dev/null; "
            f"timeout 900 {ISAAC_PYTHON} {REPO}/scripts/animate_asset.py {asset_id} --seconds-per-joint 3")
-    rc = subprocess.run(["bash", "-c", cmd], cwd=REPO, capture_output=True, text=True).returncode
+    run = subprocess.run(["bash", "-c", cmd], cwd=REPO, capture_output=True, text=True)
+    rc = run.returncode
+    # Kit's own words, kept: a run that times out (exit 124) or dies says why
+    # here and nowhere else
+    log = REPO / "workspace" / "asset_animations" / f"{asset_id}.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text((run.stdout or "")[-20000:] + "\n--- stderr ---\n" + (run.stderr or "")[-20000:])
     if not summary.exists():
-        return f"animation failed (exit {rc})"
+        tail = next((ln for ln in reversed((run.stdout or "").splitlines()) if ln.strip() and not ln.startswith("Warning")), "")
+        return f"animation failed (exit {rc}{', timed out' if rc == 124 else ''}): {tail[:120]} (log {log.relative_to(REPO)})"
     joints = json.loads(summary.read_text())["joints"]
 
     def reached(v):
@@ -553,13 +702,114 @@ def repair_after_critic(asset_id: str, result: dict, again: bool = True) -> str:
                     ("" if not again else f"; re-verified: {animate(asset_id)}"))
         e = entry_of(asset_id)
         spec = json.loads(e["articulation_draft"])
+    # a correction the judge could state (which axis, where the pivot) is
+    # drafted once more, verified and judged again: the joint is re-aimed,
+    # never taken out; a retry that still fails leaves both verdicts on record
+    e = entry_of(asset_id)
+    redone = _redraft_on_corrections(e, spec, result, failed) if again else []
+    if redone:
+        e = entry_of(asset_id)
+        failed = {k: v for k, v in failed.items() if k not in redone}
+        if not failed:
+            return f"re-drafted {', '.join(redone)} on the critic's correction: " + e.get("critic_retry", {}).get("outcome", "")
     # anything else is flagged for a person, never taken out: the critic agrees
     # with a careful reviewer only part of the time, and removing joints on its
     # word turned a K-Mini's correct lid into a fixed part
     e = entry_of(asset_id)
     e["critic_flags"] = {**e.get("critic_flags", {}), **failed}
     save_queue_entry(e)
-    return f"flagged for review: {', '.join(failed)}"
+    return (f"re-drafted {', '.join(redone)} on the critic's correction: {e.get('critic_retry', {}).get('outcome', '')}; "
+            if redone else "") + f"flagged for review: {', '.join(failed)}"
+
+
+# One re-draft per joint. Measured on the first sweep (2026-10-09): the loop
+# fired on 15 of 20 critic failures and, with a second try allowed, passed
+# none - the judge's words ("across the paddle's width") do not map onto a
+# merged double paddle's axes, and lids want a pivot moved, not an axis. A
+# second Kit run on the same words is cost without evidence; the correction
+# stays on the card for a person, and the rocker and lid cases want rules.
+MAX_CORRECTION_TRIES = 1
+AXIS_WORDS = {"horizontal": "horizontal_face", "vertical": "vertical", "along_part_length": "part_long",
+              "across_part_width": "part_short", "through_part_face": "part_face_normal",
+              "along_pin": "part_face_normal"}         # the pin itself is found by the drafter when there is one
+PIVOT_WORDS = {"part_centre": "center", "where_it_meets_parent": "contact_with_parent",
+               "on_pin": "end_near_parent"}            # on_pin: the drafter's pin rule places it when a pin exists
+
+
+def _redraft_on_corrections(e: dict, spec: dict, result: dict, failed: dict) -> list[str]:
+    """Failed joints whose judge stated an axis or pivot correction, not yet
+    retried: the survey's part gets the correction as its words, the asset is
+    re-drafted, applied, animated and judged once more. Returns the joints
+    re-drafted; e["critic_retry"] records what came of it."""
+    from asset_review_hub import apply_articulation, save_queue_entry, unarticulate
+    from motion_critic import critique
+
+    tier = (spec.get("_analysis") or {}).get("tier")
+    if tier not in GENERIC_TIERS:
+        return []
+    survey = e.get("part_survey") or {}
+    by_path = {}
+    for p in survey.get("parts", []):
+        for m in [p.get("path")] + list(p.get("members") or []) + list(p.get("copies") or []):
+            if m:
+                by_path[m] = p["id"]
+    tried = e.get("critic_corrections") or {}
+    todo = {}
+    for name in failed:
+        v = next((v for k, v in result["joints"].items() if k.split(" (")[0] == name), {})
+        corr = v.get("correction") or {}
+        if corr.get("kind") not in ("axis", "pivot"):
+            continue
+        child = next((j["child_prim"] for j in spec.get("joints", []) if j["name"] == name), None)
+        pid = by_path.get(child)
+        if pid is None:
+            continue
+        fix = {"joint": name, "kind": corr["kind"], "from": (v.get("problem") or "")[:200],
+               "axis": AXIS_WORDS.get(corr.get("axis") or "none"),
+               "pivot": PIVOT_WORDS.get(corr.get("pivot") or "none"),
+               "on_pin": corr.get("pivot") == "on_pin" or corr.get("axis") == "along_pin"}
+        if fix["kind"] == "pivot" and not fix["pivot"]:
+            # "the pivot is wrong" with no word for where: where it meets its
+            # parent is the hinge's usual home (a lid see-sawing mid-body)
+            fix["pivot"] = "contact_with_parent"
+        if not (fix["axis"] or fix["pivot"]):
+            continue
+        before = tried.get(str(pid))
+        if before:
+            # a second try only on new information: the judge's second
+            # correction differs from the first (a lid's axis fixed, now its
+            # pivot); the same words again would draft the same joint
+            same = all(before.get(k) == fix.get(k) for k in ("axis", "pivot", "on_pin"))
+            if same or before.get("tries", 1) >= MAX_CORRECTION_TRIES:
+                continue
+            fix["tries"] = before.get("tries", 1) + 1
+            # what the first try fixed stays fixed unless the judge now says otherwise
+            for k in ("axis", "pivot"):
+                if not fix.get(k) and before.get(k):
+                    fix[k] = before[k]
+        todo[str(pid)] = fix
+    if not todo:
+        return []
+    e["critic_corrections"] = {**tried, **todo}
+    save_queue_entry(e)
+    names = [f["joint"] for f in todo.values()]
+    unarticulate(e, f"critic: {', '.join(names)} re-drafted on its correction")
+    note = _articulate(e["asset_id"], dry=False)
+    e = entry_of(e["asset_id"])
+    outcome = f"draft: {note[:160]}"
+    if "articulation applied" in note:
+        anim = animate(e["asset_id"])
+        r2 = critique(e["asset_id"])
+        still = [k.split(" (")[0] for k, v in r2["joints"].items() if not v.get("motion_ok") and not v.get("not_judged")]
+        outcome = (f"verified ({anim[:80]}); critic {'PASS' if r2.get('pass') else 'FAIL on ' + ', '.join(still)}")
+        e = entry_of(e["asset_id"])
+        if not r2.get("pass"):
+            e["critic_flags"] = {**e.get("critic_flags", {}),
+                                 **{k: f"after re-draft on the critic's correction: {(v.get('problem') or '')[:200]}"
+                                    for k, v in r2["joints"].items() if not v.get("motion_ok") and not v.get("not_judged")}}
+    e["critic_retry"] = {"joints": names, "corrections": todo, "outcome": outcome}
+    save_queue_entry(e)
+    return names
 
 
 def mixed_body_test(asset_id: str) -> str:
@@ -587,6 +837,29 @@ def mixed_body_test(asset_id: str) -> str:
     record(e, "soft", kind="mixed", verdict=verdict[:160], soft=len(rec["soft"]), rigid=len(rec["rigid"]))
     e["mixed_body"] = {"verdict": verdict[:300], "pass": verdict.startswith("MIXED PASS"),
                        "summary": str(summary.relative_to(REPO)) if summary.exists() else None}
+    save_queue_entry(e)
+    return verdict
+
+
+def chess_play_test(asset_id: str) -> str:
+    """A chess set in PhysX: the pieces rest on their squares and the opening
+    moves play (verify_chess_set). One Kit at a time: the machine's slot."""
+    from asset_review_hub import save_queue_entry
+    from processing import record
+
+    summary = REPO / "workspace" / "asset_animations" / asset_id / "chess" / "summary.json"
+    summary.unlink(missing_ok=True)
+    cmd = (f"source {REPO}/scripts/isaac_slot.sh >/dev/null; "
+           f"timeout 1500 {ISAAC_PYTHON} {REPO}/scripts/verify_chess_set.py {asset_id}")
+    out = subprocess.run(["bash", "-c", cmd], cwd=REPO, capture_output=True, text=True)
+    line = next((ln for ln in out.stdout.splitlines() if ln.startswith("CHESS ")), None)
+    verdict = line or f"CHESS FAIL {asset_id}: the play test produced no verdict (exit {out.returncode})"
+    e = entry_of(asset_id)
+    record(e, "verify", chess=verdict[:160])
+    e["chess_play"] = {"verdict": verdict[:300], "pass": verdict.startswith("CHESS PASS"),
+                       "summary": str(summary.relative_to(REPO)) if summary.exists() else None,
+                       "video": f"workspace/asset_animations/{asset_id}/chess/chess.mp4"
+                       if (summary.parent / "chess.mp4").exists() else None}
     save_queue_entry(e)
     return verdict
 
@@ -721,6 +994,10 @@ def process(staged: list[Path], library_root: Path, args, report: dict, incoming
             short = {k: v["missing"] for k, v in bc.items() if not v["ok"]}
             print(f"behaviors  {a}: " + ("all met" if not short else "; ".join(
                 f"{k} lacks {', '.join(m) or 'a draft'}" for k, m in short.items())))
+        chess = chess_convention(a)
+        if chess:
+            report["assets"][a]["chess"] = chess
+            print(f"chess      {a}: {chess}")
     # 7c. capability gaps: per class, what the conventions do not yet cover
     gaps = class_gaps(ids)
     report["class_coverage"] = gaps["classes"]

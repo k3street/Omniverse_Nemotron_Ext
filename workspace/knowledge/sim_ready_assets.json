@@ -2647,6 +2647,1271 @@
      }
     }
    }
+  },
+  {
+   "asset_id": "b1559_ugg",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/b1559_ugg/b1559_ugg.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/B1559_UGG.usdz",
+   "category": "mixed_body_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-07",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A single pink/blush sheepskin-style winter boot (UGG Bailey Bow look) with a white fleece cuff at the top, two decorative bows on the back/side of the shaft, a branded heel label, and a thick lug rubber outsole.",
+      "confidence": 0.7
+     }
+    },
+    "audit_sampled": true
+   },
+   "soft_parts": {
+    "base": "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_25/Object_23",
+    "rigid": [
+     "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_25/Object_23",
+     "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_5/Object_3",
+     "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_2/Object_0"
+    ],
+    "hidden": [
+     "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_5/Object_3"
+    ],
+    "soft": [
+     {
+      "body": "/World/B1559Ugg/SoftBodies/Object_1",
+      "source": "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_3/Object_1",
+      "role": "boot upper / shaft and vamp (suede body)",
+      "material": "leather",
+      "kind": "cloth",
+      "riders": [
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_4/Object_2",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_14/Object_12",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_15/Object_13",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_11/Object_9",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_16/Object_14",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_17/Object_15",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_18/Object_16",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_20/Object_18",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_19/Object_17",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_6/Object_4",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_8/Object_6",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_9/Object_7",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_13/Object_11",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_7/Object_5",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_12/Object_10",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_21/Object_19",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_22/Object_20",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_23/Object_21",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_10/Object_8",
+       "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_24/Object_22"
+      ],
+      "attached_to": "/World/B1559Ugg/Meshes/Sketchfab_model/B1559_UGG_OBJ_cleaner_materialmerger_gles/Object_25/Object_23",
+      "note": null
+     }
+    ],
+    "notes": [
+     "3 rigid part(s), 1 soft, 20 trim(s) riding on them",
+     "hidden internal heel counter / footbed block inside boot: hidden inside, kept rigid with the base"
+    ]
+   }
+  },
+  {
+   "asset_id": "chess_2",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_2/chess_2.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Games/Chess(2).usdz",
+   "category": "set_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-08",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, chess_playable, chess_played, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "chess_playable",
+      "chess_played",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": null,
+      "confidence": null
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-08",
+    "method": "live_physx_play_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "play": {
+     "settled": true,
+     "max_off_after_settle_m": 0.004,
+     "board_moved_m": 0.0020001218164297004,
+     "moves": [
+      {
+       "from": "e2",
+       "to": "e4",
+       "ok": true,
+       "landed": "e4",
+       "off_m": 0.0,
+       "tilt_deg": 0.0,
+       "piece": "________________________________3__3D_Walnut___Unfinished_0"
+      },
+      {
+       "from": "e7",
+       "to": "e5",
+       "ok": true,
+       "landed": "e5",
+       "off_m": 0.0,
+       "tilt_deg": 0.0,
+       "piece": "________________________________1___1___2__3D_Walnut___Unfinished__1__0"
+      },
+      {
+       "from": "g1",
+       "to": "f3",
+       "ok": true,
+       "landed": "f3",
+       "off_m": 0.0,
+       "tilt_deg": 0.0,
+       "piece": "__________________________1__3D_Walnut___Unfinished_0"
+      }
+     ],
+     "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "fen_expected": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "disturbed": {},
+     "played": true,
+     "square_m": 0.04145
+    }
+   }
+  },
+  {
+   "asset_id": "chess_board",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_board/chess_board.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Games/Chess_Board.usdz",
+   "category": "set_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-08",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, chess_playable, chess_played, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "chess_playable",
+      "chess_played",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": null,
+      "confidence": null
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-08",
+    "method": "live_physx_play_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "play": {
+     "settled": true,
+     "max_off_after_settle_m": 0.0075,
+     "board_moved_m": 0.0020000198893031546,
+     "moves": [
+      {
+       "from": "e2",
+       "to": "e4",
+       "ok": true,
+       "landed": "e4",
+       "off_m": 0.0,
+       "tilt_deg": 2.8,
+       "piece": "W_Pawn_4_02___Default_0"
+      },
+      {
+       "from": "e7",
+       "to": "e5",
+       "ok": true,
+       "landed": "e5",
+       "off_m": 0.0,
+       "tilt_deg": 2.9,
+       "piece": "B_Pawn_4_01___Default_0"
+      },
+      {
+       "from": "g1",
+       "to": "f3",
+       "ok": true,
+       "landed": "f3",
+       "off_m": 0.0,
+       "tilt_deg": 2.9,
+       "piece": "W_Knight_1_02___Default_0"
+      }
+     ],
+     "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "fen_expected": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "disturbed": {},
+     "played": true,
+     "square_m": 0.04227
+    }
+   }
+  },
+  {
+   "asset_id": "chess_set",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_set/chess_set.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Games/Chess_Set.usdz",
+   "category": "set_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-08",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, chess_playable, chess_played, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "chess_playable",
+      "chess_played",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": null,
+      "confidence": null
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-08",
+    "method": "live_physx_play_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "play": {
+     "settled": true,
+     "max_off_after_settle_m": 0.0077,
+     "board_moved_m": 0.001999901382788949,
+     "moves": [
+      {
+       "from": "e2",
+       "to": "e4",
+       "ok": true,
+       "landed": "e4",
+       "off_m": 0.0,
+       "tilt_deg": 1.9,
+       "piece": "Piece_01_012_Black_Player_001_0"
+      },
+      {
+       "from": "e7",
+       "to": "e5",
+       "ok": true,
+       "landed": "e5",
+       "off_m": 0.0,
+       "tilt_deg": 1.1,
+       "piece": "Piece_01_003_White_player_001_0"
+      },
+      {
+       "from": "g1",
+       "to": "f3",
+       "ok": true,
+       "landed": "f3",
+       "off_m": 0.0,
+       "tilt_deg": 0.7,
+       "piece": "Piece_03_003_Black_Player_001_0"
+      }
+     ],
+     "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "fen_expected": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "disturbed": {},
+     "played": true,
+     "square_m": 0.04099
+    }
+   }
+  },
+  {
+   "asset_id": "chess_set_2",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_set_2/chess_set_2.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Games/Chess_Set(2).usdz",
+   "category": "set_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-08",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, chess_playable, chess_played, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "chess_playable",
+      "chess_played",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": null,
+      "confidence": null
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-08",
+    "method": "live_physx_play_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "play": {
+     "settled": true,
+     "max_off_after_settle_m": 0.0056,
+     "board_moved_m": 0.002000037581725304,
+     "moves": [
+      {
+       "from": "e2",
+       "to": "e4",
+       "ok": true,
+       "landed": "e4",
+       "off_m": 0.0001,
+       "tilt_deg": 1.0,
+       "piece": "Board_Material_001_0_part04"
+      },
+      {
+       "from": "e7",
+       "to": "e5",
+       "ok": true,
+       "landed": "e5",
+       "off_m": 0.0002,
+       "tilt_deg": 1.0,
+       "piece": "Board_Material_002_0_part04"
+      },
+      {
+       "from": "g1",
+       "to": "f3",
+       "ok": true,
+       "landed": "f3",
+       "off_m": 0.0001,
+       "tilt_deg": 0.2,
+       "piece": "Board_Material_008_0_part01"
+      }
+     ],
+     "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "fen_expected": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "disturbed": {},
+     "played": true,
+     "square_m": 0.0455
+    }
+   }
+  },
+  {
+   "asset_id": "chess",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess/chess.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Games/Chess.usdz",
+   "category": "set_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-08",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, chess_playable, chess_played, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "chess_playable",
+      "chess_played",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A chess set: a square wooden checkered board with a border, holding a full complement of light and dark chess pieces (pawns, rooks, knights, bishops, queens, kings) arranged on the two end ranks.",
+      "confidence": 0.72
+     }
+    },
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-10-08",
+    "method": "live_physx_play_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "play": {
+     "settled": true,
+     "max_off_after_settle_m": 0.0013,
+     "board_moved_m": 0.0020000368851231264,
+     "moves": [
+      {
+       "from": "e2",
+       "to": "e4",
+       "ok": true,
+       "landed": "e4",
+       "off_m": 0.0,
+       "tilt_deg": 0.0,
+       "piece": "instance_9"
+      },
+      {
+       "from": "e7",
+       "to": "e5",
+       "ok": true,
+       "landed": "e5",
+       "off_m": 0.0,
+       "tilt_deg": 0.0,
+       "piece": "Material2"
+      },
+      {
+       "from": "g1",
+       "to": "f3",
+       "ok": true,
+       "landed": "f3",
+       "off_m": 0.0,
+       "tilt_deg": 0.9,
+       "piece": "instance_6"
+      }
+     ],
+     "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "fen_expected": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "disturbed": {},
+     "played": true,
+     "square_m": 0.045
+    }
+   }
+  },
+  {
+   "asset_id": "chess_set_1",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_set_1/chess_set_1.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Games/Chess_Set(1).usdz",
+   "category": "set_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-08",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, chess_playable, chess_played, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "chess_playable",
+      "chess_played",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A chessboard with a complete 32-piece chess set arranged in the standard starting position, rendered from four angles.",
+      "confidence": 0.78
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-08",
+    "method": "live_physx_play_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "play": {
+     "settled": true,
+     "max_off_after_settle_m": 0.0033,
+     "board_moved_m": 0.0020000362377174583,
+     "moves": [
+      {
+       "from": "e2",
+       "to": "e4",
+       "ok": true,
+       "landed": "e4",
+       "off_m": 0.0,
+       "tilt_deg": 2.8,
+       "piece": "Pawn_2_Pawn_2_0_part03"
+      },
+      {
+       "from": "e7",
+       "to": "e5",
+       "ok": true,
+       "landed": "e5",
+       "off_m": 0.0,
+       "tilt_deg": 2.8,
+       "piece": "Pawn_1_Pawn_1_0_part04"
+      },
+      {
+       "from": "g1",
+       "to": "f3",
+       "ok": true,
+       "landed": "f3",
+       "off_m": 0.0,
+       "tilt_deg": 2.0,
+       "piece": "Knight_2_Knight_2_0_part00"
+      }
+     ],
+     "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "fen_expected": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "disturbed": {},
+     "played": true,
+     "square_m": 0.04047
+    }
+   }
+  },
+  {
+   "asset_id": "chess_set_595e2f",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/chess_set_595e2f/chess_set_595e2f.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Games/Chess_set.usdz",
+   "category": "set_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-08",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, chess_playable, chess_played, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "chess_playable",
+      "chess_played",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A wooden chess board with a raised/molded border and a complete set of 32 light and dark chess pieces arranged in the standard starting array.",
+      "confidence": 0.78
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-08",
+    "method": "live_physx_play_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "play": {
+     "settled": true,
+     "max_off_after_settle_m": 0.0047,
+     "board_moved_m": 0.0019772345194878443,
+     "moves": [
+      {
+       "from": "e2",
+       "to": "e4",
+       "ok": true,
+       "landed": "e4",
+       "off_m": 0.0,
+       "tilt_deg": 1.7,
+       "piece": "Object_0"
+      },
+      {
+       "from": "e7",
+       "to": "e5",
+       "ok": true,
+       "landed": "e5",
+       "off_m": 0.0,
+       "tilt_deg": 1.8,
+       "piece": "Object_28"
+      },
+      {
+       "from": "g1",
+       "to": "f3",
+       "ok": true,
+       "landed": "f3",
+       "off_m": 0.0001,
+       "tilt_deg": 0.6,
+       "piece": "Object_38"
+      }
+     ],
+     "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "fen_expected": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "disturbed": {},
+     "played": true,
+     "square_m": 0.04401
+    }
+   }
+  },
+  {
+   "asset_id": "samurai_chess",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/samurai_chess/samurai_chess.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Games/Samurai_chess.usdz",
+   "category": "set_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-08",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, chess_playable, chess_played, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "chess_playable",
+      "chess_played",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A chess set: a square checkered board with low side rails and light corner caps, fully populated with 32 ornate, spiky pieces in the standard starting array, consistent with a stylized samurai/fantasy theme.",
+      "confidence": 0.72
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-08",
+    "method": "live_physx_play_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "play": {
+     "settled": true,
+     "max_off_after_settle_m": 0.0069,
+     "board_moved_m": 0.0020002099248136967,
+     "moves": [
+      {
+       "from": "e2",
+       "to": "e4",
+       "ok": true,
+       "landed": "e4",
+       "off_m": 0.0,
+       "tilt_deg": 0.0,
+       "piece": "b_P4_bw_0"
+      },
+      {
+       "from": "e7",
+       "to": "e5",
+       "ok": true,
+       "landed": "e5",
+       "off_m": 0.0,
+       "tilt_deg": 0.0,
+       "piece": "b_P5_2_bw2_0"
+      },
+      {
+       "from": "g1",
+       "to": "f3",
+       "ok": true,
+       "landed": "f3",
+       "off_m": 0.0,
+       "tilt_deg": 0.0,
+       "piece": "b_D2_bw_0"
+      }
+     ],
+     "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "fen_expected": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R",
+     "disturbed": {},
+     "played": true,
+     "square_m": 0.0407
+    }
+   }
+  },
+  {
+   "asset_id": "apple_iphone_13_pro_max",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/apple_iphone_13_pro_max/apple_iphone_13_pro_max.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/Apple_iPhone_13_Pro_Max.usdz",
+   "category": "articulated_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-09",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, run_current, held_together, reached_travel, behaviours, motion_critic, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)",
+     "claude-opus-5 (motion critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "run_current",
+      "held_together",
+      "reached_travel",
+      "behaviours",
+      "motion_critic",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A smartphone modeled as an Apple iPhone 13 Pro Max: rounded-rectangle slab with flat stainless-style side rails, a triple-camera square bump and Apple logo on the silver/blue back, and a notched front display showing the blue iPhone 13 Pro wallpaper.",
+      "confidence": 0.72
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-09",
+    "method": "live_physx_drive_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "articulation": {
+     "joint": "press_05_volume_up_button_on_left",
+     "unit": "m",
+     "commanded_m": 0.0003000000142492354,
+     "measured_m": 0.0003,
+     "position_error_m": 0.0,
+     "max_position_error_m": 0.005,
+     "base_drift_m": 0.0,
+     "max_base_drift_m": 0.01,
+     "joints": [
+      {
+       "joint": "press_05_volume_up_button_on_left",
+       "type": "prismatic",
+       "commanded": 0.0003000000142492354,
+       "measured": 0.0003,
+       "error": 0.0,
+       "unit": "m",
+       "pass": true
+      },
+      {
+       "joint": "press_10_volume_down_button_on_le",
+       "type": "prismatic",
+       "commanded": 0.0003000000142492354,
+       "measured": 0.0003,
+       "error": 0.0,
+       "unit": "m",
+       "pass": true
+      },
+      {
+       "joint": "slide_13_ring_silent_switch_in_sl",
+       "type": "prismatic",
+       "commanded": -0.0020000000949949026,
+       "measured": -0.002,
+       "error": 0.0,
+       "unit": "m",
+       "pass": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "asset_id": "insma_wire_stripper_cutter_tool",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/insma_wire_stripper_cutter_tool/insma_wire_stripper_cutter_tool.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Tools/INSMA_Wire_Stripper_Cutter_Tool.usdz",
+   "category": "articulated_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-09",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, run_current, held_together, reached_travel, behaviours, motion_critic, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)",
+     "claude-opus-5 (motion critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "run_current",
+      "held_together",
+      "reached_travel",
+      "behaviours",
+      "motion_critic",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A hand tool resembling a wire stripper/cutter (pliers family): a dark steel body with yellow printed gauge markings and stripping notches, a pivot joint, and two red grip handles (one clearly ribbed, the other smoother/rounded).",
+      "confidence": 0.6
+     }
+    },
+    "audit_sampled": true
+   },
+   "verification": {
+    "date": "2026-10-09",
+    "method": "live_physx_drive_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "articulation": {
+     "joint": "pivot",
+     "unit": "deg",
+     "commanded_m": -28.5,
+     "measured_m": -28.4815,
+     "position_error_m": 0.0185,
+     "max_position_error_m": 2.0,
+     "base_drift_m": 0.0,
+     "max_base_drift_m": 0.01,
+     "joints": [
+      {
+       "joint": "pivot",
+       "type": "revolute",
+       "commanded": -28.5,
+       "measured": -28.4815,
+       "error": 0.0185,
+       "unit": "deg",
+       "pass": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "asset_id": "platform_trolley",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/platform_trolley/platform_trolley.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Medical/Platform_Trolley.usdz",
+   "category": "articulated_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-09",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, run_current, held_together, reached_travel, behaviours, motion_critic, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)",
+     "claude-opus-5 (motion critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "run_current",
+      "held_together",
+      "reached_travel",
+      "behaviours",
+      "motion_critic",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A flatbed platform push cart: a rectangular dark deck in a red steel frame, with a tall tubular red push handle at one end and four casters underneath.",
+      "confidence": 0.8
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-09",
+    "method": "live_physx_drive_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "articulation": {
+     "joint": "hinge_02_tubular_push_handle_fram",
+     "unit": "deg",
+     "commanded_m": -90.0,
+     "measured_m": -90.0,
+     "position_error_m": 0.0,
+     "max_position_error_m": 2.0,
+     "base_drift_m": 0.0027,
+     "max_base_drift_m": 0.01,
+     "joints": [
+      {
+       "joint": "hinge_02_tubular_push_handle_fram",
+       "type": "revolute",
+       "commanded": -90.0,
+       "measured": -90.0,
+       "error": 0.0,
+       "unit": "deg",
+       "pass": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "asset_id": "pliers_1",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/pliers_1/pliers_1.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Tools/Pliers(1).usdz",
+   "category": "articulated_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-09",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, run_current, held_together, reached_travel, behaviours, motion_critic, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)",
+     "claude-opus-5 (motion critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "run_current",
+      "held_together",
+      "reached_travel",
+      "behaviours",
+      "motion_critic",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A pair of combination/lineman's pliers: dark steel head with gripping jaws, cutter and pivot rivet, plus two red insulated plastic-dipped handles, shown from four orbit angles.",
+      "confidence": 0.8
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-09",
+    "method": "live_physx_drive_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "articulation": {
+     "joint": "pivot",
+     "unit": "deg",
+     "commanded_m": 40.5,
+     "measured_m": 40.4737,
+     "position_error_m": 0.0263,
+     "max_position_error_m": 2.0,
+     "base_drift_m": 0.0,
+     "max_base_drift_m": 0.01,
+     "joints": [
+      {
+       "joint": "pivot",
+       "type": "revolute",
+       "commanded": 40.5,
+       "measured": 40.4737,
+       "error": 0.0263,
+       "unit": "deg",
+       "pass": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "asset_id": "scissor",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/scissor/scissor.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Scissor.usdz",
+   "category": "articulated_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-09",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, mass, run_current, held_together, reached_travel, behaviours, motion_critic, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)",
+     "claude-opus-5 (motion critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "mass",
+      "run_current",
+      "held_together",
+      "reached_travel",
+      "behaviours",
+      "motion_critic",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A pair of scissors (two pivoting blades with looped finger handles, visible pivot screw), shown in four rotated views lying flat.",
+      "confidence": 0.72
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-09",
+    "method": "live_physx_drive_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "articulation": {
+     "joint": "pivot",
+     "unit": "deg",
+     "commanded_m": -54.0,
+     "measured_m": -53.965,
+     "position_error_m": 0.035,
+     "max_position_error_m": 2.0,
+     "base_drift_m": 0.0,
+     "max_base_drift_m": 0.01,
+     "joints": [
+      {
+       "joint": "pivot",
+       "type": "revolute",
+       "commanded": -54.0,
+       "measured": -53.965,
+       "error": 0.035,
+       "unit": "deg",
+       "pass": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "asset_id": "vintage_desk_lamp",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/vintage_desk_lamp/vintage_desk_lamp.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/vintage_desk_lamp.usdz",
+   "category": "articulated_verified",
+   "audit": {
+    "ready": true,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-09",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, run_current, held_together, reached_travel, behaviours, motion_critic, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)",
+     "claude-opus-5 (motion critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "run_current",
+      "held_together",
+      "reached_travel",
+      "behaviours",
+      "motion_critic",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A banker's-style desk lamp: a dome/wedge-shaped pale green (glass-like, marbled) shade mounted on a bracket atop a slender dark brass stem with a stepped round weighted base, with a thin pull chain hanging from the shade/socket area.",
+      "confidence": 0.72
+     }
+    }
+   },
+   "verification": {
+    "date": "2026-10-09",
+    "method": "live_physx_drive_test",
+    "simulator": "Isaac Sim 6 / PhysX",
+    "articulation": {
+     "joint": "press_11_rotary_pull_switch_shaft",
+     "unit": "m",
+     "commanded_m": -0.004000000189989805,
+     "measured_m": -0.004,
+     "position_error_m": 0.0,
+     "max_position_error_m": 0.005,
+     "base_drift_m": 0.0,
+     "max_base_drift_m": 0.01,
+     "joints": [
+      {
+       "joint": "press_11_rotary_pull_switch_shaft",
+       "type": "prismatic",
+       "commanded": -0.004000000189989805,
+       "measured": -0.004,
+       "error": 0.0,
+       "unit": "m",
+       "pass": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "asset_id": "capped_permanent_marker_pens",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/capped_permanent_marker_pens/capped_permanent_marker_pens.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Misc/Capped_Permanent_Marker_Pens.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-09",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "A row of 13 capped marker pens (Sharpie-style fine point markers) with white/light-grey barrels, printed labels, and colored caps in a rainbow of hues, arranged side by side in a single line.",
+      "confidence": 0.62
+     }
+    },
+    "audit_sampled": true
+   }
   }
  ]
 }

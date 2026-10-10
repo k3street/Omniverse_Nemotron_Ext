@@ -21,6 +21,7 @@ re-runs them.
 from __future__ import annotations
 
 import functools
+import re
 import json
 import subprocess
 from datetime import datetime
@@ -33,10 +34,10 @@ RULES = {
     "ingest": "2026-10-04",      # prim names keep only characters USD takes
     "classify": "2026-10-04",    # the VLM reports what the object does (functions)
     "file": "2026-10-04",        # wheelchair / power_wheelchair classes, Mobility
-    "articulate": "2026-10-05d",  # see TIERS; set bodies off; press-fits filtered; mirrored meshes unmirrored
-    "behaviors": "2026-10-05c",  # motor, wheeled_base (driven, or pushed on casters with forks; split wheels one body), gate; not internal ones
-    "verify": "2026-10-06",      # close-up per joint; integrity of every part (fixed joints, press fits, loose bodies)
-    "critic": "2026-10-06",      # four-frame close-ups, unseen is not judged, completeness, whole-video check; judge errors never prune
+    "articulate": "2026-10-09",  # + sets of articulable copies split into assets; links massed by volume; set bodies from the survey  # see TIERS; set bodies off; press-fits filtered; mirrored meshes unmirrored
+    "behaviors": "2026-10-08",   # + chess sets: board grid, piece identities, starting FEN (chess_board)  # motor, wheeled_base (driven, or pushed on casters with forks; split wheels one body), gate; not internal ones
+    "verify": "2026-10-09b",     # + a wide view of the whole run recorded beside the close-ups  # hand-sized tools held in a hand while driven  # chess sets: settle on their squares, 1. e4 e5 2. Nf3 carried and read back; close-up per joint; integrity of every part
+    "critic": "2026-10-09b",     # + whole-run view from wide frames only, an unsure fault counts, a still root overrides "it moved"  # the judge states a correction and a failed joint is re-drafted on it once; pins hinged about and whole-tool uses are not missing joints; whole video cropped to the object, an unsure fault noted not counted  # four-frame close-ups, unseen is not judged, completeness; judge errors never prune
     "soft": "2026-10-07",        # cloth proxy drape, squish, cable; mixed bodies: per-part deformables, drop test
     "rig": "2026-10-04",         # character rigs: detected, or a humanoid autorig + pose check
     "survey": "2026-10-06",      # moulded-in movers split and surveyed again; unmirrored, normals blocked; manual; pivot_toward
@@ -52,7 +53,7 @@ TIERS = {
     "rotors": "2026-10-04",       # rotors are spindles
     "buttons": "2026-10-03",      # keys on the deck they sit in; key split
     "generic": "2026-10-04",      # wheeled base: forks swivel, rims ride, casters
-    "survey": "2026-10-05g",      # + wheels round, forks not (swapped by shape); body a substantial still part; riders on what they touch; long parts pinned at an end, edges not faces; edge hinges: axis from geometry (leaf plane, beam horizontal); housings by enclosure; forks swivel; copies jointed each; pin toward a named part; parents touch their parts; housings hand motion to the leaf on them; pin on a face, recessed lids open away, housings held back; body = what parts move against; spin about the symmetry axis; slides out the near side; merged movers held back; sets
+    "survey": "2026-10-09",       # + hinges about the pin that joins them; fasteners are small; shafts spin about their length; rack-driven parts follow the worm (couple); the critic's corrections honoured  # wheels round, forks not (swapped by shape); body a substantial still part; riders on what they touch; long parts pinned at an end, edges not faces; edge hinges: axis from geometry (leaf plane, beam horizontal); housings by enclosure; forks swivel; copies jointed each; pin toward a named part; parents touch their parts; housings hand motion to the leaf on them; pin on a face, recessed lids open away, housings held back; body = what parts move against; spin about the symmetry axis; slides out the near side; merged movers held back; sets
     "door": "2026-10-02", "watch": "2026-10-02", "turntable": "2026-10-02", "cabinet": "2026-10-02",
     "temples": "2026-10-02", "thread": "2026-10-02", "plunger": "2026-10-02",
 }
@@ -105,6 +106,7 @@ def _prior(entry: dict) -> dict:
 
 
 SOFT_MATERIALS = {"fabric_cotton", "foam_polyurethane", "leather", "paper_kraft"}
+DECAL = re.compile(r"\b(decal|label|sticker|marking|print(ed|ing)?|pad|felt|logo|tag)\b", re.I)
 
 
 def soft_parts(entry: dict) -> dict:
@@ -125,9 +127,21 @@ def soft_parts(entry: dict) -> dict:
         # not this asset was surveyed or the classifier said so
         kind = kind or prior.get("soft_kind", "cloth")
         parts += list(prior["soft_parts"])
-    for p in (entry.get("part_survey") or {}).get("parts") or []:
+    survey_parts = (entry.get("part_survey") or {}).get("parts") or []
+    big = max([float((entry.get("report") or {}).get("max_dim_m") or 0.0)]
+              + [max(p.get("size_m") or [0.0]) for p in survey_parts])
+    for p in survey_parts:
         role = p.get("role") or p["path"].split("/")[-1]
+        size = p.get("size_m") or [0.0, 0.0, 0.0]
         if p.get("material") in SOFT_MATERIALS:
+            # a felt pad under a chess piece, a paper decal, a label: soft in
+            # material, nothing in the simulation (tiny beside the object, or
+            # flat on another part)
+            tiny = big > 0 and max(size) < 0.05 * big
+            flat = min(size) < 0.001 and DECAL.search(role)
+            if tiny or flat:
+                accessories.append(role)
+                continue
             parts.append(role)                   # a soft body: an upper, a cushion, a strap
         elif p.get("motion") == "flex":
             # a cable, a cord, a hose on a rigid object: wrong as a rigid rod,
@@ -159,6 +173,8 @@ def articulated(entry: dict) -> bool:
 
 def applicable(entry: dict) -> list[str]:
     """The stages that apply to this asset."""
+    if entry.get("split_into"):
+        return []                             # split into one asset per object: those carry on, not this
     prior = _prior(entry)
     stages = ["ingest", "classify", "file"]
     meshes = (entry.get("report") or {}).get("structure", {}).get("meshes", 0)
@@ -173,12 +189,14 @@ def applicable(entry: dict) -> list[str]:
     if cls == "human_character" or (entry.get("report") or {}).get("skeleton"):
         stages.append("rig")
     if articulated(entry) or prior.get("mechanism_templates") or prior.get("behaviors") \
-            or (prior.get("articulable") and not prior.get("deformable")):
-        stages.append("articulate")
-    if prior.get("behaviors") or (entry.get("vlm") or {}).get("functions"):
-        stages.append("behaviors")
+            or (prior.get("articulable") and not prior.get("deformable")) or prior.get("multi_body"):
+        stages.append("articulate")           # a set of free bodies: its bodies follow the survey here
+    if prior.get("behaviors") or (entry.get("vlm") or {}).get("functions") or cls == "chess_set":
+        stages.append("behaviors")            # a chess set's board and pieces are its behaviour
     if articulated(entry):
         stages += ["verify", "critic"]
+    elif prior.get("game"):
+        stages.append("verify")               # a set is played in PhysX (verify_chess_set)
     if entry.get("deformable") or prior.get("deformable") or soft_parts(entry)["kind"]:
         stages.append("soft")                 # a whole soft body, or soft parts on a rigid one
     stages.append("approve")                  # last: on everything the stages before measured

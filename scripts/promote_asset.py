@@ -207,12 +207,17 @@ def land_in_library(entry: dict, category: str, reviewer: str) -> str:
         kids = default.GetChildren() if default else []
         prim = kids[0] if kids else default
     if prim and prim.IsValid():
-        prim.SetCustomDataByKey("simReady", {
+        # merged in: "simReady" is a dictionary that also holds behaviors,
+        # gates, soft parts and the chess board - replacing it wiped them
+        existing = prim.GetCustomDataByKey("simReady")
+        merged = dict(existing) if isinstance(existing, dict) else {}
+        merged.update({
             "category": category,
             "registry": "workspace/knowledge/sim_ready_assets.json",
             "verified": date.today().isoformat(),
             "reviewer": reviewer,
         })
+        prim.SetCustomDataByKey("simReady", merged)
         stage.GetRootLayer().Save()
     # thumbnail alongside
     thumb = entry.get("thumbnail")

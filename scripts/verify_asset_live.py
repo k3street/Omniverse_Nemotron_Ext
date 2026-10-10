@@ -382,7 +382,10 @@ def verify(asset_id: str, reg: dict) -> str:
                 if cd:
                     cd = dict(cd)
                     cd["category"] = entry["category"]
-                    p.SetCustomDataByKey("simReady", cd)
+                    _sr = p.GetCustomDataByKey("simReady")
+                    _sr = dict(_sr) if isinstance(_sr, dict) else {}
+                    _sr.update(cd)
+                    p.SetCustomDataByKey("simReady", _sr)
                     st.GetRootLayer().Save()
                     break
         except Exception:

@@ -56,9 +56,10 @@
       "deformable_verified",
       "character_rigged",
       "mixed_body_verified",
-      "mixed_body_unverified"
+      "mixed_body_unverified",
+      "set_verified"
      ],
-     "description": "articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class \u2014 sim-ready is unattainable from this file. deformable_unverified: soft-body class routed past rigid authoring (deformable APIs are PhysX-only; create_deformable_mesh applies the preset live at scene build/verification). deformable_verified: live soft-body evidence (drape/settle) within tolerance. character_rigged: UsdSkel rigged character \u2014 kinematic animated collider for navigation/interaction sims, never a dynamic rigid body; requires the skeleton record. mixed_body_verified: a rigid part with soft parts authored as PhysX deformables and attached to it, dropped in PhysX with the soft parts deforming and staying attached (soft_parts records which). mixed_body_unverified: authored, not yet dropped."
+     "description": "set_verified: a set of free bodies (a chess set) rested and played in PhysX: every piece settles on its square, scripted moves land where the convention says and the position reads back (verification.play records it). articulated_verified: joints exist AND live drive-response evidence meets the articulation criteria. articulated_unverified: joints authored, no live evidence yet. rigid_verified: single rigid body with live rest/contact evidence. rigid_only_baked: source file is a fused mesh of an articulable object class \u2014 sim-ready is unattainable from this file. deformable_unverified: soft-body class routed past rigid authoring (deformable APIs are PhysX-only; create_deformable_mesh applies the preset live at scene build/verification). deformable_verified: live soft-body evidence (drape/settle) within tolerance. character_rigged: UsdSkel rigged character \u2014 kinematic animated collider for navigation/interaction sims, never a dynamic rigid body; requires the skeleton record. mixed_body_verified: a rigid part with soft parts authored as PhysX deformables and attached to it, dropped in PhysX with the soft parts deforming and staying attached (soft_parts records which). mixed_body_unverified: authored, not yet dropped."
     },
     "scale_correction": {
      "type": "number",
@@ -191,6 +192,34 @@
      "if": {
       "properties": {
        "category": {
+        "const": "set_verified"
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "verification"
+      ],
+      "properties": {
+       "review": {
+        "properties": {
+         "approved": {
+          "const": true
+         }
+        }
+       },
+       "verification": {
+        "required": [
+         "play"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "category": {
         "const": "rigid_only_baked"
        }
       }
@@ -235,7 +264,8 @@
          "rigid_verified",
          "rigid_unverified",
          "articulated_verified",
-         "mixed_body_verified"
+         "mixed_body_verified",
+         "set_verified"
         ]
        },
        "review": {
@@ -378,11 +408,23 @@
      "type": "string",
      "enum": [
       "live_physx_drive_test",
-      "live_physx_drop_test"
+      "live_physx_drop_test",
+      "live_physx_play_test"
      ]
     },
     "simulator": {
      "type": "string"
+    },
+    "play": {
+     "type": "object",
+     "description": "A set played in PhysX: pieces settled on their squares (max_off_after_settle_m against 0.3 of a square), the moves carried and where each landed, the position read back from live poses against the one the moves give.",
+     "required": [
+      "settled",
+      "moves",
+      "fen_after",
+      "fen_expected",
+      "played"
+     ]
     },
     "articulation": {
      "type": "object",

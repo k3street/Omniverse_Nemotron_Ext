@@ -120,12 +120,15 @@ def stamp_usd(file_path: str, category: str, reviewer: str) -> str:
                     if c.GetTypeName() in ("Xform", "Scope", "")]
             if kids:
                 prim = kids[0]
-        prim.SetCustomDataByKey("simReady", {
+        _sr = prim.GetCustomDataByKey("simReady")
+        _sr = dict(_sr) if isinstance(_sr, dict) else {}
+        _sr.update({
             "category": category,
             "registry": "workspace/knowledge/sim_ready_assets.json",
             "verified": date.today().isoformat(),
             "reviewer": reviewer,
         })
+        prim.SetCustomDataByKey("simReady", _sr)
         stage.GetRootLayer().Save()
         return f"stamped {prim.GetPath()}"
     except Exception as e:
@@ -230,6 +233,7 @@ def draft_articulation(entry: dict) -> str:
             from survey_draft import propose_survey
             tmpl = dict(templates.get("survey") or {})
             tmpl["set"] = (entry.get("vlm") or {}).get("content_kind") == "object_set"
+            tmpl["corrections"] = entry.get("critic_corrections") or {}   # the motion critic's, per part
             spec, notes = propose_survey(stage, survey.get("root") or asset_root, survey, tmpl)
             spec["prim_path"] = asset_root
         else:
@@ -474,6 +478,23 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
             for p in massed:
                 p.GetAttribute("physics:mass").Set(p.GetAttribute("physics:mass").Get() * k)
             made.append({"mass_rescaled": round(total, 4), "to": round(total * k, 4)})
+        elif not massed:
+            # no drafter gave the links masses (only the door drafter does):
+            # the class's mass, shared out by each link's box volume, so the
+            # file says what it weighs and not only PhysX's density guess
+            from pxr import UsdGeom as _UG
+            links = [p for p in _Usd.PrimRange(stage.GetPrimAtPath(spec["prim_path"])) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+            cache = _UG.BBoxCache(_Usd.TimeCode.Default(), [_UG.Tokens.default_, _UG.Tokens.render])
+            vols = {}
+            for p in links:
+                sz = cache.ComputeWorldBound(p).ComputeAlignedRange().GetSize()
+                vols[p] = max(float(sz[0] * sz[1] * sz[2]), 1e-9)
+            if vols:
+                total = (rng[0] * rng[1]) ** 0.5
+                vsum = sum(vols.values())
+                for p, v in vols.items():
+                    UsdPhysics.MassAPI.Apply(p).CreateMassAttr().Set(round(max(0.005, total * v / vsum), 5))
+                made.append({"link_masses_authored_kg": round(total, 4), "links": len(vols)})
     stage.GetRootLayer().Save()
     entry["articulation_draft"] = spec_text
     entry["applied_fixes"] = entry.get("applied_fixes", []) + [
@@ -649,6 +670,53 @@ def page(body: str) -> bytes:
 <main>{body}</main></body></html>""".encode()
 
 
+def motion_critic_html(e: dict) -> str:
+    """What the motion critic saw in the animation: each joint's verdict with
+    its reason, what the survey said should move and did not, and the
+    close-up strips it judged from."""
+    mq = e.get("motion_qa")
+    if not mq:
+        return ""
+    aid = e["asset_id"]
+    colour = "#3fb950" if mq.get("pass") else "#f85149"
+    rows = []
+    for name, v in (mq.get("joints") or {}).items():
+        ok = v.get("motion_ok")
+        state = "not judged" if v.get("not_judged") else "ok" if ok else "FAIL"
+        reason = v.get("problem") or v.get("motion_seen") or ""
+        strip = ANIM_DIR / aid / "motion_qa" / f"{name.split(' (')[0]}.png"
+        img = (f'<br><img src="/anim/{aid}/motion_qa/{strip.name}" style="max-width:100%;border-radius:6px">'
+               if strip.exists() else "")
+        corr = v.get("correction") or {}
+        fix = (f' &rarr; correction: {html.escape(corr.get("kind", ""))}'
+               + "".join(f', {k} {html.escape(corr[k])}' for k in ("axis", "pivot") if corr.get(k) and corr[k] != "none")
+               + (f' ({html.escape(str(corr.get("note"))[:160])})' if corr.get("note") else "")
+               if corr and corr.get("kind") not in (None, "none") else "")
+        rows.append(f'<p class="meta"><b style="color:{"#3fb950" if ok else "#f85149" if state == "FAIL" else "#8b949e"}">'
+                    f'{html.escape(state)}</b> {html.escape(name)}: {html.escape(str(reason)[:400])}{fix}</p>{img}')
+    comp = mq.get("completeness") or {}
+    if comp and not comp.get("ok"):
+        rows.append('<p class="meta">not jointed, though it should move: '
+                    + html.escape("; ".join(str(m)[:120] for m in comp.get("missing") or [])) + "</p>")
+    whole = mq.get("whole") or {}
+    if whole:
+        rows.append(f'<p class="meta">whole video: {html.escape(str(whole.get("problem") or whole.get("verdict") or whole)[:300])}</p>')
+    sheet = ANIM_DIR / aid / "motion_qa" / "whole_video.png"
+    if sheet.exists():
+        rows.append(f'<img src="/anim/{aid}/motion_qa/whole_video.png" style="max-width:100%;border-radius:6px">')
+    retry = e.get("critic_retry") or {}
+    if retry:
+        rows.append('<p class="meta">re-drafted on the critic\'s correction (' + html.escape(", ".join(
+            f"{v.get('joint')}: {' '.join(x for x in (v.get('axis'), v.get('pivot')) if x)}" for v in (retry.get("corrections") or {}).values()))
+            + f'): {html.escape(str(retry.get("outcome"))[:200])}</p>')
+    flags = e.get("critic_flags") or {}
+    if flags:
+        rows.append('<p class="meta">flagged for a person: ' + html.escape("; ".join(f"{k}: {str(v)[:160]}" for k, v in flags.items())) + "</p>")
+    return (f'<details open style="margin:8px 0"><summary class="meta">Motion critic ({html.escape(str(mq.get("judge") or ""))}, '
+            f'{html.escape(str(mq.get("date") or ""))}): <b style="color:{colour}">{"PASS" if mq.get("pass") else "FAIL"}</b>'
+            f'</summary>{"".join(rows)}</details>')
+
+
 def mixed_body_html(e: dict) -> str:
     """A mixed body: which parts are deformables on which rigid part, and
     how the PhysX drop went."""
@@ -665,6 +733,22 @@ def mixed_body_html(e: dict) -> str:
     return (f'<details style="margin:8px 0"><summary class="meta">Mixed body: <b style="color:{colour}">'
             f'{html.escape(verdict[:90])}</b></summary><p class="meta">soft parts: {html.escape(parts)}</p>'
             f'<p class="meta">{html.escape("; ".join(sbp.get("notes", [])))}</p>{img}</details>')
+
+
+def chess_play_html(e: dict) -> str:
+    """A chess set played in PhysX: the verdict, the video, the frames."""
+    cp = e.get("chess_play")
+    if not cp:
+        return ""
+    aid = e["asset_id"]
+    run = REPO / "workspace" / "asset_animations" / aid / "chess"
+    colour = "#3fb950" if cp.get("pass") else "#f85149"
+    video = (f'<video controls muted loop playsinline style="max-width:100%;border-radius:6px" '
+             f'src="/anim/{aid}/chess/chess.mp4"></video>' if (run / "chess.mp4").exists() else "")
+    sheet = (f'<br><img src="/anim/{aid}/chess/contact_sheet.png" style="max-width:100%;border-radius:6px">'
+             if (run / "contact_sheet.png").exists() else "")
+    return (f'<details open style="margin:8px 0"><summary class="meta">Played in PhysX: <b style="color:{colour}">'
+            f'{html.escape((cp.get("verdict") or "")[:140])}</b></summary>{video}{sheet}</details>')
 
 
 def approval_html(e: dict) -> str:
@@ -815,8 +899,8 @@ def render_entry(e: dict) -> str:
 </form>"""
     return (f'<div class="card">{thumb}<h2>{aid}{badge}</h2>'
             f'<div class="path">{html.escape(e.get("file", ""))}</div>'
-            f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{mixed_body_html(e)}{approval_html(e)}{review_note}{actions}'
-            f'{animation_html(aid)}{arti_editor}{reclass}'
+            f'<p class="meta">{meta}</p>{cert}{fixes}{callouts}{mixed_body_html(e)}{chess_play_html(e)}{approval_html(e)}{review_note}{actions}'
+            f'{animation_html(aid)}{motion_critic_html(e)}{arti_editor}{reclass}'
             f'<div style="clear:both"></div></div>')
 
 

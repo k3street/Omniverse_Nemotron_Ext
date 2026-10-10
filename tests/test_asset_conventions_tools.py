@@ -275,6 +275,14 @@ def test_a_shoe_with_a_soft_upper_is_not_a_rigid_body(monkeypatch):
         {"id": 1, "path": "/M/case", "role": "case", "material": "plastic_abs", "motion": "none"},
         {"id": 2, "path": "/M/lead", "role": "test lead cable", "material": "rubber_soft", "motion": "flex"}]}})
     assert meter["kind"] is None and meter["accessories"] == ["test lead cable"]    # a cable does not make it soft
+    # a felt pad and a paper decal on a chess set are not soft parts of it
+    chess = soft_parts({"report": {"max_dim_m": 0.42}, "part_survey": {"parts": [
+        {"id": 1, "path": "/C/board", "role": "board", "material": "wood_oak", "motion": "none", "size_m": [0.42, 0.42, 0.03]},
+        {"id": 2, "path": "/C/felt", "role": "felt pad under a piece base", "material": "fabric_cotton", "motion": "none",
+         "size_m": [0.005, 0.005, 0.0]},
+        {"id": 3, "path": "/C/decal", "role": "printed crown marking", "material": "paper_kraft", "motion": "none",
+         "size_m": [0.004, 0.004, 0.0]}]}})
+    assert chess["kind"] is None and len(chess["accessories"]) == 2
     # the class knows even when nothing else says so
     monkeypatch.setattr(processing, "_prior", lambda e: {"soft_parts": ["upper"], "soft_kind": "cloth"})
     assert soft_parts({"asset_id": "x"})["parts"] == ["upper"]
@@ -375,3 +383,154 @@ def test_a_shoe_becomes_a_sole_with_a_deformable_upper(tmp_path, monkeypatch):
     assert sbp.strip(st, "/World/Shoe") == 1
     assert st.GetPrimAtPath("/World/Shoe").HasAPI(UsdPhysics.RigidBodyAPI) and st.GetPrimAtPath("/World/Shoe/upper").IsActive()
     assert not st.GetPrimAtPath("/World/Shoe/SoftBodies")
+
+
+def test_a_chess_set_needs_its_board_and_pieces_to_be_approved(monkeypatch, tmp_path):
+    pytest.importorskip("pxr")
+    sys.path.insert(0, str(REPO / "scripts"))
+    import auto_approve, ingest_asset, processing, process_downloads as pd
+
+    assert pd.chess_convention.__doc__ and pd.class_of({"class_hint": "mug"}) == "mug"
+    monkeypatch.setattr(pd, "entry_of", lambda a: {"asset_id": a, "class_hint": "mug", "file": "/x"})
+    assert pd.chess_convention("mug_t") is None                       # not a chess set: nothing to do
+    monkeypatch.setattr(ingest_asset, "run_report", lambda *a, **k: {"callouts": []})
+    monkeypatch.setattr(processing, "_prior", lambda e: {"max_dim_m": [0.25, 0.7], "mass_kg": [0.6, 4.0]})
+    pri = tmp_path / "priors.json"
+    pri.write_text(json.dumps({"classes": {"chess_set": {"max_dim_m": [0.25, 0.7], "mass_kg": [0.6, 4.0]}}}))
+    monkeypatch.setattr(auto_approve, "PRIORS", pri)
+    m = {"up": "Z", "meters_per_unit": 1.0, "dims_m": [0.4, 0.4, 0.08], "bodies": 33, "colliders": 33,
+         "no_collider": [], "no_physics_material": [], "mass_kg": 1.2, "bodies_with_mass": 33, "mirrored": [],
+         "moving_joints": 0, "physics_materials": ["wood_oak"]}
+    e = {"asset_id": "chess_t", "file": "/x", "class_hint": "chess_set"}
+    failed = [c["check"] for c in auto_approve.gates(e, m) if not c["ok"]]
+    assert "chess_playable" in failed
+    e["chess"] = {"ok": True, "pieces": 32, "standard_start": True, "board": {"a1_is_dark": True}}
+    assert "chess_playable" not in [c["check"] for c in auto_approve.gates(e, m) if not c["ok"]]
+
+
+def test_a_set_of_free_bodies_is_not_articulated(monkeypatch):
+    sys.path.insert(0, str(REPO / "scripts"))
+    import asset_review_hub
+    import process_downloads as pd
+
+    e = {"asset_id": "chess_t", "file": "/x", "class_hint": "chess_set", "applied_fixes": [], "report": {},
+         "vlm": {"content_kind": "object_set"},
+         "part_survey": {"parts": [{"id": 1, "role": "board", "motion": "none"},
+                                   {"id": 2, "role": "queen piece", "motion": "detach"}]}}
+    monkeypatch.setattr(pd, "entry_of", lambda a: e)
+    monkeypatch.setattr(asset_review_hub, "_load_priors_fresh", lambda: {"chess_set": {"articulable": False}})
+    assert pd._articulate("chess_t", dry=False).startswith("rigid: a set of free bodies")
+
+
+# --- rules the corkscrew and the padlocks taught (2026-10-09) ----------------------
+
+sys.path.insert(0, str(REPO / "scripts"))
+
+def test_a_hinge_turns_about_the_pin_that_joins_it():
+    """A rivet the survey says joins the wing to the body gives the hinge its
+    axis (the pin's length) and its pivot (the pin's centre)."""
+    import numpy as np
+    from survey_draft import _pin_for, _pin_id
+
+    wing = {"id": 3, "role": "Side wing lever arm (x2)", "path": "/w", "centroid": [0, 0.047, -0.008],
+            "size_m": [0.011, 0.087, 0.058], "motion": "hinge"}
+    pin = {"id": 4, "role": "Wing hinge pin/rivet (x2) joining wing to body", "path": "/p",
+           "centroid": [0, 0.0175, 0.008], "size_m": [0.0126, 0.0058, 0.0058], "motion": "spin"}
+    far_pin = {**pin, "id": 5, "path": "/q", "centroid": [0, -0.0175, 0.008]}
+    blob = {"id": 6, "role": "hinge pin", "path": "/b", "centroid": [0, 0.02, 0.0], "size_m": [0.01, 0.01, 0.01]}
+    geo = {"/w": {"min": [-0.006, 0.004, -0.037], "max": [0.006, 0.091, 0.021]},
+           "/p": {"min": [-0.006, 0.0146, 0.005], "max": [0.006, 0.0204, 0.011]},
+           "/q": {"min": [-0.006, -0.0204, 0.005], "max": [0.006, -0.0146, 0.011]},
+           "/b": {"min": [-0.005, 0.015, -0.005], "max": [0.005, 0.025, 0.005]}}
+    sparts = {p["id"]: p for p in (wing, pin, far_pin, blob)}
+    assert _pin_id(wing, sparts, geo) == 4                       # the pin touching it, not the far one or a blob
+    axis, centre = _pin_for(wing, sparts, geo)
+    assert list(axis) == [1.0, 0.0, 0.0] and np.allclose(centre, [0, 0.0175, 0.008])
+
+
+def test_a_rack_driven_part_and_its_worm_are_told_apart_by_their_words():
+    from survey_draft import DRIVEN, LEADER, PIN
+
+    assert DRIVEN.search("Side wing lever arm driven by the rack and pinion")
+    assert not DRIVEN.search("Central screw shaft with helical worm")
+    assert LEADER.search("Central screw shaft with helical worm") and not LEADER.search("Side wing lever arm")
+    assert PIN.search("Wing hinge pin/rivet joining wing to body")
+
+
+def test_a_pin_hinged_about_and_a_whole_tool_use_are_not_missing_joints():
+    """Completeness wanted the rivets as spin joints and a joint for prying a
+    cap off with the whole tool; neither is an articulation."""
+    from motion_critic import completeness
+
+    spec = {"joints": [{"name": "hinge_03", "joint_type": "revolute", "parent_prim": "/body", "child_prim": "/wing"},
+                       {"name": "part_003", "joint_type": "fixed", "parent_prim": "/body", "child_prim": "/pin"}],
+            "_analysis": {"notes": ["#3 hinges about pin #4", "#3 Side wing: hinge about/along X"]}}
+    entry = {"articulation_draft": json.dumps(spec),
+             "part_survey": {"parts": [
+                 {"id": 1, "role": "body", "path": "/body", "motion": "none"},
+                 {"id": 3, "role": "Side wing lever arm", "path": "/wing", "motion": "hinge"},
+                 {"id": 4, "role": "Wing hinge pin/rivet joining wing to body", "path": "/pin", "motion": "spin"}]},
+             "vlm": {"functions": [{"kind": "manual", "does": "pries off a crown cap",
+                                    "moving_part": "whole tool pivoting on cap edge"}]}}
+    c = completeness(entry)
+    assert c["ok"] and c["missing"] == []
+    entry["part_survey"]["parts"].append({"id": 5, "role": "trigger", "path": "/trig", "motion": "press"})
+    assert completeness(entry)["missing"] == ["#5 trigger (press)"]
+
+
+def test_the_whole_video_grid_frames_the_object_not_the_floor():
+    """A corkscrew was a thumbnail in its own panels; the judge said it could
+    not see it and inferred faults. The grid crops to the object: colour or
+    strong contrast, with room for pale parts; grey shadows do not count."""
+    import numpy as np
+    from PIL import Image
+    from motion_critic import _crop_tile, _object_box
+
+    frame = np.full((720, 1280, 3), 229, dtype=np.uint8)
+    frame[300:480, 600:690] = (196, 90, 89)          # the red body
+    frame[480:700, 300:650] = 175                     # its grey shadow, long and dark
+    box = _object_box([Image.fromarray(frame)])
+    assert 400 <= box[0] <= 560 and box[2] <= 800 and box[1] >= 150 and box[3] <= 640   # the body, with room, not the floor
+    tile = _crop_tile(Image.fromarray(frame), box, (480, 270))
+    assert tile.size == (480, 270)
+
+
+def test_a_set_of_articulable_copies_is_split_one_asset_per_object():
+    """Two padlocks in one file: an object set whose survey finds a hinge on
+    each is split; a set of pieces that only sit there is not."""
+    pytest.importorskip("pxr")
+    from pxr import Usd, UsdGeom
+    sys.path.insert(0, str(REPO / "tests"))
+    from test_door_mechanism import _mesh
+    from split_set import splittable
+
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.Xform.Define(stage, "/World")
+    UsdGeom.Xform.Define(stage, "/World/Set")
+    for name, x in (("Lock", 0.0), ("Lock_1", 0.3)):
+        UsdGeom.Xform.Define(stage, f"/World/Set/{name}")
+        _mesh(stage, f"/World/Set/{name}/Body", [((x, 0, 0), (x + 0.05, 0.02, 0.06))])
+        _mesh(stage, f"/World/Set/{name}/Shackle", [((x + 0.01, 0.005, 0.06), (x + 0.04, 0.015, 0.1))])
+    survey = {"root": "/World/Set", "parts": [
+        {"id": 1, "role": "padlock body", "path": "/World/Set/Lock/Body", "motion": "none",
+         "members": ["/World/Set/Lock/Body", "/World/Set/Lock_1/Body"]},
+        {"id": 2, "role": "U-shaped shackle", "path": "/World/Set/Lock/Shackle", "motion": "hinge",
+         "members": ["/World/Set/Lock/Shackle", "/World/Set/Lock_1/Shackle"]}]}
+    entry = {"vlm": {"content_kind": "object_set"}, "part_survey": survey}
+    groups = splittable(entry, stage)
+    assert len(groups) == 2 and all(any("Shackle" in p or "Lock" in p for p in g) for g in groups)
+    still = {**entry, "part_survey": {**survey, "parts": [dict(p, motion="none") for p in survey["parts"]]}}
+    assert splittable(still, stage) == []
+    assert splittable({**entry, "vlm": {"content_kind": "single"}}, stage) == []
+
+
+def test_the_critic_s_corrections_map_onto_the_survey_s_words():
+    """Every axis and pivot the judge may name has a drafter's word (or is
+    the pin rule's job); nothing it says is dropped on the floor."""
+    from motion_critic import _schema
+    from process_downloads import AXIS_WORDS, PIVOT_WORDS
+
+    corr = _schema()["properties"]["correction"]["properties"]
+    assert set(corr["axis"]["enum"]) - {"none"} == set(AXIS_WORDS)
+    assert set(corr["pivot"]["enum"]) - {"none", "other_end"} == set(PIVOT_WORDS)    # other_end is the flip's

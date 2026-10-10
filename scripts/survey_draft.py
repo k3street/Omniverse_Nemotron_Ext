@@ -43,6 +43,53 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 UP = 2
 FORK = re.compile(r"\b(fork|yoke|swivel (bracket|housing|plate|mount))\b", re.I)
 FASTENER = re.compile(r"\b(screw|bolt|rivet|nut|washer|pin)s?\b", re.I)
+PIN = re.compile(r"\b(pin|rivet|axle|pivot)s?\b", re.I)
+ROLLING = re.compile(r"\b(wheel|caster|castor|roller)s?\b", re.I)
+DIAL = re.compile(r"\b(dial|thumb|combination|number(ed)?|scroll|setting|hand|steering|selector|code)\b", re.I)
+DRIVEN = re.compile(r"\b(rack and pinion|driven by|geared to|follows)\b", re.I)
+LEADER = re.compile(r"\b(worm|screw shaft|screw|shaft|spindle|handle|crank|knob)\b", re.I)
+DRIVEN_TURNS = 5.0            # a butterfly corkscrew's wings: fully up after about five turns
+
+
+def _pin_id(p, sparts, geo):
+    """The id of the pin part that joins p (see _pin_for). With the critic
+    naming a pin (p["_on_pin"]), any pin-shaped fastener touching p counts,
+    whatever the survey called its purpose."""
+    best = None
+    pc = np.array(p["centroid"], float)
+    gp = geo.get(p["path"])
+    if not gp:
+        return None
+    for q in sparts.values():
+        if q is p or not (PIN.search(q.get("role") or "") or (p.get("_on_pin") and FASTENER.search(q.get("role") or ""))):
+            continue
+        if not p.get("_on_pin") and not re.search(r"hinge|pivot|join|connect|axle|pin", q.get("role") or "", re.I):
+            continue
+        gq = geo.get(q["path"])
+        if not gq:
+            continue
+        if not all(gp["min"][k] - 0.003 <= gq["max"][k] and gq["min"][k] - 0.003 <= gp["max"][k] for k in range(3)):
+            continue
+        sz = np.array(q["size_m"], float)
+        if sz.max() < 1.5 * np.sort(sz)[1]:
+            continue                                   # a pin is long: no axis to read off a blob
+        d = float(np.linalg.norm(np.array(q["centroid"], float) - pc))
+        if best is None or d < best[0]:
+            best = (d, q["id"])
+    return best[1] if best else None
+
+
+def _pin_for(p, sparts, geo):
+    """(axis, centre) of the pin that joins hinge part p, or None: a pin-named
+    part the survey says joins/hinges something, touching p's box, long in
+    one direction."""
+    qid = _pin_id(p, sparts, geo)
+    if qid is None:
+        return None
+    q = sparts[qid]
+    sz = np.array(q["size_m"], float)
+    axis = np.eye(3)[int(np.argmax(sz))]
+    return axis, np.array(q["centroid"], float)
 
 
 def _pca(pts):
@@ -73,7 +120,7 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
         sz = sorted(q["size_m"])
         return sz[2] > 0 and abs(sz[2] - sz[1]) <= 0.15 * sz[2] and sz[0] < 0.8 * sz[1]
     for w in list(sparts.values()):
-        if w.get("motion") != "spin" or not re.search(r"wheel|caster|castor|roller", w.get("role") or "", re.I) \
+        if w.get("motion") != "spin" or not ROLLING.search(w.get("role") or "") or DIAL.search(w.get("role") or "") \
                 or FORK.search(w.get("role") or "") or _round(w):
             continue
         f = next((q for q in sparts.values() if q is not w and FORK.search(q.get("role") or "") and _round(q)
@@ -240,8 +287,10 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
                                                  for n in held_back):
                 held_back.append(note)
             return False
-        if FASTENER.search(p["role"] or "") and p["motion"] != "detach":
+        if FASTENER.search(p["role"] or "") and p["motion"] != "detach" \
+                and np.prod(p["size_m"]) < 0.02 * np.prod(body["size_m"]):
             return False                                           # a screw head turns only for a screwdriver
+            # (a corkscrew's "screw shaft" is the mechanism, not a fastener: size tells them apart)
         if p["motion"] == "spin" and FORK.search(p["role"] or ""):
             # a caster's fork swivels about its stem, not the axle: the wheeled
             # base makes it the caster's swivelling body (the crane's six forks
@@ -287,16 +336,36 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
                 continue
             if (q["motion"], q.get("axis")) != (p["motion"], p.get("axis")):
                 continue
+            # a rider is a small thing on a big one (a cap on a knob), with
+            # its middle inside the carrier's box: five equal dials side by
+            # side touch, and are five dials (a padlock's were chained as one)
+            if np.prod(p["size_m"]) > 0.5 * np.prod(q["size_m"]):
+                continue
             gp, gq = geo.get(p["path"]), geo.get(q["path"])
-            if gp and gq and all(gp["min"][k] - 0.002 <= gq["max"][k] and gq["min"][k] - 0.002 <= gp["max"][k]
-                                 for k in range(3)):
+            if gp and gq and all(gq["min"][k] - 0.002 <= p["centroid"][k] <= gq["max"][k] + 0.002 for k in range(3)) \
+                    and all(gp["min"][k] - 0.002 <= gq["max"][k] and gq["min"][k] - 0.002 <= gp["max"][k] for k in range(3)):
                 rides_on[p["id"]] = q["id"]
                 break
     joints, mechanisms, notes, attached = [], [], [], set()
     names = "XYZ"
+    # the motion critic's corrections (a wing drafted to yaw: "through the
+    # part's face, on its pin"): the survey's words for that part, overridden
+    corrections = {int(k): v for k, v in (template.get("corrections") or {}).items() if v}
     for p in sorted(sparts.values(), key=lambda p: p["id"]):
         if p is body or not moving(p) or p["id"] in rides_on:
             continue
+        fixed_axis = False
+        if p["id"] in corrections:
+            fix = corrections[p["id"]]
+            p = {**p, **{k: fix[k] for k in ("axis", "pivot") if fix.get(k)}}
+            if fix.get("pivot"):
+                p["pivot_toward"] = None          # the critic's pivot, not the survey's edge
+            fixed_axis = bool(fix.get("axis"))     # and its axis is final: no re-reading from the edge
+            if fix.get("on_pin"):
+                p["_on_pin"] = True                # the critic names a pin: any pin-shaped part touching it will do
+            sparts[p["id"]] = p
+            notes.append(f"#{p['id']} drafted on the critic's correction: " +
+                         ", ".join(f"{k} {fix[k]}" for k in ("axis", "pivot") if fix.get(k)))
         par = parent_of(p)
         # a moving part hung on another moving part is fine (a shade on a lamp
         # arm); one hung on a part that is itself fixed rides on the body chain
@@ -304,7 +373,10 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
         c, sv, vt = _pca(pts) if len(pts) >= 3 else (np.array(p["centroid"]), np.ones(3), np.eye(3))
         dirs = {"part_long": vt[0], "part_short": vt[1], "part_face_normal": vt[2],
                 "vertical": np.eye(3)[UP], "horizontal_long": np.eye(3)[horiz[0]],
-                "horizontal_short": np.eye(3)[horiz[1]]}
+                "horizontal_short": np.eye(3)[horiz[1]],
+                # "horizontal", the critic's word: a pin runs through a plate's
+                # face, so the level direction nearest the part's face normal
+                "horizontal_face": np.eye(3)[max(horiz, key=lambda i: abs(float(vt[2][i])))]}
         a_vec = dirs.get(p.get("axis") or "", vt[2] if p["motion"] in ("press", "spin") else vt[0])
         if p["motion"] == "spin":
             # a knob or a wheel turns about the direction it is round about: the
@@ -312,9 +384,15 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
             # dial turns about the 4). Not the vertices' principal axes: a
             # low-poly dial's 55 vertices bunch at its pointer.
             sz = np.array(p["size_m"], float)
-            k = min(range(3), key=lambda i: (round(abs(sz[(i + 1) % 3] - sz[(i + 2) % 3])
-                                                   / max(sz[(i + 1) % 3], sz[(i + 2) % 3], 1e-9), 2), sz[i]))
-            a_vec = np.eye(3)[k]
+            srt = np.sort(sz)
+            if p.get("axis") == "part_long" and srt[2] >= 2.5 * srt[1]:
+                # a shaft or a worm spins about its length (a corkscrew's screw
+                # with its ring handle is round about nothing)
+                a_vec = np.eye(3)[int(np.argmax(sz))]
+            else:
+                k = min(range(3), key=lambda i: (round(abs(sz[(i + 1) % 3] - sz[(i + 2) % 3])
+                                                       / max(sz[(i + 1) % 3], sz[(i + 2) % 3], 1e-9), 2), sz[i]))
+                a_vec = np.eye(3)[k]
         ax, _ = _snap(a_vec)
         pc = np.array(par["centroid"])
         g = geo.get(p["path"])
@@ -367,7 +445,7 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
                 thin_i = ext_o[0]
                 cand = [i for i in allowed if i != thin_i] or allowed
                 new_ax = ax if ax in cand else cand[0]
-            if new_ax != ax:
+            if new_ax != ax and not fixed_axis:
                 ax = new_ax
                 a_vec = np.eye(3)[ax]
                 vt = np.array([vt[0], np.eye(3)[ax], vt[2]])
@@ -387,12 +465,43 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
             if gp:
                 olo, ohi = np.maximum(pmin, gp["min"]), np.minimum(pmax, gp["max"])
                 pivot = (olo + ohi) / 2
+                # a part that meets its parent in two places (a padlock's
+                # shackle, both legs in the body) turns about the deeper one:
+                # the retained leg holds more of the part inside the body
+                inside = pts[np.all((pts >= np.array(gp["min"]) - 0.002) & (pts <= np.array(gp["max"]) + 0.002), axis=1)] \
+                    if len(pts) else pts
+                if len(inside) >= 6:
+                    # the points that reach the parent are the contact; two
+                    # clumps (both legs) -> the bigger; one clump (only the
+                    # retained leg reaches the body) -> that one
+                    across = [i for i in range(3) if i != ax]
+                    spread = {i: float(np.ptp(inside[:, i])) for i in across}
+                    k = max(across, key=lambda i: spread[i])
+                    order = np.sort(inside[:, k])
+                    gaps = np.diff(order)
+                    contact = inside
+                    if len(gaps) and gaps.max() > 0.2 * max(spread[k], 1e-9):
+                        cut = order[int(np.argmax(gaps))]
+                        low, high = inside[inside[:, k] <= cut], inside[inside[:, k] > cut]
+                        contact = low if len(low) >= len(high) else high
+                    pivot = contact.mean(axis=0)
+                    pivot[ax] = (olo[ax] + ohi[ax]) / 2
+        if p["motion"] == "hinge":
+            # a pin or rivet the survey says joins this part is the hinge: its
+            # long axis and its centre (a butterfly corkscrew's wings were
+            # drafted to yaw about the body; their rivets run across it)
+            pin = _pin_for(p, sparts, geo)
+            if pin is not None:
+                pax, pc = pin
+                ax, _ = _snap(pax)
+                pivot = pc
+                notes.append(f"#{p['id']} hinges about pin #{_pin_id(p, sparts, geo)}")
         name = f"{p['motion']}_{p['id']:02d}_" + re.sub(r"\W+", "_", (p["role"] or "part").lower()).strip("_")[:24]
         rng = p.get("range")
         j = {"name": name, "parent_prim": par["path"], "child_prim": p["path"], "axis": names[ax],
              "anchor": [round(float(v), 6) for v in pivot]}
         if p["motion"] == "spin":
-            if re.search(r"wheel|caster|castor|roller", p["role"] or "", re.I):
+            if ROLLING.search(p["role"] or "") and not DIAL.search(p["role"] or ""):
                 side = "L" if p["centroid"][ax] < (lo[ax] + hi[ax]) / 2 else "R"
                 j["name"] = f"wheel_{side}_{p['id']:02d}"
             j.update(joint_type="revolute", lower_limit=None, upper_limit=None, stiffness=0.0, damping=0.01,
@@ -511,6 +620,27 @@ def propose_survey(stage, asset_root: str, survey: dict, template: dict | None =
                      + (f", range {rng:g}" if rng else ""))
     # everything else rides: on the part the survey said it sits on, else the body
     moving_paths = {j["child_prim"] for j in joints} | attached
+    # a part the survey says a worm, screw or rack drives follows that
+    # part's turn: a butterfly corkscrew's wings rise as the handle is
+    # screwed down (rack and pinion). PhysX mimic: the coupling is two-way.
+    # Full travel over DRIVEN_TURNS turns unless a manual says otherwise.
+    driven = [j for j in joints if j.get("joint_type") == "revolute" and j.get("lower_limit") is not None
+              and DRIVEN.search(next((q.get("role") or "" for q in sparts.values() if q["path"] == j["child_prim"]), ""))]
+    leaders = [j for j in joints if j.get("joint_type") == "revolute" and j.get("lower_limit") is None
+               and LEADER.search(next((q.get("role") or "" for q in sparts.values() if q["path"] == j["child_prim"]), ""))]
+    if driven and len(leaders) == 1:
+        lead = leaders[0]
+        for j in driven:
+            lo_, hi_ = float(j["lower_limit"]), float(j["upper_limit"])
+            travel = hi_ if abs(hi_) >= abs(lo_) else lo_
+            # follower + gearing * leader = 0: the handle screwed down (a
+            # negative turn about its axis, clockwise from above) lifts the wing
+            gearing = travel / (DRIVEN_TURNS * 360.0)
+            mechanisms.append({"type": "couple", "leader": lead["name"], "follower": j["name"],
+                               "gearing": round(gearing, 6),
+                               "note": f"follows {lead['name']}: {abs(travel):g} deg over {DRIVEN_TURNS:g} turns (rack and pinion)"})
+            notes.append(f"{j['name']} follows {lead['name']} ({abs(travel):g} deg over {DRIVEN_TURNS:g} turns)")
+
     for p in sorted(sparts.values(), key=lambda p: p["id"]):
         for member in p["members"]:
             if member in moving_paths or member == body["path"]:

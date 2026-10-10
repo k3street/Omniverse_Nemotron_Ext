@@ -509,7 +509,7 @@ def apply_rigid_physics(entry: dict, provisional: bool = False) -> str | None:
     cls = report.get("matched_class")
     prior = _load_asset_priors().get("classes", {}).get(cls or "", {})
     if prior.get("multi_body"):
-        note = apply_set_physics(stage, f"/World/{_camel(entry['asset_id'])}", prior)
+        note = apply_set_physics(stage, f"/World/{_camel(entry['asset_id'])}", prior, entry)
         stage.GetRootLayer().Save()
         del stage
         return note
@@ -593,11 +593,18 @@ def set_members(stage, asset_root: str) -> list:
         common = members[0].GetPath()
 
 
-def apply_set_physics(stage, asset_root: str, prior: dict) -> str:
+def apply_set_physics(stage, asset_root: str, prior: dict, entry: dict | None = None) -> str:
     """One rigid body per member of a set (chess pieces, dominoes), so they
-    move independently; one body over the whole file would weld them."""
+    move independently; one body over the whole file would weld them. With
+    a surveyed entry the bodies follow the survey (set_bodies): a piece per
+    object it names, the board as one; before the survey, a body per child
+    of the meshes' common ancestor."""
     import contextlib
     import io
+
+    if entry and (entry.get("part_survey") or {}).get("parts"):
+        from set_bodies import apply as set_bodies_apply
+        return set_bodies_apply(stage, asset_root, entry, prior)
 
     from pxr import Usd, UsdGeom
 

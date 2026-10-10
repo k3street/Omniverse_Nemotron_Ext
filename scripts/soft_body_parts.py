@@ -71,6 +71,11 @@ SOFT_PRESETS = {
 }
 HIDDEN = re.compile(r"\b(hidden|internal|inside|inner (block|core|filler))\b", re.I)
 STRUCTURE = re.compile(r"\b(sole|outsole|midsole|frame|chassis|base plate|with moulded|moulded)\b", re.I)
+# a shoe's upper, tongue or collar is a padded, structured textile: it bends,
+# it does not balloon like a T-shirt (a knit sneaker upper inflated as cotton)
+PADDED = re.compile(r"\b(upper|tongue|collar|vamp|shaft|quarter|heel counter|strap|cushion|padded|padding)\b", re.I)
+PADDED_TEXTILE = {"kind": "cloth", "density": 400.0, "thickness_m": 0.004, "stretch": 6000.0, "shear": 2.0,
+                  "bend": 30.0, "friction": 0.6, "note": "padded textile: stiffer than the plain cloth preset"}
 RIDER = re.compile(r"\b(fur|tuft|strand|trim|bow|ribbon|label|patch|lace|stitch|tag|logo|pull tab|eyelet)s?\b", re.I)
 MIN_CLOTH_FACES = 200          # fewer: a trim, not a cloth of its own
 TARGET_TRIANGLES = 2500        # the simulation mesh PhysX cooks from the copy
@@ -120,6 +125,7 @@ def plan(entry: dict, stage=None) -> dict:
                 # a part nothing can see (a foam footbed modelled inside a boot)
                 # stays rigid with the base: as a deformable it starts inside the
                 # sole's collider and is thrown out of it
+                rec["hidden"] = bool(hidden)
                 rigid.append(rec)
                 if hidden and p.get("material") in SOFT_PRESETS:
                     hidden_soft.append(p.get("role") or path)
@@ -146,6 +152,8 @@ def plan(entry: dict, stage=None) -> dict:
         raise RuntimeError("the soft parts are all trims (fur, laces, labels): nothing to make a cloth of")
     for c in carriers:
         c["preset"] = SOFT_PRESETS.get(c["material"]) or SOFT_PRESETS["fabric_cotton"]
+        if c["material"] in ("fabric_cotton", "paper_kraft") and PADDED.search(c["role"]):
+            c["preset"] = PADDED_TEXTILE
         c["attach_to"] = min(rigid, key=lambda r: (gap(c, r), -float(np.prod(r["size"]))))["path"]
         c["riders"] = []
     for r in riders:
@@ -154,7 +162,8 @@ def plan(entry: dict, stage=None) -> dict:
     base = max(rigid, key=lambda r: float(np.prod(r["size"])))
     if close:
         del stage
-    return {"root": root, "base": base["path"], "rigid": [r["path"] for r in rigid], "carriers": carriers,
+    return {"root": root, "base": base["path"], "rigid": [r["path"] for r in rigid],
+            "hidden": [r["path"] for r in rigid if r.get("hidden")], "carriers": carriers,
             "notes": [f"{len(rigid)} rigid part(s), {len(carriers)} soft, {len(riders)} trim(s) riding on them"]
             + [f"{c['role']}: {c['preset'].get('note')}" for c in carriers if c["preset"].get("note")]
             + [f"{r}: hidden inside, kept rigid with the base" for r in hidden_soft]}
@@ -234,14 +243,17 @@ def _soft_material(stage, path: str, preset: dict, mpu: float):
     return mat
 
 
-def strip(stage, root_path: str) -> int:
+def strip(stage, root_path: str, fallback: dict | None = None) -> int:
     """Undo apply(): the copies, bodies, joints and attachments go, the
     originals come back, the root's single rigid body is restored. Returns
-    how many soft bodies were taken off."""
+    how many soft bodies were taken off. `fallback` is the entry's own record,
+    for a file whose customData was lost (promotion once replaced it)."""
     from pxr import UsdPhysics
 
     root = stage.GetPrimAtPath(root_path)
     rec = root.GetCustomDataByKey("simReady:softParts") if root else None
+    if not rec and fallback and stage.GetPrimAtPath(f"{root_path}/SoftBodies"):
+        rec = fallback
     if not rec:
         return 0
     rec = json.loads(rec) if isinstance(rec, str) else dict(rec)
@@ -270,6 +282,13 @@ def strip(stage, root_path: str) -> int:
             prim.RemoveAPI(UsdPhysics.MassAPI)
         if prim.HasAPI(UsdPhysics.RigidBodyAPI):
             prim.RemoveAPI(UsdPhysics.RigidBodyAPI)
+        if prim.HasAPI(UsdPhysics.FilteredPairsAPI):
+            prim.RemoveAPI(UsdPhysics.FilteredPairsAPI)
+            rel = prim.GetRelationship("physics:filteredPairs")
+            if rel:
+                rel.ClearTargets(True)
+        if path in rec.get("hidden", []) and not prim.HasAPI(UsdPhysics.CollisionAPI):
+            UsdPhysics.CollisionAPI.Apply(prim)          # its collider, back
     UsdPhysics.RigidBodyAPI.Apply(root)
     if mass:
         UsdPhysics.MassAPI.Apply(root).CreateMassAttr().Set(float(mass))
@@ -292,7 +311,7 @@ def apply(asset_id: str) -> dict:
     stage = Usd.Stage.Open(entry["file"])
     survey_root = (entry.get("part_survey") or {}).get("root")
     if survey_root:
-        strip(stage, survey_root)
+        strip(stage, survey_root, entry.get("soft_body_parts"))
     p = plan(entry, stage)
     root = stage.GetPrimAtPath(p["root"])
     xf = UsdGeom.XformCache(Usd.TimeCode.Default())
@@ -315,10 +334,22 @@ def apply(asset_id: str) -> dict:
     for i, path in enumerate(p["rigid"]):
         prim = stage.GetPrimAtPath(path)
         UsdPhysics.RigidBodyAPI.Apply(prim)
-        if not prim.HasAPI(UsdPhysics.CollisionAPI):
+        if path in p.get("hidden", []):
+            # inside the object: it has mass, nothing to touch (its collider
+            # sat inside the sole's and the two fought, a footbed jittering out)
+            for api in (UsdPhysics.CollisionAPI, UsdPhysics.MeshCollisionAPI):
+                if prim.HasAPI(api):
+                    prim.RemoveAPI(api)
+        elif not prim.HasAPI(UsdPhysics.CollisionAPI):
             UsdPhysics.CollisionAPI.Apply(prim)
             mc = UsdPhysics.MeshCollisionAPI.Apply(prim)
             mc.CreateApproximationAttr().Set("convexDecomposition")
+        # one solid object: its rigid parts never collide with each other
+        # (fixed joints between plain rigid bodies do not filter contact)
+        fp = UsdPhysics.FilteredPairsAPI.Apply(prim)
+        for other in p["rigid"]:
+            if other != path:
+                fp.CreateFilteredPairsRel().AddTarget(other)
         if path == p["base"]:
             if mass:
                 UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(float(mass))
@@ -396,7 +427,8 @@ def apply(asset_id: str) -> dict:
         made.append({"body": body_path, "source": c["path"], "role": c["role"], "material": c["material"],
                      "kind": c["preset"]["kind"], "riders": c["riders"], "attached_to": c["attach_to"],
                      "note": c["preset"].get("note")})
-    record_soft = {"base": p["base"], "rigid": p["rigid"], "soft": made, "notes": p["notes"]}
+    record_soft = {"base": p["base"], "rigid": p["rigid"], "hidden": p.get("hidden", []), "soft": made,
+                   "notes": p["notes"]}
     root.SetCustomDataByKey("simReady:softParts", json.dumps(record_soft))
     stage.GetRootLayer().Save()
     del stage

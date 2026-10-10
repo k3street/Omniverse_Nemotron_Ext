@@ -150,6 +150,7 @@ if any(v is True for _, v in completed):
 # --- what to measure ------------------------------------------------------------
 base_path = soft_rec["base"]
 soft_bodies = soft_rec["soft"]
+rigid_parts = [r for r in soft_rec.get("rigid", []) if r != base_path]   # must ride with the base, still
 xf = UsdGeom.XformCache(Usd.TimeCode.Default())
 root_prim = stage.GetPrimAtPath(entry.get("part_survey", {}).get("root") or str(stage.GetPrimAtPath(base_path).GetParent().GetPath()))
 
@@ -162,19 +163,37 @@ def base_pose():
     return Gf.Vec3d(*r["position"]), Gf.Rotation(Gf.Quatd(q[3], q[0], q[1], q[2]))
 
 
+def _world_points(prim):
+    pts = UsdGeom.Mesh(prim).GetPointsAttr().Get()
+    if not pts:
+        return None
+    m = xf.GetLocalToWorldTransform(prim)
+    return np.array([list(m.Transform(Gf.Vec3d(p))) for p in pts])
+
+
 def render_points(body):
     """The skinned copy's points, in world space."""
     src = stage.GetPrimAtPath(f"{body['body']}/{Path(body['source']).name}")
     if not src:
         kids = [c for c in stage.GetPrimAtPath(body["body"]).GetChildren() if c.IsA(UsdGeom.Mesh) and c.GetName() != "simMesh"]
         src = kids[0] if kids else None
-    if not src:
+    return _world_points(src) if src else None
+
+
+def rider_prims(body):
+    """The trims skinned along with the soft part (fur, bows, a label)."""
+    main = Path(body["source"]).name
+    return [c for c in stage.GetPrimAtPath(body["body"]).GetChildren()
+            if c.IsA(UsdGeom.Mesh) and c.GetName() not in ("simMesh", main)]
+
+
+def part_offset(path, pose):
+    """A rigid part's position in the base's frame."""
+    r = px.get_rigidbody_transformation(path)
+    if not r.get("ret_val", True) or not pose:
         return None
-    pts = UsdGeom.Mesh(src).GetPointsAttr().Get()
-    if not pts:
-        return None
-    m = xf.GetLocalToWorldTransform(src)
-    return np.array([list(m.Transform(Gf.Vec3d(p))) for p in pts])
+    p0, r0 = pose
+    return r0.GetInverse().TransformDir(Gf.Vec3d(*r["position"]) - p0)
 
 
 def in_base_frame(pts, pose):
@@ -202,10 +221,18 @@ rgb = rep.AnnotatorRegistry.get_annotator("rgb")
 rgb.attach([render_product])
 
 pose0 = base_pose()
+rest_rigid = {r: part_offset(r, pose0) for r in rigid_parts}
+rigid_drift = {r: 0.0 for r in rigid_parts}
 rest = {}
+rider_rest, rider_peak = {}, {}
 for b in soft_bodies:
     pts = render_points(b)
     rest[b["body"]] = in_base_frame(pts, pose0) if (pts is not None and pose0) else None
+    for r in rider_prims(b):
+        rp = _world_points(r)
+        if rp is not None and pose0:
+            rider_rest[str(r.GetPath())] = in_base_frame(rp, pose0)
+            rider_peak[str(r.GetPath())] = 0.0
 steps_per_frame = max(1, HZ // args.fps)
 n_frames = int(args.seconds * args.fps)
 log = []
@@ -221,6 +248,10 @@ for i in range(n_frames):
     pose = base_pose()
     row = {"t": round(i / args.fps, 3), "base_z": None, "soft": {}}
     if pose:
+        for r in rigid_parts:
+            o = part_offset(r, pose)
+            if o is not None and rest_rigid.get(r) is not None:
+                rigid_drift[r] = max(rigid_drift[r], (o - rest_rigid[r]).GetLength())
         row["base_z"] = round(float(pose[0][2]), 4)
         up = pose[1].TransformDir(Gf.Vec3d(0, 0, 1))
         row["base_tilt_deg"] = round(math.degrees(math.acos(max(-1.0, min(1.0, up[2])))), 2)
@@ -234,6 +265,14 @@ for i in range(n_frames):
             row["soft"][b["body"]] = {"mean_m": round(float(np.nanmean(d)), 5), "max_m": round(float(np.nanmax(d)), 5),
                                       "drift_m": round(float(np.linalg.norm(now.mean(0) - r0.mean(0))), 5),
                                       "finite": bool(np.isfinite(now).all())}
+            if i >= args.fps // 2:                 # after the first half second: skinning has settled
+                for r in rider_prims(b):
+                    rp = _world_points(r)
+                    r0r = rider_rest.get(str(r.GetPath()))
+                    if rp is not None and r0r is not None and len(rp) == len(r0r):
+                        dd = np.linalg.norm(in_base_frame(rp, pose) - r0r, axis=1)
+                        rider_peak[str(r.GetPath())] = max(rider_peak[str(r.GetPath())],
+                                                           float(np.nanmax(dd)) if np.isfinite(dd).all() else float("inf"))
     log.append(row)
 
 # --- verdict --------------------------------------------------------------------
@@ -257,11 +296,21 @@ for b in soft_bodies:
     deformed = peak > 0.001
     attached = drift < 0.1 * sz
     bounded = peak < 0.5 * sz
-    soft_results[b["body"]] = {"ok": bool(finite and deformed and attached and bounded), "role": b["role"],
+    # the trims skinned with it must stay with it too (a 70-vertex heel label
+    # skinned to a far triangle swung out as spikes the size of the sole)
+    wild = {Path(k).name: (round(v, 4) if np.isfinite(v) else "inf") for k, v in rider_peak.items()
+            if k.startswith(b["body"] + "/") and (not np.isfinite(v) or v > 0.5 * sz)}
+    riders_ok = not wild
+    soft_results[b["body"]] = {"ok": bool(finite and deformed and attached and bounded and riders_ok), "role": b["role"],
                                "peak_m": round(peak, 5), "drift_m": round(drift, 5), "size_m": round(sz, 4),
-                               "finite": finite, "deformed": deformed, "attached": attached, "bounded": bounded}
-ok = cooked and landed and bool(soft_results) and all(v["ok"] for v in soft_results.values())
+                               "finite": finite, "deformed": deformed, "attached": attached, "bounded": bounded,
+                               "riders_ok": riders_ok, "riders_wild": wild,
+                               "rider_peaks_m": {Path(k).name: (round(v, 4) if np.isfinite(v) else "inf")
+                                                 for k, v in rider_peak.items() if k.startswith(b["body"] + "/")}}
+loose_rigid = {Path(r).name: round(d, 4) for r, d in rigid_drift.items() if d > max(0.01, 0.02 * radius)}
+ok = cooked and landed and bool(soft_results) and all(v["ok"] for v in soft_results.values()) and not loose_rigid
 summary = {"asset": args.asset_id, "cooked": cooked, "landed": landed, "attachments": completed,
+           "rigid_parts_moved": loose_rigid,
            "base": {"z_first": z_first, "z_final": final.get("base_z"), "tilt_deg": final.get("base_tilt_deg")},
            "soft": soft_results, "pass": ok, "frames": len(log), "fps": args.fps}
 out_dir.mkdir(parents=True, exist_ok=True)
@@ -279,8 +328,10 @@ if picks:
     for i, t in enumerate(tiles):
         sheet.paste(t, ((i % 3) * t.width, (i // 3) * t.height))
     sheet.save(out_dir / "contact_sheet.png")
-why = [] if ok else [k for k in ("cooked", "landed") if not summary[k]] + [
-    f"{Path(k).name}: " + ", ".join(w for w in ("finite", "deformed", "attached", "bounded") if v.get(w) is False)
+why = [] if ok else [k for k in ("cooked", "landed") if not summary[k]] + (
+    [f"rigid parts moved against the base: {loose_rigid}"] if loose_rigid else []) + [
+    f"{Path(k).name}: " + ", ".join(w for w in ("finite", "deformed", "attached", "bounded", "riders_ok") if v.get(w) is False)
+    + (f" (wild trims {v['riders_wild']})" if v.get("riders_wild") else "")
     + (f" {v.get('why')}" if v.get("why") else "") for k, v in soft_results.items() if not v["ok"]]
 print(f"MIXED {'PASS' if ok else 'FAIL'} {args.asset_id}: " + ("; ".join(why) or "soft parts deform and stay attached"),
       flush=True)

@@ -32,6 +32,12 @@ import os
 import shutil
 import subprocess
 import sys
+
+# every line out as it happens: a run that hangs or times out leaves its last step in the log
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except (AttributeError, ValueError):
+    pass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -61,6 +67,13 @@ out_dir = (args.out or OUT_ROOT / asset_id).resolve()
 frames_dir = out_dir / "frames"
 shutil.rmtree(frames_dir, ignore_errors=True)
 frames_dir.mkdir(parents=True)
+# a second, wide view of the whole run (every WIDE_EVERY frames, small):
+# the main camera closes in on each joint, and a judge of the whole run
+# needs to see the whole object the whole time
+wide_dir = out_dir / "frames_wide"
+shutil.rmtree(wide_dir, ignore_errors=True)
+wide_dir.mkdir(parents=True)
+WIDE_EVERY, WIDE_SIZE = 5, (640, 360)
 
 from isaacsim import SimulationApp  # noqa: E402
 
@@ -528,7 +541,9 @@ with Usd.EditContext(stage, stage.GetSessionLayer()):
     rolls = any(b.get("type") == "wheeled_base" for b in behaviors)   # it must be free to drive
     # a power tool is run in a hand: loose on the floor, a chuck spun to 2250
     # deg/s flings the body by reaction (electric_drill_1 left the scene)
-    in_hand = any(b.get("type") == "motor" for b in behaviors)
+    # a hand-sized tool is worked in a hand too: loose on the floor its wings
+    # or jaws push the body over and the mechanism is lost in the tumble
+    in_hand = any(b.get("type") == "motor" for b in behaviors) or max(size) <= 0.35
     if not anchored and not rolls and (args.hold or in_hand or size[2] > 1.5 * max(size[0], size[1]) or root_floats):
         if root_links:
             UsdPhysics.FixedJoint.Define(stage, "/AnimView/Hold").CreateBody1Rel().SetTargets([root_links[0]])
@@ -544,7 +559,12 @@ with Usd.EditContext(stage, stage.GetSessionLayer()):
     cam.CreateFocalLengthAttr(18.0)
     cam.CreateHorizontalApertureAttr(20.955)
     cam.CreateClippingRangeAttr(Gf.Vec2f(0.01, 1000.0))
+    wide_cam = UsdGeom.Camera.Define(stage, "/AnimView/WideCamera")
+    wide_cam.CreateFocalLengthAttr(18.0)
+    wide_cam.CreateHorizontalApertureAttr(20.955)
+    wide_cam.CreateClippingRangeAttr(Gf.Vec2f(0.01, 1000.0))
 cam_xf = UsdGeom.Xformable(cam.GetPrim())
+wide_xf = UsdGeom.Xformable(wide_cam.GetPrim())
 
 
 def view_azimuth() -> float:
@@ -583,9 +603,16 @@ def place_camera(u: float, focus: str | None = None):
         target, dist = FOCUS_BOX[focus]
     eye = target + Gf.Vec3d(dist * math.cos(ELEV) * math.cos(az), dist * math.cos(ELEV) * math.sin(az), dist * math.sin(ELEV))
     CAM[:] = [list(eye), list(target)]
+    wtarget = Gf.Vec3d(center[0], center[1], lo[2] + 0.5 * size[2])
+    # nearer than the opening wide shot: the whole object still in frame
+    # (the crop in the critic takes care of the rest), twice the size
+    wdist = 0.7 * DIST
+    weye = wtarget + Gf.Vec3d(wdist * math.cos(ELEV) * math.cos(az), wdist * math.cos(ELEV) * math.sin(az), wdist * math.sin(ELEV))
     with Usd.EditContext(stage, stage.GetSessionLayer()):
         cam_xf.ClearXformOpOrder()
         cam_xf.AddTransformOp().Set(Gf.Matrix4d().SetLookAt(eye, target, Gf.Vec3d(0, 0, 1)).GetInverse())
+        wide_xf.ClearXformOpOrder()
+        wide_xf.AddTransformOp().Set(Gf.Matrix4d().SetLookAt(weye, wtarget, Gf.Vec3d(0, 0, 1)).GetInverse())
 
 
 # whether the asset holds together and stays where the camera looks
@@ -624,6 +651,9 @@ for j in primaries:
 render_product = rep.create.render_product("/AnimView/Camera", (args.width, args.height))
 rgb = rep.AnnotatorRegistry.get_annotator("rgb")
 rgb.attach([render_product])
+wide_product = rep.create.render_product("/AnimView/WideCamera", WIDE_SIZE)
+rgb_wide = rep.AnnotatorRegistry.get_annotator("rgb")
+rgb_wide.attach([wide_product])
 
 # --- run ------------------------------------------------------------------------
 
@@ -742,6 +772,8 @@ for seg in segments:
         place_camera(min(1.0, (elapsed + i / args.fps) / total), seg.get("focus"))
         rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
         Image.fromarray(rgb.get_data()[:, :, :3]).save(frames_dir / f"f{frame_i:05d}.png")
+        if frame_i % WIDE_EVERY == 0:
+            Image.fromarray(rgb_wide.get_data()[:, :, :3]).save(wide_dir / f"f{frame_i:05d}.png")
         CAMS.append([list(CAM[0]), list(CAM[1])])
         FOCUS_LOG.append(seg.get("focus") if seg.get("focus") in FOCUS_BOX else None)
         measured = {j["name"]: measure(j) for j in joints}

@@ -89,9 +89,12 @@ def run_stage(stage: str, a: str, library_root: Path) -> str:
         e["behavior_check"] = bc
         record(e, "behaviors", ok=all(v.get("ok") for v in bc.values()))
         save_queue_entry(e)
-        return "all met" if all(v.get("ok") for v in bc.values()) else json.dumps(
-            {k: v["missing"] for k, v in bc.items() if not v.get("ok")})
+        chess = pd.chess_convention(a)
+        return ("all met" if all(v.get("ok") for v in bc.values()) else json.dumps(
+            {k: v["missing"] for k, v in bc.items() if not v.get("ok")})) + (f"; {chess}" if chess else "")
     if stage == "verify":
+        if pd.class_of(pd.entry_of(a)) == "chess_set":
+            return pd.chess_play_test(a)
         return pd.animate(a)
     if stage == "critic":
         from motion_critic import ANIM_DIR, critique
@@ -101,6 +104,9 @@ def run_stage(stage: str, a: str, library_root: Path) -> str:
             return "skipped: no animation (not articulated, or verify did not run)"
         r = critique(a)
         if r["pass"]:
+            e = pd.entry_of(a)
+            if e.pop("critic_flags", None) is not None:     # an earlier run's flags are history
+                save_queue_entry(e)
             return "PASS"
         if r.get("integrity"):
             return "FAIL: " + pd.repair_after_critic(a, r)
@@ -145,6 +151,8 @@ def main() -> int:
                     help="re-run the selected stages whether or not the ledger says they are stale")
     ap.add_argument("--library", default=str(Path.home() / "Desktop/assets/SketchFab_Assets"))
     args = ap.parse_args()
+    import process_downloads as pd
+    pd.SET_BODIES_REDO = bool(getattr(args, 'force', False))
     _load_env()
     stages = [s.strip() for s in args.stages.split(",") if s.strip()]
     bad = [s for s in stages if s not in ORDER]
@@ -189,6 +197,16 @@ def main() -> int:
                 # what follows would build on the old result of this stage
                 # (a failed survey re-drafted the joints the critic had taken out)
                 print("   (the rest of this asset's stages wait for that one)")
+                break
+            kids = pd.entry_of(a).get("split_into") or []
+            if kids:
+                # one asset per object now: the children take the stages on
+                from processing import applicable
+                for cid in kids:
+                    if cid not in {x for x, _ in todo}:
+                        todo.append((cid, [(x, f"split from {a}") for x in ORDER
+                                           if x in stages and x in applicable(pd.entry_of(cid))]))
+                print(f"   split into {', '.join(kids)}: they follow")
                 break
         report["assets"][a] = done
     out = QUEUE / "_runs" / f"reprocess_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"

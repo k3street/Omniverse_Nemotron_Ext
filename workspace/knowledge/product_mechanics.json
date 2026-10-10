@@ -3174,6 +3174,1498 @@
    "notes": "The 310 ran from 1954 to 1980 across many variants, so some items are model-specific: the nose baggage compartment and its side doors exist only on the long-nose 310R/T310R (1975-80); engine nacelle wing lockers are factory-fit from the 310I or retrofit; cowl flaps are manual-lever on early models and electric-switch on later ones; a left-hand crew door was an option on late aircraft. Flap travel is quoted as 45\u00b0 on the earliest 310 in TCDS 3A10 and 35\u00b0 on later models \u2014 I used 35 and flag the difference here. Degree and millimetre figures for cockpit controls (yoke travel, lever arcs, pedal travel, seat travel, door opening angles) are typical light-twin values given so they can be checked against a 3D model, not factory rigging dimensions; exact rigging figures come from the Cessna 310 Service Manual. The cabin door hinge side (forward edge, swinging forward) and the nose/locker door hinge lines (top edge, lifting up) should be verified against photographs of the specific variant being modelled. Flight controls, flaps, cowl flaps, gear and props are 'user moved' only indirectly, through the cockpit controls listed, but are included because they are the parts that visibly articulate on the airframe. Cowlings, fuel caps, dipsticks and cabin seats are the items that come off for servicing or cleaning and are marked detach.",
    "looked_up": "2026-10-05"
   },
-  "desktop pc tower on a flat base plane": null
+  "desktop pc tower on a flat base plane": null,
+  "mercedes benz amg gt sports car model on a ground plane": {
+   "product_name": "Mercedes-AMG GT (C190) two-door sports coup\u00e9",
+   "moving_parts": [
+    {
+     "part": "Driver's / passenger's door",
+     "motion": "hinge",
+     "how": "Conventional front-hinged door; two hinges on the A-pillar at the leading edge of the door. Pull the flush exterior handle (or interior release lever) and swing the door outward and forward; two detent stops hold it part-open and full-open. Reveals the cabin and sill.",
+     "axis": "vertical (hinge line is vertical, slightly raked front-to-back)",
+     "pivot": "front edge of the door at the A-pillar",
+     "range": 70
+    },
+    {
+     "part": "Exterior door handle",
+     "motion": "hinge",
+     "how": "Pull-up/pull-out grab handle recessed in the door skin; pivots on a pin at its forward end and swings the rear end outward to trip the latch cable, then spring-returns.",
+     "axis": "vertical pin, handle swings across the car's width",
+     "pivot": "forward end of the handle, inside the door skin",
+     "range": 25
+    },
+    {
+     "part": "Interior door release lever",
+     "motion": "hinge",
+     "how": "Lever on the inner door trim; pull rearward/inboard about a vertical pin at its forward end to release the latch.",
+     "axis": "vertical pin, lever sweeps across the width",
+     "pivot": "forward end of the lever on the door card",
+     "range": 25
+    },
+    {
+     "part": "Side window glass (frameless)",
+     "motion": "slide",
+     "how": "Powered by the switch on the door card; glass runs in channels inside the door and drops straight down into the door cavity. It auto-drops a few millimetres when the door is opened and re-seals against the roof when closed.",
+     "axis": "vertical (glass plane tilts slightly inboard at the top)",
+     "pivot": "regulator track inside the door",
+     "range": 420
+    },
+    {
+     "part": "Bonnet / hood",
+     "motion": "hinge",
+     "how": "Interior release lever in the driver's footwell pops the latch, then a secondary safety catch under the front edge is slid sideways; the long hood lifts from its front edge on two hinges at the cowl (base of the windscreen) and is held by a gas strut/prop, revealing the front-mid-mounted V8 and fluid reservoirs.",
+     "axis": "across the width (hinge pins transverse, at the rear of the hood)",
+     "pivot": "rear edge of the hood at the cowl",
+     "range": 60
+    },
+    {
+     "part": "Bonnet release lever (footwell)",
+     "motion": "hinge",
+     "how": "Small pull lever low in the driver's footwell; pivots on a pin at its mounting and is pulled rearward to release the primary hood latch.",
+     "axis": "transverse pin, lever sweeps front-to-back",
+     "pivot": "lever mount on the footwell panel",
+     "range": 30
+    },
+    {
+     "part": "Bonnet safety catch",
+     "motion": "slide",
+     "how": "Spring-loaded catch reached through the gap under the front edge of the raised hood; pushed sideways/up to free the hood for full lift.",
+     "axis": "across the width",
+     "pivot": "catch guide on the front crossmember",
+     "range": 20
+    },
+    {
+     "part": "Tailgate / rear hatch",
+     "motion": "hinge",
+     "how": "Glass-and-metal liftback hinged at the rear edge of the roof; released by the button under the tailgate trim or the key, swings up and rearward on gas struts (power EASY-PACK option), revealing the luggage compartment.",
+     "axis": "across the width (transverse hinge pins at the roof's rear edge)",
+     "pivot": "rear top edge, where roof meets tailgate",
+     "range": 80
+    },
+    {
+     "part": "Luggage-compartment floor panel",
+     "motion": "hinge",
+     "how": "Lift the recessed strap at the front of the boot floor; the panel tips up and forward to reveal the tyre sealant kit, tool kit and spare-wheel well.",
+     "axis": "across the width",
+     "pivot": "forward edge of the floor panel",
+     "range": 80
+    },
+    {
+     "part": "Luggage cover / roller blind",
+     "motion": "detach",
+     "how": "Cassette clipped into sockets in the boot side trims; the blind pulls out rearward and hooks to the tailgate, and the whole cassette lifts out of its sockets for removal.",
+     "axis": "front-to-back when extended; lifts vertically out of its mounts",
+     "pivot": "comes off at the two side-trim sockets",
+     "range": null
+    },
+    {
+     "part": "Fuel filler flap",
+     "motion": "hinge",
+     "how": "Press the outer edge of the flap on the right rear quarter panel; the push-push latch releases and the flap swings outward about its hinge at the forward edge, revealing the filler neck and cap.",
+     "axis": "vertical hinge line, flap sweeps outward across the width",
+     "pivot": "forward (leading) edge of the flap",
+     "range": 90
+    },
+    {
+     "part": "Fuel filler cap",
+     "motion": "spin",
+     "how": "Unscrew anticlockwise about one and a half turns, then hang it on the tether/holder inside the flap; screws back clockwise until it clicks.",
+     "axis": "through the cap's face, along the filler-neck axis",
+     "pivot": "centre of the cap on the filler neck",
+     "range": null
+    },
+    {
+     "part": "Active rear spoiler / airfoil",
+     "motion": "hinge",
+     "how": "Electrically driven aerofoil in the tailgate's trailing edge; rises up and rearward on linkages automatically above roughly 80 km/h (and in RACE/SPORT settings), retracts flush at lower speed, and can also be commanded from the console button.",
+     "axis": "across the width (pivot pins transverse at the tailgate trailing edge)",
+     "pivot": "trailing edge of the tailgate, below the spoiler blade",
+     "range": null
+    },
+    {
+     "part": "Exterior mirror housing",
+     "motion": "spin",
+     "how": "Power-folding: the housing swings rearward and inboard against the door about the vertical post of the mirror base when folded by the mirror switch or locking; the glass itself tilts on a ball mount inside the housing via the joystick/switch.",
+     "axis": "vertical for folding; glass tilts about horizontal and vertical axes",
+     "pivot": "mirror base post on the door shoulder",
+     "range": 60
+    },
+    {
+     "part": "Steering wheel (rotation)",
+     "motion": "spin",
+     "how": "Turns about the steering-column axis to steer the front wheels; roughly two turns lock to lock.",
+     "axis": "along the column, raked up toward the driver",
+     "pivot": "column centreline at the wheel hub",
+     "range": 720
+    },
+    {
+     "part": "Steering column adjustment (reach)",
+     "motion": "slide",
+     "how": "Electric (or manual lever) telescoping of the column; the wheel moves fore and aft along the column axis toward the driver.",
+     "axis": "front to back along the column",
+     "pivot": "telescoping track inside the column shroud",
+     "range": 50
+    },
+    {
+     "part": "Steering column adjustment (tilt)",
+     "motion": "hinge",
+     "how": "The column pivots at its base so the wheel rim arcs up and down for the driver's height.",
+     "axis": "across the width (transverse pivot at the column base)",
+     "pivot": "column base under the dashboard",
+     "range": 10
+    },
+    {
+     "part": "Shift paddles",
+     "motion": "press",
+     "how": "Two fixed paddles behind the wheel spokes; pull the right one toward you to upshift, the left to downshift, each pivoting on a short pin at its inboard mounting and spring-returning.",
+     "axis": "front to back (paddle tips move rearward toward the driver)",
+     "pivot": "inboard mount on the steering-wheel hub",
+     "range": 10
+    },
+    {
+     "part": "Accelerator pedal",
+     "motion": "hinge",
+     "how": "Organ-type pedal hinged at the floor; press the top of the pedal down and forward, spring returns to rest.",
+     "axis": "across the width (transverse hinge pin at the floor)",
+     "pivot": "bottom edge of the pedal at the floor pan",
+     "range": 60
+    },
+    {
+     "part": "Brake pedal",
+     "motion": "hinge",
+     "how": "Top-hung pendulum pedal; press the pad forward, pivoting about the bracket under the dashboard.",
+     "axis": "across the width (transverse pin on the pedal box)",
+     "pivot": "top of the pedal arm on the pedal-box bracket",
+     "range": 80
+    },
+    {
+     "part": "Road wheels (rolling)",
+     "motion": "spin",
+     "how": "Each wheel rotates on its hub bearing about the axle.",
+     "axis": "across the width (axle axis)",
+     "pivot": "wheel hub centre",
+     "range": null
+    },
+    {
+     "part": "Front wheels (steering)",
+     "motion": "spin",
+     "how": "Front wheels swivel about the steering-knuckle (kingpin) axis when the wheel is turned, left and right of straight ahead.",
+     "axis": "vertical, slightly inclined (steering axis)",
+     "pivot": "steering knuckle between the upper and lower wishbones",
+     "range": 70
+    },
+    {
+     "part": "Wheel centre cap / hub cap",
+     "motion": "detach",
+     "how": "Press-fit cap in the wheel centre; prised out from the face of the rim to expose the hub, normally only removed for service.",
+     "axis": "across the width (pulls straight off the wheel face)",
+     "pivot": "comes off the spigot in the wheel centre",
+     "range": null
+    },
+    {
+     "part": "Wheel bolts",
+     "motion": "spin",
+     "how": "Unscrew anticlockwise with the wheel wrench to remove the wheel.",
+     "axis": "across the width (along the bolt axis)",
+     "pivot": "bolt threads in the hub",
+     "range": null
+    },
+    {
+     "part": "DIRECT SELECT gear selector lever (console)",
+     "motion": "slide",
+     "how": "Short lever in the centre console moved fore and aft through its gate for R / N / D, with a separate P button; spring-returns to centre.",
+     "axis": "front to back",
+     "pivot": "ball/gate pivot at the base of the lever in the console",
+     "range": 30
+    },
+    {
+     "part": "AMG DRIVE UNIT rotary controller (DYNAMIC SELECT)",
+     "motion": "spin",
+     "how": "Knob on the centre console turned about its vertical axis to step through C / S / S+ / I / RACE drive programmes; detented, no end stop in some modes.",
+     "axis": "vertical (through the knob's face, console-mounted)",
+     "pivot": "knob centre on the console",
+     "range": null
+    },
+    {
+     "part": "AMG console buttons (ESP, suspension, exhaust flap, manual mode, spoiler, start/stop)",
+     "motion": "press",
+     "how": "Row of V-arranged pushbuttons on the centre console; each pressed straight down a couple of millimetres and spring-returning, toggling the function and its indicator.",
+     "axis": "vertical (perpendicular to the console face)",
+     "pivot": "button guide in the console panel",
+     "range": 3
+    },
+    {
+     "part": "Engine START/STOP button",
+     "motion": "press",
+     "how": "Round button on the console (or key slot) pressed straight in to crank or shut down the engine.",
+     "axis": "vertical/perpendicular to the console face",
+     "pivot": "button bore in the console",
+     "range": 3
+    },
+    {
+     "part": "AMG TRACTION CONTROL knob (GT R / GT R Pro)",
+     "motion": "spin",
+     "how": "Yellow dial on the centre of the dashboard turned about its own axis through nine detented slip-threshold settings.",
+     "axis": "front to back (through the dial's face on the dash)",
+     "pivot": "dial centre in the dashboard panel",
+     "range": null
+    },
+    {
+     "part": "COMAND rotary controller",
+     "motion": "spin",
+     "how": "Central rotary puck on the console: rotate to scroll, press down to confirm, and nudge it in four directions to navigate menus.",
+     "axis": "vertical for rotation and press; tips about horizontal axes",
+     "pivot": "puck centre in the console cradle",
+     "range": null
+    },
+    {
+     "part": "Touchpad above the controller",
+     "motion": "press",
+     "how": "Flat pad hinged on its mount; a firm press clicks it down a millimetre or two to select.",
+     "axis": "vertical",
+     "pivot": "pad mount in the console",
+     "range": 2
+    },
+    {
+     "part": "Glovebox lid",
+     "motion": "hinge",
+     "how": "Pull the handle/latch on the passenger-side dashboard; the lid drops forward and down on hinges at its bottom edge, revealing the stowage box.",
+     "axis": "across the width (transverse hinge at the lid's lower edge)",
+     "pivot": "bottom edge of the lid",
+     "range": 65
+    },
+    {
+     "part": "Centre console armrest / stowage lid",
+     "motion": "hinge",
+     "how": "Press the release and lift the padded lid; it swings up and rearward about hinges at its rear edge, revealing the stowage bin and connectivity sockets.",
+     "axis": "across the width",
+     "pivot": "rear edge of the lid",
+     "range": 70
+    },
+    {
+     "part": "Cupholder cover",
+     "motion": "slide",
+     "how": "Roller/sliding lid in the console ahead of the armrest; pushed rearward along its guides to expose the two cupholders.",
+     "axis": "front to back",
+     "pivot": "guide rails in the console moulding",
+     "range": 120
+    },
+    {
+     "part": "Dashboard air-vent louvres",
+     "motion": "flex",
+     "how": "Turbine-style round vents: the vanes inside tilt up/down and side to side when the central nub is pushed, directing the airflow.",
+     "axis": "tilt about horizontal and vertical axes in the vent face",
+     "pivot": "vane pivots inside the vent barrel",
+     "range": 30
+    },
+    {
+     "part": "Air-vent thumbwheel",
+     "motion": "spin",
+     "how": "Small knurled wheel at the vent edge rolled with the thumb to open or shut that vent.",
+     "axis": "across the vent face",
+     "pivot": "wheel spindle in the vent housing",
+     "range": null
+    },
+    {
+     "part": "Seat fore/aft adjustment",
+     "motion": "slide",
+     "how": "Powered by the door-panel seat switch; the whole seat runs along rails bolted to the floor, forward and back.",
+     "axis": "front to back",
+     "pivot": "seat rails on the floor pan",
+     "range": 240
+    },
+    {
+     "part": "Seat height adjustment",
+     "motion": "slide",
+     "how": "Seat cushion raised or lowered on its scissor mechanism using the seat switch.",
+     "axis": "vertical",
+     "pivot": "lift linkage between cushion frame and rails",
+     "range": 55
+    },
+    {
+     "part": "Seat backrest (recline)",
+     "motion": "hinge",
+     "how": "Backrest tips rearward or forward about the recliner hinge at the junction of cushion and backrest; also folds sharply forward to reach the stowage area behind the seats.",
+     "axis": "across the width (transverse recliner axis)",
+     "pivot": "recliner hinge at the base of the backrest",
+     "range": 80
+    },
+    {
+     "part": "Head restraint",
+     "motion": "slide",
+     "how": "Lifts and lowers on its two posts through the top of the backrest; press the detent button to lower.",
+     "axis": "vertical (angled with the backrest)",
+     "pivot": "guide sleeves in the top of the backrest",
+     "range": 70
+    },
+    {
+     "part": "Seat belt buckle button",
+     "motion": "press",
+     "how": "Red button on the buckle pressed in to eject the tongue.",
+     "axis": "through the buckle face",
+     "pivot": "button bore in the buckle housing",
+     "range": 4
+    },
+    {
+     "part": "Seat belt webbing",
+     "motion": "slide",
+     "how": "Pulls out of the inertia reel on the B-pillar and retracts automatically; tongue clips into the buckle beside the seat.",
+     "axis": "along the belt path, diagonally across the occupant",
+     "pivot": "reel in the pillar and the upper turning loop",
+     "range": null
+    },
+    {
+     "part": "Sun visor",
+     "motion": "hinge",
+     "how": "Swings down about its transverse rod at the header rail to shade the windscreen, then unclips from the inner hook and swivels about the end post to the side window.",
+     "axis": "across the width for the down swing; vertical for the swivel to the side",
+     "pivot": "visor rod at the roof header",
+     "range": 90
+    },
+    {
+     "part": "Interior rear-view mirror",
+     "motion": "hinge",
+     "how": "Tilts on its ball joint at the windscreen mount for aim; auto-dimming glass, no manual day/night tab.",
+     "axis": "ball joint \u2014 tilts about horizontal and vertical axes",
+     "pivot": "ball mount on the windscreen base",
+     "range": 30
+    },
+    {
+     "part": "Combination / indicator stalk",
+     "motion": "hinge",
+     "how": "Stalk on the column pushed up or down about its mount for indicators, pulled toward the driver for main-beam flash.",
+     "axis": "transverse pivot; tip arcs vertically",
+     "pivot": "stalk root on the steering column",
+     "range": 15
+    },
+    {
+     "part": "Wiper arm",
+     "motion": "spin",
+     "how": "Sweeps across the windscreen on its driven spindle; the arm can also be lifted off the glass about the same spindle head for blade changes.",
+     "axis": "through the windscreen face (spindle axis) for the sweep",
+     "pivot": "wiper spindle at the base of the windscreen",
+     "range": 90
+    },
+    {
+     "part": "Wiper blade",
+     "motion": "detach",
+     "how": "Unclipped from the hook/bayonet at the end of the lifted arm and pulled off for replacement.",
+     "axis": "along the arm",
+     "pivot": "comes off at the arm-to-blade clip",
+     "range": null
+    },
+    {
+     "part": "Floor mats",
+     "motion": "detach",
+     "how": "Lift off the two retaining pins/twist fasteners in the footwell for cleaning.",
+     "axis": "vertical lift off the floor",
+     "pivot": "comes off at the floor anchor studs",
+     "range": null
+    },
+    {
+     "part": "Towing-eye cover (bumper)",
+     "motion": "detach",
+     "how": "Small blanking cap in the front (and rear) bumper prised out to expose the threaded socket for the screw-in towing eye.",
+     "axis": "front to back (pulls straight out of the bumper face)",
+     "pivot": "comes off its clip in the bumper",
+     "range": null
+    },
+    {
+     "part": "Screw-in towing eye",
+     "motion": "spin",
+     "how": "From the tool kit; screwed into the exposed bumper socket (anticlockwise thread on Mercedes models) until tight.",
+     "axis": "front to back along the socket axis",
+     "pivot": "threaded socket behind the bumper",
+     "range": null
+    },
+    {
+     "part": "Fluid reservoir caps (washer, coolant, oil filler) under the hood",
+     "motion": "spin",
+     "how": "Each cap twists anticlockwise roughly a quarter to half turn and lifts off its filler neck; the washer cap flips up on a tether.",
+     "axis": "vertical, along each filler-neck axis",
+     "pivot": "filler neck in the engine bay",
+     "range": null
+    },
+    {
+     "part": "Folding fabric roof (Roadster variants only)",
+     "motion": "flex",
+     "how": "Three-layer soft top stacked and stowed behind the seats by the console switch; the header unlatches automatically and the frame folds under a cover while the side windows drop.",
+     "axis": "front to back as the frame folds; hoop pivots run across the width",
+     "pivot": "main roof-frame pivots at the rear body sides",
+     "range": null
+    }
+   ],
+   "source": "Mercedes-Benz / Mercedes-AMG GT (C190) Operator's Manual and Digital Owner's Manuals (mbusa.com/en/owners/manuals; moba.i.mercedes-benz.com), Mercedes-AMG GT press information on the active rear aerofoil and AMG DRIVE UNIT, and published road tests/teardown and engine-bay photography of the C190 coup\u00e9 and roadster.",
+   "notes": "The identification is a real product family: the Mercedes-AMG GT (C190, 2015-2021) two-door sports car; this list covers the coup\u00e9, with the roadster's folding top flagged separately. Web search was unavailable during this session, so the entries are from documented knowledge of the model rather than a freshly pulled manual page \u2014 treat the numeric ranges as nominal engineering estimates to verify against a CAD model or the printed manual (door ~70 deg, hood ~60 deg at the cowl hinges, tailgate ~80 deg at the roof hinge, seat travel ~240 mm). Items that are automatic rather than user-moved (active rear aerofoil, GT R active front underbody panel, exhaust flaps, power-fold mirrors) are listed because the driver can command them from a button or they visibly change the model's geometry. Parts not listed because they are fixed or non-user: badges, fixed rear diffuser, fixed roof panel on the coup\u00e9. For simulation, the highest-value articulations are the two doors, the hood, the tailgate, the fuel flap, the steering wheel plus front-wheel steer, the four rolling wheels, and the deployable rear aerofoil.",
+   "looked_up": "2026-10-09"
+  },
+  "scale model of a mercedes maybach vision 6 concept car sitting inside a circular display ring base": null,
+  "triple fan pc graphics card": null,
+  "nintendo switch pro game controller": {
+   "product_name": "Nintendo Switch Pro Controller (Nintendo, model HAC-013 / HAC-A-FSSKA)",
+   "moving_parts": [
+    {
+     "part": "Left Stick",
+     "motion": "spin",
+     "how": "Thumbstick on a ball/gimbal joint in the upper-left of the front face; the cap tilts freely in any direction (360\u00b0 of azimuth) and self-centres by spring when released. Tilting it does not reveal anything - it drives two potentiometer gimbals inside the shell.",
+     "axis": "two orthogonal tilt axes in the face plane - across the controller's width and front-to-back - with the shaft's rest position vertical to the front face",
+     "pivot": "ball pivot at the base of the stick shaft, at the centre of the circular stick well",
+     "range": 22
+    },
+    {
+     "part": "Left Stick (click / L3)",
+     "motion": "press",
+     "how": "The whole stick assembly pushes straight down into the shell along the shaft until an internal dome switch clicks, then springs back.",
+     "axis": "through the stick's face, perpendicular to the front shell (into the body)",
+     "pivot": "no pivot - linear plunge along the stick shaft",
+     "range": 1
+    },
+    {
+     "part": "Right Stick",
+     "motion": "spin",
+     "how": "Identical gimballed thumbstick on the lower-right of the front face, below the ABXY cluster; tilts in any direction and spring-returns to centre.",
+     "axis": "two orthogonal tilt axes in the face plane - across the width and front-to-back - from a vertical rest axis",
+     "pivot": "ball pivot at the base of the stick shaft, centre of the right stick well",
+     "range": 22
+    },
+    {
+     "part": "Right Stick (click / R3)",
+     "motion": "press",
+     "how": "Stick assembly plunges straight into the shell onto a dome switch and springs back.",
+     "axis": "through the stick's face, into the body",
+     "pivot": "no pivot - linear plunge along the stick shaft",
+     "range": 1
+    },
+    {
+     "part": "+Control Pad (D-pad)",
+     "motion": "hinge",
+     "how": "One-piece cross-shaped rocker seated on a central dome; pressing any arm tips the cross about its centre so that arm sinks into the shell and the opposite arm lifts slightly. Returns flat by the rubber membrane underneath.",
+     "axis": "rocks about two in-face axes - across the width (for up/down) and front-to-back (for left/right)",
+     "pivot": "central boss at the middle of the cross, under the hub",
+     "range": 6
+    },
+    {
+     "part": "A Button",
+     "motion": "press",
+     "how": "Round button on the right of the ABXY diamond; pushes straight into the front shell onto a rubber dome and springs back flush.",
+     "axis": "through the button's face, into the body",
+     "pivot": "none - straight-line plunger in its own bezel",
+     "range": 1
+    },
+    {
+     "part": "B Button",
+     "motion": "press",
+     "how": "Round button at the bottom of the ABXY diamond; straight plunge into the front shell onto a rubber dome.",
+     "axis": "through the button's face, into the body",
+     "pivot": "none - straight-line plunger",
+     "range": 1
+    },
+    {
+     "part": "X Button",
+     "motion": "press",
+     "how": "Round button at the top of the ABXY diamond; straight plunge into the front shell onto a rubber dome.",
+     "axis": "through the button's face, into the body",
+     "pivot": "none - straight-line plunger",
+     "range": 1
+    },
+    {
+     "part": "Y Button",
+     "motion": "press",
+     "how": "Round button on the left of the ABXY diamond; straight plunge into the front shell onto a rubber dome.",
+     "axis": "through the button's face, into the body",
+     "pivot": "none - straight-line plunger",
+     "range": 1
+    },
+    {
+     "part": "+ (Plus) Button",
+     "motion": "press",
+     "how": "Small round button on the front face right of centre, above the right grip; pushes straight in and springs back.",
+     "axis": "through the button's face, into the body",
+     "pivot": "none - straight-line plunger",
+     "range": 1
+    },
+    {
+     "part": "- (Minus) Button",
+     "motion": "press",
+     "how": "Small round button on the front face left of centre, mirroring the + button; pushes straight in and springs back.",
+     "axis": "through the button's face, into the body",
+     "pivot": "none - straight-line plunger",
+     "range": 1
+    },
+    {
+     "part": "HOME Button",
+     "motion": "press",
+     "how": "Round backlit button on the centre line of the front face, right of the Capture button; pushes straight in; its ring glows/blinks but the motion reveals nothing.",
+     "axis": "through the button's face, into the body",
+     "pivot": "none - straight-line plunger",
+     "range": 1
+    },
+    {
+     "part": "Capture Button",
+     "motion": "press",
+     "how": "Small square button on the centre line of the front face, left of HOME; pushes straight in and springs back.",
+     "axis": "through the button's face, into the body",
+     "pivot": "none - straight-line plunger",
+     "range": 1
+    },
+    {
+     "part": "L Button (left shoulder)",
+     "motion": "hinge",
+     "how": "Long bar on the top edge of the left shoulder, in front of ZL; the outboard end is pressed down and the bar tips about a short pivot at its inboard (centre-facing) end, sinking into the top shell seam.",
+     "axis": "rotation about an axis running front-to-back through the inboard end; the free end travels vertically",
+     "pivot": "inboard end of the bar, where it meets the top shell near the controller centre",
+     "range": 5
+    },
+    {
+     "part": "R Button (right shoulder)",
+     "motion": "hinge",
+     "how": "Mirror of the L bar on the right shoulder's top edge, in front of ZR; the outboard end depresses and the bar tips about its inboard end.",
+     "axis": "rotation about a front-to-back axis at the inboard end; free end travels vertically",
+     "pivot": "inboard end of the bar at the top shell",
+     "range": 5
+    },
+    {
+     "part": "ZL Button (left trigger)",
+     "motion": "hinge",
+     "how": "Concave trigger paddle on the rear of the left shoulder, behind the L bar. It hangs on a pin running across the controller's width at the top of the trigger and swings forward/downward into the recess when the index finger pulls it; a spring returns it. Digital, not analogue - it bottoms out on a switch rather than giving proportional output.",
+     "axis": "across the product's width (left-right pin), paddle swinging in the front-to-back/vertical plane",
+     "pivot": "pin at the upper rear edge of the trigger, inside the top of the left shoulder housing",
+     "range": 11
+    },
+    {
+     "part": "ZR Button (right trigger)",
+     "motion": "hinge",
+     "how": "Mirror-image trigger paddle on the rear of the right shoulder, behind the R bar; swings forward/down on a width-wise pin at its top and springs back.",
+     "axis": "across the product's width (left-right pin), paddle swinging in the front-to-back/vertical plane",
+     "pivot": "pin at the upper rear edge of the trigger, inside the top of the right shoulder housing",
+     "range": 11
+    },
+    {
+     "part": "SYNC Button",
+     "motion": "press",
+     "how": "Tiny recessed button on the top edge of the controller, immediately to the left of the USB Type-C connector; pressed straight down into the top edge to pair or reset the wireless link.",
+     "axis": "vertical - through the top edge face, into the body",
+     "pivot": "none - short straight-line plunger in a recess",
+     "range": 1
+    }
+   ],
+   "source": "Nintendo official support diagram, 'Nintendo Switch Pro Controller Diagram' (front and back views, control list incl. Capture, HOME, Left/Right Stick click, USB-C, SYNC, ZL, ZR, charge and player LEDs): https://www.nintendo.com/au/support/articles/nintendo-switch-pro-controller-diagram/ ; Nintendo Switch Pro Controller quick-start/operations manual (HAC-013); iFixit Nintendo Switch Pro Controller teardown and repair guides (internal battery secured by tri-point screws, gimballed stick modules, hinged ZL/ZR paddles).",
+   "notes": "Only the controls listed above are user-moved. Travel figures for buttons (~1 mm) and stick tilt (~\u00b122\u00b0) are typical measured/estimated values, not published Nintendo specifications, so treat them as approximate for rigging. Deliberately excluded: the USB Type-C port, NFC/amiibo touchpoint, charge LED, player LEDs and the IR/HD-rumble hardware are static features with no user motion. The Pro Controller has NO user-openable battery door, tray, lid or hatch - the 1300 mAh Li-ion pack is sealed inside behind tri-point (Y-type) screws and the two shell halves, so it is a service operation rather than a user-moved part. The grips are moulded into the shell and do not fold, detach or adjust, and there are no swappable stick caps, weights or back-paddle modules (unlike some third-party pads). The thumbstick caps are press-fit onto the shafts and can be pulled off during repair, but they are not designed as user-removable, so they are not listed as detach parts. ZL/ZR are digital switches despite their trigger shape, so in simulation their hinge is a short binary throw rather than a proportional axis.",
+   "looked_up": "2026-10-09"
+  },
+  "onewheel pint self balancing electric one wheel board": {
+   "product_name": "Onewheel Pint (Future Motion, self-balancing single-wheel electric board; Pint X is mechanically near-identical)",
+   "moving_parts": [
+    {
+     "part": "Maghandle (integrated magnetic carry handle)",
+     "motion": "hinge",
+     "how": "Strap-shaped handle sits stowed flush in the recess on the handle-side axle block / inner rail next to the tire, held closed by a magnet. The rider hooks fingers under it and pulls outward (away from the tire) against the magnet; it swings out only far enough to clear the fingers for 'briefcase-style' carrying and snaps back flush by itself when released. Reveals nothing - it is purely a grab loop. Fixed by a single screw to the axle block (sold/replaceable as 'Maghandle Hardware Kit').",
+     "axis": "pivot pin runs front-to-back (along the board's length) on one side of the hub; the handle swings outboard across the board's width",
+     "pivot": "single screw at the handle's mounted end on the axle block / hub side, beside the wheel",
+     "range": 15
+    },
+    {
+     "part": "Main power pushbutton switch",
+     "motion": "press",
+     "how": "Momentary rubber-capped pushbutton on the side of the battery box (the box ahead of the wheel). Pressed straight inward toward the board's centreline to toggle power on/off; the Lightbar lights to confirm. Short click-travel with spring return; sold as a replaceable part ('Pint (X) & GT Power Button').",
+     "axis": "across the board's width (inboard, normal to the battery-box side face)",
+     "pivot": "none - linear plunger in the battery-box side wall",
+     "range": 1.5
+    },
+    {
+     "part": "Front footpad sensor pad (two pressure zones either side of the centreline dots)",
+     "motion": "press",
+     "how": "The rider's front foot presses down on the front footpad; both zones each side of the centre dots must be loaded for the board to arm and balance. The pad deflects a fraction of a millimetre onto the sensor; the Lightbar turns blue to show which zones are engaged. Lifting the foot (or Simplestop) disarms it.",
+     "axis": "vertical (down into the deck, perpendicular to the footpad face)",
+     "pivot": "none - the pad surface deflects on its sensor stack over the front rail section",
+     "range": 1
+    },
+    {
+     "part": "Tire / wheel on the hub motor",
+     "motion": "spin",
+     "how": "The go-kart tire on the hub-motor rim rotates continuously about the axle that is clamped between the two axle blocks at the centre of the frame; forward rotation drives the board forward, reverse backward. Free to be spun by hand when the board is off.",
+     "axis": "across the board's width (axle line, perpendicular to the direction of travel)",
+     "pivot": "motor axle, clamped in the two axle blocks at the mid-point of the rails",
+     "range": null
+    },
+    {
+     "part": "Tire air valve cap",
+     "motion": "spin",
+     "how": "Small screw-on cap on the valve stem protruding from the wheel's side face; unscrew anticlockwise and lift off to reach the Schrader valve for checking/setting tyre pressure, screw back on clockwise. Sold separately as 'Onewheel Air Valve Cap'.",
+     "axis": "along the valve stem, i.e. through the wheel's face / across the board's width",
+     "pivot": "threaded valve stem on the rim sidewall",
+     "range": null
+    },
+    {
+     "part": "Charger barrel plug in the charge port",
+     "motion": "detach",
+     "how": "The brick charger's round connector is pushed straight into the recessed charge port in the side of the battery box, and pulled straight out when charging finishes; the Lightbar pulses while charging. The port itself is a replaceable module ('Pint (X) Charge Port').",
+     "axis": "across the board's width, straight into the battery-box side face",
+     "pivot": "comes off at the charge-port socket on the battery box side",
+     "range": 12
+    },
+    {
+     "part": "Silicone charger plug / port bung (optional accessory)",
+     "motion": "detach",
+     "how": "A flexible silicone stopper pushed into the charge port to keep dust and debris out; pulled out by its lip before plugging the charger in. Not supplied with the board - sold as 'Pint Charger Plugs'.",
+     "axis": "across the board's width, in and out of the port",
+     "pivot": "comes off at the charge-port opening in the battery-box side",
+     "range": 12
+    },
+    {
+     "part": "Fender (accessory, over-tyre mudguard)",
+     "motion": "detach",
+     "how": "Arched guard that spans the gap over the tire and bolts to the inner faces of the two rails / axle-block area with the supplied screws; unbolted and lifted straight up off the board when riders want a bare-wheel look or to clean the tire.",
+     "axis": "vertical lift-off; fixing screws run across the board's width into the rails",
+     "pivot": "comes off at the screw bosses on the inboard faces of both rails above the wheel",
+     "range": null
+    },
+    {
+     "part": "Front and rear bumpers",
+     "motion": "detach",
+     "how": "Plastic end bumpers on the nose and tail of the frame; user unscrews the fasteners from underneath/through the bumper face and pulls the bumper straight off the end of the rail to replace a scuffed one. Reveals the rail ends and bumper screw bosses.",
+     "axis": "front-to-back (lengthwise, off the ends of the board)",
+     "pivot": "comes off at the screw bosses on the nose and tail of the rails",
+     "range": null
+    },
+    {
+     "part": "Footpads (front sensor footpad and rear footpad)",
+     "motion": "detach",
+     "how": "Each footpad is screwed down onto its rail section; with the board off, the user removes the screws, lifts the pad vertically and unplugs its connector (Future Motion sells a dedicated footpad connector wrench) to fit a different footpad, grip tape or concave kit. Reveals the sensor wiring and rail top.",
+     "axis": "vertical lift-off; screws run vertically down into the rail",
+     "pivot": "comes off at the screw bosses along each rail's top face and the footpad connector",
+     "range": null
+    },
+    {
+     "part": "Rail guards / axle block covers",
+     "motion": "detach",
+     "how": "Clip- and screw-on side covers along the outer faces of the rails and over the axle blocks; peeled/unscrewed off to swap colours or clean grit out, exposing the bare rail sides and axle hardware.",
+     "axis": "across the board's width (outboard, off the side faces)",
+     "pivot": "comes off at the clips/screws on the outer rail and axle-block faces",
+     "range": null
+    },
+    {
+     "part": "Battery module and controller module (user-replaceable service modules)",
+     "motion": "detach",
+     "how": "The sealed battery box ahead of the wheel and the controller box behind it each unbolt from the rails, lift away from their gaskets and unplug; Future Motion sells both modules plus their gaskets as spares. Reveals the internal harness between the two boxes and the motor cable.",
+     "axis": "vertical lift-off from the rail cradle; fixing screws vertical and across the width",
+     "pivot": "comes off at the module mounting screws and the internal plug connectors",
+     "range": null
+    }
+   ],
+   "source": "Onewheel Pint Owner's Manual (Future Motion), PDF copies at https://motosurfing.com/upload/iblock/d1d/8izmqfb69wayjbdoz0g6x2uc05nyfu2x.pdf and https://www.funshop.at/anleitungen/onewheel/onewheel-future-motion-pint-pintx-manual-v2-english.pdf (sections: Main power pushbutton switch, Lightbar, Understanding the footpad, How to charge your battery, Maintaining your Pint); https://onewheel.com/products/maghandle; https://onewheel.com/products/pint-charger-plugs; https://onewheel.com/collections/pint-parts and /pint-x-parts (charge port, power button, axle block covers, footpad connector wrench, module gaskets); rider reports on Maghandle swing-out travel and DIY charge-port plugs at community.onewheel.com / archive.owforum.co.uk",
+   "notes": "The Pint has no lids, doors, trays or knobs - it is a sealed-deck board, so almost all user interaction is press (power button, footpad sensor), spin (wheel, valve cap) and detach (consumables and accessories). Ranges: button travel and footpad deflection are approximate from the sealed-switch and sense-pad design (manual gives no figures); the Maghandle angle is approximate - riders report it releases only far enough (roughly 10-20 degrees, about 12 mm clear of the tire) to get fingers through before the magnet pulls it flush again, so it is a magnetically detented hinge rather than a fully folding handle. The board itself pitches nose-up/nose-down about the axle under the rider, but that is whole-body motion, not a separate part. Battery/controller modules are listed because Future Motion sells them as owner-replaceable, but they are service-level, not everyday, disassembly. Dimensions in millimetres and degrees are best estimates for checking a 3D model, not published specs.",
+   "looked_up": "2026-10-09"
+  },
+  "resin 3d printer with opaque cover": null,
+  "coaxial rc toy helicopter with landing skids": null,
+  "tesla model s sedan": {
+   "product_name": "Tesla Model S (all-electric 5-door liftback sedan; covers both the 2012\u20132020 original and the 2021+ 'refresh'/Plaid interior)",
+   "moving_parts": [
+    {
+     "part": "Front doors (driver and passenger)",
+     "motion": "hinge",
+     "how": "Two-hinge door swings outward and forward from the A-pillar; detent stops hold it part-open; latch is electric (button inside, handle outside) with a mechanical cable backup",
+     "axis": "vertical",
+     "pivot": "two hinge pins on the front edge of the door at the A-pillar",
+     "range": 70
+    },
+    {
+     "part": "Rear doors",
+     "motion": "hinge",
+     "how": "Swing outward from the B-pillar, slightly smaller swing than the fronts because of the rear wheel arch; reveals the rear bench",
+     "axis": "vertical",
+     "pivot": "two hinge pins on the front edge of the door at the B-pillar",
+     "range": 68
+    },
+    {
+     "part": "Exterior door handle, 2012\u20132020 style (auto-presenting flush handle)",
+     "motion": "slide",
+     "how": "Handle sits flush in the door skin and is motored straight out of its pocket when the key approaches or you touch it; once presented you pull it outboard to trip the latch microswitch, then the door opens",
+     "axis": "across the car's width (outboard out of the door face)",
+     "pivot": "no pin \u2013 it rides a motorised carrier inside the door; the pull action rotates about its inner (forward) end",
+     "range": 20
+    },
+    {
+     "part": "Exterior door handle, 2021+ refresh (fixed paddle)",
+     "motion": "press",
+     "how": "Press the wide rear half of the flush paddle inwards; the narrow front end tips proud of the door so you can hook it and pull, which electrically releases the latch (doors can also auto-present/open on approach)",
+     "axis": "across the car's width (inboard into the door face)",
+     "pivot": "the paddle rocks about a vertical pin at its middle, inside the door skin",
+     "range": 8
+    },
+    {
+     "part": "Hood / frunk lid",
+     "motion": "hinge",
+     "how": "Released from the touchscreen, phone app or key fob (double press), then lifts up and rearward on gas struts to reveal the front trunk; refreshed/Plaid cars can have a powered frunk that opens and closes on a button",
+     "axis": "across the car's width",
+     "pivot": "two hinges on the rear edge of the hood, at the base of the windshield",
+     "range": 65
+    },
+    {
+     "part": "Rear liftgate (hatch with glass)",
+     "motion": "hinge",
+     "how": "Power liftgate swings up and forward on motorised struts from the roof rear edge, lifting the rear glass with it to expose the full cargo opening; maximum opening height is settable on the screen; a button on the lower inside edge closes it",
+     "axis": "across the car's width",
+     "pivot": "hinges at the top of the tailgate aperture, at the rear edge of the roof",
+     "range": 80
+    },
+    {
+     "part": "Boot (sub-trunk) floor panel",
+     "motion": "detach",
+     "how": "Carpeted load-floor lid lifts straight out by a finger strap to reveal the deep well behind the rear axle; on some cars it is hinged at the front edge and props against the seatbacks",
+     "axis": "vertical (lifts up out of its rebate)",
+     "pivot": "lifts out at the front lip; no permanent pin",
+     "range": null
+    },
+    {
+     "part": "Charge port door",
+     "motion": "hinge",
+     "how": "Flap moulded into the left rear light cluster; pops open electrically (press the flap, press the button on the charge cable, app, or Controls > Charging) and swings outward/rearward to reveal the socket; a manual release cord sits behind the left-side trim in the boot",
+     "axis": "vertical (swings out from the body side)",
+     "pivot": "hinge along the forward edge of the flap, inside the taillight housing",
+     "range": 75
+    },
+    {
+     "part": "Charge port manual release cord (boot left-side trim)",
+     "motion": "slide",
+     "how": "Peel the carpeted trim panel in the left rear of the boot and pull the cord straight down/rearward to unlatch a connector or pop the door when there is no power",
+     "axis": "along the cable run, front to back",
+     "pivot": "cable anchor at the charge port actuator",
+     "range": 40
+    },
+    {
+     "part": "Exterior mirror housings",
+     "motion": "spin",
+     "how": "Power-fold motor swings each mirror head rearward against the glass for parking/car washes; folds automatically with the Auto-Fold setting",
+     "axis": "vertical, through the mirror stalk",
+     "pivot": "the base of the mirror stalk on the door",
+     "range": 85
+    },
+    {
+     "part": "Exterior mirror glass",
+     "motion": "hinge",
+     "how": "Two-axis electric actuator tips the glass up/down and in/out when the steering-wheel scroll wheel is used after selecting the mirror on the screen",
+     "axis": "across the car's width and vertical (two axes through the glass carrier)",
+     "pivot": "ball pivot at the centre of the mirror glass carrier",
+     "range": 15
+    },
+    {
+     "part": "Side window glass (\u00d74, frameless)",
+     "motion": "slide",
+     "how": "Powered glass runs up and down in the channels inside the door; one-touch auto up/down, drops a few mm automatically when the door is opened because there is no frame",
+     "axis": "vertical",
+     "pivot": "window regulator track inside the door",
+     "range": 450
+    },
+    {
+     "part": "Panoramic roof glass (2012\u20132016 option)",
+     "motion": "slide",
+     "how": "Glass panel slides rearward along roof rails over the fixed rear glass; driven by a motor with percentage-open positions on the touchscreen",
+     "axis": "front to back",
+     "pivot": "roof rail tracks either side of the aperture",
+     "range": 500
+    },
+    {
+     "part": "Road wheels",
+     "motion": "spin",
+     "how": "Each wheel/tyre rotates on its hub; the user moves them when rolling or when changing a tyre",
+     "axis": "across the car's width, through the hub",
+     "pivot": "wheel bearing centre",
+     "range": null
+    },
+    {
+     "part": "Front wheels (steering)",
+     "motion": "spin",
+     "how": "Steered by the rack; wheels pivot about their steering axis when the wheel is turned",
+     "axis": "vertical, through the kingpin/strut axis",
+     "pivot": "steering axis at each front upright",
+     "range": 35
+    },
+    {
+     "part": "Aero wheel covers / centre caps",
+     "motion": "detach",
+     "how": "Plastic cover clips onto the wheel face and pulls straight off outboard for access to the lug nuts; the small centre cap and lug-nut caps also pull off",
+     "axis": "across the car's width (outboard, off the wheel face)",
+     "pivot": "clip ring on the wheel face \u2013 comes off entirely",
+     "range": null
+    },
+    {
+     "part": "Tow-eye cover in front bumper",
+     "motion": "detach",
+     "how": "Press the upper edge of the small bumper panel, then pry it out; it unclips completely to reveal the threaded tow-eye socket (and, on early cars, access to the hood release cables)",
+     "axis": "front to back (pulls forward off the bumper)",
+     "pivot": "clip tab at the panel's top edge \u2013 detaches entirely",
+     "range": null
+    },
+    {
+     "part": "Screw-in tow eye",
+     "motion": "spin",
+     "how": "Threads anticlockwise into the socket behind the bumper cover and is tightened by hand/wheel wrench",
+     "axis": "front to back, along the eye",
+     "pivot": "the threaded socket in the bumper beam",
+     "range": null
+    },
+    {
+     "part": "Windshield wiper arms",
+     "motion": "spin",
+     "how": "Sweep across the windshield from their cowl pivots; Service Mode parks them upright so they can be worked on",
+     "axis": "through the wiper pivot face (perpendicular to the glass)",
+     "pivot": "wiper spindle on the cowl at the base of the windshield",
+     "range": 90
+    },
+    {
+     "part": "Wiper arm lift (for blade change)",
+     "motion": "hinge",
+     "how": "Arm folds away from the glass on its spring joint so the blade can be reached",
+     "axis": "along the wiper arm's base joint",
+     "pivot": "spring hinge where the arm meets the spindle head",
+     "range": 70
+    },
+    {
+     "part": "Wiper blades",
+     "motion": "detach",
+     "how": "Squeeze the release clip and slide the blade off the hook/bayonet of the arm \u2013 a wear item the owner replaces",
+     "axis": "along the arm",
+     "pivot": "blade-to-arm clip",
+     "range": null
+    },
+    {
+     "part": "Steering wheel rim (round wheel or Plaid yoke)",
+     "motion": "spin",
+     "how": "Turns on the column to steer; the yoke version has the same rack travel but no rim to pass hand-over-hand",
+     "axis": "along the steering column, front to back and slightly upward",
+     "pivot": "steering column shaft",
+     "range": 720
+    },
+    {
+     "part": "Steering column tilt",
+     "motion": "hinge",
+     "how": "Power (or manual on early cars) tilt raises/lowers the wheel; adjusted from the screen with the left scroll wheel and stored per driver profile, with Easy Entry retracting it away",
+     "axis": "across the car's width",
+     "pivot": "tilt hinge in the column mount under the dash",
+     "range": 12
+    },
+    {
+     "part": "Steering column telescope",
+     "motion": "slide",
+     "how": "Wheel moves toward and away from the driver along the column axis, same control as tilt",
+     "axis": "along the column, front to back",
+     "pivot": "telescoping sleeve in the column",
+     "range": 60
+    },
+    {
+     "part": "Steering-wheel scroll wheels (two thumbwheels)",
+     "motion": "spin",
+     "how": "Each rolls up/down for volume, mirror and column adjustment and presses inward to confirm; on the yoke they also tilt left/right",
+     "axis": "across the car's width, through the wheel's face",
+     "pivot": "thumbwheel spindle in the spoke",
+     "range": null
+    },
+    {
+     "part": "Scroll wheel click (press)",
+     "motion": "press",
+     "how": "Push the thumbwheel straight into the spoke to select; holding both reboots the touchscreen",
+     "axis": "through the part's face, into the spoke",
+     "pivot": "switch plunger behind the wheel",
+     "range": 2
+    },
+    {
+     "part": "Column stalks \u2013 turn signal/high beam, wiper, gear selector (2012\u20132020 and 2023+ cars)",
+     "motion": "hinge",
+     "how": "Flick the left stalk up/down for indicators and pull it toward you for a wash/wipe; the right stalk moves up for Reverse, down for Drive, with a Park button on its end; stalks are spring-returned",
+     "axis": "across the car's width (lever swings in a vertical plane)",
+     "pivot": "ball pivot where the stalk enters the column shroud",
+     "range": 15
+    },
+    {
+     "part": "Stalk end buttons (Park / voice / autopilot)",
+     "motion": "press",
+     "how": "Push the button on the tip of the stalk straight in",
+     "axis": "along the stalk",
+     "pivot": "switch plunger in the stalk tip",
+     "range": 2
+    },
+    {
+     "part": "Centre touchscreen tilt (2021+ 17-inch landscape screen)",
+     "motion": "hinge",
+     "how": "Motorised; choose a preset in Controls > Display and the screen rotates toward the driver or the passenger, clearing the dash as it moves (the 2012\u20132020 portrait 17-inch screen is fixed)",
+     "axis": "vertical, through the centre of the screen",
+     "pivot": "powered pivot on the screen's centre mount behind the display",
+     "range": null
+    },
+    {
+     "part": "Glovebox door",
+     "motion": "hinge",
+     "how": "No handle \u2013 released electrically from Controls > Glovebox (or the shortcut icon) and can be PIN-locked; the door drops forward and down on its lower hinge, damped, to reveal the storage bin",
+     "axis": "across the car's width",
+     "pivot": "hinge along the bottom edge of the glovebox door",
+     "range": 80
+    },
+    {
+     "part": "Centre console armrest lid / sliding cover",
+     "motion": "slide",
+     "how": "The console cover slides fore-and-aft by hand to expose the cupholders, the wireless phone docks and the bin under the armrest (early 2012\u20132015 cars had an open shelf instead; some have a roller-type cover)",
+     "axis": "front to back",
+     "pivot": "runners in the console side rails",
+     "range": 150
+    },
+    {
+     "part": "Centre console bin lid",
+     "motion": "hinge",
+     "how": "Padded armrest lid tips up on its rear hinge to reveal the deep storage bin and USB ports",
+     "axis": "across the car's width",
+     "pivot": "hinge along the rear edge of the lid",
+     "range": 75
+    },
+    {
+     "part": "Front seats \u2013 fore/aft",
+     "motion": "slide",
+     "how": "Power seat track moves the whole seat toward or away from the pedals; Easy Entry slides it back automatically",
+     "axis": "front to back",
+     "pivot": "seat rails bolted to the floor",
+     "range": 250
+    },
+    {
+     "part": "Front seat backrest recline",
+     "motion": "hinge",
+     "how": "Power recliner tips the backrest rearward from upright; stored in the driver profile",
+     "axis": "across the car's width",
+     "pivot": "recliner hinge at the hip point where the backrest meets the cushion",
+     "range": 60
+    },
+    {
+     "part": "Front seat height / cushion tilt",
+     "motion": "slide",
+     "how": "Scissor lift raises and lowers the cushion; a separate control tips the front of the cushion up",
+     "axis": "vertical",
+     "pivot": "seat-frame lift linkage under the cushion",
+     "range": 60
+    },
+    {
+     "part": "Head restraints",
+     "motion": "slide",
+     "how": "Pull up or press the release button and push down on the posts; rear head restraints lift out completely for child seats",
+     "axis": "vertical, along the posts",
+     "pivot": "guide sleeves in the top of the backrest",
+     "range": 70
+    },
+    {
+     "part": "Rear seatbacks (60/40 split)",
+     "motion": "hinge",
+     "how": "Pull the release lever at the top of the backrest or the levers in the boot side trim; each section folds forward onto the cushion to make a flat load floor through to the hatch",
+     "axis": "across the car's width",
+     "pivot": "pivot at the bottom rear of each seatback, at the cushion line",
+     "range": 72
+    },
+    {
+     "part": "Rear centre armrest",
+     "motion": "hinge",
+     "how": "Pull the strap at the top of the centre backrest and fold it down onto the seat to expose cupholders (and the pass-through on cars so equipped)",
+     "axis": "across the car's width",
+     "pivot": "hinge at the base of the centre seatback section",
+     "range": 85
+    },
+    {
+     "part": "Seat belts (webbing and buckle)",
+     "motion": "slide",
+     "how": "Webbing pulls out of the inertia reel at the B-pillar and the tongue clicks into the buckle; the red button on the buckle is pressed to release it",
+     "axis": "along the belt",
+     "pivot": "reel in the pillar and the anchor at the sill",
+     "range": null
+    },
+    {
+     "part": "Seat belt buckle release button",
+     "motion": "press",
+     "how": "Press the red button straight into the buckle body to eject the tongue",
+     "axis": "through the part's face",
+     "pivot": "buckle latch plunger",
+     "range": 5
+    },
+    {
+     "part": "Sun visors",
+     "motion": "hinge",
+     "how": "Fold down from the headliner to block forward glare",
+     "axis": "across the car's width, along the visor rod",
+     "pivot": "the visor rod at the header above the windshield",
+     "range": 90
+    },
+    {
+     "part": "Sun visor side swing",
+     "motion": "spin",
+     "how": "Unclip the inboard end from its hook and swing the visor about its support rod to cover the side window",
+     "axis": "vertical, through the outboard support",
+     "pivot": "the outboard visor mount in the headliner",
+     "range": 90
+    },
+    {
+     "part": "Vanity mirror cover",
+     "motion": "slide",
+     "how": "Slide the cover panel on the back of the visor to uncover the illuminated mirror (the lamp switches on with it)",
+     "axis": "along the visor",
+     "pivot": "cover runs in slots in the visor shell",
+     "range": 80
+    },
+    {
+     "part": "Interior door release buttons",
+     "motion": "press",
+     "how": "Push the small button on the armrest/door card; it electrically unlatches the door, which then pushes slightly ajar",
+     "axis": "through the part's face, into the door trim",
+     "pivot": "switch plunger behind the button",
+     "range": 4
+    },
+    {
+     "part": "Front door manual release lever",
+     "motion": "hinge",
+     "how": "Mechanical backup if the car has no power \u2013 pull the lever located forward of the window switches on the door panel upward/rearward to pull the latch cable directly",
+     "axis": "across the car's width (lever rotates up out of the trim)",
+     "pivot": "pin at the forward end of the lever in the door trim",
+     "range": 30
+    },
+    {
+     "part": "Rear door manual release cable",
+     "motion": "slide",
+     "how": "Lift the mat in the rear door pocket, pull the panel away to expose the cable, then pull it up/forward to unlatch (not fitted to every build year)",
+     "axis": "vertical then front to back, along the cable",
+     "pivot": "cable anchored at the rear door latch",
+     "range": 40
+    },
+    {
+     "part": "Window / lock / mirror rocker switches",
+     "motion": "press",
+     "how": "Rockers on the driver's door card tip down to lower and up to raise the glass, with a two-stage detent for one-touch auto",
+     "axis": "through the part's face (rocks about its centre)",
+     "pivot": "rocker pin in the switch pack",
+     "range": 5
+    },
+    {
+     "part": "Accelerator pedal",
+     "motion": "press",
+     "how": "Depress with the right foot; a spring returns it and the car regenerates when it is released",
+     "axis": "front to back and downward, through the pedal face",
+     "pivot": "pedal arm hinge at the top of the pedal box behind the firewall",
+     "range": 70
+    },
+    {
+     "part": "Brake pedal",
+     "motion": "press",
+     "how": "Depress to brake; must be pressed to shift out of Park and to start the car",
+     "axis": "front to back and downward, through the pedal face",
+     "pivot": "pedal arm hinge at the top of the pedal box",
+     "range": 80
+    },
+    {
+     "part": "Interior rear-view mirror",
+     "motion": "spin",
+     "how": "Hand-tilted on its ball joint at the windshield mount (auto-dimming, so no day/night tab)",
+     "axis": "across the car's width and vertical, through the ball",
+     "pivot": "ball joint on the windshield-mounted stalk",
+     "range": 25
+    },
+    {
+     "part": "HVAC vent louvres (2012\u20132020 cars)",
+     "motion": "flex",
+     "how": "Thumbwheel/tab aims the vane pack up-down and side-to-side and closes the vent; refreshed 2021+ cars have a hidden full-width vent aimed only from the touchscreen, with no part to touch",
+     "axis": "across the car's width and vertical, through the vent face",
+     "pivot": "vane pivots inside the vent barrel",
+     "range": 30
+    },
+    {
+     "part": "Liftgate close button",
+     "motion": "press",
+     "how": "Press the button on the inner lower edge of the open liftgate to power it shut",
+     "axis": "through the part's face",
+     "pivot": "switch plunger in the tailgate trim",
+     "range": 3
+    },
+    {
+     "part": "Key fob buttons (car-shaped fob)",
+     "motion": "press",
+     "how": "Press the roof of the fob twice to lock/unlock, the nose twice to pop the frunk, the tail twice for the boot (hold for the charge port)",
+     "axis": "through the part's face",
+     "pivot": "membrane switch inside the fob shell",
+     "range": 1
+    },
+    {
+     "part": "Mobile connector / charge cable latch button",
+     "motion": "press",
+     "how": "Press the button on the connector handle to release the latch pin so the cable can be pulled out of the charge port",
+     "axis": "through the part's face, into the handle",
+     "pivot": "button pivot in the connector housing",
+     "range": 3
+    },
+    {
+     "part": "Cabin air filter access cover (passenger footwell)",
+     "motion": "detach",
+     "how": "Unclip/unscrew the kick panel under the glovebox and withdraw the filter cassette forward for replacement \u2013 an owner-serviceable maintenance item",
+     "axis": "front to back",
+     "pivot": "clips and screws \u2013 the cover comes off entirely",
+     "range": null
+    },
+    {
+     "part": "Floor mats",
+     "motion": "detach",
+     "how": "Unhook from the floor retaining posts and lift out for cleaning; must be re-anchored so they cannot slide under the pedals",
+     "axis": "vertical (lifts off the retaining pins)",
+     "pivot": "floor anchor posts \u2013 comes away completely",
+     "range": null
+    },
+    {
+     "part": "Frunk and boot carpet liners / side trim panels",
+     "motion": "detach",
+     "how": "Lift out of the luggage wells for cleaning or to reach the manual charge-port release and the 12 V battery area",
+     "axis": "vertical",
+     "pivot": "clips and friction fit \u2013 lifts out entirely",
+     "range": null
+    },
+    {
+     "part": "Rear parcel shelf / cargo cover",
+     "motion": "detach",
+     "how": "Lifts out of its side supports behind the rear seats to free up full hatch height",
+     "axis": "vertical then rearward out of the hatch",
+     "pivot": "side support ledges \u2013 removable",
+     "range": null
+    }
+   ],
+   "source": "Tesla Model S Owner's Manual (2021+), https://www.tesla.com/ownersmanual/models/en_us/Owners_Manual.pdf \u2014 sections on Doors, Opening and Closing (manual releases), Front/Rear Trunk, Charge Port, Touchscreen tilt, Glovebox, Seats, Mirrors, Windows, Wipers (Service Mode), Towing (tow eye), Cleaning/Maintenance (cabin filter, wiper blades); legacy Model S 2012\u20132020 owner's manual at https://www.tesla.com/ownersmanual/2012_2020_models/en_us/ (auto-presenting door handles, panoramic roof, manual HVAC vents); supporting coverage: notateslaapp.com article on the Model S/X display-tilt software update; electrek.co on the 2021 Model S/X refresh frunk and interior; teslamotorsclub.com threads on door handle/latch mechanisms.",
+   "notes": "Tesla Model S is a real, specific product, but it spans two very different interiors: the 2012\u20132020 car (portrait 17-inch fixed screen, auto-presenting motorised flush door handles, round wheel with two stalks, optional sliding panoramic roof, manually aimed HVAC vents) and the 2021+ 'refresh'/Plaid (landscape tilting screen, fixed press-to-pop paddle handles, yoke or round wheel, screen-only shift on early refresh cars with stalks returning from 2023, fixed glass roof, hidden vent). I have flagged which generation applies where it differs; a 3D model should be matched to one of them before the kinematics are applied. Angles and travels are engineering-plausible values checked against photos and the manual's descriptions \u2014 Tesla does not publish door-swing angles, window travel, screen-tilt degrees or pedal travel, so treat every number as approximate (\u00b120%) and verify against the mesh. The tilt range of the 2021+ centre screen is left null because Tesla only names preset positions, not degrees. Nearly all 'latches' on this car are electric: doors, frunk, liftgate, charge port and glovebox all have no mechanical outside handle or button, so a simulation needs both the powered path and the cable backups (front-door lever, rear-door pocket cable, boot-trim charge-port cord, early-car hood cables behind the tow-eye cover). Excluded: suspension travel, HVAC flaps, headlight levelling and other parts the user never touches; a factory tow hitch was offered on some European Model S cars only, and the active rear spoiler belongs to the Model X, not the S.",
+   "looked_up": "2026-10-09"
+  },
+  "tesla roadster sports car": {
+   "product_name": "Tesla Roadster (first generation, 2008\u20132012; Roadster, Roadster 2 / 2.5 and Roadster Sport \u2014 Lotus Elise-derived 2-seat targa roadster)",
+   "moving_parts": [
+    {
+     "part": "Driver/passenger door",
+     "motion": "hinge",
+     "how": "Conventional front-hinged door; hinge pin is vertical at the door's forward (A-pillar) edge, so the door swings outward and forward to reveal the high sill and cabin. Released by the touch pad in the door air inlet (exterior) or the interior release lever.",
+     "axis": "vertical",
+     "pivot": "front vertical edge of the door at the A-pillar",
+     "range": 67
+    },
+    {
+     "part": "Exterior door release touch pad (in the door air inlet/scoop)",
+     "motion": "press",
+     "how": "Flush pad recessed in the side air inlet ahead of the rear wheel; press it lightly inward (toward the car centreline) with the car unlocked and the latch releases so the door pops free. No pull-up handle on the body.",
+     "axis": "across its width (inward, perpendicular to the door face)",
+     "pivot": "flush pad, travels straight in on its own guides",
+     "range": 6
+    },
+    {
+     "part": "Interior door release lever",
+     "motion": "hinge",
+     "how": "Small cable lever on the inner door trim just ahead of the armrest; pull it rearward/inward about its base pin to pull the latch cable and open the door.",
+     "axis": "vertical",
+     "pivot": "base of the lever on the door trim panel",
+     "range": 30
+    },
+    {
+     "part": "Door key lock cylinder (emergency unlocking)",
+     "motion": "spin",
+     "how": "Key barrel in the door; insert the mechanical key and rotate it about the key axis to unlock/lock when the fob is dead.",
+     "axis": "through the part's face (horizontal, into the door skin)",
+     "pivot": "centre of the lock barrel",
+     "range": 90
+    },
+    {
+     "part": "Trunk lid (rear deck panel carrying the rear spoiler)",
+     "motion": "hinge",
+     "how": "Rear deck lid pivots on a transverse hinge line at its forward edge, just behind the roll hoops, and lifts up and rearward to reveal the luggage compartment above the motor/PEM. Closed by pressing firmly down on one side of the rear spoiler until it clicks, then the other side.",
+     "axis": "across its width",
+     "pivot": "forward transverse edge of the lid, behind the cabin",
+     "range": 60
+    },
+    {
+     "part": "Trunk release button (dashboard, bottom left)",
+     "motion": "press",
+     "how": "Push button on the lower left of the dash; press straight in to pop the trunk latch. Disabled when the car is locked with the fob or above 5 mph (8 km/h).",
+     "axis": "front to back (in toward the dash)",
+     "pivot": "button slides straight in on its own stem",
+     "range": 5
+    },
+    {
+     "part": "Trunk external key lock",
+     "motion": "spin",
+     "how": "Insert the mechanical key in the external trunk lock and turn counter-clockwise to release the trunk latch.",
+     "axis": "through the part's face",
+     "pivot": "centre of the lock barrel",
+     "range": 90
+    },
+    {
+     "part": "Trunk interior emergency release (T-handle)",
+     "motion": "slide",
+     "how": "T-shaped handle at the back of the trunk toward the driver's side; grab and pull it toward you along its cable to trip the latch from inside the trunk.",
+     "axis": "front to back (along the cable)",
+     "pivot": "cable exit point at the latch bracket \u2014 handle pulls straight out",
+     "range": 60
+    },
+    {
+     "part": "Charging port door (flap on the body side/rear quarter)",
+     "motion": "hinge",
+     "how": "Small body-coloured flap over the charge inlet; it releases (press-to-pop / release latch) and swings outward on its concealed hinge at one edge to expose the charge connector socket.",
+     "axis": "vertical",
+     "pivot": "one vertical edge of the flap, concealed hinge behind the body panel",
+     "range": 90
+    },
+    {
+     "part": "Charge connector / charge cable plug",
+     "motion": "detach",
+     "how": "Push the connector straight into the charge inlet to latch, squeeze the release and pull it straight out along the socket axis to remove.",
+     "axis": "through the part's face (into the inlet)",
+     "pivot": "comes off at the charge inlet socket",
+     "range": null
+    },
+    {
+     "part": "Hard-top roof panel (removable targa top)",
+     "motion": "detach",
+     "how": "Comes off completely: open both doors, use the supplied Torx tool to loosen the three bolts holding the header-rail trim panel, remove that trim panel, loosen the two bolts at the rear mounting brackets, disengage the rear hooks from the rear header rail, then lift the rear edge and slide the panel off the front header rail. Reinstall is the reverse. Reveals open cockpit; the panel stows in the trunk.",
+     "axis": "vertical (lifted off), then front to back off the header rail",
+     "pivot": "comes off at the front header rail tongue and the two rear bracket hooks/bolts",
+     "range": null
+    },
+    {
+     "part": "Soft-top roof (fabric alternative top)",
+     "motion": "detach",
+     "how": "Fabric top with bows that hooks to the front header rail and rear header rail in place of the hard-top; unhook and lift away, then fold and stow. Alternative weather cover for the same opening.",
+     "axis": "vertical",
+     "pivot": "comes off at front and rear header rails",
+     "range": null
+    },
+    {
+     "part": "Front hood / nose access panel",
+     "motion": "hinge",
+     "how": "Front body panel lifts on its transverse hinge to give access to the washer-fluid reservoir, 12 V battery, coolant/radiator area (no front luggage space). Must be closed for the alarm to arm.",
+     "axis": "across its width",
+     "pivot": "transverse hinge line at one end of the panel (forward edge on the Elise-type clamshell architecture)",
+     "range": 45
+    },
+    {
+     "part": "Washer fluid reservoir cap",
+     "motion": "spin",
+     "how": "Cap on the washer bottle under the front body panel; twist/lift it off about the filler-neck axis to top up fluid.",
+     "axis": "vertical (through the cap face)",
+     "pivot": "centre of the filler neck",
+     "range": 90
+    },
+    {
+     "part": "Coolant expansion reservoir cap",
+     "motion": "spin",
+     "how": "Pressure cap on the coolant expansion bottle; press and rotate about the neck axis to release (only when cold).",
+     "axis": "vertical",
+     "pivot": "centre of the reservoir neck",
+     "range": 60
+    },
+    {
+     "part": "Glove box lid",
+     "motion": "hinge",
+     "how": "Passenger-side stowage lid; release the catch and the lid drops on its hinge along its lower edge to reveal the cubby.",
+     "axis": "across its width",
+     "pivot": "lower edge of the lid",
+     "range": 80
+    },
+    {
+     "part": "Side window glass",
+     "motion": "slide",
+     "how": "Frameless glass runs in channels inside the door and slides straight down into the door shell / up to the seal, driven by the electric regulator.",
+     "axis": "vertical",
+     "pivot": "window regulator track inside the door",
+     "range": 380
+    },
+    {
+     "part": "Power window switch",
+     "motion": "press",
+     "how": "Rocker switch on the centre console; press down to lower, lift to raise; it rocks about its centre pin.",
+     "axis": "across its width (rocker pin)",
+     "pivot": "centre of the rocker",
+     "range": 4
+    },
+    {
+     "part": "Exterior mirror head",
+     "motion": "hinge",
+     "how": "Mirror head folds in toward the glass about its vertical mounting stalk pin (parking/clearance), and the mirror glass itself tilts on its ball mount for aiming.",
+     "axis": "vertical for folding; through the glass face for aiming",
+     "pivot": "vertical pin at the door-mounted mirror base; ball joint behind the glass",
+     "range": 75
+    },
+    {
+     "part": "Interior rear-view mirror",
+     "motion": "spin",
+     "how": "Mirror pivots on its ball joint at the windscreen/header mount for aiming; the small lever under it flips the prism to the night setting.",
+     "axis": "through the part's face (ball joint, all directions)",
+     "pivot": "ball joint at the header/windscreen mount",
+     "range": 40
+    },
+    {
+     "part": "Steering wheel",
+     "motion": "spin",
+     "how": "Rotates about the steering column axis (unassisted rack); roughly 2.5 turns lock to lock, i.e. about 450\u00b0 each way from centre.",
+     "axis": "along the part (the column axis, angled front-to-back)",
+     "pivot": "centre of the steering column",
+     "range": 900
+    },
+    {
+     "part": "Column stalks (indicator/lights and wiper/washer)",
+     "motion": "hinge",
+     "how": "Each stalk swings up/down and fore/aft about its pivot at the column shroud; the wiper stalk also has a rotating collar for intermittent speed and is pushed in for the washer.",
+     "axis": "across its width (up/down swing); along the part (collar rotation)",
+     "pivot": "stalk root at the steering column shroud",
+     "range": 25
+    },
+    {
+     "part": "Accelerator pedal",
+     "motion": "press",
+     "how": "Foot pad pivots on its pin at the floor/bracket; press forward and down to increase torque, releases back by spring.",
+     "axis": "front to back",
+     "pivot": "pedal pin at the floor pan",
+     "range": 60
+    },
+    {
+     "part": "Brake pedal",
+     "motion": "press",
+     "how": "Pivots on its pin at the pedal box; press forward to apply the hydraulic brakes.",
+     "axis": "front to back",
+     "pivot": "pedal pin at the pedal box",
+     "range": 70
+    },
+    {
+     "part": "Handbrake (parking brake) lever",
+     "motion": "hinge",
+     "how": "Lever between the seats; pull up about its base pivot to set the rear parking brake; press the button on the end of the handle and lower it to release.",
+     "axis": "across its width",
+     "pivot": "base of the lever on the centre tunnel",
+     "range": 45
+    },
+    {
+     "part": "Handbrake release button",
+     "motion": "press",
+     "how": "Button in the end of the handbrake grip; press it straight along the lever to free the ratchet pawl before lowering the lever.",
+     "axis": "along the part",
+     "pivot": "button slides in its bore in the grip",
+     "range": 10
+    },
+    {
+     "part": "Drive-direction selector buttons (P / R / N / D)",
+     "motion": "press",
+     "how": "Row of push buttons on the centre console/dash; press one straight in to select park, reverse, neutral or drive.",
+     "axis": "front to back (into the console face)",
+     "pivot": "each button slides straight in on its stem",
+     "range": 4
+    },
+    {
+     "part": "VDS touch screen / centre display controls",
+     "motion": "press",
+     "how": "Fixed-mount screen on the centre stack; the user presses on-screen targets (and surrounding hard buttons) straight into the face to control charging, climate, fob programming and vehicle settings.",
+     "axis": "through the part's face",
+     "pivot": "no pivot \u2014 screen is fixed; hard buttons travel straight in",
+     "range": 2
+    },
+    {
+     "part": "Climate control knob/dials",
+     "motion": "spin",
+     "how": "Rotary controls on the centre stack for fan speed and temperature; turn about their shaft axis through the fascia face.",
+     "axis": "through the part's face",
+     "pivot": "centre of the knob shaft",
+     "range": 270
+    },
+    {
+     "part": "Seat fore/aft adjustment",
+     "motion": "slide",
+     "how": "Lift the bar/lever under the front of the seat cushion and run the whole seat along its floor rails toward or away from the pedals, then release to latch.",
+     "axis": "front to back",
+     "pivot": "seat runner rails bolted to the floor",
+     "range": 160
+    },
+    {
+     "part": "Seat back recline adjuster",
+     "motion": "hinge",
+     "how": "On seats fitted with recline, the back pivots about the hinge at the base of the backrest where it meets the cushion, operated by the side lever/knob (fixed-back shells on the Sport seat option do not move).",
+     "axis": "across its width",
+     "pivot": "hinge at the junction of backrest and cushion",
+     "range": 35
+    },
+    {
+     "part": "Seat belt webbing and buckle",
+     "motion": "slide",
+     "how": "Webbing pulls out of the inertia reel on the B-pillar/bulkhead and retracts back; the latch plate pushes into the buckle on the inboard side and is freed by pressing the red button on the buckle face.",
+     "axis": "along the part (webbing); through the part's face (buckle button)",
+     "pivot": "inertia reel spool behind the seat; buckle stalk base on the tunnel",
+     "range": null
+    },
+    {
+     "part": "Sun visor",
+     "motion": "hinge",
+     "how": "Swings down about the transverse rod at the header rail to shade the windscreen, and unclips to swivel about the vertical end pivot to the side window.",
+     "axis": "across its width (down), vertical (swing to side)",
+     "pivot": "visor rod at the header rail; end clip for the side swing",
+     "range": 90
+    },
+    {
+     "part": "Windscreen wiper arm",
+     "motion": "spin",
+     "how": "Sweeps across the glass about its spindle on the scuttle; also lifts away from the glass about the arm's knuckle for blade service.",
+     "axis": "through the part's face (spindle, perpendicular to the glass); across its width at the knuckle",
+     "pivot": "wiper spindle on the scuttle; knuckle pin on the arm",
+     "range": 90
+    },
+    {
+     "part": "Wiper blade",
+     "motion": "detach",
+     "how": "Unclips from the hook/pin on the wiper arm and slides off for replacement.",
+     "axis": "along the part",
+     "pivot": "comes off at the arm-to-blade clip",
+     "range": null
+    },
+    {
+     "part": "Road wheels",
+     "motion": "spin",
+     "how": "Each wheel/tyre rotates about its hub axis; the front pair also steer about the kingpin axis when the steering wheel is turned.",
+     "axis": "across its width (hub axis); vertical (steering axis)",
+     "pivot": "wheel hub centre; front suspension steering axis",
+     "range": null
+    },
+    {
+     "part": "Wheel lug nuts",
+     "motion": "spin",
+     "how": "Turn about each stud axis with the wheel wrench \u2014 anticlockwise to loosen, clockwise to torque \u2014 to take a wheel off.",
+     "axis": "across its width (along the stud)",
+     "pivot": "centre of each wheel stud",
+     "range": null
+    },
+    {
+     "part": "Tyre valve cap",
+     "motion": "spin",
+     "how": "Unscrew about the valve-stem axis to check or set tyre pressure.",
+     "axis": "along the part (valve stem)",
+     "pivot": "valve stem thread",
+     "range": 360
+    },
+    {
+     "part": "Key fob buttons (lock, unlock, programmable)",
+     "motion": "press",
+     "how": "Three rubber buttons on the fob face; press straight in \u2014 lock, unlock, and the programmable button that can be set to open the trunk remotely.",
+     "axis": "through the part's face",
+     "pivot": "button pad travels straight into the fob",
+     "range": 2
+    },
+    {
+     "part": "Mechanical key blade (fob/key)",
+     "motion": "spin",
+     "how": "Inserted into the trunk or door lock barrel and rotated (counter-clockwise at the trunk) to release the latch or unlock.",
+     "axis": "along the part",
+     "pivot": "lock barrel centre",
+     "range": 90
+    },
+    {
+     "part": "Trunk cargo/roof-panel stowage straps and toolkit",
+     "motion": "detach",
+     "how": "The supplied Torx tool and the stowage bag for the removable top lift out of the trunk; the hard-top itself is strapped/laid in the trunk when not fitted.",
+     "axis": "vertical",
+     "pivot": "comes free from its trunk stowage location",
+     "range": null
+    }
+   ],
+   "source": "Tesla Roadster 2 / Roadster Sport Owner's Manual (exterior overview, Doors\u2013Locks\u2013Security, Trunk, Glove Box, Removable Roof: hard-top and soft-top removal, p. 60 and p. 65) via ManualsLib: https://www.manualslib.com/manual/809111/Tesla-Roadster-2.html ; Tesla service portal, Roadster 2.5 Quick Reference (doors and locks, opening/closing the trunk, door touch pad, key fob): https://service.tesla.com/docs/Public/Roadster/Owner/Roadster_2.5_Quick_Reference.pdf",
+   "notes": "Identified as the first-generation Tesla Roadster (2008\u20132012), the Lotus Elise-based 2-seat targa EV \u2014 that is a specific real product with published manuals. (The 2017-announced second-generation Roadster is not in customer production and has no owner's manual, so it was not used.) Confirmed directly from the manual/quick reference: door opening via a touch pad in the door air inlet, trunk opened by a dash button on the lower left, by the key turned counter-clockwise in the external lock, or by a programmed fob button; trunk closed by pressing down on each side of the rear spoiler; T-shaped interior trunk escape handle at the rear of the trunk on the driver's side; charging port door and hood listed as separate openable items; and the bolt-off hard-top/soft-top removable roof using the supplied Torx tool (three header-rail trim bolts plus two rear bracket bolts). Items where the geometry is inferred rather than quoted and should be checked against the 3D model or photos before use: the exact hinge edge and swing angle of the trunk lid and of the front hood panel, the hinge edge and release mechanism of the charging port door, whether the fitted seats recline (Sport shell seats are fixed-back) and whether mirrors are power or manually adjusted (varies by 1.5/2.0/2.5 build). All angles and millimetre figures are typical-sports-car estimates unless stated in the manual; the manual does not publish opening angles. Wheel rotation, lug nuts, valve caps and wiper blades are included as user-moved service items; the hard-top, soft-top, wiper blades and toolkit are the parts that come fully off.",
+   "looked_up": "2026-10-09"
+  }
  }
 }

@@ -198,9 +198,11 @@ def split_mesh_by_box(stage, mesh_path: str, box_min, box_max,
                                             (outside_name, groups[False])])
 
 
-def _author_parts(stage, mesh_prim, groups) -> list[str]:
+def _author_parts(stage, mesh_prim, groups, under=None, transform=None) -> list[str]:
     """Author one Mesh prim per (name, faces) group next to `mesh_prim`,
-    carrying its attributes; deactivate the original."""
+    carrying its attributes; deactivate the original. `under` puts the parts
+    beneath another prim instead, with `transform` (their placement below
+    it, a Gf.Matrix4d) in place of the source's own xform ops."""
     from pxr import Gf, Sdf, UsdGeom, UsdShade, UsdSkel, Vt
 
     mesh = UsdGeom.Mesh(mesh_prim)
@@ -227,7 +229,7 @@ def _author_parts(stage, mesh_prim, groups) -> list[str]:
     material = binding.GetMaterial() if binding else None
 
     xform_ops = mesh_prim.GetAttribute("xformOpOrder")
-    parent_path = mesh_prim.GetParent().GetPath()
+    parent_path = Sdf.Path(under) if under else mesh_prim.GetParent().GetPath()
     new_paths = []
     for part_name, faces in groups:
         part_path = parent_path.AppendChild(part_name)
@@ -310,8 +312,12 @@ def _author_parts(stage, mesh_prim, groups) -> list[str]:
                 dst.CreateJointsAttr(src.GetJointsAttr().Get())
             if src.GetSkeletonRel().GetTargets():
                 dst.CreateSkeletonRel().SetTargets(src.GetSkeletonRel().GetTargets())
-        # carry the source mesh's local transform
-        if xform_ops and xform_ops.Get():
+        # carry the source mesh's local transform (or the placement given)
+        if transform is not None:
+            xf = UsdGeom.Xformable(part.GetPrim())
+            xf.ClearXformOpOrder()
+            xf.AddTransformOp().Set(Gf.Matrix4d(transform))
+        elif xform_ops and xform_ops.Get():
             for op_name in xform_ops.Get():
                 src_attr = mesh_prim.GetAttribute(str(op_name))
                 if src_attr and src_attr.HasValue():

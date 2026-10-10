@@ -64,13 +64,24 @@ def measure(entry: dict) -> dict:
 
     def physics_material(p):
         m, _ = UsdShade.MaterialBindingAPI(p).ComputeBoundMaterial(materialPurpose="physics")
-        return m.GetPrim().GetName() if m and m.GetPrim().HasAPI(UsdPhysics.MaterialAPI) else None
+        if not m:
+            return None
+        mp = m.GetPrim()
+        # a deformable material (a soft part's simulation mesh) is a physics
+        # material too; its schema is not registered in a bare OpenUSD build
+        authored = mp.GetMetadata("apiSchemas")
+        deformable = authored and any("DeformableMaterialAPI" in a for a in authored.GetAddedOrExplicitItems())
+        return mp.GetName() if mp.HasAPI(UsdPhysics.MaterialAPI) or deformable else None
 
     bound = {str(p.GetPath()): physics_material(p) for p in colliders}
     no_material = [k.split("/")[-1] for k, v in bound.items() if not v]
     col_paths = [p.GetPath() for p in colliders]
+    hidden = set((entry.get("soft_body_parts") or {}).get("hidden") or [])     # mass without a collider, on purpose
+    # a body with no geometry of its own (a caster's or a thread's carrier,
+    # a link that only carries a joint) has nothing to collide with: not missing
     no_collider = [str(b.GetPath()).split("/")[-1] for b in bodies
-                   if not any(c.HasPrefix(b.GetPath()) for c in col_paths)]
+                   if str(b.GetPath()) not in hidden and not any(c.HasPrefix(b.GetPath()) for c in col_paths)
+                   and any(q.IsA(UsdGeom.Gprim) for q in Usd.PrimRange(b))]
     masses = {}
     for b in bodies:
         if b.HasAPI(UsdPhysics.MassAPI):
@@ -145,22 +156,39 @@ def gates(entry: dict, m: dict) -> list[dict]:
     else:
         r = prior.get("max_dim_m")
         out.append(_check("size", r and _within(big, r[0], r[1]), f"{big} m against class range {r}"))
+    # furniture (ingest's "furniture" profile: tables, cabinets, doors, large
+    # appliances) stands still: static colliders, no rigid body, no mass - by
+    # design, not by omission (every dresser failed these two gates)
+    static = cls in STATIC_CLASSES and not m["moving_joints"]
     out.append(_check("physics_complete",
-                      m["bodies"] >= 1 and not m["no_collider"] and not m["no_physics_material"] and not m["mirrored"],
+                      (static or m["bodies"] >= 1) and m["colliders"] >= 1 and not m["no_collider"]
+                      and not m["no_physics_material"] and not m["mirrored"],
                       f"{m['bodies']} bodies, {m['colliders']} colliders; without collider {m['no_collider'][:4]}, "
-                      f"without physics material {m['no_physics_material'][:4]}, mirrored {m['mirrored'][:4]}"))
+                      f"without physics material {m['no_physics_material'][:4]}, mirrored {m['mirrored'][:4]}"
+                      + ("; static furniture, no body by design" if static else "")))
     if len(surveyed_mats) >= 2:
         # the survey saw several materials: every part must carry its own
         # (four shoes were approved as one lump of soft rubber)
         out.append(_check("multi_material", len(m.get("physics_materials") or []) >= 2,
                           f"survey saw {sorted(surveyed_mats)}, bound {m.get('physics_materials')}"))
-    if spec.get("mass_kg"):
+    if static:
+        out.append(_check("mass", True, "static furniture: no mass by design"))
+    elif spec.get("mass_kg"):
         out.append(_check("mass", m["bodies_with_mass"] and abs(m["mass_kg"] - spec["mass_kg"]) <= 0.25 * spec["mass_kg"],
                           f"{m['mass_kg']} kg against the product's {spec['mass_kg']} kg"))
     else:
         r = prior.get("mass_kg")
         out.append(_check("mass", m["bodies_with_mass"] and r and _within(m["mass_kg"], r[0], r[1], 0.25),
                           f"{m['mass_kg']} kg on {m['bodies_with_mass']} bodies against class range {r}"))
+    if cls == "chess_set":
+        ch = entry.get("chess") or {}
+        out.append(_check("chess_playable", ch.get("ok"),
+                          ch.get("error") or (f"{ch.get('pieces')} pieces, standard start {ch.get('standard_start')}, "
+                                              f"a1 dark {(ch.get('board') or {}).get('a1_is_dark')}" if ch
+                                              else "the chess convention has not run")))
+        cp = entry.get("chess_play") or {}
+        out.append(_check("chess_played", cp.get("pass") and "verify" not in dict(stale(entry, ["verify"])),
+                          (cp.get("verdict") or "not played in PhysX yet")[:160]))
     if m["moving_joints"]:
         out += _articulated(entry)
     elif prior.get("mechanism_templates"):
@@ -273,6 +301,7 @@ def visual_critic(entry: dict, m: dict) -> dict:
         + (f"; soft parts simulated as deformables: {', '.join(x['role'][:30] for x in (entry.get('soft_body_parts') or {}).get('soft', []))}"
            if entry.get("soft_body_parts") else "")
         + (f", {m['moving_joints']} moving joints (their motion was judged separately)" if m["moving_joints"] else "")
+        + (f". Measured on the file, not to be judged from the picture: {_chess_measured(entry)}" if entry.get("chess") else "")
         + ".\nAs a careful reviewer, say: what it is; whether that matches; whether it rests upright the way the "
         "real object stands; whether it is intact (no missing, black or inside-out surfaces, no parts floating "
         "free, no leftover ground plane or backdrop, no duplicate overlapping copies); whether the size and mass "
@@ -291,6 +320,35 @@ def visual_critic(entry: dict, m: dict) -> dict:
                    and v["size_plausible"] and v["materials_plausible"] and v["confidence"] >= 0.55)
     v["image"] = str(path.relative_to(REPO))
     return v
+
+
+STATIC_CLASSES = ("table", "cabinet", "door", "appliance_large", "medical_furniture")   # ingest's furniture profile
+
+
+def _chess_measured(entry: dict) -> str:
+    """What the chess convention measured: the pieces' placement is a
+    matter of record, not of a thumbnail."""
+    c = entry.get("chess") or {}
+    if c.get("error"):
+        return f"the chess convention failed ({c['error'][:80]})"
+    return (f"{c.get('pieces')} pieces, each within {c.get('max_offset_from_square_m')} m of its square "
+            f"(squares {c.get('board', {}).get('square_m')} m), standard starting position: {c.get('standard_start')}")
+
+
+def _registry_category(asset_id: str) -> str | None:
+    from asset_review_hub import load_registry
+    return next((a.get("category") for a in load_registry().get("assets", []) if a.get("asset_id") == asset_id), None)
+
+
+def _play_verification(entry: dict) -> dict | None:
+    """The registry's evidence for a set played in PhysX."""
+    sf = ANIM / entry["asset_id"] / "chess" / "summary.json"
+    if not sf.exists():
+        return None
+    s = json.loads(sf.read_text())
+    return {"date": date.today().isoformat(), "method": "live_physx_play_test", "simulator": "Isaac Sim 6 / PhysX",
+            "play": {k: s.get(k) for k in ("settled", "max_off_after_settle_m", "board_moved_m", "moves",
+                                           "fen_after", "fen_expected", "disturbed", "played", "square_m")}}
 
 
 def _verification(entry: dict) -> dict | None:
@@ -369,6 +427,7 @@ def approve(asset_id: str, dry: bool = False, use_critic: bool = True) -> dict:
         if not visual.get("ok"):
             failed.append("visual_critic")
     category = ("mixed_body_verified" if entry.get("soft_body_parts") and (entry.get("mixed_body") or {}).get("pass")
+                else "set_verified" if (entry.get("chess_play") or {}).get("pass")
                 else "articulated_verified" if m.get("moving_joints") else "rigid_unverified")
     outcome = "approved" if not failed else "human_review"
     msg = ""
@@ -377,7 +436,8 @@ def approve(asset_id: str, dry: bool = False, use_critic: bool = True) -> dict:
             prior_machine = sum(1 for a in load_registry().get("assets", [])
                                 if (a.get("review") or {}).get("reviewer_type") == "machine")
             sampled = (prior_machine + 1) % max(1, AUDIT_EVERY) == 0
-            ver = _verification(entry) if category.startswith("articulated") else None
+            ver = (_verification(entry) if category.startswith("articulated")
+                   else _play_verification(entry) if category == "set_verified" else None)
             msg = do_approve(
                 entry, category, REVIEWER,
                 "approved on measured evidence and a visual critic: " + ", ".join(c["check"] for c in checks),
@@ -387,6 +447,23 @@ def approve(asset_id: str, dry: bool = False, use_critic: bool = True) -> dict:
                               "evidence": {"checks": [c["check"] for c in checks],
                                            "visual": {k: visual.get(k) for k in ("what_it_is", "confidence")}},
                               **({"audit_sampled": True} if sampled else {})},
+                verification=ver,
+                soft_parts=entry.get("soft_body_parts") if category.startswith("mixed") else None)
+            if not msg.startswith("approved"):
+                outcome, failed = "human_review", failed + ["sign_off"]
+        elif outcome == "approved" and was_machine and category.endswith("_verified") \
+                and category != _registry_category(asset_id):
+            # new evidence raises a standing approval (a set played in PhysX
+            # was approved rigid_unverified before it had a play test)
+            prev_visual = (entry.get("auto_approval") or {}).get("visual") or {}
+            ver = (_verification(entry) if category.startswith("articulated")
+                   else _play_verification(entry) if category == "set_verified" else None)
+            msg = do_approve(
+                entry, category, REVIEWER,
+                "approved on measured evidence and a visual critic: " + ", ".join(c["check"] for c in checks),
+                review_extra={"reviewer_type": "machine", "models": [f"{MODEL} (visual critic)"],
+                              "evidence": {"checks": [c["check"] for c in checks],
+                                           "visual": {k: prev_visual.get(k) for k in ("what_it_is", "confidence")}}},
                 verification=ver,
                 soft_parts=entry.get("soft_body_parts") if category.startswith("mixed") else None)
             if not msg.startswith("approved"):
