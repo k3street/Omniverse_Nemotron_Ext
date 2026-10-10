@@ -801,7 +801,7 @@ def queue_file(file_path: str, class_hint: str | None = None,
     applied fix is recorded on the entry; the ORIGINAL file is preserved
     and approval still requires a human.
     """
-    file_path = str(Path(file_path).resolve())
+    file_path = os.path.abspath(str(Path(file_path).expanduser()))   # not resolve(): the storage links stay in the path
     features = scan_scene_features(file_path)
     report = run_report(file_path, class_hint)
     report.update(features)
@@ -892,7 +892,7 @@ def resolve_identity(file_path: str, index: dict | None = None) -> tuple[str | N
     """(asset_id, skip reason). A file name is not an identity: two different
     files can share one (Remote_Control.usdz from two shops), and one file
     can arrive under two (Vilya.usdz, Vilya(1).usdz). Content decides."""
-    src = str(Path(file_path).resolve())
+    src = os.path.abspath(str(Path(file_path).expanduser()))
     sha = _file_sha1(src)
     index = content_index() if index is None else index
     base = _asset_id_for(src)
@@ -919,7 +919,7 @@ def resolve_identity(file_path: str, index: dict | None = None) -> tuple[str | N
 
 def _already_processed(file_path: str, asset_id: str | None = None) -> str | None:
     """Reason to skip this source file, or None to ingest it."""
-    src = str(Path(file_path).resolve())
+    src = os.path.abspath(str(Path(file_path).expanduser()))
     asset_id = asset_id or _asset_id_for(src)
     qf = QUEUE_DIR / f"{asset_id}.json"
     if qf.exists():
@@ -992,7 +992,7 @@ def relink_sources(search_dir: str) -> list[str]:
         if match is None:
             report.append(f"{e['asset_id']}: source {src} missing, no match in {root}")
             continue
-        new = str(match.resolve())
+        new = os.path.abspath(str(match))
         wrapper = e.get("file")
         if wrapper and wrapper != src and Path(wrapper).exists() and wrapper.endswith(".usda"):
             text = Path(wrapper).read_text()

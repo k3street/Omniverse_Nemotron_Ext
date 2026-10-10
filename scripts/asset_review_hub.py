@@ -666,7 +666,8 @@ def page(body: str) -> bytes:
  code {{ background: #22252a; padding: 1px 6px; border-radius: 5px; font-size: 12.5px; }}
 </style></head><body>
 <header><h1>Asset Review Hub</h1>
-<span>machine evidence &rarr; human verification &rarr; sim-ready registry &nbsp;·&nbsp; registry: <code>{html.escape(str(REGISTRY.relative_to(REPO)))}</code></span></header>
+<span>machine evidence &rarr; human verification &rarr; sim-ready registry &nbsp;·&nbsp; registry: <code>{html.escape(str(REGISTRY.relative_to(REPO)))}</code>
+ &nbsp;·&nbsp; storage: <code>{html.escape(_storage_note())}</code></span></header>
 <main>{body}</main></body></html>""".encode()
 
 
@@ -733,6 +734,17 @@ def mixed_body_html(e: dict) -> str:
     return (f'<details style="margin:8px 0"><summary class="meta">Mixed body: <b style="color:{colour}">'
             f'{html.escape(verdict[:90])}</b></summary><p class="meta">soft parts: {html.escape(parts)}</p>'
             f'<p class="meta">{html.escape("; ".join(sbp.get("notes", [])))}</p>{img}</details>')
+
+
+def _storage_note() -> str:
+    """Where the records and library actually live (the workspace folders
+    are links onto the external drive)."""
+    q = QUEUE_DIR
+    try:
+        real = q.resolve()
+        return str(real.parent).replace(str(Path.home()), "~") if real != q else "repo workspace"
+    except OSError:
+        return "repo workspace"
 
 
 def chess_play_html(e: dict) -> str:

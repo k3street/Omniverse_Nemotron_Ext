@@ -157,11 +157,16 @@ def owned(path: str) -> bool:
     assets_fixed copies, the library). A downloaded or vendor source never is."""
     import tempfile
 
-    for base in (REPO / "workspace", Path(tempfile.gettempdir())):   # and scratch files (tests)
+    # workspace/{assets_fixed,asset_library,review_queue,asset_animations}
+    # are symlinks onto the external drive (2026-10-10): a file resolves to
+    # the drive, so each base is resolved the same way before comparing
+    bases = [REPO / "workspace", Path(tempfile.gettempdir())] + [
+        REPO / "workspace" / d for d in ("assets_fixed", "asset_library", "review_queue", "asset_animations")]
+    for base in bases:                                              # and scratch files (tests)
         try:
             Path(path).resolve().relative_to(base.resolve())
             return True
-        except ValueError:
+        except (ValueError, OSError):
             pass
     return False
 
