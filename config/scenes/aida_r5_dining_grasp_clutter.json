@@ -1,0 +1,81 @@
+{
+  "extends": "aida_r5_dining_grasp_tucked.json",
+  "name": "aida_r5_dining_grasp_clutter",
+  "purpose": "arms tucked, the can crowded by look-alikes within 12 cm: a beer can and a red fish tin either side, a glass Coca-Cola bottle and a beer bottle behind",
+  "objects": [
+    {
+      "name": "Target",
+      "asset_id": "simple_cola_can",
+      "xy": [
+        4.648,
+        0.764
+      ],
+      "yaw_deg": 30,
+      "target": true,
+      "label": "the red Coca-Cola can"
+    },
+    {
+      "name": "GlassBowl",
+      "asset_id": "glass_bowl",
+      "xy": [
+        4.93,
+        0.9
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "Plate",
+      "asset_id": "decorated_plate",
+      "xy": [
+        5.22,
+        0.99
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "BeerCan",
+      "asset_id": "beer_can",
+      "xy": [
+        4.535,
+        0.775
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "FishTin",
+      "asset_id": "canned_fish_freepoly",
+      "xy": [
+        4.765,
+        0.76
+      ],
+      "yaw_deg": 40
+    },
+    {
+      "name": "ColaBottle",
+      "asset_id": "cola_bottle",
+      "xy": [
+        4.66,
+        0.905
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "BeerBottle",
+      "asset_id": "beer_bottle",
+      "xy": [
+        4.42,
+        0.93
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "GlassBottle",
+      "asset_id": "glass_bottle",
+      "xy": [
+        5.47,
+        0.78
+      ],
+      "yaw_deg": 0
+    }
+  ]
+}

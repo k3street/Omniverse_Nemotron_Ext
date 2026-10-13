@@ -1,0 +1,33 @@
+{
+  "extends": "aida_r5_dining_grasp.json",
+  "name": "aida_r5_dining_grasp_tucked",
+  "purpose": "the same scene with both arms in HomeHero's navigation rest (down at the sides): the target unobstructed - the baseline for the pre-grasp case",
+  "robot": {
+    "posture_source": "~/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/articulated_v2/navigation_rest.json, shoulder lifts -0.015 (commission_aida_r5.py), head on the table as in the pre-grasp case",
+    "posture_rad_or_m": {
+      "amber_head_pan_joint": 1.5298320021493235,
+      "amber_head_pitch_joint": 0.5585053609999999,
+      "amber_left_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_pitch_joint": -0.01752971268371528,
+      "amber_right_shoulder_roll_joint": -0.2838099793421452,
+      "amber_right_upper_arm_roll_joint": -0.07824394607011698,
+      "amber_right_elbow_pitch_joint": -0.07046256339005019,
+      "amber_right_forearm_roll_joint": 0.7021713351646428,
+      "amber_right_wrist_pitch_joint": 0.1990612065483086,
+      "amber_right_wrist_roll_joint": 0.2022547925603151,
+      "amber_left_shoulder_pitch_joint": 0.0034333767979382052,
+      "amber_left_shoulder_roll_joint": -0.3141592653589793,
+      "amber_left_upper_arm_roll_joint": -0.0034333767979379815,
+      "amber_left_elbow_pitch_joint": 0.008577507875388732,
+      "amber_left_forearm_roll_joint": 0.7454971616233473,
+      "amber_left_wrist_pitch_joint": 0.23811919684040284,
+      "amber_left_wrist_roll_joint": 0.20683488558339833,
+      "psyonic_left_thumb_q1": 0.0
+    },
+    "check_links": [
+      "psyonic_left_base",
+      "amber_head_pitch_link"
+    ]
+  }
+}

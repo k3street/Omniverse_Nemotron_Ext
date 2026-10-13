@@ -1,0 +1,176 @@
+{
+  "extends": "aida_r5_dining_grasp.json",
+  "name": "aida_r5_dining_mug_grasp",
+  "purpose": "Aida R5 picks up the YCB mug from the dining table: HomeHero's audited R5 pickup (reference_learning_v1) replayed with the mug at the same place relative to the robot, the arm lifted by the table's extra height",
+  "environment": {
+    "support_physics": {
+      "static_friction": 1.0,
+      "dynamic_friction": 0.8,
+      "why": "HomeHero's pickup table (commission_aida_r5.py)"
+    }
+  },
+  "robot": {
+    "posture_rad_or_m": {
+      "amber_head_pan_joint": 1.5298320021493235,
+      "amber_head_pitch_joint": 0.5585053609999999,
+      "amber_right_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_pitch_joint": -0.01752971268371528,
+      "amber_right_shoulder_roll_joint": -0.2838099793421452,
+      "amber_right_upper_arm_roll_joint": -0.07824394607011698,
+      "amber_right_elbow_pitch_joint": -0.07046256339005019,
+      "amber_right_forearm_roll_joint": 0.7021713351646428,
+      "amber_right_wrist_pitch_joint": 0.1990612065483086,
+      "amber_right_wrist_roll_joint": 0.2022547925603151,
+      "amber_left_shoulder_lift_joint": -0.0046719805293378575,
+      "amber_left_shoulder_pitch_joint": -0.11068534601422896,
+      "amber_left_shoulder_roll_joint": -1.054199099319047,
+      "amber_left_upper_arm_roll_joint": 0.615360816597392,
+      "amber_left_elbow_pitch_joint": -0.5445122470188611,
+      "amber_left_forearm_roll_joint": 0.24238597458747554,
+      "amber_left_wrist_pitch_joint": -0.6531658556198223,
+      "amber_left_wrist_roll_joint": 0.7527663341115176,
+      "psyonic_left_index_q1": 0.0,
+      "psyonic_left_index_q2": 0.0,
+      "psyonic_left_middle_q1": 0.0,
+      "psyonic_left_middle_q2": 0.0,
+      "psyonic_left_ring_q1": 0.0,
+      "psyonic_left_ring_q2": 0.0,
+      "psyonic_left_pinky_q1": 0.01964470318502387,
+      "psyonic_left_pinky_q2": 0.02079417861366497,
+      "psyonic_left_thumb_q2": 0.0,
+      "psyonic_left_thumb_q1": -1.4702284649855213
+    },
+    "fix_base": true,
+    "solver_iterations": [
+      64,
+      1
+    ],
+    "drive_overrides": {
+      "psyonic_left_.*": {
+        "stiffness": 30.0,
+        "damping": 1.0,
+        "max_force": 6.0,
+        "armature": 0.005
+      }
+    },
+    "drive_overrides_why": "HomeHero's hand gains; the USD ships hand damping 0.05/rad, which made the fingers oscillate (docs/aida_r5_retention_repair.md); armature 0.005 as HomeHero's hand actuator config (commission_aida_r5.py)",
+    "check_links": [
+      "psyonic_left_base",
+      "amber_head_pitch_link"
+    ]
+  },
+  "grasp_replay": {
+    "reference": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/reference.npz",
+    "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+    "protocol": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/protocol.json",
+    "lift_offset_m": 0.103,
+    "control_hz": 30,
+    "finger_q2_coefficient": 1.05851325,
+    "hold_s": 1.5,
+    "why": "no R5 grasp exists for a can; this is the only audited R5 pickup, recorded for this mug at this relative pose",
+    "preload_rad": {
+      "fingers": 0.08,
+      "thumb_flex": 0.15
+    },
+    "preload_why": "the recording holds the fingers where they stopped on the mug, not where they were driven: replayed open-loop the hand closes to the touching pose and squeezes nothing (measured: no rise). HomeHero drove past contact and held 3-12 N per finger, 10-24 N on the thumb; this drives past the recorded pose by a fixed amount, ramped in as the hand closes"
+  },
+  "objects": [
+    {
+      "name": "Target",
+      "asset_id": "ycb_mug",
+      "usd": "~/Documents/Github/HomeHero/artifacts/aida_real_objects_20261001/assets_v3/ycb_mug/asset.usda",
+      "category": "homehero_audited",
+      "xy": [
+        4.6426,
+        0.76381
+      ],
+      "yaw_deg": 90.349,
+      "target": true,
+      "label": "the red mug",
+      "centre_xy": true,
+      "physics": {
+        "static_friction": 0.9,
+        "dynamic_friction": 0.7,
+        "mass_kg": 0.118,
+        "contact_offset": 0.002,
+        "rest_offset": 0.0,
+        "position_iterations": 16,
+        "max_depenetration": 1.0
+      }
+    },
+    {
+      "name": "ColaCan",
+      "asset_id": "simple_cola_can",
+      "xy": [
+        4.98,
+        0.66
+      ],
+      "yaw_deg": 30
+    },
+    {
+      "name": "BeerCan",
+      "asset_id": "beer_can",
+      "xy": [
+        4.4,
+        1.0
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "FishTin",
+      "asset_id": "canned_fish_freepoly",
+      "xy": [
+        4.78,
+        1.13
+      ],
+      "yaw_deg": 15
+    },
+    {
+      "name": "GlassBowl",
+      "asset_id": "glass_bowl",
+      "xy": [
+        4.97,
+        0.92
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "Plate",
+      "asset_id": "decorated_plate",
+      "xy": [
+        5.24,
+        1.0
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "ColaBottle",
+      "asset_id": "cola_bottle",
+      "xy": [
+        5.47,
+        0.78
+      ],
+      "yaw_deg": 0
+    }
+  ],
+  "extra_cameras": [
+    {
+      "name": "GraspCloseup",
+      "eye": [
+        4.98,
+        1.48,
+        1.12
+      ],
+      "target": [
+        4.62,
+        0.72,
+        0.8
+      ],
+      "focal_length_mm": 22.0,
+      "resolution": [
+        1280,
+        720
+      ]
+    }
+  ]
+}

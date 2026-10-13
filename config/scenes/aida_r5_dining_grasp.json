@@ -1,0 +1,194 @@
+{
+  "name": "aida_r5_dining_grasp",
+  "purpose": "Aida R5 (Amber RevZ71) beside a dining table in a furnished apartment, a graspable can on the table among distractors: an egocentric test scene for gemini-robotics-er-2-preview",
+  "environment": {
+    "usd": "~/Desktop/assets/Lightwheel_kb2Hg5blQp_Apartment-20260207T160945Z-3-001/Lightwheel_kb2Hg5blQp_Apartment/Apartment/scene_04.usd",
+    "prim": "/Root",
+    "support": "/Root/props/Group/SM_table_02_0",
+    "deactivate": [
+      "/Root/props/Group/SM_chair_01_1"
+    ],
+    "deactivate_why": "the chair on the table's south side, pulled away so the robot can come up to the table",
+    "attribute_overrides": {
+      "/Root/DomeLight": {
+        "inputs:intensity": 2500.0
+      }
+    },
+    "attribute_overrides_why": "the sky through the east windows reads as night at the source's 1000"
+  },
+  "robot": {
+    "usd": "~/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/physics_v7_joint_filters/robot.usdc",
+    "usd_sha256": "c916f949fcd4effb25d1a82e74a85139f1a3b6d6186ecc72871034b22f235c47",
+    "urdf": "~/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/articulated_v2/aida_r5_articulated.urdf",
+    "source": "cad_creator projects/amber/whole_robot/urdf/amber_revz71_latest (Amber R5, rear head drive), converted and qualified for Isaac by HomeHero (scene_playground/current_robot.json)",
+    "position": [
+      4.6,
+      -0.09,
+      0.403
+    ],
+    "cad_yaw_deg": 90.0,
+    "placement_why": "HomeHero's R5 grasp geometry: the table on the robot's physical left (CAD +X), the object 0.854 m to that side and 0.048 m forward of the base origin. CAD forward is -Y; a CAD yaw of 90 deg faces world +X with the table at world +Y.",
+    "posture_source": "~/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json rest (left-arm pre-grasp, head on the table), shoulder lift raised by the table's extra height",
+    "posture_rad_or_m": {
+      "amber_head_pan_joint": 1.5298320021493235,
+      "amber_head_pitch_joint": 0.5585053609999999,
+      "amber_left_shoulder_lift_joint": -0.003,
+      "amber_left_shoulder_pitch_joint": -0.11068534601422896,
+      "amber_left_shoulder_roll_joint": -1.054199099319047,
+      "amber_left_upper_arm_roll_joint": 0.615360816597392,
+      "amber_left_elbow_pitch_joint": -0.5445122470188611,
+      "amber_left_forearm_roll_joint": 0.24238597458747554,
+      "amber_left_wrist_pitch_joint": -0.6531658556198223,
+      "amber_left_wrist_roll_joint": 0.7527663341115176,
+      "amber_right_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_pitch_joint": -0.01752971268371528,
+      "amber_right_shoulder_roll_joint": -0.2838099793421452,
+      "amber_right_upper_arm_roll_joint": -0.07824394607011698,
+      "amber_right_elbow_pitch_joint": -0.07046256339005019,
+      "amber_right_forearm_roll_joint": 0.7021713351646428,
+      "amber_right_wrist_pitch_joint": 0.1990612065483086,
+      "amber_right_wrist_roll_joint": 0.2022547925603151,
+      "psyonic_left_thumb_q1": -1.4702284649855213
+    }
+  },
+  "objects": [
+    {
+      "name": "Target",
+      "asset_id": "simple_cola_can",
+      "xy": [
+        4.648,
+        0.764
+      ],
+      "yaw_deg": 30,
+      "target": true,
+      "label": "the red Coca-Cola can"
+    },
+    {
+      "name": "BeerCan",
+      "asset_id": "beer_can",
+      "xy": [
+        4.4,
+        0.99
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "GlassBowl",
+      "asset_id": "glass_bowl",
+      "xy": [
+        4.93,
+        0.9
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "Plate",
+      "asset_id": "decorated_plate",
+      "xy": [
+        5.22,
+        0.99
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "FishTin",
+      "asset_id": "canned_fish_freepoly",
+      "xy": [
+        4.7,
+        1.16
+      ],
+      "yaw_deg": 15
+    },
+    {
+      "name": "ColaBottle",
+      "asset_id": "cola_bottle",
+      "xy": [
+        5.47,
+        0.78
+      ],
+      "yaw_deg": 0
+    }
+  ],
+  "head_camera": {
+    "mount_link": "amber_head_pitch_link",
+    "optical_frame": "amber_head_oak4_rgb_optical_frame",
+    "mount_xyz": [
+      1.19379e-06,
+      -0.139956956,
+      0.096175
+    ],
+    "mount_rpy": [
+      1.57079633,
+      0.0,
+      0.0
+    ],
+    "optical_roll_rad": 3.141592653589793,
+    "optical_roll_why": "HomeHero aida_teaching_cameras.OPTICAL_FRAMES: the head's optical joint lacks the Rz(pi) the chest's has",
+    "focal_length_mm": 7.56,
+    "horizontal_aperture_mm": 20.955,
+    "resolution": [
+      1280,
+      960
+    ],
+    "clipping_m": [
+      0.04,
+      20.0
+    ]
+  },
+  "overview_camera": {
+    "eye": [
+      6.65,
+      2.3,
+      1.7
+    ],
+    "target": [
+      4.75,
+      0.45,
+      0.85
+    ],
+    "focal_length_mm": 18.0,
+    "resolution": [
+      1600,
+      900
+    ],
+    "why": "from the window corner, the robot and the table side on"
+  },
+  "physics_hz": 120,
+  "settle_s": 2.0,
+  "lights": [
+    {
+      "name": "TablePendant",
+      "type": "rect",
+      "position": [
+        4.97,
+        0.95,
+        2.42
+      ],
+      "size": [
+        0.9,
+        0.35
+      ],
+      "intensity": 16000,
+      "color_temperature_k": 3200,
+      "why": "a warm panel pendant over the dining table (the room's own lamps are in other rooms; sun and sky enter only through the east windows)"
+    },
+    {
+      "name": "CeilingFill",
+      "type": "disk",
+      "position": [
+        3.2,
+        0.2,
+        2.55
+      ],
+      "radius": 0.25,
+      "intensity": 10000,
+      "color_temperature_k": 4000,
+      "why": "a ceiling downlight over the living side, so the room is not a black void behind the table"
+    }
+  ],
+  "render": {
+    "mode": "pathtrace",
+    "spp": 128,
+    "why": "real-time RTX leaves a window-lit interior near black; path tracing carries the daylight in"
+  }
+}
