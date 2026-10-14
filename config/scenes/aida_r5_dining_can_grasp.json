@@ -1,0 +1,139 @@
+{
+  "extends": "aida_r5_dining_grasp_tucked.json",
+  "name": "aida_r5_dining_can_grasp",
+  "purpose": "Aida R5 picks up the red Coca-Cola can from the dining table, from its arms-down rest: approach planned by HomeHero's R5 grasp planner (hull candidates, opposition ranking, pinocchio IK, coal screening), close/lift/hold appended open-loop",
+  "environment": {
+    "support_physics": {
+      "static_friction": 1.0,
+      "dynamic_friction": 0.8,
+      "why": "HomeHero's pickup table (commission_aida_r5.py)"
+    }
+  },
+  "robot": {
+    "fix_base": true,
+    "solver_iterations": [
+      64,
+      1
+    ],
+    "drive_overrides": {
+      "psyonic_left_.*": {
+        "stiffness": 30.0,
+        "damping": 1.0,
+        "max_force": 6.0,
+        "armature": 0.005
+      }
+    },
+    "drive_overrides_why": "HomeHero's hand gains; the USD ships hand damping 0.05/rad, which made the fingers oscillate (docs/aida_r5_retention_repair.md); armature 0.005 as HomeHero's hand actuator config (commission_aida_r5.py)"
+  },
+  "objects": [
+    {
+      "name": "Target",
+      "asset_id": "simple_cola_can",
+      "xy": [
+        4.648,
+        0.764
+      ],
+      "yaw_deg": 30,
+      "target": true,
+      "label": "the red Coca-Cola can",
+      "physics": {
+        "static_friction": 0.9,
+        "dynamic_friction": 0.7,
+        "mass_kg": 0.385,
+        "contact_offset": 0.002,
+        "rest_offset": 0.0,
+        "position_iterations": 16,
+        "max_depenetration": 1.0
+      },
+      "physics_why": "a full 355 ml can (the library's 0.5 kg is rounded up); friction and solver settings as HomeHero's pickup object"
+    },
+    {
+      "name": "BeerCan",
+      "asset_id": "beer_can",
+      "xy": [
+        4.4,
+        0.99
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "GlassBowl",
+      "asset_id": "glass_bowl",
+      "xy": [
+        4.93,
+        0.9
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "Plate",
+      "asset_id": "decorated_plate",
+      "xy": [
+        5.22,
+        0.99
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "name": "FishTin",
+      "asset_id": "canned_fish_freepoly",
+      "xy": [
+        4.7,
+        1.16
+      ],
+      "yaw_deg": 15
+    },
+    {
+      "name": "ColaBottle",
+      "asset_id": "cola_bottle",
+      "xy": [
+        5.47,
+        0.78
+      ],
+      "yaw_deg": 0
+    }
+  ],
+  "extra_cameras": [
+    {
+      "name": "GraspCloseup",
+      "eye": [
+        4.98,
+        1.48,
+        1.12
+      ],
+      "target": [
+        4.62,
+        0.72,
+        0.8
+      ],
+      "focal_length_mm": 22.0,
+      "resolution": [
+        1280,
+        720
+      ]
+    }
+  ],
+  "grasp_plan": {
+    "preload_rad": {
+      "fingers": 0.08,
+      "thumb_flex": 0.15
+    },
+    "lift_m": 0.08,
+    "hold_s": 1.5,
+    "via": "homehero_reset",
+    "via_why": "HomeHero's planner starts from its reset pose; rest -> reset by its RRT",
+    "hover_clearance_m": 0.12,
+    "hover_clearance_why": "HomeHero's 0.14 m hover over the object's top is out of the R5's reach here: 0.985 m needed, 0.978 m reachable from the reset pose (shoulder lift at its stop, then the upper arm meets the chassis). 0.12 m keeps the open fingers (hanging about 0.1 m below the palm) above the can"
+  },
+  "grasp_replay": {
+    "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_dining_can_grasp/grasp_plan/targets.npz",
+    "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+    "lift_offset_m": 0.0,
+    "control_hz": 30,
+    "finger_q2_coefficient": 1.05851325,
+    "hold_s": 0.0,
+    "why": "targets planned by plan_er_grasp.py: the close, lift and hold are already in them",
+    "controller": "homehero_r5_action",
+    "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)"
+  }
+}
