@@ -74,6 +74,136 @@ def _object_physics(stage, prim, ph: dict, material_path: str) -> None:
                 q.CreateAttribute("physxRigidBody:maxDepenetrationVelocity", Sdf.ValueTypeNames.Float).Set(float(ph["max_depenetration"]))
 
 
+def _ability_hand(stage, ah: dict, joints: dict, rroot) -> dict:
+    """The PSYONIC Ability Hand's mechanics that live in the scene: each
+    finger's four-bar as a mimic joint (q2 = c q1, so a load on the distal
+    link reaches the motor, as through the linkage), and its silicone pads as
+    compliant contact on the digit links (what a halted digit's squeeze is
+    stored in while the worm holds it). The motors, worms and firmware are
+    run by replay_grasp.py (ability_hand_model.py)."""
+    import re as _re
+
+    from pxr import Sdf, Usd, UsdPhysics, UsdShade
+
+    side = ah.get("side", "left")
+    c = float(ah.get("coupling", 1.05851325))                  # official URDF mimic multiplier
+    out = {"mimic": [], "pads": []}
+
+    def scene_path(src):
+        return Sdf.Path("/World/Robot").AppendPath(src.GetPath().MakeRelativePath(rroot))
+
+    if ah.get("mimic", True):
+        for d in ("index", "middle", "ring", "pinky"):
+            j1, j2 = joints[f"psyonic_{side}_{d}_q1"], joints[f"psyonic_{side}_{d}_q2"]
+            p2 = stage.OverridePrim(scene_path(j2))
+            # follower + gearing * leader = 0; revolute to revolute, so the
+            # ratio is the same in degrees (the instance name is ignored for
+            # single-axis joints, omni.physx.demos MimicJointDemo)
+            p2.AddAppliedSchema("PhysxMimicJointAPI:rotX")
+            p2.CreateRelationship("physxMimicJoint:rotX:referenceJoint").SetTargets([scene_path(j1)])
+            p2.CreateAttribute("physxMimicJoint:rotX:gearing", Sdf.ValueTypeNames.Float).Set(-c)
+            p2.CreateAttribute("physxMimicJoint:rotX:offset", Sdf.ValueTypeNames.Float).Set(0.0)
+            drive = UsdPhysics.DriveAPI.Apply(p2, "angular")     # the linkage drives it, not a servo
+            drive.CreateStiffnessAttr(0.0)
+            drive.CreateDampingAttr(0.0)
+            out["mimic"].append(f"{j2.GetName()} = {c} x {j1.GetName()}")
+    pads = ah.get("pads")
+    if pads:
+        mat = UsdShade.Material.Define(stage, "/World/PhysicsMaterials/AbilityHandPad")
+        api = UsdPhysics.MaterialAPI.Apply(mat.GetPrim())
+        api.CreateStaticFrictionAttr(float(pads["static_friction"]))
+        api.CreateDynamicFrictionAttr(float(pads["dynamic_friction"]))
+        api.CreateRestitutionAttr(0.0)
+        mp = mat.GetPrim()
+        mp.AddAppliedSchema("PhysxMaterialAPI")
+        mp.CreateAttribute("physxMaterial:compliantContactStiffness", Sdf.ValueTypeNames.Float).Set(
+            float(pads["compliant_stiffness_n_per_m"]))
+        mp.CreateAttribute("physxMaterial:compliantContactDamping", Sdf.ValueTypeNames.Float).Set(
+            float(pads["compliant_damping_n_s_per_m"]))
+        links = [q for q in stage.Traverse() if q.HasAPI(UsdPhysics.RigidBodyAPI)
+                 and _re.fullmatch(pads["links"], q.GetName()) and str(q.GetPath()).startswith("/World/Robot/")]
+        for link in links:
+            for q in [x for x in Usd.PrimRange(link) if x.HasAPI(UsdPhysics.CollisionAPI)]:
+                UsdShade.MaterialBindingAPI.Apply(q).Bind(mat, bindingStrength=UsdShade.Tokens.strongerThanDescendants,
+                                                           materialPurpose="physics")
+                out["pads"].append(str(q.GetPath()))
+    return out
+
+
+def _chess_meta(stage_or_prim_root) -> dict:
+    """The board's annotated grid (chess_board.annotate), in the asset's frame."""
+    from pxr import Usd
+    for q in Usd.PrimRange(stage_or_prim_root):
+        if q.HasCustomDataKey("simReady:chessboard"):
+            return {"prim": q, **json.loads(q.GetCustomDataByKey("simReady:chessboard"))}
+    raise SystemExit("the chess object has no annotated board (scripts/chess_board.py annotate)")
+
+
+def _chess(stage, obj, chess: dict, label: str | None) -> dict:
+    """A chess set's target piece and destination square, in the scene.
+
+    The board's grid is annotated in the asset's frame (a1 centre, file and
+    rank directions, square size, surface height). The target piece is the
+    member annotated with the given colour and start square; the destination
+    square's centre and corners are stored in the board body's own frame
+    (/World customData er:destination), so they follow the board if it moves
+    while settling. Checked: the target sits on its square here.
+    """
+    from pxr import Gf, Usd, UsdGeom
+
+    meta = _chess_meta(obj)
+    board = meta["prim"]
+    xc = UsdGeom.XformCache()
+    M_obj = xc.GetLocalToWorldTransform(obj)              # the asset's frame -> world (its root is identity)
+    M_board_inv = xc.GetLocalToWorldTransform(board).GetInverse()
+    sq = float(meta["square_m"])
+    fd, rd = meta["file_dir"], meta["rank_dir"]
+
+    def square_world(name, du=0.0, dv=0.0):
+        f, r = "abcdefgh".index(name[0]) + du, int(name[1]) - 1 + dv
+        x = meta["a1_center"][0] + (f * fd[0] + r * rd[0]) * sq
+        y = meta["a1_center"][1] + (f * fd[1] + r * rd[1]) * sq
+        return M_obj.Transform(Gf.Vec3d(x, y, float(meta["surface_z"])))
+
+    out = {"square_m": sq}
+    want = chess["target"]
+    piece = None
+    for q in Usd.PrimRange(obj):
+        if q.HasCustomDataKey("simReady:chess"):
+            info = json.loads(q.GetCustomDataByKey("simReady:chess"))
+            if info["color"] == want["color"] and info["start_square"] == want["square"] \
+                    and (not want.get("piece") or info["piece"] == want["piece"]):
+                piece = q
+                break
+    if piece is None:
+        raise SystemExit(f"no {want} in the chess set")
+    piece.SetCustomDataByKey("er:target", True)
+    piece.SetCustomDataByKey("er:label", label or f"the {want['color']} piece on {want['square']}")
+    piece.SetCustomDataByKey("er:asset_id", obj.GetCustomDataByKey("er:asset_id"))
+    bc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    pc = bc.ComputeWorldBound(piece).ComputeAlignedRange().GetMidpoint()
+    home = square_world(want["square"])
+    off = float(Gf.Vec2d(pc[0] - home[0], pc[1] - home[1]).GetLength())
+    if off > 0.4 * sq:
+        raise SystemExit(f"the target is {off:.3f} m from {want['square']}: the board's grid and the pieces disagree")
+    out["target"] = {"path": str(piece.GetPath()), "square": want["square"], "off_square_m": round(off, 4)}
+    dest = chess.get("destination")
+    if dest:
+        corners = [square_world(dest["square"], du, dv) for du, dv in ((-.5, -.5), (.5, -.5), (.5, .5), (-.5, .5))]
+        centre = square_world(dest["square"])
+        d = {"kind": "chess_square", "square": dest["square"], "label": dest.get("label", f"square {dest['square']}"),
+             "board": str(board.GetPath()), "square_m": sq,
+             "centre_board": list(M_board_inv.Transform(centre)),
+             "corners_board": [list(M_board_inv.Transform(c)) for c in corners],
+             "centre_world_at_build": [round(v, 4) for v in centre]}
+        stage.GetPrimAtPath("/World").SetCustomDataByKey("er:destination", json.dumps(d))
+        out["destination"] = d
+    out["instruction"] = chess.get("instruction")
+    if chess.get("instruction"):
+        stage.GetPrimAtPath("/World").SetCustomDataByKey("er:instruction", chess["instruction"])
+    return out
+
+
 def build(spec: dict, out_dir: Path) -> Path:
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
@@ -177,6 +307,19 @@ def build(spec: dict, out_dir: Path) -> Path:
                 # thrashed open and shut and threw the mug 1.8 m)
                 jp.AddAppliedSchema("PhysxJointAPI")
                 jp.CreateAttribute("physxJoint:armature", Sdf.ValueTypeNames.Float).Set(float(gains["armature"]))
+    hand_mechanics = _ability_hand(stage, rb["ability_hand"], joints, rroot) if rb.get("ability_hand") else None
+    filtered = []
+    if rb.get("collision_exceptions"):
+        # the asset's recorded collision-model exceptions (r5_collision_exceptions.py),
+        # filtered in PhysX exactly as the planners drop them
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from r5_collision_exceptions import physx_filtered_pairs
+        for a, b in physx_filtered_pairs("/World/Robot", str(rroot)):
+            pa = stage.OverridePrim(a)
+            pa.AddAppliedSchema("PhysicsFilteredPairsAPI")
+            rel = pa.GetRelationship("physics:filteredPairs") or pa.CreateRelationship("physics:filteredPairs")
+            rel.AddTarget(Sdf.Path(b))
+            filtered.append([a, b])
     root_link = rb.get("articulation_root", "Links/amber_base_link")
     art = stage.OverridePrim(f"/World/Robot/{root_link}")
     if rb.get("solver_iterations"):
@@ -222,6 +365,13 @@ def build(spec: dict, out_dir: Path) -> Path:
         x, y = o["xy"]
         # the asset's footprint centre over (x, y), its lowest point 2 mm above the top
         z = top - float(orng.GetMin()[2]) + 0.002
+        yaw_deg = o.get("yaw_deg", 0.0)
+        if (o.get("chess") or {}).get("white_toward_robot"):
+            # turned so the ranks run away from the robot: white on its side
+            rd = _chess_meta(odef)["rank_dir"]
+            away = math.atan2(y - rb["position"][1], x - rb["position"][0])
+            yaw_deg = math.degrees(away - math.atan2(rd[1], rd[0]))
+        o["yaw_deg"] = yaw_deg
         yaw = math.radians(float(o.get("yaw_deg", 0.0)))
         cx, cy = mid[0] * math.cos(yaw) - mid[1] * math.sin(yaw), mid[0] * math.sin(yaw) + mid[1] * math.cos(yaw)
         oxf = UsdGeom.XformCommonAPI(prim)
@@ -233,10 +383,12 @@ def build(spec: dict, out_dir: Path) -> Path:
         prim.GetPrim().SetCustomDataByKey("er:label", o.get("label", o["asset_id"].replace("_", " ")))
         if o.get("target"):
             prim.GetPrim().SetCustomDataByKey("er:target", True)
+        chess_info = _chess(stage, prim.GetPrim(), o["chess"], o.get("target_label")) if o.get("chess") else None
         if o.get("physics"):
             _object_physics(stage, prim.GetPrim(), o["physics"], f"/World/PhysicsMaterials/{o['name']}")
         placed.append({"name": o["name"], "asset_id": o["asset_id"], "category": a["category"],
                        "xy": [x, y], "z": round(z, 4), "target": bool(o.get("target")),
+                       "yaw_deg": round(float(o.get("yaw_deg", 0.0)), 2), "chess": chess_info,
                        "size_m": [round(float(s), 4) for s in orng.GetSize()]})
 
     # --- lights the spec adds (pointing down: UsdLux area lights emit along -Z) --
@@ -296,7 +448,8 @@ def build(spec: dict, out_dir: Path) -> Path:
     (out_dir / "build.json").write_text(json.dumps(
         {"scene": str(out), "support": env["support"], "support_top_m": round(top, 4),
          "support_range": [[round(v, 3) for v in srng.GetMin()], [round(v, 3) for v in srng.GetMax()]],
-         "robot_joints_posed": posed, "objects": placed}, indent=1))
+         "robot_joints_posed": posed, "hand_mechanics": hand_mechanics, "collision_filtered_pairs": filtered,
+         "objects": placed}, indent=1))
     return out
 
 

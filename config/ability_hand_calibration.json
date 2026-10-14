@@ -1,0 +1,99 @@
+{
+ "stall_torque_per_volt_nm": {
+  "finger": 0.10498,
+  "thumb_flexor": 0.14166
+ },
+ "lever_m_at_q1": {
+  "q1_rad": 0.75,
+  "index": 0.1102,
+  "thumb_flexor": 0.07
+ },
+ "lever_sweep_m": {
+  "q1_rad": [
+   0.3,
+   0.4,
+   0.5,
+   0.6,
+   0.7,
+   0.8,
+   0.9,
+   1.0,
+   1.1,
+   1.2
+  ],
+  "index": [
+   0.1192,
+   0.1177,
+   0.1159,
+   0.1138,
+   0.1115,
+   0.1089,
+   0.1061,
+   0.103,
+   0.0998,
+   0.0963
+  ],
+  "middle": [
+   0.1192,
+   0.1177,
+   0.1159,
+   0.1138,
+   0.1115,
+   0.1089,
+   0.1061,
+   0.103,
+   0.0998,
+   0.0963
+  ],
+  "ring": [
+   0.1192,
+   0.1177,
+   0.1159,
+   0.1138,
+   0.1115,
+   0.1089,
+   0.1061,
+   0.103,
+   0.0998,
+   0.0963
+  ],
+  "pinky": [
+   0.1192,
+   0.1177,
+   0.1159,
+   0.1138,
+   0.1115,
+   0.1089,
+   0.1061,
+   0.103,
+   0.0998,
+   0.0963
+  ],
+  "thumb": [
+   0.07,
+   0.07,
+   0.07,
+   0.07,
+   0.07,
+   0.07,
+   0.07,
+   0.07,
+   0.07,
+   0.07
+  ]
+ },
+ "published_forces": {
+  "pinch_n": 8.0,
+  "key_n": 17.0,
+  "power_n": 78.0,
+  "source": "Knox Labs, PSYONIC Ability Hand Robotics Edition product page (2026-10-14)"
+ },
+ "supply_v": 8.4,
+ "coupling": 1.05851325,
+ "power_grasp_check_n": {
+  "model_mid_finger_contacts": 98.0,
+  "published": 78.0
+ },
+ "fingertip": "distal-link collision point farthest from its joint (HomeHero R5 collision cache)",
+ "assumption": "the published grasp forces are full-supply stalls"
+}

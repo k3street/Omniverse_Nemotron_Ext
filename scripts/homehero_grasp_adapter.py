@@ -11,12 +11,14 @@ against the robot's own links, the support and the obstacles - the same way
 HomeHero's preflight adapter calls it (aida_exploration_recovery._worker).
 
 The planner covers raise, align and descend. HomeHero closes, lifts and
-holds with a force-feedback grip controller; this replay has no fingertip
-sensing, so the rest is appended open-loop and stated as such:
+holds with a grip controller on fingertip forces; here the rest is appended
+to the plan:
 
-  close  each digit to its predicted contact angle (the planner's
-         contact_prediction) plus a preload, at the commissioned per-tick
-         rate (the mug replay held with +0.08 rad fingers, +0.15 thumb)
+  close  "grip_command": the real hand's grip - every digit commanded
+         closed, each stopped by the hand's firmware on contact (replay_grasp
+         runs it: ability_hand_model.py); or "predicted_contact": each digit
+         to the planner's predicted contact angle plus a preload, at the
+         commissioned per-tick rate
   lift   the shoulder slide alone raised by lift_m (HomeHero's lift rule),
          arm and hand held
   hold   the last target, hold_s
@@ -85,6 +87,9 @@ def main() -> int:
     planner.protocol["table"] = dict(planner.protocol["table"], top=req["table_top"])
     planner.checker = Checker(planner.g, Path(config["planning"]["collision_cache"]), req["obstacles"],
                               clearance=config["planning"]["table_margin_m"])
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from r5_collision_exceptions import apply_to_checker
+    exceptions_dropped = apply_to_checker(planner.checker)              # the recorded asset exceptions (see that module)
     if planner.contact_targets is not None:
         planner.contact_targets.checker = planner.checker
     lower = np.r_[planner.original_bounds[:, 0], HAND_LO]
@@ -112,6 +117,7 @@ def main() -> int:
         # without it swept the hand through the can (measured: tipped 14 deg)
         entry_checker = Checker(planner.g, Path(config["planning"]["collision_cache"]),
                                 req["obstacles"] + [req["target_box"]], clearance=config["planning"]["table_margin_m"])
+        apply_to_checker(entry_checker)
         dense, entry_info = joint_path(entry_checker, measured[:8], via[:8], measured[8:])
         # joint_path emits commands for a faster controller (0.025 rad per
         # command); resampled here to the 30 Hz action limits, along the same
@@ -151,6 +157,44 @@ def main() -> int:
     # carried mass (plan_er_grasp.py); the other entries are not read.
     sg = req["slide_gravity_offset"]
     gravity_offset = [float(sg["m"])] + [0.0] * 7
+    task = req.get("task") or {"kind": "pickup"}
+    if task["kind"] == "pinch_place":
+        # a pinch pick-and-place (a chess move): planned with HomeHero's
+        # geometry, checker and RRT by pinch_place_planner.py, from where the
+        # reach left the arm, inside the slide's compensated travel
+        from aida_r5_grasp_planner import reachable_slide_bounds
+        from pinch_place_planner import plan_pinch_place
+        bounds = reachable_slide_bounds(planner.original_bounds,
+                                        {"arm_lower": lower[:8].tolist(), "arm_upper": upper[:8].tolist(),
+                                         "gravity_offset": gravity_offset}, config["planning"]["slide_headroom_m"])
+        g.bounds = bounds
+        if task.get("survey"):
+            from pinch_place_planner import survey
+
+            def checker_without(body_id):
+                boxes = [o for o in req["obstacles_all"] if not o["id"].startswith(body_id + ":") and o["id"] != body_id]
+                c = Checker(g, Path(config["planning"]["collision_cache"]), boxes,
+                            clearance=config["planning"]["table_margin_m"])
+                apply_to_checker(c)
+                return c
+            rows = survey(req, g, checker_without, measured)
+            print(json.dumps({"passed": True, "survey": rows}))
+            return 0
+        res = plan_pinch_place(req, g, planner.checker, measured, lower, upper, ACTION_STEP, bounds[0])
+        out = {"planner": "pinch_place_planner (HomeHero geometry, checker, RRT)", "task": task,
+               "passed": bool(res.get("passed")), "reason": res.get("reason"),
+               "slide_gravity_offset": dict(sg), "entry": entry_info, "collision_exceptions_dropped": exceptions_dropped,
+               **{k: res[k] for k in ("pinch", "grasp", "options", "tried", "rrt", "lifted_m", "screened_ticks",
+                                      "rejections", "examples", "closure") if k in res}}
+        if res.get("passed"):
+            start = np.asarray(req["measured"], float)
+            arr = np.vstack([start] + entry + list(res["targets"][1:]))
+            stages = ["start"] + ["entry"] * len(entry) + list(res["stages"][1:])
+            np.savez(req["out_npz"], targets=arr, stages=np.asarray(stages))
+            out.update(targets=req["out_npz"], ticks=len(arr), seconds_at_30hz=round(len(arr) / 30, 2),
+                       stage_ticks={k: int(sum(1 for x in stages if x == k)) for k in dict.fromkeys(stages)})
+        print(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else float(o)))
+        return 0
     plan = planner.plan(dict(env_id=0, round=0, measured=measured.tolist(), base_pose=req["base_pose"],
                              object_pose=req["object_pose"], object_id=req["object_id"], palm_pose=palm.tolist(),
                              cloud=req["cloud"], joint_positions=req["joint_positions"],
@@ -180,18 +224,31 @@ def main() -> int:
             path.append(q * (1 - f) + goal * f)
             stages.append(label)
 
-    # close: each digit to its predicted contact plus a preload
-    pre = req.get("preload_rad", {"fingers": 0.08, "thumb_flex": 0.15})
-    fallback = float(pred.get("closure_rad") or 0.5)
-    goal = path[-1].copy()
-    for k in range(4):
-        a = contacts[k]["angle"] if contacts[k] else fallback
-        goal[8 + k] = min(0.95, a + float(pre["fingers"]))          # q1 <= 0.95: L2 meets the palm past it
-    goal[12] = min(float(HAND_HI[4]), (contacts[4]["angle"] if contacts[4] else fallback) + float(pre["thumb_flex"]))
-    walk(goal, "close")
-    for _ in range(int(0.5 * 30)):                                   # let the squeeze build
-        path.append(path[-1].copy())
-        stages.append("close")
+    close = req.get("close") or {"mode": "predicted_contact"}
+    open_hand = path[-1][8:].copy()                                  # the hand as the planner left it, open
+    if close["mode"] == "grip_command":
+        # the real hand's grip command: every digit driven toward closed (a
+        # power grip; the thumb rotator stays where the planner put it) and
+        # stopped by its own firmware on contact - halt-on-collision, run by
+        # replay_grasp.py's Ability Hand model. One command, held.
+        goal = path[-1].copy()
+        goal[8:13] = np.asarray(HAND_HI[:5], float)
+        for _ in range(int(float(close.get("hold_s", 1.0)) * 30)):
+            path.append(goal.copy())
+            stages.append("close")
+    else:
+        # each digit to its predicted contact plus a preload, at the commissioned rate
+        pre = req.get("preload_rad", {"fingers": 0.08, "thumb_flex": 0.15})
+        fallback = float(pred.get("closure_rad") or 0.5)
+        goal = path[-1].copy()
+        for k in range(4):
+            a = contacts[k]["angle"] if contacts[k] else fallback
+            goal[8 + k] = min(0.95, a + float(pre["fingers"]))      # q1 <= 0.95: L2 meets the palm past it
+        goal[12] = min(float(HAND_HI[4]), (contacts[4]["angle"] if contacts[4] else fallback) + float(pre["thumb_flex"]))
+        walk(goal, "close")
+        for _ in range(int(0.5 * 30)):                               # let the squeeze build
+            path.append(path[-1].copy())
+            stages.append("close")
     # lift: HomeHero's rule (homehero_core/aida_r5_recovery.PickupRecovery):
     # the arm held where it closed, the vertical shoulder slide raised 0.4 mm
     # per tick, to lift_m or the slide's reachable top (the planner's bounds,
@@ -223,11 +280,20 @@ def main() -> int:
     from aida_r5_motion import screen
     labels = np.asarray(stages)
     appended = np.flatnonzero(np.isin(labels, ("close", "lift", "hold")))
-    appended_screen = screen(planner.checker, [arr[i] for i in appended])
+    screened = [arr[i].copy() for i in appended]
+    if close["mode"] == "grip_command":
+        # a grip command's digits stop on the object, not at the closed
+        # posture they are commanded to; the arm is what moves here, screened
+        # with the hand as it was before the grip
+        for q in screened:
+            q[8:] = open_hand
+    appended_screen = screen(planner.checker, screened)
     for h in appended_screen["collisions"]:
         h["tick"] = int(appended[h.pop("waypoint")])
         h["stage"] = str(labels[h["tick"]])
     jumps = np.abs(np.diff(arr, axis=0))
+    if close["mode"] == "grip_command":
+        jumps[:, 8:13] = 0.0       # the hand's firmware runs a grip command's motion path, at its own speed
     if np.any(jumps > step + 1e-8):
         raise ValueError(f"path exceeds per-tick limits at {int(np.argmax(np.max(jumps - step, axis=1)))}")
     if np.any(arr < lower - 1e-8) or np.any(arr > upper + 1e-8):
@@ -247,7 +313,7 @@ def main() -> int:
                closure_targets=arr[np.asarray(stages) == "close"][-1, 8:].round(4).tolist(),
                lift=lift_fit,
                stage_ticks={s: int(sum(1 for x in stages if x == s)) for s in dict.fromkeys(stages)},
-               appended_screen={k: appended_screen[k] for k in ("passed", "waypoints", "scope")},
+               appended_screen={k: appended_screen[k] for k in ("passed", "waypoints", "scope")}, close=close,
                scope="every tick screened by coal (the planner's checker); PhysX decides")
     print(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else float(o)))
     return 0

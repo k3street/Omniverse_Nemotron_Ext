@@ -1,0 +1,117 @@
+{
+  "extends": "aida_r5_dining_can_grasp.json",
+  "name": "aida_r5_dining_chess",
+  "purpose": "Aida R5 at the dining table with a chess set in the starting position, white toward the robot: 'Move the white pawn from e2 to e4.' Gemini Robotics-ER points to the pawn and to the square; HomeHero's R5 arm and the Ability Hand model make the move",
+  "objects": [
+    {
+      "name": "ChessSet",
+      "asset_id": "chess_set_595e2f",
+      "xy": [
+        4.626,
+        0.76
+      ],
+      "label": "the chess set",
+      "target_label": "the white pawn on e2",
+      "chess": {
+        "white_toward_robot": true,
+        "target": {
+          "color": "white",
+          "piece": "p",
+          "square": "e2"
+        },
+        "destination": {
+          "square": "e4",
+          "label": "square e4"
+        },
+        "instruction": "Move the white pawn from e2 to e4."
+      },
+      "why": "the largest pawns of the verified sets (5.0 cm tall, 2.8 cm wide, 4.4 cm squares); the board 11 cm nearer the robot than first placed (centre y 0.874): a pinch's grip point sits 11.5 cm out from the palm, and only from here does the R5 reach a collision-free pinch of the e2 pawn that also reaches e4 (pinch_place_planner.survey: none at 0.874, one at 0.76)"
+    },
+    {
+      "name": "ColaCan",
+      "asset_id": "simple_cola_can",
+      "xy": [
+        4.27,
+        0.74
+      ],
+      "yaw_deg": 30,
+      "label": "the red Coca-Cola can"
+    },
+    {
+      "name": "GlassBowl",
+      "asset_id": "glass_bowl",
+      "xy": [
+        5.02,
+        0.82
+      ],
+      "label": "the glass bowl"
+    },
+    {
+      "name": "Plate",
+      "asset_id": "decorated_plate",
+      "xy": [
+        5.3,
+        1.05
+      ],
+      "label": "the decorated plate"
+    },
+    {
+      "name": "FishTin",
+      "asset_id": "canned_fish_freepoly",
+      "xy": [
+        4.28,
+        1.2
+      ],
+      "label": "the tin of fish"
+    },
+    {
+      "name": "ColaBottle",
+      "asset_id": "cola_bottle",
+      "xy": [
+        5.55,
+        0.8
+      ],
+      "label": "the glass cola bottle"
+    }
+  ],
+  "grasp_plan": {
+    "task": "pinch_place",
+    "grip_height_fraction": 0.85,
+    "pregrasp_height_m": 0.05,
+    "curl_rad": 1.5,
+    "open_clearance_m": 0.01,
+    "close_s": 1.0,
+    "lift_m": 0.03,
+    "set_down_gap_m": 0.002,
+    "release_s": 0.7,
+    "retreat_m": 0.06,
+    "hold_s": 1.0,
+    "why": "a pawn among its neighbours is a pinch, index against thumb, the other fingers curled away: pinch_place_planner.py with HomeHero's geometry, checker and RRT; gripped at the head (0.85 of its height, the widest point above the neck), lifted 3 cm on the slide, carried two squares, set down from 2 mm",
+    "reach_why": "the free-space reach by NVIDIA cuMotion (Isaac Sim 6's GPU graph planner, scripts/cumotion_reach.py): tens of milliseconds per candidate where HomeHero's Python RRT found nothing in 300 s; every candidate screened with HomeHero's mesh checker, the first clean one taken, the RRT the fallback",
+    "open_clearance_why": "1 cm either side of the pawn's head when open: at 2 cm the open thumb met the white king on e1 in every reachable grasp (the left hand's thumb comes in on the robot's side, where the king stands)",
+    "reach": "cumotion",
+    "cumotion_seeds": 8
+  },
+  "grasp_replay": {
+    "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_dining_chess/grasp_plan/targets.npz",
+    "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+    "lift_offset_m": 0.0,
+    "control_hz": 30,
+    "finger_q2_coefficient": 1.05851325,
+    "hold_s": 0.0,
+    "controller": "homehero_r5_action",
+    "hand_model": {
+      "kind": "ability_hand",
+      "calibration": "config/ability_hand_calibration.json",
+      "collision_voltage": 3.0,
+      "postcontact_voltage": 1.5,
+      "grip_speed": 0.3,
+      "why": "as the can, at 30 % grip speed (the grip command's speed byte): a 13.6 g pawn hit by a fingertip at full speed (0.8 m/s) is knocked over before the halt can register"
+    },
+    "why": "the planned chess move (plan_er_grasp.py, task pinch_place)"
+  },
+  "robot": {
+    "collision_exceptions": true,
+    "collision_exceptions_why": "r5_collision_exceptions.py: the shoulder housing's convex hull jams in the chassis column by 1.5 mm of hull slop in four 60-degree pitch bands; filtered in PhysX as the planners drop it"
+  }
+}

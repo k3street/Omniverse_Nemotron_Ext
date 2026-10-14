@@ -28,6 +28,7 @@ import json
 import math
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -60,7 +61,7 @@ import omni.replicator.core as rep  # noqa: E402
 import omni.timeline  # noqa: E402
 import omni.usd  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
-from pxr import Gf, Usd, UsdGeom  # noqa: E402
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics  # noqa: E402
 
 omni.usd.get_context().open_stage(str(scene_dir / "scene.usda"))
 for _ in range(30):
@@ -75,7 +76,7 @@ if args.pathtrace:
     s.set("/rtx/pathtracing/optixDenoiser/enabled", True)
 
 LINKS = "/World/Robot/Links"
-target = next(p for p in stage.GetPrimAtPath("/World/Objects").GetChildren() if p.GetCustomDataByKey("er:target"))
+target = next(p for p in Usd.PrimRange(stage.GetPrimAtPath("/World/Objects")) if p.GetCustomDataByKey("er:target"))
 target_body = next((q for q in Usd.PrimRange(target) if q.GetAttribute("physics:mass")), target)
 
 
@@ -129,6 +130,16 @@ def tilt_deg():
     return round(math.degrees(math.acos(max(-1.0, min(1.0, float((R @ up0)[2]))))), 1)
 
 
+HM = gr.get("hand_model") or {}
+if HM.get("kind") not in (None, "ability_hand"):
+    raise SystemExit(f"unknown grasp_replay.hand_model.kind {HM.get('kind')!r}")
+TARGET_RB = next((q for q in Usd.PrimRange(target) if q.HasAPI(UsdPhysics.RigidBodyAPI)), target_body)
+if HM:
+    # the grip force each digit puts on the target, read like HomeHero's
+    # object contact sensor (a sensor on the object, filtered by hand link)
+    TARGET_RB.AddAppliedSchema("PhysxContactReportAPI")
+    TARGET_RB.CreateAttribute("physxContactReport:threshold", Sdf.ValueTypeNames.Float).Set(0.0)
+
 # --- start: posture, then settle --------------------------------------------------------
 timeline = omni.timeline.get_timeline_interface()
 timeline.play()
@@ -170,6 +181,69 @@ LIMITS = np.asarray(art.get_dof_limits(), float).reshape(1, NDOF, 2)
 if CONTROLLER == "homehero_r5_action" and np.any(STIFF[0, ARM_IDS] <= 0):
     raise SystemExit("an arm joint has no drive stiffness; gravity compensation needs one")
 SENT = {"offset": np.zeros(NDOF)}
+PHYS_HZ = int(spec.get("physics_hz", 120))
+DT = 1.0 / PHYS_HZ
+DECIM = max(1, round(PHYS_HZ / 60))                    # HomeHero's action layer runs at 60 Hz
+
+# --- the hand ------------------------------------------------------------------------------
+# grasp_replay.hand_model "ability_hand": the PSYONIC Ability Hand's motors,
+# worms and API firmware (scripts/ability_hand_model.py). Each motor digit
+# (four fingers' q1, the thumb flexor) is a velocity drive - a DC motor at
+# voltage V, damping K Ke, target V / Ke - on the rotor's inertia; its limits
+# are the worm's ratchet; the firmware sets both every physics step. The
+# fingers' q2 follow through the four-bar (mimic joints, built in the scene).
+FINGERS = ("index", "middle", "ring", "pinky")
+HAND = None
+CONTACTS = None
+if HM:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from ability_hand_model import AbilityHandFirmware, AbilityHandParams
+    HP = AbilityHandParams.from_spec(HM)
+    MOTOR = np.array([dof[f"psyonic_left_{d}_q1"] for d in FINGERS] + [dof["psyonic_left_thumb_q2"]], int)
+    DISTAL = np.array([dof[f"psyonic_left_{d}_q2"] for d in FINGERS], int)
+    stiff = np.asarray(art.get_dof_stiffnesses(), np.float32).reshape(1, NDOF).copy()
+    damp = np.asarray(art.get_dof_dampings(), np.float32).reshape(1, NDOF).copy()
+    arm_ = np.asarray(art.get_dof_armatures(), np.float32).reshape(1, NDOF).copy()
+    stiff[0, MOTOR], damp[0, MOTOR], arm_[0, MOTOR] = 0.0, HP.motor_damping, HP.rotor_inertia_kg_m2
+    stiff[0, DISTAL], damp[0, DISTAL], arm_[0, DISTAL] = 0.0, 0.0, 1e-5      # the linkage moves them
+    art.set_dof_stiffnesses(stiff, idx)
+    art.set_dof_dampings(damp, idx)
+    art.set_dof_armatures(arm_, idx)
+    STIFF[0, MOTOR] = 0.0
+    HAND = AbilityHandFirmware(HP, np.asarray(art.get_dof_positions(), float)[0, MOTOR],
+                               LIMITS[0, MOTOR, 0], LIMITS[0, MOTOR, 1])
+    HAND_LIM = LIMITS.astype(np.float32).copy()
+    # set_dof_limits writes every joint; the wheels and casters have none,
+    # and the tensor plugin warns for each of them on every call (480 Hz)
+    carb.settings.get_settings().set("/log/channels/omni.physx.tensors.plugin", "error")
+    HAND_VT = np.zeros((1, NDOF), np.float32)
+    HAND_LINKS = [f"{LINKS}/psyonic_left_{d}_{part}" for d in FINGERS + ("thumb",) for part in ("L1", "L2")] \
+        + [f"{LINKS}/psyonic_left_base"]
+    try:
+        CONTACTS = sim_view.create_rigid_contact_view(TARGET_RB.GetPath().pathString, filter_patterns=HAND_LINKS)
+    except Exception as e:                              # the grip still runs; its forces go unmeasured
+        print(f"[hand] no contact view: {e}", flush=True)
+
+
+def hand_step():
+    qa = np.asarray(art.get_dof_positions(), float)[0]
+    qda = np.asarray(art.get_dof_velocities(), float)[0]
+    v_t, lo, hi = HAND.step(DT, CMD[0, MOTOR], qa[MOTOR], qda[MOTOR])
+    HAND_VT[0, MOTOR] = v_t
+    HAND_LIM[0, MOTOR, 0], HAND_LIM[0, MOTOR, 1] = lo, hi
+    art.set_dof_velocity_targets(HAND_VT, idx)
+    art.set_dof_limits(HAND_LIM, idx)
+
+
+def digit_forces():
+    """Each digit's contact force on the target (N; L1 + L2), and the palm's."""
+    if CONTACTS is None:
+        return None
+    m = np.asarray(CONTACTS.get_contact_force_matrix(DT), float).reshape(-1, 3)
+    n = np.linalg.norm(m, axis=1)
+    per = [round(float(n[2 * k] + n[2 * k + 1]), 3) for k in range(5)]
+    return {"index": per[0], "middle": per[1], "ring": per[2], "pinky": per[3], "thumb": per[4],
+            "palm": round(float(n[10]), 3)}
 
 
 def apply_controller():
@@ -183,21 +257,24 @@ def apply_controller():
     t = np.clip(t, LIMITS[..., 0], LIMITS[..., 1])
     SENT["offset"] = (t - CMD)[0]
     g[:, ARM_IDS] = 0.0
+    if HAND is not None:
+        g[:, MOTOR] = 0.0                               # the worms hold the digits; their motors get no free torque
+        g[:, DISTAL] = 0.0
     art.set_dof_position_targets(t.astype(np.float32), idx)
     art.set_dof_actuation_forces(g.astype(np.float32), idx)
 
 # physics is stepped here, not by the timeline: a headless timeline over a
 # stage with no time range does not advance (measured: 0 s per update), so
 # app updates alone simulate nothing. The timeline only attaches PhysX.
-PHYS_HZ = int(spec.get("physics_hz", 120))
-DT = 1.0 / PHYS_HZ
 CLOCK = [0.0]
 
 
 def simulate(seconds):
     for k in range(max(1, round(seconds * PHYS_HZ))):
-        if k % 2 == 0:                                  # HomeHero's decimation: targets every second step
+        if k % DECIM == 0:                              # HomeHero's action layer at 60 Hz
             apply_controller()
+        if HAND is not None:
+            hand_step()                                 # the hand's firmware, every physics step
         px.update_simulation(DT, CLOCK[0])
         CLOCK[0] += DT
     px.update_transformations(False, True, False, False)
@@ -273,9 +350,58 @@ def capture(i):
         Image.fromarray(a.get_data()[:, :, :3]).save(frames[k] / f"f{i:05d}.png")
 
 
+# the fingertip vertices (HomeHero's planning collision cache: the distal
+# link's farthest point from its joint), as the pinch planner defines them
+def _tip_vertex(link):
+    cache = Path("/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/physics_v7_joint_filters/planning_collision")
+    man = json.loads(cache.with_suffix(".json").read_text())
+    data = np.load(cache.with_suffix(".npz"))
+    pts = np.concatenate([data[f"p{i}"] for i, sh in enumerate(man["shapes"]) if sh["link"] == link])
+    return pts[np.argmax(np.linalg.norm(pts, axis=1))]
+
+
+TIP_VERTEX = {d: _tip_vertex(f"psyonic_left_{d}_L2") for d in ("index", "thumb")} if HAND is not None else {}
+
 # --- replay -------------------------------------------------------------------------------
 hz = float(gr.get("control_hz", 30))
 rest_c = target_centre()
+DEST = json.loads(stage.GetPrimAtPath("/World").GetCustomDataByKey("er:destination") or "null")
+
+
+def chess_pieces():
+    """Every annotated piece of the target's set: its body's centre now."""
+    bc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    root = target
+    while root.GetParent().GetPath().pathString != "/World/Objects":
+        root = root.GetParent()
+    out = {}
+    for q in Usd.PrimRange(root):
+        if q.HasCustomDataKey("simReady:chess"):
+            info = json.loads(q.GetCustomDataByKey("simReady:chess"))
+            out[q.GetPath().pathString] = {"piece": info["piece"], "color": info["color"], "start": info["start_square"],
+                                           "centre": np.array(bc.ComputeWorldBound(q).ComputeAlignedRange().GetMidpoint(), float)}
+    return out
+
+
+def board_grid():
+    """The board's squares in world now, from the destination's stored corners."""
+    Mb = UsdGeom.XformCache().GetLocalToWorldTransform(stage.GetPrimAtPath(DEST["board"]))
+    cw = np.array(Mb.Transform(Gf.Vec3d(*DEST["centre_board"])), float)
+    cs = [np.array(Mb.Transform(Gf.Vec3d(*c)), float) for c in DEST["corners_board"]]
+    sq = DEST["square_m"]
+    fd, rd = (cs[1] - cs[0]) / sq, (cs[3] - cs[0]) / sq
+    f0, r0 = "abcdefgh".index(DEST["square"][0]), int(DEST["square"][1]) - 1
+    return cw - f0 * sq * fd - r0 * sq * rd, fd, rd, sq, cw
+
+
+def square_of(pt, grid):
+    a1, fd, rd, sq, _ = grid
+    f, r = (pt - a1) @ fd / sq, (pt - a1) @ rd / sq
+    fi, ri = int(np.floor(f + 0.5)), int(np.floor(r + 0.5))
+    return f"{'abcdefgh'[fi]}{ri + 1}" if 0 <= fi < 8 and 0 <= ri < 8 else "off"
+
+
+PIECES0 = chess_pieces() if DEST and DEST.get("kind") == "chess_square" else None
 tilt_deg()                                              # the target's attitude at rest: tilt is measured from here
 rows = list(ref) + [ref[-1]] * int(float(gr.get("hold_s", 1.5)) * hz)
 log = []
@@ -284,7 +410,32 @@ px.update_transformations(False, True, False, False)
 for _ in range(3):                                      # the renderer catches up with the posture first
     app.update()                                        # (the first film's frame 0 showed the arm still down)
 capture(0)
-for i, row in enumerate(rows):
+GRIP_WAIT_S = float(HM.get("grip_wait_s", 3.0))
+grip_wait = {"ticks": 0, "complete": None}
+
+
+def schedule():
+    """The plan's rows; with the hand's firmware, the lift waits for the
+    grip to complete, as a controller reading the hand's grip-completion
+    byte would."""
+    for i, row in enumerate(rows):
+        stage = STAGES[min(i, len(STAGES) - 1)] if STAGES else ("replay" if i < len(ref) else "hold")
+        if HAND is not None and STAGES and stage == "lift" and grip_wait["complete"] is None:
+            prev = rows[i - 1]
+            for _ in range(int(GRIP_WAIT_S * hz)):
+                qa = np.asarray(art.get_dof_positions(), float)[0]
+                qda = np.asarray(art.get_dof_velocities(), float)[0]
+                if HAND.grip_complete(qa[MOTOR], qda[MOTOR]):
+                    break
+                grip_wait["ticks"] += 1
+                yield i - 1, prev, "grip_wait"
+            qa = np.asarray(art.get_dof_positions(), float)[0]
+            qda = np.asarray(art.get_dof_velocities(), float)[0]
+            grip_wait["complete"] = HAND.grip_complete(qa[MOTOR], qda[MOTOR])
+        yield i, row, stage
+
+
+for tick, (plan_i, row, stage_name) in enumerate(schedule()):
     tg = to_targets(row)
     for n, v in tg.items():
         CMD[0, dof[n]] = v
@@ -292,16 +443,35 @@ for i, row in enumerate(rows):
     c = target_centre()
     palm = body_pose(f"{LINKS}/psyonic_left_base")
     qn = art.get_dof_positions()
-    log.append({"tick": i, "t": round(i / hz, 3), "phase": "replay" if i < len(ref) else "hold",
-                "target_rise_m": round(float(c[2] - rest_c[2]), 4),
-                "palm_to_target_m": round(float(np.linalg.norm(palm[0] - c)), 4) if palm else None,
-                "lift_m": round(float(qn[0, dof["amber_left_shoulder_lift_joint"]]), 4),
-                "lift_cmd_m": round(float(CMD[0, dof["amber_left_shoulder_lift_joint"]]), 4),
-                "lift_gravity_offset_m": round(float(SENT["offset"][dof["amber_left_shoulder_lift_joint"]]), 4),
-                "thumb_flex": round(float(qn[0, dof["psyonic_left_thumb_q2"]]), 3),
-                "target_tilt_deg": tilt_deg(),
-                "fingers_q1": [round(float(qn[0, dof[f"psyonic_left_{f}_q1"]]), 3) for f in fingers]})
-    capture(i + 1)
+    entry = {"tick": tick, "plan_tick": plan_i, "t": round(tick / hz, 3), "stage": stage_name,
+             "phase": "replay" if plan_i < len(ref) else "hold",
+             "target_rise_m": round(float(c[2] - rest_c[2]), 4),
+             "palm_to_target_m": round(float(np.linalg.norm(palm[0] - c)), 4) if palm else None,
+             "lift_m": round(float(qn[0, dof["amber_left_shoulder_lift_joint"]]), 4),
+             "lift_cmd_m": round(float(CMD[0, dof["amber_left_shoulder_lift_joint"]]), 4),
+             "lift_gravity_offset_m": round(float(SENT["offset"][dof["amber_left_shoulder_lift_joint"]]), 4),
+             "thumb_flex": round(float(qn[0, dof["psyonic_left_thumb_q2"]]), 3),
+             "target_tilt_deg": tilt_deg(),
+             "fingers_q1": [round(float(qn[0, dof[f"psyonic_left_{f}_q1"]]), 3) for f in fingers]}
+    if HAND is not None:
+        qv = np.asarray(qn, float)[0]
+        entry["hand"] = HAND.status()
+        entry["contact_n"] = digit_forces()
+        tips = {d: body_pose(f"{LINKS}/psyonic_left_{d}_L2") for d in ("index", "thumb")}
+        entry["tips_to_target_m"] = {d: round(float(np.linalg.norm(b[0] - c)), 4) for d, b in tips.items() if b}
+        # the fingertips themselves (the cached tip vertex carried by each distal link), and the palm, in world
+        entry["tip_world"] = {d: (b[0] + quat_to_R(b[1]) @ TIP_VERTEX[d]).round(4).tolist() for d, b in tips.items() if b}
+        if palm:
+            entry["palm_world"] = {"p": palm[0].round(4).tolist(), "q_wxyz": palm[1].round(5).tolist()}
+        entry["arm_q"] = [round(float(qv[dof[n]]), 4) for n in arm_names]
+        entry["target_xy"] = [round(float(c[0]), 4), round(float(c[1]), 4)]
+        entry["fingers_q2_over_q1"] = [round(float(qv[dof[f"psyonic_left_{f}_q2"]] / qv[dof[f"psyonic_left_{f}_q1"]]), 3)
+                                       if abs(qv[dof[f"psyonic_left_{f}_q1"]]) > 0.05 else None for f in fingers]
+    log.append(entry)
+    if tick % 100 == 0:
+        print(f"[replay] tick {tick} plan {plan_i} {stage_name}: rise {entry['target_rise_m']} m, sim {CLOCK[0]:.1f} s"
+              + (f", halted {HAND.halted.tolist()}, contact {entry.get('contact_n')}" if HAND is not None else ""), flush=True)
+    capture(tick + 1)
 
 # --- outcome ------------------------------------------------------------------------------
 rise = [r["target_rise_m"] for r in log]
@@ -326,17 +496,64 @@ drift = abs(near - grip_m) if near is not None and grip_m is not None else None
 lifted = peak >= 0.05
 kept = end >= 0.05 and drift is not None and drift < 0.02
 result = {"scene": spec["name"], "target": target.GetCustomDataByKey("er:label"),
-          "recording": gr["reference"], "ticks": len(rows), "control_hz": hz,
+          "recording": gr["reference"], "ticks": len(log), "control_hz": hz,
           "sim_seconds": round(CLOCK[0] - sim_t0, 3), "controller": CONTROLLER,
           "target_peak_rise_m": round(peak, 4), "target_end_rise_m": round(end, 4),
           "palm_to_target_end_m": near, "palm_to_target_at_liftoff_m": grip_m,
           "hand_object_drift_m": round(drift, 4) if drift is not None else None,
-          "liftoff_tick": liftoff["tick"] if liftoff else None, "target_before_liftoff": disturbed, "lifted": lifted, "held": kept, "pass": bool(lifted and kept)}
+          "liftoff_tick": liftoff["tick"] if liftoff else None, "target_before_liftoff": disturbed,
+          "hand_model": ({**HM, "halts": [dict(zip(("t_s", "digit", "direction", "speed_rad_s"), h)) for h in HAND.halts],
+                          "grip_wait_s": round(grip_wait["ticks"] / hz, 3), "grip_complete": grip_wait["complete"],
+                          "contact_n_at_liftoff": liftoff.get("contact_n") if liftoff else None,
+                          "contact_n_at_end": log[-1].get("contact_n") if log else None}
+                         if HAND is not None else None),
+          "lifted": lifted, "held": kept, "pass": bool(lifted and kept)}
+if PIECES0 is not None:
+    # a chess move: the piece on its square, upright, carried (not pushed),
+    # let go; every other piece where it stood
+    grid = board_grid()
+    pieces1 = chess_pieces()
+    tp = target.GetPath().pathString
+    tc = pieces1[tp]["centre"]
+    on = square_of(tc, grid)
+    off_centre = float(np.linalg.norm((tc - grid[4])[:2]))
+    others = {k: float(np.linalg.norm(v["centre"] - PIECES0[k]["centre"])) for k, v in pieces1.items() if k != tp}
+    moved = {pieces1[k]["start"] + pieces1[k]["piece"]: round(d_, 4) for k, d_ in others.items() if d_ > 0.01}
+    displaced = [pieces1[k]["start"] for k, v in pieces1.items() if k != tp and square_of(v["centre"], grid) != v["start"]]
+    placement = {}
+    for k, v in pieces1.items():
+        placement[square_of(v["centre"], grid)] = v["piece"].upper() if v["color"] == "white" else v["piece"]
+    rows_ = []
+    for r in range(7, -1, -1):
+        row, n_ = "", 0
+        for f in range(8):
+            c_ = placement.get(f"{'abcdefgh'[f]}{r + 1}")
+            if c_:
+                row += (str(n_) if n_ else "") + c_
+                n_ = 0
+            else:
+                n_ += 1
+        rows_.append(row + (str(n_) if n_ else ""))
+    tilt_end = log[-1].get("target_tilt_deg") if log else None
+    touching = log[-1].get("contact_n") if log else None
+    released = touching is None or sum(v for k, v in touching.items()) < 0.05
+    move = {"to": DEST["square"], "ended_on": on, "from_centre_m": round(off_centre, 4), "tilt_deg": tilt_end,
+            "carried_peak_rise_m": round(peak, 4), "released": released, "others_moved_over_1cm": moved,
+            "others_off_their_squares": displaced, "fen_placement": "/".join(rows_)}
+    move["pass"] = bool(on == DEST["square"] and (tilt_end or 0) < 10 and peak >= 0.01 and released and not displaced
+                        and not moved)
+    result["move"] = move
+    result["pass"] = move["pass"]
 (out / "grasp.json").write_text(json.dumps(result, indent=1))
 (out / "log.json").write_text(json.dumps(log))
 
 # --- video --------------------------------------------------------------------------------
 if args.no_video:
+    if "move" in result:
+        mv = result["move"]
+        print(f"MOVE {'PASS' if mv['pass'] else 'FAIL'} {spec['name']} (no video): {result['target']} ended on {mv['ended_on']} "
+              f"({mv['from_centre_m']} m from the centre of {mv['to']}), tilt {mv['tilt_deg']} deg, carried {mv['carried_peak_rise_m']} m up, "
+              f"released {mv['released']}, others moved {mv['others_moved_over_1cm']}; {mv['fen_placement']}", flush=True)
     print(f"GRASP {'PASS' if result['pass'] else 'FAIL'} {spec['name']} (no video): rose {100 * peak:.1f} cm at peak, "
           f"{100 * end:.1f} cm at the end; hand-to-object drift since liftoff {drift} m", flush=True)
     print("GRASP_RESULT " + json.dumps(result), flush=True)
@@ -346,7 +563,7 @@ OVERLAY_LABEL = str(target.GetCustomDataByKey("er:label") or target.GetName()).r
 comp = out / "frames_comp"
 shutil.rmtree(comp, ignore_errors=True)
 comp.mkdir()
-n = len(rows) + 1
+n = len(log) + 1
 for i in range(n):
     big = Image.open(frames["close"] / f"f{i:05d}.png").convert("RGB")
     head = Image.open(frames["head"] / f"f{i:05d}.png").convert("RGB").resize((384, 288))
@@ -354,7 +571,7 @@ for i in range(n):
     d = ImageDraw.Draw(big)
     d.rectangle([big.width - 384 - 16, big.height - 288 - 16, big.width - 16, big.height - 16], outline=(255, 255, 255), width=2)
     rr = log[i - 1] if i else {"t": 0.0, "phase": "start", "target_rise_m": 0.0}
-    stage_name = STAGES[min(i, len(STAGES) - 1)] if STAGES else rr["phase"]
+    stage_name = rr.get("stage", rr["phase"])
     d.text((20, 18), f"Aida R5  t={rr['t']:.2f}s  {stage_name}  {OVERLAY_LABEL} rise {100 * rr['target_rise_m']:.1f} cm",
            fill=(255, 255, 255))
     d.text((big.width - 384 - 10, big.height - 288 - 32), "head camera", fill=(255, 255, 255))
@@ -372,6 +589,11 @@ for i, t in enumerate(tiles):
 sheet.save(out / "contact_sheet.png")
 for d in list(frames.values()) + [comp]:
     shutil.rmtree(d, ignore_errors=True)
+if "move" in result:
+    mv = result["move"]
+    print(f"MOVE {'PASS' if mv['pass'] else 'FAIL'} {spec['name']}: {result['target']} ended on {mv['ended_on']} "
+          f"({mv['from_centre_m']} m from the centre of {mv['to']}), tilt {mv['tilt_deg']} deg, carried {mv['carried_peak_rise_m']} m up, "
+          f"released {mv['released']}, others moved {mv['others_moved_over_1cm']}; {mv['fen_placement']}", flush=True)
 print(f"GRASP {'PASS' if result['pass'] else 'FAIL'} {spec['name']}: {result['target']} rose {100 * peak:.1f} cm at peak, "
       f"{100 * end:.1f} cm at the end of the hold; hand-to-object drift since liftoff {drift} m", flush=True)
 print("GRASP_RESULT " + json.dumps(result), flush=True)

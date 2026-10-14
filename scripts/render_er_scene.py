@@ -73,7 +73,8 @@ if args.pathtrace or render.get("mode") == "pathtrace":
 ROBOT = "/World/Robot"
 LINKS = f"{ROBOT}/Links"
 objects = [p for p in stage.GetPrimAtPath("/World/Objects").GetChildren()]
-target = next(p for p in objects if p.GetCustomDataByKey("er:target"))
+# the target: an object, or a member of one (a chess set's piece)
+target = next(p for p in Usd.PrimRange(stage.GetPrimAtPath("/World/Objects")) if p.GetCustomDataByKey("er:target"))
 top = float(stage.GetPrimAtPath("/World").GetCustomDataByKey("er:support_top_m"))
 
 
@@ -285,7 +286,9 @@ tmask = mask_of(str(target.GetPath()))
 Image.fromarray((tmask * 255).astype(np.uint8)).save(out / "target_mask.png")
 
 # --- ground truth --------------------------------------------------------------------
-tr = after[target.GetName()]
+tr = after[target.GetName()] if target.GetName() in after else \
+    UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]) \
+    .ComputeWorldBound(target).ComputeAlignedRange()
 corners = [Gf.Vec3d(x, y, z) for x in (tr.GetMin()[0], tr.GetMax()[0]) for y in (tr.GetMin()[1], tr.GetMax()[1])
            for z in (tr.GetMin()[2], tr.GetMax()[2])]
 proj = [project(c) for c in corners]
@@ -329,6 +332,44 @@ c = project(tr.GetMidpoint())
 if c:
     gt["target"]["projected_centre_px_xy"] = [round(c[0], 1), round(c[1], 1)]
     gt["target"]["range_m"] = round(c[2], 4)
+# the destination (a place, not a thing): its square, from the board body's
+# pose after settling, projected into the head camera
+dest_raw = stage.GetPrimAtPath("/World").GetCustomDataByKey("er:destination")
+dpoly = None
+if dest_raw:
+    dest = json.loads(dest_raw)
+    Mb = UsdGeom.XformCache().GetLocalToWorldTransform(stage.GetPrimAtPath(dest["board"]))
+    cw = Mb.Transform(Gf.Vec3d(*dest["centre_board"]))
+    cws = [Mb.Transform(Gf.Vec3d(*c)) for c in dest["corners_board"]]
+    pc_ = project(cw)
+    pcs = [project(c) for c in cws]
+    gd = {"label": dest["label"], "kind": dest["kind"], "square": dest.get("square"),
+          "centre_world": [round(v, 4) for v in cw], "corners_world": [[round(v, 4) for v in c] for c in cws]}
+    if dest["kind"] == "chess_square":
+        # the whole grid in world, from the square's corners (a1 by the square's name)
+        c0, c1, c3 = (np.array(cws[i], float) for i in (0, 1, 3))
+        fdir, rdir = (c1 - c0) / dest["square_m"], (c3 - c0) / dest["square_m"]
+        f, r = "abcdefgh".index(dest["square"][0]), int(dest["square"][1]) - 1
+        a1 = np.array(cw, float) - f * dest["square_m"] * fdir - r * dest["square_m"] * rdir
+        gd["grid"] = {"a1_centre_world": a1.round(5).tolist(), "file_dir": fdir.round(5).tolist(),
+                      "rank_dir": rdir.round(5).tolist(), "square_m": dest["square_m"]}
+    if pc_ and all(pcs):
+        u, v = pc_[0], pc_[1]
+        gd.update(centre_px_xy=[round(u, 1), round(v, 1)], range_m=round(pc_[2], 4),
+                  polygon_px_xy=[[round(q[0], 1), round(q[1], 1)] for q in pcs],
+                  point_yx_1000=[round(v / H * 1000), round(u / W * 1000)],
+                  in_image=bool(0 <= u < W and 0 <= v < H))
+        if gd["in_image"]:
+            # seen, or hidden behind something nearer (the rendered depth at its centre)
+            dd = float(dv[int(v), int(u)])
+            gd["depth_at_centre_m"] = round(dd, 4)
+            gd["visible_at_centre"] = bool(abs(dd - pc_[2]) < 0.02)
+            gd["seen_at_centre"] = str(id_to_path.get(int(ids[int(v), int(u)]), ""))[-80:]
+        dpoly = [(q[0], q[1]) for q in pcs]
+    gt["destination"] = gd
+inst = stage.GetPrimAtPath("/World").GetCustomDataByKey("er:instruction")
+if inst:
+    gt["instruction"] = inst
 (out / "gt.json").write_text(json.dumps(gt, indent=1))
 
 overlay = Image.fromarray(img.copy())
@@ -338,11 +379,15 @@ if "box_px_yxyx" in gt["target"]:
     dr.rectangle([x0, y0, x1, y1], outline=(0, 255, 0), width=3)
     py, pxx = gt["target"]["point_px_yx"]
     dr.ellipse([pxx - 6, py - 6, pxx + 6, py + 6], outline=(255, 255, 0), width=3)
+if dpoly:
+    dr.polygon(dpoly, outline=(0, 160, 255), width=3)
 overlay.save(out / "head_gt_overlay.png")
 
 problems = []
 if not tmask.any():
     problems.append("the head camera does not see the target")
+if "destination" in gt and not gt["destination"].get("in_image"):
+    problems.append("the destination is outside the head camera's view")
 fell = [n for n, v in settle.items() if not v["on_support"]]
 if fell:
     problems.append(f"not resting on the support after settling: {fell}")

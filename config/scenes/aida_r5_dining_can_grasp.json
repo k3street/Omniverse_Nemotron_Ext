@@ -23,7 +23,19 @@
         "armature": 0.005
       }
     },
-    "drive_overrides_why": "HomeHero's hand gains; the USD ships hand damping 0.05/rad, which made the fingers oscillate (docs/aida_r5_retention_repair.md); armature 0.005 as HomeHero's hand actuator config (commission_aida_r5.py)"
+    "drive_overrides_why": "HomeHero's hand gains; the USD ships hand damping 0.05/rad, which made the fingers oscillate (docs/aida_r5_retention_repair.md); armature 0.005 as HomeHero's hand actuator config (commission_aida_r5.py)",
+    "ability_hand": {
+      "side": "left",
+      "mimic": true,
+      "pads": {
+        "links": "psyonic_left_(index|middle|ring|pinky|thumb)_L[12]",
+        "static_friction": 1.0,
+        "dynamic_friction": 0.9,
+        "compliant_stiffness_n_per_m": 3000.0,
+        "compliant_damping_n_s_per_m": 30.0
+      },
+      "why": "the real hand's four-bars (q2 = 1.0585 q1) as mimic joints, so a load on a fingertip reaches its motor; silicone pads as compliant contact (3 kN/m: a few mm of pad and finger give under a few newtons), where a halted digit's squeeze is stored while its worm holds it; silicone friction"
+    }
   },
   "objects": [
     {
@@ -123,7 +135,13 @@
     "via": "homehero_reset",
     "via_why": "HomeHero's planner starts from its reset pose; rest -> reset by its RRT",
     "hover_clearance_m": 0.12,
-    "hover_clearance_why": "HomeHero's 0.14 m hover over the object's top is out of the R5's reach here: 0.985 m needed, 0.978 m reachable from the reset pose (shoulder lift at its stop, then the upper arm meets the chassis). 0.12 m keeps the open fingers (hanging about 0.1 m below the palm) above the can"
+    "hover_clearance_why": "HomeHero's 0.14 m hover over the object's top is out of the R5's reach here: 0.985 m needed, 0.978 m reachable from the reset pose (shoulder lift at its stop, then the upper arm meets the chassis). 0.12 m keeps the open fingers (hanging about 0.1 m below the palm) above the can",
+    "close": {
+      "mode": "grip_command",
+      "grip": "power",
+      "hold_s": 1.0,
+      "why": "the real hand closes on a grip command: every digit driven toward closed and stopped by its own firmware on contact (halt-on-collision), not to planned angles"
+    }
   },
   "grasp_replay": {
     "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_dining_can_grasp/grasp_plan/targets.npz",
@@ -134,6 +152,16 @@
     "hold_s": 0.0,
     "why": "targets planned by plan_er_grasp.py: the close, lift and hold are already in them",
     "controller": "homehero_r5_action",
-    "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)"
-  }
+    "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)",
+    "hand_model": {
+      "kind": "ability_hand",
+      "calibration": "config/ability_hand_calibration.json",
+      "collision_voltage": 3.0,
+      "postcontact_voltage": 1.5,
+      "grip_speed": 1.0,
+      "why": "PSYONIC ICD: halt-on-collision at word 007 (3.0 V, the default); word 008 at 1.5 V, mid-range of the ICD's 1-2 V, keeps a small current flowing after contact so the digits close in if the can shifts; grip speed 0xFF (full)"
+    }
+  },
+  "physics_hz": 480,
+  "physics_hz_why": "the Ability Hand firmware runs once per physics step: 480 Hz is a 2 ms stall-detection loop, and a digit closing at its 8 rad/s top speed moves 1 degree per step"
 }
