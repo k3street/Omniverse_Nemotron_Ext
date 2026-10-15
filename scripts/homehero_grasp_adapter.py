@@ -185,7 +185,7 @@ def main() -> int:
                "passed": bool(res.get("passed")), "reason": res.get("reason"),
                "slide_gravity_offset": dict(sg), "entry": entry_info, "collision_exceptions_dropped": exceptions_dropped,
                **{k: res[k] for k in ("pinch", "grasp", "options", "tried", "rrt", "lifted_m", "screened_ticks",
-                                      "rejections", "examples", "closure") if k in res}}
+                                      "rejections", "examples", "closure", "rise_range") if k in res}}
         if res.get("passed"):
             start = np.asarray(req["measured"], float)
             arr = np.vstack([start] + entry + list(res["targets"][1:]))

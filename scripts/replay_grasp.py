@@ -425,20 +425,65 @@ def schedule():
             for _ in range(int(GRIP_WAIT_S * hz)):
                 qa = np.asarray(art.get_dof_positions(), float)[0]
                 qda = np.asarray(art.get_dof_velocities(), float)[0]
-                if HAND.grip_complete(qa[MOTOR], qda[MOTOR]):
+                if FORCE_BAND:
+                    if grip_loaded["ticks"] >= GB["load_ticks"]:   # both digits in band for load_ticks: loaded
+                        break
+                elif HAND.grip_complete(qa[MOTOR], qda[MOTOR]):
                     break
                 grip_wait["ticks"] += 1
                 yield i - 1, prev, "grip_wait"
             qa = np.asarray(art.get_dof_positions(), float)[0]
             qda = np.asarray(art.get_dof_velocities(), float)[0]
-            grip_wait["complete"] = HAND.grip_complete(qa[MOTOR], qda[MOTOR])
+            grip_wait["complete"] = (grip_loaded["ticks"] >= GB["load_ticks"]) if FORCE_BAND else HAND.grip_complete(qa[MOTOR], qda[MOTOR])
         yield i, row, stage
 
+
+# --- the grip: HomeHero's force band (aida_mesh_contact.maintain_grip) on the hand ---
+# grasp_replay.grip {"mode": "force_band", ...}: from the close on, the index and
+# thumb are commanded as HomeHero commands the real hand - positions at 30 Hz,
+# each digit tightened by tightening_step_rad while its contact force is under
+# its minimum, backed off by unloading_step_rad above its maximum - instead
+# of the plan's grip command. Each digit's creep stops at its own force, so a
+# pinch stays balanced (measured without it: the digits crept together and
+# rolled a 14 g pawn out at 61 deg). Needs the hand model's contact view.
+GRIP = gr.get("grip") or {}
+FORCE_BAND = GRIP.get("mode") == "force_band" and HAND is not None and CONTACTS is not None
+GB = {"min_n": float(GRIP.get("min_n", 3.0)), "max_n": float(GRIP.get("max_n", 12.0)),
+      "tighten": float(GRIP.get("tightening_step_rad", 0.0015)), "unload": float(GRIP.get("unloading_step_rad", 0.002)),
+      "free": float(GRIP.get("free_closing_step_rad", 0.004)),       # HomeHero: traverse free space faster, until contact
+      "contact_n": float(GRIP.get("contact_n", 0.5)), "load_ticks": int(GRIP.get("load_ticks", 6)),
+      "digits": GRIP.get("digits", ["index", "thumb"])}
+grip_loaded = {"ticks": 0}
+GRIP_DOF = {"index": dof["psyonic_left_index_q1"], "thumb": dof["psyonic_left_thumb_q2"]}
+grip_cmd = {}
 
 for tick, (plan_i, row, stage_name) in enumerate(schedule()):
     tg = to_targets(row)
     for n, v in tg.items():
         CMD[0, dof[n]] = v
+    if FORCE_BAND and stage_name in ("close", "grip_wait", "lift", "carry", "lower"):
+        forces = digit_forces() or {}
+        for d in GB["digits"]:
+            i = GRIP_DOF[d]
+            if d not in grip_cmd:
+                grip_cmd[d] = float(np.asarray(art.get_dof_positions(), float)[0, i])   # from where the digit is
+            f = float(forces.get(d, 0.0))
+            if f < GB["contact_n"] and not grip_cmd.get(d + "_touched"):
+                grip_cmd[d] += GB["free"]                  # free space: close at HomeHero's free step
+            elif f < GB["min_n"]:
+                grip_cmd[d + "_touched"] = True
+                grip_cmd[d] += GB["tighten"]
+            elif f > GB["max_n"]:
+                grip_cmd[d + "_touched"] = True
+                grip_cmd[d] -= GB["unload"]
+            else:
+                grip_cmd[d + "_touched"] = True
+            grip_cmd[d] = float(np.clip(grip_cmd[d], 0.0, 1.74))
+            CMD[0, i] = grip_cmd[d]
+        loaded = all(float(forces.get(d, 0.0)) >= GB["min_n"] for d in GB["digits"])
+        grip_loaded["ticks"] = grip_loaded["ticks"] + 1 if loaded else 0
+    elif FORCE_BAND and grip_cmd:
+        grip_cmd.clear()                                   # release: the plan's hand command again
     simulate(1.0 / hz)
     c = target_centre()
     palm = body_pose(f"{LINKS}/psyonic_left_base")
@@ -502,6 +547,7 @@ result = {"scene": spec["name"], "target": target.GetCustomDataByKey("er:label")
           "palm_to_target_end_m": near, "palm_to_target_at_liftoff_m": grip_m,
           "hand_object_drift_m": round(drift, 4) if drift is not None else None,
           "liftoff_tick": liftoff["tick"] if liftoff else None, "target_before_liftoff": disturbed,
+          "grip": {**GRIP, "active": FORCE_BAND} if GRIP else None,
           "hand_model": ({**HM, "halts": [dict(zip(("t_s", "digit", "direction", "speed_rad_s"), h)) for h in HAND.halts],
                           "grip_wait_s": round(grip_wait["ticks"] / hz, 3), "grip_complete": grip_wait["complete"],
                           "contact_n_at_liftoff": liftoff.get("contact_n") if liftoff else None,

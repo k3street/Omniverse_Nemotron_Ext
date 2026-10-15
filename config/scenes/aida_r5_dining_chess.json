@@ -76,10 +76,10 @@
   ],
   "grasp_plan": {
     "task": "pinch_place",
-    "grip_height_fraction": 0.85,
-    "pregrasp_height_m": 0.05,
+    "grip_height_fraction": 0.7,
+    "pregrasp_height_m": 0.06,
     "curl_rad": 1.5,
-    "open_clearance_m": 0.01,
+    "open_clearance_m": 0.007,
     "close_s": 1.0,
     "lift_m": 0.03,
     "set_down_gap_m": 0.002,
@@ -88,9 +88,10 @@
     "hold_s": 1.0,
     "why": "a pawn among its neighbours is a pinch, index against thumb, the other fingers curled away: pinch_place_planner.py with HomeHero's geometry, checker and RRT; gripped at the head (0.85 of its height, the widest point above the neck), lifted 3 cm on the slide, carried two squares, set down from 2 mm",
     "reach_why": "the free-space reach by NVIDIA cuMotion (Isaac Sim 6's GPU graph planner, scripts/cumotion_reach.py): tens of milliseconds per candidate where HomeHero's Python RRT found nothing in 300 s; every candidate screened with HomeHero's mesh checker, the first clean one taken, the RRT the fallback",
-    "open_clearance_why": "1 cm either side of the pawn's head when open: at 2 cm the open thumb met the white king on e1 in every reachable grasp (the left hand's thumb comes in on the robot's side, where the king stands)",
+    "open_clearance_why": "7 mm either side when open: the king on e1 stands 44 mm behind the pawn on the thumb's side",
     "reach": "cumotion",
-    "cumotion_seeds": 8
+    "cumotion_seeds": 8,
+    "grip_why": "just under the head (0.70 of the pawn's height: the ball's underside is at 0.68, the neck widening into it): the pads close on the neck and the rising fingertip arcs wedge beneath the overhang. At the head's equator (0.85) the arcs met the 16.5 mm ball tangentially, nudged the 13.6 g pawn 2 mm aside and rode over its crown, never loading the motors to the stall (measured in PhysX); at the neck itself (0.62) the thumb met the king on e1 in every reachable heading"
   },
   "grasp_replay": {
     "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_dining_chess/grasp_plan/targets.npz",
@@ -103,12 +104,24 @@
     "hand_model": {
       "kind": "ability_hand",
       "calibration": "config/ability_hand_calibration.json",
-      "collision_voltage": 3.0,
-      "postcontact_voltage": 1.5,
+      "collision_voltage": 8.0,
+      "postcontact_voltage": 0.0,
       "grip_speed": 0.3,
-      "why": "as the can, at 30 % grip speed (the grip command's speed byte): a 13.6 g pawn hit by a fingertip at full speed (0.8 m/s) is knocked over before the halt can register"
+      "why": "the halt (word 007) set above the force band, 8.0 V, so the position loop governs the squeeze: at the 3.0 V default the index stalls at about 3 N, the band's floor, and could tighten no further. Driven by the grip command alone this pinch failed every way: at 3.0 V the thumb flicked the 14 g pawn out before it stalled; at 1.0 V with 0.8 V post-contact the digits crept closed during the carry and rolled it out at 61 deg; at 1.0 V with 0 V the stored 2.4 N drained in half a second of lift"
     },
-    "why": "the planned chess move (plan_er_grasp.py, task pinch_place)"
+    "why": "the planned chess move (plan_er_grasp.py, task pinch_place)",
+    "grip": {
+      "mode": "force_band",
+      "min_n": 3.0,
+      "max_n": 6.0,
+      "tightening_step_rad": 0.0015,
+      "unloading_step_rad": 0.002,
+      "digits": [
+        "index",
+        "thumb"
+      ],
+      "why": "HomeHero's grip on the real hand (aida_mesh_contact.maintain_grip): free closing at 0.004 rad per tick until contact, then positions at 30 Hz, each digit tightened at 0.0015 rad per tick while its fingertip force is under the minimum, unloaded above the maximum; the lift waits until both digits are in band for 6 ticks. HomeHero's 3 N minimum: at 1.5 N the pinch let the pawn tilt 5 deg and slip out in the first centimetre of lift"
+    }
   },
   "robot": {
     "collision_exceptions": true,

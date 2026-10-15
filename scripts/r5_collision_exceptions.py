@@ -16,13 +16,23 @@ on the shape, build_er_scene.py) - so the planner and the simulation agree.
   hull slop, which confined every plan so far to the band holding the rest
   pose (-30..30 deg). The housing's other 99 shapes stay checked against the
   chassis, so pitching the arm into the chassis top is still caught.
+  Confirmed on the real robot (commissioning, every joint driven to its
+  limits, the shoulders through 45 deg): the pitch is free. The right arm
+  carries the same housing hull, so its pair is excepted too. The fix that
+  belongs in the asset: a collision shape for part 054 that follows the
+  housing (a convex decomposition), in place of its hull.
 """
 from __future__ import annotations
 
 EXCEPTIONS = [
     {"a": "/aida_revz71_r5_articulated/Links/amber_left_arm_link_1/cad_part_collision_054",
      "b": "/aida_revz71_r5_articulated/Links/amber_base_link/cad_part_collision_049",
-     "max_penetration_m": 0.0015, "why": "convex-hull slop of the shoulder housing in its chassis column"},
+     "max_penetration_m": 0.0015, "why": "convex-hull slop of the shoulder housing in its chassis column",
+     "evidence": "coal sweep 2026-10-14; the real shoulder pitches through 45 deg (commissioning to the joint limits)"},
+    {"a": "/aida_revz71_r5_articulated/Links/amber_right_arm_link_1/cad_part_collision_054",
+     "b": "/aida_revz71_r5_articulated/Links/amber_base_link/cad_part_collision_049",
+     "max_penetration_m": 0.0015, "why": "the right arm's housing hull, the mirror of the left",
+     "evidence": "same commissioning; the right arm is not planned here, but PhysX moves it"},
 ]
 
 

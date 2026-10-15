@@ -90,7 +90,13 @@ def pinch_configuration(g, width_m, curl=1.5, clearance_m=0.02):
         if np.linalg.norm(pt - pi) >= width_m + 2 * clearance_m:
             break
     pi, pt = tips(ho)
-    return {"closed": hc, "open": ho, "midpoint_palm": mid, "axis_palm": axis, "opposition": opp,
+    # each digit's closing direction at the closed configuration, in the palm
+    # frame: the fingertip's motion per radian of further closing
+    pi2, _ = tips(hc + [0.01, 0, 0, 0, 0, 0])
+    _, pt2 = tips(hc + [0, 0, 0, 0, 0.01, 0])
+    pic, ptc = tips(hc)
+    closing = {"index": (pi2 - pic) / 0.01, "thumb": (pt2 - ptc) / 0.01}
+    return {"closed": hc, "open": ho, "midpoint_palm": mid, "axis_palm": axis, "opposition": opp, "closing_palm": closing,
             "closed_separation_m": d, "open_separation_m": float(np.linalg.norm(pt - pi)),
             "open_midpoint_palm": (pi + pt) / 2}
 
@@ -168,12 +174,20 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
             if not checker(qp):
                 why["pregrasp_collides"] += 1
                 continue
+            # how much of each digit's closing motion is vertical in the world:
+            # a pinch that closes level only squeezes; one whose tips rise as
+            # they close levers the piece (measured: a 14 g pawn rolled out at
+            # 61 deg as the digits crept closed during the carry)
+            rise = sum(abs((R @ pinch["closing_palm"][d])[2]) / np.linalg.norm(pinch["closing_palm"][d]) for d in ("index", "thumb")) / 2
             options.append({"cost": float(np.linalg.norm(q[:8] - seed[:8])), "q": q_open, "q_pre": qp, "p": p, "R": R,
+                            "rise": round(float(rise), 3),
                             "heading_deg": round(float(np.degrees(psi)), 1), "roll_deg": round(float(np.degrees(phi)), 1)})
     if not options:
         return {"passed": False, "reason": f"no reachable, collision-free pinch over {tried} hand orientations: {why}",
                 "pinch": _jsonable(pinch), "rejections": why, "examples": examples}
-    options.sort(key=lambda o: o["cost"])
+    # level closing first (within 0.15 of the levellest), then the least arm motion
+    best_rise = min(o["rise"] for o in options)
+    options.sort(key=lambda o: (o["rise"] > best_rise + 0.15, o["cost"]))
     # the place: the same grip over the destination, lifted, possibly turned
     # about the vertical through the grip (the piece stays upright)
     lift = float(task.get("lift_m", 0.03))
@@ -203,7 +217,8 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
             result = {"passed": False, "reason": f"reach: {e}"}
         if result["passed"]:
             result.update(pinch=_jsonable(pinch), options=len(options), tried=tried,
-                          grasp={k: choice[k] for k in ("heading_deg", "roll_deg", "cost")})
+                          grasp={k: choice[k] for k in ("heading_deg", "roll_deg", "cost", "rise")},
+                          rise_range=[round(min(o["rise"] for o in options), 3), round(max(o["rise"] for o in options), 3)])
             return result
         last = result
     return {**last, "pinch": _jsonable(pinch), "options": len(options), "tried": tried, "rejections": why}
@@ -254,9 +269,9 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     task = req["task"]
     path, stages = [np.asarray(start, float)], ["start"]
 
-    def walk(goal, label, hand_free=False):
+    def walk(goal, label, hand_free=False, step_scale=1.0):
         q = path[-1].copy()
-        s = step.copy()
+        s = step.copy() * step_scale
         if hand_free:
             s[8:] = np.inf                                    # the hand's firmware runs a grip command itself
         n = int(np.ceil(np.max(np.abs(goal - q) / s))) if np.any(goal != q) else 0
@@ -280,7 +295,17 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
         g.forward(np.r_[path[-1][:8], hand_seen])
         p0, _ = g.pose()
         n = max(1, int(np.ceil(max(np.linalg.norm(target_p - p0), abs(yaw) * 0.05) / 0.005)))
-        for f in np.linspace(0, 1, n + 1)[1:]:
+        # a smooth profile (smoothstep over twice the steps): the palm starts
+        # and stops without a jolt, at most 3/4 of the 5 mm step at mid-stroke.
+        # Started at 15 cm/s in one step, a pawn pinched above its centre of
+        # mass swung 17 deg and rolled out of the pads (measured)
+        n2 = 2 * n
+        us = np.linspace(0, 1, n2 + 1)[1:]
+        fs = [u * u * (3 - 2 * u) for u in us]
+        for u, f in zip(us, fs):
+            # the per-tick joint step scaled with the profile's slope, so the
+            # ticks slow at both ends rather than only the waypoints bunching
+            scale = max(0.2, 6 * u * (1 - u))
             pf, Rf = p0 * (1 - f) + target_p * f, R
             if yaw:
                 Rz = Rotation.from_euler("z", yaw * f).as_matrix()
@@ -292,7 +317,7 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
                 return f"{label}: IK failed at {f:.2f} of the way"
             if not checker(q):
                 return f"{label}: collision at {f:.2f} of the way: {checker(q, details=True)[:2]}"
-            walk(np.r_[q[:8], path[-1][8:]], label)
+            walk(np.r_[q[:8], path[-1][8:]], label, step_scale=min(1.0, scale))
         return None
 
     def slide(dz, label):
@@ -317,14 +342,32 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     reach_info = None
     toward = np.asarray(req["base_pose"][:2], float) - grip_point[:2]
     toward /= np.linalg.norm(toward)
+    side = np.array([-toward[1], toward[0]])
     g.forward(goal)
     p_pre, R_pre = g.pose()
-    for back in (float(task.get("staging_back_m", 0.10)), 0.07, 0.13):
-        p_st = p_pre + np.r_[toward * back, 0.0]
-        q_st, f_st = g.solve(goal, p_st, R_pre)
-        if f_st["passed"] and checker(q_st):
-            staged = (q_st, p_pre, R_pre, back)
-            goal = q_st
+
+    def segment_clear(q_from, p_from, p_to, R, hand):
+        """A straight palm segment, IK per 5 mm and screened, without walking it."""
+        n = max(1, int(np.ceil(np.linalg.norm(p_to - p_from) / 0.005)))
+        q = np.r_[q_from[:8], hand]
+        for f in np.linspace(0, 1, n + 1)[1:]:
+            q, fit = g.solve(q, p_from * (1 - f) + p_to * f, R)
+            if not fit["passed"] or not checker(q):
+                return False
+        return True
+    # the staging pose: drawn back from the pre-grasp along the first of four
+    # directions whose straight approach is clear - toward the robot (over
+    # e1 that swept the open index through the king's crown), away (over the
+    # empty squares ahead), or to either side
+    for d_name, d_ in (("toward", toward), ("away", -toward), ("side+", side), ("side-", -side)):
+        for back in (float(task.get("staging_back_m", 0.10)), 0.07, 0.13):
+            p_st = p_pre + np.r_[d_ * back, 0.0]
+            q_st, f_st = g.solve(goal, p_st, R_pre)
+            if f_st["passed"] and checker(q_st) and segment_clear(q_st, p_st, p_pre, R_pre, ho):
+                staged = (q_st, p_pre, R_pre, back, d_name)
+                goal = q_st
+                break
+        if staged:
             break
     legs = None
     if task.get("reach") == "cumotion":
@@ -357,7 +400,7 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
         walk(np.r_[q[:8], ho], "reach")
     walk(np.r_[goal[:8], ho], "reach")
     if staged:
-        rrt = dict(rrt or {}, staging_back_m=staged[3])
+        rrt = dict(rrt or {}, staging_back_m=staged[3], staging_direction=staged[4])
         err = straight(staged[1], staged[2], "approach", ho)
         if err:
             return {"passed": False, "reason": err}

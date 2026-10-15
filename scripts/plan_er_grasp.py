@@ -151,10 +151,16 @@ def main() -> int:
         if q.IsA(UsdGeom.Mesh):
             M = xc.GetLocalToWorldTransform(q)
             pts += [list(M.Transform(Gf.Vec3d(*v))) for v in UsdGeom.Mesh(q).GetPointsAttr().Get()]
+    # the build sets every object down 2 mm above the support and the replay
+    # settles it first, so the planned geometry is 2 mm high (measured: the
+    # pinch skimmed the pawn's crown); planned against the settled pose
+    DROP = np.array([0.0, 0.0, 0.002])
+    pts = [list(np.asarray(v, float) - DROP) for v in pts]
     cloud = np.unique(np.round(np.asarray(pts), 5), axis=0)
     if len(cloud) > args.max_points:
         cloud = cloud[np.random.default_rng(0).choice(len(cloud), args.max_points, replace=False)]
     tr = bc.ComputeWorldBound(target).ComputeAlignedRange()
+    tr = Gf.Range3d(tr.GetMin() - Gf.Vec3d(0, 0, 0.002), tr.GetMax() - Gf.Vec3d(0, 0, 0.002))
 
     env = spec["environment"]
     src_root = env.get("prim", "")
@@ -182,11 +188,14 @@ def main() -> int:
                 if q.HasAPI(UsdPhysics.RigidBodyAPI) and q != target:
                     qr = bc.ComputeWorldBound(q).ComputeAlignedRange()
                     near = np.linalg.norm(np.asarray(qr.GetMidpoint(), float)[:2] - tc_[:2]) < float(spec.get("grasp_plan", {}).get("slice_radius_m", 0.12))
-                    obstacles += _slices(q, xc, bc, f"{p.GetName()}:{q.GetName()}") if near else \
+                    boxes_ = _slices(q, xc, bc, f"{p.GetName()}:{q.GetName()}") if near else \
                         [dict(id=f"{p.GetName()}:{q.GetName()}", min=list(qr.GetMin()), max=list(qr.GetMax()))]
+                    for b_ in boxes_:
+                        b_["min"], b_["max"] = list(np.asarray(b_["min"]) - DROP), list(np.asarray(b_["max"]) - DROP)
+                    obstacles += boxes_
             continue
         r = bc.ComputeWorldBound(p).ComputeAlignedRange()
-        obstacles.append(dict(id=p.GetName(), min=list(r.GetMin()), max=list(r.GetMax())))
+        obstacles.append(dict(id=p.GetName(), min=list(np.asarray(r.GetMin()) - DROP), max=list(np.asarray(r.GetMax()) - DROP)))
 
     robot_json = json.loads((EXPERIMENT / "robot.json").read_text())
     # HomeHero's planner keeps the gravity-compensated slide target (reference
@@ -239,7 +248,7 @@ def main() -> int:
         band = allpts[np.abs(allpts[:, 2] - gz) < 0.003]
         width = float(2 * np.linalg.norm(band[:, :2] - axis_xy, axis=1).max())
         dest = json.loads(stage.GetPrimAtPath("/World").GetCustomDataByKey("er:destination"))
-        dc = dest["centre_world_at_build"]
+        dc = list(np.asarray(dest["centre_world_at_build"], float) - DROP)
         task = {"kind": "pinch_place", "grip_point": [float(axis_xy[0]), float(axis_xy[1]), gz],
                 "grip_width_m": width, "object_base_z": base_z, "object_height_m": height,
                 "place_point": [float(dc[0]), float(dc[1]), float(dc[2]) + (gz - base_z)],
