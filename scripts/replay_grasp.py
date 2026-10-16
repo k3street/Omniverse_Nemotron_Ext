@@ -475,6 +475,23 @@ def hand_step():
     art.set_dof_limits(HAND_LIM, idx)
 
 
+def digit_forces_by_body():
+    """Each digit's contact force on each body of the target (a loop grip's two
+    halves): which loop a digit presses, not only how hard the hand presses the
+    object - the critic credited 'a digit in each loop' to a thumb and index
+    pinching the SAME half (Gemini 4, blind, 2026-10-16)."""
+    if CONTACTS is None or not CONTACTS_MORE:
+        return None
+    out = {}
+    names = {bp_: bp_.split("/")[-1] for bp_ in BODY_PATHS.values()}
+    views = [(TARGET_RB.GetPath().pathString, CONTACTS)] + list(zip([bp_ for bp_ in BODY_PATHS.values() if bp_ != TARGET_RB.GetPath().pathString], CONTACTS_MORE))
+    for bp_, cv_ in views:
+        n = np.linalg.norm(np.asarray(cv_.get_contact_force_matrix(DT), float).reshape(-1, 3), axis=1)
+        per = [round(float(n[2 * k] + n[2 * k + 1]), 3) for k in range(5)]
+        out[names[bp_]] = {"index": per[0], "middle": per[1], "ring": per[2], "pinky": per[3], "thumb": per[4], "palm": round(float(n[10]), 3)}
+    return out
+
+
 def digit_forces():
     """Each digit's contact force on the target (N; L1 + L2), and the palm's."""
     if CONTACTS is None:
@@ -1031,6 +1048,8 @@ for tick, (plan_i, row, stage_name) in enumerate(schedule()):
             entry["hand_right"] = HAND_R.status()
             entry["arm_right_q"] = [round(float(qv[dof[n]]), 4) for n in arm_names_right]
         entry["contact_n"] = digit_forces()
+        if CONTACTS_MORE:
+            entry["contact_n_by_body"] = digit_forces_by_body()
         tips = {d: body_pose(f"{LINKS}/psyonic_left_{d}_L2") for d in ("index", "thumb")}
         entry["tips_to_target_m"] = {d: round(float(np.linalg.norm(b[0] - c)), 4) for d, b in tips.items() if b}
         # the fingertips themselves (the cached tip vertex carried by each distal link), and the palm, in world

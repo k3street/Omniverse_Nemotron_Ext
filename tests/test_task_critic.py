@@ -73,3 +73,19 @@ def test_scissors_reach_rung_two_only_on_a_passing_loop_verdict():
     assert cap == 2                                                       # no sheet to cut: rung 3 is not open
     pushed = dict(spec, grasp_replay={"then": ["finger_push"]})
     assert measured_cap("scissors", pushed, {"held": True, "loop": {"pass": True}})[0] == 1
+
+
+def test_a_digit_in_each_loop_needs_the_digits_on_different_halves():
+    feats = {"features": [{"id": "loops", "text": "a digit in each loop", "measure": "digits_in_loops", "stages": ["open"],
+                           "pairs": {"thumb": "thumb_loop", "index": "finger_loop"}, "min_n": 0.3}]}
+    spec = {"grasp_plan": {"loop_grip": {"thumb_loop": "A", "finger_loop": "B"}}}
+    def row(by_body):
+        return {"stage": "open", "contact_n": {"thumb": 2.0, "index": 2.0}, "contact_n_by_body": by_body}
+    pinch = [row({"A": {"thumb": 2.0, "index": 2.0}, "B": {"thumb": 0.0, "index": 0.0}})]          # both on one half
+    f = grip_findings(feats, grip_measures(pinch, {}), spec)[0]
+    assert f["pass"] is False and "index on B 0.0 N" in f["evidence"]
+    loops = [row({"A": {"thumb": 1.5, "index": 0.0}, "B": {"thumb": 0.0, "index": 0.8}})]
+    assert grip_findings(feats, grip_measures(loops, {}), spec)[0]["pass"] is True
+    # no per-body record (an older log), or no loop grip named: unmeasured, not a pass
+    assert grip_findings(feats, grip_measures([{"stage": "open", "contact_n": {"thumb": 2.0}}], {}), spec)[0]["pass"] is None
+    assert grip_findings(feats, grip_measures(loops, {}), {"grasp_plan": {}})[0]["pass"] is None

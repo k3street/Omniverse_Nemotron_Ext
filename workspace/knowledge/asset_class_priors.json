@@ -1393,19 +1393,19 @@
       },
       {
        "id": "loops_on_digits",
-       "text": "a digit in each loop presses it: the thumb in one, a finger in the other",
-       "measure": "digit_n",
-       "digits": [
-        "thumb",
-        "index"
-       ],
+       "text": "a digit in each loop presses it: the thumb in one half's loop, a finger in the OTHER half's",
+       "measure": "digits_in_loops",
        "stages": [
         "open",
         "open_hold",
         "close",
         "close_hold"
        ],
-       "min_n": 0.3
+       "min_n": 0.3,
+       "pairs": {
+        "thumb": "thumb_loop",
+        "index": "finger_loop"
+       }
       }
      ],
      "why": "curated 2026-10-15 for the task critic's grip judgment (the loop-grip run logs the stage 'cycle')"

@@ -1,0 +1,289 @@
+{
+ "experiment": "vision judges, BLIND (no measurements given; the film's captions show stage and rise), scored against the run's record",
+ "at": "2026-10-16",
+ "critic": "scripts/task_critic.py --blind --no-backlog",
+ "note": "the scissors' loops_on_digits 'wrong' for gemini is the RECORD's error: its measure passed a thumb and index pinching the SAME half; fixed to digits_in_loops (contact per body), now unmeasured for that take",
+ "runs": [
+  {
+   "scene": "aida_r5_dining_drill",
+   "take": "take 4 (filmed 2026-10-15)",
+   "judge": "gemini",
+   "model": "gemini-4-argon",
+   "run": "critique_gemini_blind",
+   "with_video": true,
+   "seconds": 49.2,
+   "prompt_tokens": 15003,
+   "output_tokens": 2260,
+   "rung_claimed": 2,
+   "record_cap": 2,
+   "over_credited": false,
+   "features_agree": [
+    "fingers_wrap",
+    "thumb_opposes",
+    "index_alone_on_trigger",
+    "still_in_hand",
+    "seats_as_planned"
+   ],
+   "features_wrong": [],
+   "features_cannot_tell": [
+    "full_trigger_travel"
+   ],
+   "features_missing": [],
+   "operated_as_intended": false,
+   "what_the_robot_did": "The robot reached with its left arm, wrapped its middle, ring, and pinky fingers around the handle below the trigger, placed its index finger on the trigger, lifted the drill off the table by about 7.1 cm while the thumb remained extended upward behind the motor housing until flexing down onto the top rear of the housing during the trigger pull, pulled the trigger with its index finger causing the chuck to spin, and then slightly relaxed the index finger.",
+   "feature_verdicts": [
+    {
+     "id": "fingers_wrap",
+     "holds": "yes",
+     "evidence": "In f03_lift, f04_settle, f05_run, and f06_release, the middle, ring, and pinky fingers are clearly wrapped around the front of the handle below the trigger."
+    },
+    {
+     "id": "thumb_opposes",
+     "holds": "no",
+     "evidence": "In f02_approach and f03_lift, the thumb points straight up in the air above the rear of the drill housing; in f04_settle, f05_run, and f06_release, it folds down onto the top rear of the motor housing rather than wrapping around the handle's far side."
+    },
+    {
+     "id": "index_alone_on_trigger",
+     "holds": "yes",
+     "evidence": "In f03_lift through f06_release, the index finger alone rests on and depresses the black trigger while the other three fingers remain on the handle below the trigger guard."
+    },
+    {
+     "id": "full_trigger_travel",
+     "holds": "cannot_tell",
+     "evidence": "In f04_settle and f05_run, the index finger pulls the trigger inward compared to f03_lift, and relaxes slightly in f06_release, but from the exterior visual frames alone it is impossible to verify whether the internal mechanical stop of full trigger travel was reached."
+    },
+    {
+     "id": "still_in_hand",
+     "holds": "yes",
+     "evidence": "Comparing f04_settle (t=44.27s) and f05_run (t=47.40s) and video 00:44-00:48 while the chuck is spinning, the drill body remains stationary relative to the fingers and palm."
+    },
+    {
+     "id": "seats_as_planned",
+     "holds": "no",
+     "evidence": "Between f03_lift (00:37) and f04_settle (00:44), as the drill's battery leaves the table and the hand takes the full weight, the drill pitches and shifts noticeably inside the grasp before settling."
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_dining_drill",
+   "take": "take 4 (filmed 2026-10-15)",
+   "judge": "gemini",
+   "model": "gemini-4-argon",
+   "run": "critique_gemini_blind_r2",
+   "with_video": true,
+   "seconds": 33.3,
+   "prompt_tokens": 15003,
+   "output_tokens": 2102,
+   "rung_claimed": 2,
+   "record_cap": 2,
+   "over_credited": false,
+   "features_agree": [
+    "fingers_wrap",
+    "thumb_opposes",
+    "index_alone_on_trigger",
+    "still_in_hand",
+    "seats_as_planned"
+   ],
+   "features_wrong": [],
+   "features_cannot_tell": [
+    "full_trigger_travel"
+   ],
+   "features_missing": [],
+   "operated_as_intended": false,
+   "what_the_robot_did": "The robot reached with its left hand, wrapped its middle, ring, and pinky fingers around the front of the drill handle with its index finger on the trigger, lifted the drill 7.1 cm off the table, pulled the trigger causing the chuck to spin (visible from 00:44 to 00:49), and released the trigger so the chuck stopped.",
+   "feature_verdicts": [
+    {
+     "id": "fingers_wrap",
+     "holds": "yes",
+     "evidence": "In f03_lift, f04_settle, f05_run, and f06_release, the middle, ring, and pinky fingers are clearly wrapped around the front of the handle below the trigger."
+    },
+    {
+     "id": "thumb_opposes",
+     "holds": "no",
+     "evidence": "In f03_lift (and contact sheet panel 5), the thumb extends straight upward above the top of the drill housing; in f04_settle, f05_run, and f06_release, it folds down slightly behind the upper housing rather than wrapping around the handle's far side to close a ring."
+    },
+    {
+     "id": "index_alone_on_trigger",
+     "holds": "yes",
+     "evidence": "In f03_lift through f06_release, only the index finger is positioned on the black trigger while the other three fingers remain on the yellow handle below it."
+    },
+    {
+     "id": "full_trigger_travel",
+     "holds": "cannot_tell",
+     "evidence": "In f04_settle and f05_run (and video 00:43-00:49), the index finger visibly flexes and depresses the trigger inward compared to f03_lift and f06_release, but the pictures cannot show whether the trigger reached its internal mechanical end-stop (100% travel)."
+    },
+    {
+     "id": "still_in_hand",
+     "holds": "yes",
+     "evidence": "Comparing f04_settle, f05_run, and f06_release (and video 00:44-00:50 while the chuck spins), the drill handle does not shift, slide, or twist relative to the robot's hand."
+    },
+    {
+     "id": "seats_as_planned",
+     "holds": "no",
+     "evidence": "In the video between 00:38 (f03_lift) and 00:42 (f04_settle), as the drill lifts off the table and takes its weight, the tool tilts slightly nose-down/forward in the grip before settling."
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_dining_drill",
+   "take": "take 4 (filmed 2026-10-15)",
+   "judge": "gemma",
+   "model": "gemma4",
+   "run": "critique_gemma_blind",
+   "with_video": false,
+   "seconds": null,
+   "prompt_tokens": null,
+   "output_tokens": null,
+   "rung_claimed": 2,
+   "record_cap": 2,
+   "over_credited": false,
+   "features_agree": [],
+   "features_wrong": [],
+   "features_cannot_tell": [
+    "fingers_wrap",
+    "thumb_opposes",
+    "index_alone_on_trigger",
+    "full_trigger_travel",
+    "still_in_hand",
+    "seats_as_planned"
+   ],
+   "features_missing": [],
+   "operated_as_intended": false,
+   "what_the_robot_did": "The robot approached the drill, grasped it by the handle with its left hand, and lifted it. It then pulled the trigger, causing the chuck to spin, and finally released the drill.",
+   "feature_verdicts": [
+    {
+     "id": "fingers_wrap",
+     "holds": "cannot_tell",
+     "evidence": "The fingers are shown wrapped around the handle (f01_reach, f02_approach), but the specific anatomical wrapping of the middle, ring, and pinky is not detailed enough to confirm."
+    },
+    {
+     "id": "thumb_opposes",
+     "holds": "cannot_tell",
+     "evidence": "The thumb is shown wrapping around the far side of the handle (f01_reach, f02_approach), but whether it is actively opposing and closing the hand into a ring, or merely resting, cannot be definitively determined from the images."
+    },
+    {
+     "id": "index_alone_on_trigger",
+     "holds": "cannot_tell",
+     "evidence": "The index finger is positioned near the trigger (f01_reach, f02_approach), but the images cannot confirm that it is the *only* finger making contact with the trigger."
+    },
+    {
+     "id": "full_trigger_travel",
+     "holds": "cannot_tell",
+     "evidence": "The robot pulls the trigger (f05_run), but the images cannot confirm that the pull reached the trigger's full travel."
+    },
+    {
+     "id": "still_in_hand",
+     "holds": "cannot_tell",
+     "evidence": "The images show the tool being held while the motor runs (f05_run), but they cannot confirm that the tool neither turns nor slides in the hand due to torque or vibration."
+    },
+    {
+     "id": "seats_as_planned",
+     "holds": "cannot_tell",
+     "evidence": "The tool is shown being held (f01_reach), but the images cannot confirm that the grip maintains its position and weight distribution as intended by the human grip."
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_rail_scissors",
+   "take": "two-hand take (gallery 16)",
+   "judge": "gemini",
+   "model": "gemini-4-argon",
+   "run": "critique_gemini_blind",
+   "with_video": true,
+   "seconds": 35.1,
+   "prompt_tokens": 16113,
+   "output_tokens": 1881,
+   "rung_claimed": 1,
+   "record_cap": 1,
+   "over_credited": false,
+   "features_agree": [],
+   "features_wrong": [
+    "loops_on_digits"
+   ],
+   "features_cannot_tell": [],
+   "features_missing": [],
+   "operated_as_intended": false,
+   "what_the_robot_did": "The robot reached with its left hand, hooked its left thumb through the top handle loop of the scissors hanging on the wall peg, lifted the scissors off the peg, and carried them away from the wall. Then, while the left thumb held the top handle loop stationary, the robot brought its right hand over to push down and pull up on the bottom handle loop to cycle the blades open and closed slightly.",
+   "feature_verdicts": [
+    {
+     "id": "in_hand_while_cycling",
+     "holds": "no",
+     "evidence": "In f03_push, f04_open, f05_open_approach, and f06_open_approach, the left digits do not cycle at all (they remain static with the thumb in the top loop and four fingers curled), while the right hand's index finger repeatedly loses and regains contact with the lower loop rather than staying in the loop while cycling."
+    },
+    {
+     "id": "loops_on_digits",
+     "holds": "no",
+     "evidence": "In f03_push through f06_open_approach, the left thumb is inside the upper loop, but no finger of the left hand is in the lower loop; instead, the right hand's index fingertip intermittently pushes and hooks the lower loop."
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_rail_scissors",
+   "take": "two-hand take (gallery 16)",
+   "judge": "gemini",
+   "model": "gemini-4-argon",
+   "run": "critique_gemini_blind_r2",
+   "with_video": true,
+   "seconds": 38.5,
+   "prompt_tokens": 16113,
+   "output_tokens": 1743,
+   "rung_claimed": 1,
+   "record_cap": 1,
+   "over_credited": false,
+   "features_agree": [],
+   "features_wrong": [
+    "loops_on_digits"
+   ],
+   "features_cannot_tell": [],
+   "features_missing": [],
+   "operated_as_intended": false,
+   "what_the_robot_did": "The robot reached with its left hand, hooked the thumb into one handle loop of the scissors hanging on a wall peg, lifted the scissors off the peg, and carried them away. Then, while the left thumb held one loop, the right hand came in to push the other handle loop down and pull it up with its index finger to open and close the blades slightly.",
+   "feature_verdicts": [
+    {
+     "id": "in_hand_while_cycling",
+     "holds": "no",
+     "evidence": "In f03_push through f06_open_approach, only one loop stays on the left thumb; the other loop is not on the holding hand's digits at all and the right hand's index finger repeatedly detaches from the lower loop (f05_open_approach, f06_open_approach)."
+    },
+    {
+     "id": "loops_on_digits",
+     "holds": "no",
+     "evidence": "In f03_push, f04_open, f05_open_approach, and f06_open_approach, the left thumb is in the upper loop, but the left hand's four fingers are curled away from the lower loop; the lower loop is only briefly touched or hooked by the right hand's index finger (f03_push, f04_open) and is completely empty in f05_open_approach and f06_open_approach."
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_rail_scissors",
+   "take": "two-hand take (gallery 16)",
+   "judge": "gemma",
+   "model": "gemma4",
+   "run": "critique_gemma_blind",
+   "with_video": false,
+   "seconds": null,
+   "prompt_tokens": null,
+   "output_tokens": null,
+   "rung_claimed": 2,
+   "record_cap": 1,
+   "over_credited": true,
+   "features_agree": [],
+   "features_wrong": [],
+   "features_cannot_tell": [
+    "loops_on_digits"
+   ],
+   "features_missing": [],
+   "operated_as_intended": false,
+   "what_the_robot_did": "The robot used its left hand to grasp the scissors by one handle loop, lifting them from a peg on the wall. It then used its right hand to open and close the scissors repeatedly, demonstrating the action of shearing, while the left hand maintained the grip.",
+   "feature_verdicts": [
+    {
+     "id": "in_hand_while_cycling",
+     "holds": "cannot_tell",
+     "evidence": "The left hand is holding the scissors in all frames (f00-f06), but the images do not show the grip stability or slippage during the opening/closing action."
+    },
+    {
+     "id": "loops_on_digits",
+     "holds": "cannot_tell",
+     "evidence": "The left hand is grasping the handle loops in all frames (f00-f06), but the images do not provide sufficient detail to confirm if the digits are pressing the loops as described."
+    }
+   ]
+  }
+ ]
+}
