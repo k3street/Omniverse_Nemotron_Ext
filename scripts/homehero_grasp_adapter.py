@@ -158,7 +158,63 @@ def main() -> int:
     sg = req["slide_gravity_offset"]
     gravity_offset = [float(sg["m"])] + [0.0] * 7
     task = req.get("task") or {"kind": "pickup"}
-    if task["kind"] == "pinch_place":
+    if task["kind"] == "loop_grip":
+        # a flat tool worked by two digits through its loops (scissors by one hand)
+        from aida_r5_grasp_planner import reachable_slide_bounds
+        from loop_grip_planner import plan_loop_grip
+        bounds = reachable_slide_bounds(planner.original_bounds,
+                                        {"arm_lower": lower[:8].tolist(), "arm_upper": upper[:8].tolist(),
+                                         "gravity_offset": gravity_offset}, config["planning"]["slide_headroom_m"])
+        g.bounds = bounds
+
+        def make_checker_l(extra):
+            c = Checker(g, Path(config["planning"]["collision_cache"]), list(req["obstacles"]) + list(extra),
+                        clearance=config["planning"]["table_margin_m"])
+            apply_to_checker(c)
+            return c
+        res = plan_loop_grip(req, g, planner.checker, measured, lower, upper, ACTION_STEP, bounds[0], make_checker_l)
+        out = {"planner": "loop_grip_planner (HomeHero geometry, checker, RRT)", "task": {k: v for k, v in task.items() if k != "bodies"},
+               "passed": bool(res.get("passed")), "reason": res.get("reason"), "slide_gravity_offset": dict(sg), "entry": entry_info,
+               **{k: res[k] for k in ("grip", "holes", "rrt", "tried", "candidates", "spread_now_m") if k in res}}
+        if res.get("passed"):
+            start = np.asarray(req["measured"], float)
+            arr = np.vstack([start] + entry + list(res["targets"][1:]))
+            stages = ["start"] + ["entry"] * len(entry) + list(res["stages"][1:])
+            np.savez(req["out_npz"], targets=arr, stages=np.asarray(stages))
+            out.update(targets=req["out_npz"], ticks=len(arr), seconds_at_30hz=round(len(arr) / 30, 2),
+                       stage_ticks={k: int(sum(1 for x in stages if x == k)) for k in dict.fromkeys(stages)})
+        print(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else float(o)))
+        return 0
+    if task["kind"] == "tool_grip":
+        # a tool taken by its handle, a finger on its control (a drill's
+        # trigger): tool_grip_planner.py, HomeHero's geometry, checker and RRT
+        from aida_r5_grasp_planner import reachable_slide_bounds
+        from tool_grip_planner import plan_tool_grip
+        bounds = reachable_slide_bounds(planner.original_bounds,
+                                        {"arm_lower": lower[:8].tolist(), "arm_upper": upper[:8].tolist(),
+                                         "gravity_offset": gravity_offset}, config["planning"]["slide_headroom_m"])
+        g.bounds = bounds
+
+        def make_checker(extra):
+            c = Checker(g, Path(config["planning"]["collision_cache"]), list(req["obstacles"]) + list(extra),
+                        clearance=config["planning"]["table_margin_m"])
+            apply_to_checker(c)
+            return c
+        res = plan_tool_grip(req, g, planner.checker, measured, lower, upper, ACTION_STEP, bounds[0], make_checker)
+        out = {"planner": "tool_grip_planner (HomeHero geometry, checker, RRT)", "task": {k: v for k, v in task.items() if k != "tool"},
+               "passed": bool(res.get("passed")), "reason": res.get("reason"), "slide_gravity_offset": dict(sg), "entry": entry_info,
+               "collision_exceptions_dropped": exceptions_dropped,
+               **{k: res[k] for k in ("grip", "palm", "index_pre_rad", "lifted_m", "frame", "rrt", "candidates", "tried", "screen", "best") if k in res}}
+        if res.get("passed"):
+            start = np.asarray(req["measured"], float)
+            arr = np.vstack([start] + entry + list(res["targets"][1:]))
+            stages = ["start"] + ["entry"] * len(entry) + list(res["stages"][1:])
+            np.savez(req["out_npz"], targets=arr, stages=np.asarray(stages))
+            out.update(targets=req["out_npz"], ticks=len(arr), seconds_at_30hz=round(len(arr) / 30, 2),
+                       stage_ticks={k: int(sum(1 for x in stages if x == k)) for k in dict.fromkeys(stages)})
+        print(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else float(o)))
+        return 0
+    if task["kind"] in ("pinch_place", "pinch_lift"):
         # a pinch pick-and-place (a chess move): planned with HomeHero's
         # geometry, checker and RRT by pinch_place_planner.py, from where the
         # reach left the arm, inside the slide's compensated travel

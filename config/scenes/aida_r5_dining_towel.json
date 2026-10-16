@@ -1,0 +1,173 @@
+{
+  "extends": "aida_r5_dining_can_grasp.json",
+  "name": "aida_r5_dining_towel",
+  "purpose": "A cotton towel hung over a drying rail in the dining room, a corner hanging free at reach height: the R5 stands before the rail, reaches forward, pinches the hanging corner with its left hand, lifts it 20 cm and holds. The first cloth experiment: does a PhysX surface deformable stay in the Ability Hand's pinch?",
+  "physics_hz": 240,
+  "physics_hz_why": "the hand firmware per physics step as before, at 240 Hz: cloth at 480 Hz doubles the cost of every trial; 240 Hz is a 4 ms stall loop",
+  "environment": {
+    "fixtures": [
+      {
+        "name": "Rail",
+        "size": [
+          0.06,
+          0.8,
+          0.03
+        ],
+        "position": [
+          6.3,
+          1.0,
+          0.965
+        ],
+        "color": [
+          0.35,
+          0.33,
+          0.3
+        ],
+        "physics": {
+          "static_friction": 1.0,
+          "dynamic_friction": 0.8
+        }
+      }
+    ],
+    "fixtures_why": "a wall-mounted drying rail between the table's end (x 5.807) and the east wall (x 6.9), its top at 0.98 m; the towel hangs over it with both faces free; the rail runs y 0.60-1.40 so the robot's front (y 0.52) is clear of it (a rail from 0.50 ran into the chassis at 0.95 m)",
+    "support": "/World/Fixtures/Rail",
+    "support_why": "the rail is the support: a towel hanging over a table's edge put the hem 13 cm below a 0.71 m top, and from some twenty robot placements the arm could not present a pinch across the sheet there (the digit behind the flap under the slab, or no IK with the closing axis near the sheet's normal); over a rail the hem hangs at 0.67 m with nothing behind it"
+  },
+  "objects": [
+    {
+      "name": "Towel",
+      "asset_id": "towel_cotton",
+      "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/towel_cotton/towel_cotton.usda",
+      "category": "cloth",
+      "deformable": true,
+      "xy": [
+        6.3,
+        0.75
+      ],
+      "overhang": {
+        "edge": "+x",
+        "m": 0.12
+      },
+      "yaw_deg": 90,
+      "target": true,
+      "label": "the blue towel",
+      "why": "0.30 x 0.40 m, its long side across the rail: 12 cm hangs on the +x side and 28 cm on the robot's side (-x), so the long flap's hem is at about 0.67 m; its -y corner is the one nearest the robot"
+    }
+  ],
+  "grasp_plan": {
+    "task": "pinch_lift",
+    "support_parts": "split",
+    "cloth_grip": {
+      "corner_side": "-y",
+      "inset_m": 0.025,
+      "up_m": 0.01,
+      "thickness_m": 0.002,
+      "hang_band_m": 0.03,
+      "closing_axis_tolerance_deg": 40.0,
+      "tolerance_why": "a 1.5 mm sheet is sandwiched only by a pinch close to its normal (at 60 deg the tips closed beside the sheet)"
+    },
+    "lift_mode": "palm",
+    "lift_out_xy": [
+      -0.05,
+      0.0
+    ],
+    "lift_out_why": "drawn 5 cm away from the rail at the pinch height first (the flap off the rail's face), then up 20 cm",
+    "lift_m": 0.2,
+    "pregrasp_height_m": 0.04,
+    "open_clearance_m": 0.012,
+    "curl_rad": 1.5,
+    "close_s": 1.0,
+    "hold_s": 2.0,
+    "reach": "cumotion",
+    "cumotion_seeds": 8,
+    "why": "the long flap's -y corner, 2.5 cm in from the corner and 1 cm up from its hem, pinched across the cloth; drawn off the rail, then the palm straight up 20 cm; the rail as a slab band (support_geometry.py)"
+  },
+  "grasp_replay": {
+    "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_dining_towel/grasp_plan/targets.npz",
+    "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+    "lift_offset_m": 0.0,
+    "control_hz": 30,
+    "finger_q2_coefficient": 1.05851325,
+    "hold_s": 0.0,
+    "controller": "homehero_r5_action",
+    "hand_model": {
+      "kind": "ability_hand",
+      "calibration": "config/ability_hand_calibration.json",
+      "collision_voltage": 3.0,
+      "postcontact_voltage": 1.5,
+      "grip_speed": 0.3,
+      "why": "the grip command with the ICD's post-contact voltage (misc word 008) at 1.5 V: on cloth a digit halts tip-to-tip with the fabric between the pads at the 3 V threshold, and at 0 V the worm then holds only the pad squeeze stored at that instant - the pinch closed on the corner and let it go 2 cm into the draw-out (2026-10-15). With 1.5 V after contact the digits keep closing in as the cloth shifts, as the real hand does with the setting; the can held at 1.5 V and dropped at 0 V the same way"
+    },
+    "why": "the planned pinch-and-lift (plan_er_grasp.py, task pinch_lift)"
+  },
+  "robot": {
+    "position": [
+      6.3,
+      0.2,
+      0.403
+    ],
+    "cad_yaw_deg": 180.0,
+    "placement_why": "before the rail's near end, facing along it (+y; CAD forward is -Y, yaw 180 faces world +Y): the towel's flap hangs on the robot's left (-x), its plane along the forward reach, its normal the robot's lateral axis - a lateral pinch in a forward reach",
+    "posture_rad_or_m": {
+      "amber_head_pan_joint": 0.0,
+      "amber_head_pitch_joint": 0.5585053609999999,
+      "amber_left_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_pitch_joint": -0.01752971268371528,
+      "amber_right_shoulder_roll_joint": -0.2838099793421452,
+      "amber_right_upper_arm_roll_joint": -0.07824394607011698,
+      "amber_right_elbow_pitch_joint": -0.07046256339005019,
+      "amber_right_forearm_roll_joint": 0.7021713351646428,
+      "amber_right_wrist_pitch_joint": 0.1990612065483086,
+      "amber_right_wrist_roll_joint": 0.2022547925603151,
+      "amber_left_shoulder_pitch_joint": 0.0034333767979382052,
+      "amber_left_shoulder_roll_joint": -0.3141592653589793,
+      "amber_left_upper_arm_roll_joint": -0.0034333767979379815,
+      "amber_left_elbow_pitch_joint": 0.008577507875388732,
+      "amber_left_forearm_roll_joint": 0.7454971616233473,
+      "amber_left_wrist_pitch_joint": 0.23811919684040284,
+      "amber_left_wrist_roll_joint": 0.20683488558339833,
+      "psyonic_left_thumb_q1": 0.0
+    },
+    "posture_why": "HomeHero's navigation rest as the base spec, the head panned to look ahead at the table's end (the side-table posture panned it 88 deg left); a one-level spec merge replaces the whole posture dict, so it is carried in full"
+  },
+  "overview_camera": {
+    "eye": [
+      5.35,
+      -0.45,
+      1.85
+    ],
+    "target": [
+      6.25,
+      0.7,
+      0.8
+    ],
+    "focal_length_mm": 18.0,
+    "resolution": [
+      1600,
+      900
+    ],
+    "why": "from the room's south-west, ahead and to the robot's left: the robot's front-left, its left arm, the rail and the hanging towel (a camera behind the robot filmed its back panels, 2026-10-15)"
+  },
+  "extra_cameras": [
+    {
+      "name": "GraspCloseup",
+      "eye": [
+        5.7,
+        0.28,
+        1.05
+      ],
+      "target": [
+        6.24,
+        0.63,
+        0.78
+      ],
+      "focal_length_mm": 22.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "why": "from the robot's left-front at hand height: the flap, the pinch and the lift"
+    }
+  ]
+}

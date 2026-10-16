@@ -1,0 +1,338 @@
+{
+  "extends": "aida_r5_dining_can_grasp.json",
+  "name": "aida_r5_rail_scissors",
+  "purpose": "Scissors hanging by one handle ring from a peg on the dining room's east wall: the R5 faces the wall, takes the scissors down by the free half's ring with its left hand, lifts it off the peg and holds. The second step opens and closes the scissors with the right hand while the left holds it: the first two-arm task.",
+  "environment": {
+    "fixtures": [
+      {
+        "name": "Post",
+        "shape": "cylinder",
+        "axis": "Z",
+        "radius": 0.012,
+        "length": 0.7,
+        "position": [
+          6.84,
+          1.08,
+          0.75
+        ],
+        "color": [
+          0.25,
+          0.22,
+          0.2
+        ],
+        "physics": {
+          "static_friction": 0.8,
+          "dynamic_friction": 0.6
+        }
+      },
+      {
+        "name": "Peg",
+        "shape": "cylinder",
+        "axis": "Y",
+        "radius": 0.003,
+        "length": 0.12,
+        "position": [
+          6.84,
+          1.02,
+          0.88
+        ],
+        "color": [
+          0.25,
+          0.22,
+          0.2
+        ],
+        "physics": {
+          "static_friction": 0.8,
+          "dynamic_friction": 0.6
+        }
+      }
+    ],
+    "fixtures_why": "a hook: a 6 mm round peg along y (y 0.96-1.08) from a vertical post at (6.84, 1.08), 6 cm before the east wall. The peg runs along the loop's hole AXIS: the scissors' handle loop lies in the x-z plane (its faces normal to y, the robot's lateral axis), so a peg out of the east wall along x lay in the ring's plane, through the rim, and the standing penetration threw the scissors across the room in the first quarter second (2026-10-15). Hook at 0.88 m: at 1.02 m the free loop's rim hung 11 cm below the shoulder and 40 cm out, an arm-folded pose with no IK over 130 orientations; the towel pinch that worked was 31 cm below the shoulder and 44 cm out",
+    "support": "/World/Fixtures/Peg",
+    "support_why": "the peg is the support for the planner's boxes; the scissors is placed by its hang point, not on the support's top"
+  },
+  "robot": {
+    "position": [
+      6.25,
+      0.75,
+      0.403
+    ],
+    "cad_yaw_deg": 90.0,
+    "placement_why": "facing the east wall (yaw 90 faces +x), its front 33 cm from the wall; the hook ahead and 20-30 cm to its left (+y), the hanging scissors' faces normal to y - the robot's lateral axis, a lateral pinch in a forward reach",
+    "posture_rad_or_m": {
+      "amber_head_pan_joint": 0.0,
+      "amber_head_pitch_joint": 0.5585053609999999,
+      "amber_left_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_pitch_joint": -0.01752971268371528,
+      "amber_right_shoulder_roll_joint": -0.2838099793421452,
+      "amber_right_upper_arm_roll_joint": -0.07824394607011698,
+      "amber_right_elbow_pitch_joint": -0.07046256339005019,
+      "amber_right_forearm_roll_joint": 0.7021713351646428,
+      "amber_right_wrist_pitch_joint": 0.1990612065483086,
+      "amber_right_wrist_roll_joint": 0.2022547925603151,
+      "amber_left_shoulder_pitch_joint": 0.0034333767979382052,
+      "amber_left_shoulder_roll_joint": -0.3141592653589793,
+      "amber_left_upper_arm_roll_joint": -0.0034333767979379815,
+      "amber_left_elbow_pitch_joint": 0.008577507875388732,
+      "amber_left_forearm_roll_joint": 0.7454971616233473,
+      "amber_left_wrist_pitch_joint": 0.23811919684040284,
+      "amber_left_wrist_roll_joint": 0.20683488558339833,
+      "psyonic_left_thumb_q1": 0.0
+    },
+    "posture_why": "HomeHero's navigation rest with the head looking ahead at the wall (a one-level spec merge replaces the whole posture dict, so it is carried in full)",
+    "drive_overrides": {
+      "psyonic_left_.*": {
+        "stiffness": 30.0,
+        "damping": 1.0,
+        "max_force": 6.0,
+        "armature": 0.005
+      },
+      "psyonic_right_.*": {
+        "stiffness": 30.0,
+        "damping": 1.0,
+        "max_force": 6.0,
+        "armature": 0.005
+      }
+    },
+    "drive_overrides_why": "HomeHero's hand gains on BOTH hands: the base spec sets them for the left (the pinch) only, and the right hand pushed the scissors' handle with the USD's stock finger drives (2026-10-15)"
+  },
+  "objects": [
+    {
+      "name": "Scissors",
+      "asset_id": "scissor",
+      "category": "articulated_verified",
+      "xy": [
+        6.81,
+        0.94
+      ],
+      "target_member": "Object_0_part01",
+      "label": "the scissors",
+      "hang": {
+        "on": "/World/Fixtures/Peg",
+        "point": [
+          0.0295,
+          -0.0685,
+          0.0129
+        ],
+        "at": [
+          6.84,
+          0.98,
+          0.88
+        ],
+        "rpy_deg": [
+          -90,
+          0,
+          0
+        ]
+      },
+      "hang_why": "part02's handle loop (hole centre 2.95, -6.85, 1.29 cm in the asset's frame, measured on 1 mm rows; open in the cooked collision, verify_loop_holes.py) around the peg's axis 2 cm from its free end; turned handles-up (rpy -90 about x: the asset's -y, the handles, up; its thickness z along world y, the hole axis along the peg). PhysX lets the loop drop onto the peg and part01, the free half, swing on the pivot to its stop; its loop is the pinch: a 1 cm rim in a vertical plane",
+      "physics": {
+        "static_friction": 0.8,
+        "dynamic_friction": 0.6
+      },
+      "joint_state": {
+        "pivot": -45.0
+      },
+      "joint_state_why": "hung handles-up and closed, the free half stayed closed (2 deg) and its loop lay stacked against the other with no free face; authored 45 deg open its loop stands clear on the far side of the pivot"
+    }
+  ],
+  "physics_hz": 480,
+  "settle_s": 4.0,
+  "settle_why": "the free half swings on the pivot after the hang; its rest decides the pinch",
+  "overview_camera": {
+    "eye": [
+      5.6,
+      1.9,
+      1.7
+    ],
+    "target": [
+      6.6,
+      0.85,
+      1.0
+    ],
+    "focal_length_mm": 18.0,
+    "resolution": [
+      1600,
+      900
+    ],
+    "why": "from the north-west, the robot's left side, the wall with the peg and the hanging scissors"
+  },
+  "extra_cameras": [
+    {
+      "name": "GraspCloseup",
+      "eye": [
+        6.35,
+        1.55,
+        1.15
+      ],
+      "target": [
+        6.82,
+        0.95,
+        0.92
+      ],
+      "focal_length_mm": 22.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "why": "from the robot's left, level with the scissors: the ring, the pinch and the lift off the peg"
+    },
+    {
+      "name": "PushCloseup",
+      "eye": [
+        6.748,
+        1.283,
+        1.165
+      ],
+      "target": [
+        6.625,
+        0.823,
+        0.89
+      ],
+      "focal_length_mm": 22.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "why": "aimed by line of sight (scripts/film_camera.py on take 12's log: the robot's links posed from the logged joints, sight lines to the loop and both index tips over 53 ticks of the close and the open): from the robot's left-front, 0.55 m out, 30 deg up - every sight line clear; the first guess sat behind the east wall"
+    }
+  ],
+  "grasp_plan": {
+    "task": "pinch_lift",
+    "support_parts": "split",
+    "member_grip": {
+      "band": "highest",
+      "band_m": 0.025,
+      "side": "centre",
+      "inset_m": 0.0,
+      "up_m": 0.008,
+      "thickness_m": 0.01,
+      "closing_axis_tolerance_deg": 40.0
+    },
+    "member_grip_why": "the free half's loop is its highest part (handles up): the pinch on the top of its rim, 8 mm down from the top, across the half's 1 cm thickness along the loop plane's normal",
+    "lift_mode": "palm",
+    "lift_out_xy": [
+      0.0,
+      -0.03
+    ],
+    "lift_m": 0.1,
+    "lift_why": "straight up 10 cm: the hanging ring clears the peg's top (1.2 cm) and the scissors comes away in the hand",
+    "pregrasp_height_m": 0.04,
+    "open_clearance_m": 0.012,
+    "curl_rad": 1.5,
+    "close_s": 1.0,
+    "hold_s": 2.0,
+    "reach": "cumotion",
+    "cumotion_seeds": 8,
+    "why": "the pinch planner's cloth task on a rigid member: the grip from the member's own points, the closure against the member's hull, the rest of the scissors and the peg as obstacles",
+    "lift_out_why": "the loop hangs on a peg along y: it comes off the peg's free end along -y (3 cm), not upward (the hole is 5.6 cm tall, the peg would ride down it)",
+    "after_lift_xy": [
+      -0.15,
+      -0.12
+    ],
+    "after_lift_why": "carried 15 cm toward the robot (-x) and 12 cm toward its midline (-y) after the rise: at the hook's y (0.94) the free loop hung 38 cm across from the right shoulder and no finger face or direction reached under it without the right arm meeting the torso's casing or the wrist folding on the forearm; 12 cm nearer the midline the push planner finds 30 clear fits (scout_carry.py, synthetic holds from take 4; at 16 cm the LEFT wrist meets the casing during the carry)"
+  },
+  "grasp_replay": {
+    "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_rail_scissors/grasp_plan/targets.npz",
+    "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+    "lift_offset_m": 0.0,
+    "control_hz": 30,
+    "finger_q2_coefficient": 1.05851325,
+    "hold_s": 0.0,
+    "controller": "homehero_r5_action",
+    "hand_model": {
+      "kind": "ability_hand",
+      "calibration": "config/ability_hand_calibration.json",
+      "collision_voltage": 8.0,
+      "postcontact_voltage": 0.0,
+      "grip_speed": 0.3,
+      "why": "the halt (word 007) set above the force band, 8.0 V, so the position loop governs the squeeze: at the 3.0 V default the index stalls at about 3 N, the band's floor, and could tighten no further. Driven by the grip command alone this pinch failed every way: at 3.0 V the thumb flicked the 14 g pawn out before it stalled; at 1.0 V with 0.8 V post-contact the digits crept closed during the carry and rolled it out at 61 deg; at 1.0 V with 0 V the stored 2.4 N drained in half a second of lift"
+    },
+    "grip": {
+      "mode": "force_band",
+      "min_n": 3.0,
+      "max_n": 6.0,
+      "tightening_step_rad": 0.0015,
+      "unloading_step_rad": 0.002,
+      "digits": [
+        "index",
+        "thumb"
+      ],
+      "why": "HomeHero's grip on the real hand (aida_mesh_contact.maintain_grip): free closing at 0.004 rad per tick until contact, then positions at 30 Hz, each digit tightened at 0.0015 rad per tick while its fingertip force is under the minimum, unloaded above the maximum; the lift waits until both digits are in band for 6 ticks. HomeHero's 3 N minimum: at 1.5 N the pinch let the pawn tilt 5 deg and slip out in the first centimetre of lift"
+    },
+    "why": "the chess pawn's grip: the force band on the Ability Hand model (3-6 N per digit) - a 1 cm rim pinched like the pawn's neck",
+    "live_plan": true,
+    "live_plan_why": "the free half's rest on the pivot decides the pinch: the replay settles, writes every body's pose, plans against it and executes that plan",
+    "bimanual": true,
+    "then": [
+      "finger_push:close",
+      "finger_push:open",
+      "finger_push:open",
+      "finger_push:open"
+    ],
+    "then_why": "after the pick's hold the replay writes every body's live pose, plans the CLOSE against it (finger_push_planner.py) and executes it; then three OPEN strokes, each planned live against the loop as it then is. One 35 deg open stroke turned the hinge 11 deg and swung the whole scissors 16 deg about the pinch instead (take 9): the pinch resists rotation weakly, so a push on the free loop away from the held loop swings the scissors and the finger outruns the loop. Short strokes: the swing relaxes while the finger withdraws, the hinge keeps its angle, the next stroke starts from where the loop is. Perceive, plan, act: five times in one episode",
+    "film": {
+      "cuts": [
+        {
+          "from_stage": "right_preshape",
+          "camera": "PushCloseup"
+        }
+      ],
+      "why": "the close-up at the hook for the pick, then on the two hands for the close and the open: after the carry the scissors are 20 cm from the hook, out of its frame"
+    }
+  },
+  "finger_push": {
+    "object": "Scissors",
+    "pushed": "Object_0_part02",
+    "held": "Object_0_part01",
+    "loop_point": [
+      0.0295,
+      -0.0685,
+      0.0129
+    ],
+    "held_loop_point": [
+      -0.0179,
+      -0.0703,
+      0.0131
+    ],
+    "pivot_axis": [
+      0,
+      0,
+      1
+    ],
+    "close_deg": 40.0,
+    "approach_m": 0.04,
+    "release_m": 0.05,
+    "hold_s": 2.0,
+    "preshape": [
+      0.0,
+      1.5,
+      1.5,
+      1.5,
+      0.0,
+      -1.47
+    ],
+    "obstacles": [
+      {
+        "id": "wall_east",
+        "min": [
+          6.9,
+          -2.0,
+          0.0
+        ],
+        "max": [
+          7.4,
+          4.0,
+          3.0
+        ]
+      }
+    ],
+    "why": "with the left hand holding part01 by its loop, the right index (straight, the other digits curled, the thumb turned away) is laid along part02's handle with its pad on the handle's outer wall, measured on the body's points in the ring's plane through the loop point (outer_wall: the loop is no circle - its rim was 10 mm from the loop point on the finger's side, and a 15 mm radius left the tip 5 mm outside it, grazing the rim once), pressed 3 mm in, and pushes the loop along its arc about the pivot by 40 deg toward part01 (closing the scissors), then withdraws 5 cm (the half swings back open under gravity); the east wall is an obstacle for the right arm",
+    "press_m": 0.004,
+    "wall_band_m": 0.004,
+    "wall_window_m": 0.01,
+    "open_deg": 12.0,
+    "open_why": "pushed closed by 32 deg the half stayed closed (take 5: 17 deg at the pivot, creeping open 0.03 deg per tick): real scissors stay where they are put, so the hand opens them again - the same finger pressed along the opening arc's tangent on the loop's upper wall 2.5 cm toward the handle's end (square on that wall; straight down it slid, take 8), approached from above (the tangent's trailing direction runs into the held loop and the pinch); 12 deg per stroke, three strokes planned live (take 9: a 35 deg stroke swung the scissors about the pinch)"
+  }
+}

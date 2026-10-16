@@ -366,6 +366,36 @@ def _strip_set_bodies(stage, spec: dict) -> int:
     return len(stripped)
 
 
+def exact_actuator_housings(stage, root_path: str, behaviors: list) -> list:
+    """The body an actuator slides or turns in (a motor's throttle joint's
+    body0: a drill's handle around its trigger) collides through its own
+    surface, an SDF, not a convex decomposition: PhysX's default 16 hulls of a
+    drill body swallowed 25 of its trigger's 46 vertices and the face a finger
+    presses, and every pull stalled on the body's hull with the trigger barely
+    moved (cooked and measured, 2026-10-15). Returns what was changed."""
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    joints = {q.GetName(): q for q in Usd.PrimRange(stage.GetPrimAtPath(root_path)) if q.IsA(UsdPhysics.Joint)}
+    out = []
+    for b in behaviors:
+        jn = b.get("throttle") if b.get("type") == "motor" else None
+        if jn not in joints:
+            continue
+        targets = UsdPhysics.Joint(joints[jn]).GetBody0Rel().GetTargets()
+        if not targets:
+            continue
+        body = stage.GetPrimAtPath(targets[0])
+        for q in Usd.PrimRange(body):
+            if q != body and q.HasAPI(UsdPhysics.RigidBodyAPI):
+                continue
+            if q.IsA(UsdGeom.Mesh) and q.HasAPI(UsdPhysics.CollisionAPI):
+                UsdPhysics.MeshCollisionAPI.Apply(q).CreateApproximationAttr().Set("sdf")
+                q.AddAppliedSchema("PhysxSDFMeshCollisionAPI")
+                q.CreateAttribute("physxSDFMeshCollision:sdfResolution", Sdf.ValueTypeNames.UInt).Set(256)
+                out.append({"exact_housing": str(q.GetPath()), "for": jn, "approximation": "sdf", "sdf_resolution": 256})
+    return out
+
+
 def apply_articulation(entry: dict, spec_text: str) -> str:
     """Run articulate_asset with the reviewer-edited spec on the derivative."""
     import contextlib
@@ -495,6 +525,8 @@ def apply_articulation(entry: dict, spec_text: str) -> str:
                 for p, v in vols.items():
                     UsdPhysics.MassAPI.Apply(p).CreateMassAttr().Set(round(max(0.005, total * v / vsum), 5))
                 made.append({"link_masses_authored_kg": round(total, 4), "links": len(vols)})
+    if behaviors:
+        made += exact_actuator_housings(stage, spec["prim_path"], behaviors)
     stage.GetRootLayer().Save()
     entry["articulation_draft"] = spec_text
     entry["applied_fixes"] = entry.get("applied_fixes", []) + [

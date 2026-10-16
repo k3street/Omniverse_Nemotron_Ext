@@ -1363,7 +1363,54 @@
     }
    },
    "source": "curated",
-   "curated_on": "2026-10-02"
+   "curated_on": "2026-10-02",
+   "use": {
+    "purpose": "cut sheet material - paper, cloth, string, tape - by shearing it between two blades",
+    "operated_by": "ONE hand: the thumb through one handle loop, one or two fingers through the other; opening the hand opens the blades, closing it shears. The other hand holds the material, not the scissors",
+    "work_signal": "the blades close across material held between them and the material separates along the cut",
+    "ladder": [
+     "held by its handles",
+     "opened and closed by the holding hand alone - its own digits through the two loops, the blades swinging on the pivot",
+     "closed across a sheet held by the other hand: the sheet is cut",
+     "a cut along a line: open, advance, close, repeated"
+    ],
+    "why": "curated 2026-10-15 for the task critic: what using the object means, rung by rung - the critic places a run on this ladder and the next rung is the next task",
+    "grip": {
+     "how": "the thumb through one loop and the middle (or index and middle) through the other, the loops on the digits' middle segments rather than their tips; the index may steady the lower handle; the blades opened by spreading thumb and fingers apart and closed by squeezing them together",
+     "features": [
+      {
+       "id": "in_hand_while_cycling",
+       "text": "the scissors stay on the digits while they open and close",
+       "measure": "in_hand_motion",
+       "stages": [
+        "open",
+        "open_hold",
+        "close",
+        "close_hold"
+       ],
+       "max_turn_deg": 15.0,
+       "max_slide_mm": 15.0
+      },
+      {
+       "id": "loops_on_digits",
+       "text": "a digit in each loop presses it: the thumb in one, a finger in the other",
+       "measure": "digit_n",
+       "digits": [
+        "thumb",
+        "index"
+       ],
+       "stages": [
+        "open",
+        "open_hold",
+        "close",
+        "close_hold"
+       ],
+       "min_n": 0.3
+      }
+     ],
+     "why": "curated 2026-10-15 for the task critic's grip judgment (the loop-grip run logs the stage 'cycle')"
+    }
+   }
   },
   "key": {
    "keywords": [
@@ -2075,7 +2122,99 @@
    },
    "behaviors": [
     "motor"
-   ]
+   ],
+   "use": {
+    "purpose": "drill holes and drive screws with a bit turned by the motor",
+    "operated_by": "one hand on the pistol grip, the index finger on the trigger (variable speed), the forward/reverse switch set by that hand's thumb or the other hand; the other hand may steady the workpiece",
+    "work_signal": "the bit turns at speed while pressed into a workpiece: a hole forms or a screw advances",
+    "ladder": [
+     "held by its pistol grip and lifted",
+     "trigger pulled by the holding hand's index: the chuck spins at the motor law's speed for that pull, and stops when released",
+     "the switch set (forward/reverse) by the hand, and the speed controlled by the pull",
+     "a bit in the chuck pressed into a workpiece: material removed or a screw driven"
+    ],
+    "why": "curated 2026-10-15 for the task critic",
+    "grip": {
+     "how": "a pistol grip: the handle's back seated in the web between thumb and index, high under the housing, so the tool's weight and the motor's reaction bear on the web; the middle, ring and pinky wrapped round the handle's front below the trigger; the index on the trigger alone; the thumb wrapped round the handle's far side, closing the hand into a ring round it; the trigger pulled through its whole travel when full speed is wanted (a stiff trigger is taken nearer the index's first joint, where the finger is strongest)",
+     "features": [
+      {
+       "id": "fingers_wrap",
+       "text": "the middle, ring and pinky hold the handle's front",
+       "measure": "digit_n",
+       "digits": [
+        "middle",
+        "ring",
+        "pinky"
+       ],
+       "stages": [
+        "settle",
+        "run",
+        "hold"
+       ],
+       "min_n": 1.0
+      },
+      {
+       "id": "thumb_opposes",
+       "text": "the thumb flexes round the handle's far side and presses it, closing the hand into a ring - not lying flat against the tool",
+       "measure": "thumb_opposes",
+       "stages": [
+        "settle",
+        "run",
+        "hold"
+       ],
+       "min_flex_rad": 0.4,
+       "min_n": 1.0
+      },
+      {
+       "id": "index_alone_on_trigger",
+       "text": "the index alone works the trigger",
+       "measure": "control_digits",
+       "stages": [
+        "pull",
+        "run"
+       ],
+       "only": [
+        "index"
+       ],
+       "min_n": 1.0,
+       "max_other_n": 0.5
+      },
+      {
+       "id": "full_trigger_travel",
+       "text": "the pull can reach the trigger's whole travel (the full speed range under the finger)",
+       "measure": "trigger_fraction",
+       "stages": [
+        "pull",
+        "run"
+       ],
+       "min": 0.9
+      },
+      {
+       "id": "still_in_hand",
+       "text": "the tool neither turns nor slides in the hand while the motor runs",
+       "measure": "in_hand_motion",
+       "stages": [
+        "pull",
+        "run",
+        "release"
+       ],
+       "max_turn_deg": 5.0,
+       "max_slide_mm": 5.0
+      },
+      {
+       "id": "seats_as_planned",
+       "text": "the tool stays where the grip put it as it takes its weight",
+       "measure": "in_hand_motion",
+       "stages": [
+        "lift"
+       ],
+       "max_turn_deg": 3.0,
+       "max_slide_mm": 5.0
+      }
+     ],
+     "why": "curated 2026-10-15 for the task critic's grip judgment: how a person holds a drill, as features the run's record can check (task_critic.grip_findings)"
+    }
+   }
   },
   "blister_pack": {
    "keywords": [

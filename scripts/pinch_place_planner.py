@@ -134,15 +134,28 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
 
     # --- grasp: the pinch line level, every heading and roll -------------------------
     tried, options = 0, []
-    why = {"ik": 0, "open_collides": 0, "closed_collides": 0, "pregrasp_ik": 0, "pregrasp_collides": 0}
+    why = {"ik": 0, "open_collides": 0, "closed_collides": 0, "pregrasp_ik": 0, "pregrasp_collides": 0, "axis_off_normal": 0}
     examples = {}
+    # a sheet (a cloth) is pinched ACROSS it: the closing axis within the
+    # task's tolerance of the cloth's normal at the grip. Ranked by cost alone
+    # the axis lay in the flap's plane and the tips met edge-on with nothing
+    # between them (2026-10-15)
+    normal = np.asarray(task["cloth_normal"], float) if task.get("cloth_normal") else None
+    cos_tol = np.cos(np.radians(float(task.get("closing_axis_tolerance_deg", 30.0))))
     for psi in np.radians(np.arange(0, 360, 15)):             # index-to-thumb either way round: different grasps
         a_w = np.array([np.cos(psi), np.sin(psi), 0.0])
+        if normal is not None and abs(float(a_w @ normal)) < cos_tol:
+            why["axis_off_normal"] += 1
+            continue
         u, v = up, np.cross(a_w, up)
         for phi in np.radians(np.arange(0, 360, 15)):
             R = _rotation_taking(a, b, a_w, np.cos(phi) * u + np.sin(phi) * v)
             p = grip_point - R @ m
-            if p[2] - grip_point[2] < 0.03:                   # the palm above the grip, not beside or under it
+            # the palm above the grip for a piece on a table (not beside or
+            # under it); a hanging sheet is pinched with the hand level, the
+            # palm beside the corner, so a cloth task allows any palm height
+            # from the hem up
+            if p[2] - grip_point[2] < (-0.02 if task.get("kind") == "pinch_lift" else 0.03):
                 continue
             tried += 1
             for sd in seeds:
@@ -193,7 +206,9 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     lift = float(task.get("lift_m", 0.03))
     yaws = np.radians([0, 15, -15, 30, -30])
     feasible = []
-    for o in options:
+    if task.get("kind") == "pinch_lift":
+        feasible = [{**o, "place_yaw": 0.0} for o in options]       # no place: every grasp is a candidate
+    for o in ([] if feasible else options):
         for yw in yaws:
             Rz = Rotation.from_euler("z", yw).as_matrix()
             R2 = Rz @ o["R"]
@@ -212,9 +227,11 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     for choice in options[:8]:                                 # the cheapest whose whole path checks out
         try:
             result = _path(choice, req, g, checker, seed, hc, ho, grip_point, place_point, step, lower, upper,
-                           slide_bounds, joint_path, screen, m)
+                           slide_bounds, joint_path, screen, m, axis_palm=pinch["axis_palm"])
         except RuntimeError as e:                              # HomeHero's RRT out of budget
             result = {"passed": False, "reason": f"reach: {e}"}
+        from checker_boxes import restore_boxes
+        restore_boxes(checker)                                 # a cloth's cells, dropped once held, back for the next option
         if result["passed"]:
             result.update(pinch=_jsonable(pinch), options=len(options), tried=tried,
                           grasp={k: choice[k] for k in ("heading_deg", "roll_deg", "cost", "rise")},
@@ -265,7 +282,7 @@ def _jsonable(d):
 
 
 def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step, lower, upper, slide_bounds,
-          joint_path, screen, m):
+          joint_path, screen, m, axis_palm=None):
     task = req["task"]
     path, stages = [np.asarray(start, float)], ["start"]
 
@@ -359,11 +376,48 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     # directions whose straight approach is clear - toward the robot (over
     # e1 that swept the open index through the king's crown), away (over the
     # empty squares ahead), or to either side
-    for d_name, d_ in (("toward", toward), ("away", -toward), ("side+", side), ("side-", -side)):
+    dirs = [("toward", np.r_[toward, 0.0]), ("away", np.r_[-toward, 0.0]), ("side+", np.r_[side, 0.0]), ("side-", np.r_[-side, 0.0])]
+    if task.get("kind") == "pinch_lift":
+        # a hanging cloth is entered from where there is no cloth: the open
+        # pinch slid onto the corner from the corner's free side or from
+        # below the hem, never swept through the flap (staged "toward" the
+        # robot, the approach pushed the flap 2 cm aside and the pads closed
+        # 2 cm from the nearest vertex, 2026-10-15). The directions are tried
+        # in order of the staging point's clearance from the cloth's cells
+        # (the cells near the grip are not obstacles, so this is the one
+        # place the cloth's whereabouts enter the approach)
+        dirs.append(("below", np.array([0.0, 0.0, -1.0])))
+        cells = [o for o in req["obstacles"] if str(o["id"]).startswith("cloth:")]
+        # and never along the closing axis: the open pinch straddles the flap
+        # only if it moves in the cloth's plane - along the axis its leading
+        # digit meets the cloth first and shoves it (a staging point 10 cm in
+        # front of the flap had the most clearance of all, and did just that)
+        axis_w = R_pre @ np.asarray(axis_palm, float) if axis_palm is not None else None
+        if axis_w is not None:
+            along = {n: round(abs(float(np.dot(d, axis_w)) / (np.linalg.norm(d) * np.linalg.norm(axis_w) + 1e-9)), 3) for n, d in dirs}
+            dirs = [(n, d) for n, d in dirs if along[n] <= 0.35]
+
+        def clearance(d):
+            p_st = p_pre + d * float(task.get("staging_back_m", 0.10))
+            if not cells:
+                return 0.0
+            return min(float(np.linalg.norm(np.maximum(0.0, np.maximum(np.asarray(o["min"]) - p_st, p_st - np.asarray(o["max"])))))
+                       for o in cells)
+        dirs.sort(key=lambda nd: -clearance(nd[1]))
+        clearances = {n: round(clearance(d), 4) for n, d in dirs}
+        if axis_w is not None:
+            clearances["along_axis"] = along
+    else:
+        clearances = {}
+    staging_tried = []                                          # the record: why each direction was passed over
+    for d_name, d_ in dirs:
         for back in (float(task.get("staging_back_m", 0.10)), 0.07, 0.13):
-            p_st = p_pre + np.r_[d_ * back, 0.0]
+            p_st = p_pre + d_ * back
             q_st, f_st = g.solve(goal, p_st, R_pre)
-            if f_st["passed"] and checker(q_st) and segment_clear(q_st, p_st, p_pre, R_pre, ho):
+            why_not = (None if f_st["passed"] else "ik") or (None if checker(q_st) else "staging pose collides") \
+                or (None if segment_clear(q_st, p_st, p_pre, R_pre, ho) else "approach segment")
+            staging_tried.append({"direction": d_name, "back_m": back, "rejected": why_not})
+            if why_not is None:
                 staged = (q_st, p_pre, R_pre, back, d_name)
                 goal = q_st
                 break
@@ -400,7 +454,8 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
         walk(np.r_[q[:8], ho], "reach")
     walk(np.r_[goal[:8], ho], "reach")
     if staged:
-        rrt = dict(rrt or {}, staging_back_m=staged[3], staging_direction=staged[4])
+        rrt = dict(rrt or {}, staging_back_m=staged[3], staging_direction=staged[4],
+                   staging={"clearance_m": clearances, "tried": staging_tried})     # a dict: _finish drops list values
         err = straight(staged[1], staged[2], "approach", ho)
         if err:
             return {"passed": False, "reason": err}
@@ -408,19 +463,35 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     # by 2 mm steps until index and thumb both meet the piece before they
     # meet each other (measured: at the first height the tips rose 9 mm
     # along their arcs and met over the crown, the pawn untouched)
-    p_grasp = np.asarray(choice["p"], float).copy()
+    p_grasp0 = np.asarray(choice["p"], float).copy()
     closure = None
-    for k in range(int(task.get("closure_steps", 8))):
+    if task.get("cloth_normal"):
+        # a hanging sheet: the adjustment is ALONG ITS NORMAL, in alternating
+        # steps either way, until the sheet lies between the tips (both touch
+        # it before they meet); lowering moves the hand along the sheet and
+        # changes nothing (the thumb never met the patch at any height)
+        n_w = np.asarray(task["cloth_normal"], float)
+        offsets = [0.0] + [sgn * 0.002 * k for k in range(1, int(task.get("closure_steps", 8))) for sgn in (1.0, -1.0)]
+        label = "shift_m"
+        moves = [n_w * d for d in offsets]
+    else:
+        offsets = [0.002 * k for k in range(int(task.get("closure_steps", 8)))]
+        label = "lowered_m"
+        moves = [np.array([0.0, 0.0, -d]) for d in offsets]
+    tried_closure = []
+    for d, mv in zip(offsets, moves):
+        p_grasp = p_grasp0 + mv
         q_g, fit = g.solve(np.r_[path[-1][:8], ho], p_grasp, choice["R"])
         if not fit["passed"] or not checker(q_g):
-            break
+            tried_closure.append({label: round(d, 4), "rejected": "ik" if not fit["passed"] else "collides"})
+            continue
         ok, first = closure_contact(g, checker, req["cloud"], q_g[:8], ho)
-        closure = {"lowered_m": round(0.002 * k, 4), "first_contact": first, "ok": ok}
+        closure = {label: round(d, 4), "first_contact": first, "ok": ok}
+        tried_closure.append(closure)
         if ok:
             break
-        p_grasp = p_grasp - np.array([0.0, 0.0, 0.002])
     if closure is None or not closure["ok"]:
-        return {"passed": False, "reason": f"no grasp height where the pinch closes on the piece: {closure}"}
+        return {"passed": False, "reason": f"no grasp {'offset' if task.get('cloth_normal') else 'height'} where the pinch closes on the piece: {tried_closure[-6:]}"}
     err = straight(p_grasp, choice["R"], "descend", ho)
     if err:
         return {"passed": False, "reason": err}
@@ -431,8 +502,48 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     hold(float(task.get("close_s", 1.0)), "close")
     lift = float(task.get("lift_m", 0.03))
     z0 = path[-1][0]
-    slide(lift, "lift")
-    lifted = path[-1][0] - z0
+    if task.get("kind") == "pinch_lift":
+        # the cloth is in the hand from here: its cells were obstacles for the
+        # reach, approach and descent, and rise with the palm now (kept, they
+        # stopped every lift at the thumb 6 cm up). _finish screens the held
+        # stages without them and the others with them; plan_pinch_place puts
+        # them back before the next option
+        from checker_boxes import drop_boxes
+        drop_boxes(checker, "cloth:")
+    if task.get("lift_mode") == "palm":
+        # the palm straight up by lift_m, IK per 5 mm with the hand closed,
+        # screened (a cloth corner: more than the slide's travel)
+        g.forward(np.r_[path[-1][:8], hc])
+        p_now, R_now = g.pose()
+        out = np.asarray(task.get("lift_out_xy", [0.0, 0.0]), float)
+        if np.linalg.norm(out) > 0:
+            # drawn out horizontally first: a corner pinched under a table's
+            # edge cannot rise straight up (the index met the slab 9 cm up)
+            err = straight(p_now + np.r_[out, 0.0], R_now, "lift", hc)
+            if err:
+                return {"passed": False, "reason": "lift (out): " + err}
+            g.forward(np.r_[path[-1][:8], hc])
+            p_now, R_now = g.pose()
+        err = straight(p_now + np.array([0.0, 0.0, lift]), R_now, "lift", hc)
+        if err:
+            return {"passed": False, "reason": err}
+        lifted = lift
+        after = np.asarray(task.get("after_lift_xy", [0.0, 0.0]), float)
+        if np.linalg.norm(after) > 0:
+            # carried horizontally after the rise, the hand closed: a scissors
+            # off its hook comes away from the wall so the other hand has room
+            # behind its free half
+            g.forward(np.r_[path[-1][:8], hc])
+            p_now, R_now = g.pose()
+            err = straight(p_now + np.r_[after, 0.0], R_now, "carry", hc)
+            if err:
+                return {"passed": False, "reason": "carry: " + err}
+    else:
+        slide(lift, "lift")
+        lifted = path[-1][0] - z0
+    if task.get("kind") == "pinch_lift":
+        hold(float(task.get("hold_s", 2.0)), "hold")
+        return _finish(path, stages, step, lower, upper, checker, hc, screen, rrt, lifted, closure)
     # carry: the palm straight across, by the move, at the lifted height
     g.forward(np.r_[path[-1][:8], hc])
     p_now, R_now = g.pose()
@@ -449,6 +560,10 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     slide(float(task.get("retreat_m", 0.06)), "retreat")
     hold(float(task.get("hold_s", 1.0)), "hold")
 
+    return _finish(path, stages, step, lower, upper, checker, hc, screen, rrt, lifted, closure)
+
+
+def _finish(path, stages, step, lower, upper, checker, hc, screen, rrt, lifted, closure):
     arr = np.asarray(path)
     labels = np.asarray(stages)
     jumps = np.abs(np.diff(arr, axis=0))
@@ -464,8 +579,18 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     held = np.isin(labels, ("close", "lift", "carry", "lower"))
     seen = arr.copy()
     seen[held, 8:] = hc
-    screened = [q for q, s in zip(seen, labels) if s in ("reach", "approach", "descend", "lift", "carry", "lower", "retreat")]
-    sc = screen(checker, screened)
+    from checker_boxes import drop_boxes, restore_boxes
+    carried = getattr(checker, "_dropped", [])                # a cloth in the hand: its cells are not obstacles while held
+    in_hand = [q for q, s in zip(seen, labels) if s in ("lift", "carry", "lower")]
+    before = [q for q, s in zip(seen, labels) if s in ("reach", "approach", "descend", "retreat")]
+    sc = screen(checker, in_hand) if in_hand else {"passed": True}
+    if sc["passed"]:
+        if carried:
+            restore_boxes(checker)
+        sc = screen(checker, before)
+        if carried:
+            drop_boxes(checker, "cloth:")
+    screened = before + in_hand
     if not sc["passed"]:
         return {"passed": False, "reason": f"collision in the path: {sc['collisions'][:1]}"}
     return {"passed": True, "targets": arr, "stages": labels, "closure": closure,

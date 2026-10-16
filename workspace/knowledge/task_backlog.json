@@ -1,0 +1,333 @@
+{
+ "tasks": [
+  {
+   "from_scene": "aida_r5_rail_scissors",
+   "object": "scissor",
+   "class": "scissors",
+   "at": "2026-10-15T18:51:05",
+   "judge": "gemma",
+   "rung_reached": 1,
+   "title": "Rung 2: Open and close the scissors using only the holding hand's digits.",
+   "rung": 2,
+   "description": "The robot must open and close the scissors using only the digits of the hand that is holding the handles, simulating the natural human action of using the fingers through both loops. The robot must maintain a stable grip on the handles while performing the opening and closing motion.",
+   "success_measures": [
+    "The robot must achieve a minimum of 5 full open/close cycles.",
+    "The opening and closing motion must be achieved solely by the digits of the holding hand, without external pushing or mechanical assistance.",
+    "The simulation must confirm that the pivot movement is driven by the digits of the holding hand, not by the wrist or forearm."
+   ],
+   "capabilities_needed": [
+    "Fine motor control and dexterity in the holding hand's digits.",
+    "Ability to isolate and control the movement of the digits relative to the object's pivot point."
+   ],
+   "status": "in_progress",
+   "scene": "aida_r5_dining_scissors_hand",
+   "work": [
+    {
+     "fix": "the pair tipped 50 deg off the stand in the settle",
+     "rule": "build_er_scene part_densities_kg_m3 (masses and centres of mass from the parts' materials: steel blades, plastic loops, 80 g) and the overhang gate (centre of mass >= 1 cm inside the support's edge)",
+     "result": "settles flat, 2.4 cm inside the edge"
+    },
+    {
+     "fix": "the halves read 0 deg apart",
+     "rule": "joint_drives (the ArtVIP display spring off; pivot damping) - the joint state itself was applied (PhysicsJointStateAPI)",
+     "result": "settles 16 deg open as authored"
+    },
+    {
+     "fix": "no loop-grip plan: the thumb (2.5 x 2.8 cm) does not fit a 2.72 cm loop at depth",
+     "rule": "loop_grip_planner: thumb_insert_m (1.4 cm), digits' sections (cores) centred in the holes",
+     "result": "plans"
+    },
+    {
+     "take": 1,
+     "result": "the straight digits went through both loops without touching and slid out on the lift: rise 0"
+    },
+    {
+     "take": 3,
+     "result": "index curled under the INNER rim: it pressed the inner wall, the half swung closed 16 -> 9 deg, the finger slid out: rise 0"
+    },
+    {
+     "take": 4,
+     "result": "index extended under the FAR rim (3 cm in): tip only 4 mm under the loop, the rim rode over it: rise 0"
+    },
+    {
+     "take": 5,
+     "result": "4 cm in, 14 mm out under the far rim: the half swung 3 deg open and the finger slid up through: rise 0"
+    },
+    {
+     "replay": "LOOP verdict (blades' angle per tick, swings with the hand's spread, held up); contact on every body of the scissors; the replay refuses a spec.json stale against its config"
+    }
+   ],
+   "finding": "Vertical digits through horizontal loops cannot hold a pair whose halves turn freely on the pivot: any digit pressing a loop's wall swings the half out of its way (the halves sit ~10 deg from their stops), and a lift catches nothing. A person's scissors hang on HORIZONTAL digits, gravity on the digits, the loops' planes vertical.",
+   "next": "Insert vertically, squeeze the loops to the blades' closed stop (both halves pinned against each other), lift 1-2 cm on that squeeze, turn the hand so the digits are horizontal and the pair hangs on them (the wrist roll about the spread line), ease the squeeze, then cycle the thumb's spread. Or pick the pair from a vertical presentation (hung by its blades), entering the loops horizontally."
+  },
+  {
+   "from_scene": "pipeline",
+   "object": "model_scissors_21",
+   "class": "scissors",
+   "at": "2026-10-15T19:05:00",
+   "judge": "claude-code",
+   "title": "Jointed source assets through the pipeline",
+   "rung": null,
+   "status": "proposed",
+   "description": "Assets that arrive jointed (ArtVIP) return 'already articulated' from the articulate stage and never get class masses, physics materials or a derivative copy; model_scissors_21 is also fixed to the world by its pivot's fixed joint (a display fixture). The pipeline should give them a derivative, the class's masses and materials, free any world-fixed joint, and run verify.",
+   "success_measures": [
+    "mass check passes",
+    "no joint to the world",
+    "held_together and reached_travel run in PhysX"
+   ],
+   "capabilities_needed": [
+    "pipeline: jointed-source branch"
+   ]
+  },
+  {
+   "from_scene": "aida_r5_dining_drill",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-15T19:21:30",
+   "kind": "grip",
+   "judge": "record",
+   "rung_reached": 2,
+   "title": "grip: thumb_opposes, full_trigger_travel, seats_as_planned",
+   "failed_features": [
+    {
+     "id": "thumb_opposes",
+     "feature": "the thumb flexes round the handle's far side and presses it, closing the hand into a ring - not lying flat against the tool",
+     "pass": false,
+     "evidence": "thumb flexed 0.00 rad (opposing needs >= 0.4), pressing 7.8 N - a flat thumb that the tool rests against, not one closing round it"
+    },
+    {
+     "id": "full_trigger_travel",
+     "feature": "the pull can reach the trigger's whole travel (the full speed range under the finger)",
+     "pass": false,
+     "evidence": "peak pull 50% of the trigger's travel (needs 90%); the index commanded to 1.6 rad reached 1.037 rad and halted (stalled at the collision threshold)"
+    },
+    {
+     "id": "seats_as_planned",
+     "feature": "the tool stays where the grip put it as it takes its weight",
+     "pass": false,
+     "evidence": "over lift: turned 3.62 deg, slid 9.9 mm in the hand"
+    }
+   ],
+   "judge_tasks": [
+    {
+     "title": "Improve the grip stability and full trigger actuation.",
+     "description": "The planner must be updated to allow the thumb to wrap around the handle's far side (increasing the 'thumb_opposes' requirement) and the hand's firmware must be adjusted to allow the index finger to pull the trigger through its full travel (increasing the 'pull_max_rad' target).",
+     "changes_to_try": [
+      "Planner: Update 'thumb_why' to allow wrapping motion (e.g., setting 'thumb' to 'wrap').",
+      "Firmware: Increase 'collision_voltage' or adjust the index finger's motor limits to allow the full 1.6 rad pull."
+     ],
+     "success_measures": [
+      "Thumb opposition angle (rad): >= 0.4",
+      "Trigger pull distance (rad): >= 1.5 rad"
+     ],
+     "judge": "gemma"
+    }
+   ],
+   "status": "in_progress",
+   "work": [
+    {
+     "feature": "full_trigger_travel",
+     "change": "tool_grip_planner: the index's force along the trigger's travel through the faces it presses (push_force, force_reach; calibrated on take 4: 7.2 N predicted, 7.5 N stall measured) gates the search; the index may meet the trigger near its knuckle (index_touch_rad 0.15-1.5) with the handle 1-4 cm deeper in the hand",
+     "planned": "full travel at the planned pose and with the drill settled 1 and 2 cm toward the wrist (grip yaw -15, roll -5, forward 2 cm; the index meets the trigger at 0.46 rad, take 4's at 1.06)",
+     "status": "to verify in PhysX"
+    },
+    {
+     "feature": "thumb_opposes",
+     "change": "tool_grip_planner thumb 'wrap_handle': a thumb's first contact on the handle's far half below the housing",
+     "finding": "the wrap exists for this hand and drill (rotation -1.6 to -1.74) but cannot be reached: with the palm in place the thumb's clear (rotation, flexion) configurations are two islands with the handle between them, and a straight slide with the thumb already wrapped drives it through the handle; with the drill straight ahead the wrapping grips' forearm meets the torso",
+     "status": "blocked: needs the capability task below"
+    },
+    {
+     "feature": "seats_as_planned",
+     "change": "none yet: the knuckle grip is not seated at the heel; its settling is measured by the next take",
+     "status": "to measure"
+    }
+   ],
+   "takes": [
+    {
+     "take": 4,
+     "grip": "seated at the heel, index pad on the trigger (yaw -10, roll -5)",
+     "trigger": 0.5,
+     "seat_lift_mm_deg": [
+      9.9,
+      3.6
+     ],
+     "failed": [
+      "thumb_opposes",
+      "full_trigger_travel",
+      "seats_as_planned"
+     ],
+     "tool": "PASS"
+    },
+    {
+     "take": 5,
+     "grip": "knuckle pull: handle 2 cm deeper, index meets the trigger at 0.46 rad (yaw -15, roll -5)",
+     "trigger": 0.68,
+     "index_on_trigger_n": 22,
+     "tool": "FAIL",
+     "why": "the middle met the trigger mid-close and held it in: the chuck ran before the pull (202 rpm) and after the release (408 rpm)",
+     "rules_added": [
+      "the wrapping digits clear the trigger along their whole close (wrap_overshoot_rad)",
+      "the release opens the index fully",
+      "the index waits short of its earliest touch over the settle shifts"
+     ]
+    },
+    {
+     "take": 6,
+     "grip": "knuckle pull with those rules (yaw -20, roll 0, forward 1.5 cm)",
+     "trigger": 0.54,
+     "seat_lift_mm_deg": [
+      18.8,
+      7.1
+     ],
+     "failed": [
+      "thumb_opposes",
+      "index_alone_on_trigger",
+      "full_trigger_travel",
+      "seats_as_planned"
+     ],
+     "tool": "PASS",
+     "why": "not seated at the heel and with no thumb on the far side, the drill slid 2.5 cm and turned 7 deg in the hand over the close and lift; the index then met the trigger at its pad again (0.94 rad, 14 N)",
+     "verdict": "worse than take 4 by the critic (4 failed features against 3): the config reverted to take 4's"
+    },
+    {
+     "take": 7,
+     "grip": "the force-ranked grip (yaw 0, roll -5): the index's modelled force ranked grips",
+     "trigger": 0.15,
+     "tool": "FAIL",
+     "failed": [
+      "fingers_wrap",
+      "thumb_opposes",
+      "full_trigger_travel",
+      "seats_as_planned"
+     ],
+     "rule": "force_score_weight 0 for this drill; the incumbent rule"
+    },
+    {
+     "take": 8,
+     "grip": "the incumbent (take 4's) with the index opened fully on release",
+     "trigger": 0.36,
+     "seat_lift_mm_deg": [
+      0.4,
+      1.1
+     ],
+     "tool": "FAIL",
+     "why": "opened fully, the index no longer held the drill: it slid 12 mm and dropped 8 mm; and seated without take 4's 1 cm settle the index reached 36%, not 50%",
+     "rule": "release reverted to the waiting angle (the take-5 trigger was held by the middle, not the index)"
+    },
+    {
+     "take": 9,
+     "grip": "the incumbent, take 4's plan tick for tick (release at the waiting angle)",
+     "trigger": 0.36,
+     "seat_lift_mm_deg": [
+      0.4,
+      1.1
+     ],
+     "in_hand_pull_mm_deg": [
+      12.0,
+      4.9
+     ],
+     "tool": "FAIL",
+     "why": "identical to take 8: the slide was not the release rule; take 4 (filmed) differs from takes 8-9 (physics only) with the same plan"
+    }
+   ],
+   "finding": "the index's force needs the trigger near its knuckle, and that needs the handle deeper in the hand than the heel seat; off the heel seat, a hand with no thumb on the handle's far side lets the drill settle 2.5 cm, undoing the placement. The grip holding the tool where it was planned (the thumb ring: capability task) is the gate for the trigger's full travel. The trigger's travel with the same grip ranges 36-50% with how the drill comes to rest in the hand (takes 4, 8): the settle, not the plan, decides it."
+  },
+  {
+   "from_scene": "aida_r5_dining_drill",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-15T19:21:30",
+   "judge": "gemma",
+   "rung_reached": 2,
+   "title": "Rung 3: Setting the Forward/Reverse Switch",
+   "rung": 3,
+   "description": "The robot must set the forward/reverse switch (located on the handle) using a finger (e.g., middle or ring finger) and then pull the trigger to demonstrate controlled speed and direction.",
+   "success_measures": [
+    "The robot must successfully manipulate the switch (e.g., from 'off' to 'forward') and maintain contact force on the switch for a minimum of 1 second.",
+    "The robot must then pull the trigger (trigger_peak_fraction >= 0.8) to demonstrate maximum speed control, resulting in a run_rpm of at least 700 RPM."
+   ],
+   "capabilities_needed": [
+    "Fine motor control to manipulate a small, discrete switch (Rung 3).",
+    "Coordination to combine switch setting and trigger pulling in sequence."
+   ],
+   "status": "proposed"
+  },
+  {
+   "from_scene": "pipeline",
+   "kind": "capability",
+   "judge": "critic loop",
+   "at": "2026-10-15",
+   "title": "Thread a digit round a handle: plan the arm and the hand's joints together against the tool's exact surface",
+   "description": "A person's pistol grip closes the thumb round the handle's back. For the R5's Ability Hand on drill_1 that grip exists, but every way to it passes through the handle: a palm-fixed thumb sweep is blocked (two islands of clear thumb configurations), and a straight slide with the thumb already wrapped drives it through. The hand must come round the handle while the thumb opens and closes - a path in the arm's 8 joints and the thumb's 2 at once, collision-checked against the tool's surface (slab hulls), not its bounding box, which is what the reach checker uses now.",
+   "success_measures": [
+    "the critic's thumb_opposes passes on the drill: the thumb flexed >= 0.4 rad, pressing the handle >= 1 N",
+    "no tool contact before the grip's close (the take's contact log)"
+   ],
+   "capabilities_needed": [
+    "an RRT or trajectory optimiser over arm + hand joints with the tool's hulls as obstacles",
+    "the hand's contact geometry (HomeHero collision cache) in that checker"
+   ],
+   "status": "proposed"
+  },
+  {
+   "from_scene": "pipeline",
+   "kind": "pipeline",
+   "judge": "measured",
+   "at": "2026-10-15",
+   "title": "Robot posture joint states use an unregistered schema name",
+   "description": "build_er_scene authors the robot's posture with apiSchemas 'PhysxJointStateAPI:<kind>'; the PhysX schema registers the joint state as 'PhysicsJointStateAPI' (omni.usd.schema.physx plugInfo: schemaIdentifier PhysicsJointStateAPI). The object joint_state path uses the registered name and PhysX applies it (the scissors' halves start at +8.6/-7.0 deg in the articulation view). So every robot scene starts at the zero pose and its drives pull the arms to the posture in the settle. Fix the name, then re-run each robot scene's settle and compare its first-second contacts.",
+   "success_measures": [
+    "the articulation view's dof positions at the first physics step equal the posture (within 1e-3 rad)",
+    "the scenes' grasp verdicts unchanged or better"
+   ],
+   "capabilities_needed": [],
+   "status": "proposed"
+  },
+  {
+   "from_scene": "aida_r5_dining_drill",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-15T21:14:56",
+   "kind": "grip",
+   "judge": "record",
+   "rung_reached": 1,
+   "title": "grip: thumb_opposes, full_trigger_travel, still_in_hand",
+   "failed_features": [
+    {
+     "id": "thumb_opposes",
+     "feature": "the thumb flexes round the handle's far side and presses it, closing the hand into a ring - not lying flat against the tool",
+     "pass": false,
+     "evidence": "thumb flexed 0.00 rad (opposing needs >= 0.4), pressing 6.5 N - a flat thumb that the tool rests against, not one closing round it"
+    },
+    {
+     "id": "full_trigger_travel",
+     "feature": "the pull can reach the trigger's whole travel (the full speed range under the finger)",
+     "pass": false,
+     "evidence": "peak pull 36% of the trigger's travel (needs 90%); the index commanded to 1.6 rad reached 1.208 rad and halted (stalled at the collision threshold)"
+    },
+    {
+     "id": "still_in_hand",
+     "feature": "the tool neither turns nor slides in the hand while the motor runs",
+     "pass": false,
+     "evidence": "over pull, run, release: turned 4.9 deg, slid 12.0 mm in the hand"
+    }
+   ],
+   "judge_tasks": [],
+   "status": "proposed"
+  },
+  {
+   "from_scene": "aida_r5_dining_drill",
+   "kind": "pipeline",
+   "judge": "measured",
+   "at": "2026-10-15",
+   "title": "A filmed take and a physics-only take of the same plan disagree",
+   "description": "drill take 4 (filmed) and takes 8-9 (--no-video) replayed the same grip and plan: take 4 pulled the trigger 50% with the drill seated 1 cm deeper over the lift and held still through the pull; takes 8 and 9 (identical to each other) pulled 36%, seated 0.4 mm, and slid 12 mm in the hand in the pull. Check whether rendering steps physics between control ticks (app.update with the timeline playing), make both modes step identically, and re-run take 4's plan both ways.",
+   "success_measures": [
+    "the same plan gives the same verdict numbers filmed and physics-only (trigger within 2%, in-hand slide within 1 mm)"
+   ],
+   "capabilities_needed": [],
+   "status": "proposed"
+  }
+ ]
+}

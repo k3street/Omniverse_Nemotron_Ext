@@ -1,0 +1,206 @@
+{
+  "extends": "aida_r5_dining_can_grasp.json",
+  "name": "aida_r5_dining_scissors_hand",
+  "purpose": "Scissors used as scissors, by one hand: a pair lies on a small stand on the dining table with its handle loops over the stand's edge; the R5's left hand puts its thumb through one loop and its index through the other, lifts the scissors on its digits and opens and closes them by its own spread - the rung of the scissors' use ladder the critic named next (rung 2: opened and closed by the holding hand alone).",
+  "environment": {
+    "deactivate": [
+      "/Root/props/Group/SM_chair_01_1",
+      "/Root/props/Group/SM_chair_01_25"
+    ],
+    "deactivate_why": "the chairs on the table's south side pulled away so the robot can come up to the table (SM_chair_01_25 is where this robot stands: the build's robot-overlap gate)",
+    "fixtures": [
+      {
+        "name": "Stand",
+        "size": [
+          0.1,
+          0.1,
+          0.06
+        ],
+        "position": [
+          4.8,
+          0.67,
+          0.738
+        ],
+        "color": [
+          0.3,
+          0.28,
+          0.26
+        ],
+        "physics": {
+          "static_friction": 0.8,
+          "dynamic_friction": 0.6
+        }
+      }
+    ],
+    "fixtures_why": "a 6 cm block on the table under the scissors' blades, so the handle loops hang over its -x edge with nothing under them: the digits go through the loops from above (on the bare table the tabletop closes the loops from below)",
+    "support": "/World/Fixtures/Stand",
+    "obstacle_prims": [
+      "/Root/props/Group/SM_table_02_0"
+    ],
+    "obstacle_prims_why": "the dining table under the stand: the stand is the support, the table still an obstacle for the arm"
+  },
+  "robot": {
+    "position": [
+      4.95,
+      0.19,
+      0.403
+    ],
+    "cad_yaw_deg": 180.0,
+    "placement_why": "as for the drill: before the table's near edge, facing it (+y); the stand ahead and to the left, the loops hanging toward the left hand"
+  },
+  "objects": [
+    {
+      "name": "Scissors",
+      "asset_id": "model_scissors_21",
+      "usd": "~/Desktop/assets/ArtVIP-20260207T153325Z-3-003/ArtVIP/Articulated_objects/household_items/stationery/scissors/scissors_21/model_scissors_21.usd",
+      "category": "articulated_verified",
+      "xy": [
+        4.8,
+        0.67
+      ],
+      "overhang": {
+        "edge": "-x",
+        "m": 0.06,
+        "com_margin_m": 0.01
+      },
+      "overhang_why": "the loops past the stand's -x edge with nothing under them, the pair's centre of mass (from its parts' materials) over the stand by the build's margin: at 7.5 cm, with every part at one density, the centre of mass lay 2 cm past the edge and the pair tipped 50 deg off it in the settle (2026-10-15)",
+      "yaw_deg": -90.0,
+      "target": true,
+      "label": "the scissors",
+      "deactivate": [
+        "FixedJoint_scissors_21_middle"
+      ],
+      "deactivate_why": "the ArtVIP scissors' pivot screw is fixed to the world (a display fixture); freed, the scissors rest on the stand",
+      "part_densities_kg_m3": {
+        "E_blade_*": 7850.0,
+        "E_handle_*": 1050.0,
+        "E_body_*": 7850.0
+      },
+      "part_densities_why": "steel blades and pivot screw, plastic (ABS) loops: the parts' meshes are closed (blade 2.29 cm3, loop 21.7 cm3 a half), so 18 g + 23 g a half, 88 g the pair - a 20 cm household pair's weight; the asset has no masses (a jointed source skips the pipeline's articulate stage - backlog), and one density put the centre of mass in the loops",
+      "joint_drives": {
+        "RevoluteJoint_scissors_21_right": {
+          "type": "force",
+          "stiffness": 0.0,
+          "damping": 0.0002
+        },
+        "RevoluteJoint_scissors_21_left": {
+          "type": "force",
+          "stiffness": 0.0,
+          "damping": 0.0002
+        }
+      },
+      "joint_drives_why": "no spring at the pivot: the ArtVIP source drives each half toward 20 deg open (stiffness 10 per degree, a display pose); a real pivot only rubs. Damping 0.0002 N m s per degree: 0.02 N m at 100 deg/s, a screwed pivot's feel - the hand's spread opens and closes the blades, nothing else does",
+      "physics": {
+        "static_friction": 0.6,
+        "dynamic_friction": 0.45,
+        "collision_overrides": {
+          "E_scissors_1_1": {
+            "approximation": "sdf",
+            "sdf_resolution": 256
+          },
+          "E_scissors_2_5": {
+            "approximation": "sdf",
+            "sdf_resolution": 256
+          },
+          "E_body_4": {
+            "approximation": "convexHull"
+          }
+        },
+        "collision_overrides_why": "the loops a digit goes through collide exactly (a convex hull or decomposition fills or narrows a 2.7 cm loop); the drill's housing showed the same; the pivot screw a convex hull, as PhysX falls back to for a triangle mesh on a dynamic body (said, not warned)"
+      },
+      "why": "model_scissors_21 (ArtVIP): two halves on a pivot screw, each 0-20 deg about the screw's axis; its loops 2.67 x 3.96 and 2.61 x 4.04 cm (scripts/loop_holes.py), wide enough for the Ability Hand's thumb (2.5 cm across its distal link on the narrow side) and index (1.6-1.8 cm) - the approved scissor's loops are 2.0 cm. Turned -90 deg: the loops (asset -y) toward world -x, over the stand's -x edge by 7.5 cm",
+      "joint_state": {
+        "RevoluteJoint_scissors_21_right": 8.0,
+        "RevoluteJoint_scissors_21_left": -8.0
+      },
+      "joint_state_why": "laid partly open (8 deg each half, 16 between the blades): closed, the loops are 5.4 cm apart and the Ability Hand's thumb and index, held level and parallel to go through them, reach no nearer than 6.9 cm (FK table); open by 16 deg they are ~7.5 cm apart"
+    }
+  ],
+  "grasp_plan": {
+    "task": "loop_grip",
+    "loop_grip": {
+      "hand": "left",
+      "thumb_loop": "E_scissors_1_1",
+      "finger_loop": "E_scissors_2_5",
+      "insert_m": 0.04,
+      "why": "the thumb through one half's loop, the index through the other's, from above; the hand's own thumb-index spread opens and closes the blades",
+      "open_spread_target_m": 0.1,
+      "close_spread_target_m": 0.054,
+      "spreads_why": "open to the hand's 10 cm (the blades near their 40 deg limit), closed to the loops' 5.4 cm at the blades' stop",
+      "thumb_insert_m": 0.014,
+      "thumb_max_insert_m": 0.018,
+      "clearance_m": 0.001,
+      "thumb_insert_why": "the thumb only 1.4 cm into its loop (at most 1.8): the Ability Hand's thumb is 2.3 cm across 1.2-1.6 cm back from its tip and 2.5 x 2.5 cm at 2 cm, and the loop is 2.72 cm wide - at the index's 2.5 cm it would fill the loop with 1 mm a side; the index (1.3 cm across) goes through by 2.5 cm (offline section measurement, 2026-10-15). Clearance 1 mm: at 2 mm a side the 2.72 cm loop left 2.3 cm, less than the thumb",
+      "hook": true,
+      "hook_why": "the index, 3 cm through its loop, curled under the loop's rim before the lift (loop_grip_planner.hook_flex): the straight digits went through both loops without touching them and slid out as the hand rose - the scissors stayed on the stand (loop take 1, 2026-10-15). The thumb, 1.4 cm into its loop, works the blades by the hand's spread",
+      "hook_side": "outer",
+      "hook_side_why": "the index hooks the FAR rim of its loop (it extends, away from the thumb): curled, it hooked the inner rim, pressed the loop's inner wall and the half swung closed from 16 to 9 deg and let it slide out on the lift (take 3); pushed outward the half stops at its open limit and its rim holds, while the thumb works the other half",
+      "hook_allow_push": true,
+      "hook_max_rad": 0.35,
+      "hook_allow_push_why": "extending toward the far rim the index presses its loop's outer wall first; that push swings its half toward the half's open stop (the planner does not model the swing), where the rim stays put - PhysX decides (take 4)",
+      "insert_why": "the index 4 cm through its loop: extending to hook the far rim lifts its tip 1 cm, and at 3 cm in the tip ended 4 mm under the loop - the rim rode over the rounded fingertip on the lift, the half swung aside and the finger came out (take 4); at 4.5 cm the index's thicker middle and the curled fingers meet the scissors"
+    },
+    "lift_m": 0.05,
+    "cycles": 5,
+    "why": "reach above the loops with the thumb and index pointing down at the loops' spread, descend through them, lift 5 cm on the digits, then open and close by the spread, five times"
+  },
+  "grasp_replay": {
+    "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_dining_scissors_hand/grasp_plan/targets.npz",
+    "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+    "lift_offset_m": 0.0,
+    "control_hz": 30,
+    "finger_q2_coefficient": 1.05851325,
+    "hold_s": 0.0,
+    "controller": "homehero_r5_action",
+    "hand_model": {
+      "kind": "ability_hand",
+      "calibration": "config/ability_hand_calibration.json",
+      "collision_voltage": 8.0,
+      "postcontact_voltage": 2.0,
+      "grip_speed": 0.5,
+      "why": "the position loop governs (the spread is a position the hand moves through); 2 V after a stall keeps the digits pressing the loops"
+    },
+    "live_plan": true,
+    "live_plan_why": "the scissors settle on the stand (the halves may swing on the pivot); the loops are planned where they come to rest"
+  },
+  "physics_hz": 480,
+  "overview_camera": {
+    "eye": [
+      4.25,
+      0.25,
+      1.4
+    ],
+    "target": [
+      4.75,
+      0.66,
+      0.85
+    ],
+    "focal_length_mm": 20.0,
+    "resolution": [
+      1600,
+      900
+    ],
+    "why": "from the robot's left-front: the left hand above the stand and the scissors"
+  },
+  "extra_cameras": [
+    {
+      "name": "GraspCloseup",
+      "eye": [
+        4.55,
+        0.98,
+        0.95
+      ],
+      "target": [
+        4.72,
+        0.67,
+        0.82
+      ],
+      "focal_length_mm": 22.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "why": "from ahead and to the left of the stand at hand height: the digits in the loops and the blades opening and closing (to be aimed by film_camera.py from the first run's log)"
+    }
+  ]
+}

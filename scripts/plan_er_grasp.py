@@ -116,6 +116,167 @@ def _slices(body, xc, bc, name, band_m=0.01):
     return out
 
 
+def _at_settled_pose(world_pts, authored_matrix, settled):
+    """World points of a body, moved from the body's authored pose to its
+    settled one (p, q_wxyz): a frame change about the body's origin, the
+    authored rotation taken from the matrix with its scale normalised out
+    (an asset's scale op otherwise scattered the points, 2026-10-15)."""
+    import numpy as np
+    from scipy.spatial.transform import Rotation as _R
+    M = np.array(authored_matrix).T                                   # column convention: axes in the columns, translation in the last
+    p_auth = M[:3, 3].copy()
+    R_auth = M[:3, :3] / np.linalg.norm(M[:3, :3], axis=0)
+    R_set = _R.from_quat([settled["q_wxyz"][1], settled["q_wxyz"][2], settled["q_wxyz"][3], settled["q_wxyz"][0]]).as_matrix()
+    p_set = np.asarray(settled["p"], float)
+    pts = (np.asarray(world_pts, float) - p_auth) @ (R_set @ R_auth.T).T + p_set
+    return pts, float(np.linalg.norm(p_set - p_auth))
+
+
+def _loop_grip_task(stage, obj, xc, d, gp, drop):
+    """A flat tool's bodies (a scissors' halves) densely sampled at their
+    settled poses, for loop_grip_planner.py."""
+    import numpy as np
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    from tool_grip_planner import sample_faces
+
+    settled = json.loads((d / "settled_poses.json").read_text())["bodies"] if (d / "settled_poses.json").exists() else {}
+    bodies = {}
+    for b in Usd.PrimRange(obj):
+        if not b.HasAPI(UsdPhysics.RigidBodyAPI) or not b.IsActive():
+            continue
+        P = []
+        for m in Usd.PrimRange(b):
+            if m != b and m.HasAPI(UsdPhysics.RigidBodyAPI):
+                continue
+            if m.IsA(UsdGeom.Mesh) and UsdGeom.Imageable(m).GetPurposeAttr().Get() != "guide":
+                M = xc.GetLocalToWorldTransform(m)
+                mesh = UsdGeom.Mesh(m)
+                V = np.asarray([list(M.Transform(Gf.Vec3d(*v))) for v in mesh.GetPointsAttr().Get()], float)
+                P.append(sample_faces(V, list(mesh.GetFaceVertexCountsAttr().Get()), list(mesh.GetFaceVertexIndicesAttr().Get()), 0.0015))
+        if not P:
+            continue
+        W = np.vstack(P)
+        sp = settled.get(b.GetPath().pathString)
+        W = _at_settled_pose(W, xc.GetLocalToWorldTransform(b), sp)[0] if sp else W - drop
+        bodies[b.GetName()] = np.round(W, 5).tolist()
+    print(f"[loop] {obj.GetName()}: {', '.join(f'{k} {len(v)} points' for k, v in bodies.items())}", flush=True)
+    return {"kind": "loop_grip", "bodies": bodies, "loop_grip": gp.get("loop_grip", {}),
+            **{k: gp[k] for k in ("lift_m", "cycles", "hold_s", "rrt_timeout_s") if k in gp}}
+
+
+def _tool_grip_task(stage, tool, xc, d, gp, drop):
+    """A motor tool's parts, by its own behaviour (simReady:behaviors, the
+    motor law): the throttle joint's body is the trigger and its other body
+    the handle's; the power press-fit's body the battery; the output joint
+    (the chuck) says which way is forward. Every body's surface densely
+    sampled, at its settled pose when the replay wrote one."""
+    import numpy as np
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    from tool_grip_planner import sample_faces
+
+    beh = None
+    for q in Usd.PrimRange(tool):
+        raw = q.GetCustomDataByKey("simReady:behaviors")
+        if raw:
+            beh = next((b for b in json.loads(raw) if b.get("type") == "motor"), None)
+            if beh:
+                break
+    if beh is None:
+        raise SystemExit(f"{tool.GetName()}: no motor behaviour (simReady:behaviors) - the tool grip reads its parts from it")
+    joints = {q.GetName(): q for q in Usd.PrimRange(tool) if q.IsA(UsdPhysics.Joint)}
+    for k in ("throttle", "output"):
+        if beh.get(k) not in joints:
+            raise SystemExit(f"{tool.GetName()}: the motor's {k} joint {beh.get(k)!r} is not in the asset")
+    settled = json.loads((d / "settled_poses.json").read_text())["bodies"] if (d / "settled_poses.json").exists() else {}
+
+    def world_fn(body):
+        """authored-world point(s) -> where the body is now"""
+        sp = settled.get(body.GetPath().pathString)
+        M = xc.GetLocalToWorldTransform(body)
+        if sp:
+            return lambda W: _at_settled_pose(np.atleast_2d(W), M, sp)[0]
+        return lambda W: np.atleast_2d(W) - drop
+
+    from tool_grip_planner import face_normals
+
+    bodies, fns, faces = {}, {}, {}
+    for b in Usd.PrimRange(tool):
+        if not b.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        fn = world_fn(b)
+        fns[b.GetPath().pathString] = fn
+        P, F = [], []
+        for m in Usd.PrimRange(b):
+            if m != b and m.HasAPI(UsdPhysics.RigidBodyAPI):
+                continue
+            if m.IsA(UsdGeom.Mesh) and UsdGeom.Imageable(m).GetPurposeAttr().Get() != "guide":
+                M = xc.GetLocalToWorldTransform(m)
+                mesh = UsdGeom.Mesh(m)
+                V = np.asarray([list(M.Transform(Gf.Vec3d(*v))) for v in mesh.GetPointsAttr().Get()], float)
+                P.append(sample_faces(V, list(mesh.GetFaceVertexCountsAttr().Get()), list(mesh.GetFaceVertexIndicesAttr().Get()),
+                                      float(gp.get("tool_grip", {}).get("sample_m", 0.003))))
+                # the triangles too (at the settled pose: the vertices moved, the normals
+                # recomputed), for the force a digit makes through a face it pushes
+                c_, n_, a_ = face_normals(fn(V), list(mesh.GetFaceVertexCountsAttr().Get()),
+                                          list(mesh.GetFaceVertexIndicesAttr().Get()))
+                if str(mesh.GetOrientationAttr().Get() or "rightHanded") == "leftHanded":
+                    n_ = -n_
+                F.append((c_, n_, a_))
+        if P:
+            bodies[b.GetName()] = np.round(fn(np.vstack(P)), 5)
+        if F:
+            faces[b.GetName()] = {"c": np.round(np.vstack([f[0] for f in F]), 5).tolist(),
+                                  "n": np.round(np.vstack([f[1] for f in F]), 5).tolist(),
+                                  "area": np.round(np.concatenate([f[2] for f in F]), 9).tolist()}
+
+    def joint_world(jp):
+        j = UsdPhysics.Joint(jp)
+        b0 = stage.GetPrimAtPath(j.GetBody0Rel().GetTargets()[0])
+        b1 = stage.GetPrimAtPath(j.GetBody1Rel().GetTargets()[0])
+        M0 = xc.GetLocalToWorldTransform(b0)
+        lp = jp.GetAttribute("physics:localPos0").Get()
+        lr = jp.GetAttribute("physics:localRot0").Get()
+        ax = {"X": Gf.Vec3d(1, 0, 0), "Y": Gf.Vec3d(0, 1, 0), "Z": Gf.Vec3d(0, 0, 1)}[str(jp.GetAttribute("physics:axis").Get() or "X")]
+        ax_b = Gf.Rotation(Gf.Quatd(lr.GetReal(), Gf.Vec3d(lr.GetImaginary()))).TransformDir(ax)
+        p0 = np.asarray(list(M0.Transform(Gf.Vec3d(lp))), float)
+        p1 = np.asarray(list(M0.Transform(Gf.Vec3d(lp) + ax_b * 0.01)), float)
+        w0, w1 = fns[b0.GetPath().pathString](np.vstack([p0, p1]))
+        return b0.GetName(), b1.GetName(), w0, (w1 - w0) / np.linalg.norm(w1 - w0)
+
+    h_body, trig_body, _, t_axis = joint_world(joints[beh["throttle"]])
+    # the trigger's return spring (its drive: the force the finger works against)
+    jt = joints[beh["throttle"]]
+    k_trig = float(jt.GetAttribute("drive:linear:physics:stiffness").Get() or 0.0) if jt.HasAttribute("drive:linear:physics:stiffness") else 0.0
+    _, _, chuck_p, _ = joint_world(joints[beh["output"]])
+    pull = t_axis * (1.0 if float(beh.get("throttle_full", 1.0)) >= 0 else -1.0)
+    up = np.array([0.0, 0.0, 1.0])
+    bat = None
+    if beh.get("power") in joints:
+        _, bat, _, _ = joint_world(joints[beh["power"]])
+    trig = bodies[trig_body]
+    H = bodies[h_body]
+    lo = float(bodies[bat][:, 2].max()) + 0.004 if bat in bodies else float(H[:, 2].min()) + 0.03
+    hi = float(trig[:, 2].min()) - 0.002
+    handle = H[(H[:, 2] > lo) & (H[:, 2] < hi)]
+    hc = (handle.max(0) + handle.min(0)) / 2
+    fwd = chuck_p - hc
+    fwd[2] = 0.0
+    fwd /= np.linalg.norm(fwd)
+    print(f"[tool] {tool.GetName()}: handle {h_body} ({len(handle)} points, z {lo:.3f}-{hi:.3f}), trigger {trig_body} (pull "
+          f"{np.round(pull, 3).tolist()}), battery {bat}, chuck at {np.round(chuck_p, 3).tolist()}, forward {np.round(fwd, 3).tolist()}; "
+          f"{sum(len(v) for v in bodies.values())} surface points over {len(bodies)} bodies", flush=True)
+    return {"kind": "tool_grip",
+            "tool": {"bodies": {k: v.tolist() for k, v in bodies.items()}, "handle_body": h_body, "trigger_body": trig_body,
+                     "battery_body": bat, "handle_points": handle.tolist(), "trigger_points": trig.tolist(),
+                     "pull": pull.tolist(), "forward": fwd.tolist(), "up": up.tolist(),
+                     "chuck_point": chuck_p.tolist(), "travel_m": abs(float(beh.get("throttle_full", 0.01))), "behavior": beh,
+                     "trigger_spring_n_per_m": k_trig, "trigger_faces": faces.get(trig_body)},
+            "tool_grip": gp.get("tool_grip", {}),
+            **{k: gp[k] for k in ("approach_m", "lift_m", "close_s", "pull_s", "run_s", "release_s", "hold_s", "rrt_timeout_s") if k in gp}}
+
+
 def main() -> int:
     import numpy as np
     from pxr import Gf, Usd, UsdGeom
@@ -147,15 +308,23 @@ def main() -> int:
     # the target: an object, or a member of one (a chess set's piece)
     target = next(p for p in Usd.PrimRange(stage.GetPrimAtPath("/World/Objects")) if p.GetCustomDataByKey("er:target"))
     pts = []
-    for q in Usd.PrimRange(target):
-        if q.IsA(UsdGeom.Mesh):
+    settled = d / "cloth_settled.npz"
+    target_obj = target
+    while target_obj.GetParent().GetPath().pathString != "/World/Objects":
+        target_obj = target_obj.GetParent()
+    cloth = settled.exists() and target_obj.GetName() in np.load(settled).files
+    if cloth:
+        # a cloth: where it came to rest in PhysX (settle_cloth.py), not the flat sheet it was placed as
+        pts = np.load(settled)[target_obj.GetName()].tolist()
+    for q in ([] if cloth else Usd.PrimRange(target)):
+        if q.IsA(UsdGeom.Mesh) and q.GetName() != "simMesh":
             M = xc.GetLocalToWorldTransform(q)
             pts += [list(M.Transform(Gf.Vec3d(*v))) for v in UsdGeom.Mesh(q).GetPointsAttr().Get()]
     # the build sets every object down 2 mm above the support and the replay
     # settles it first, so the planned geometry is 2 mm high (measured: the
     # pinch skimmed the pawn's crown); planned against the settled pose
     DROP = np.array([0.0, 0.0, 0.002])
-    pts = [list(np.asarray(v, float) - DROP) for v in pts]
+    pts = [list(np.asarray(v, float) - (0 if cloth else DROP)) for v in pts]
     cloud = np.unique(np.round(np.asarray(pts), 5), axis=0)
     if len(cloud) > args.max_points:
         cloud = cloud[np.random.default_rng(0).choice(len(cloud), args.max_points, replace=False)]
@@ -164,9 +333,30 @@ def main() -> int:
 
     env = spec["environment"]
     src_root = env.get("prim", "")
-    sup = stage.GetPrimAtPath("/World/Environment" + env["support"][len(src_root):])
+    # the support: a prim of the environment (under /World/Environment) or one of the scene's own fixtures
+    sup_path = env["support"]
+    if src_root and sup_path.startswith(src_root):
+        sup_path = "/World/Environment" + sup_path[len(src_root):]
+    sup = stage.GetPrimAtPath(sup_path)
+    if not sup:
+        raise SystemExit(f"support prim {sup_path} is not in the scene")
     srng = bc.ComputeWorldBound(sup).ComputeAlignedRange()
-    obstacles = [dict(id="table", min=list(srng.GetMin()), max=list(srng.GetMax()))]
+    if gp_support_split := (spec.get("grasp_plan") or {}).get("support_parts") == "split":
+        # the slab and each leg panel as their own boxes (a pinch under the
+        # slab's edge is free space the one box to the floor would forbid)
+        from support_geometry import mesh_samples, support_boxes
+        obstacles = support_boxes(mesh_samples(sup, float(srng.GetMax()[2])), float(srng.GetMax()[2]))
+    else:
+        obstacles = [dict(id="table", min=list(srng.GetMin()), max=list(srng.GetMax()))]
+    for op in env.get("obstacle_prims", []):
+        # more of the room the arm must clear (the table under a stand that is the support)
+        opath = "/World/Environment" + op[len(src_root):] if src_root and op.startswith(src_root) else op
+        oprim = stage.GetPrimAtPath(opath)
+        if not oprim:
+            raise SystemExit(f"obstacle prim {opath} is not in the scene")
+        from support_geometry import mesh_samples, support_boxes
+        otop = float(bc.ComputeWorldBound(oprim).ComputeAlignedRange().GetMax()[2])
+        obstacles += [dict(b, id=f"{oprim.GetName()}:{b['id']}") for b in support_boxes(mesh_samples(oprim, otop), otop)]
     tpath = target.GetPath().pathString
     obstacles_all = []
     for p in objs:
@@ -184,11 +374,20 @@ def main() -> int:
             # one box each further off (every box costs each collision check,
             # and HomeHero's RRT ran out of budget with all of them sliced)
             tc_ = np.asarray(bc.ComputeWorldBound(target).ComputeAlignedRange().GetMidpoint(), float)
+            settled = json.loads((d / "settled_poses.json").read_text())["bodies"] if (d / "settled_poses.json").exists() else {}
             for q in Usd.PrimRange(p):
                 if q.HasAPI(UsdPhysics.RigidBodyAPI) and q != target:
                     qr = bc.ComputeWorldBound(q).ComputeAlignedRange()
+                    sp = settled.get(q.GetPath().pathString)
+                    if sp:
+                        # the body where it came to rest (a scissors' free half swung on the pivot): its mesh points at the settled pose
+                        lp = [list(xc.GetLocalToWorldTransform(m_).Transform(Gf.Vec3d(*v))) for m_ in Usd.PrimRange(q)
+                              if m_.IsA(UsdGeom.Mesh) and UsdGeom.Imageable(m_).GetPurposeAttr().Get() != "guide" for v in UsdGeom.Mesh(m_).GetPointsAttr().Get()]
+                        if lp:
+                            Ws, _ = _at_settled_pose(np.asarray(lp, float), xc.GetLocalToWorldTransform(q), sp)
+                            qr = Gf.Range3d(Gf.Vec3d(*Ws.min(0)), Gf.Vec3d(*Ws.max(0)))
                     near = np.linalg.norm(np.asarray(qr.GetMidpoint(), float)[:2] - tc_[:2]) < float(spec.get("grasp_plan", {}).get("slice_radius_m", 0.12))
-                    boxes_ = _slices(q, xc, bc, f"{p.GetName()}:{q.GetName()}") if near else \
+                    boxes_ = _slices(q, xc, bc, f"{p.GetName()}:{q.GetName()}") if (near and not sp) else \
                         [dict(id=f"{p.GetName()}:{q.GetName()}", min=list(qr.GetMin()), max=list(qr.GetMax()))]
                     for b_ in boxes_:
                         b_["min"], b_["max"] = list(np.asarray(b_["min"]) - DROP), list(np.asarray(b_["max"]) - DROP)
@@ -238,6 +437,112 @@ def main() -> int:
         via = list(robot_json["reset_arm"]) + list(robot_json["reset_hand"])
         via[0] += float(srng.GetMax()[2]) - float(protocol["table"]["top"])
     task = None
+    if gp.get("task") == "pinch_lift":
+        # a hanging corner: of a cloth's flap (cloth_grip) or of a rigid
+        # member hung from a peg (member_grip, a scissors' free half). The
+        # grip point: in the lowest band, inset from the band's far end along
+        # `side`, up from the bottom; the pinch's width is the part's thickness
+        allpts = np.asarray(pts)
+        if (gp.get("member_grip") and not cloth) and (d / "settled_poses.json").exists():
+            # a rigid member at its SETTLED pose (settle_scene.py, or the replay's
+            # live dump): hung on a peg it swings on its joints after authoring
+            body = next((q for q in Usd.PrimRange(target) if q.HasAPI(UsdPhysics.RigidBodyAPI)), target)
+            sp = json.loads((d / "settled_poses.json").read_text())["bodies"].get(body.GetPath().pathString)
+            if sp:
+                allpts, moved = _at_settled_pose(allpts, xc.GetLocalToWorldTransform(body), sp)
+                print(f"[member] {body.GetName()} at its settled pose: moved {1000 * moved:.1f} mm from the authored", flush=True)
+        cg = gp.get("cloth_grip") or gp.get("member_grip") or {}
+        band_m = float(cg.get("hang_band_m", cg.get("band_m", 0.03)))
+        if cg.get("band", "lowest") == "highest":
+            low = allpts[allpts[:, 2] > allpts[:, 2].max() - band_m]                              # the top band (a loop's rim, handles up)
+        else:
+            low = allpts[allpts[:, 2] < allpts[:, 2].min() + band_m]                              # the lower band (a hem, a hanging corner)
+        side = cg.get("corner_side", cg.get("side", "+x"))                                       # which end of the band, or its centre
+        if side == "centre":
+            corner = low[np.argmax(low[:, 2])].copy() if cg.get("band") == "highest" else low[np.argmin(low[:, 2])].copy()
+            corner[:2] = low[:, :2].mean(0)
+            axis, sgn = 0, 0.0
+        else:
+            axis, sgn = (0, 1.0) if side == "+x" else (0, -1.0) if side == "-x" else (1, 1.0) if side == "+y" else (1, -1.0)
+            corner = low[np.argmax(sgn * low[:, axis])]
+        grip = corner.copy()
+        grip[axis] -= sgn * float(cg.get("inset_m", 0.02))
+        grip[2] += float(cg.get("up_m", 0.02)) * (-1.0 if cg.get("band") == "highest" else 1.0)   # down from a top rim, up from a hem
+        # on a cloth VERTEX: PhysX makes cloth-rigid contacts at the cloth's
+        # vertices, and the pads are narrower than the mesh's cells (1 cm vs
+        # 2 cm). The rule's point sat between four vertices; the pads closed
+        # on a triangle's interior and the fabric slid out of a held pinch in
+        # the draw-out (nearest vertex 7-11 mm from the pinch, 2026-10-15)
+        snapped = allpts[np.argmin(np.linalg.norm(allpts - grip, axis=1))]
+        print(f"[cloth] grip {grip.round(4).tolist()} snapped to the nearest vertex {snapped.round(4).tolist()} "
+              f"({1000 * np.linalg.norm(snapped - grip):.1f} mm)", flush=True)
+        grip = snapped.copy()
+        # the cloth's normal at the grip (a plane fit to the points within 5
+        # cm): a sheet is pinched ACROSS it, the closing axis along the normal.
+        # Ranked by cost alone the planner chose a closing axis in the flap's
+        # plane and the tips met edge-on with nothing between them (2026-10-15)
+        near = allpts[np.linalg.norm(allpts - grip, axis=1) < 0.05]
+        _, _, vt = np.linalg.svd(near - near.mean(0))
+        cloth_normal = vt[-1] / np.linalg.norm(vt[-1])
+        print(f"[cloth] normal at the grip {cloth_normal.round(3).tolist()} from {len(near)} points", flush=True)
+        # the object the pinch closes on is the cloth's local patch, densely
+        # sampled over its grid cells: closure_contact sweeps the digits
+        # against the cloud's CONVEX HULL, and the hull of a whole draped
+        # towel is a 13 x 33 x 25 cm block (the thumb never "touched" it)
+        cells = None
+        try:
+            cells = json.loads(target_obj.GetCustomDataByKey("simReady:cloth") or "{}").get("cells") if cloth else None
+        except Exception:
+            cells = None
+        patch = []
+        if cells and (cells[0] + 1) * (cells[1] + 1) == len(allpts):
+            nx, ny = int(cells[0]), int(cells[1])
+            G = allpts.reshape(ny + 1, nx + 1, 3)                     # row-major as make_towel.py writes the grid
+            for j in range(ny):
+                for i in range(nx):
+                    q00, q10, q01, q11 = G[j, i], G[j, i + 1], G[j + 1, i], G[j + 1, i + 1]
+                    if min(np.linalg.norm(q - grip) for q in (q00, q10, q01, q11)) > 0.06:
+                        continue
+                    for u in np.linspace(0, 1, 5):
+                        for v in np.linspace(0, 1, 5):
+                            patch.append((1 - u) * (1 - v) * q00 + u * (1 - v) * q10 + (1 - u) * v * q01 + u * v * q11)
+        patch = np.asarray(patch) if patch else near
+        patch = patch[np.linalg.norm(patch - grip, axis=1) < 0.05]
+        cloud = np.unique(np.round(patch, 5), axis=0)
+        print(f"[cloth] the pinch's object: the patch within 5 cm of the grip, {len(cloud)} points", flush=True)
+        # the rest of the cloth is an obstacle: where it lies on the table the
+        # curled fingers pressed it onto the slab and the arm stalled (measured:
+        # no rigid contact reported, the slide 9 cm short). Every settled point
+        # farther than free_radius_m from the grip becomes a 2 cm box
+        free_r = float(cg.get("free_radius_m", 0.06))
+        cell = float(cg.get("obstacle_cell_m", 0.02))
+        cells = {}
+        for q_ in allpts:
+            if np.linalg.norm(q_ - grip) < free_r:
+                continue
+            key = tuple(np.floor(q_ / cell).astype(int))
+            cells.setdefault(key, []).append(q_)
+        for k_, members in cells.items():
+            m_ = np.asarray(members)
+            obstacles.append(dict(id=f"cloth:{k_[0]}_{k_[1]}_{k_[2]}", min=(m_.min(0) - 0.004).tolist(), max=(m_.max(0) + 0.004).tolist()))
+        task = {"kind": "pinch_lift", "grip_point": grip.tolist(), "grip_width_m": float(cg.get("thickness_m", 0.002)),
+                "cloth_normal": cloth_normal.tolist(), "closing_axis_tolerance_deg": float(cg.get("closing_axis_tolerance_deg", 30.0)),
+                "cloth_obstacle_boxes": len(cells),
+                "object_base_z": float(allpts[:, 2].min()), "object_height_m": float(np.ptp(allpts[:, 2])),
+                "place_point": grip.tolist(), "lift_mode": gp.get("lift_mode", "palm"), "corner": corner.tolist(),
+                **{k: gp[k] for k in ("lift_m", "lift_out_xy", "after_lift_xy", "close_s", "hold_s", "pregrasp_height_m", "open_clearance_m", "curl_rad",
+                                      "reach", "cumotion_seeds", "staging_back_m", "rrt_timeout_s") if k in gp}}
+    if gp.get("task") == "tool_grip":
+        task = _tool_grip_task(stage, target_obj, xc, d, gp, DROP)
+        # the index's strength: a finger's stall torque at the hand's collision
+        # voltage (the firmware halts it there), from the hand's calibration
+        hm = (spec.get("grasp_replay") or {}).get("hand_model") or {}
+        if hm.get("kind") == "ability_hand":
+            cal = json.loads((REPO / hm.get("calibration", "config/ability_hand_calibration.json")).read_text())
+            v = float(hm.get("collision_voltage", 3.0))
+            task["tool"]["finger_torque_nm"] = float(cal["stall_torque_per_volt_nm"]["finger"]) * min(v, float(cal.get("supply_v", 8.4)))
+    if gp.get("task") == "loop_grip":
+        task = _loop_grip_task(stage, target_obj, xc, d, gp, DROP)
     if gp.get("task") == "pinch_place":
         # a pinch at a height up the piece, across its width there; set down
         # on the destination with the grip point at the same height above it
@@ -253,12 +558,13 @@ def main() -> int:
                 "grip_width_m": width, "object_base_z": base_z, "object_height_m": height,
                 "place_point": [float(dc[0]), float(dc[1]), float(dc[2]) + (gz - base_z)],
                 "destination": dest["label"],
-                # HomeHero's reset arm (the lift raised for this table) as an IK starting point
-                "ik_seeds": [[v + (float(srng.GetMax()[2]) - float(json.loads((EXPERIMENT / "protocol.json").read_text())["table"]["top"]))
-                              * (i == 0) for i, v in enumerate(robot_json["reset_arm"])]],
                 **{k: gp[k] for k in ("lift_m", "close_s", "release_s", "retreat_m", "hold_s", "pregrasp_height_m",
                                       "open_clearance_m", "curl_rad", "set_down_gap_m", "reach", "cumotion_seeds",
                                       "staging_back_m", "rrt_timeout_s") if k in gp}}
+    if task:
+        # HomeHero's reset arm (the lift raised for this table) as an IK starting point
+        task["ik_seeds"] = [[v + (float(srng.GetMax()[2]) - float(json.loads((EXPERIMENT / "protocol.json").read_text())["table"]["top"]))
+                             * (i == 0) for i, v in enumerate(robot_json["reset_arm"])]]
     if task and gp.get("survey"):
         task["survey"] = _chess_survey(stage, target, xc, bc, json.loads(stage.GetPrimAtPath("/World").GetCustomDataByKey(
             "er:destination")), float(gp.get("grip_height_fraction", 0.85)))
@@ -283,6 +589,20 @@ def main() -> int:
         print(r.stderr[-2000:])
         raise SystemExit("the planner adapter failed")
     plan = json.loads(r.stdout.strip().splitlines()[-1])
+    if (spec.get("grasp_replay") or {}).get("bimanual") and plan.get("passed"):
+        # a two-arm task: the pick's plan carries the right arm and hand at
+        # rest in columns 14:28 (the replay drives both arms from one row)
+        z = np.load(req["out_npz"])
+        arr = np.asarray(z["targets"], float)
+        if arr.shape[1] < 28:
+            posture = spec["robot"].get("posture_rad_or_m", {})
+            right_arm = [float(posture.get(n.replace("left", "right"), 0.0)) for n in robot_json["arm_names"]]
+            right_hand = [float(v) for v in robot_json["reset_hand"]]
+            pad = np.tile(np.r_[right_arm, right_hand], (len(arr), 1))
+            arr = np.hstack([arr, pad[:, :28 - arr.shape[1]]])
+            np.savez(req["out_npz"], targets=arr, stages=z["stages"])
+            plan["columns"] = int(arr.shape[1])
+            print(f"[bimanual] the plan padded to {arr.shape[1]} columns: the right arm and hand at rest", flush=True)
     (out_dir / "plan.json").write_text(json.dumps(plan, indent=1))
     if plan.get("survey"):
         print(f"GRASP_SURVEY {spec['name']}:")
@@ -294,8 +614,19 @@ def main() -> int:
         print(f"GRASP_PLAN FAIL {spec['name']}: {plan.get('reason')}; trials: "
               + "; ".join(str(t.get("failure"))[:120] for t in (plan.get("trials") or [])[:6]))
         return 1
+    if task and task["kind"] == "loop_grip":
+        print(f"GRASP_PLAN OK {spec['name']}: loop_grip, {plan['ticks']} ticks ({plan['seconds_at_30hz']} s at 30 Hz), stages {plan['stage_ticks']}, "
+              f"grip {plan.get('grip')}, holes {plan.get('holes')}")
+        return 0
+    if task and task["kind"] == "tool_grip":
+        gr_ = plan.get("grip", {})
+        print(f"GRASP_PLAN OK {spec['name']}: tool_grip, {plan['ticks']} ticks ({plan['seconds_at_30hz']} s at 30 Hz), stages {plan['stage_ticks']}, "
+              f"grip yaw {gr_.get('yaw_deg')} roll {gr_.get('roll_deg')}, wrap {gr_.get('wrap')}, index meets the trigger at {gr_.get('index_trigger_rad')} rad "
+              f"(held at {plan.get('index_pre_rad')}), thumb rot {gr_.get('thumb_rot')} contact {gr_.get('thumb_contact_rad')}, "
+              f"trigger travel where the index stops {gr_.get('travel_at_stop_m')} m (at {gr_.get('index_stop_rad')} rad), {plan.get('candidates')} candidates")
+        return 0
     if task:
-        print(f"GRASP_PLAN OK {spec['name']}: pinch-place, {plan['ticks']} ticks ({plan['seconds_at_30hz']} s at 30 Hz), "
+        print(f"GRASP_PLAN OK {spec['name']}: {task['kind']}, {plan['ticks']} ticks ({plan['seconds_at_30hz']} s at 30 Hz), "
               f"stages {plan['stage_ticks']}, grasp {plan.get('grasp')}, pinch closed {plan['pinch']['closed']} "
               f"open {plan['pinch']['open']} (opposition {plan['pinch']['opposition']:.2f}), {plan.get('options')} options")
         return 0
