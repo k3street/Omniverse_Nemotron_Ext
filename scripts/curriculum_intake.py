@@ -301,7 +301,15 @@ def requirements(L: dict, b: dict, reg: dict, lib: Library) -> list[dict]:
             bound = (occ_b.get("roles") or {}).get(r["role"])
             req = r.get("requirements") or {}
             if bound:
-                add(rid, "asset", f"asset for {r['role']}", True, f"bound to {bound}", "")
+                # a role is met by a library asset that passed a task preflight in a scene of
+                # ours: {asset, preflight: {scene, record}} (HomeHero: a catalogue match is a
+                # candidate until task-specific preflight)
+                b_ = bound if isinstance(bound, dict) else {"asset": bound}
+                pf = b_.get("preflight")
+                ok, ev = _proven(pf) if pf else (False, "bound without a preflight take")
+                add(rid, "asset", f"asset for the {r['role'].replace('_', ' ')} ({L['source']['title']})", ok,
+                    f"bound to {b_['asset']}; preflight {ev}", "" if ok else
+                    f"pass a preflight take of {b_['asset']} for '{r['role']}'" + (f" ({pf['scene']}: {pf['record']})" if pf else ""))
                 continue
             # the role's own terms, and its noun (the role id's last word: a 'sealed_inert_container' is a container)
             terms = list(dict.fromkeys(list(req.get("search_terms") or [r["role"].replace("_", " ")]) + [r["role"].split("_")[-1]]))

@@ -5639,6 +5639,34 @@
     "why": "curated 2026-10-16; the button force (~10 N) from a forum's 2-2.5 lbf for microwave door buttons - no manufacturer figure found"
    },
    "why": "a class of its own (not appliance_small's kettles and toasters)"
+  },
+  "pill_bottle": {
+   "keywords": [
+    "pill bottle",
+    "pill_bottle",
+    "pills",
+    "medicine bottle",
+    "prescription vial",
+    "supplement bottle",
+    "sample bottle"
+   ],
+   "max_dim_m": [
+    0.05,
+    0.15
+   ],
+   "mass_kg": [
+    0.005,
+    0.25
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "plastic_abs"
+   ],
+   "source": "curated",
+   "sources": {
+    "size": "pharmacy pill vials, Fisher Scientific listings: 6 dram 63 mm x 22 mm, 16 dram 80 x 31 mm, 30 dram 91 x 41 mm (heights without the cap; a cap adds ~1 cm); 60-dram vials run to ~136 mm (retailer listings). https://www.fishersci.com/shop/products/vial-6-dram-amber-safe-cap/502643414 , https://www.fishersci.com/shop/products/vial-30-dram-bluesafe-cap/502643423"
+   },
+   "why": "a screw- or snap-capped plastic pill/sample bottle: the 'bottle' class's 0.1-0.4 m (drink bottles) refused a 95 mm pill bottle (pills_linezolid, 2026-10-17); HomeHero's laboratory occupation wants a sealed inert container of this kind"
   }
  }
 }

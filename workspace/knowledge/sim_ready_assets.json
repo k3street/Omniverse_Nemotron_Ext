@@ -3912,6 +3912,46 @@
     },
     "audit_sampled": true
    }
+  },
+  {
+   "asset_id": "pills_linezolid",
+   "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/pills_linezolid/pills_linezolid.usda",
+   "source_file": "/home/kimate/Desktop/assets/SketchFab_Assets/Medical/Pills_-_Linezolid.usdz",
+   "category": "rigid_unverified",
+   "audit": {
+    "ready": false,
+    "simulable": true
+   },
+   "review": {
+    "approved": true,
+    "reviewer": "auto-approval-v2",
+    "date": "2026-10-17",
+    "notes": "approved on measured evidence and a visual critic: registry_id, loads, no_error_callouts, classified, class_confirmed, in_machine_scope, units, size, physics_complete, multi_material, mass, nothing_missing",
+    "reviewer_type": "machine",
+    "models": [
+     "claude-opus-5 (visual critic)"
+    ],
+    "evidence": {
+     "checks": [
+      "registry_id",
+      "loads",
+      "no_error_callouts",
+      "classified",
+      "class_confirmed",
+      "in_machine_scope",
+      "units",
+      "size",
+      "physics_complete",
+      "multi_material",
+      "mass",
+      "nothing_missing"
+     ],
+     "visual": {
+      "what_it_is": "An amber/orange plastic prescription pill bottle with a white ribbed child-resistant screw cap and a printed white pharmacy label reading 'Linezolid 40mg' with patient name and pharmacy details.",
+      "confidence": 0.72
+     }
+    }
+   }
   }
  ]
 }

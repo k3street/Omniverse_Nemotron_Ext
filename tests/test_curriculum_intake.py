@@ -126,3 +126,14 @@ def test_next_follows_an_open_blocker():
     assert ci.next_task(backlog)["id"] == "grip_thrust"
     backlog["tasks"][1]["status"] = "done"
     assert ci.next_task(backlog)["id"] == "cur:hole"
+
+
+def test_a_bound_role_is_met_only_by_a_passing_preflight(monkeypatch):
+    monkeypatch.setattr(ci, "_proven", lambda pb: (pb is not None and pb["scene"] == "good", f"{pb and pb['scene']}"))
+    b = dict(BIND, occupations={"lab": {"roles": {"carry_tray": {"asset": "simple_tray", "preflight": {"scene": "good", "record": "pass"}}}}})
+    assert ci.requirements(_occ_lesson(), b, REG, _Lib())[0]["met"]
+    b["occupations"]["lab"]["roles"]["carry_tray"]["preflight"]["scene"] = "bad"
+    r = ci.requirements(_occ_lesson(), b, REG, _Lib())[0]
+    assert not r["met"] and r["work"].startswith("pass a preflight take of simple_tray")
+    b["occupations"]["lab"]["roles"]["carry_tray"] = "simple_tray"
+    assert not ci.requirements(_occ_lesson(), b, REG, _Lib())[0]["met"]

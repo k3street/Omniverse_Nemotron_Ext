@@ -1,0 +1,93 @@
+{
+ "extends": "aida_r5_dining_can_grasp.json",
+ "name": "aida_r5_dining_pillbottle_grasp",
+ "purpose": "task preflight of pills_linezolid as HomeHero's laboratory 'sealed inert container' (the occupation's sealed_inert_container role): the R5's left hand takes the screw-capped pill bottle off the table where the can grasp stood its can, lifts and holds it - the same planner, grip command and controller as the can",
+ "objects": [
+  {
+   "name": "Target",
+   "asset_id": "pills_linezolid",
+   "xy": [
+    4.648,
+    0.764
+   ],
+   "yaw_deg": 30,
+   "target": true,
+   "label": "the screw-capped pill bottle",
+   "physics": {
+    "static_friction": 0.9,
+    "dynamic_friction": 0.7,
+    "mass_kg": 0.385,
+    "contact_offset": 0.002,
+    "rest_offset": 0.0,
+    "position_iterations": 16,
+    "max_depenetration": 1.0
+   },
+   "physics_why": "a full 355 ml can (the library's 0.5 kg is rounded up); friction and solver settings as HomeHero's pickup object",
+   "why": "pills_linezolid (machine-approved 2026-10-17 as pill_bottle: 59 x 59 x 87 mm, 0.096 kg, plastic body and cap, one rigid body - the cap does not open: sealed) at the can's place, turned as the can was"
+  },
+  {
+   "name": "BeerCan",
+   "asset_id": "beer_can",
+   "xy": [
+    4.4,
+    0.99
+   ],
+   "yaw_deg": 0
+  },
+  {
+   "name": "GlassBowl",
+   "asset_id": "glass_bowl",
+   "xy": [
+    4.93,
+    0.9
+   ],
+   "yaw_deg": 0
+  },
+  {
+   "name": "Plate",
+   "asset_id": "decorated_plate",
+   "xy": [
+    5.22,
+    0.99
+   ],
+   "yaw_deg": 0
+  },
+  {
+   "name": "FishTin",
+   "asset_id": "canned_fish_freepoly",
+   "xy": [
+    4.7,
+    1.16
+   ],
+   "yaw_deg": 15
+  },
+  {
+   "name": "ColaBottle",
+   "asset_id": "cola_bottle",
+   "xy": [
+    5.47,
+    0.78
+   ],
+   "yaw_deg": 0
+  }
+ ],
+ "grasp_replay": {
+  "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_dining_pillbottle_grasp/grasp_plan/targets.npz",
+  "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+  "lift_offset_m": 0.0,
+  "control_hz": 30,
+  "finger_q2_coefficient": 1.05851325,
+  "hold_s": 0.0,
+  "why": "targets planned by plan_er_grasp.py: the close, lift and hold are already in them",
+  "controller": "homehero_r5_action",
+  "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)",
+  "hand_model": {
+   "kind": "ability_hand",
+   "calibration": "config/ability_hand_calibration.json",
+   "collision_voltage": 3.0,
+   "postcontact_voltage": 1.5,
+   "grip_speed": 1.0,
+   "why": "PSYONIC ICD: halt-on-collision at word 007 (3.0 V, the default); word 008 at 1.5 V, mid-range of the ICD's 1-2 V, keeps a small current flowing after contact so the digits close in if the can shifts; grip speed 0xFF (full)"
+  }
+ }
+}

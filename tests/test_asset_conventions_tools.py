@@ -283,6 +283,19 @@ def test_a_shoe_with_a_soft_upper_is_not_a_rigid_body(monkeypatch):
         {"id": 3, "path": "/C/decal", "role": "printed crown marking", "material": "paper_kraft", "motion": "none",
          "size_m": [0.004, 0.004, 0.0]}]}})
     assert chess["kind"] is None and len(chess["accessories"]) == 2
+    # a label wrapped round a bottle: its box as thick as the bottle's, but inside the bottle's box - printed on it
+    bottle = soft_parts({"report": {"max_dim_m": 0.087}, "part_survey": {"parts": [
+        {"id": 1, "path": "/B/body", "role": "bottle body / container", "material": "plastic_abs", "motion": "none",
+         "size_m": [0.0594, 0.0594, 0.0718], "centroid": [0.0, 0.0, -0.00257]},
+        {"id": 4, "path": "/B/label", "role": "wrap-around printed label", "material": "paper_kraft", "motion": "none",
+         "size_m": [0.0462, 0.0321, 0.0381], "centroid": [0.0018, -0.00881, -0.00007]}]}})
+    assert bottle["kind"] is None and bottle["accessories"] == ["wrap-around printed label"]
+    # a soft part outside every rigid part's box (a strap) stays soft
+    strap = soft_parts({"part_survey": {"parts": [
+        {"id": 1, "path": "/B/body", "role": "bag body", "material": "plastic_abs", "motion": "none", "size_m": [0.1, 0.1, 0.1], "centroid": [0, 0, 0]},
+        {"id": 2, "path": "/B/strap", "role": "printed strap", "material": "fabric_cotton", "motion": "none", "size_m": [0.3, 0.02, 0.01],
+         "centroid": [0, 0, 0.2]}]}})
+    assert strap["kind"] == "cloth" and strap["parts"] == ["printed strap"]
     # the class knows even when nothing else says so
     monkeypatch.setattr(processing, "_prior", lambda e: {"soft_parts": ["upper"], "soft_kind": "cloth"})
     assert soft_parts({"asset_id": "x"})["parts"] == ["upper"]

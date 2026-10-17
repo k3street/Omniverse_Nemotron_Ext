@@ -1815,6 +1815,11 @@ if PIECES0 is not None:
                         and not moved)
     result["move"] = move
     result["pass"] = move["pass"]
+# a container's seal, by its structure: a target with no joints is one rigid body - its cap or lid
+# cannot open (HomeHero's container_sealed criterion; a jointed lid needs its joint's state read)
+_tjs = [q.GetName() for q in Usd.PrimRange(target) if q.IsA(UsdPhysics.Joint)]
+result["container"] = {"sealed": not _tjs, "joints": _tjs[:8],
+                       "why": "one rigid body: its cap cannot open" if not _tjs else "jointed: its lid's state is not read here"}
 apply_acquisition_outcome(result, acquisition)
 (out / "acquisition.json").write_text(json.dumps(acquisition, indent=1))
 (out / "grasp.json").write_text(json.dumps(result, indent=1))

@@ -115,11 +115,13 @@
   "stable_supported_placement": "move.pass",
   "released": "move.released",
   "retained_during_transport": "move.pass",
-  "_unmeasured_why": "container_sealed (the cap's state), collision_violation_count (the robot's contacts with anything but the target and supports), object_contained, all_transfers_verified (several moves in one record), both_hands_loaded and payload_retained have no field in our records yet; pause_respected and resume_authorized are HomeHero Brain's, not a scene measure",
+  "_unmeasured_why": "collision_violation_count (the robot's contacts with anything but the target and supports), object_contained, all_transfers_verified (several moves in one record), both_hands_loaded and payload_retained have no field in our records yet; pause_respected and resume_authorized are HomeHero Brain's, not a scene measure",
   "_homehero_owned": [
    "pause_respected",
    "resume_authorized"
-  ]
+  ],
+  "container_sealed": "container.sealed",
+  "_container_sealed_why": "replay_grasp records container.sealed by the target's structure: no joints, one rigid body, its cap cannot open (a jointed lid is not read as sealed)"
  },
  "lessons": {
   "homehero.interaction.household_mug.pick_place": {
@@ -448,6 +450,18 @@
   }
  },
  "occupations": {
-  "_doc": "per occupation: 'scene' (a config/scenes name that serves its lessons) and 'roles' ({role: asset_id}) once qualified; empty until built"
+  "_doc": "per occupation: 'scene' (a config/scenes name that serves its lessons) and 'roles' ({role: asset_id}) once qualified; empty until built",
+  "laboratory_materials_handler": {
+   "roles": {
+    "sealed_inert_container": {
+     "asset": "pills_linezolid",
+     "preflight": {
+      "scene": "aida_r5_dining_pillbottle_grasp",
+      "record": "pass"
+     },
+     "why": "a screw-capped plastic pill bottle (59 x 59 x 87 mm, 0.096 kg; one rigid body, its cap fixed: sealed), machine-approved 2026-10-17 as pill_bottle; the R5's left hand took it off the dining table and held it 5.9 cm up with no drift (filmed). Its label reads 'Linezolid': an inert training prop, not a hazardous material"
+    }
+   }
+  }
  }
 }

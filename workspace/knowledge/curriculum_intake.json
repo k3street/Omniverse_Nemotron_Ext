@@ -1,5 +1,5 @@
 {
- "at": "2026-10-17T12:14:28",
+ "at": "2026-10-17T13:53:11",
  "superseded_revisions": [
   {
    "occupation": "laboratory_materials_handler",
@@ -25,13 +25,13 @@
     "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
     "title": "Laboratory materials handler"
    },
-   "next": "asset:laboratory_materials_handler:sealed_inert_container",
+   "next": "asset:laboratory_materials_handler:receiving_bench",
    "requirements": [
     {
      "id": "asset:laboratory_materials_handler:sealed_inert_container",
      "step": "asset",
-     "met": false,
-     "evidence": "no approved asset by ['sealed container', 'inert training container', 'container'] (17 pending)"
+     "met": true,
+     "evidence": "bound to pills_linezolid; preflight aida_r5_dining_pillbottle_grasp pass = True"
     },
     {
      "id": "asset:laboratory_materials_handler:receiving_bench",
@@ -128,13 +128,13 @@
     "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
     "title": "Laboratory materials handler"
    },
-   "next": "asset:laboratory_materials_handler:sealed_inert_container",
+   "next": "asset:laboratory_materials_handler:inspection_bench",
    "requirements": [
     {
      "id": "asset:laboratory_materials_handler:sealed_inert_container",
      "step": "asset",
-     "met": false,
-     "evidence": "no approved asset by ['sealed container', 'inert training container', 'container'] (17 pending)"
+     "met": true,
+     "evidence": "bound to pills_linezolid; preflight aida_r5_dining_pillbottle_grasp pass = True"
     },
     {
      "id": "asset:laboratory_materials_handler:inspection_bench",
@@ -237,13 +237,13 @@
     "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
     "title": "Laboratory materials handler"
    },
-   "next": "asset:laboratory_materials_handler:sealed_inert_container",
+   "next": "asset:laboratory_materials_handler:open_storage_bin",
    "requirements": [
     {
      "id": "asset:laboratory_materials_handler:sealed_inert_container",
      "step": "asset",
-     "met": false,
-     "evidence": "no approved asset by ['sealed container', 'inert training container', 'container'] (17 pending)"
+     "met": true,
+     "evidence": "bound to pills_linezolid; preflight aida_r5_dining_pillbottle_grasp pass = True"
     },
     {
      "id": "asset:laboratory_materials_handler:open_storage_bin",
@@ -1716,23 +1716,16 @@
  ],
  "open": [
   {
-   "id": "cur:asset:laboratory_materials_handler:sealed_inert_container",
-   "priority": 10000,
-   "actionable": true,
-   "title": "asset for the sealed inert container (Laboratory materials handler)",
-   "blocks": 3
-  },
-  {
    "id": "cur:asset:laboratory_materials_handler:receiving_bench",
    "priority": 10001,
-   "actionable": false,
+   "actionable": true,
    "title": "asset for the receiving bench (Laboratory materials handler)",
    "blocks": 2
   },
   {
    "id": "cur:asset:laboratory_materials_handler:inspection_bench",
    "priority": 10002,
-   "actionable": false,
+   "actionable": true,
    "title": "asset for the inspection bench (Laboratory materials handler)",
    "blocks": 4
   },
@@ -1774,7 +1767,7 @@
   {
    "id": "cur:asset:laboratory_materials_handler:open_storage_bin",
    "priority": 10102,
-   "actionable": false,
+   "actionable": true,
    "title": "asset for the open storage bin (Laboratory materials handler)",
    "blocks": 2
   },

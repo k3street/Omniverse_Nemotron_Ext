@@ -41,7 +41,7 @@ RULES = {
     "soft": "2026-10-07",        # cloth proxy drape, squish, cable; mixed bodies: per-part deformables, drop test
     "rig": "2026-10-04",         # character rigs: detected, or a humanoid autorig + pose check
     "survey": "2026-10-06",      # moulded-in movers split and surveyed again; unmirrored, normals blocked; manual; pivot_toward
-    "approve": "2026-10-06",     # evidence gates, then a visual critic; machine approvals withdrawn when they stop passing
+    "approve": "2026-10-17",     # + a soft label printed on a rigid part (inside its box) is an accessory, not a soft body  # evidence gates, then a visual critic; machine approvals withdrawn when they stop passing
     "materials": "2026-10-06",   # physics materials per part from the survey; the class's on any bare collider
 }
 
@@ -109,6 +109,14 @@ SOFT_MATERIALS = {"fabric_cotton", "foam_polyurethane", "leather", "paper_kraft"
 DECAL = re.compile(r"\b(decal|label|sticker|marking|print(ed|ing)?|pad|felt|logo|tag)\b", re.I)
 
 
+def _box_within(p: dict, q: dict, tol: float = 0.002) -> bool:
+    """Whether surveyed part p's box (centroid +- size/2) lies inside q's, to tol."""
+    if not (p.get("size_m") and p.get("centroid") and q.get("size_m") and q.get("centroid")):
+        return False
+    return all(abs(float(p["centroid"][k]) - float(q["centroid"][k])) + float(p["size_m"][k]) / 2
+               <= float(q["size_m"][k]) / 2 + tol for k in range(3))
+
+
 def soft_parts(entry: dict) -> dict:
     """The soft parts of an asset the class prior calls rigid: what the
     classifier read as deformable (a shoe's knit upper, dropped because the
@@ -136,10 +144,14 @@ def soft_parts(entry: dict) -> dict:
         if p.get("material") in SOFT_MATERIALS:
             # a felt pad under a chess piece, a paper decal, a label: soft in
             # material, nothing in the simulation (tiny beside the object, or
-            # flat on another part)
+            # flat on another part, or - a label wrapped round a bottle, its
+            # box as thick as the bottle - inside a rigid part's box: printed on
+            # it; the pill bottle's label read as cloth, 2026-10-17)
             tiny = big > 0 and max(size) < 0.05 * big
             flat = min(size) < 0.001 and DECAL.search(role)
-            if tiny or flat:
+            on_part = bool(DECAL.search(role)) and any(_box_within(p, q) for q in survey_parts
+                                                       if q is not p and q.get("material") not in SOFT_MATERIALS)
+            if tiny or flat or on_part:
                 accessories.append(role)
                 continue
             parts.append(role)                   # a soft body: an upper, a cushion, a strap

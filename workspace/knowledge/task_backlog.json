@@ -960,8 +960,10 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): bound to pills_linezolid; preflight aida_r5_dining_pillbottle_grasp pass = True"
   },
   {
    "id": "cur:asset:laboratory_materials_handler:receiving_bench",
@@ -974,7 +976,7 @@
     "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
     "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
     "homehero_occupation"
@@ -1011,7 +1013,7 @@
     "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
     "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
     "homehero_occupation"
@@ -1164,7 +1166,7 @@
     "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
     "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
     "homehero_occupation"
@@ -2233,7 +2235,7 @@
     "nemotron_use_ladder"
    ],
    "interaction_kind": "material",
-   "status": "in_progress",
+   "status": "proposed",
    "first_seen": "2026-10-17",
    "findings": "2026-10-17 take 1 (aida_r5_dining_drill_hole, physics only): the grip, lift, looks and spin ran (bit 3.2 mm, 137 rpm at a third of the trigger); the hole started at the face (tilt 0.14 deg) but no wood was cut: the wall spring's damping read the tip's velocity as the link's linear velocity plus w x (tip - link origin) - this chuck's origin is the drill's, ~12 cm off the spin axis, so the tip read ~1.7 m/s sideways: the bit was kicked 7 mm off its line at the first touch and, back at the face, thrown out of the hand with the drill (the impact set the switch to reverse). Rule: material_laws.bit_reaction takes the tip's velocity from its position's change (tested); take 2 running | takes 2-3 (2026-10-17): with the tip's velocity its own, the drill stayed in the hand, but the hand never pushed the bit past ~6 N (take 2: 0.25 mm/rev, 1.5 mm lead) / 10.4 N (take 3: 0.15 mm/rev, 4 mm lead, no re-squeeze) against the 13.4 N a 3.2 mm bit needs to start cutting 710 kg/m3 plywood: as the arm pushes, the drill pitches back in the thumbless grip (1.7 -> 25 deg, 24 mm), the handle turns away from the index (15 -> 0 N on the trigger), the chuck stops (131 -> 0 rpm) and the bit walks 58 mm across the face. Take 2's re-squeeze dip let the index slam back at 39 N and kicked the bit out of its dimple (re-squeeze off for drilling; the wall now bears at most EN 1995's embedment strength x d x depth, then yields - tested). The geometry half is proven in PhysX on a DECLARED 3.2 mm hole (probe_hole.py: 2.9 mm peg through 18 mm, 4.2 mm peg stopped at the face; blind 10 mm: the peg stopped at 9.99 mm). Blocked by nemotron_grip_thrust_v1",
    "blocked_by": [
@@ -2540,7 +2542,8 @@
     "task 20 (drill creeps back in the thumbless grip)",
     "task 4 (thumb wrap)"
    ],
-   "first_seen": "2026-10-17"
+   "first_seen": "2026-10-17",
+   "findings": "2026-10-17, offline (tool_grip_planner on the hole scene's own request, HomeHero's adapter): no grip turns the palm behind the handle and keeps the index on the trigger. Yaw (the hand about the handle) 15-100 deg with the heel seat: every candidate rejected (no wrap: the fingers pass the handle; open hand in the tool: the palm's top in the barrel's overhang; the index misses the trigger). Yaw 45-60 deg, roll -15..15, placement free along and across the fingers (seat_at_heel off), handle depth 8 and 10 cm: 7,500 placements, none - 3,054 open hands in the tool, ~1,050 where the fingers wrapped but the index could not reach the trigger round the handle's side. Friction (mu ~0.8) puts the palm's face on the push only from ~50 deg. Left: (a) the thumb behind the handle under the overhang (thumb_opposes; the search's only thumb so far closed on the barrel's top), or (b) the right hand on the drill's back - the push a person adds with the other hand (needs the right arm in HomeHero's checker: planner bimanual)"
   }
  ]
 }
