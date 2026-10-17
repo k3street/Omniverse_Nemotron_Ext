@@ -1,0 +1,453 @@
+{
+ "schema": "nemotron.curriculum_bindings.v1",
+ "_doc": "How scripts/curriculum_intake.py reads the curricula that ask this pipeline for scenes: which source outranks which, what our planners can do, which record field measures each lesson criterion, and - per lesson - the interactions, planner capabilities, scene and record that serve it. A lesson with no entry here is mapped by the registries' terms and its tasks say so ('matched by terms: confirm'). Edit this file when a lesson's mapping is settled; the intake re-derives the backlog from it.",
+ "source_rank": {
+  "homehero_occupation": 1,
+  "homehero_scenario_queue": 2,
+  "homehero_interaction": 3,
+  "nemotron_use_ladder": 4,
+  "_why": "HomeHero's lab handoff (2026-10-17): 'the new laboratory scene is the current scene-development focus'; its scenario queue (same day) ranks microwave, tool transfer, drawer storage; then its interaction curriculum; then our own use ladders"
+ },
+ "sources": {
+  "homehero_root": "/home/kimate/Documents/Github/HomeHero",
+  "occupation_deliveries": "workspace/knowledge/homehero_occupation_requests",
+  "occupation_handoff_curricula": [
+   "/home/kimate/Documents/Github/HomeHero/docs/test_evidence/occupation_lab_20261017/curriculum.json"
+  ],
+  "studio": "http://127.0.0.1:8780",
+  "scenario_queue": "workspace/knowledge/homehero_scenario_queue_v1.json",
+  "interaction_curriculum": "/home/kimate/Documents/Github/HomeHero/config/skill_pipeline/aida_interaction_curriculum_v1.json",
+  "use_ladders": "workspace/knowledge/asset_class_priors.json"
+ },
+ "planners": {
+  "pinch_place": {
+   "module": "pinch_place_planner",
+   "what": "one hand picks an object and sets it on a destination",
+   "proven_by": {
+    "scene": "aida_r5_dining_chess",
+    "record": "move.pass"
+   }
+  },
+  "tool_grip": {
+   "module": "tool_grip_planner",
+   "what": "one hand takes a tool by its handle and lifts it",
+   "proven_by": {
+    "scene": "aida_r5_dining_drill_screw",
+    "record": "held"
+   }
+  },
+  "button_press": {
+   "module": "button_press_planner",
+   "what": "a fingertip presses a button through its travel",
+   "proven_by": {
+    "scene": "aida_r5_kitchen_microwave",
+    "record": "door.tripped"
+   }
+  },
+  "door_push": {
+   "module": "door_open_planner",
+   "what": "the hand swings a hinged door open by pushing its edge",
+   "proven_by": {
+    "scene": "aida_r5_kitchen_microwave",
+    "record": "door.opened_by_hand"
+   }
+  },
+  "door_pull": {
+   "module": "door_open_planner",
+   "what": "the hand pulls a hinged door open by its handle",
+   "proven_by": {
+    "scene": "aida_r5_living_fridge",
+    "record": "door.seal_broken"
+   }
+  },
+  "screw_drive": {
+   "module": "screw_drive_planner",
+   "what": "a held power drill's bit brought onto an axis, spun and fed along it",
+   "proven_by": {
+    "scene": "aida_r5_dining_drill_screw",
+    "record": "screw.pass"
+   }
+  },
+  "loop_grip": {
+   "module": "loop_grip_planner",
+   "what": "digits through a tool's loops (scissors)",
+   "proven_by": {
+    "scene": "aida_r5_rail_scissors",
+    "record": "pass"
+   }
+  },
+  "base_motion": {
+   "what": "the R5 moves its base between stations in a take (Nav2 is HomeHero's; our replays stand still)",
+   "needs": "a base path in the replay (the R5's wheels or a kinematic base move between stances) with the carried object retained, or a layout whose stations one stance reaches"
+  },
+  "bimanual_carry": {
+   "what": "both hands hold one object and carry it",
+   "needs": "a two-arm plan (HomeHero's checker pairs are left-arm only; the right arm's pairs and both hands' grip on one body) and a record of both hands loaded"
+  },
+  "place_inside": {
+   "what": "an object put inside a receptacle (a bin, a drawer, a microwave's cavity) clear of its walls",
+   "needs": "pinch_place with the receptacle's walls as obstacles and the cavity floor as the destination; a record of the object contained"
+  },
+  "drawer_pull": {
+   "what": "the hand pulls a drawer out by its handle and pushes it shut",
+   "needs": "a prismatic-joint version of door_open_planner (a straight pull along the slides)"
+  },
+  "hand_turn": {
+   "what": "the wrist turns a held screwdriver against a screw",
+   "needs": "a wrist-roll stage holding the tip seated, regrasping between turns"
+  },
+  "strike": {
+   "what": "a held hammer swung onto a target",
+   "needs": "a swing plan (the head's path and speed at contact) and the impact's record"
+  },
+  "slide_to_edge": {
+   "what": "a flat object pushed along the table to its edge before a pinch",
+   "needs": "a finger-push stage sliding the object (finger_push_planner pushes buttons and pivots, not a slide yet)"
+  },
+  "sheet_hold": {
+   "what": "the other hand holds a sheet for the cut",
+   "needs": "a right-arm pinch of a sheet held through the left hand's cut (bimanual)"
+  }
+ },
+ "measures": {
+  "correct_object": "target",
+  "destination_match": "move.ended_on",
+  "stable_supported_placement": "move.pass",
+  "released": "move.released",
+  "retained_during_transport": "move.pass",
+  "_unmeasured_why": "container_sealed (the cap's state), collision_violation_count (the robot's contacts with anything but the target and supports), object_contained, all_transfers_verified (several moves in one record), both_hands_loaded and payload_retained have no field in our records yet; pause_respected and resume_authorized are HomeHero Brain's, not a scene measure",
+  "_homehero_owned": [
+   "pause_respected",
+   "resume_authorized"
+  ]
+ },
+ "lessons": {
+  "homehero.interaction.household_mug.pick_place": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "pinch_place"
+   ],
+   "scene": "aida_r5_dining_mug_grasp",
+   "record": "pass",
+   "why": "the mug's wrap-lift passes; its place onto a requested support is the chess move's planner"
+  },
+  "homehero.interaction.household_mug.handle_pick_place": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "pinch_place"
+   ],
+   "scene": null,
+   "why": "no handle-only grasp scene yet",
+   "asset": "mug"
+  },
+  "homehero.interaction.scissor.edge_pickup": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "slide_to_edge",
+    "pinch_place"
+   ],
+   "scene": null,
+   "why": "HomeHero's queue: the rail-scissors pass is not a one-hand table-edge pickup",
+   "asset": "scissors"
+  },
+  "homehero.interaction.scissor.operate": {
+   "interactions": [
+    "joint_pivot"
+   ],
+   "planners": [
+    "loop_grip"
+   ],
+   "scene": "aida_r5_rail_scissors",
+   "record": "push.opened_by_the_hand",
+   "why": "the hand opens the pair on the rail; digit-only cycling is backlog task 0"
+  },
+  "homehero.interaction.screwdriver.pick_place": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "tool_grip",
+    "pinch_place"
+   ],
+   "scene": null,
+   "asset": "screwdriver"
+  },
+  "homehero.interaction.screwdriver.engage_tip": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "tool_grip",
+    "hand_turn"
+   ],
+   "scene": null,
+   "asset": "screwdriver"
+  },
+  "homehero.interaction.screwdriver.turn_screw": {
+   "interactions": [
+    "screw_drive_wood"
+   ],
+   "planners": [
+    "tool_grip",
+    "hand_turn"
+   ],
+   "scene": null,
+   "asset": "screwdriver",
+   "why": "the screw law is proven with the drill; a hand-turned screwdriver needs its own stage"
+  },
+  "homehero.interaction.hammer.pick_place": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "tool_grip",
+    "pinch_place"
+   ],
+   "scene": null,
+   "asset": "hammer"
+  },
+  "homehero.interaction.hammer.tap_target": {
+   "interactions": [
+    "impact_strike"
+   ],
+   "planners": [
+    "tool_grip",
+    "strike"
+   ],
+   "scene": null,
+   "asset": "hammer"
+  },
+  "homehero.interaction.drawer_kit_10.open": {
+   "interactions": [
+    "drawer_slide"
+   ],
+   "planners": [
+    "drawer_pull"
+   ],
+   "scene": null,
+   "asset": "drawer"
+  },
+  "homehero.interaction.drawer_kit_10.close": {
+   "interactions": [
+    "drawer_slide"
+   ],
+   "planners": [
+    "drawer_pull"
+   ],
+   "scene": null,
+   "asset": "drawer"
+  },
+  "homehero.interaction.drawer_kit_10.store": {
+   "interactions": [
+    "drawer_slide",
+    "rigid_contact"
+   ],
+   "planners": [
+    "place_inside"
+   ],
+   "scene": null,
+   "asset": "drawer"
+  },
+  "homehero.interaction.drawer_kit_10.retrieve": {
+   "interactions": [
+    "drawer_slide",
+    "rigid_contact"
+   ],
+   "planners": [
+    "pinch_place"
+   ],
+   "scene": null,
+   "asset": "drawer"
+  },
+  "homehero.interaction.fridge_1.open": {
+   "interactions": [
+    "gasket",
+    "hinge_friction"
+   ],
+   "planners": [
+    "door_pull"
+   ],
+   "scene": "aida_r5_living_fridge",
+   "record": "door.seal_broken",
+   "why": "34 deg of the 60 deg goal: the seal broken by hand; the swing past 60 is backlog tasks 11-12"
+  },
+  "homehero.interaction.fridge_1.close": {
+   "interactions": [
+    "gasket",
+    "hinge_friction"
+   ],
+   "planners": [
+    "door_push"
+   ],
+   "scene": null,
+   "why": "a refrigerator has no latch: its gasket draws the door shut",
+   "asset": "refrigerator"
+  },
+  "homehero.interaction.microwave_1.release_door": {
+   "interactions": [
+    "latch_kick",
+    "hinge_friction"
+   ],
+   "planners": [
+    "button_press"
+   ],
+   "scene": "aida_r5_kitchen_microwave",
+   "record": "door.tripped"
+  },
+  "homehero.interaction.microwave_1.open_farther": {
+   "interactions": [
+    "hinge_friction"
+   ],
+   "planners": [
+    "door_push"
+   ],
+   "scene": "aida_r5_kitchen_microwave",
+   "record": "door.opened_by_hand"
+  },
+  "homehero.interaction.microwave_1.place_item": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "place_inside"
+   ],
+   "scene": null,
+   "asset": "microwave"
+  },
+  "homehero.queue.hh_port_microwave_v1": {
+   "interactions": [
+    "latch_kick",
+    "hinge_friction",
+    "latch_close"
+   ],
+   "planners": [
+    "button_press",
+    "door_push",
+    "place_inside"
+   ],
+   "scene": "aida_r5_kitchen_microwave",
+   "record": "door.opened_by_hand",
+   "why": "first deliverable: package the press, pop and hand-driven opening (all passing); insertion and closure are later stages",
+   "handoff": true
+  },
+  "homehero.queue.hh_port_tool_transfer_v1": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "tool_grip",
+    "pinch_place",
+    "slide_to_edge"
+   ],
+   "scene": null,
+   "why": "one-hand acquisition by the intended region, then placed in a tray; a hook or two-hand pickup does not count",
+   "handoff": true,
+   "asset": "scissors"
+  },
+  "homehero.queue.hh_port_drawer_storage_v1": {
+   "interactions": [
+    "rigid_contact",
+    "drawer_slide"
+   ],
+   "planners": [
+    "place_inside",
+    "pinch_place"
+   ],
+   "scene": null,
+   "why": "an already-open drawer first: storage needs place_inside; opening and closing afterward",
+   "handoff": true,
+   "asset": "drawer"
+  },
+  "nemotron.ladder.power_drill.r4": {
+   "interactions": [
+    "drill_hole_wood"
+   ],
+   "planners": [
+    "tool_grip",
+    "screw_drive"
+   ],
+   "scene": "aida_r5_dining_drill_hole",
+   "record": "hole.pass",
+   "why": "'material removed or a screw driven': the screw is driven (aida_r5_dining_drill_screw); the hole is the material interaction still to prove"
+  },
+  "nemotron.ladder.power_drill.r3": {
+   "interactions": [
+    "motor"
+   ],
+   "planners": [
+    "button_press",
+    "tool_grip"
+   ],
+   "scene": "aida_r5_dining_drill_switch",
+   "record": "tool.switch_set_by_hand"
+  },
+  "nemotron.ladder.scissors.r3": {
+   "interactions": [
+    "cut_sheet_scissors"
+   ],
+   "planners": [
+    "loop_grip",
+    "sheet_hold"
+   ],
+   "scene": null
+  },
+  "nemotron.ladder.scissors.r4": {
+   "interactions": [
+    "cut_sheet_scissors"
+   ],
+   "planners": [
+    "loop_grip",
+    "sheet_hold"
+   ],
+   "scene": null
+  },
+  "nemotron.ladder.microwave.r3": {
+   "interactions": [
+    "latch_close",
+    "rigid_contact"
+   ],
+   "planners": [
+    "place_inside",
+    "door_push"
+   ],
+   "scene": null
+  },
+  "nemotron.ladder.microwave.r4": {
+   "interactions": [
+    "appliance_run"
+   ],
+   "planners": [
+    "button_press"
+   ],
+   "scene": null
+  },
+  "nemotron.ladder.refrigerator.r3": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "door_pull",
+    "pinch_place"
+   ],
+   "scene": null
+  },
+  "nemotron.ladder.refrigerator.r4": {
+   "interactions": [
+    "gasket"
+   ],
+   "planners": [
+    "door_push"
+   ],
+   "scene": null
+  }
+ },
+ "occupations": {
+  "_doc": "per occupation: 'scene' (a config/scenes name that serves its lessons) and 'roles' ({role: asset_id}) once qualified; empty until built"
+ }
+}

@@ -1,0 +1,101 @@
+{
+  "schema": "homehero.nemotron_scenario_queue.v1",
+  "created_date": "2026-10-17",
+  "scope": "Simulation scenario development and evidence handoff; no hardware execution or new cloud budget.",
+  "ownership": {
+    "nemotron": ["asset and mechanism preflight", "scenario development", "native executions and failure analysis", "frozen evidence packages"],
+    "homehero": ["independent reproduction", "shared skill adapters and outcome checks", "ROS2/Nav2 and pre-contact arm staging", "workflow composition, recovery and learning records"]
+  },
+  "common_protocol": {
+    "controller_policy": "One frozen controller, calibration and physics configuration per comparison; derive poses from geometry. Any correction creates a new revision evaluated across the same cases.",
+    "cases": [
+      {"id": "development_nominal", "split": "train", "variation": "Declared nominal state"},
+      {"id": "development_pose", "split": "train", "variation": "Changed target pose or approach; record actual settled state"},
+      {"id": "development_mechanism", "split": "train", "variation": "Changed permitted initial joint state or object orientation"},
+      {"id": "development_asset", "split": "train", "variation": "Second compatible asset instance at authored scale; if unavailable, deliver a documented gap"},
+      {"id": "reserved_pose", "split": "test", "variation": "Unseen combination of the declared pose and initial-state ranges"},
+      {"id": "reserved_asset", "split": "test", "variation": "Reserved compatible asset instance; if unavailable, no unseen-object claim"}
+    ],
+    "freeze_before_execution": ["numerical case definitions and settled-reset tolerances", "task and stage success criteria", "force and collision limits", "controller and passive mechanism settings", "planner and execution time budgets", "development/reserved partition"],
+    "attempt_policy": "Record each attempt once in an append-only ledger. Preserve planning failures, timeouts, negative controls and native failures. A corrected attempt gets a new ID and revision; no silent overwrite or unchanged retry.",
+    "scope_policy": "Single native success is a reproducible candidate, not a generalization claim. Export partial success and failed tasks as useful evidence.",
+    "gpu_policy": "Use the shared isaac_slot.sh lock and bounded jobs. Do not stop HomeHero training or another thread's process. Render after physics when possible.",
+    "speed_metrics": ["planning_wall_s", "execution_sim_s", "execution_wall_s", "simulation_real_time_factor", "recovery_count", "retention_during_motion"],
+    "required_package": [
+      "manifest.json: scenario, robot, asset, controller and dependency identities; units and coordinate frames; runtime versions",
+      "case_definitions.json: frozen case splits, initial conditions, goal predicates and numerical limits",
+      "attempts.jsonl: every declared case and attempt, including nonexecuted cases and reasons",
+      "source/: executable source snapshots plus hashes; label unavailable historical execution provenance",
+      "assets/: USD dependency closure or a reproducible content-addressed locator; preflight results",
+      "attempts/<id>/commands: commanded robot joints and timestamps",
+      "attempts/<id>/observations: measured joints, objects, mechanism states, target/body-specific contact and force, timestamps",
+      "attempts/<id>/result.json: separate process completion, source verdict, stage outcomes and whole-task outcome",
+      "attempts/<id>/recording: browser-playable overview/contact video, capture type and timing alignment; failures included",
+      "critic.json: human-use semantics, failure diagnosis, uncertain claims and proposed reusable correction",
+      "PORTING.md: replay command, dependencies, shared adapter requirements, known gaps and next experiment"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "hh_port_microwave_v1",
+      "priority": 1,
+      "title": "Package microwave release and opening; develop insertion and closure as later stages",
+      "status": "proposed",
+      "source_scene": "aida_r5_kitchen_microwave",
+      "asset_id": "microwave_1",
+      "family_ids": ["press_button", "rotate_articulation", "pick_hold_place"],
+      "skills": ["press", "push", "wrap", "carry", "insert", "release"],
+      "required_hands": 1,
+      "first_deliverable": "Freeze the existing measured press/pop/push sequence and its failures. Reproduce that prefix before extending it.",
+      "stages": ["contact-supported button trip and observed latch release", "passive spring opening with the hand clear", "hand-driven opening to a measured usable aperture", "insert a fitting rigid object and withdraw", "close and verify retained contents and latch state"],
+      "success_requirements": ["distinguish button actuation, passive pop and hand-driven travel", "credit insertion only from measured cavity containment and released support", "observe complete closure and latch state for a full workflow pass", "preserve stage progress when full aperture or insertion is unreachable"],
+      "known_gaps": ["Existing source result reports 66.2 degrees, not an 80-degree opening or an insertion result", "Source backlog records approximately 150 seconds of planned push motion", "Cabinet cavity collision representation and button-panel finger contact need review"],
+      "source_backlog_titles": ["Microwave cabinet colliders: convex hulls fill its cavity in PhysX", "Microwave push takes 150 s of planned motion", "Open the microwave door past 80 degrees (a dish goes in)", "The microwave press jams the index on the panel around the button"],
+      "homehero_follow_on": "Reproduce the prefix, then use navigation and reachable base placement for a larger usable aperture; benchmark time and retention independently.",
+      "not_required_for_first_delivery": ["full opening with a permanently fixed base", "physical appliance operation"]
+    },
+    {
+      "id": "hh_port_tool_transfer_v1",
+      "priority": 2,
+      "title": "Acquire a tool by its intended region, orient it and place it in a tray",
+      "status": "proposed",
+      "source_scene": "aida_r5_rail_scissors",
+      "asset_id": "scissor",
+      "family_ids": ["part_grasp_tool_use", "pick_hold_place", "reorient_object"],
+      "skills": ["push", "pinch", "wrap", "carry", "release"],
+      "required_hands": 1,
+      "first_deliverable": "One-hand acquisition/transfer with scissors or a graspable screwdriver, followed by the same task on another compatible tool.",
+      "stages": ["locate the permitted handle/contact region", "if declared, slide a table-supported tool to an accessible edge", "acquire with one hand and measured opposing contact", "lift, orient for placement and retain", "release into a tray and withdraw"],
+      "success_requirements": ["declared initial support must match: a hook pickup cannot satisfy a table-edge task", "one-hand task must record actual hand identity and cannot be passed by a two-hand workaround", "retain the tool throughout transfer", "tool ends in the requested tray region and orientation after release"],
+      "known_gaps": ["Existing rail-scissors source pass is not proof of a one-hand table-edge task", "Current horizontal-loop scissors experiment reports failure", "Drill trigger/grip and screw work remain separate capability tasks"],
+      "source_backlog_titles": ["Rung 2: Open and close the scissors using only the holding hand's digits.", "Thread a digit round a handle: plan the arm and the hand's joints together against the tool's exact surface"],
+      "homehero_follow_on": "Reuse the common grasp/transfer judge, then add ROS2 approach and noncontact arm staging.",
+      "not_required_for_first_delivery": ["cutting", "five digit-only blade cycles", "powered screw driving", "in-hand dexterity beyond the declared reorientation"]
+    },
+    {
+      "id": "hh_port_drawer_storage_v1",
+      "priority": 3,
+      "title": "Store and retrieve fitting objects in an already-open drawer",
+      "status": "proposed",
+      "source_scene": "homehero_artvip_drawer_kit_10_parked_r5",
+      "asset_id": "drawer_kit_10",
+      "family_ids": ["pick_hold_place", "slide_articulation"],
+      "skills": ["wrap", "pinch", "carry", "insert", "release", "push", "pull"],
+      "required_hands": 1,
+      "first_deliverable": "A fitting object placed in and retrieved from a measured open cavity; preserve the authored object scale.",
+      "stages": ["verify open cavity and object fit", "acquire from the staging surface", "insert, release, withdraw and verify containment", "retrieve the requested object and place it on the staging surface", "add contact-driven closing, then opening as separate extensions"],
+      "success_requirements": ["entire object is inside the measured cavity after release", "withdrawal does not drag the object out", "retrieval preserves the requested object identity and stable supported placement", "drawer motion must follow its declared passive mechanism and measured hand contact"],
+      "known_gaps": ["The existing HomeHero cabinet fixture is a commissioning model with assumed mass/damping", "Closed-drawer lip hooking is not required to begin storage lessons", "Cavity fit and collision coverage need validation for each compatible drawer"],
+      "source_backlog_titles": [],
+      "homehero_follow_on": "Compose store/retrieve/close in the current cabinet curriculum, then vary drawers, objects and rooms.",
+      "not_required_for_first_delivery": ["closed-drawer under-lip hooking", "visual search through all drawers", "new room construction"]
+    }
+  ],
+  "homehero_acceptance": [
+    "Evidence intake: identity, dependency and recording integrity; failures accepted as failures",
+    "Freeze an independent copy and reproduce declared cases without changing the source controller",
+    "Compare stage and whole-task evidence; mechanism, support, hand-count and order must match the requested task",
+    "Evaluate predeclared variations with the same controller; retain reserved cases and every failure",
+    "Integrate shared adapters and workflow ownership; add Nav2 and arm staging as a separately measured experiment"
+  ]
+}

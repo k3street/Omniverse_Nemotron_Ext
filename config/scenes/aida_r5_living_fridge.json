@@ -1,0 +1,246 @@
+{
+  "extends": "aida_r5_dining_can_grasp.json",
+  "name": "aida_r5_living_fridge",
+  "purpose": "A two-door refrigerator against the living room's south wall: the R5 takes the fresh-food door's bar handle in its left hand, the fingers wrapped behind the bar, breaks the door's magnetic seal and swings the door open along its arc about the hinge - a door opened as a person opens it, against the gasket's stated opening force, not a pick and place.",
+  "environment": {
+    "support": "/Root/props/Group/SM_floor_01_0",
+    "support_why": "the refrigerator stands on the floor",
+    "deactivate": [
+      "/Root/props/Group/SM_chair_01_1",
+      "/Root/props/Group/SM_carpetl_18_0"
+    ],
+    "deactivate_why": "as in the base scene (SM_chair_01_1); the living room's rug (SM_carpetl_18_0) pulled away: its edge (y -0.84) ran under the refrigerator's front, where the freezer door reaches 2 cm off the floor - the settle tipped the refrigerator 4 deg forward and slid it 13.5 cm (2026-10-16)",
+    "obstacle_prims": [
+      "/Root/props/Group/SM_wall_13_0"
+    ],
+    "obstacle_prims_why": "the south wall behind the refrigerator: an obstacle for the arm",
+    "placement_why": "the living room's clear floor (2.9 x 2.6 m free of props, x -3.7..-0.8, y -1.5..1.1; mapped 2026-10-16): a fixed-base robot that can reach the handle must stand on the handle's side, beyond the door's latch edge, or the door swings into it (0.61 m door, the robot's base 0.33 m in radius: in front of the handle the door meets the robot at ~20 deg). At the kitchen counters that side is the dining table's"
+  },
+  "robot": {
+    "position": [
+      -2.03,
+      -0.11,
+      0.403
+    ],
+    "cad_yaw_deg": -90.0,
+    "placement_why": "found by a stance search (base poses scored by how far the pull's IK chain goes without the arm meeting the torso, the robot outside the door's swing; 2026-10-16): 0.26 m east of the latch edge and 0.68 m out from the refrigerator's front, facing west along it - the handle's arc stays ahead of the left shoulder instead of crossing the body (from 0.37 m out, every pull stopped at 15-24 deg with the upper arm on the torso casing)",
+    "posture_rad_or_m": {
+      "amber_head_pan_joint": 0.0,
+      "amber_head_pitch_joint": 0.5585053609999999,
+      "amber_left_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_pitch_joint": -0.01752971268371528,
+      "amber_right_shoulder_roll_joint": -0.2838099793421452,
+      "amber_right_upper_arm_roll_joint": -0.07824394607011698,
+      "amber_right_elbow_pitch_joint": -0.07046256339005019,
+      "amber_right_forearm_roll_joint": 0.7021713351646428,
+      "amber_right_wrist_pitch_joint": 0.1990612065483086,
+      "amber_right_wrist_roll_joint": 0.2022547925603151,
+      "amber_left_shoulder_pitch_joint": 0.0034333767979382052,
+      "amber_left_shoulder_roll_joint": -0.3141592653589793,
+      "amber_left_upper_arm_roll_joint": -0.0034333767979379815,
+      "amber_left_elbow_pitch_joint": 0.008577507875388732,
+      "amber_left_forearm_roll_joint": 0.7454971616233473,
+      "amber_left_wrist_pitch_joint": 0.23811919684040284,
+      "amber_left_wrist_roll_joint": 0.20683488558339833,
+      "psyonic_left_thumb_q1": 0.0
+    },
+    "posture_why": "HomeHero's navigation rest, the head looking ahead and down"
+  },
+  "objects": [
+    {
+      "name": "Fridge",
+      "asset_id": "model_fridge_1",
+      "class": "refrigerator",
+      "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_sources/ArtVIP/Articulated_objects/major_appliances/refrigerator/fridge_1/model_fridge_1.usd",
+      "category": "articulated_verified",
+      "target_member": "E_door_1",
+      "target_member_why": "the fresh-food door is what the hand works: its body carries the handle, and the hand's contact is read on it",
+      "xy": [
+        -2.6,
+        -1.126
+      ],
+      "yaw_deg": 180.0,
+      "label": "the refrigerator",
+      "why": "ArtVIP fridge_1 (the merged five-part archive, workspace/asset_sources/ArtVIP): a 0.61 x 0.66 x 1.75 m two-door refrigerator, the fresh-food door above (0.95 m, four door bins, a bar handle 0.74-1.01 m up on two posts with a 2.3 cm gap behind it), the freezer below, three drawers; revolute hinges 0-120 deg. Turned 180 deg: its back against the south wall (y -1.5), its front facing the room (+y, y -0.83); the hinge on its west side, the handle on the east",
+      "deactivate": [
+        "FixedJoint"
+      ],
+      "deactivate_why": "the source's body is fixed to the WORLD at the asset's own origin; placed elsewhere, that joint would drag it back - a 62 kg refrigerator on the floor stays where it stands (friction 0.5 x 608 N >> the door's pull)",
+      "body_masses_kg": {
+        "E_body_12": 62.0,
+        "E_door_1": 6.5,
+        "E_door2_9": 4.5,
+        "E_drawer1_19": 1.2,
+        "E_drawer2_20": 1.5,
+        "E_drawer3_18": 1.5
+      },
+      "body_masses_why": "a 1.75 m two-door household refrigerator: 55-70 kg net (manufacturers' spec sheets for this size); a fresh-food door of steel skin, foam and liner with four bins ~6-7 kg, the freezer door ~4-5 kg, plastic drawers 1-1.5 kg (estimates - the asset has none: a jointed source skips the articulate stage, backlog)",
+      "joint_drives": {
+        "RevoluteJoint_fridge_1_up": {
+          "type": "force",
+          "stiffness": 0.0,
+          "damping": 0.01
+        },
+        "RevoluteJoint_fridge_1_down": {
+          "type": "force",
+          "stiffness": 0.5,
+          "damping": 0.01,
+          "target": 0.0
+        }
+      },
+      "joint_drives_why": "the doors' display springs off (the source drives each door toward 100 deg open, stiffness 18-20 per degree); a hinge only rubs: 0.01 N m s per degree (0.57 N m s/rad) of viscous friction. The door's closed hold is its magnetic gasket - the replay's door seal law (grasp_replay.door), not a spring; the freezer door, not worked here, held shut by a spring of 0.5 N m per degree standing in for its gasket",
+      "physics": {
+        "static_friction": 0.5,
+        "dynamic_friction": 0.4,
+        "collision_overrides": {
+          "E_handle_1_7": {
+            "approximation": "sdf",
+            "sdf_resolution": 256
+          }
+        },
+        "collision_overrides_why": "the handle collides exactly: its bar stands 2.3 cm off the door on two posts, and a convex decomposition can close that gap, where the fingers go (as it closed the drill's trigger slot)"
+      },
+      "usd_why": "the merged view of the five-part ArtVIP archive (symlinks): its model files and the layers they sublayer are in different parts; referenced through the merged tree, not the resolved file, so its relative layers resolve",
+      "touching": [
+        "/Root/props/Group/SM_wall_01_0"
+      ],
+      "touching_why": "the floor slab under the visual floor (SM_wall_01_0, z -0.09..0): the refrigerator stands on it",
+      "xy_why": "4 cm off the south wall: 3 mm off it, its cooked convex decomposition started inside the wall's collider and the settle tipped it 45 deg (the build's clearance gate now refuses that)"
+    }
+  ],
+  "grasp_plan": {
+    "task": "door_open",
+    "door_open": {
+      "hand": "left",
+      "joint": "RevoluteJoint_fridge_1_up",
+      "handle": "E_handle_1_7",
+      "open_deg": 60.0,
+      "min_open_deg": 30.0,
+      "why": "the fresh-food door by its bar handle: the left hand's fingers wrapped behind the bar, the palm on its front, then the hand carried round the hinge with the door (the grip rigid on the handle) as far as the arm reaches from where it stands (~30-40 deg: beyond that the handle leaves the arm's reach as it swings away)"
+    },
+    "approach_m": 0.06,
+    "close_s": 1.0,
+    "hold_s": 1.0,
+    "why": "reach a staging pose 6 cm in front of the bar with the hand open, slide onto it, close the fingers behind it, pull along the door's arc, let go, back off"
+  },
+  "grasp_replay": {
+    "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_living_fridge/grasp_plan/targets.npz",
+    "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+    "lift_offset_m": 0.0,
+    "control_hz": 30,
+    "finger_q2_coefficient": 1.05851325,
+    "hold_s": 0.0,
+    "controller": "homehero_r5_action",
+    "hand_model": {
+      "kind": "ability_hand",
+      "calibration": "config/ability_hand_calibration.json",
+      "collision_voltage": 8.0,
+      "postcontact_voltage": 2.0,
+      "grip_speed": 0.5,
+      "why": "as for the drill: the fingers squeeze the bar at near full voltage and keep closing in at 2 V after contact; their worms hold them on the bar against the door's pull"
+    },
+    "door": {
+      "joint": "RevoluteJoint_fridge_1_up",
+      "law": "magnetic_gasket",
+      "opening_force_n": 35.0,
+      "force_at": "handle",
+      "decay_m": 0.003,
+      "why": "the force a person pulls at the handle to break a refrigerator door's magnetic gasket: no manufacturer publishes one (searched 2026-10-16); magnet suppliers give 22-44 N to pull a refrigerator door open (KJ Magnetics; First4Magnets) - 35 N, mid-range. The US Refrigerator Safety Act's rule (16 CFR 1750.5) caps the force to open a door from INSIDE at 66.7 N at the latch edge: a ceiling, not the value. The gasket's pull falls with the gap at the latch edge over ~3 mm (a magnetic strip's reach): the law holds the door with opening_force x handle radius, times exp(-gap / decay)",
+      "sources": [
+        "https://www.law.cornell.edu/cfr/text/16/1750.5",
+        "https://www.kjmagnetics.com/blog/remagnetizing-fridge-seals",
+        "https://www.first4magnets.com/blog/remagnetise-a-fridge-door-seal/"
+      ]
+    },
+    "live_plan": true,
+    "live_plan_why": "the refrigerator settles on the floor; the door and its handle are planned where they come to rest"
+  },
+  "overview_camera": {
+    "eye": [
+      -0.9,
+      0.9,
+      1.75
+    ],
+    "target": [
+      -2.35,
+      -0.6,
+      0.9
+    ],
+    "focal_length_mm": 20.0,
+    "resolution": [
+      1600,
+      900
+    ],
+    "why": "from the room, behind the robot's right shoulder: the robot, its arm on the handle and the door's swing"
+  },
+  "extra_cameras": [
+    {
+      "name": "GraspCloseup",
+      "eye": [
+        -1.7,
+        -1.3,
+        1.25
+      ],
+      "target": [
+        -2.33,
+        -0.72,
+        0.88
+      ],
+      "focal_length_mm": 22.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "why": "from the floor between the robot and the wall, south-east of the handle: the fingers round the bar from the latch side and the door swinging away from them. film_camera.py (robot links as obstacles, the refrigerator and the door's swing excluded) scored the views across the door's swing best, but the swinging door - which it does not model - crosses those sight lines as it opens"
+    }
+  ],
+  "physics_hz": 480,
+  "lights": [
+    {
+      "name": "TablePendant",
+      "type": "rect",
+      "position": [
+        4.97,
+        0.95,
+        2.42
+      ],
+      "size": [
+        0.9,
+        0.35
+      ],
+      "intensity": 16000,
+      "color_temperature_k": 3200,
+      "why": "a warm panel pendant over the dining table (the room's own lamps are in other rooms; sun and sky enter only through the east windows)"
+    },
+    {
+      "name": "CeilingFill",
+      "type": "disk",
+      "position": [
+        3.2,
+        0.2,
+        2.55
+      ],
+      "radius": 0.25,
+      "intensity": 10000,
+      "color_temperature_k": 4000,
+      "why": "a ceiling downlight over the living side, so the room is not a black void behind the table"
+    },
+    {
+      "name": "FridgeFill",
+      "type": "rect",
+      "position": [
+        -2.2,
+        -0.2,
+        2.45
+      ],
+      "size": [
+        0.8,
+        0.4
+      ],
+      "intensity": 14000,
+      "color_temperature_k": 4000,
+      "why": "a ceiling panel over the refrigerator and the robot (the living room's own lamps are off)"
+    }
+  ]
+}

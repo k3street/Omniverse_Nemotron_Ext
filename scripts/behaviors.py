@@ -95,6 +95,116 @@ def motor(b: dict, q: dict, powered: bool = True) -> dict:
     return {b["output"]: w, "_state": {"throttle": round(t, 3), "direction": d, "powered": powered}}
 
 
+def gasket(angle_rad: float, force_n: float, handle_radius_m: float, edge_radius_m: float, decay_m: float = 0.003) -> float:
+    """A door's magnetic gasket as a closing torque on its hinge (N m): the
+    stated opening force at the handle while the door is shut, falling as
+    exp(-gap / decay) with the gap the latch edge has opened (edge radius x
+    angle). A refrigerator's gasket lets go within a few millimetres; no
+    manufacturer states the force - magnet suppliers give 22-44 N at the
+    handle, and 16 CFR 1750.5 caps opening from inside at 66.7 N."""
+    gap = edge_radius_m * max(float(angle_rad), 0.0)
+    return float(force_n) * float(handle_radius_m) * math.exp(-gap / float(decay_m))
+
+
+def latch_kick(angle_rad: float, button_m: float, state: dict, trip_m: float, latch_torque_n_m: float,
+               kick_torque_n_m: float, kick_end_rad: float, catch_rad: float = math.radians(0.5),
+               relatch_rad: float = math.radians(1.0), arm_rad: float = math.radians(3.0)) -> float:
+    """A button-released door (a microwave's): the torque on its hinge (N m,
+    positive opens) from its latch and its kick spring, and the latch's state
+    updated in `state` ({'latched': bool, 'armed': bool}).
+
+    Latched, the hooks hold it shut: a closing torque that takes up the
+    catch's play within catch_rad and holds with latch_torque. The button's
+    travel past trip_m lifts the hooks: unlatched, the kick spring pushes the
+    door open, its torque falling to nothing at kick_end_rad. Once the door
+    has opened past arm_rad, coming back under relatch_rad latches it again
+    (not before: the finger still on the button must not re-hook it)."""
+    a = float(angle_rad)
+    state.setdefault("latched", True)
+    state.setdefault("armed", False)
+    if state.get("latched", True) and button_m >= trip_m:
+        state["latched"], state["armed"] = False, False
+    if not state.get("latched", True):
+        if a > arm_rad:
+            state["armed"] = True
+        if state.get("armed") and a < relatch_rad and button_m < 0.5 * trip_m:
+            state["latched"] = True
+    if state.get("latched", True):
+        return -latch_torque_n_m * min(1.0, max(a, 0.0) / catch_rad)
+    return kick_torque_n_m * max(0.0, 1.0 - max(a, 0.0) / kick_end_rad)
+
+
+def hinge_friction(omega_rad_s: float, torque_n_m: float, slip_rad_s: float = math.radians(0.5)) -> float:
+    """A hinge's friction (N m, positive opens; against the door's turning):
+    Coulomb friction of `torque_n_m` once the door turns faster than
+    slip_rad_s, proportionally less below - a smooth stick that holds a door
+    against any smaller torque, letting it creep at slip x atanh(load/torque).
+    A microwave's door stays where its kick leaves it; with damping alone the
+    0.08 deg tilt of its settled hinge axis turned gravity into 0.005 N m and
+    the door crept from 13.5 to 90 deg in 28 s (2026-10-16)."""
+    return -float(torque_n_m) * math.tanh(float(omega_rad_s) / float(slip_rad_s))
+
+
+def screw_resistance(state: dict, drive_n_m: float, tighten_n_m: float, strip_n_m: float, engage_m: float = 0.006,
+                     tighten_rad: float = math.pi / 2) -> float:
+    """The wood's torque against a screw being turned in (N m), along the
+    insertion curve measured for wood screws (Kumpenza et al. 2020: 4.8 mm
+    screws in birch plywood with a 3.5 mm pilot): rising to the driving torque
+    as the thread engages over engage_m, flat while the thread forms (~1 N m),
+    then - the head on the surface - rising to the tightening torque over
+    tighten_rad and on to the stripping torque; stripped, the sheared thread
+    spins at a third of the driving torque. `state` as screw_drive keeps it."""
+    if state.get("stripped"):
+        return drive_n_m / 3.0
+    if not state.get("seated"):
+        return drive_n_m * min(1.0, max(state.get("engaged_m", 0.0), 0.0) / engage_m)
+    past = max(state.get("past_seat_rad", 0.0), 0.0)
+    if past <= tighten_rad:
+        return drive_n_m + (tighten_n_m - drive_n_m) * past / tighten_rad
+    return tighten_n_m + (strip_n_m - tighten_n_m) * (past - tighten_rad) / tighten_rad
+
+
+def screw_drive(state: dict, dphi_rad: float, engaged: bool, pitch_m: float, seat_depth_m: float,
+                drive_n_m: float, tighten_n_m: float, strip_n_m: float, start_depth_m: float = 0.0,
+                engage_m: float = 0.006, tighten_rad: float = math.pi / 2) -> float:
+    """One physics step of a screw driven by a bit: while the bit sits in the
+    screw's head (`engaged`), the screw turns with the chuck (dphi_rad, positive
+    drives it in) and advances pitch_m a turn until its head seats at
+    seat_depth_m; past seating it only tightens, and past the stripping torque
+    the thread shears. Off the bit the screw stays where it is. Updates `state`
+    ({'theta_rad', 'depth_m', 'engaged_m', 'seated', 'past_seat_rad',
+    'stripped'}) and returns the wood's torque against the turning (N m, a
+    magnitude: the caller opposes the chuck's motion with it)."""
+    state.setdefault("theta_rad", 0.0)
+    state.setdefault("depth_m", float(start_depth_m))
+    state.setdefault("engaged_m", float(start_depth_m))
+    state.setdefault("seated", False)
+    state.setdefault("past_seat_rad", 0.0)
+    state.setdefault("stripped", False)
+    if not engaged or dphi_rad == 0.0:
+        return screw_resistance(state, drive_n_m, tighten_n_m, strip_n_m, engage_m, tighten_rad) if engaged else 0.0
+    state["theta_rad"] += dphi_rad
+    if state["stripped"]:
+        pass                                                        # spins in its sheared thread
+    elif not state["seated"]:
+        d = state["depth_m"] + pitch_m * dphi_rad / (2 * math.pi)
+        if d >= seat_depth_m:
+            state["past_seat_rad"] = (d - seat_depth_m) / pitch_m * 2 * math.pi
+            d, state["seated"] = seat_depth_m, True
+        state["depth_m"] = max(d, 0.0)
+        state["engaged_m"] = state["depth_m"]
+    else:
+        state["past_seat_rad"] += dphi_rad
+        if state["past_seat_rad"] < 0.0:                            # backed out of its seat
+            state["seated"] = False
+            state["depth_m"] = seat_depth_m + pitch_m * state["past_seat_rad"] / (2 * math.pi)
+            state["past_seat_rad"] = 0.0
+    t = screw_resistance(state, drive_n_m, tighten_n_m, strip_n_m, engage_m, tighten_rad)
+    if state["seated"] and not state["stripped"] and t >= strip_n_m:
+        state["stripped"] = True
+    return t
+
+
 def wheeled_base(b: dict, v: float, w: float) -> dict:
     """Differential drive: wheel target velocities (deg/s, joint sign) for a
     forward speed v (m/s) and a turn rate w (rad/s, left positive).

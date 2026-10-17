@@ -23,3 +23,12 @@ def test_the_work_points_own_surroundings_do_not_block_it():
     eye = np.zeros(3)
     finger_on_the_loop = np.array([[0.98, 0.0, 0.0]])               # 2 cm short of the target, on the line
     assert sight_clear(eye, np.array([[1.0, 0.0, 0.0]]), finger_on_the_loop).tolist() == [True]
+
+
+def test_a_solid_box_blocks_the_sight_lines_through_it():
+    from film_camera import box_surface_points, sight_clear
+    P = box_surface_points([-0.3, 0.3, -0.3, 0.3, 0.0, 1.0], 0.05)
+    assert P[:, 0].min() == -0.3 and P[:, 2].max() == 1.0
+    eye, target = np.array([-2.0, 0.0, 0.5]), np.array([2.0, 0.0, 0.5])
+    assert not sight_clear(eye, target, P)[0]                             # straight through the box
+    assert sight_clear(eye, target + [0, 0, 1.0], P + [0, 5.0, 0])[0]     # the box elsewhere

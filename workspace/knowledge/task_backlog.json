@@ -123,7 +123,7 @@
      "judge": "gemma"
     }
    ],
-   "status": "in_progress",
+   "status": "superseded",
    "work": [
     {
      "feature": "full_trigger_travel",
@@ -231,7 +231,9 @@
      "why": "identical to take 8: the slide was not the release rule; take 4 (filmed) differs from takes 8-9 (physics only) with the same plan"
     }
    ],
-   "finding": "the index's force needs the trigger near its knuckle, and that needs the handle deeper in the hand than the heel seat; off the heel seat, a hand with no thumb on the handle's far side lets the drill settle 2.5 cm, undoing the placement. The grip holding the tool where it was planned (the thumb ring: capability task) is the gate for the trigger's full travel. The trigger's travel with the same grip ranges 36-50% with how the drill comes to rest in the hand (takes 4, 8): the settle, not the plan, decides it."
+   "finding": "the index's force needs the trigger near its knuckle, and that needs the handle deeper in the hand than the heel seat; off the heel seat, a hand with no thumb on the handle's far side lets the drill settle 2.5 cm, undoing the placement. The grip holding the tool where it was planned (the thumb ring: capability task) is the gate for the trigger's full travel. The trigger's travel with the same grip ranges 36-50% with how the drill comes to rest in the hand (takes 4, 8): the settle, not the plan, decides it.",
+   "closed_at": "2026-10-17",
+   "closed_why": "the drill's grip record of 2026-10-15; the latest grip record of the drill is task 22 (the screw take)"
   },
   {
    "from_scene": "aida_r5_dining_drill",
@@ -251,7 +253,10 @@
     "Fine motor control to manipulate a small, discrete switch (Rung 3).",
     "Coordination to combine switch setting and trigger pulling in sequence."
    ],
-   "status": "proposed"
+   "status": "done",
+   "findings": "tried 2026-10-17 with the holding hand's thumb (tool_grip_planner.thumb_switch_press, switch_body/switch_other_body): the switch's push-to-forward end is on the palm's side, but it sits in the corner under the barrel's overhang. Mapped over the thumb's whole joint space it comes within 0.2-0.6 mm of the end's face only at poses 8-20 mm inside the housing (one grip 2 mm, at the slicing's own error); a breadth-first search over (rotation, flex) from the grip's thumb found 95-206 clear poses for the three grips that reach the stage and none touching the switch. The Ability Hand's thumb (2.3-2.5 cm across) cannot reach it from the trigger grip. Next: the right hand pushes it while the left holds (a two-arm plan: the pick padded to 28 columns, a straight-line push like finger_push_planner's), or grips chosen for the switch as well as the trigger | Index probe 2026-10-17 (button_press_planner on the switch's 'direction' joint, the drill standing, switch centred): 451 index poses press part12's end face along +x with the hand clear of the drill - the barrel's overhang blocks the thumb, not a finger; the asset's switch has no detent (damping 5 N s/m), so a slow press takes a fraction of a newton and will not tip the standing drill. Every pose fails IK (16-32 mm, 23-41 deg): pushing toward forward points the LEFT index to the robot's right from the drill's left side. Next: a stance or drill pose (turned so the switch's left end faces the left hand) where the arm reaches it, then a pre-grasp press stage before the tool grip | 2026-10-17, the turned-drill route: scene aida_r5_dining_drill_switch (yaw -60, direction authored 0.0) - the index presses the switch on the standing drill (button_press, press_m 3.5 mm: 883 ticks, the law read forward from tick 699), then a tool_grip then-stage takes it up. The grip's then-plan failed (8 candidates, none with IK clear of the torso): its IK seeds were all scattered about the arm the press left (folded, the wrist rolled 120 deg). Each half alone planned (the live drill with the press's earlier arm; the authored drill with the live arm); seeded with the first stage's reset arm and the authored arm too it plans 1492 ticks. Rule: plan_er_grasp.then_request (tests/test_then_request.py), used by tool_then, door_then and screw_then",
+   "closed_at": "2026-10-17",
+   "closed_why": "2026-10-17, aida_r5_dining_drill_switch (filmed): the index pressed the forward/reverse switch on the standing drill (direction 0 -> 1 at tick 699, switch_set_by_hand), the hand then took the drill up by its grip (TOOL_PLAN OK after then_request's seeds) and ran it: trigger 45 %, 289 rpm against the law's 288, stopped on release (1.5 rpm), held (drift 6.7 mm, still_in_hand 1.65 deg / 2.6 mm). Record cap rung 3 (no bit/workpiece: rung 4 is the drill-hole and screw scenes). Gemini placed it at rung 1: it judged the pre-grasp press unnatural (a person flips it in hand with the thumb - this hand's thumb cannot reach it, see findings) and wrongly said the trigger was never released (the log has the trigger to 0 and 477 -> 1.5 rpm in the release stage). Its in-hand reversal and full trigger range are its new rung-3 task. The critic's still_in_hand had read the press's 'release' stage as the drill sliding 218 mm in the hand: grip measures now read a stage after the grasp (task_critic._stage_rows, tested)"
   },
   {
    "from_scene": "pipeline",
@@ -282,7 +287,7 @@
     "the scenes' grasp verdicts unchanged or better"
    ],
    "capabilities_needed": [],
-   "status": "proposed"
+   "status": "in_progress"
   },
   {
    "from_scene": "aida_r5_dining_drill",
@@ -314,7 +319,9 @@
     }
    ],
    "judge_tasks": [],
-   "status": "proposed"
+   "status": "superseded",
+   "closed_at": "2026-10-17",
+   "closed_why": "as task 2: replaced by task 22"
   },
   {
    "from_scene": "aida_r5_dining_drill",
@@ -327,7 +334,2213 @@
     "the same plan gives the same verdict numbers filmed and physics-only (trigger within 2%, in-hand slide within 1 mm)"
    ],
    "capabilities_needed": [],
+   "status": "done",
+   "closed_at": "2026-10-17",
+   "closed_why": "re-run 2026-10-17 on aida_r5_dining_drill: the second physics-only run and the filmed run (--frame-every 2) agree to 0.0 mm at the palm over all 1519 ticks and to the digit on the trigger (33.2 %, 487 rpm) - rendering does not step physics. The FIRST physics-only run read 35.7 % / 535 rpm, diverging from tick 0 by 0.1 mm: it loaded the scene built by 2026-10-15's builder and its live plan rebuilt it with today's mid-run, so every run after started from the new build. The 2026-10-15 gap (50 vs 36 %) most likely had the same cause. Rule: build.json stamps the builder's code hash; the replay refuses a scene built by other builder code (build_er_scene.stale_build, tested)"
+  },
+  {
+   "from_scene": "aida_r5_living_fridge",
+   "object": "model_fridge_1",
+   "class": "refrigerator",
+   "at": "2026-10-16T00:09:37",
+   "kind": "grip",
+   "judge": "record",
+   "rung_reached": 1,
+   "title": "grip: judged",
+   "failed_features": [],
+   "judge_tasks": [
+    {
+     "title": "Incorporate palm stabilization and guidance.",
+     "description": "The planner must be updated to include a 'palm_contact' joint and force measurement. The robot should be instructed to apply a sustained, low-level force (e.g., 5-10 N) with the palm against the front of the door/handle during the entire 'pull' phase, in addition to the current finger grip.",
+     "changes_to_try": [
+      "Add 'palm' to the list of measured contact points.",
+      "Modify the planner's grip strategy to include a secondary, stabilizing force vector applied by the palm."
+     ],
+     "success_measures": [
+      "The 'palm' contact force must show a sustained mean value (e.g., > 5 N) during the 'pull' phase.",
+      "The robot must maintain the grip while simulating the natural arc of the door swing, suggesting the palm is guiding the pull."
+     ],
+     "judge": "gemma"
+    },
+    {
+     "title": "Seat the palm and engage the thumb in a full wrap on the bar handle",
+     "description": "Adjust the `door_open` grasp pose and wrist orientation so the palm presses against the outer face of the handle `E_handle_1_7` before finger closure, and command thumb flexion/opposition so the thumb wraps around the front of the bar while the four fingers wrap behind it, equalizing the load across the digits.",
+     "changes_to_try": [
+      "In `door_open`, shift the pre-grasp approach target deeper toward the handle bar so the palm contacts the front surface of `E_handle_1_7` prior to the `close` stage.",
+      "Adjust wrist roll/pitch alignment in `door_open` to make the palm parallel to the vertical handle axis so index, middle, ring, and pinky share the pull force evenly rather than loading the pinky.",
+      "Enable thumb opposition and flexion in the `ability_hand` preshape and `close` commands so the thumb closes against the front/side of the bar instead of remaining extended downward."
+     ],
+     "success_measures": [
+      "Mean palm contact force >= 2.0 N during `close` and > 0.5 N during `pull`",
+      "Mean thumb contact force >= 2.0 N during `close` and `pull`",
+      "Pinky mean contact force during `pull` is within 50% of the index/middle/ring mean force",
+      "handle_kept continues to pass (handle rotation < 2.0 deg and slip < 5.0 mm)"
+     ],
+     "judge": "gemini"
+    }
+   ],
+   "status": "superseded",
+   "closed_at": "2026-10-17",
+   "closed_why": "an empty 'grip: judged' entry (no description or measures); the fridge's grip gaps are in its critique.json"
+  },
+  {
+   "from_scene": "aida_r5_living_fridge",
+   "object": "model_fridge_1",
+   "class": "refrigerator",
+   "at": "2026-10-16T00:06:54",
+   "judge": "gemma",
+   "rung_reached": 0,
+   "title": "Rung 1: Break the seal and open the door a few degrees.",
+   "rung": 1,
+   "description": "The robot must grasp the handle and pull the door open just enough to break the magnetic gasket seal (a few degrees).",
+   "success_measures": [
+    "The door must open at least 10 degrees (to confirm seal breaking).",
+    "The robot must maintain contact with the handle throughout the pull.",
+    "The robot must successfully break the seal (measured by the system's force sensor reading a drop in required opening force)."
+   ],
+   "capabilities_needed": [
+    "The ability to apply a controlled, sustained pulling force to overcome the gasket seal (as demonstrated).",
+    "The ability to maintain a stable grip on the handle while the door moves."
+   ],
+   "status": "done",
+   "closed_at": "2026-10-17",
+   "closed_why": "the fridge take broke the 35 N gasket (seal let go within 0.5 deg) and opened the door to 34.3 deg; its critique (2026-10-16T00:09:37) reached rung 1"
+  },
+  {
+   "from_scene": "aida_r5_living_fridge",
+   "object": "model_fridge_1",
+   "class": "refrigerator",
+   "at": "2026-10-16T00:06:54",
+   "judge": "gemini",
+   "rung_reached": 0,
+   "title": "Break the refrigerator door gasket seal and hold the handle open",
+   "rung": 1,
+   "description": "Have the R5 grasp the fresh-food door's vertical bar handle with its left hand (wrapping fingers behind the bar and seating the palm/thumb against the front), pull along the hinge arc against the 35 N magnetic gasket to open the door at least 10-30 degrees, and maintain the grasp on the handle through the `hold` stage so the harness registers the door handle as held.",
+   "success_measures": [
+    "door.seal_broken == true",
+    "door.deg_at_end >= 15.0",
+    "door.followed_the_hand == true",
+    "held == true (hand maintains >= 5 N total finger contact force and palm/thumb opposition on the handle through the final hold stage without releasing)"
+   ],
+   "capabilities_needed": [
+    "Full wrap grasp preshape and approach depth that seats the palm and thumb on the handle bar rather than hooking only the distal fingers",
+    "Task-state retention at the end of `door_open` (skipping the automatic release/retreat before the evaluation check) or harness logic that evaluates `held` during the active pull phase for hinged doors"
+   ],
+   "status": "done",
+   "closed_at": "2026-10-17",
+   "closed_why": "as task 9: seal broken, door 34.3 deg, critique rung 1 (the 'held' measure counts a door pass)"
+  },
+  {
+   "from_scene": "aida_r5_living_fridge",
+   "object": "model_fridge_1",
+   "class": "refrigerator",
+   "at": "2026-10-16T00:09:37",
+   "judge": "gemma",
+   "rung_reached": 1,
+   "title": "Open the door to a minimum of 60 degrees and maintain the door's position.",
+   "rung": 2,
+   "description": "The robot must grasp the handle, break the seal, and swing the door open to at least 60 degrees, ensuring the robot's body and arm do not obstruct the door's swing path.",
+   "success_measures": [
+    "Minimum door opening angle: $\\ge 60.0$ degrees.",
+    "Robot body/arm collision with door during swing: False."
+   ],
+   "capabilities_needed": [
+    "Increased torque/force control to sustain the door at a wide angle (60 degrees).",
+    "Improved path planning to ensure the robot's body clears the door's swing arc."
+   ],
    "status": "proposed"
+  },
+  {
+   "from_scene": "aida_r5_living_fridge",
+   "object": "model_fridge_1",
+   "class": "refrigerator",
+   "at": "2026-10-16T00:09:37",
+   "judge": "gemini",
+   "rung_reached": 1,
+   "title": "Swing the refrigerator door open 60+ degrees with coordinated base motion",
+   "rung": 2,
+   "description": "The robot grasps the fresh-food door handle, breaks the seal, and steps back or aside while pulling the handle along its hinge arc until the door is open at least 60 degrees and the robot's body is clear of the doorway.",
+   "success_measures": [
+    "door.max_deg >= 60.0",
+    "door.deg_at_end_of_pull >= 60.0",
+    "door.seal_broken == true",
+    "door.followed_the_hand == true",
+    "Robot base bounding box does not intersect the swept volume or open access corridor of the refrigerator doorway at the end of the pull"
+   ],
+   "capabilities_needed": [
+    "Whole-body mobile manipulation combining base locomotion with arm trajectory tracking along the door's circular arc",
+    "Dynamic stance repositioning so the robot steps clear of the swinging door while keeping the handle within the arm's workspace"
+   ],
+   "status": "proposed"
+  },
+  {
+   "from_scene": "aida_r5_kitchen_microwave",
+   "object": "microwave_1",
+   "class": "microwave",
+   "at": "2026-10-16T05:30:00",
+   "judge": "engineer",
+   "status": "deferred",
+   "kind": "physics",
+   "title": "Microwave cabinet colliders: convex hulls fill its cavity in PhysX",
+   "description": "PhysX refuses triangle-mesh collision on the dynamic microwave body (E_body_12) and falls back to a convex hull per sub-mesh; a hull of the casing can fill the cavity and the door's recess, which the planners model as slabs. Set the body's parts to convexDecomposition or SDF (collision_overrides) and check the push behind the door still clears.",
+   "success_measures": [
+    "no 'cannot be a part of a dynamic body' errors for Microwave in the replay log",
+    "door_edge push passes unchanged"
+   ],
+   "deferred_why": "tried 2026-10-17: a convex decomposition of E_body_12 filled the cut-out round the release bar (the press stopped at 5.25 of its 6 mm trip, the index on the cabinet at 52 N, no pop); an SDF made the press clean (6.3 N on the bar, 0.0 on the panel) but the door's own hulls then caught the exact cabinet and the pop fell from 19.8 to 5.5 deg - too narrow for the push. Exact colliders for the door too are the fix; nothing goes into the cavity until a dish does (task 'a dish put in'), so it waits for that; then with the door exact too (both SDFs) the press was clean (7.0 mm, 0.0 N on the panel) but the door still popped only 5.6 deg - not the hulls: with exact shapes something in the asset stops it (the door's inner plug against the turntable plate or the cavity's edge, to trace). Back on the fallback hulls the index bears ~5 N on the panel as it presses (critic: index_off_the_panel)"
+  },
+  {
+   "from_scene": "aida_r5_kitchen_microwave",
+   "object": "microwave_1",
+   "class": "microwave",
+   "at": "2026-10-16T05:30:00",
+   "judge": "engineer",
+   "status": "proposed",
+   "kind": "capability",
+   "title": "Open the microwave door past 80 degrees (a dish goes in)",
+   "description": "The fixed-base push takes the door from its 19.8 deg pop to 66 deg; arm link 4 folds onto link 2 near there. 80+ deg needs the base to step with the door, or a hand change (push the inner face from the room side once it faces the robot).",
+   "success_measures": [
+    "door.max_deg >= 80",
+    "door.opened_by_hand == true"
+   ]
+  },
+  {
+   "from_scene": "aida_r5_kitchen_microwave",
+   "object": "microwave_1",
+   "class": "microwave",
+   "at": "2026-10-16T05:30:00",
+   "judge": "engineer",
+   "status": "done",
+   "kind": "efficiency",
+   "title": "Microwave push takes 150 s of planned motion",
+   "description": "reach 496 + approach 867 + push 2514 ticks at 30 Hz: the posture walks during the push and the slide-in at a third of the action step dominate. Shorten the slide (approach from the reach's end), and walk postures at full step where the hand is held still.",
+   "success_measures": [
+    "then-stage ticks < 2500",
+    "door.opened_by_hand == true"
+   ],
+   "closed_at": "2026-10-17",
+   "closed_why": "the slide behind the door at 0.7 of the action step and the push at 0.8 (door_edge approach_scale, pull_scale): the push stage went from 4584 to 2713 ticks (153 -> 90 s) and the door further, 65.6 -> 71.4 deg, the hand on it through 100 % of its turning (0.21 N) - DOOR PASS (physics-only take, 2026-10-17). The 7 posture walks of the push set the floor (80 s at full rate)"
+  },
+  {
+   "from_scene": "aida_r5_kitchen_microwave",
+   "object": "model_microwave_1",
+   "class": "microwave",
+   "at": "2026-10-16T10:46:57",
+   "kind": "grip",
+   "judge": "record",
+   "rung_reached": 1,
+   "title": "grip: judged",
+   "failed_features": [],
+   "judge_tasks": [
+    {
+     "title": "Improve the door grasp by simulating a full finger wrap.",
+     "description": "The planner needs to be updated to model the full hand wrapping around the door's free edge, not just the pinky finger. This requires changing the planner's grasp model from a single-point hook to a multi-finger, encompassing grasp.",
+     "changes_to_try": [
+      "Update the 'clear_swing_why' calculation to account for the hand's full volume and the required finger curvature.",
+      "Modify the grasp planner to use a 'full_wrap' or 'cradle' grasp type, ensuring all fingers (index, middle, ring, pinky) make contact with the door's edge.",
+      "The success measure would be a successful simulation of the door swing with a minimum of 3 fingers making contact (e.g., index, middle, ring) and the total contact force being distributed across these fingers, rather than concentrated on the pinky."
+     ],
+     "success_measures": [
+      "The robot must successfully execute the full sequence of actions (place dish, close door, set time, press start).",
+      "The robot must maintain the natural, encompassing grip on the door during the swing phase."
+     ],
+     "judge": "gemma"
+    },
+    {
+     "title": "Establish four-finger edge hook on the door during pull and center index pad on button",
+     "description": "Adjust the door-pull grasp pose so the wrist is oriented with the fingers perpendicular to the vertical free edge of the door, curling the index, middle, ring, and pinky pads onto the inner face of the door frame, and refine the `button_press` contact point so the instrumented index pad registers the press force.",
+     "changes_to_try": [
+      "In the door-pull planner, raise the target grasp height along `RevoluteJoint_microwave_1_left` to the mid-height of the vertical free edge and align the hand's flexion plane perpendicular to the door edge so all four fingers hook behind it.",
+      "Increase finger flexion closure in the `close` stage prior to `pull` so index, middle, ring, and pinky pads engage the inner door bezel.",
+      "In `button_press`, adjust the contact frame on `finger: index` so the distal pad sensor (rather than the tip/nail or intermediate phalanx) directly contacts `PrismaticJoint_microwave_1_down`."
+     ],
+     "success_measures": [
+      "Mean contact force during `press`/`pressed` on `index` >= 1.0 N",
+      "Mean contact force during `pull` > 0.2 N on at least three of the four fingers (index, middle, ring, pinky)",
+      "door_untouched_while_pressing continues to PASS (<= 0.5 N)"
+     ],
+     "judge": "gemini"
+    }
+   ],
+   "status": "superseded",
+   "closed_at": "2026-10-17",
+   "closed_why": "an empty 'grip: judged' entry; the microwave's grip gaps are tasks 19 and its critique.json"
+  },
+  {
+   "from_scene": "aida_r5_kitchen_microwave",
+   "object": "model_microwave_1",
+   "class": "microwave",
+   "at": "2026-10-16T10:46:57",
+   "judge": "gemma",
+   "rung_reached": 1,
+   "title": "Open the door by hand to a minimum of 80 degrees.",
+   "rung": 2,
+   "description": "The robot must grasp the door by its free edge and pull it open until the door angle is 80 degrees or greater. Success is measured by the final door angle being $\\ge 80$ degrees.",
+   "success_measures": [
+    "door_angle_at_end: $\\ge 80$ degrees",
+    "hand_on_door_mean_n: $> 0.0$ N (to confirm grasp)",
+    "hand_object_drift_m: $< 0.01$ m (to confirm stable grasp)"
+   ],
+   "capabilities_needed": [
+    "Increased torque/force in the wrist/arm to overcome the door's resistance and reach the required 80-degree opening.",
+    "Improved planning to maintain a stable grasp while applying sustained force over a larger range of motion."
+   ],
+   "status": "proposed"
+  },
+  {
+   "from_scene": "aida_r5_kitchen_microwave",
+   "object": "model_microwave_1",
+   "class": "microwave",
+   "at": "2026-10-16T10:46:57",
+   "judge": "gemini",
+   "rung_reached": 1,
+   "title": "Swing the microwave door open to at least 80 degrees",
+   "rung": 2,
+   "description": "After pressing the release button and allowing the door to pop ajar, hook the fingers of the left hand around the free edge of the microwave door and swing it along its hinge arc to at least 85 degrees so the opening is fully clear for a dish.",
+   "success_measures": [
+    "button_max_mm >= 8.0 and door pops ajar to >= 15.0 deg",
+    "door max_deg >= 80.0 deg and deg_at_end >= 80.0 deg",
+    "mean contact force across index, middle, ring, and pinky > 0.5 N during the pull phase",
+    "appliance_moved_m < 0.005 m"
+   ],
+   "capabilities_needed": [
+    "Trajectory planning for revolute joints up to 85-90 degrees without kinematic arm singularity or self-collision with the counter",
+    "Edge-hooking grasp planner that maintains finger pad contact on the inner face of the door throughout a wide arc"
+   ],
+   "status": "proposed"
+  },
+  {
+   "from_scene": "aida_r5_kitchen_microwave",
+   "object": "microwave_1",
+   "class": "microwave",
+   "at": "2026-10-16T06:40:00",
+   "judge": "engineer",
+   "status": "in_progress",
+   "kind": "grip",
+   "title": "The microwave press jams the index on the panel around the button",
+   "description": "Per-body contacts (now logged for appliances): while held pressed the index carries 8.71 N on the button (its spring: 8.76 N at 8.76 mm) and 15.1 N on the cabinet - the plan presses 2 mm past the button's 10 mm travel and the pad meets the bezel at 8.76 mm. Press to the trip plus a margin, or stop on the index's contact force, as a person stops when the button bottoms out.",
+   "success_measures": [
+    "index on the cabinet over 'pressed' < 2 N",
+    "button tripped; index on the button >= 5 N"
+   ],
+   "findings": "press_m 0.008-0.009 (trip 6 mm + margin, button_press_planner.press_depth) took the panel load from 15.1 N to ~5.4 N; the rest is the cabinet's fallback hull filling part of the cut-out round the bar (with an exact cabinet: 0.0 N) - which waits on the collider task"
+  },
+  {
+   "from_scene": "aida_r5_dining_drill_screw",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-16T13:30:00",
+   "judge": "engineer",
+   "status": "proposed",
+   "kind": "grip",
+   "title": "The drill creeps 6-7 mm back in the thumbless grip over a screw's drive",
+   "description": "Pulling the trigger (and re-squeezing it) pulls the drill toward the heel of the palm; with no thumb round the handle only friction holds it, and the held index lets the trigger forward as the drill slides. The drive feeds 8 mm past the seat and re-squeezes the trigger every second to make up for it. A thumb that wraps the handle (unreachable so far: it strikes the barrel) or a palm stop would remove the workarounds.",
+   "success_measures": [
+    "drill drift in the palm over the drive < 2 mm",
+    "trigger travel within 0.5 mm of its stall through the drive"
+   ]
+  },
+  {
+   "from_scene": "aida_r5_dining_drill_screw",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-16T13:30:00",
+   "judge": "engineer",
+   "status": "proposed",
+   "kind": "capability",
+   "title": "The trigger stalls at a third of its travel: the screw drives at 35-70 rpm of 450",
+   "description": "The index stalls the trigger at ~33 % (the Ability Hand's fingertip force against the trigger spring), so the low gear's 450 rpm becomes ~150 free and 35-70 under the wood's torque; a 16-turn screw takes ~13 s. A knuckle-side pull (21 N at the knuckle, reference_ability_hand_forces) or the middle finger on the trigger would reach further.",
+   "success_measures": [
+    "trigger travel >= 70 % during the drive",
+    "drive time < 6 s"
+   ]
+  },
+  {
+   "from_scene": "aida_r5_dining_drill_screw",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-16T15:51:22",
+   "kind": "grip",
+   "judge": "record",
+   "rung_reached": 2,
+   "title": "grip: thumb_opposes, index_alone_on_trigger, full_trigger_travel, still_in_hand",
+   "failed_features": [
+    {
+     "id": "thumb_opposes",
+     "feature": "the thumb flexes round the handle's far side and presses it, closing the hand into a ring - not lying flat against the tool",
+     "pass": false,
+     "evidence": "thumb flexed 0.00 rad (opposing needs >= 0.4), pressing 10.7 N - a flat thumb that the tool rests against, not one closing round it"
+    },
+    {
+     "id": "index_alone_on_trigger",
+     "feature": "the index alone works the trigger",
+     "pass": false,
+     "evidence": "peak force on the control: index 17.87 N, middle 1.16 N"
+    },
+    {
+     "id": "full_trigger_travel",
+     "feature": "the pull can reach the trigger's whole travel (the full speed range under the finger)",
+     "pass": false,
+     "evidence": "peak pull 35% of the trigger's travel (needs 90%); the index commanded to 1.55 rad reached 1.314 rad and halted (stalled at the collision threshold)"
+    },
+    {
+     "id": "still_in_hand",
+     "feature": "the tool neither turns nor slides in the hand while the motor runs",
+     "pass": false,
+     "evidence": "over pull, run, release, spin, drive, seat: turned 4.2 deg, slid 10.1 mm in the hand"
+    }
+   ],
+   "judge_tasks": [
+    {
+     "title": "Achieve stable, full-travel grip",
+     "description": "The planner must be updated to enforce full trigger travel (index finger pull reaching 90% of the trigger's range) and to incorporate a grip strategy that achieves stable opposition for the thumb and index finger, ensuring the tool does not slide or rotate during the 'drive' phase.",
+     "changes_to_try": [
+      "Update the grip planner to prioritize 'full_trigger_travel' and 'thumb_opposes' features.",
+      "Adjust the hand's firmware settings to increase the post-contact voltage or use a more robust force-feedback loop to maintain grip stability against external forces (e.g., motor torque)."
+     ],
+     "success_measures": [
+      "full_trigger_travel: PASS (peak pull >= 0.9)",
+      "thumb_opposes: PASS (thumb flexed >= 0.4 rad)",
+      "still_in_hand: PASS (rotation < 1.0 deg, slide < 0.5 mm)"
+     ],
+     "judge": "gemma"
+    },
+    {
+     "title": "Restore Thumb Opposition, Clear Middle Finger from Trigger, and Achieve Full Trigger Pull",
+     "description": "Modify the tool_grip planner parameters so the hand grasps slightly lower and seated deeper at the web, allowing the middle finger to clear the trigger completely, the index finger to strike the trigger with better leverage to reach >= 90% travel without stalling, and the thumb to flex into the web concavity after the palm seats.",
+     "changes_to_try": [
+      "Lower the hand slightly along the handle in tool_grip (e.g., shift along_m from -0.003 to -0.005 or -0.006 m and tighten finger_edge_m from -0.006 toward -0.002 m) so the middle finger stays strictly below the trigger guard and never contacts the trigger.",
+      "Replace thumb='off' with a delayed two-stage thumb closure (rotate thumb abduction into opposition and flex to >= 0.5 rad only after the approach/palm-seat phase completes) so the thumb wraps the narrow neck behind the trigger rather than striking the wide top barrel during approach.",
+      "Reduce palm_gap_m or adjust wrist yaw_deg/roll_deg (e.g., yaw_deg toward -15 or -20 deg) so the index proximal/middle phalanx contacts the trigger closer to the knuckle, increasing mechanical advantage against the 15 N trigger spring and keeping the handle back seated against the palm during axial drive."
+     ],
+     "success_measures": [
+      "thumb_opposes passes: thumb flexion >= 0.4 rad with opposing contact on the handle's far side",
+      "index_alone_on_trigger passes: middle finger peak force on the trigger control == 0.0 N",
+      "full_trigger_travel passes: trigger_peak_fraction >= 0.90",
+      "still_in_hand passes: tool rotation < 2.0 deg and slide < 5.0 mm across pull, spin, drive, and seat, with mean palm contact >= 3.0 N during drive"
+     ],
+     "judge": "gemini"
+    }
+   ],
+   "status": "proposed"
+  },
+  {
+   "from_scene": "aida_r5_dining_drill_screw",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-16T15:51:22",
+   "judge": "gemma",
+   "rung_reached": 2,
+   "title": "Set the Forward/Reverse Switch (Rung 3)",
+   "rung": 3,
+   "description": "The robot must set the forward/reverse switch (e.g., to 'forward') using the hand's thumb or index finger, and then pull the trigger to initiate the drive.",
+   "success_measures": [
+    "The hand must physically manipulate the switch mechanism (e.g., a force sensor reading on the switch area).",
+    "The robot must maintain a stable grip (e.g., 'still_in_hand' > 0.95) while setting the switch.",
+    "The subsequent trigger pull must show the motor starting from a controlled, non-zero RPM (e.g., 'run_rpm' > 10 RPM) and maintaining it."
+   ],
+   "capabilities_needed": [
+    "Fine motor control to manipulate small, discrete switches.",
+    "Ability to maintain grip stability while performing a secondary, non-linear action (setting the switch)."
+   ],
+   "status": "done",
+   "findings": "tried 2026-10-17 with the holding hand's thumb (tool_grip_planner.thumb_switch_press, switch_body/switch_other_body): the switch's push-to-forward end is on the palm's side, but it sits in the corner under the barrel's overhang. Mapped over the thumb's whole joint space it comes within 0.2-0.6 mm of the end's face only at poses 8-20 mm inside the housing (one grip 2 mm, at the slicing's own error); a breadth-first search over (rotation, flex) from the grip's thumb found 95-206 clear poses for the three grips that reach the stage and none touching the switch. The Ability Hand's thumb (2.3-2.5 cm across) cannot reach it from the trigger grip. Next: the right hand pushes it while the left holds (a two-arm plan: the pick padded to 28 columns, a straight-line push like finger_push_planner's), or grips chosen for the switch as well as the trigger | Index probe 2026-10-17 (button_press_planner on the switch's 'direction' joint, the drill standing, switch centred): 451 index poses press part12's end face along +x with the hand clear of the drill - the barrel's overhang blocks the thumb, not a finger; the asset's switch has no detent (damping 5 N s/m), so a slow press takes a fraction of a newton and will not tip the standing drill. Every pose fails IK (16-32 mm, 23-41 deg): pushing toward forward points the LEFT index to the robot's right from the drill's left side. Next: a stance or drill pose (turned so the switch's left end faces the left hand) where the arm reaches it, then a pre-grasp press stage before the tool grip | 2026-10-17, the turned-drill route: scene aida_r5_dining_drill_switch (yaw -60, direction authored 0.0) - the index presses the switch on the standing drill (button_press, press_m 3.5 mm: 883 ticks, the law read forward from tick 699), then a tool_grip then-stage takes it up. The grip's then-plan failed (8 candidates, none with IK clear of the torso): its IK seeds were all scattered about the arm the press left (folded, the wrist rolled 120 deg). Each half alone planned (the live drill with the press's earlier arm; the authored drill with the live arm); seeded with the first stage's reset arm and the authored arm too it plans 1492 ticks. Rule: plan_er_grasp.then_request (tests/test_then_request.py), used by tool_then, door_then and screw_then",
+   "closed_at": "2026-10-17",
+   "closed_why": "2026-10-17, aida_r5_dining_drill_switch (filmed): the index pressed the forward/reverse switch on the standing drill (direction 0 -> 1 at tick 699, switch_set_by_hand), the hand then took the drill up by its grip (TOOL_PLAN OK after then_request's seeds) and ran it: trigger 45 %, 289 rpm against the law's 288, stopped on release (1.5 rpm), held (drift 6.7 mm, still_in_hand 1.65 deg / 2.6 mm). Record cap rung 3 (no bit/workpiece: rung 4 is the drill-hole and screw scenes). Gemini placed it at rung 1: it judged the pre-grasp press unnatural (a person flips it in hand with the thumb - this hand's thumb cannot reach it, see findings) and wrongly said the trigger was never released (the log has the trigger to 0 and 477 -> 1.5 rpm in the release stage). Its in-hand reversal and full trigger range are its new rung-3 task. The critic's still_in_hand had read the press's 'release' stage as the drill sliding 218 mm in the hand: grip measures now read a stage after the grasp (task_critic._stage_rows, tested)"
+  },
+  {
+   "from_scene": "aida_r5_dining_drill_screw",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-16T15:17:30",
+   "judge": "gemini",
+   "rung_reached": 1,
+   "title": "Rung 2: Trigger pull to spin chuck at target RPM and stop on release",
+   "rung": 2,
+   "description": "Have the robot pick up the drill, hold it in free space, pull the trigger with the index finger alone through at least 90% of its travel so the chuck spins according to the motor law, and then release the trigger so the chuck stops.",
+   "success_measures": [
+    "trigger_peak_fraction >= 0.90",
+    "run_rpm > 0 and within 10% of law_rpm_at_that_pull",
+    "rpm_at_end == 0.0 after trigger release",
+    "index_alone_on_trigger == PASS (middle finger contact on trigger == 0 N)"
+   ],
+   "capabilities_needed": [
+    "Index finger placement and trajectory that applies leverage near the proximal/middle phalanx without stalling against the trigger spring or housing before 90% travel",
+    "Accurate trigger-joint to motor-controller coupling so index finger displacement registers as trigger_peak_fraction",
+    "Hand preshape and along_m positioning that keeps the middle finger strictly below the trigger guard/bottom edge during both lift and drive"
+   ],
+   "status": "superseded",
+   "closed_at": "2026-10-17",
+   "closed_why": "raised from a record that measured the chuck over a 'run' stage the screw take has no part of (0 rpm); with the drive's stages measured, both judges placed the take at rung 2 (capped by the authored switch) - the trigger's reach is tasks 21/22"
+  },
+  {
+   "from_scene": "aida_r5_dining_drill_screw",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-16T15:51:22",
+   "judge": "gemini",
+   "rung_reached": 2,
+   "title": "Set the forward/reverse switch and modulate trigger speed",
+   "rung": 3,
+   "description": "Start with the power drill's forward/reverse selector switch in the neutral or reverse position. Have the robot pick up the drill, use its thumb (or the right hand's index finger) to push the switch fully into the forward setting, and then pull the trigger through multiple distinct depth targets (e.g., 25%, 50%, 90%) to demonstrate deliberate speed control before releasing.",
+   "success_measures": [
+    "Forward/reverse switch joint position transitions from reverse/neutral to full forward state via robot digit contact force > 2 N.",
+    "Trigger reaches at least 90% of its travel (trigger_peak_fraction >= 0.90).",
+    "Chuck RPM tracks the motor law across at least two distinct commanded pull fractions (tracking within 0.95 to 1.05) and returns to 0.0 RPM upon release."
+   ],
+   "capabilities_needed": [
+    "Fine finger or thumb actuation to locate and toggle a small selector switch on a held tool.",
+    "Bimanual coordination (if using the secondary hand to flip the switch) or in-hand thumb repositioning.",
+    "A grip posture that allows the index finger to pull the trigger through 90%+ of its travel without stalling prematurely."
+   ],
+   "status": "done",
+   "findings": "tried 2026-10-17 with the holding hand's thumb (tool_grip_planner.thumb_switch_press, switch_body/switch_other_body): the switch's push-to-forward end is on the palm's side, but it sits in the corner under the barrel's overhang. Mapped over the thumb's whole joint space it comes within 0.2-0.6 mm of the end's face only at poses 8-20 mm inside the housing (one grip 2 mm, at the slicing's own error); a breadth-first search over (rotation, flex) from the grip's thumb found 95-206 clear poses for the three grips that reach the stage and none touching the switch. The Ability Hand's thumb (2.3-2.5 cm across) cannot reach it from the trigger grip. Next: the right hand pushes it while the left holds (a two-arm plan: the pick padded to 28 columns, a straight-line push like finger_push_planner's), or grips chosen for the switch as well as the trigger | Index probe 2026-10-17 (button_press_planner on the switch's 'direction' joint, the drill standing, switch centred): 451 index poses press part12's end face along +x with the hand clear of the drill - the barrel's overhang blocks the thumb, not a finger; the asset's switch has no detent (damping 5 N s/m), so a slow press takes a fraction of a newton and will not tip the standing drill. Every pose fails IK (16-32 mm, 23-41 deg): pushing toward forward points the LEFT index to the robot's right from the drill's left side. Next: a stance or drill pose (turned so the switch's left end faces the left hand) where the arm reaches it, then a pre-grasp press stage before the tool grip | 2026-10-17, the turned-drill route: scene aida_r5_dining_drill_switch (yaw -60, direction authored 0.0) - the index presses the switch on the standing drill (button_press, press_m 3.5 mm: 883 ticks, the law read forward from tick 699), then a tool_grip then-stage takes it up. The grip's then-plan failed (8 candidates, none with IK clear of the torso): its IK seeds were all scattered about the arm the press left (folded, the wrist rolled 120 deg). Each half alone planned (the live drill with the press's earlier arm; the authored drill with the live arm); seeded with the first stage's reset arm and the authored arm too it plans 1492 ticks. Rule: plan_er_grasp.then_request (tests/test_then_request.py), used by tool_then, door_then and screw_then",
+   "closed_at": "2026-10-17",
+   "closed_why": "2026-10-17, aida_r5_dining_drill_switch (filmed): the index pressed the forward/reverse switch on the standing drill (direction 0 -> 1 at tick 699, switch_set_by_hand), the hand then took the drill up by its grip (TOOL_PLAN OK after then_request's seeds) and ran it: trigger 45 %, 289 rpm against the law's 288, stopped on release (1.5 rpm), held (drift 6.7 mm, still_in_hand 1.65 deg / 2.6 mm). Record cap rung 3 (no bit/workpiece: rung 4 is the drill-hole and screw scenes). Gemini placed it at rung 1: it judged the pre-grasp press unnatural (a person flips it in hand with the thumb - this hand's thumb cannot reach it, see findings) and wrongly said the trigger was never released (the log has the trigger to 0 and 477 -> 1.5 rpm in the release stage). Its in-hand reversal and full trigger range are its new rung-3 task. The critic's still_in_hand had read the press's 'release' stage as the drill sliding 218 mm in the hand: grip measures now read a stage after the grasp (task_critic._stage_rows, tested)"
+  },
+  {
+   "id": "hh_port_microwave_v1",
+   "from_scene": "aida_r5_kitchen_microwave",
+   "object": "microwave_1",
+   "class": "appliance_small",
+   "at": "2026-10-17",
+   "kind": "homehero_port",
+   "judge": "user_requested_handoff",
+   "title": "Package microwave release and opening; develop insertion and closure as later stages",
+   "priority": 1,
+   "rung": null,
+   "status": "proposed",
+   "description": "Freeze the existing measured press/pop/push sequence and its failures. Reproduce that prefix before extending it.",
+   "success_measures": [
+    "distinguish button actuation, passive pop and hand-driven travel",
+    "credit insertion only from measured cavity containment and released support",
+    "observe complete closure and latch state for a full workflow pass",
+    "preserve stage progress when full aperture or insertion is unreachable"
+   ],
+   "capabilities_needed": [
+    "press_button",
+    "rotate_articulation",
+    "pick_hold_place"
+   ],
+   "related_existing_task_titles": [
+    "Microwave cabinet colliders: convex hulls fill its cavity in PhysX",
+    "Microwave push takes 150 s of planned motion",
+    "Open the microwave door past 80 degrees (a dish goes in)",
+    "The microwave press jams the index on the panel around the button"
+   ],
+   "request_file": "workspace/knowledge/homehero_scenario_queue_v1.json",
+   "request_brief": "docs/homehero_scenario_handoff_20261017.md",
+   "source_request_sha256": "fdd5a29259d94e659bd5d30242971e1791625d9edcfe43feacbcce3b1314e2ed",
+   "delivery_folder": "workspace/handoffs/homehero/hh_port_microwave_v1/<revision>/",
+   "homehero_follow_on": "Reproduce the prefix, then use navigation and reachable base placement for a larger usable aperture; benchmark time and retention independently."
+  },
+  {
+   "id": "hh_port_tool_transfer_v1",
+   "from_scene": "aida_r5_rail_scissors",
+   "object": "scissor",
+   "class": "scissors",
+   "at": "2026-10-17",
+   "kind": "homehero_port",
+   "judge": "user_requested_handoff",
+   "title": "Acquire a tool by its intended region, orient it and place it in a tray",
+   "priority": 2,
+   "rung": null,
+   "status": "proposed",
+   "description": "One-hand acquisition/transfer with scissors or a graspable screwdriver, followed by the same task on another compatible tool.",
+   "success_measures": [
+    "declared initial support must match: a hook pickup cannot satisfy a table-edge task",
+    "one-hand task must record actual hand identity and cannot be passed by a two-hand workaround",
+    "retain the tool throughout transfer",
+    "tool ends in the requested tray region and orientation after release"
+   ],
+   "capabilities_needed": [
+    "part_grasp_tool_use",
+    "pick_hold_place",
+    "reorient_object"
+   ],
+   "related_existing_task_titles": [
+    "Rung 2: Open and close the scissors using only the holding hand's digits.",
+    "Thread a digit round a handle: plan the arm and the hand's joints together against the tool's exact surface"
+   ],
+   "request_file": "workspace/knowledge/homehero_scenario_queue_v1.json",
+   "request_brief": "docs/homehero_scenario_handoff_20261017.md",
+   "source_request_sha256": "fdd5a29259d94e659bd5d30242971e1791625d9edcfe43feacbcce3b1314e2ed",
+   "delivery_folder": "workspace/handoffs/homehero/hh_port_tool_transfer_v1/<revision>/",
+   "homehero_follow_on": "Reuse the common grasp/transfer judge, then add ROS2 approach and noncontact arm staging."
+  },
+  {
+   "id": "hh_port_drawer_storage_v1",
+   "from_scene": "homehero_artvip_drawer_kit_10_parked_r5",
+   "object": "drawer_kit_10",
+   "class": "cabinet",
+   "at": "2026-10-17",
+   "kind": "homehero_port",
+   "judge": "user_requested_handoff",
+   "title": "Store and retrieve fitting objects in an already-open drawer",
+   "priority": 3,
+   "rung": null,
+   "status": "proposed",
+   "description": "A fitting object placed in and retrieved from a measured open cavity; preserve the authored object scale.",
+   "success_measures": [
+    "entire object is inside the measured cavity after release",
+    "withdrawal does not drag the object out",
+    "retrieval preserves the requested object identity and stable supported placement",
+    "drawer motion must follow its declared passive mechanism and measured hand contact"
+   ],
+   "capabilities_needed": [
+    "pick_hold_place",
+    "slide_articulation"
+   ],
+   "related_existing_task_titles": [],
+   "request_file": "workspace/knowledge/homehero_scenario_queue_v1.json",
+   "request_brief": "docs/homehero_scenario_handoff_20261017.md",
+   "source_request_sha256": "fdd5a29259d94e659bd5d30242971e1791625d9edcfe43feacbcce3b1314e2ed",
+   "delivery_folder": "workspace/handoffs/homehero/hh_port_drawer_storage_v1/<revision>/",
+   "homehero_follow_on": "Compose store/retrieve/close in the current cabinet curriculum, then vary drawers, objects and rooms."
+  },
+  {
+   "id": "hh_lab_materials_scene_v1",
+   "from_scene": "sterile_materials_lab_v1",
+   "object": "sealed_inert_container",
+   "class": "laboratory_materials",
+   "at": "2026-10-17",
+   "kind": "homehero_occupation",
+   "judge": "user_requested_handoff",
+   "title": "Build and qualify the clean laboratory materials-handling curriculum",
+   "priority": 1,
+   "rung": null,
+   "status": "proposed",
+   "description": "New scene-development focus: sterile lab benches, storage and desks, six frozen lessons, measured native resets and evidence return.",
+   "success_measures": [
+    "Nominal sealed-container bench transfer has matching Brain judgment and native measurements",
+    "Return all declared cases including unavailable/failed cases with reason",
+    "Report planning and execution time, retention, collision and evidence video"
+   ],
+   "capabilities_needed": [
+    "scene_composition",
+    "simready_asset_preflight",
+    "pick_hold_place",
+    "bimanual_transport",
+    "workflow_evidence"
+   ],
+   "request_file": "workspace/knowledge/homehero_laboratory_scene_request_v1.json",
+   "request_brief": "docs/homehero_laboratory_occupation_20261017.md",
+   "curriculum_sha256": "a92fc13a63cfbff00518736742ddd9f8b3020ddc5c09bd2d31a8e73de80e7b18"
+  },
+  {
+   "id": "cur:asset:laboratory_materials_handler:sealed_inert_container",
+   "kind": "asset",
+   "title": "asset for the sealed inert container (Laboratory materials handler)",
+   "description": "source or generate a sim-ready 'sealed_inert_container' (movable: Graspable, sealed inert training container.) - CAD Creator request or the asset pipeline; pending review: ['axe', 'box_of_medical_washcloths', 'cao_sao_v\u00e0ng_golden_star_aromatic_balm', 'container_h20', 'container_h20_base', 'container_h20_inst']",
+   "evidence": "no approved asset by ['sealed container', 'inert training container', 'container'] (17 pending)",
+   "priority": 10000,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+    "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+    "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "candidates": [
+    "axe",
+    "box_of_medical_washcloths",
+    "cao_sao_v\u00e0ng_golden_star_aromatic_balm",
+    "container_h20",
+    "container_h20_base",
+    "container_h20_inst",
+    "container_h20_inst_base",
+    "cosmetic_pack",
+    "cosmetic_tube",
+    "gochujang_korea"
+   ],
+   "role_kind": "movable",
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:asset:laboratory_materials_handler:receiving_bench",
+   "kind": "asset",
+   "title": "asset for the receiving bench (Laboratory materials handler)",
+   "description": "source or generate a sim-ready 'receiving_bench' (support: Stable support surface for containers and tray.) - CAD Creator request or the asset pipeline; pending review: ['bench_curved_01', 'bench_curved_01_base', 'bench_curved_01_inst', 'bench_curved_01_inst_base', 'bench_wrought_iron_02', 'bench_wrought_iron_02_base']",
+   "evidence": "no approved asset by ['receiving bench', 'laboratory workbench', 'bench'] (12 pending)",
+   "priority": 10001,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+    "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "candidates": [
+    "bench_curved_01",
+    "bench_curved_01_base",
+    "bench_curved_01_inst",
+    "bench_curved_01_inst_base",
+    "bench_wrought_iron_02",
+    "bench_wrought_iron_02_base",
+    "bench_wrought_iron_02_inst",
+    "bench_wrought_iron_02_inst_base",
+    "chair_hospital",
+    "grand_piano"
+   ],
+   "role_kind": "support",
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:asset:laboratory_materials_handler:inspection_bench",
+   "kind": "asset",
+   "title": "asset for the inspection bench (Laboratory materials handler)",
+   "description": "source or generate a sim-ready 'inspection_bench' (support: Stable support surface for containers and tray.) - CAD Creator request or the asset pipeline; pending review: ['bench_curved_01', 'bench_curved_01_base', 'bench_curved_01_inst', 'bench_curved_01_inst_base', 'bench_wrought_iron_02', 'bench_wrought_iron_02_base']",
+   "evidence": "no approved asset by ['inspection bench', 'laboratory workbench', 'bench'] (12 pending)",
+   "priority": 10002,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+    "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+    "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+    "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "candidates": [
+    "bench_curved_01",
+    "bench_curved_01_base",
+    "bench_curved_01_inst",
+    "bench_curved_01_inst_base",
+    "bench_wrought_iron_02",
+    "bench_wrought_iron_02_base",
+    "bench_wrought_iron_02_inst",
+    "bench_wrought_iron_02_inst_base",
+    "chair_hospital",
+    "grand_piano"
+   ],
+   "role_kind": "support",
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:base_motion",
+   "kind": "planner",
+   "title": "the base motion planner",
+   "description": "a base path in the replay (the R5's wheels or a kinematic base move between stances) with the carried object retained, or a layout whose stations one stance reaches",
+   "evidence": "no planner",
+   "priority": 10025,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+    "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+    "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+    "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17",
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json"
+  },
+  {
+   "id": "cur:scene:laboratory_materials_handler",
+   "kind": "scene",
+   "title": "the Laboratory materials handler scene (scene_45d46bc54017)",
+   "description": "compose scene_45d46bc54017: A clean laboratory simulation with a receiving bench, an inspection bench, an open storage bin, sealed inert training containers, and a tray preloaded with an inert training container.; stations ['receiving_bench', 'inspection_bench', 'open_storage_bin']; native case resets per the curriculum's cases",
+   "evidence": "none built",
+   "priority": 10036,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+    "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+    "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+    "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:measure:collision_violation_count",
+   "kind": "measure",
+   "title": "measure 'collision_violation_count' in the take's record",
+   "description": "record 'collision_violation_count' in replay_grasp's result (and map it in curriculum_bindings.json measures)",
+   "evidence": "no record field",
+   "priority": 10049,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+    "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+    "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+    "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+   "kind": "take",
+   "title": "a passing take: Move a container to the inspection bench",
+   "description": "run and pass a take for 'Move a container to the inspection bench'",
+   "evidence": "no take",
+   "priority": 10059,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:handoff:laboratory_materials_handler",
+   "kind": "handoff",
+   "title": "the evidence handoff for laboratory_materials_handler",
+   "description": "package laboratory_materials_handler's evidence per HomeHero's queue: manifest, frozen cases, attempt ledger, measured states, critic findings, videos",
+   "evidence": "no package",
+   "priority": 10069,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+    "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+    "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+    "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:asset:laboratory_materials_handler:open_storage_bin",
+   "kind": "asset",
+   "title": "asset for the open storage bin (Laboratory materials handler)",
+   "description": "qualify one of ['trash_can_1_e5f3af'] for the role 'open_storage_bin' (Open receptacle suitable for placing and retrieving the inert container.): measured size, mass, friction, task preflight; then bind it in curriculum_bindings.json occupations.laboratory_materials_handler.roles",
+   "evidence": "1 approved/verified candidates by ['open bin', 'storage bin', 'bin'], none bound",
+   "priority": 10102,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+    "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "candidates": [
+    "trash_can_1_e5f3af",
+    "black_sorting_bin",
+    "blue_sorting_bin",
+    "hospital_sharps_container",
+    "low_poly_kids_tricycle",
+    "office_bin",
+    "plastic_bin_m30_m\u0171anyag_rekesz_m30",
+    "public_trash_bin_2",
+    "recycle_bin",
+    "recycle_bin_1"
+   ],
+   "role_kind": "receptacle",
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:place_inside",
+   "kind": "planner",
+   "title": "the place inside planner",
+   "description": "pinch_place with the receptacle's walls as obstacles and the cavity floor as the destination; a record of the object contained",
+   "evidence": "no planner",
+   "priority": 10126,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.store",
+    "homehero.interaction.microwave_1.place_item",
+    "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin",
+    "homehero.queue.hh_port_drawer_storage_v1",
+    "homehero.queue.hh_port_microwave_v1",
+    "nemotron.ladder.microwave.r3"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation",
+    "homehero_scenario_queue",
+    "homehero_interaction",
+    "nemotron_use_ladder"
+   ],
+   "parents": [
+    "hh_port_microwave_v1",
+    "hh_port_drawer_storage_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17",
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json"
+  },
+  {
+   "id": "cur:take:homehero.occupation.laboratory_materials_handler.store_container_in_open_bin",
+   "kind": "take",
+   "title": "a passing take: Store a container in the open bin",
+   "description": "run and pass a take for 'Store a container in the open bin'",
+   "evidence": "no take",
+   "priority": 10159,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+   "kind": "take",
+   "title": "a passing take: Retrieve a container from the open bin",
+   "description": "run and pass a take for 'Retrieve a container from the open bin'",
+   "evidence": "no take",
+   "priority": 10259,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:asset:laboratory_materials_handler:loaded_tray",
+   "kind": "asset",
+   "title": "asset for the loaded tray (Laboratory materials handler)",
+   "description": "source or generate a sim-ready 'loaded_tray' (movable: Graspable tray preloaded with a sealed inert training container.) - CAD Creator request or the asset pipeline; pending review: ['baby_chair', 'bathroom_accesories', 'cable_tray_61x299x5cm_a', 'cable_tray_corner_86x85x5cm_a', 'cable_tray_segment_25x61x5cm_a', 'cable_tray_tee_01']",
+   "evidence": "no approved asset by ['tray', 'loaded tray'] (12 pending)",
+   "priority": 10300,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "candidates": [
+    "baby_chair",
+    "bathroom_accesories",
+    "cable_tray_61x299x5cm_a",
+    "cable_tray_corner_86x85x5cm_a",
+    "cable_tray_segment_25x61x5cm_a",
+    "cable_tray_tee_01",
+    "kidney_tray",
+    "kitchen_woodenware_objects",
+    "parambulator_v_013",
+    "simple_tray"
+   ],
+   "role_kind": "movable",
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:bimanual_carry",
+   "kind": "planner",
+   "title": "the bimanual carry planner",
+   "description": "a two-arm plan (HomeHero's checker pairs are left-arm only; the right arm's pairs and both hands' grip on one body) and a record of both hands loaded",
+   "evidence": "no planner",
+   "priority": 10325,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17",
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json"
+  },
+  {
+   "id": "cur:measure:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches:additional_outcome_1",
+   "kind": "measure",
+   "title": "measure 'additional_outcome_1' (Keep the inert container on the tray throughout transport.) in the take's record",
+   "description": "record 'additional_outcome_1' in replay_grasp's result (and map it in curriculum_bindings.json measures)",
+   "evidence": "no record field",
+   "priority": 10349,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+   "kind": "take",
+   "title": "a passing take: Carry a loaded tray between benches",
+   "description": "run and pass a take for 'Carry a loaded tray between benches'",
+   "evidence": "no take",
+   "priority": 10359,
+   "blocks": [
+    "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_occupation"
+   ],
+   "parents": [
+    "hh_lab_materials_scene_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:interaction:latch_close",
+   "kind": "interaction",
+   "title": "the latch close interaction",
+   "description": "a sourced latch law (the closing force and travel of an appliance door latch) run on the door's hinge, latch_kick's state re-armed when it catches; a record of the door closed and latched",
+   "evidence": "no law",
+   "priority": 20112,
+   "blocks": [
+    "homehero.queue.hh_port_microwave_v1",
+    "nemotron.ladder.microwave.r3"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue",
+    "nemotron_use_ladder"
+   ],
+   "interaction_kind": "mechanism",
+   "parents": [
+    "hh_port_microwave_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:handoff:hh_port_microwave_v1",
+   "kind": "handoff",
+   "title": "the evidence handoff for hh_port_microwave_v1",
+   "description": "package hh_port_microwave_v1's evidence per HomeHero's queue: manifest, frozen cases, attempt ledger, measured states, critic findings, videos",
+   "evidence": "no package",
+   "priority": 20168,
+   "blocks": [
+    "homehero.queue.hh_port_microwave_v1"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue"
+   ],
+   "parents": [
+    "hh_port_microwave_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:slide_to_edge",
+   "kind": "planner",
+   "title": "the slide to edge planner",
+   "description": "a finger-push stage sliding the object (finger_push_planner pushes buttons and pivots, not a slide yet)",
+   "evidence": "no planner",
+   "priority": 20224,
+   "blocks": [
+    "homehero.interaction.scissor.edge_pickup",
+    "homehero.queue.hh_port_tool_transfer_v1"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue",
+    "homehero_interaction"
+   ],
+   "parents": [
+    "hh_port_tool_transfer_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.queue.hh_port_tool_transfer_v1",
+   "kind": "scene",
+   "title": "a scene for Acquire a tool by its intended region, orient it and place it in a tray",
+   "description": "build a scene for 'Acquire a tool by its intended region, orient it and place it in a tray'",
+   "evidence": "none named",
+   "priority": 20235,
+   "blocks": [
+    "homehero.queue.hh_port_tool_transfer_v1"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue"
+   ],
+   "parents": [
+    "hh_port_tool_transfer_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.queue.hh_port_tool_transfer_v1",
+   "kind": "take",
+   "title": "a passing take: Acquire a tool by its intended region, orient it and place it in a tray",
+   "description": "run and pass a take for 'Acquire a tool by its intended region, orient it and place it in a tray'",
+   "evidence": "no take",
+   "priority": 20256,
+   "blocks": [
+    "homehero.queue.hh_port_tool_transfer_v1"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue"
+   ],
+   "parents": [
+    "hh_port_tool_transfer_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:handoff:hh_port_tool_transfer_v1",
+   "kind": "handoff",
+   "title": "the evidence handoff for hh_port_tool_transfer_v1",
+   "description": "package hh_port_tool_transfer_v1's evidence per HomeHero's queue: manifest, frozen cases, attempt ledger, measured states, critic findings, videos",
+   "evidence": "no package",
+   "priority": 20267,
+   "blocks": [
+    "homehero.queue.hh_port_tool_transfer_v1"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue"
+   ],
+   "parents": [
+    "hh_port_tool_transfer_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:asset:drawer",
+   "kind": "asset",
+   "title": "a sim-ready drawer",
+   "description": "bring a drawer through the asset pipeline (HomeHero's source: None)",
+   "evidence": "none approved (33 candidates)",
+   "priority": 20300,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.close",
+    "homehero.interaction.drawer_kit_10.open",
+    "homehero.interaction.drawer_kit_10.retrieve",
+    "homehero.interaction.drawer_kit_10.store",
+    "homehero.queue.hh_port_drawer_storage_v1"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue",
+    "homehero_interaction"
+   ],
+   "candidates": [
+    "16_dresser_householdpropschallenge",
+    "antique_dresser",
+    "dresser",
+    "dresser_1",
+    "dresser_2",
+    "dresser_859dce",
+    "dresser_and_vanity_table_m34223_motion",
+    "dresser_and_vanity_table_m34223_motion__1",
+    "dresser_and_vanity_table_m34223_motion__10",
+    "dresser_and_vanity_table_m34223_motion__11"
+   ],
+   "parents": [
+    "hh_port_drawer_storage_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:interaction:drawer_slide",
+   "kind": "interaction",
+   "title": "the drawer slide interaction",
+   "description": "the drawer asset's prismatic joints with a sourced slide friction law (behaviors), end stops at the asset's travel; a record of the travel the hand caused",
+   "evidence": "no law",
+   "priority": 20312,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.close",
+    "homehero.interaction.drawer_kit_10.open",
+    "homehero.interaction.drawer_kit_10.retrieve",
+    "homehero.interaction.drawer_kit_10.store",
+    "homehero.queue.hh_port_drawer_storage_v1"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue",
+    "homehero_interaction"
+   ],
+   "interaction_kind": "mechanism",
+   "parents": [
+    "hh_port_drawer_storage_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.queue.hh_port_drawer_storage_v1",
+   "kind": "scene",
+   "title": "a scene for Store and retrieve fitting objects in an already-open drawer",
+   "description": "build a scene for 'Store and retrieve fitting objects in an already-open drawer'",
+   "evidence": "none named",
+   "priority": 20335,
+   "blocks": [
+    "homehero.queue.hh_port_drawer_storage_v1"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue"
+   ],
+   "parents": [
+    "hh_port_drawer_storage_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.queue.hh_port_drawer_storage_v1",
+   "kind": "take",
+   "title": "a passing take: Store and retrieve fitting objects in an already-open drawer",
+   "description": "run and pass a take for 'Store and retrieve fitting objects in an already-open drawer'",
+   "evidence": "no take",
+   "priority": 20356,
+   "blocks": [
+    "homehero.queue.hh_port_drawer_storage_v1"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue"
+   ],
+   "parents": [
+    "hh_port_drawer_storage_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:handoff:hh_port_drawer_storage_v1",
+   "kind": "handoff",
+   "title": "the evidence handoff for hh_port_drawer_storage_v1",
+   "description": "package hh_port_drawer_storage_v1's evidence per HomeHero's queue: manifest, frozen cases, attempt ledger, measured states, critic findings, videos",
+   "evidence": "no package",
+   "priority": 20367,
+   "blocks": [
+    "homehero.queue.hh_port_drawer_storage_v1"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_scenario_queue"
+   ],
+   "parents": [
+    "hh_port_drawer_storage_v1"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.household_mug.handle_pick_place",
+   "kind": "scene",
+   "title": "a scene for Household mug: handle pick place",
+   "description": "build a scene for 'Household mug: handle pick place'",
+   "evidence": "none named",
+   "priority": 30133,
+   "blocks": [
+    "homehero.interaction.household_mug.handle_pick_place"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.household_mug.handle_pick_place",
+   "kind": "take",
+   "title": "a passing take: Household mug: handle pick place",
+   "description": "run and pass a take for 'Household mug: handle pick place'",
+   "evidence": "no take",
+   "priority": 30154,
+   "blocks": [
+    "homehero.interaction.household_mug.handle_pick_place"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.scissor.edge_pickup",
+   "kind": "scene",
+   "title": "a scene for Articulated scissors: edge pickup",
+   "description": "build a scene for 'Articulated scissors: edge pickup'",
+   "evidence": "none named",
+   "priority": 30234,
+   "blocks": [
+    "homehero.interaction.scissor.edge_pickup"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.scissor.edge_pickup",
+   "kind": "take",
+   "title": "a passing take: Articulated scissors: edge pickup",
+   "description": "run and pass a take for 'Articulated scissors: edge pickup'",
+   "evidence": "no take",
+   "priority": 30255,
+   "blocks": [
+    "homehero.interaction.scissor.edge_pickup"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:asset:screwdriver",
+   "kind": "asset",
+   "title": "a sim-ready screwdriver",
+   "description": "bring a screwdriver through the asset pipeline (HomeHero's source: SketchFab_Assets/Screw_Driver(1).usdz)",
+   "evidence": "none approved (9 candidates)",
+   "priority": 30400,
+   "blocks": [
+    "homehero.interaction.screwdriver.engage_tip",
+    "homehero.interaction.screwdriver.pick_place",
+    "homehero.interaction.screwdriver.turn_screw"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "candidates": [
+    "screw_driver_1",
+    "tools_pack",
+    "tools_pack__1",
+    "tools_pack__2",
+    "tools_pack__3",
+    "tools_pack__4",
+    "tools_pack__5",
+    "tools_pack__6",
+    "tools_pack__7"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.screwdriver.pick_place",
+   "kind": "scene",
+   "title": "a scene for Screwdriver: pick place",
+   "description": "build a scene for 'Screwdriver: pick place'",
+   "evidence": "none named",
+   "priority": 30434,
+   "blocks": [
+    "homehero.interaction.screwdriver.pick_place"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.screwdriver.pick_place",
+   "kind": "take",
+   "title": "a passing take: Screwdriver: pick place",
+   "description": "run and pass a take for 'Screwdriver: pick place'",
+   "evidence": "no take",
+   "priority": 30455,
+   "blocks": [
+    "homehero.interaction.screwdriver.pick_place"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:hand_turn",
+   "kind": "planner",
+   "title": "the hand turn planner",
+   "description": "a wrist-roll stage holding the tip seated, regrasping between turns",
+   "evidence": "no planner",
+   "priority": 30523,
+   "blocks": [
+    "homehero.interaction.screwdriver.engage_tip",
+    "homehero.interaction.screwdriver.turn_screw"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.screwdriver.engage_tip",
+   "kind": "scene",
+   "title": "a scene for Screwdriver: engage tip",
+   "description": "build a scene for 'Screwdriver: engage tip'",
+   "evidence": "none named",
+   "priority": 30534,
+   "blocks": [
+    "homehero.interaction.screwdriver.engage_tip"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.screwdriver.engage_tip",
+   "kind": "take",
+   "title": "a passing take: Screwdriver: engage tip",
+   "description": "run and pass a take for 'Screwdriver: engage tip'",
+   "evidence": "no take",
+   "priority": 30555,
+   "blocks": [
+    "homehero.interaction.screwdriver.engage_tip"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.screwdriver.turn_screw",
+   "kind": "scene",
+   "title": "a scene for Screwdriver: turn screw",
+   "description": "build a scene for 'Screwdriver: turn screw'",
+   "evidence": "none named",
+   "priority": 30634,
+   "blocks": [
+    "homehero.interaction.screwdriver.turn_screw"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.screwdriver.turn_screw",
+   "kind": "take",
+   "title": "a passing take: Screwdriver: turn screw",
+   "description": "run and pass a take for 'Screwdriver: turn screw'",
+   "evidence": "no take",
+   "priority": 30655,
+   "blocks": [
+    "homehero.interaction.screwdriver.turn_screw"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:asset:hammer",
+   "kind": "asset",
+   "title": "a sim-ready hammer",
+   "description": "bring a hammer through the asset pipeline (HomeHero's source: SketchFab_Assets/Tools/Stanley_Hammer.usdz)",
+   "evidence": "none approved (4 candidates)",
+   "priority": 30700,
+   "blocks": [
+    "homehero.interaction.hammer.pick_place",
+    "homehero.interaction.hammer.tap_target"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "candidates": [
+    "hammer",
+    "hammer_1",
+    "stanley_hammer",
+    "toy_hammer"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.hammer.pick_place",
+   "kind": "scene",
+   "title": "a scene for Hammer: pick place",
+   "description": "build a scene for 'Hammer: pick place'",
+   "evidence": "none named",
+   "priority": 30734,
+   "blocks": [
+    "homehero.interaction.hammer.pick_place"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.hammer.pick_place",
+   "kind": "take",
+   "title": "a passing take: Hammer: pick place",
+   "description": "run and pass a take for 'Hammer: pick place'",
+   "evidence": "no take",
+   "priority": 30755,
+   "blocks": [
+    "homehero.interaction.hammer.pick_place"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:interaction:impact_strike",
+   "kind": "interaction",
+   "title": "the impact strike interaction",
+   "description": "an impact law: the head's contact impulse read from the contact report, a nail fixture advancing per blow against a sourced withdrawal/driving resistance in wood; the blows and the nail's depth recorded",
+   "evidence": "no law",
+   "priority": 30811,
+   "blocks": [
+    "homehero.interaction.hammer.tap_target"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "interaction_kind": "material",
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:strike",
+   "kind": "planner",
+   "title": "the strike planner",
+   "description": "a swing plan (the head's path and speed at contact) and the impact's record",
+   "evidence": "no planner",
+   "priority": 30823,
+   "blocks": [
+    "homehero.interaction.hammer.tap_target"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.hammer.tap_target",
+   "kind": "scene",
+   "title": "a scene for Hammer: tap target",
+   "description": "build a scene for 'Hammer: tap target'",
+   "evidence": "none named",
+   "priority": 30834,
+   "blocks": [
+    "homehero.interaction.hammer.tap_target"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.hammer.tap_target",
+   "kind": "take",
+   "title": "a passing take: Hammer: tap target",
+   "description": "run and pass a take for 'Hammer: tap target'",
+   "evidence": "no take",
+   "priority": 30855,
+   "blocks": [
+    "homehero.interaction.hammer.tap_target"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:drawer_pull",
+   "kind": "planner",
+   "title": "the drawer pull planner",
+   "description": "a prismatic-joint version of door_open_planner (a straight pull along the slides)",
+   "evidence": "no planner",
+   "priority": 30922,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.close",
+    "homehero.interaction.drawer_kit_10.open"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drawer_kit_10.open",
+   "kind": "scene",
+   "title": "a scene for Workshop drawer cabinet: open",
+   "description": "build a scene for 'Workshop drawer cabinet: open'",
+   "evidence": "none named",
+   "priority": 30933,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.open"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.drawer_kit_10.open",
+   "kind": "take",
+   "title": "a passing take: Workshop drawer cabinet: open",
+   "description": "run and pass a take for 'Workshop drawer cabinet: open'",
+   "evidence": "no take",
+   "priority": 30954,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.open"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drawer_kit_10.close",
+   "kind": "scene",
+   "title": "a scene for Workshop drawer cabinet: close",
+   "description": "build a scene for 'Workshop drawer cabinet: close'",
+   "evidence": "none named",
+   "priority": 31033,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.close"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.drawer_kit_10.close",
+   "kind": "take",
+   "title": "a passing take: Workshop drawer cabinet: close",
+   "description": "run and pass a take for 'Workshop drawer cabinet: close'",
+   "evidence": "no take",
+   "priority": 31054,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.close"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drawer_kit_10.store",
+   "kind": "scene",
+   "title": "a scene for Workshop drawer cabinet: store",
+   "description": "build a scene for 'Workshop drawer cabinet: store'",
+   "evidence": "none named",
+   "priority": 31134,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.store"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.drawer_kit_10.store",
+   "kind": "take",
+   "title": "a passing take: Workshop drawer cabinet: store",
+   "description": "run and pass a take for 'Workshop drawer cabinet: store'",
+   "evidence": "no take",
+   "priority": 31155,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.store"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drawer_kit_10.retrieve",
+   "kind": "scene",
+   "title": "a scene for Workshop drawer cabinet: retrieve",
+   "description": "build a scene for 'Workshop drawer cabinet: retrieve'",
+   "evidence": "none named",
+   "priority": 31234,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.retrieve"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.drawer_kit_10.retrieve",
+   "kind": "take",
+   "title": "a passing take: Workshop drawer cabinet: retrieve",
+   "description": "run and pass a take for 'Workshop drawer cabinet: retrieve'",
+   "evidence": "no take",
+   "priority": 31255,
+   "blocks": [
+    "homehero.interaction.drawer_kit_10.retrieve"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.fridge_1.close",
+   "kind": "scene",
+   "title": "a scene for Refrigerator: close",
+   "description": "build a scene for 'Refrigerator: close'",
+   "evidence": "none named",
+   "priority": 31434,
+   "blocks": [
+    "homehero.interaction.fridge_1.close"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.fridge_1.close",
+   "kind": "take",
+   "title": "a passing take: Refrigerator: close",
+   "description": "run and pass a take for 'Refrigerator: close'",
+   "evidence": "no take",
+   "priority": 31455,
+   "blocks": [
+    "homehero.interaction.fridge_1.close"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.microwave_1.place_item",
+   "kind": "scene",
+   "title": "a scene for Microwave: place item",
+   "description": "build a scene for 'Microwave: place item'",
+   "evidence": "none named",
+   "priority": 31733,
+   "blocks": [
+    "homehero.interaction.microwave_1.place_item"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.microwave_1.place_item",
+   "kind": "take",
+   "title": "a passing take: Microwave: place item",
+   "description": "run and pass a take for 'Microwave: place item'",
+   "evidence": "no take",
+   "priority": 31754,
+   "blocks": [
+    "homehero.interaction.microwave_1.place_item"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:interaction:drill_hole_wood",
+   "kind": "interaction",
+   "title": "the drill hole wood interaction",
+   "description": "a take in aida_r5_dining_drill_hole that passes hole.pass",
+   "evidence": "aida_r5_dining_drill_hole hole.pass = False",
+   "priority": 40410,
+   "blocks": [
+    "nemotron.ladder.power_drill.r4"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "interaction_kind": "material",
+   "status": "in_progress",
+   "first_seen": "2026-10-17",
+   "findings": "2026-10-17 take 1 (aida_r5_dining_drill_hole, physics only): the grip, lift, looks and spin ran (bit 3.2 mm, 137 rpm at a third of the trigger); the hole started at the face (tilt 0.14 deg) but no wood was cut: the wall spring's damping read the tip's velocity as the link's linear velocity plus w x (tip - link origin) - this chuck's origin is the drill's, ~12 cm off the spin axis, so the tip read ~1.7 m/s sideways: the bit was kicked 7 mm off its line at the first touch and, back at the face, thrown out of the hand with the drill (the impact set the switch to reverse). Rule: material_laws.bit_reaction takes the tip's velocity from its position's change (tested); take 2 running | takes 2-3 (2026-10-17): with the tip's velocity its own, the drill stayed in the hand, but the hand never pushed the bit past ~6 N (take 2: 0.25 mm/rev, 1.5 mm lead) / 10.4 N (take 3: 0.15 mm/rev, 4 mm lead, no re-squeeze) against the 13.4 N a 3.2 mm bit needs to start cutting 710 kg/m3 plywood: as the arm pushes, the drill pitches back in the thumbless grip (1.7 -> 25 deg, 24 mm), the handle turns away from the index (15 -> 0 N on the trigger), the chuck stops (131 -> 0 rpm) and the bit walks 58 mm across the face. Take 2's re-squeeze dip let the index slam back at 39 N and kicked the bit out of its dimple (re-squeeze off for drilling; the wall now bears at most EN 1995's embedment strength x d x depth, then yields - tested). The geometry half is proven in PhysX on a DECLARED 3.2 mm hole (probe_hole.py: 2.9 mm peg through 18 mm, 4.2 mm peg stopped at the face; blind 10 mm: the peg stopped at 9.99 mm). Blocked by nemotron_grip_thrust_v1",
+   "blocked_by": [
+    "nemotron_grip_thrust_v1"
+   ]
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.power_drill.r4",
+   "kind": "scene",
+   "title": "a scene for power_drill rung 4: a bit in the chuck pressed into a workpiece: material removed or a screw driven",
+   "description": "build a scene for 'power_drill rung 4: a bit in the chuck pressed into a workpiece: material removed or a screw driven' (aida_r5_dining_drill_hole)",
+   "evidence": "aida_r5_dining_drill_hole not built",
+   "priority": 40433,
+   "blocks": [
+    "nemotron.ladder.power_drill.r4"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_dining_drill_hole"
+  },
+  {
+   "id": "cur:interaction:motor",
+   "kind": "interaction",
+   "title": "the motor interaction",
+   "description": "a test of behaviors:motor against its sources",
+   "evidence": "law behaviors:motor has no test",
+   "priority": 40310,
+   "blocks": [
+    "nemotron.ladder.power_drill.r3"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "interaction_kind": "mechanism",
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:interaction:cut_sheet_scissors",
+   "kind": "interaction",
+   "title": "the cut sheet scissors interaction",
+   "description": "a sheet (paper_kraft) that can part: pieces joined along a fine grid whose joins break where the blades' crossing point passes and the shear force (sourced: paper's shear strength x thickness x the length in the bite) is met; the cut's length and the two pieces recorded; a scene with a sheet held by the other hand",
+   "evidence": "no law",
+   "priority": 40311,
+   "blocks": [
+    "nemotron.ladder.scissors.r3",
+    "nemotron.ladder.scissors.r4"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "interaction_kind": "material",
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:sheet_hold",
+   "kind": "planner",
+   "title": "the sheet hold planner",
+   "description": "a right-arm pinch of a sheet held through the left hand's cut (bimanual)",
+   "evidence": "no planner",
+   "priority": 40323,
+   "blocks": [
+    "nemotron.ladder.scissors.r3",
+    "nemotron.ladder.scissors.r4"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.scissors.r3",
+   "kind": "scene",
+   "title": "a scene for scissors rung 3: closed across a sheet held by the other hand: the sheet is cut",
+   "description": "build a scene for 'scissors rung 3: closed across a sheet held by the other hand: the sheet is cut'",
+   "evidence": "none named",
+   "priority": 40334,
+   "blocks": [
+    "nemotron.ladder.scissors.r3"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.scissors.r4",
+   "kind": "scene",
+   "title": "a scene for scissors rung 4: a cut along a line: open, advance, close, repeated",
+   "description": "build a scene for 'scissors rung 4: a cut along a line: open, advance, close, repeated'",
+   "evidence": "none named",
+   "priority": 40434,
+   "blocks": [
+    "nemotron.ladder.scissors.r4"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.microwave.r3",
+   "kind": "scene",
+   "title": "a scene for microwave rung 3: a dish put in on the turntable and the door pushed shut until it latches",
+   "description": "build a scene for 'microwave rung 3: a dish put in on the turntable and the door pushed shut until it latches'",
+   "evidence": "none named",
+   "priority": 40335,
+   "blocks": [
+    "nemotron.ladder.microwave.r3"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:interaction:appliance_run",
+   "kind": "interaction",
+   "title": "the appliance run interaction",
+   "description": "the microwave's panel buttons as pressable parts with a state machine (time, start), and its turntable on a motor law; a record of the run",
+   "evidence": "no law",
+   "priority": 40411,
+   "blocks": [
+    "nemotron.ladder.microwave.r4"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "interaction_kind": "mechanism",
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.microwave.r4",
+   "kind": "scene",
+   "title": "a scene for microwave rung 4: it is run: the time set, start pressed, the turntable turning",
+   "description": "build a scene for 'microwave rung 4: it is run: the time set, start pressed, the turntable turning'",
+   "evidence": "none named",
+   "priority": 40433,
+   "blocks": [
+    "nemotron.ladder.microwave.r4"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.refrigerator.r3",
+   "kind": "scene",
+   "title": "a scene for refrigerator rung 3: an item taken from or put on a shelf with the door open",
+   "description": "build a scene for 'refrigerator rung 3: an item taken from or put on a shelf with the door open'",
+   "evidence": "none named",
+   "priority": 40334,
+   "blocks": [
+    "nemotron.ladder.refrigerator.r3"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.refrigerator.r4",
+   "kind": "scene",
+   "title": "a scene for refrigerator rung 4: the door closed again until the gasket seals it",
+   "description": "build a scene for 'refrigerator rung 4: the door closed again until the gasket seals it'",
+   "evidence": "none named",
+   "priority": 40433,
+   "blocks": [
+    "nemotron.ladder.refrigerator.r4"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "from_scene": "aida_r5_dining_drill_switch",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-17T11:42:10",
+   "kind": "grip",
+   "judge": "record",
+   "rung_reached": 1,
+   "title": "grip: thumb_opposes, full_trigger_travel, still_in_hand",
+   "failed_features": [
+    {
+     "id": "thumb_opposes",
+     "feature": "the thumb flexes round the handle's far side and presses it, closing the hand into a ring - not lying flat against the tool",
+     "pass": false,
+     "evidence": "thumb flexed 0.05 rad (opposing needs >= 0.4), pressing 5.2 N - a flat thumb that the tool rests against, not one closing round it"
+    },
+    {
+     "id": "full_trigger_travel",
+     "feature": "the pull can reach the trigger's whole travel (the full speed range under the finger)",
+     "pass": false,
+     "evidence": "peak pull 45% of the trigger's travel (needs 90%); the index commanded to 1.6 rad reached 1.097 rad and halted (stalled at the collision threshold)"
+    },
+    {
+     "id": "still_in_hand",
+     "feature": "the tool neither turns nor slides in the hand while the motor runs",
+     "pass": false,
+     "evidence": "over pull, run, release, spin, drive, seat: turned 103.32 deg, slid 218.5 mm in the hand"
+    }
+   ],
+   "judge_tasks": [
+    {
+     "title": "Seat web deeply and wrap thumb to oppose handle while increasing index trigger leverage",
+     "description": "Modify the pistol-grip preshape and approach pose in the grasp planner so the hand seats further forward and slightly lower around the handle neck, allowing the thumb to abduct and flex around the far side of the handle below the motor housing and placing the index finger's stronger middle phalanx on the trigger.",
+     "changes_to_try": [
+      "Advance the hand approach pose forward along the drill axis by 10-15 mm so the handle back seats firmly against the palm/web (registering palm contact > 0 N) and the index finger contacts the trigger nearer its first joint for higher mechanical advantage.",
+      "Command thumb rotation (opposition) to bring the thumb below the wide motor housing and command thumb flexion >= 0.6 rad during the 'close' stage so it wraps the far side of the handle.",
+      "Separate the 'button_press' stage naming from the pistol-grip 'hold'/'release' stage names so 'still_in_hand' only evaluates motion after the pistol grip 'close' stage completes."
+     ],
+     "success_measures": [
+      "thumb_opposes: PASS (thumb flexion >= 0.4 rad, wrapping the handle neck)",
+      "full_trigger_travel: PASS (trigger_peak_fraction >= 0.90)",
+      "still_in_hand: PASS (rotation < 5 deg and slide < 5 mm during lift, settle, pull, and run)",
+      "Mean palm contact force > 1.0 N during lift and run"
+     ],
+     "judge": "gemini"
+    }
+   ],
+   "status": "proposed"
+  },
+  {
+   "from_scene": "aida_r5_dining_drill_switch",
+   "object": "drill_1",
+   "class": "power_drill",
+   "at": "2026-10-17T11:42:10",
+   "judge": "gemini",
+   "rung_reached": 1,
+   "title": "Full-range trigger speed modulation, release to stop, and in-hand switch reversal (Rungs 2 & 3)",
+   "rung": 3,
+   "description": "Have the robot grasp and lift the drill, use the right hand (or left thumb) to set the switch to forward while held, pull the trigger through >=90% of its travel to reach near-maximum RPM, release the trigger completely so the chuck stops while still holding the drill aloft, and then toggle the switch to reverse.",
+   "success_measures": [
+    "direction_at_end == 1.0 (or -1.0 for reverse test) set while lifted == true",
+    "trigger_peak_fraction >= 0.90",
+    "run_rpm >= 0.90 * max_motor_rpm",
+    "Trigger released after run stage while lifted == true, with trigger_end_fraction <= 0.05 and rpm_after_release <= 1.0",
+    "hand_object_drift_m < 0.01 throughout lift, run, and release"
+   ],
+   "capabilities_needed": [
+    "Bimanual coordination (using the right hand to toggle the direction switch while the left hand holds the pistol grip) or in-hand thumb repositioning",
+    "Deeper index finger leverage on the trigger (placing the proximal/middle phalanx on the trigger rather than the fingertip) to overcome the 15 N spring without stalling",
+    "Explicit post-run trigger release stage while maintaining lower-finger grip force"
+   ],
+   "status": "proposed"
+  },
+  {
+   "id": "nemotron_grip_thrust_v1",
+   "kind": "capability",
+   "status": "proposed",
+   "class": "power_drill",
+   "from_scene": "aida_r5_dining_drill_hole",
+   "title": "A grip that bears a drill's thrust: the handle's back in the web or palm, not only in the fingers' wrap",
+   "description": "drilling wants the hand to push along the bit: 13.4 N before a 3.2 mm bit cuts 710 kg/m3 plywood, ~25 N at 0.15 mm/rev (material_laws.drill_cut). The thumbless pistol grip (palm on the handle's left side, fingers round its front) holds the drill's weight and the trigger's spring but not a push: the bit's line is ~10 cm above the fingers, the push pitches the drill back in the hand and the trigger turns away from the index. A person seats the handle's back in the web/palm (the beavertail) so the push goes straight into the hand. Plan the tool grip with the handle's back against the palm or web (a yaw that turns the palm behind it, or the thumb's web over its top), check it holds 25 N along the bit on the rig before a take, then re-run aida_r5_dining_drill_hole",
+   "success_measures": [
+    "the drill pitches < 2 deg in the hand at 25 N along the bit",
+    "the trigger keeps >= 25 % under that push",
+    "HOLE PASS in aida_r5_dining_drill_hole: 18 mm through, 3.2-3.7 mm across",
+    "PROBE PASS on its outcome"
+   ],
+   "blocks": [
+    "cur:interaction:drill_hole_wood"
+   ],
+   "related": [
+    "Gemini's grip task on the switch take (seat the web, oppose the thumb)",
+    "task 20 (drill creeps back in the thumbless grip)",
+    "task 4 (thumb wrap)"
+   ],
+   "first_seen": "2026-10-17"
   }
  ]
 }

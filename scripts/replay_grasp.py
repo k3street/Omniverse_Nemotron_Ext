@@ -62,6 +62,13 @@ if _cfg_path.exists() and not args.allow_stale_spec:
         raise SystemExit(f"{scene_dir.name}: spec.json is stale against {_cfg_path.name} ({', '.join(_drift[:6])}): "
                          f"rebuild with plan_er_grasp.py {_cfg_path.relative_to(_cfg_path.parents[2])}, or pass --allow-stale-spec")
 gr = spec["grasp_replay"]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_er_scene import foreign_reference as _foreign_reference, stale_build as _stale_build  # noqa: E402
+if _stale_build(scene_dir) and not args.allow_stale_spec:
+    raise SystemExit(f"{scene_dir.name}: the scene was {_stale_build(scene_dir)}: rebuild with plan_er_grasp.py (the live plan rebuilds it "
+                     "mid-run, and the first run on an old build differs from every run after), or pass --allow-stale-spec")
+if _foreign_reference(spec, scene_dir):
+    raise SystemExit(f"{scene_dir.name}: {_foreign_reference(spec, scene_dir)} - it would replay another scene's plan")
 out = scene_dir / "grasp"
 frames = {k: out / f"frames_{k}" for k in ("close", "head", "overview")}
 for d in frames.values():
@@ -80,7 +87,7 @@ import omni.replicator.core as rep  # noqa: E402
 import omni.timeline  # noqa: E402
 import omni.usd  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
-from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics  # noqa: E402
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, Vt  # noqa: E402
 
 omni.usd.get_context().open_stage(str(scene_dir / "scene.usda"))
 for _ in range(30):
@@ -202,17 +209,27 @@ if BIMANUAL and spec.get("finger_push"):
     _M = np.array(_xc.GetLocalToWorldTransform(_pu)).T
     _R = _M[:3, :3] / np.linalg.norm(_M[:3, :3], axis=0)
     PUSH_LOOP_LOCAL = _R.T @ (_lw - _M[:3, 3])
+# every body of the object measured against the hand, body by body (a loop grip's
+# halves, an appliance's button and cabinet): the contact report goes on each body
+# before the simulation starts, and its contact view after - one test for both (the
+# views were made for an appliance's bodies without the report: all four came back
+# empty, 2026-10-16)
+ALL_BODY_CONTACTS = (spec.get("grasp_plan") or {}).get("task") in ("loop_grip", "button_press", "door_open") or bool(gr.get("door"))
 if HM and not CLOTH:
     # the grip force each digit puts on the target, read like HomeHero's
     # object contact sensor (a sensor on the object, filtered by hand link)
     TARGET_RB.AddAppliedSchema("PhysxContactReportAPI")
     TARGET_RB.CreateAttribute("physxContactReport:threshold", Sdf.ValueTypeNames.Float).Set(0.0)
-    if gr.get("tool") or (spec.get("grasp_plan") or {}).get("task") == "loop_grip":
+    if gr.get("tool") or ALL_BODY_CONTACTS:
         # a tool's other bodies too (its trigger): a digit on the trigger, not the
         # body around it, is what a pull needs, and a contact view needs the
         # report on its body before the simulation starts
-        for _q in Usd.PrimRange(target):
-            if _q.HasAPI(UsdPhysics.RigidBodyAPI) and _q != TARGET_RB:
+        # the object's every body - the bodies the views are made for (BODY_PATHS, from the
+        # object's root: a microwave's target is its door, and its button and cabinet are
+        # the door's siblings, outside it)
+        for _bp in BODY_PATHS.values():
+            _q = stage.GetPrimAtPath(_bp)
+            if _q != TARGET_RB:
                 _q.AddAppliedSchema("PhysxContactReportAPI")
                 _q.CreateAttribute("physxContactReport:threshold", Sdf.ValueTypeNames.Float).Set(0.0)
 
@@ -282,6 +299,8 @@ if gr.get("tool"):
                 break
     if _troot is None or _beh is None:
         raise SystemExit(f"grasp_replay.tool: {target.GetPath()} has no articulation root or no {gr['tool'].get('behavior', 'motor')} behaviour")
+    # the scene's own settings of the tool (a two-speed drill in its low gear: max_rpm)
+    _beh = {**_beh, **(gr["tool"].get("behavior_overrides") or {})}
     _tv = sim_view.create_articulation_view(_troot.GetPath().pathString)
     _tdof = {n: i for i, n in enumerate(_tv.shared_metatype.dof_names)}
     _tjoints = {q.GetName(): q for q in Usd.PrimRange(target) if q.IsA(UsdPhysics.Joint)}
@@ -305,6 +324,314 @@ if gr.get("tool"):
     print(f"[tool] {_troot.GetPath()}: dofs {list(_tdof)}; motor {_beh['throttle']} -> {_beh['output']} "
           f"(switch {_beh.get('direction')}, power {_beh.get('power')}); output drive damping {_c[0, _out]:.3f} N m s/rad, max {_f[0, _out]} N m", flush=True)
 
+
+# a screw driven by the tool's bit (grasp_replay.screw): the screw is a kinematic
+# fixture the law moves each physics step - it turns with the chuck while the bit
+# sits in its head and advances a pitch a turn; the wood's torque loads the chuck
+# (behaviors.screw_drive), the motor's drive pushing back against it through the
+# drill's body into the hand
+SCREW = None
+if gr.get("screw") and TOOL is not None:
+    from behaviors import screw_drive as _screw_law
+    _sc = gr["screw"]
+    _spec_sd = spec.get("screw_drive") or {}
+    _bitc = _spec_sd.get("bit") or _sc["bit"]
+    _chuck_body = next((q for q in Usd.PrimRange(_tobj) if q.GetName() == _bitc["body"]), None)
+    _bit_prim = _chuck_body.GetChild(_bitc["attachment"]) if _chuck_body else None
+    if _bit_prim is None or not _bit_prim.IsValid():
+        raise SystemExit(f"grasp_replay.screw: no bit {_bitc['attachment']} on {_bitc['body']}")
+    _rec = json.loads(_bit_prim.GetCustomDataByKey("er:attachment"))
+    if "tip_body" not in _rec:
+        raise SystemExit("grasp_replay.screw: the bit's record has no tip_body - rebuild the scene (build_er_scene._attach)")
+    _tip_local = np.asarray(_rec["tip_body"], float)                  # in the chuck body's own frame, as built
+    _dir_local = np.asarray(_rec["axis_body"], float)
+    _sv = sim_view.create_rigid_body_view(f"/World/Fixtures/{_sc['fixture']}")
+    _head0 = np.asarray(_spec_sd.get("head") or _sc["head"], float)
+    _out = np.asarray(_spec_sd.get("out") or _sc["out"], float); _out /= np.linalg.norm(_out)
+    _fx = next(f for f in spec["environment"].get("fixtures", []) if f["name"] == _sc["fixture"])
+    _links = list(TOOL["view"].shared_metatype.link_names)
+    if _bitc["body"] not in _links:
+        raise SystemExit(f"grasp_replay.screw: {_bitc['body']} is not a link of the tool's articulation ({_links})")
+    # the screw's prim, for the renderer: a kinematic target set through the tensors moves the
+    # body in PhysX but not its USD transform - the film showed the screw standing proud of the
+    # board while the bit ran through it, the physics having driven it home (2026-10-16)
+    _sprim = stage.GetPrimAtPath(f"/World/FixtureVisuals/{_sc['fixture']}")       # its look, not its body (build_er_scene)
+    if not _sprim:
+        raise SystemExit(f"grasp_replay.screw: no visual twin /World/FixtureVisuals/{_sc['fixture']} - rebuild the scene")
+    _sx = UsdGeom.Xformable(_sprim)
+    _sops = {op.GetOpName(): op for op in _sx.GetOrderedXformOps()}
+    _s_tr = _sops.get("xformOp:translate") or _sx.AddTranslateOp()
+    _s_or = _sops.get("xformOp:orient") or _sx.AddOrientOp(UsdGeom.XformOp.PrecisionDouble)
+    SCREW = {"view": _sv, "idx": np.arange(1, dtype=np.int32), "chuck_path": _chuck_body.GetPath().pathString,
+             "usd_translate": _s_tr, "usd_orient": _s_or,
+             "link": _links.index(_bitc["body"]), "n_links": len(_links),
+             "tip_local": _tip_local, "dir_local": _dir_local, "head0": _head0, "out": _out,
+             "origin0": np.asarray(_fx["position"], float), "state": {}, "q_prev": None, "last": {},
+             "fwd": float(TOOL["beh"].get("forward_sign", 1.0)), "out_dof": TOOL["dof"][TOOL["beh"]["output"]],
+             "kw": dict(pitch_m=float(_spec_sd.get("pitch_m", _sc.get("pitch_m"))), seat_depth_m=float(_spec_sd.get("seat_depth_m", _sc.get("seat_depth_m"))),
+                        start_depth_m=float(_spec_sd.get("start_depth_m", _sc.get("start_depth_m"))),
+                        drive_n_m=float(_sc["drive_n_m"]), tighten_n_m=float(_sc["tighten_n_m"]), strip_n_m=float(_sc["strip_n_m"])),
+             "tol": {"lateral_m": float(_sc.get("engage_lateral_m", 0.0012)), "gap_m": float(_sc.get("engage_gap_m", 0.0015)),
+                     "angle_deg": float(_sc.get("engage_angle_deg", 8.0))}}
+    print(f"[screw] {_sc['fixture']}: head {_head0.round(4).tolist()} out {_out.round(3).tolist()}; pitch {SCREW['kw']['pitch_m'] * 1000:.2f} mm, "
+          f"{SCREW['kw']['start_depth_m'] * 1000:.1f} -> {SCREW['kw']['seat_depth_m'] * 1000:.1f} mm; wood {SCREW['kw']['drive_n_m']} / "
+          f"{SCREW['kw']['tighten_n_m']} / {SCREW['kw']['strip_n_m']} N m; bit {_bitc['attachment']} on {_bitc['body']}", flush=True)
+
+
+def screw_step():
+    """The screw law on the bit's turn and pose, every physics step. The screw turns
+    with the bit's ABSOLUTE turn about the screw's axis (not the chuck's angle on a
+    housing that may twist in the hand), and the wood's torque is an external torque
+    on the chuck from the world: the motor drives the chuck against it and its
+    reaction goes into the housing - the hand holds that, as a person holds a drill.
+    (Applied as a force on the chuck's joint, the load's reaction went into the
+    housing too and cancelled the motor's: the hand felt nothing, 2026-10-16.)"""
+    S = SCREW
+    v = TOOL["view"]
+    into = -S["out"]
+    vel = np.asarray(v.get_link_velocities(), float).reshape(S["n_links"], 6)
+    w_fwd = float(vel[S["link"], 3:] @ into)                           # the bit's turn about the screw's axis, driving it in positive
+    qd = float(np.asarray(v.get_dof_velocities(), float).reshape(-1)[S["out_dof"]])
+    dphi = w_fwd * DT
+    st = S["state"]
+    depth = st.get("depth_m", S["kw"]["start_depth_m"])
+    head = S["head0"] - S["out"] * (depth - S["kw"]["start_depth_m"])
+    bp_ = body_pose(S["chuck_path"])
+    engaged, lat, gap, ang = False, None, None, None
+    if bp_ is not None:
+        Rb = quat_to_R(bp_[1])
+        tip = bp_[0] + Rb @ S["tip_local"]
+        bd = Rb @ S["dir_local"]
+        rel = tip - head
+        gap = float(rel @ S["out"])                                    # the tip's height above the head, along the screw
+        lat = float(np.linalg.norm(rel - S["out"] * gap))
+        ang = float(np.degrees(np.arccos(np.clip(-bd @ S["out"], -1.0, 1.0))))
+        engaged = lat <= S["tol"]["lateral_m"] and -0.003 <= gap <= S["tol"]["gap_m"] and ang <= S["tol"]["angle_deg"]
+    T = _screw_law(st, dphi, engaged, **S["kw"])
+    # the wood's torque on the bit, from the world, against its turn (smoothed through zero:
+    # it resists, never drives)
+    tq = np.zeros((1, S["n_links"], 3), np.float32)
+    tq[0, S["link"]] = -into * T * np.tanh(w_fwd / np.radians(5.0))
+    v.apply_forces_and_torques_at_position(np.zeros((1, S["n_links"], 3), np.float32), tq, None, TOOL["idx"], True)
+    # the screw where the law has it: down its axis by the depth gained, turned by its angle
+    depth = st.get("depth_m", S["kw"]["start_depth_m"])
+    from scipy.spatial.transform import Rotation as _Rot
+    qx = _Rot.from_rotvec(-S["out"] * st.get("theta_rad", 0.0)).as_quat()
+    pos = S["origin0"] - S["out"] * (depth - S["kw"]["start_depth_m"])
+    S["view"].set_kinematic_targets(np.asarray([[*pos, *qx]], np.float32), S["idx"])
+    S["pose"] = (pos, qx)
+    S["last"] = {"engaged": engaged, "torque_n_m": round(float(T), 3), "depth_mm": round(depth * 1000, 2),
+                 "turns": round(st.get("theta_rad", 0.0) / (2 * np.pi), 2), "seated": bool(st.get("seated")), "stripped": bool(st.get("stripped")),
+                 "lateral_mm": None if lat is None else round(lat * 1000, 2), "gap_mm": None if gap is None else round(gap * 1000, 2),
+                 "angle_deg": None if ang is None else round(ang, 2), "chuck_rpm": round(abs(qd) * 60 / (2 * np.pi), 1),
+                 "bit_rpm": round(w_fwd * 60 / (2 * np.pi), 1)}
+
+
+# a hole drilled in a board (grasp_replay.hole): the bit's colliders pass the
+# board in PhysX (build_er_scene._filter_bit) and the wood is the cutting law
+# (material_laws.drill_cut) every physics step - the uncut wood at the hole's
+# bottom pushes the bit back (the thrust), the hole's wall holds it to its line,
+# the chip the thrust buys advances the bottom with the chuck's turn and its
+# torque loads the chuck. Both pushes are stiff damped springs the step's
+# explicit force can carry (k, c below at PHYS_HZ). The board's look takes the
+# hole as it deepens (its twin's pieces); the hole is written as the take's
+# outcome, which a later scene builds as exact colliders (holes_from).
+HOLE = None
+if gr.get("hole") and TOOL is not None:
+    from material_laws import bit_reaction as _bit_reaction, board_frame as _board_frame, drill_coefficients as _drill_coeff, \
+        drill_cut as _drill_cut, embedment_strength_n_mm2 as _embed, hole_pieces as _hole_pieces
+    _hc = gr["hole"]
+    _hb = (spec.get("screw_drive") or {}).get("bit") or _hc["bit"]
+    _hchuck = next((q for q in Usd.PrimRange(_tobj) if q.GetName() == _hb["body"]), None)
+    _hbit = _hchuck.GetChild(_hb["attachment"]) if _hchuck else None
+    if _hbit is None or not _hbit.IsValid():
+        raise SystemExit(f"grasp_replay.hole: no bit {_hb['attachment']} on {_hb['body']}")
+    _hrec = json.loads(_hbit.GetCustomDataByKey("er:attachment"))
+    _hfx = next(f for f in spec["environment"].get("fixtures", []) if f["name"] == _hc["fixture"])
+    if not _hfx.get("drillable"):
+        raise SystemExit(f"grasp_replay.hole: fixture {_hc['fixture']} is not drillable - its bit would strike it")
+    _hlinks = list(TOOL["view"].shared_metatype.link_names)
+    _board = _board_frame(_hfx["size"], _hfx["position"], _hc["out"])
+    _bd = float(_hc["bit_d_m"])
+    HOLE = {"link": _hlinks.index(_hb["body"]), "n_links": len(_hlinks), "chuck_path": _hchuck.GetPath().pathString,
+            "tip_local": np.asarray(_hrec["tip_body"], float), "dir_local": np.asarray(_hrec["axis_body"], float),
+            "board": _board, "n": np.asarray(_board["n"], float), "t": float(_board["t"]),
+            "face": np.asarray(_board["centre"], float) + np.asarray(_board["n"], float) * float(_board["t"]) / 2,
+            "coeff": _drill_coeff(_bd, float(_hc["density_kg_m3"]), int(_hc.get("blades", 2))), "bit_d_m": _bd,
+            "bearing": _embed(_bd, float(_hc["density_kg_m3"])) * 1e6 * _bd, "axis": None,
+            "k": float(_hc.get("k_n_per_m", 2.0e4)), "c": float(_hc.get("c_n_s_per_m", 150.0)),
+            "target_depth_m": float(_hc.get("target_depth_m", _board["t"])), "sides": int(_hfx["drillable"].get("sides", 16)),
+            "state": {"bit_d_m": _bd}, "entry": None, "lat_cut": [], "last": {}, "vis": f"/World/FixtureVisuals/{_hc['fixture']}",
+            "vis_depth": -1.0}
+    print(f"[hole] {_hc['fixture']}: a {_bd * 1000:.1f} mm bit ({_hb['attachment']}) into {_hc.get('material')} "
+          f"({_hc['density_kg_m3']} kg/m3, {HOLE['t'] * 1000:.0f} mm): thrust {HOLE['coeff']['f0_n']:.1f} N + "
+          f"{HOLE['coeff']['kf_n_per_mm']:.0f} N/mm of chip, torque {HOLE['coeff']['m0_nm']:.4f} + {HOLE['coeff']['km_nm_per_mm']:.3f} N m/mm; "
+          f"the wood's push k {HOLE['k']:.0f} N/m c {HOLE['c']:.0f} N s/m at {int(spec.get('physics_hz', 120))} Hz; "
+          f"the wall bears {HOLE['bearing'] / 1000:.0f} N per mm of bit in it", flush=True)
+
+
+def hole_step():
+    """The cutting law on the bit's pose and turn, every physics step (see HOLE)."""
+    H = HOLE
+    v = TOOL["view"]
+    bp_ = body_pose(H["chuck_path"])
+    if bp_ is None:
+        return
+    Rb = quat_to_R(bp_[1])
+    tip = bp_[0] + Rb @ H["tip_local"]
+    bdir = Rb @ H["dir_local"]
+    n, into = H["n"], -H["n"]
+    vel = np.asarray(v.get_link_velocities(), float).reshape(H["n_links"], 6)
+    w_fwd = float(vel[H["link"], 3:] @ into)                             # the chuck's spin about the hole's axis
+    depth_tip = float((H["face"] - tip) @ n)                             # how far the tip is into the board
+    st = H["state"]
+    # the hole starts where a forward-turning bit first meets the face: its axis the face's normal there
+    if H["entry"] is None and depth_tip > -0.0003 and w_fwd > np.radians(360.0):
+        H["entry"] = tip + n * depth_tip
+        H["axis"] = H["entry"].copy()
+        H["tilt_deg"] = float(np.degrees(np.arccos(np.clip(bdir @ into, -1.0, 1.0))))
+        H["start_tick"] = CLOCK[0]
+    # once cut, the bit's floor is the cut's bottom (the wall keeps it over it); before, the face
+    inside = H["entry"] is not None
+    F, thrust, _, shift = _bit_reaction(tip, H.get("tip_prev"), DT, H["face"], n, H["axis"],
+                                        st.get("depth_m", 0.0) if inside else 0.0, H["k"], H["c"],
+                                        cutting=not st.get("through"), bearing_n_per_m=H["bearing"])
+    H["tip_prev"] = tip
+    if inside:
+        H["axis"] = H["axis"] + shift                                    # the wall crushed: the hole's line yields
+        rel0 = tip - H["entry"]
+        lat_m = float(np.linalg.norm(rel0 - into * float(rel0 @ into)))  # from the line it entered on: the hole's reach
+    else:
+        lat_m = 0.0
+    dphi = w_fwd * DT
+    was = st.get("depth_m", 0.0)
+    T = _drill_cut(st, thrust, dphi if inside else 0.0, H["coeff"], H["t"])
+    if st.get("depth_m", 0.0) > was:
+        H["lat_cut"].append(lat_m)                                       # the bit's reach while it cut: the hole's size
+    tq = np.zeros((1, H["n_links"], 3), np.float32)
+    tq[0, H["link"]] = -into * T * np.tanh(w_fwd / np.radians(5.0))
+    fo = np.zeros((1, H["n_links"], 3), np.float32)
+    fo[0, H["link"]] = F
+    po = np.zeros((1, H["n_links"], 3), np.float32)
+    po[0, H["link"]] = tip
+    v.apply_forces_and_torques_at_position(fo, tq, po, TOOL["idx"], True)
+    H["last"] = {"depth_mm": round(st.get("depth_m", 0.0) * 1000, 3), "tip_mm": round(depth_tip * 1000, 2),
+                 "thrust_n": round(thrust, 2), "torque_n_m": round(float(T), 4), "chip_mm": round(st.get("chip_mm", 0.0), 4),
+                 "lateral_mm": round(lat_m * 1000, 3), "wall_n": round(float(np.linalg.norm(F - n * thrust)), 2),
+                 "bit_rpm": round(w_fwd * 60 / (2 * np.pi), 1), "through": bool(st.get("through")), "started": H["entry"] is not None}
+
+
+def hole_look():
+    """The board's twin shaped to the hole as it is (each control tick it deepened)."""
+    H = HOLE
+    d = HOLE["state"].get("depth_m", 0.0)
+    if H["entry"] is None or abs(d - H["vis_depth"]) < 2.5e-4:
+        return
+    H["vis_depth"] = d
+    r = 0.5 * H["bit_d_m"] + (float(np.percentile(H["lat_cut"], 95)) if H["lat_cut"] else 0.0)
+    pieces = {pc["name"]: pc for pc in _hole_pieces(H["board"], {"entry": H["entry"].tolist(), "r": r, "depth_m": max(d, 1e-5)}, H["sides"])}
+    for q in stage.GetPrimAtPath(H["vis"]).GetChildren():
+        nm = q.GetName()
+        if nm == "Solid":
+            UsdGeom.Imageable(q).MakeInvisible()
+            continue
+        pc = pieces.get(nm)
+        m = UsdGeom.Mesh(q)
+        if pc is None:
+            UsdGeom.Imageable(q).MakeInvisible()
+            continue
+        m.GetPointsAttr().Set(Vt.Vec3fArray([Gf.Vec3f(*x) for x in pc["points"]]))
+        m.GetFaceVertexCountsAttr().Set(Vt.IntArray([len(f) for f in pc["faces"]]))
+        m.GetFaceVertexIndicesAttr().Set(Vt.IntArray([i for f in pc["faces"] for i in f]))
+        UsdGeom.Imageable(q).MakeVisible()
+
+
+# a hinged door held shut by its gasket (a refrigerator's magnetic seal): the
+# law runs every physics step on the door's joint - a closing torque of the
+# stated opening force at the handle, falling with the gap at the latch edge
+DOOR = None
+if gr.get("door"):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from behaviors import gasket as _gasket_law, hinge_friction as _hinge_friction, latch_kick as _latch_law
+    _dc = gr["door"]
+    _dj = next((q for q in Usd.PrimRange(_tobj) if q.IsA(UsdPhysics.RevoluteJoint) and q.GetName() == _dc["joint"]), None)
+    _droot = next((q for q in Usd.PrimRange(_tobj) if q.HasAPI(UsdPhysics.ArticulationRootAPI)), None)
+    if _dj is None or _droot is None:
+        raise SystemExit(f"grasp_replay.door: no revolute joint {_dc['joint']!r} or no articulation root under {_tobj.GetPath()}")
+    _dv = sim_view.create_articulation_view(_droot.GetPath().pathString)
+    _dnames = list(_dv.shared_metatype.dof_names)
+    _rj = UsdPhysics.RevoluteJoint(_dj)
+    _door_prim = stage.GetPrimAtPath(_rj.GetBody1Rel().GetTargets()[0])
+    _cab_t = _rj.GetBody0Rel().GetTargets()
+    _cab_name = _cab_t[0].name if _cab_t else None                   # the body the door hangs on: the critic reads the hand on it
+    _xc = UsdGeom.XformCache()
+    _M1 = _xc.GetLocalToWorldTransform(_door_prim)
+    _lp, _lr = _rj.GetLocalPos1Attr().Get(), _rj.GetLocalRot1Attr().Get()
+    _ax = {"X": Gf.Vec3d(1, 0, 0), "Y": Gf.Vec3d(0, 1, 0), "Z": Gf.Vec3d(0, 0, 1)}[str(_rj.GetAxisAttr().Get() or "Z")]
+    _hinge = np.asarray(list(_M1.Transform(Gf.Vec3d(_lp))), float)
+    _axis = np.asarray(list(_M1.TransformDir(Gf.Rotation(Gf.Quatd(_lr.GetReal(), Gf.Vec3d(_lr.GetImaginary()))).TransformDir(_ax))), float)
+    _axis /= np.linalg.norm(_axis)
+    _hname = _dc.get("handle") or ((spec.get("grasp_plan") or {}).get("door_open") or {}).get("handle")
+    _hprim = next((q for q in Usd.PrimRange(_door_prim) if q.GetName() == _hname), None)
+    _bbc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+
+    def _perp(v):
+        v = np.asarray(v, float) - _hinge
+        return float(np.linalg.norm(v - _axis * (v @ _axis)))
+    _hc = np.asarray(_bbc.ComputeWorldBound(_hprim).ComputeAlignedRange().GetMidpoint(), float) if _hprim else None
+    _dr = _bbc.ComputeWorldBound(_door_prim).ComputeAlignedRange()
+    _corners = [np.array([x_, y_, z_]) for x_ in (_dr.GetMin()[0], _dr.GetMax()[0]) for y_ in (_dr.GetMin()[1], _dr.GetMax()[1])
+                for z_ in (_dr.GetMin()[2], _dr.GetMax()[2])]
+    _r_edge = max(_perp(c_) for c_ in _corners)
+    _r_h = _perp(_hc) if _hc is not None else _r_edge
+    _lo, _hi = float(_rj.GetLowerLimitAttr().Get()), float(_rj.GetUpperLimitAttr().Get())
+    DOOR = {"view": _dv, "dof": _dnames.index(_dc["joint"]), "n": len(_dnames), "idx": np.arange(1, dtype=np.int32),
+            "sign": 1.0 if abs(_hi) >= abs(_lo) else -1.0, "r_h": _r_h, "r_edge": _r_edge,
+            "force": float(_dc.get("opening_force_n", 35.0)), "decay": float(_dc.get("decay_m", 0.003)),
+            "door_path": _door_prim.GetPath().pathString, "root_path": _droot.GetPath().pathString, "last": (0.0, 0.0),
+            "law": _dc.get("law", "magnetic_gasket"), "state": {}, "button": None, "button_m": 0.0,
+            "friction": float(_dc.get("hinge_friction_n_m", 0.0))}
+    if DOOR["law"] == "latch_kick":
+        # the release button: a prismatic joint of the same articulation, its travel inward positive
+        _bj = next((q for q in Usd.PrimRange(_tobj) if q.IsA(UsdPhysics.PrismaticJoint) and q.GetName() == _dc["button_joint"]), None)
+        if _bj is None or _dc["button_joint"] not in _dnames:
+            raise SystemExit(f"grasp_replay.door: no button joint {_dc['button_joint']!r} in {_droot.GetPath()}")
+        _blo, _bhi = float(_bj.GetAttribute("physics:lowerLimit").Get()), float(_bj.GetAttribute("physics:upperLimit").Get())
+        DOOR["button"] = _dnames.index(_dc["button_joint"])
+        _bb1 = UsdPhysics.PrismaticJoint(_bj).GetBody1Rel().GetTargets()
+        DOOR["button_body"] = _bb1[0].name if _bb1 else None          # the critic reads the press on it
+        DOOR["button_sign"] = 1.0 if abs(_bhi) >= abs(_blo) else -1.0
+        DOOR["trip_m"] = float(_dc.get("trip_m", 0.006))
+        DOOR["kw"] = dict(trip_m=DOOR["trip_m"], latch_torque_n_m=float(_dc.get("latch_torque_n_m", 30.0)),
+                          kick_torque_n_m=float(_dc.get("kick_torque_n_m", 0.6)), kick_end_rad=np.radians(float(_dc.get("kick_end_deg", 10.0))))
+    print(f"[door] {_dj.GetName()} ({DOOR['law']}): hinge {np.round(_hinge, 3).tolist()} axis {np.round(_axis, 3).tolist()}; handle {_r_h:.3f} m from the hinge, "
+          f"latch edge {_r_edge:.3f} m" + (f"; hinge friction {DOOR['friction']} N m" if DOOR["friction"] else "") + (f"; gasket {DOOR['force']} N at the handle ({DOOR['force'] * _r_h:.1f} N m), decaying over {DOOR['decay'] * 1000:.1f} mm"
+                                           if DOOR["law"] == "magnetic_gasket" else f"; latched until {_dc['button_joint']} travels {DOOR['trip_m'] * 1000:.1f} mm, "
+                                           f"then kicked {DOOR['kw']['kick_torque_n_m']} N m to {np.degrees(DOOR['kw']['kick_end_rad']):.0f} deg"), flush=True)
+
+
+def door_step():
+    """The gasket law on the door's measured angle: a closing torque of the
+    opening force at the handle, times exp(-gap / decay) with the gap the
+    latch edge's travel from closed. Every physics step."""
+    v = DOOR["view"]
+    qd_ = np.asarray(v.get_dof_positions(), float).reshape(-1)
+    th = float(qd_[DOOR["dof"]]) * DOOR["sign"]
+    if DOOR["law"] == "latch_kick":
+        DOOR["button_m"] = float(qd_[DOOR["button"]]) * DOOR["button_sign"]
+        T = _latch_law(th, DOOR["button_m"], DOOR["state"], **DOOR["kw"])
+    else:
+        T = _gasket_law(th, DOOR["force"], DOOR["r_h"], DOOR["r_edge"], DOOR["decay"])
+    f = np.zeros((1, DOOR["n"]), np.float32)
+    # the gasket's law gives a closing magnitude; the latch's a signed torque, positive
+    # opening (negated, the latch's 30 N m hold flung a microwave's door open, 2026-10-16)
+    f[0, DOOR["dof"]] = (DOOR["sign"] * T) if DOOR["law"] == "latch_kick" else (-DOOR["sign"] * T)
+    if DOOR["friction"] > 0.0:
+        # the hinge's friction, against the door's turning (behaviors.hinge_friction)
+        om = float(np.asarray(v.get_dof_velocities(), float).reshape(-1)[DOOR["dof"]]) * DOOR["sign"]
+        f[0, DOOR["dof"]] += DOOR["sign"] * _hinge_friction(om, DOOR["friction"])
+    v.set_dof_actuation_forces(f, DOOR["idx"])
+    DOOR["last"] = (th, T)
 
 def tool_step():
     """The motor law on the tool's measured joints: its output's target speed."""
@@ -428,11 +755,23 @@ if HM:
         if CLOTH:
             raise RuntimeError("a deformable target has no rigid contact view")
         CONTACTS = sim_view.create_rigid_contact_view(TARGET_RB.GetPath().pathString, filter_patterns=HAND_LINKS)
-        if (spec.get("grasp_plan") or {}).get("task") == "loop_grip":
-            # every body of the scissors: the index is in the OTHER half's loop
-            # (the target body is the thumb's half), and its force went unmeasured
-            CONTACTS_MORE = [sim_view.create_rigid_contact_view(bp_, filter_patterns=HAND_LINKS)
-                             for bp_ in BODY_PATHS.values() if bp_ != TARGET_RB.GetPath().pathString]
+        if ALL_BODY_CONTACTS:
+            # every body of the object, logged body by body: the scissors' index is in the
+            # OTHER half's loop (the target body is the thumb's half); a microwave's index
+            # pressed its release button 8.76 mm while the force on the door - the target -
+            # read 0.0 N, and the critic took the press for untouched (Gemini 4, 2026-10-16)
+            CONTACTS_MORE = []
+            for bp_ in BODY_PATHS.values():
+                if bp_ == TARGET_RB.GetPath().pathString:
+                    continue
+                cv_ = sim_view.create_rigid_contact_view(bp_, filter_patterns=HAND_LINKS)
+                if getattr(cv_, "_backend", True) is None:
+                    # a body PhysX gives no contact view (a microwave's lamp, filtered against its
+                    # cabinet: the view came back empty and the replay died at its first read)
+                    print(f"[hand] no contact view on {bp_.split('/')[-1]}: its contacts go unmeasured", flush=True)
+                    continue
+                cv_.body_path = bp_
+                CONTACTS_MORE.append(cv_)
         if TOOL is not None:
             TOOL["trigger_contacts"] = sim_view.create_rigid_contact_view(TOOL["trigger_path"], filter_patterns=HAND_LINKS)
     except Exception as e:                              # the grip still runs; its forces go unmeasured
@@ -484,9 +823,15 @@ def digit_forces_by_body():
         return None
     out = {}
     names = {bp_: bp_.split("/")[-1] for bp_ in BODY_PATHS.values()}
-    views = [(TARGET_RB.GetPath().pathString, CONTACTS)] + list(zip([bp_ for bp_ in BODY_PATHS.values() if bp_ != TARGET_RB.GetPath().pathString], CONTACTS_MORE))
+    views = [(TARGET_RB.GetPath().pathString, CONTACTS)] + [(cv_.body_path, cv_) for cv_ in CONTACTS_MORE]
     for bp_, cv_ in views:
-        n = np.linalg.norm(np.asarray(cv_.get_contact_force_matrix(DT), float).reshape(-1, 3), axis=1)
+        try:
+            n = np.linalg.norm(np.asarray(cv_.get_contact_force_matrix(DT), float).reshape(-1, 3), axis=1)
+        except AttributeError as e:                              # an empty view: unmeasured, not a crash
+            print(f"[hand] contact view on {names[bp_]} unreadable ({e}): dropped", flush=True)
+            if cv_ in CONTACTS_MORE:
+                CONTACTS_MORE.remove(cv_)
+            continue
         per = [round(float(n[2 * k] + n[2 * k + 1]), 3) for k in range(5)]
         out[names[bp_]] = {"index": per[0], "middle": per[1], "ring": per[2], "pinky": per[3], "thumb": per[4], "palm": round(float(n[10]), 3)}
     return out
@@ -498,8 +843,9 @@ def digit_forces():
         return None
     m = np.asarray(CONTACTS.get_contact_force_matrix(DT), float).reshape(-1, 3)
     n = np.linalg.norm(m, axis=1)
-    for cv_ in CONTACTS_MORE:                                   # the object's other bodies (a loop grip's other half)
-        n = n + np.linalg.norm(np.asarray(cv_.get_contact_force_matrix(DT), float).reshape(-1, 3), axis=1)
+    if (spec.get("grasp_plan") or {}).get("task") == "loop_grip":
+        for cv_ in CONTACTS_MORE:                               # the object's other bodies (a loop grip's other half)
+            n = n + np.linalg.norm(np.asarray(cv_.get_contact_force_matrix(DT), float).reshape(-1, 3), axis=1)
     per = [round(float(n[2 * k] + n[2 * k + 1]), 3) for k in range(5)]
     return {"index": per[0], "middle": per[1], "ring": per[2], "pinky": per[3], "thumb": per[4],
             "palm": round(float(n[10]), 3)}
@@ -534,6 +880,12 @@ def simulate(seconds):
             apply_controller()
         if HAND is not None:
             hand_step()                                 # the hand's firmware, every physics step
+        if DOOR is not None:
+            door_step()                                 # the door's gasket, every physics step
+        if SCREW is not None:
+            screw_step()                                # the screw on the bit, every physics step
+        if HOLE is not None:
+            hole_step()                                 # the wood under the bit, every physics step
         px.update_simulation(DT, CLOCK[0])
         CLOCK[0] += DT
     px.update_transformations(False, True, False, False)
@@ -841,16 +1193,24 @@ def plan_then(hold_row, at_tick, k=0, stage="finger_push"):
     env.update({"PYTHONPATH": os.path.expanduser("~/Documents/Github/openusd_build/lib/python") + ":" + os.path.expanduser("~/Documents/Github/HomeHero"),
                 "LD_LIBRARY_PATH": os.path.expanduser("~/Documents/Github/openusd_build/lib")})
     out_npz = scene_dir / "grasp_plan" / f"then_targets{sfx}.npz"
-    r = subprocess.run([os.path.expanduser("~/Documents/Github/HomeHero/.venv/bin/python"), str(Path(__file__).resolve().parent / "finger_push_planner.py"),
-                        str(scene_dir), "--hold", str(scene_dir / "grasp_plan" / f"hold{sfx}.npz"), "--poses", str(scene_dir / f"settled_poses_hold{sfx}.json"),
-                        "--out", str(out_npz), "--stroke", stroke],
-                       env=env, capture_output=True, text=True, timeout=1200)
-    verdict = next((ln for ln in r.stdout.splitlines() if ln.startswith("PUSH_PLAN")), None)
+    door_stage = stage.split(":")[0] == "door_edge"
+    screw_stage = stage.split(":")[0] == "screw_drive"
+    tool_stage = stage.split(":")[0] == "tool_grip"
+    # a door's next stage (door_then.py: the door where it is now, its free edge the handle),
+    # or the other hand's push on a held object (finger_push_planner.py)
+    tool_ = ("door_then.py" if door_stage else "screw_then.py" if screw_stage else "tool_then.py" if tool_stage
+             else "finger_push_planner.py")
+    cmd = [os.path.expanduser("~/Documents/Github/HomeHero/.venv/bin/python"), str(Path(__file__).resolve().parent / tool_),
+           str(scene_dir), "--hold", str(scene_dir / "grasp_plan" / f"hold{sfx}.npz"), "--poses", str(scene_dir / f"settled_poses_hold{sfx}.json"),
+           "--out", str(out_npz)] + ([] if door_stage or tool_stage else ["--part", stage.split(":")[1] if ":" in stage else "drive"] if screw_stage
+                                     else ["--stroke", stroke])
+    r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=1800)
+    verdict = next((ln for ln in r.stdout.splitlines() if ln.startswith(("PUSH_PLAN", "DOOR_PLAN", "SCREW_PLAN", "TOOL_PLAN"))), None)
     (scene_dir / "grasp_plan" / f"then_plan{sfx}.log").write_text(r.stdout[-20000:] + "\n--- stderr ---\n" + r.stderr[-20000:])
     print(f"[then {k} {stage}] {verdict or 'the push planner printed no verdict'}", flush=True)
     THEN["plans"].append(f"{stage}: {verdict}")
     THEN["plan"] = " | ".join(THEN["plans"])
-    if not (verdict or "").startswith("PUSH_PLAN OK"):
+    if not (verdict or "").startswith(("PUSH_PLAN OK", "DOOR_PLAN OK", "SCREW_PLAN OK", "TOOL_PLAN OK")):
         return None
     z = np.load(out_npz)
     return [np.asarray(x, float) for x in z["targets"][1:]], [str(x) for x in z["stages"][1:]]
@@ -966,6 +1326,32 @@ for tick, (plan_i, row, stage_name) in enumerate(schedule()):
     palm = body_pose(f"{LINKS}/psyonic_left_base")
     qn = art.get_dof_positions()
     tool_entry = tool_step() if TOOL is not None else None
+    if SCREW is not None:
+        tool_entry = dict(tool_entry or {}, screw=dict(SCREW["last"]))
+        if SCREW.get("pose") is not None:
+            # the render follows the physics: the screw's visual twin set where the law put it (its
+            # body's transform is never written: PhysX took that as a teleport)
+            _pp, _qq = SCREW["pose"]
+            SCREW["usd_translate"].Set(Gf.Vec3d(*[float(v) for v in _pp]))
+            _o = SCREW["usd_orient"]
+            _qv = Gf.Quatd(float(_qq[3]), Gf.Vec3d(float(_qq[0]), float(_qq[1]), float(_qq[2])))
+            _o.Set(_qv if _o.GetPrecision() == UsdGeom.XformOp.PrecisionDouble else Gf.Quatf(_qv))
+    if HOLE is not None:
+        tool_entry = dict(tool_entry or {}, hole=dict(HOLE["last"]))
+        hole_look()
+    if DOOR is not None:
+        th_, T_ = DOOR["last"]
+        bp_ = body_pose(DOOR["root_path"])
+        door_entry = {"deg": round(float(np.degrees(th_)), 3), "seal_n_m": round(float(T_), 3),
+                      "seal_at_handle_n": round(float(T_) / DOOR["r_h"], 2) if DOOR["r_h"] > 0 else None,
+                      "appliance_p": np.round(np.asarray(bp_[0], float), 4).tolist() if bp_ is not None else None}
+        if DOOR["law"] == "latch_kick":
+            door_entry.update(button_mm=round(DOOR["button_m"] * 1000, 2), latched=bool(DOOR["state"].get("latched", True)))
+        tool_entry = dict(tool_entry or {}, door=door_entry)
+        db_ = body_pose(DOOR["door_path"])
+        if db_ is not None and "body" not in tool_entry:
+            # the door's own pose: the critic reads the handle's motion in the palm from it
+            tool_entry["body"] = {"p": np.round(np.asarray(db_[0], float), 5).tolist(), "q_wxyz": np.round(np.asarray(db_[1], float), 6).tolist()}
     entry = {"tick": tick, "plan_tick": plan_i, "t": round(tick / hz, 3), "stage": stage_name, **({"tool": tool_entry} if tool_entry else {}),
              "phase": "replay" if plan_i < len(ref) else "hold",
              "target_rise_m": round(float(c[2] - rest_c[2]), 4),
@@ -1197,26 +1583,120 @@ if LOOP is not None:
     print(f"LOOP {'PASS' if loop['pass'] else 'FAIL'} {spec['name']}: {len(good)} of {len(swings)} swings followed the hand's spread by >= {min_swing:.0f} deg "
           f"(blades {loop['blades_deg_range'][0]} to {loop['blades_deg_range'][1]} deg); the scissors {'stayed up' if held_up else 'did NOT stay up'} on the digits "
           f"(lowest rise during the cycles {loop['min_rise_during_cycles_m']} m)", flush=True)
+if DOOR is not None:
+    # the door opened by the hand at its handle: the gasket broken, the door
+    # swung at least the plan's least angle, the hand on the door while it
+    # pulled, the appliance where it stood
+    dl = [(r["stage"], r["tool"]["door"], r.get("contact_n") or {}) for r in log if (r.get("tool") or {}).get("door")]
+    degs = [d["deg"] for _, d, _ in dl]
+    pull_rows = [(d, c) for s_, d, c in dl if s_ == "pull"]
+    plan_ = json.loads(Path(gr["reference"]).expanduser().with_name("plan.json").read_text()) if Path(gr["reference"]).expanduser().with_name("plan.json").exists() else {}
+    planned = float(plan_.get("pull_deg") or ((spec.get("grasp_plan") or {}).get("door_open") or {}).get("open_deg", 40.0))
+    least = float(((spec.get("grasp_plan") or {}).get("door_open") or {}).get("min_open_deg", 25.0))
+    if THEN.get("kind") == "door_edge" and spec.get("door_edge"):
+        # the door swung by a later stage (a microwave's, pushed from inside after its pop): that
+        # stage's plan, from where the door stood when it began; its least is the door's angle
+        _tp = scene_dir / "grasp_plan" / "then_targets.plan.json"
+        _tpj = json.loads(_tp.read_text()) if _tp.exists() else {}
+        _de = spec["door_edge"]
+        _deg0 = pull_rows[0][0]["deg"] if pull_rows else 0.0
+        planned = round(float(_deg0) + float(_tpj.get("pull_deg") or _de.get("open_deg", 40.0)), 1)
+        least = float(_de.get("min_open_deg", least))
+    hand_n = [sum(v for k, v in c.items() if k != "palm") for _, c in pull_rows]
+    p0 = next((d["appliance_p"] for _, d, _ in dl if d.get("appliance_p")), None)
+    p1 = next((d["appliance_p"] for _, d, _ in reversed(dl) if d.get("appliance_p")), None)
+    moved = float(np.linalg.norm(np.asarray(p1) - np.asarray(p0))) if p0 and p1 else None
+    door = {"opening_force_n": DOOR["force"], "handle_radius_m": round(DOOR["r_h"], 3), "planned_deg": planned, "least_deg": least,
+            "max_deg": round(max(degs), 1) if degs else None, "deg_at_end_of_pull": round(pull_rows[-1][0]["deg"], 1) if pull_rows else None,
+            "deg_at_end": round(degs[-1], 1) if degs else None,
+            "seal_broken": bool(degs and max(degs) > np.degrees(3 * DOOR["decay"] / DOOR["r_edge"])),
+            "hand_on_door_mean_n": round(float(np.mean(hand_n)), 2) if hand_n else None,
+            "hand_on_door_min_n": round(float(np.min(hand_n)), 2) if hand_n else None,
+            "appliance_moved_m": round(moved, 4) if moved is not None else None}
+    door["followed_the_hand"] = bool(door["deg_at_end_of_pull"] is not None and door["deg_at_end_of_pull"] >= 0.8 * planned)
+    door["pass"] = bool(door["seal_broken"] and (door["max_deg"] or 0) >= least and (door["hand_on_door_mean_n"] or 0) >= 1.0
+                        and (moved is None or moved < 0.01))
+    if DOOR["law"] == "latch_kick":
+        # the button pressed past its trip, the latch held until then, the door kicked ajar
+        bt = [(d.get("button_mm") or 0.0, d["deg"], d.get("latched")) for _, d, _ in dl]
+        trip_i = next((i for i, (b_, _, _) in enumerate(bt) if b_ >= DOOR["trip_m"] * 1000), None)
+        before = [g_ for b_, g_, _ in bt[:trip_i]] if trip_i is not None else [g_ for _, g_, _ in bt]
+        # the pop: from the trip to the end of the press's own plan (a later stage's
+        # rows are the hand's work, not the kick's: a door creeping open on its tilted
+        # hinge read as a pop to 90 deg, 2026-10-16)
+        _pt = [r.get("plan_tick", r["tick"]) for r in log if (r.get("tool") or {}).get("door")]
+        _st = THEN.get("start_tick")
+        _end_i = next((i for i, t_ in enumerate(_pt) if _st is not None and t_ >= _st), len(bt))
+        after = [g_ for _, g_, _ in bt[trip_i:_end_i]] if trip_i is not None else []
+        door.update(button_body=DOOR.get("button_body"), cabinet_body=_cab_name, button_max_mm=round(max((b_ for b_, _, _ in bt), default=0.0), 2), tripped=trip_i is not None,
+                    latch_held_deg=round(max(before, default=0.0), 2), popped_deg=round(max(after, default=0.0), 1),
+                    seal_broken=None)
+        kick_end = float(np.degrees(DOOR["kw"]["kick_end_rad"]))
+        popped = door["popped_deg"] >= 0.5 * kick_end
+        # opened by the hand: the door at least `least` open, and the hand's push the cause -
+        # the door turned through the pull with the hand on it (the creep above passed on
+        # max_deg alone, the hand 0.0 N on a door already at 90 deg)
+        if pull_rows:
+            # turned only while the hand was on it (door_verdict: a force floor fails a light door)
+            from door_verdict import hand_drove_door
+            _v = hand_drove_door([d_["deg"] for d_, _ in pull_rows], hand_n, least, planned - float(pull_rows[0][0]["deg"]))
+            door.update(deg_at_start_of_pull=round(float(pull_rows[0][0]["deg"]), 1), **{k: v for k, v in _v.items() if k != "opened_by_hand"})
+            opened_by_hand = _v["opened_by_hand"]
+        else:
+            # a later stage was to swing the door and never ran (its plan failed): not opened
+            opened_by_hand = False if (THEN.get("kind") == "door_edge" and spec.get("door_edge")) else None
+        door["opened_by_hand"] = opened_by_hand
+        door["pass"] = bool(door["tripped"] and door["latch_held_deg"] <= 1.0 and popped and (moved is None or moved < 0.01)
+                            and (opened_by_hand is not False))
+    result["door"] = door
+    result["pass"] = door["pass"]
+    if DOOR["law"] == "latch_kick":
+        print(f"BUTTON {'PASS' if door['tripped'] else 'FAIL'} {spec['name']}: the button pressed {door['button_max_mm']} mm (trips at {DOOR['trip_m'] * 1000:.1f}); "
+              f"the latch held the door within {door['latch_held_deg']} deg until then; the door popped to {door['popped_deg']} deg", flush=True)
+    _seal = (f"the hand found it at {door.get('deg_at_start_of_pull')} deg and pushed it {door.get('pushed_by_hand_deg')} deg, "
+             f"on the door through {100 * (door.get('turning_with_hand_fraction') or 0):.0f} % of its turning ({door.get('hand_n_while_turning')} N)"
+             if DOOR["law"] == "latch_kick" else f"gasket {'broken' if door['seal_broken'] else 'HELD'} against {DOOR['force']} N at the handle")
+    print(f"DOOR {'PASS' if door['pass'] else 'FAIL'} {spec['name']}: the door opened {door['max_deg']} deg at most ({door['deg_at_end_of_pull']} deg at the end of "
+          f"the pull, planned {planned}, least {least}); {_seal}; "
+          f"the hand on the door {door['hand_on_door_mean_n']} N mean through the pull; the appliance moved {door['appliance_moved_m']} m; "
+          f"{door['deg_at_end']} deg at the end", flush=True)
 if TOOL is not None:
     # the tool worked in the hand: the trigger pulled, the output at the law's
     # speed for that pull, stopped after the release, the tool held throughout
     tl = [(r["tick"], r["stage"], r["tool"]) for r in log if r.get("tool")]
-    run = [t for _, s_, t in tl if s_ == "run"]
+    # the run: the plain trigger test's "run" stage - or a screw's drive, the trigger held through
+    # "spin", "drive" and "seat" (no "run": the record read 0 rpm for a chuck that turned a screw
+    # 15.8 times, and Gemini 4 took the screw for pushed in without turning, 2026-10-16)
+    run = [t for _, s_, t in tl if s_ == "run"] or [t for _, s_, t in tl if s_ in ("spin", "drive")]
     tail = run[len(run) // 2:] if run else []
     after = [t for _, s_, t in tl if s_ == "hold"]
-    peak_tr = max((t["throttle"] for _, s_, t in tl if s_ in ("pull", "run")), default=0.0)
+    _TRIG = ("pull", "run", "spin", "drive", "seat")                 # a screw's drive holds the trigger through these
+    peak_tr = max((t["throttle"] for _, s_, t in tl if s_ in _TRIG), default=0.0)
     run_rpm = float(np.mean([t["chuck_rpm"] for t in tail])) if tail else 0.0
     law_rpm = float(np.mean([t["law_rpm"] for t in tail])) if tail else 0.0
     end_rpm = float(after[-1]["chuck_rpm"]) if after else None
     before_pull = [t["chuck_rpm"] for _, s_, t in tl if s_ in ("close", "lift", "settle")]
     tool = {"behavior": TOOL["beh"]["type"], "trigger_peak_fraction": round(peak_tr, 3),
-            "trigger_peak_mm": round(1000 * max((t["trigger_m"] for _, s_, t in tl if s_ in ("pull", "run")), default=0.0), 2),
+            "trigger_peak_mm": round(1000 * max((t["trigger_m"] for _, s_, t in tl if s_ in _TRIG), default=0.0), 2),
             "run_rpm": round(run_rpm, 1), "law_rpm_at_that_pull": round(law_rpm, 1),
             "tracking": round(run_rpm / law_rpm, 3) if law_rpm > 0 else None,
             "rpm_before_pull_max": round(max(before_pull, default=0.0), 1), "rpm_at_end": end_rpm,
             "powered_throughout": all(t["powered"] for _, _, t in tl)}
-    tool["pass"] = bool(result["lifted"] and result["held"] and peak_tr >= 0.4 and law_rpm > 0 and run_rpm >= 0.8 * law_rpm
-                        and end_rpm is not None and end_rpm <= max(30.0, 0.05 * run_rpm) and tool["rpm_before_pull_max"] < 30.0)
+    # the switch: where the law read it at the start and the end, and whether the hand set it to
+    # forward in its own stage (the thumb's press) - authored there, the critic caps the ladder
+    _dirs = [(s_, t.get("direction")) for _, s_, t in tl if t.get("direction") is not None]
+    if _dirs:
+        tool.update(direction_at_start=_dirs[0][1], direction_at_end=_dirs[-1][1],
+                    switch_set_by_hand=bool(_dirs[0][1] != 1 and any(d_ == 1 for s_, d_ in _dirs
+                                                                     if s_ in ("switch", "switch_release", "press", "pressed", "release"))
+                                            and _dirs[-1][1] == 1))
+    # the use ladder's rung 2, in its own words: the chuck at the motor law's speed for the pull it got, stopped on
+    # the release, still before the pull - apart from how far the trigger went (the 40 % floor below; the grip's
+    # full_trigger_travel grades the reach): a 35 % pull that ran the chuck to the law read as "did not run" (2026-10-17)
+    tool["ran_per_law"] = bool(law_rpm > 0 and run_rpm >= 0.8 * law_rpm and end_rpm is not None
+                               and end_rpm <= max(30.0, 0.05 * run_rpm) and tool["rpm_before_pull_max"] < 30.0)
+    tool["pull_reach_ok"] = bool(peak_tr >= 0.4)
+    tool["pass"] = bool(result["lifted"] and result["held"] and tool["pull_reach_ok"] and tool["ran_per_law"])
     result["tool"] = tool
     result["pass"] = tool["pass"]
     print(f"TOOL {'PASS' if tool['pass'] else 'FAIL'} {spec['name']}: the index pulled the trigger {tool['trigger_peak_mm']} mm "
@@ -1224,6 +1704,66 @@ if TOOL is not None:
           f"(tracking {tool['tracking']}), {end_rpm} rpm at the end after the release, {tool['rpm_before_pull_max']} rpm before the pull; "
           f"the tool rose {100 * result['target_peak_rise_m']:.1f} cm and {'stayed' if result['held'] else 'did NOT stay'} in the hand "
           f"(drift {result['hand_object_drift_m']} m); battery seated throughout: {tool['powered_throughout']}", flush=True)
+if SCREW is not None:
+    # the screw driven by the bit: seated flush, not stripped, the whole length driven,
+    # the drill still in the hand - and it turned only with the bit in its head
+    sl = [(r["stage"], r["tool"]["screw"]) for r in log if (r.get("tool") or {}).get("screw")]
+    kw_ = SCREW["kw"]
+    turned = [(s_, x) for k_, (s_, x) in enumerate(sl) if k_ and x["turns"] > sl[k_ - 1][1]["turns"] + 1e-6]
+    drove_mm = (sl[-1][1]["depth_mm"] - kw_["start_depth_m"] * 1000) if sl else 0.0
+    need_mm = (kw_["seat_depth_m"] - kw_["start_depth_m"]) * 1000
+    drv = [x for s_, x in sl if s_ in ("drive", "seat")]
+    screw_v = {"start_mm": round(kw_["start_depth_m"] * 1000, 2), "end_mm": sl[-1][1]["depth_mm"] if sl else None, "drove_mm": round(drove_mm, 2),
+               "needed_mm": round(need_mm, 2), "turns": sl[-1][1]["turns"] if sl else 0.0,
+               "seated": bool(SCREW["state"].get("seated")), "stripped": bool(SCREW["state"].get("stripped")),
+               "turned_with_bit_in_head": round(float(np.mean([x["engaged"] for _, x in turned])), 3) if turned else None,
+               "engaged_in_drive": round(float(np.mean([x["engaged"] for x in drv])), 3) if drv else None,
+               "peak_torque_n_m": round(max((x["torque_n_m"] for _, x in sl), default=0.0), 3),
+               "chuck_rpm_in_drive": round(float(np.mean([x["chuck_rpm"] for x in drv])), 1) if drv else None,
+               "closest_lateral_mm": min((x["lateral_mm"] for _, x in sl if x["lateral_mm"] is not None), default=None),
+               "held": bool(result.get("held"))}
+    screw_v["pass"] = bool(screw_v["seated"] and not screw_v["stripped"] and drove_mm >= 0.95 * need_mm and screw_v["held"])
+    result["screw"] = screw_v
+    result["pass"] = screw_v["pass"]
+    print(f"SCREW {'PASS' if screw_v['pass'] else 'FAIL'} {spec['name']}: the screw went {screw_v['drove_mm']} of {screw_v['needed_mm']} mm in "
+          f"{screw_v['turns']} turns, {'seated' if screw_v['seated'] else 'NOT seated'}{', STRIPPED' if screw_v['stripped'] else ''}; "
+          f"the bit in its head through {100 * (screw_v['engaged_in_drive'] or 0):.0f} % of the drive (closest {screw_v['closest_lateral_mm']} mm off its axis), "
+          f"peak {screw_v['peak_torque_n_m']} N m at {screw_v['chuck_rpm_in_drive']} rpm; the drill {'held' if screw_v['held'] else 'NOT held'}", flush=True)
+if HOLE is not None:
+    # the hole the bit cut: as deep as asked (through, for a through hole), the bit's size and
+    # no more than the play it cut with, on its line; the drill still in the hand. Its shape is
+    # the take's outcome: a later scene builds the board with it (build_er_scene holes_from)
+    hl = [(r["stage"], r["tool"]["hole"]) for r in log if (r.get("tool") or {}).get("hole")]
+    st_ = HOLE["state"]
+    cutting = [x for _, x in hl if x["chip_mm"] > 0]
+    r_ = 0.5 * HOLE["bit_d_m"] + (float(np.percentile(HOLE["lat_cut"], 95)) if HOLE["lat_cut"] else 0.0)
+    need = HOLE["target_depth_m"]
+    hole_v = {"depth_mm": round(st_.get("depth_m", 0.0) * 1000, 2), "needed_mm": round(need * 1000, 2), "through": bool(st_.get("through")),
+              "diameter_mm": round(2000 * r_, 3), "bit_mm": round(HOLE["bit_d_m"] * 1000, 3),
+              "lateral_max_mm": round(1000 * max(HOLE["lat_cut"], default=0.0), 3), "tilt_deg": round(HOLE.get("tilt_deg") or 0.0, 2),
+              "turns": round(st_.get("turns", 0.0), 2), "cut_cm3": round(st_.get("cut_m3", 0.0) * 1e6, 4),
+              "thrust_mean_n": round(float(np.mean([x["thrust_n"] for x in cutting])), 1) if cutting else None,
+              "thrust_peak_n": round(max((x["thrust_n"] for _, x in hl), default=0.0), 1),
+              "chip_mean_mm": round(float(np.mean([x["chip_mm"] for x in cutting])), 4) if cutting else None,
+              "torque_peak_n_m": round(max((x["torque_n_m"] for _, x in hl), default=0.0), 4),
+              "rpm_cutting": round(float(np.mean([x["bit_rpm"] for x in cutting])), 1) if cutting else None,
+              "entry": None if HOLE["entry"] is None else np.round(HOLE["entry"], 5).tolist(), "held": bool(result.get("held"))}
+    hole_v["pass"] = bool(HOLE["entry"] is not None and st_.get("depth_m", 0.0) >= need - 5e-4 and r_ * 2 <= HOLE["bit_d_m"] + 5e-4
+                          and hole_v["held"])
+    result["hole"] = hole_v
+    result["pass"] = hole_v["pass"]
+    if HOLE["entry"] is not None:
+        (out / "outcome.json").write_text(json.dumps({
+            "kind": "drill_hole_wood", "scene": spec["name"], "fixture": gr["hole"]["fixture"], "material": gr["hole"].get("material"),
+            "board_size": next(f for f in spec["environment"]["fixtures"] if f["name"] == gr["hole"]["fixture"])["size"],
+            "holes": [{"entry": np.round(HOLE["entry"], 6).tolist(), "r": round(r_, 6), "depth_m": round(st_.get("depth_m", 0.0), 6),
+                       "out": HOLE["n"].tolist(), "sides": HOLE["sides"], "through": bool(st_.get("through")),
+                       "bit_d_m": HOLE["bit_d_m"], "tilt_deg": hole_v["tilt_deg"]}],
+            "law": "material_laws.drill_cut", "sources": gr["hole"].get("sources")}, indent=1))
+    print(f"HOLE {'PASS' if hole_v['pass'] else 'FAIL'} {spec['name']}: {hole_v['depth_mm']} of {hole_v['needed_mm']} mm"
+          f"{' (through)' if hole_v['through'] else ''}, {hole_v['diameter_mm']} mm across for a {hole_v['bit_mm']} mm bit (tilt {hole_v['tilt_deg']} deg); "
+          f"thrust {hole_v['thrust_mean_n']} N mean / {hole_v['thrust_peak_n']} N peak, chip {hole_v['chip_mean_mm']} mm a blade at "
+          f"{hole_v['rpm_cutting']} rpm, {hole_v['turns']} turns; the drill {'held' if hole_v['held'] else 'NOT held'}", flush=True)
 if CLOTH and log:
     held_rows = [r for r in log if r["stage"] == "hold"]
     end_row = held_rows[-1] if held_rows else log[-1]
@@ -1296,40 +1836,11 @@ if args.no_video:
     print("GRASP_RESULT " + json.dumps(result), flush=True)
     app.close()
     raise SystemExit(0)
-if args.frame_every > 1:
-    print(f"GRASP_FRAMES {frames['close']} every {args.frame_every} ticks (no video)", flush=True)
-    app.close()
-    raise SystemExit(0)
 OVERLAY_LABEL = str(target.GetCustomDataByKey("er:label") or target.GetName()).removeprefix("the ")
-comp = out / "frames_comp"
-shutil.rmtree(comp, ignore_errors=True)
-comp.mkdir()
-n = len(log) + 1
-for i in range(n):
-    big = Image.open(frames["close"] / f"f{i:05d}.png").convert("RGB")
-    head = Image.open(frames["head"] / f"f{i:05d}.png").convert("RGB").resize((384, 288))
-    big.paste(head, (big.width - 384 - 16, big.height - 288 - 16))
-    d = ImageDraw.Draw(big)
-    d.rectangle([big.width - 384 - 16, big.height - 288 - 16, big.width - 16, big.height - 16], outline=(255, 255, 255), width=2)
-    rr = log[i - 1] if i else {"t": 0.0, "phase": "start", "target_rise_m": 0.0}
-    stage_name = rr.get("stage", rr["phase"])
-    d.text((20, 18), f"Aida R5  t={rr['t']:.2f}s  {stage_name}  {OVERLAY_LABEL} rise {100 * rr['target_rise_m']:.1f} cm",
-           fill=(255, 255, 255))
-    d.text((big.width - 384 - 10, big.height - 288 - 32), "head camera", fill=(255, 255, 255))
-    big.save(comp / f"f{i:05d}.png")
-ff = shutil.which("ffmpeg") or "ffmpeg"
-for name, src in (("grasp.mp4", comp), ("grasp_overview.mp4", frames["overview"])):
-    subprocess.run([ff, "-v", "error", "-y", "-framerate", str(int(hz)), "-i", str(src / "f%05d.png"),
-                    "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-                    str(out / name)], check=False)
-picks = [round((n - 1) * f) for f in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)]
-tiles = [Image.open(comp / f"f{p:05d}.png").resize((640, 360)) for p in picks]
-sheet = Image.new("RGB", (3 * 640, 2 * 360))
-for i, t in enumerate(tiles):
-    sheet.paste(t, ((i % 3) * 640, (i // 3) * 360))
-sheet.save(out / "contact_sheet.png")
-for d in list(frames.values()) + [comp]:
-    shutil.rmtree(d, ignore_errors=True)
+# the film, from every tick's frames or every Nth (compose_film.py: plays at the control rate / N)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from compose_film import compose as _compose_film  # noqa: E402
+print("FILM " + json.dumps(_compose_film(out, log, OVERLAY_LABEL, hz)), flush=True)
 if "cloth" in result:
     cl = result["cloth"]
     print(f"CLOTH {'PASS' if cl['pass'] else 'FAIL'} {spec['name']}: the pinched point rose {100 * cl['rise_at_end_m']:.1f} cm "

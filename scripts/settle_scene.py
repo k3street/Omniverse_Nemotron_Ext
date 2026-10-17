@@ -44,7 +44,41 @@ xc0 = UsdGeom.XformCache()
 first = next((q for o in stage.GetPrimAtPath("/World/Objects").GetChildren() for q in Usd.PrimRange(o) if q.HasAPI(UsdPhysics.RigidBodyAPI)), None)
 p_start = np.array(xc0.GetLocalToWorldTransform(first).ExtractTranslation()) if first else None
 trajectory = []
+# a door held shut by its gasket in the replay (grasp_replay.door) is held so in
+# the settle too: free, a refrigerator's door drifted open as it settled
+DOOR = None
+_dc = (spec.get("grasp_replay") or {}).get("door")
+if _dc:
+    import omni.physics.tensors as _tensors
+    sys_path = str(Path(__file__).resolve().parent)
+    import sys as _sys
+    _sys.path.insert(0, sys_path)
+    from behaviors import gasket as _gasket, hinge_friction as _friction, latch_kick as _latch
+    _sv = _tensors.create_simulation_view("numpy", stage_id=omni.usd.get_context().get_stage_id())
+    _sv.set_subspace_roots("/")
+    _root = next(q for q in stage.Traverse() if q.HasAPI(UsdPhysics.ArticulationRootAPI) and "/World/Objects/" in q.GetPath().pathString
+                 and any(j.GetName() == _dc["joint"] for j in Usd.PrimRange(q.GetParent())))
+    _av = _sv.create_articulation_view(_root.GetPath().pathString)
+    _names = list(_av.shared_metatype.dof_names)
+    _jp = next(j for j in Usd.PrimRange(_root.GetParent()) if j.GetName() == _dc["joint"])
+    _lo, _hi = float(_jp.GetAttribute("physics:lowerLimit").Get()), float(_jp.GetAttribute("physics:upperLimit").Get())
+    # the lever arms as the replay measures them are not needed to hold the door shut: the full
+    # opening force at a 0.5 m handle, decaying over the gasket's reach
+    DOOR = {"view": _av, "dof": _names.index(_dc["joint"]), "n": len(_names), "sign": 1.0 if abs(_hi) >= abs(_lo) else -1.0}
+    print(f"[settle] holding {_dc['joint']} shut ({_dc.get('law', 'magnetic_gasket')})", flush=True)
 for k in range(int(args.seconds * HZ)):
+    if DOOR is not None:
+        th = float(np.asarray(DOOR["view"].get_dof_positions(), float).reshape(-1)[DOOR["dof"]]) * DOOR["sign"]
+        f = np.zeros((1, DOOR["n"]), np.float32)
+        if _dc.get("law", "magnetic_gasket") == "latch_kick":
+            f[0, DOOR["dof"]] = DOOR["sign"] * _latch(th, 0.0, DOOR.setdefault("state", {}), float(_dc.get("trip_m", 0.006)),
+                                                      float(_dc.get("latch_torque_n_m", 30.0)), 0.0, 1.0)
+        else:
+            f[0, DOOR["dof"]] = -DOOR["sign"] * _gasket(th, float(_dc.get("opening_force_n", 35.0)), 0.5, 0.6, float(_dc.get("decay_m", 0.003)))
+        if float(_dc.get("hinge_friction_n_m", 0.0)) > 0.0:
+            om = float(np.asarray(DOOR["view"].get_dof_velocities(), float).reshape(-1)[DOOR["dof"]]) * DOOR["sign"]
+            f[0, DOOR["dof"]] += DOOR["sign"] * _friction(om, float(_dc["hinge_friction_n_m"]))
+        DOOR["view"].set_dof_actuation_forces(f, np.arange(1, dtype=np.int32))
     px.update_simulation(DT, t)
     t += DT
     if first is not None and k % (HZ // 4) == 0:

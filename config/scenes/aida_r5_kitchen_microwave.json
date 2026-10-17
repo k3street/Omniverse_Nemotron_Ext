@@ -1,0 +1,271 @@
+{
+  "extends": "aida_r5_dining_can_grasp.json",
+  "name": "aida_r5_kitchen_microwave",
+  "purpose": "A countertop microwave on the kitchen counter, its door shut on its latch: the R5 presses the door-release button with its left index, the latch lets go and the door's kick spring pops it ajar, then the hand hooks its fingers round the door's free edge and swings the door open - a button pressed for what it does, then a handle-less door opened by its edge.",
+  "environment": {
+    "support": "/Root/props/Group/SM_kitchen_02_0",
+    "support_why": "the counter's top slab (0.86-0.89 m), clear along its length",
+    "deactivate": [
+      "/Root/props/Group/SM_chair_01_1"
+    ],
+    "deactivate_why": "as in the base scene",
+    "obstacle_prims": [
+      "/Root/props/Group/SM_kitchen_01_0",
+      "/Root/props/Group/SM_kitchen_03_0",
+      "/Root/props/Group/SM_kitchen_04_0"
+    ],
+    "obstacle_prims_why": "the counter's carcass below the slab, the backsplash and the wall cabinets above: obstacles for the arm"
+  },
+  "robot": {
+    "position": [
+      0.35,
+      0.95,
+      0.403
+    ],
+    "cad_yaw_deg": 0.0,
+    "placement_why": "in the aisle before the counter, facing it, 0.42 m west of the release button (a stance search, 2026-10-16: touch, press and staging all clear; 0.22 m from the button the forearm folded into the torso casing as the hand drew back from it); west of the button side, so the door swings open about its east hinge away from the robot",
+    "posture_rad_or_m": {
+      "amber_head_pan_joint": 0.0,
+      "amber_head_pitch_joint": 0.5585053609999999,
+      "amber_left_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_lift_joint": -0.015,
+      "amber_right_shoulder_pitch_joint": -0.01752971268371528,
+      "amber_right_shoulder_roll_joint": -0.2838099793421452,
+      "amber_right_upper_arm_roll_joint": -0.07824394607011698,
+      "amber_right_elbow_pitch_joint": -0.07046256339005019,
+      "amber_right_forearm_roll_joint": 0.7021713351646428,
+      "amber_right_wrist_pitch_joint": 0.1990612065483086,
+      "amber_right_wrist_roll_joint": 0.2022547925603151,
+      "amber_left_shoulder_pitch_joint": 0.0034333767979382052,
+      "amber_left_shoulder_roll_joint": -0.3141592653589793,
+      "amber_left_upper_arm_roll_joint": -0.0034333767979379815,
+      "amber_left_elbow_pitch_joint": 0.008577507875388732,
+      "amber_left_forearm_roll_joint": 0.7454971616233473,
+      "amber_left_wrist_pitch_joint": 0.23811919684040284,
+      "amber_left_wrist_roll_joint": 0.20683488558339833,
+      "psyonic_left_thumb_q1": 0.0
+    },
+    "posture_why": "HomeHero's navigation rest"
+  },
+  "objects": [
+    {
+      "name": "Microwave",
+      "asset_id": "model_microwave_1",
+      "class": "microwave",
+      "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_sources/ArtVIP/Articulated_objects/small_appliances/microwave/microwave_1/model_microwave_1.usd",
+      "usd_why": "the merged view of the five-part ArtVIP archive",
+      "category": "articulated_verified",
+      "target_member": "E_door_1",
+      "target_member_why": "the door is what the hand opens; the button is pressed first",
+      "xy": [
+        1.0,
+        0.241
+      ],
+      "yaw_deg": 180.0,
+      "why": "ArtVIP microwave_1: a 57 x 43 x 34 cm countertop microwave, its 46.5 cm door hinged on its left (0-90 deg) with no handle, opened by a 7.5 x 3 cm release bar at the foot of the control panel (10 mm travel). Turned 180 deg: its front faces the aisle (+y), 5 cm back from the counter's edge; hinge east, button and free edge west",
+      "deactivate": [
+        "FixedJoint_microwave_1_middle"
+      ],
+      "deactivate_why": "the source fixes the body to the world at the asset's origin; on the counter it stands on its feet",
+      "body_masses_kg": {
+        "E_body_12": 11.0,
+        "E_door_1": 1.6,
+        "E_base_plate_7": 0.9,
+        "E_switch_11": 0.01,
+        "E_light_23": 0.01
+      },
+      "body_masses_why": "a 0.9-1.2 cu ft countertop microwave weighs 11-14 kg (manufacturers' spec sheets); its door with the glass and choke ~1.5 kg, the glass turntable ~0.9 kg (estimates - the asset has none)",
+      "joint_drives": {
+        "RevoluteJoint_microwave_1_left": {
+          "type": "force",
+          "stiffness": 0.0,
+          "damping": 0.002
+        },
+        "RevoluteJoint_microwave_1_down": {
+          "type": "force",
+          "stiffness": 0.0,
+          "damping": 0.01
+        },
+        "PrismaticJoint_microwave_1_down": {
+          "type": "force",
+          "stiffness": 1000.0,
+          "damping": 5.0,
+          "target": 0.0
+        }
+      },
+      "joint_drives_why": "the door free on its hinge (the source's display drive toward closed is gone: the latch holds it, grasp_replay.door); the turntable free (its display spin target off); the release button's return spring 1000 N/m - 10 N at its full 10 mm, the 2-2.5 lbf (9-11 N) a forum gives for a microwave's door button (no manufacturer figure found, 2026-10-16)",
+      "touching": [],
+      "physics": {
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5
+      }
+    }
+  ],
+  "grasp_plan": {
+    "task": "button_press",
+    "button_press": {
+      "hand": "left",
+      "joint": "PrismaticJoint_microwave_1_down",
+      "finger": "index",
+      "overtravel_m": 0.002,
+      "why": "the index's pad on the release bar's centre, the finger pointing into the panel, pushed along the button's travel to its stop and 2 mm on (the pad gives), held, then drawn back",
+      "door_joint": "RevoluteJoint_microwave_1_left",
+      "clear_swing_deg": 25.0,
+      "clear_swing_why": "the door the button releases kicks out by itself: the whole hand, pressing and drawn back, stays out of its first 25 deg (button_press_planner) - with the thumb in front of the free edge the door was held back through the press and stopped at 9.6 deg, leaving a 3.7 cm slot at the control panel's corner, too narrow for the hand (take 2026-10-16); free, a 1-D model of the door puts the pop near 20 deg",
+      "press_m": 0.009,
+      "press_why": "pressed 9 mm: the latch trips at 6 mm and the arm falls ~2 mm short of its target against the bar's spring (6.02-6.38 mm reached for an 8 mm press, 2026-10-17); pressed for the bar's full 10 mm and 2 more, the pad met the bezel and loaded the cabinet with 15 N"
+    },
+    "approach_m": 0.05,
+    "hold_s": 1.0,
+    "why": "reach in front of the button with the index out and the other fingers curled, press, hold while the door pops, back off"
+  },
+  "grasp_replay": {
+    "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_kitchen_microwave/grasp_plan/targets.npz",
+    "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+    "lift_offset_m": 0.0,
+    "control_hz": 30,
+    "finger_q2_coefficient": 1.05851325,
+    "hold_s": 0.0,
+    "controller": "homehero_r5_action",
+    "hand_model": {
+      "kind": "ability_hand",
+      "calibration": "config/ability_hand_calibration.json",
+      "collision_voltage": 8.0,
+      "postcontact_voltage": 2.0,
+      "grip_speed": 0.5,
+      "why": "as for the refrigerator"
+    },
+    "door": {
+      "joint": "RevoluteJoint_microwave_1_left",
+      "law": "latch_kick",
+      "button_joint": "PrismaticJoint_microwave_1_down",
+      "trip_m": 0.006,
+      "latch_torque_n_m": 30.0,
+      "kick_torque_n_m": 0.6,
+      "kick_end_deg": 10.0,
+      "why": "the door's latch hooks hold it shut (30 N m: ~65 N at the free edge - a pull without the button does not open it) until the release bar has travelled 6 of its 10 mm; then the door's kick spring pushes it open, its torque falling to nothing at 10 deg, and the hinge's friction stops it a little beyond: the door ajar 6-10 cm at its free edge, room for fingers behind it. Back under 1 deg it latches again",
+      "hinge_friction_n_m": 0.1,
+      "hinge_friction_why": "a microwave's door stays where it is left: no maker states its hinge friction, so it is set to hold the 1.6 kg door (centre of mass ~0.23 m from the hinge, 0.064 N m of gravity per degree the counter is out of level) still on a counter 1.5 deg out of level. With damping alone the settled hinge's 0.08 deg tilt crept the door from 13.5 to 90 deg in 28 s before the hand reached it (take 2026-10-16); a 1-D model of the door with the kick puts the free pop at ~20 deg with this friction"
+    },
+    "live_plan": true,
+    "live_plan_why": "the microwave settles on its feet; the button is planned where it comes to rest",
+    "then": [
+      "door_edge"
+    ],
+    "then_why": "the door's swing is planned live when the press's hold ends: it starts from wherever the latch's kick left the door"
+  },
+  "overview_camera": {
+    "eye": [
+      0.95,
+      1.45,
+      2.15
+    ],
+    "target": [
+      0.85,
+      0.55,
+      1.0
+    ],
+    "focal_length_mm": 16.0,
+    "resolution": [
+      1600,
+      900
+    ],
+    "why": "high in the aisle, just in front of the wardrobe, over the robot's shoulder: the robot, the microwave and the gap behind the door, open at the top, as the hand pushes it round (the first eye, 0.25 1.85 1.65, was inside the wardrobe: 2,680 black frames, 2026-10-16 - the build now refuses an eye inside furniture)"
+  },
+  "extra_cameras": [
+    {
+      "name": "GraspCloseup",
+      "eye": [
+        0.463,
+        0.559,
+        1.558
+      ],
+      "target": [
+        0.975,
+        0.696,
+        1.028
+      ],
+      "focal_length_mm": 20.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "why": "from above the latch side: the index on the release bar and the fingers in the gap behind the door's free edge as they push it round (film_camera.py from the take's log over press, pressed and pull: 65 % of sight lines clear of the robot; the hinge side's 99 % would look through the door, which the aimer does not model)"
+    },
+    {
+      "name": "DoorSide",
+      "eye": [
+        1.7,
+        0.89,
+        1.028
+      ],
+      "target": [
+        0.975,
+        0.696,
+        1.028
+      ],
+      "focal_length_mm": 18.0,
+      "resolution": [
+        1280,
+        720
+      ],
+      "why": "from the hinge side at door height: the door popping and swinging round toward the camera (the hand behind it is hidden from here)"
+    }
+  ],
+  "physics_hz": 480,
+  "door_edge": {
+    "hand": "left",
+    "joint": "RevoluteJoint_microwave_1_left",
+    "handle": "@edge",
+    "edge_m": 0.03,
+    "open_deg": 85.0,
+    "min_open_deg": 45.0,
+    "min_fingers": 3,
+    "palm_gap_m": 0.004,
+    "approach_m": 0.06,
+    "pull_scale": 0.8,
+    "why": "after the pop: the left hand's fingers into the gap behind the door's free edge (11 cm wide at the edge after the kick's 13.5 deg), its palm side to the door's inner face, and the door pushed round its hinge with the hand - as a person standing on the latch side opens it. A wrap round the edge from outside needs the arm beyond the edge: no IK from here (offline, 2026-10-16). Planned live against the door where the kick left it",
+    "contact": "push_inner",
+    "contact_why": "door_open_planner.search_pushes: the hand's parts seated on the inner face along the door's outward normal, two or more on it, clear of the door and the cabinet",
+    "push_dirs": [
+      "along the door"
+    ],
+    "push_dirs_why": "the fingers along the door toward the hinge; along the edge (up or down) the arm misses the pose by 2-4 cm and 30 deg (offline, every candidate)",
+    "max_candidates": 14,
+    "max_candidates_why": "the best push poses come first (most parts on the door); each tried costs IK seeds, a push walked with posture changes, staging and an RRT - the first plan passed on the first candidate that pushed past the least angle",
+    "min_open_why": "the push carries the door at least 45 deg further than the pop left it (the planner) and the door ends at least 45 deg open (the replay's verdict); the arm folds (link 4 on link 2) near 65 deg",
+    "approach_scale": 0.7,
+    "speed_why": "the slide in behind the door at 0.7 of the arm's step and the push at 0.8: the door is light (0.1 N m of hinge friction, no gasket), and at 0.35/0.4 the stage took 148 s of plan (80 s at full rate, the posture walks the rest) - offline 2026-10-17: 92 s. The verdict still asks the door to turn only with the hand on it: a push fast enough to let it coast ahead fails there"
+  },
+  "lights": [
+    {
+      "name": "CounterPanel",
+      "type": "rect",
+      "position": [
+        0.9,
+        0.75,
+        2.45
+      ],
+      "size": [
+        1.0,
+        0.4
+      ],
+      "intensity": 16000,
+      "color_temperature_k": 3500,
+      "why": "a ceiling panel over the counter in front of the microwave: the kitchen has no lamp of its own near it, and the filmed take averaged 17-28 of 255"
+    },
+    {
+      "name": "AisleFill",
+      "type": "disk",
+      "position": [
+        0.3,
+        1.2,
+        2.5
+      ],
+      "radius": 0.25,
+      "intensity": 10000,
+      "color_temperature_k": 4000,
+      "why": "a downlight over the aisle where the robot stands, so its arm is not a silhouette"
+    }
+  ]
+}

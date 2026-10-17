@@ -22,6 +22,20 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
+def box_surface_points(box, spacing=0.02):
+    """A solid box's six faces as points `spacing` apart (xmin,xmax,ymin,ymax,
+    zmin,zmax): obstacles for sight lines that no robot link covers."""
+    b = [float(v) for v in box]
+    xs, ys, zs = (np.arange(b[2 * k], b[2 * k + 1] + 1e-9, spacing) for k in range(3))
+    out = []
+    for k, (lo_, hi_) in enumerate(((b[0], b[1]), (b[2], b[3]), (b[4], b[5]))):
+        for v in (lo_, hi_):
+            grids = [xs, ys, zs]
+            grids[k] = np.array([v])
+            out.append(np.stack(np.meshgrid(*grids, indexing="ij"), -1).reshape(-1, 3))
+    return np.vstack(out)
+
+
 def sight_clear(eye, targets, obstacles, radius=0.015):
     """For each target: does the segment eye -> target pass farther than
     radius from every obstacle point (the last 3 cm before the target
@@ -59,6 +73,8 @@ def main() -> int:
     ap.add_argument("--every", type=int, default=6)
     ap.add_argument("--room", default="", help="xmin,xmax,ymin,ymax,zmin,zmax the eye must stay inside")
     ap.add_argument("--distance", default="0.40,0.55,0.70")
+    ap.add_argument("--exclude", action="append", default=[],
+                    help="xmin,xmax,ymin,ymax,zmin,zmax a solid box (an appliance): no eye inside it, no sight line through it (repeatable)")
     args = ap.parse_args()
     from pinch_place_planner import CACHE
     from r5_arm_side import both_arms_geometry
@@ -98,12 +114,21 @@ def main() -> int:
     allpts = np.vstack([t for _, t in ticks])
     target = allpts.mean(0)
     room = [float(v) for v in args.room.split(",")] if args.room else None
+    # solid boxes the robot's links do not cover (a refrigerator: the first aim put the
+    # eye inside it, 2026-10-16): their faces sampled as obstacle points for every tick
+    boxes = [[float(v) for v in e.split(",")] for e in args.exclude]
+    box_pts = [box_surface_points(b) for b in boxes]
+    if box_pts:
+        extra = np.vstack(box_pts)
+        ticks = [(np.vstack([o, extra]), t) for o, t in ticks]
     best = []
     for dist in [float(v) for v in args.distance.split(",")]:
         for az in np.radians(np.arange(0, 360, 15)):
             for el in np.radians([0, 15, 30, 45]):
                 eye = target + dist * np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
                 if room and not (room[0] < eye[0] < room[1] and room[2] < eye[1] < room[3] and room[4] < eye[2] < room[5]):
+                    continue
+                if any(b[0] < eye[0] < b[1] and b[2] < eye[1] < b[3] and b[4] < eye[2] < b[5] for b in boxes):
                     continue
                 score = float(np.mean(np.concatenate([sight_clear(eye, t, o) for o, t in ticks])))
                 best.append((score, dist, np.degrees(az), np.degrees(el), eye))

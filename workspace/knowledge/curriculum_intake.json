@@ -1,0 +1,2209 @@
+{
+ "at": "2026-10-17T12:14:28",
+ "superseded_revisions": [
+  {
+   "occupation": "laboratory_materials_handler",
+   "origin": "handoff:/home/kimate/Documents/Github/HomeHero/docs/test_evidence/occupation_lab_20261017/curriculum.json",
+   "curriculum_sha256": "a92fc13a63cfbff00518736742ddd9f8b3020ddc5c09bd2d31a8e73de80e7b18"
+  }
+ ],
+ "occupations": [
+  {
+   "occupation": "laboratory_materials_handler",
+   "origin": "studio:draft_7eb1d6cc4cec467db0fa2b5594047c5f (reviewed)",
+   "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
+   "lessons": 4
+  }
+ ],
+ "lessons": [
+  {
+   "key": "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+   "title": "Move a container to the inspection bench",
+   "source": {
+    "kind": "homehero_occupation",
+    "origin": "studio:draft_7eb1d6cc4cec467db0fa2b5594047c5f (reviewed)",
+    "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
+    "title": "Laboratory materials handler"
+   },
+   "next": "asset:laboratory_materials_handler:sealed_inert_container",
+   "requirements": [
+    {
+     "id": "asset:laboratory_materials_handler:sealed_inert_container",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['sealed container', 'inert training container', 'container'] (17 pending)"
+    },
+    {
+     "id": "asset:laboratory_materials_handler:receiving_bench",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['receiving bench', 'laboratory workbench', 'bench'] (12 pending)"
+    },
+    {
+     "id": "asset:laboratory_materials_handler:inspection_bench",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['inspection bench', 'laboratory workbench', 'bench'] (12 pending)"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:base_motion",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:laboratory_materials_handler",
+     "step": "scene",
+     "met": false,
+     "evidence": "none built"
+    },
+    {
+     "id": "measure:correct_object",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field target"
+    },
+    {
+     "id": "measure:destination_match",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.ended_on"
+    },
+    {
+     "id": "measure:stable_supported_placement",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.pass"
+    },
+    {
+     "id": "measure:released",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.released"
+    },
+    {
+     "id": "measure:retained_during_transport",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.pass"
+    },
+    {
+     "id": "measure:collision_violation_count",
+     "step": "measure",
+     "met": false,
+     "evidence": "no record field"
+    },
+    {
+     "id": "take:homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    },
+    {
+     "id": "handoff:laboratory_materials_handler",
+     "step": "handoff",
+     "met": false,
+     "evidence": "no package"
+    }
+   ]
+  },
+  {
+   "key": "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin",
+   "title": "Store a container in the open bin",
+   "source": {
+    "kind": "homehero_occupation",
+    "origin": "studio:draft_7eb1d6cc4cec467db0fa2b5594047c5f (reviewed)",
+    "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
+    "title": "Laboratory materials handler"
+   },
+   "next": "asset:laboratory_materials_handler:sealed_inert_container",
+   "requirements": [
+    {
+     "id": "asset:laboratory_materials_handler:sealed_inert_container",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['sealed container', 'inert training container', 'container'] (17 pending)"
+    },
+    {
+     "id": "asset:laboratory_materials_handler:inspection_bench",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['inspection bench', 'laboratory workbench', 'bench'] (12 pending)"
+    },
+    {
+     "id": "asset:laboratory_materials_handler:open_storage_bin",
+     "step": "asset",
+     "met": false,
+     "evidence": "1 approved/verified candidates by ['open bin', 'storage bin', 'bin'], none bound"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:base_motion",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:place_inside",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:laboratory_materials_handler",
+     "step": "scene",
+     "met": false,
+     "evidence": "none built"
+    },
+    {
+     "id": "measure:correct_object",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field target"
+    },
+    {
+     "id": "measure:destination_match",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.ended_on"
+    },
+    {
+     "id": "measure:stable_supported_placement",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.pass"
+    },
+    {
+     "id": "measure:released",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.released"
+    },
+    {
+     "id": "measure:retained_during_transport",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.pass"
+    },
+    {
+     "id": "measure:collision_violation_count",
+     "step": "measure",
+     "met": false,
+     "evidence": "no record field"
+    },
+    {
+     "id": "take:homehero.occupation.laboratory_materials_handler.store_container_in_open_bin",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    },
+    {
+     "id": "handoff:laboratory_materials_handler",
+     "step": "handoff",
+     "met": false,
+     "evidence": "no package"
+    }
+   ]
+  },
+  {
+   "key": "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+   "title": "Retrieve a container from the open bin",
+   "source": {
+    "kind": "homehero_occupation",
+    "origin": "studio:draft_7eb1d6cc4cec467db0fa2b5594047c5f (reviewed)",
+    "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
+    "title": "Laboratory materials handler"
+   },
+   "next": "asset:laboratory_materials_handler:sealed_inert_container",
+   "requirements": [
+    {
+     "id": "asset:laboratory_materials_handler:sealed_inert_container",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['sealed container', 'inert training container', 'container'] (17 pending)"
+    },
+    {
+     "id": "asset:laboratory_materials_handler:open_storage_bin",
+     "step": "asset",
+     "met": false,
+     "evidence": "1 approved/verified candidates by ['open bin', 'storage bin', 'bin'], none bound"
+    },
+    {
+     "id": "asset:laboratory_materials_handler:inspection_bench",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['inspection bench', 'laboratory workbench', 'bench'] (12 pending)"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:base_motion",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:laboratory_materials_handler",
+     "step": "scene",
+     "met": false,
+     "evidence": "none built"
+    },
+    {
+     "id": "measure:correct_object",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field target"
+    },
+    {
+     "id": "measure:destination_match",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.ended_on"
+    },
+    {
+     "id": "measure:stable_supported_placement",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.pass"
+    },
+    {
+     "id": "measure:released",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.released"
+    },
+    {
+     "id": "measure:retained_during_transport",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.pass"
+    },
+    {
+     "id": "measure:collision_violation_count",
+     "step": "measure",
+     "met": false,
+     "evidence": "no record field"
+    },
+    {
+     "id": "take:homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    },
+    {
+     "id": "handoff:laboratory_materials_handler",
+     "step": "handoff",
+     "met": false,
+     "evidence": "no package"
+    }
+   ]
+  },
+  {
+   "key": "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+   "title": "Carry a loaded tray between benches",
+   "source": {
+    "kind": "homehero_occupation",
+    "origin": "studio:draft_7eb1d6cc4cec467db0fa2b5594047c5f (reviewed)",
+    "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
+    "title": "Laboratory materials handler"
+   },
+   "next": "asset:laboratory_materials_handler:loaded_tray",
+   "requirements": [
+    {
+     "id": "asset:laboratory_materials_handler:loaded_tray",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['tray', 'loaded tray'] (12 pending)"
+    },
+    {
+     "id": "asset:laboratory_materials_handler:receiving_bench",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['receiving bench', 'laboratory workbench', 'bench'] (12 pending)"
+    },
+    {
+     "id": "asset:laboratory_materials_handler:inspection_bench",
+     "step": "asset",
+     "met": false,
+     "evidence": "no approved asset by ['inspection bench', 'laboratory workbench', 'bench'] (12 pending)"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:bimanual_carry",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:base_motion",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:laboratory_materials_handler",
+     "step": "scene",
+     "met": false,
+     "evidence": "none built"
+    },
+    {
+     "id": "measure:correct_object",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field target"
+    },
+    {
+     "id": "measure:destination_match",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.ended_on"
+    },
+    {
+     "id": "measure:stable_supported_placement",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.pass"
+    },
+    {
+     "id": "measure:released",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.released"
+    },
+    {
+     "id": "measure:retained_during_transport",
+     "step": "measure",
+     "met": true,
+     "evidence": "record field move.pass"
+    },
+    {
+     "id": "measure:collision_violation_count",
+     "step": "measure",
+     "met": false,
+     "evidence": "no record field"
+    },
+    {
+     "id": "measure:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches:additional_outcome_1",
+     "step": "measure",
+     "met": false,
+     "evidence": "no record field"
+    },
+    {
+     "id": "take:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    },
+    {
+     "id": "handoff:laboratory_materials_handler",
+     "step": "handoff",
+     "met": false,
+     "evidence": "no package"
+    }
+   ]
+  },
+  {
+   "key": "homehero.queue.hh_port_microwave_v1",
+   "title": "Package microwave release and opening; develop insertion and closure as later stages",
+   "source": {
+    "kind": "homehero_scenario_queue",
+    "origin": "homehero_scenario_queue_v1.json"
+   },
+   "next": "interaction:latch_close",
+   "requirements": [
+    {
+     "id": "interaction:latch_kick",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.tripped = True"
+    },
+    {
+     "id": "interaction:hinge_friction",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "interaction:latch_close",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "planner:button_press",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.tripped = True"
+    },
+    {
+     "id": "planner:door_push",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "planner:place_inside",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.queue.hh_port_microwave_v1",
+     "step": "scene",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave"
+    },
+    {
+     "id": "take:homehero.queue.hh_port_microwave_v1",
+     "step": "take",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "handoff:hh_port_microwave_v1",
+     "step": "handoff",
+     "met": false,
+     "evidence": "no package"
+    }
+   ]
+  },
+  {
+   "key": "homehero.queue.hh_port_tool_transfer_v1",
+   "title": "Acquire a tool by its intended region, orient it and place it in a tray",
+   "source": {
+    "kind": "homehero_scenario_queue",
+    "origin": "homehero_scenario_queue_v1.json"
+   },
+   "next": "planner:slide_to_edge",
+   "requirements": [
+    {
+     "id": "asset:scissors",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_scissors_21', 'scissor']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:tool_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw held = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:slide_to_edge",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.queue.hh_port_tool_transfer_v1",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.queue.hh_port_tool_transfer_v1",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    },
+    {
+     "id": "handoff:hh_port_tool_transfer_v1",
+     "step": "handoff",
+     "met": false,
+     "evidence": "no package"
+    }
+   ]
+  },
+  {
+   "key": "homehero.queue.hh_port_drawer_storage_v1",
+   "title": "Store and retrieve fitting objects in an already-open drawer",
+   "source": {
+    "kind": "homehero_scenario_queue",
+    "origin": "homehero_scenario_queue_v1.json"
+   },
+   "next": "asset:drawer",
+   "requirements": [
+    {
+     "id": "asset:drawer",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (33 candidates)"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "interaction:drawer_slide",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "planner:place_inside",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "scene:homehero.queue.hh_port_drawer_storage_v1",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.queue.hh_port_drawer_storage_v1",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    },
+    {
+     "id": "handoff:hh_port_drawer_storage_v1",
+     "step": "handoff",
+     "met": false,
+     "evidence": "no package"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.household_mug.pick_place",
+   "title": "Household mug: pick place",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": null,
+   "requirements": [
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "scene:homehero.interaction.household_mug.pick_place",
+     "step": "scene",
+     "met": true,
+     "evidence": "aida_r5_dining_mug_grasp"
+    },
+    {
+     "id": "take:homehero.interaction.household_mug.pick_place",
+     "step": "take",
+     "met": true,
+     "evidence": "aida_r5_dining_mug_grasp pass = True"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.household_mug.handle_pick_place",
+   "title": "Household mug: handle pick place",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "scene:homehero.interaction.household_mug.handle_pick_place",
+   "requirements": [
+    {
+     "id": "asset:mug",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['ycb_mug']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "scene:homehero.interaction.household_mug.handle_pick_place",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.household_mug.handle_pick_place",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.scissor.edge_pickup",
+   "title": "Articulated scissors: edge pickup",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "planner:slide_to_edge",
+   "requirements": [
+    {
+     "id": "asset:scissors",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_scissors_21', 'scissor']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:slide_to_edge",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "scene:homehero.interaction.scissor.edge_pickup",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.scissor.edge_pickup",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.scissor.operate",
+   "title": "Articulated scissors: operate",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": null,
+   "requirements": [
+    {
+     "id": "interaction:joint_pivot",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_rail_scissors push.opened_by_the_hand = True"
+    },
+    {
+     "id": "planner:loop_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_rail_scissors pass = True"
+    },
+    {
+     "id": "scene:homehero.interaction.scissor.operate",
+     "step": "scene",
+     "met": true,
+     "evidence": "aida_r5_rail_scissors"
+    },
+    {
+     "id": "take:homehero.interaction.scissor.operate",
+     "step": "take",
+     "met": true,
+     "evidence": "aida_r5_rail_scissors push.opened_by_the_hand = True"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.screwdriver.pick_place",
+   "title": "Screwdriver: pick place",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:screwdriver",
+   "requirements": [
+    {
+     "id": "asset:screwdriver",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (9 candidates)"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:tool_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw held = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "scene:homehero.interaction.screwdriver.pick_place",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.screwdriver.pick_place",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.screwdriver.engage_tip",
+   "title": "Screwdriver: engage tip",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:screwdriver",
+   "requirements": [
+    {
+     "id": "asset:screwdriver",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (9 candidates)"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:tool_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw held = True"
+    },
+    {
+     "id": "planner:hand_turn",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.screwdriver.engage_tip",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.screwdriver.engage_tip",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.screwdriver.turn_screw",
+   "title": "Screwdriver: turn screw",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:screwdriver",
+   "requirements": [
+    {
+     "id": "asset:screwdriver",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (9 candidates)"
+    },
+    {
+     "id": "interaction:screw_drive_wood",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw screw.pass = True"
+    },
+    {
+     "id": "planner:tool_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw held = True"
+    },
+    {
+     "id": "planner:hand_turn",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.screwdriver.turn_screw",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.screwdriver.turn_screw",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.hammer.pick_place",
+   "title": "Hammer: pick place",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:hammer",
+   "requirements": [
+    {
+     "id": "asset:hammer",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (4 candidates)"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:tool_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw held = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "scene:homehero.interaction.hammer.pick_place",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.hammer.pick_place",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.hammer.tap_target",
+   "title": "Hammer: tap target",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:hammer",
+   "requirements": [
+    {
+     "id": "asset:hammer",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (4 candidates)"
+    },
+    {
+     "id": "interaction:impact_strike",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "planner:tool_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw held = True"
+    },
+    {
+     "id": "planner:strike",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.hammer.tap_target",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.hammer.tap_target",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.drawer_kit_10.open",
+   "title": "Workshop drawer cabinet: open",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:drawer",
+   "requirements": [
+    {
+     "id": "asset:drawer",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (33 candidates)"
+    },
+    {
+     "id": "interaction:drawer_slide",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "planner:drawer_pull",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.drawer_kit_10.open",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.drawer_kit_10.open",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.drawer_kit_10.close",
+   "title": "Workshop drawer cabinet: close",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:drawer",
+   "requirements": [
+    {
+     "id": "asset:drawer",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (33 candidates)"
+    },
+    {
+     "id": "interaction:drawer_slide",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "planner:drawer_pull",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.drawer_kit_10.close",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.drawer_kit_10.close",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.drawer_kit_10.store",
+   "title": "Workshop drawer cabinet: store",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:drawer",
+   "requirements": [
+    {
+     "id": "asset:drawer",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (33 candidates)"
+    },
+    {
+     "id": "interaction:drawer_slide",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:place_inside",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.drawer_kit_10.store",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.drawer_kit_10.store",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.drawer_kit_10.retrieve",
+   "title": "Workshop drawer cabinet: retrieve",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:drawer",
+   "requirements": [
+    {
+     "id": "asset:drawer",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (33 candidates)"
+    },
+    {
+     "id": "interaction:drawer_slide",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "scene:homehero.interaction.drawer_kit_10.retrieve",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.drawer_kit_10.retrieve",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.fridge_1.open",
+   "title": "Refrigerator: open",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": null,
+   "requirements": [
+    {
+     "id": "interaction:gasket",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_living_fridge door.seal_broken = True"
+    },
+    {
+     "id": "interaction:hinge_friction",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "planner:door_pull",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_living_fridge door.seal_broken = True"
+    },
+    {
+     "id": "scene:homehero.interaction.fridge_1.open",
+     "step": "scene",
+     "met": true,
+     "evidence": "aida_r5_living_fridge"
+    },
+    {
+     "id": "take:homehero.interaction.fridge_1.open",
+     "step": "take",
+     "met": true,
+     "evidence": "aida_r5_living_fridge door.seal_broken = True"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.fridge_1.close",
+   "title": "Refrigerator: close",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "scene:homehero.interaction.fridge_1.close",
+   "requirements": [
+    {
+     "id": "asset:refrigerator",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_fridge_1']"
+    },
+    {
+     "id": "interaction:gasket",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_living_fridge door.seal_broken = True"
+    },
+    {
+     "id": "interaction:hinge_friction",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "planner:door_push",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "scene:homehero.interaction.fridge_1.close",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.fridge_1.close",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.microwave_1.release_door",
+   "title": "Microwave: release door",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": null,
+   "requirements": [
+    {
+     "id": "interaction:latch_kick",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.tripped = True"
+    },
+    {
+     "id": "interaction:hinge_friction",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "planner:button_press",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.tripped = True"
+    },
+    {
+     "id": "scene:homehero.interaction.microwave_1.release_door",
+     "step": "scene",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave"
+    },
+    {
+     "id": "take:homehero.interaction.microwave_1.release_door",
+     "step": "take",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.tripped = True"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.microwave_1.open_farther",
+   "title": "Microwave: open farther",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": null,
+   "requirements": [
+    {
+     "id": "interaction:hinge_friction",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "planner:door_push",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "scene:homehero.interaction.microwave_1.open_farther",
+     "step": "scene",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave"
+    },
+    {
+     "id": "take:homehero.interaction.microwave_1.open_farther",
+     "step": "take",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.microwave_1.place_item",
+   "title": "Microwave: place item",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "planner:place_inside",
+   "requirements": [
+    {
+     "id": "asset:microwave",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_microwave_1']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:place_inside",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.microwave_1.place_item",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.microwave_1.place_item",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.power_drill.r4",
+   "title": "power_drill rung 4: a bit in the chuck pressed into a workpiece: material removed or a screw driven",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "interaction:drill_hole_wood",
+   "requirements": [
+    {
+     "id": "interaction:drill_hole_wood",
+     "step": "interaction",
+     "met": false,
+     "evidence": "aida_r5_dining_drill_hole hole.pass = False"
+    },
+    {
+     "id": "planner:tool_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw held = True"
+    },
+    {
+     "id": "planner:screw_drive",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw screw.pass = True"
+    },
+    {
+     "id": "scene:nemotron.ladder.power_drill.r4",
+     "step": "scene",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_hole"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.power_drill.r3",
+   "title": "power_drill rung 3: the switch set (forward/reverse) by the hand, and the speed controlled by the pull",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "interaction:motor",
+   "requirements": [
+    {
+     "id": "interaction:motor",
+     "step": "interaction",
+     "met": false,
+     "evidence": "law behaviors:motor has no test"
+    },
+    {
+     "id": "planner:button_press",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.tripped = True"
+    },
+    {
+     "id": "planner:tool_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw held = True"
+    },
+    {
+     "id": "scene:nemotron.ladder.power_drill.r3",
+     "step": "scene",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_switch"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.scissors.r3",
+   "title": "scissors rung 3: closed across a sheet held by the other hand: the sheet is cut",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "interaction:cut_sheet_scissors",
+   "requirements": [
+    {
+     "id": "asset:scissors",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_scissors_21', 'scissor']"
+    },
+    {
+     "id": "interaction:cut_sheet_scissors",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "planner:loop_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_rail_scissors pass = True"
+    },
+    {
+     "id": "planner:sheet_hold",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:nemotron.ladder.scissors.r3",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.scissors.r4",
+   "title": "scissors rung 4: a cut along a line: open, advance, close, repeated",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "interaction:cut_sheet_scissors",
+   "requirements": [
+    {
+     "id": "asset:scissors",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_scissors_21', 'scissor']"
+    },
+    {
+     "id": "interaction:cut_sheet_scissors",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "planner:loop_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_rail_scissors pass = True"
+    },
+    {
+     "id": "planner:sheet_hold",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:nemotron.ladder.scissors.r4",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.microwave.r3",
+   "title": "microwave rung 3: a dish put in on the turntable and the door pushed shut until it latches",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "interaction:latch_close",
+   "requirements": [
+    {
+     "id": "asset:microwave",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_microwave_1']"
+    },
+    {
+     "id": "interaction:latch_close",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:place_inside",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:door_push",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "scene:nemotron.ladder.microwave.r3",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.microwave.r4",
+   "title": "microwave rung 4: it is run: the time set, start pressed, the turntable turning",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "interaction:appliance_run",
+   "requirements": [
+    {
+     "id": "asset:microwave",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_microwave_1']"
+    },
+    {
+     "id": "interaction:appliance_run",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "planner:button_press",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.tripped = True"
+    },
+    {
+     "id": "scene:nemotron.ladder.microwave.r4",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.refrigerator.r3",
+   "title": "refrigerator rung 3: an item taken from or put on a shelf with the door open",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "scene:nemotron.ladder.refrigerator.r3",
+   "requirements": [
+    {
+     "id": "asset:refrigerator",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_fridge_1']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:door_pull",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_living_fridge door.seal_broken = True"
+    },
+    {
+     "id": "planner:pinch_place",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "scene:nemotron.ladder.refrigerator.r3",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.refrigerator.r4",
+   "title": "refrigerator rung 4: the door closed again until the gasket seals it",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "scene:nemotron.ladder.refrigerator.r4",
+   "requirements": [
+    {
+     "id": "asset:refrigerator",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['model_fridge_1']"
+    },
+    {
+     "id": "interaction:gasket",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_living_fridge door.seal_broken = True"
+    },
+    {
+     "id": "planner:door_push",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_kitchen_microwave door.opened_by_hand = True"
+    },
+    {
+     "id": "scene:nemotron.ladder.refrigerator.r4",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  }
+ ],
+ "open": [
+  {
+   "id": "cur:asset:laboratory_materials_handler:sealed_inert_container",
+   "priority": 10000,
+   "actionable": true,
+   "title": "asset for the sealed inert container (Laboratory materials handler)",
+   "blocks": 3
+  },
+  {
+   "id": "cur:asset:laboratory_materials_handler:receiving_bench",
+   "priority": 10001,
+   "actionable": false,
+   "title": "asset for the receiving bench (Laboratory materials handler)",
+   "blocks": 2
+  },
+  {
+   "id": "cur:asset:laboratory_materials_handler:inspection_bench",
+   "priority": 10002,
+   "actionable": false,
+   "title": "asset for the inspection bench (Laboratory materials handler)",
+   "blocks": 4
+  },
+  {
+   "id": "cur:planner:base_motion",
+   "priority": 10025,
+   "actionable": false,
+   "title": "the base motion planner",
+   "blocks": 4
+  },
+  {
+   "id": "cur:scene:laboratory_materials_handler",
+   "priority": 10036,
+   "actionable": false,
+   "title": "the Laboratory materials handler scene (scene_45d46bc54017)",
+   "blocks": 4
+  },
+  {
+   "id": "cur:measure:collision_violation_count",
+   "priority": 10049,
+   "actionable": false,
+   "title": "measure 'collision_violation_count' in the take's record",
+   "blocks": 4
+  },
+  {
+   "id": "cur:take:homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
+   "priority": 10059,
+   "actionable": false,
+   "title": "a passing take: Move a container to the inspection bench",
+   "blocks": 1
+  },
+  {
+   "id": "cur:handoff:laboratory_materials_handler",
+   "priority": 10069,
+   "actionable": false,
+   "title": "the evidence handoff for laboratory_materials_handler",
+   "blocks": 4
+  },
+  {
+   "id": "cur:asset:laboratory_materials_handler:open_storage_bin",
+   "priority": 10102,
+   "actionable": false,
+   "title": "asset for the open storage bin (Laboratory materials handler)",
+   "blocks": 2
+  },
+  {
+   "id": "cur:planner:place_inside",
+   "priority": 10126,
+   "actionable": true,
+   "title": "the place inside planner",
+   "blocks": 6
+  },
+  {
+   "id": "cur:take:homehero.occupation.laboratory_materials_handler.store_container_in_open_bin",
+   "priority": 10159,
+   "actionable": false,
+   "title": "a passing take: Store a container in the open bin",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
+   "priority": 10259,
+   "actionable": false,
+   "title": "a passing take: Retrieve a container from the open bin",
+   "blocks": 1
+  },
+  {
+   "id": "cur:asset:laboratory_materials_handler:loaded_tray",
+   "priority": 10300,
+   "actionable": true,
+   "title": "asset for the loaded tray (Laboratory materials handler)",
+   "blocks": 1
+  },
+  {
+   "id": "cur:planner:bimanual_carry",
+   "priority": 10325,
+   "actionable": false,
+   "title": "the bimanual carry planner",
+   "blocks": 1
+  },
+  {
+   "id": "cur:measure:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches:additional_outcome_1",
+   "priority": 10349,
+   "actionable": false,
+   "title": "measure 'additional_outcome_1' (Keep the inert container on the tray throughout transport.) in the take's record",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
+   "priority": 10359,
+   "actionable": false,
+   "title": "a passing take: Carry a loaded tray between benches",
+   "blocks": 1
+  },
+  {
+   "id": "cur:interaction:latch_close",
+   "priority": 20112,
+   "actionable": true,
+   "title": "the latch close interaction",
+   "blocks": 2
+  },
+  {
+   "id": "cur:handoff:hh_port_microwave_v1",
+   "priority": 20168,
+   "actionable": false,
+   "title": "the evidence handoff for hh_port_microwave_v1",
+   "blocks": 1
+  },
+  {
+   "id": "cur:planner:slide_to_edge",
+   "priority": 20224,
+   "actionable": true,
+   "title": "the slide to edge planner",
+   "blocks": 2
+  },
+  {
+   "id": "cur:scene:homehero.queue.hh_port_tool_transfer_v1",
+   "priority": 20235,
+   "actionable": false,
+   "title": "a scene for Acquire a tool by its intended region, orient it and place it in a tray",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.queue.hh_port_tool_transfer_v1",
+   "priority": 20256,
+   "actionable": false,
+   "title": "a passing take: Acquire a tool by its intended region, orient it and place it in a tray",
+   "blocks": 1
+  },
+  {
+   "id": "cur:handoff:hh_port_tool_transfer_v1",
+   "priority": 20267,
+   "actionable": false,
+   "title": "the evidence handoff for hh_port_tool_transfer_v1",
+   "blocks": 1
+  },
+  {
+   "id": "cur:asset:drawer",
+   "priority": 20300,
+   "actionable": true,
+   "title": "a sim-ready drawer",
+   "blocks": 5
+  },
+  {
+   "id": "cur:interaction:drawer_slide",
+   "priority": 20312,
+   "actionable": false,
+   "title": "the drawer slide interaction",
+   "blocks": 5
+  },
+  {
+   "id": "cur:scene:homehero.queue.hh_port_drawer_storage_v1",
+   "priority": 20335,
+   "actionable": false,
+   "title": "a scene for Store and retrieve fitting objects in an already-open drawer",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.queue.hh_port_drawer_storage_v1",
+   "priority": 20356,
+   "actionable": false,
+   "title": "a passing take: Store and retrieve fitting objects in an already-open drawer",
+   "blocks": 1
+  },
+  {
+   "id": "cur:handoff:hh_port_drawer_storage_v1",
+   "priority": 20367,
+   "actionable": false,
+   "title": "the evidence handoff for hh_port_drawer_storage_v1",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.household_mug.handle_pick_place",
+   "priority": 30133,
+   "actionable": true,
+   "title": "a scene for Household mug: handle pick place",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.household_mug.handle_pick_place",
+   "priority": 30154,
+   "actionable": false,
+   "title": "a passing take: Household mug: handle pick place",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.scissor.edge_pickup",
+   "priority": 30234,
+   "actionable": false,
+   "title": "a scene for Articulated scissors: edge pickup",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.scissor.edge_pickup",
+   "priority": 30255,
+   "actionable": false,
+   "title": "a passing take: Articulated scissors: edge pickup",
+   "blocks": 1
+  },
+  {
+   "id": "cur:asset:screwdriver",
+   "priority": 30400,
+   "actionable": true,
+   "title": "a sim-ready screwdriver",
+   "blocks": 3
+  },
+  {
+   "id": "cur:scene:homehero.interaction.screwdriver.pick_place",
+   "priority": 30434,
+   "actionable": false,
+   "title": "a scene for Screwdriver: pick place",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.screwdriver.pick_place",
+   "priority": 30455,
+   "actionable": false,
+   "title": "a passing take: Screwdriver: pick place",
+   "blocks": 1
+  },
+  {
+   "id": "cur:planner:hand_turn",
+   "priority": 30523,
+   "actionable": false,
+   "title": "the hand turn planner",
+   "blocks": 2
+  },
+  {
+   "id": "cur:scene:homehero.interaction.screwdriver.engage_tip",
+   "priority": 30534,
+   "actionable": false,
+   "title": "a scene for Screwdriver: engage tip",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.screwdriver.engage_tip",
+   "priority": 30555,
+   "actionable": false,
+   "title": "a passing take: Screwdriver: engage tip",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.screwdriver.turn_screw",
+   "priority": 30634,
+   "actionable": false,
+   "title": "a scene for Screwdriver: turn screw",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.screwdriver.turn_screw",
+   "priority": 30655,
+   "actionable": false,
+   "title": "a passing take: Screwdriver: turn screw",
+   "blocks": 1
+  },
+  {
+   "id": "cur:asset:hammer",
+   "priority": 30700,
+   "actionable": true,
+   "title": "a sim-ready hammer",
+   "blocks": 2
+  },
+  {
+   "id": "cur:scene:homehero.interaction.hammer.pick_place",
+   "priority": 30734,
+   "actionable": false,
+   "title": "a scene for Hammer: pick place",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.hammer.pick_place",
+   "priority": 30755,
+   "actionable": false,
+   "title": "a passing take: Hammer: pick place",
+   "blocks": 1
+  },
+  {
+   "id": "cur:interaction:impact_strike",
+   "priority": 30811,
+   "actionable": false,
+   "title": "the impact strike interaction",
+   "blocks": 1
+  },
+  {
+   "id": "cur:planner:strike",
+   "priority": 30823,
+   "actionable": false,
+   "title": "the strike planner",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.hammer.tap_target",
+   "priority": 30834,
+   "actionable": false,
+   "title": "a scene for Hammer: tap target",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.hammer.tap_target",
+   "priority": 30855,
+   "actionable": false,
+   "title": "a passing take: Hammer: tap target",
+   "blocks": 1
+  },
+  {
+   "id": "cur:planner:drawer_pull",
+   "priority": 30922,
+   "actionable": false,
+   "title": "the drawer pull planner",
+   "blocks": 2
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drawer_kit_10.open",
+   "priority": 30933,
+   "actionable": false,
+   "title": "a scene for Workshop drawer cabinet: open",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.drawer_kit_10.open",
+   "priority": 30954,
+   "actionable": false,
+   "title": "a passing take: Workshop drawer cabinet: open",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drawer_kit_10.close",
+   "priority": 31033,
+   "actionable": false,
+   "title": "a scene for Workshop drawer cabinet: close",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.drawer_kit_10.close",
+   "priority": 31054,
+   "actionable": false,
+   "title": "a passing take: Workshop drawer cabinet: close",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drawer_kit_10.store",
+   "priority": 31134,
+   "actionable": false,
+   "title": "a scene for Workshop drawer cabinet: store",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.drawer_kit_10.store",
+   "priority": 31155,
+   "actionable": false,
+   "title": "a passing take: Workshop drawer cabinet: store",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drawer_kit_10.retrieve",
+   "priority": 31234,
+   "actionable": false,
+   "title": "a scene for Workshop drawer cabinet: retrieve",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.drawer_kit_10.retrieve",
+   "priority": 31255,
+   "actionable": false,
+   "title": "a passing take: Workshop drawer cabinet: retrieve",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.fridge_1.close",
+   "priority": 31434,
+   "actionable": true,
+   "title": "a scene for Refrigerator: close",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.fridge_1.close",
+   "priority": 31455,
+   "actionable": false,
+   "title": "a passing take: Refrigerator: close",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.microwave_1.place_item",
+   "priority": 31733,
+   "actionable": false,
+   "title": "a scene for Microwave: place item",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.microwave_1.place_item",
+   "priority": 31754,
+   "actionable": false,
+   "title": "a passing take: Microwave: place item",
+   "blocks": 1
+  },
+  {
+   "id": "cur:interaction:motor",
+   "priority": 40310,
+   "actionable": true,
+   "title": "the motor interaction",
+   "blocks": 1
+  },
+  {
+   "id": "cur:interaction:cut_sheet_scissors",
+   "priority": 40311,
+   "actionable": true,
+   "title": "the cut sheet scissors interaction",
+   "blocks": 2
+  },
+  {
+   "id": "cur:planner:sheet_hold",
+   "priority": 40323,
+   "actionable": false,
+   "title": "the sheet hold planner",
+   "blocks": 2
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.scissors.r3",
+   "priority": 40334,
+   "actionable": false,
+   "title": "a scene for scissors rung 3: closed across a sheet held by the other hand: the sheet is cut",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.refrigerator.r3",
+   "priority": 40334,
+   "actionable": true,
+   "title": "a scene for refrigerator rung 3: an item taken from or put on a shelf with the door open",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.microwave.r3",
+   "priority": 40335,
+   "actionable": false,
+   "title": "a scene for microwave rung 3: a dish put in on the turntable and the door pushed shut until it latches",
+   "blocks": 1
+  },
+  {
+   "id": "cur:interaction:drill_hole_wood",
+   "priority": 40410,
+   "actionable": true,
+   "title": "the drill hole wood interaction",
+   "blocks": 1
+  },
+  {
+   "id": "cur:interaction:appliance_run",
+   "priority": 40411,
+   "actionable": true,
+   "title": "the appliance run interaction",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.microwave.r4",
+   "priority": 40433,
+   "actionable": false,
+   "title": "a scene for microwave rung 4: it is run: the time set, start pressed, the turntable turning",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.refrigerator.r4",
+   "priority": 40433,
+   "actionable": true,
+   "title": "a scene for refrigerator rung 4: the door closed again until the gasket seals it",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.scissors.r4",
+   "priority": 40434,
+   "actionable": false,
+   "title": "a scene for scissors rung 4: a cut along a line: open, advance, close, repeated",
+   "blocks": 1
+  }
+ ]
+}

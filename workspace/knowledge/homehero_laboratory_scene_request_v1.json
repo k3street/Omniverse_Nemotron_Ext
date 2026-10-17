@@ -1,0 +1,1019 @@
+{
+  "schema": "homehero.occupation_scene_request.v1",
+  "curriculum_sha256": "a92fc13a63cfbff00518736742ddd9f8b3020ddc5c09bd2d31a8e73de80e7b18",
+  "robot_authority": {
+    "source_manifest": "assets/robot_descriptions/amber/current/source.json",
+    "snapshot": "assets/robot_descriptions/amber/current/amber_revz29_psyonic_lsmall_rsmall_no_wiring.urdf",
+    "sha256": "06f4e3dd8369558206aacea905d93ae10f2a3df16ef2f432171362047148e73d",
+    "source_commit": "cbf4ce3b3103aad11d040744e866912a9328c3f8",
+    "scope": "reviewed_simulation_snapshot"
+  },
+  "scene": {
+    "id": "sterile_materials_lab_v1",
+    "owner": "nemotron_extension",
+    "asset_owner": "cad_creator",
+    "style": "Photorealistic sterile laboratory / light factory: bright neutral walls, clean non-glossy floor, stainless or white workbenches, desks, labelled storage. No dining-room furnishings.",
+    "locations": [
+      "receiving_bench",
+      "inspection_bench",
+      "storage_bin",
+      "sort_bin_a",
+      "sort_bin_b",
+      "operator_desk"
+    ],
+    "requests": [
+      "Reuse catalogue assets where suitable; request missing asset sources or designs from CAD Creator.",
+      "Maintain current reviewed Amber embodiment, articulated PSYONIC hands, correct wheels and sensor frames.",
+      "Establish clear Nav2 approaches and reachable bench heights from measured robot geometry; do not guess reach or collision margins.",
+      "Provide head, chest, wrist and overview cameras; record selected cameras asynchronously or render after the trial.",
+      "Use fast interaction and separate photorealistic evidence-render presets sharing identical geometry and physics.",
+      "Snapshot robot, asset, scene, physics, controller and source hashes per attempt.",
+      "Native reset manifest binds actual asset hashes, poses, lighting and layout to each case before execution.",
+      "delivery_resume requires a measured pause and explicit resume trigger; do not count an uninterrupted transfer.",
+      "Qualify pre-task arm staging during Nav2 approach with swept collision checks; measure time saved and retention."
+    ],
+    "status": "requested_not_built"
+  },
+  "asset_roles": [
+    {
+      "role": "sealed_container",
+      "requirements": {
+        "id": "sealed_container",
+        "kind": "movable",
+        "search_terms": [
+          "bottle",
+          "container",
+          "canister"
+        ],
+        "requirements": "Sealed inert reusable laboratory container with graspable sides; measured mass, dimensions, friction and cap state.",
+        "reference_sources": []
+      },
+      "candidates": [
+        {
+          "asset_id": "basic_bottle",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/basic_bottle/basic_bottle.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        },
+        {
+          "asset_id": "beer_bottle",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/beer_bottle/beer_bottle.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        },
+        {
+          "asset_id": "cola_bottle",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/cola_bottle/cola_bottle.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        },
+        {
+          "asset_id": "glass_bottle",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/glass_bottle/glass_bottle.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        },
+        {
+          "asset_id": "wine_bottle_and_glass",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wine_bottle_and_glass/wine_bottle_and_glass.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        }
+      ],
+      "request": {
+        "owner": "cad_creator",
+        "status": "review_catalogue_candidates",
+        "reference_sources": [],
+        "output": "SimReady USD plus source and validation manifest",
+        "required_evidence": [
+          "source_provenance",
+          "dimensions_and_units",
+          "collision_geometry",
+          "mass_and_inertia",
+          "material_and_friction",
+          "articulation_if_applicable",
+          "grasp_accessibility",
+          "native_task_preflight",
+          "preview_images"
+        ],
+        "image_only_geometry": "candidate_until_dimensions_and_physics_are_measured"
+      }
+    },
+    {
+      "role": "second_container",
+      "requirements": {
+        "id": "second_container",
+        "kind": "movable",
+        "search_terms": [
+          "bottle",
+          "container",
+          "canister"
+        ],
+        "requirements": "Different container identity for sorting; no hidden reuse of the same mesh as heldout object.",
+        "reference_sources": []
+      },
+      "candidates": [
+        {
+          "asset_id": "basic_bottle",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/basic_bottle/basic_bottle.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        },
+        {
+          "asset_id": "beer_bottle",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/beer_bottle/beer_bottle.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        },
+        {
+          "asset_id": "cola_bottle",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/cola_bottle/cola_bottle.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        },
+        {
+          "asset_id": "glass_bottle",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/glass_bottle/glass_bottle.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        },
+        {
+          "asset_id": "wine_bottle_and_glass",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/wine_bottle_and_glass/wine_bottle_and_glass.usda",
+          "matched_terms": [
+            "bottle"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "rigid_unverified"
+        }
+      ],
+      "request": {
+        "owner": "cad_creator",
+        "status": "review_catalogue_candidates",
+        "reference_sources": [],
+        "output": "SimReady USD plus source and validation manifest",
+        "required_evidence": [
+          "source_provenance",
+          "dimensions_and_units",
+          "collision_geometry",
+          "mass_and_inertia",
+          "material_and_friction",
+          "articulation_if_applicable",
+          "grasp_accessibility",
+          "native_task_preflight",
+          "preview_images"
+        ],
+        "image_only_geometry": "candidate_until_dimensions_and_physics_are_measured"
+      }
+    },
+    {
+      "role": "carry_tray",
+      "requirements": {
+        "id": "carry_tray",
+        "kind": "movable",
+        "search_terms": [
+          "tray",
+          "crate",
+          "bin"
+        ],
+        "requirements": "Tray with bilateral accessible edges or handles and restrained inert payload; verify both-hand access and load distribution.",
+        "reference_sources": []
+      },
+      "candidates": [],
+      "request": {
+        "owner": "cad_creator",
+        "status": "needs_reference_or_design",
+        "reference_sources": [],
+        "output": "SimReady USD plus source and validation manifest",
+        "required_evidence": [
+          "source_provenance",
+          "dimensions_and_units",
+          "collision_geometry",
+          "mass_and_inertia",
+          "material_and_friction",
+          "articulation_if_applicable",
+          "grasp_accessibility",
+          "native_task_preflight",
+          "preview_images"
+        ],
+        "image_only_geometry": "candidate_until_dimensions_and_physics_are_measured"
+      }
+    },
+    {
+      "role": "receiving_bench",
+      "requirements": {
+        "id": "receiving_bench",
+        "kind": "support",
+        "search_terms": [
+          "workbench",
+          "bench",
+          "table"
+        ],
+        "requirements": "Clean laboratory receiving workbench, collision geometry, support polygon and named navigation approach.",
+        "reference_sources": []
+      },
+      "candidates": [
+        {
+          "asset_id": "adjustable_bedside_table",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/adjustable_bedside_table/adjustable_bedside_table.usda",
+          "matched_terms": [
+            "table"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "articulated_unverified"
+        },
+        {
+          "asset_id": "overbed_table",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/overbed_table/overbed_table.usda",
+          "matched_terms": [
+            "table"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "articulated_verified"
+        }
+      ],
+      "request": {
+        "owner": "cad_creator",
+        "status": "review_catalogue_candidates",
+        "reference_sources": [],
+        "output": "SimReady USD plus source and validation manifest",
+        "required_evidence": [
+          "source_provenance",
+          "dimensions_and_units",
+          "collision_geometry",
+          "mass_and_inertia",
+          "material_and_friction",
+          "articulation_if_applicable",
+          "grasp_accessibility",
+          "native_task_preflight",
+          "preview_images"
+        ],
+        "image_only_geometry": "candidate_until_dimensions_and_physics_are_measured"
+      }
+    },
+    {
+      "role": "inspection_bench",
+      "requirements": {
+        "id": "inspection_bench",
+        "kind": "support",
+        "search_terms": [
+          "workbench",
+          "bench",
+          "table"
+        ],
+        "requirements": "Second workbench with marked placement area and unobstructed approach.",
+        "reference_sources": []
+      },
+      "candidates": [
+        {
+          "asset_id": "adjustable_bedside_table",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/adjustable_bedside_table/adjustable_bedside_table.usda",
+          "matched_terms": [
+            "table"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "articulated_unverified"
+        },
+        {
+          "asset_id": "overbed_table",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/overbed_table/overbed_table.usda",
+          "matched_terms": [
+            "table"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "articulated_verified"
+        }
+      ],
+      "request": {
+        "owner": "cad_creator",
+        "status": "review_catalogue_candidates",
+        "reference_sources": [],
+        "output": "SimReady USD plus source and validation manifest",
+        "required_evidence": [
+          "source_provenance",
+          "dimensions_and_units",
+          "collision_geometry",
+          "mass_and_inertia",
+          "material_and_friction",
+          "articulation_if_applicable",
+          "grasp_accessibility",
+          "native_task_preflight",
+          "preview_images"
+        ],
+        "image_only_geometry": "candidate_until_dimensions_and_physics_are_measured"
+      }
+    },
+    {
+      "role": "storage_bin",
+      "requirements": {
+        "id": "storage_bin",
+        "kind": "receptacle",
+        "search_terms": [
+          "bin",
+          "drawer",
+          "cabinet"
+        ],
+        "requirements": "Open storage compartment with real interior collision geometry, fit checks and accessible grasp approach.",
+        "reference_sources": []
+      },
+      "candidates": [],
+      "request": {
+        "owner": "cad_creator",
+        "status": "needs_reference_or_design",
+        "reference_sources": [],
+        "output": "SimReady USD plus source and validation manifest",
+        "required_evidence": [
+          "source_provenance",
+          "dimensions_and_units",
+          "collision_geometry",
+          "mass_and_inertia",
+          "material_and_friction",
+          "articulation_if_applicable",
+          "grasp_accessibility",
+          "native_task_preflight",
+          "preview_images"
+        ],
+        "image_only_geometry": "candidate_until_dimensions_and_physics_are_measured"
+      }
+    },
+    {
+      "role": "sort_bin_a",
+      "requirements": {
+        "id": "sort_bin_a",
+        "kind": "receptacle",
+        "search_terms": [
+          "bin",
+          "tray"
+        ],
+        "requirements": "Marked destination A; use label as task signal, not mesh identity.",
+        "reference_sources": []
+      },
+      "candidates": [],
+      "request": {
+        "owner": "cad_creator",
+        "status": "needs_reference_or_design",
+        "reference_sources": [],
+        "output": "SimReady USD plus source and validation manifest",
+        "required_evidence": [
+          "source_provenance",
+          "dimensions_and_units",
+          "collision_geometry",
+          "mass_and_inertia",
+          "material_and_friction",
+          "articulation_if_applicable",
+          "grasp_accessibility",
+          "native_task_preflight",
+          "preview_images"
+        ],
+        "image_only_geometry": "candidate_until_dimensions_and_physics_are_measured"
+      }
+    },
+    {
+      "role": "sort_bin_b",
+      "requirements": {
+        "id": "sort_bin_b",
+        "kind": "receptacle",
+        "search_terms": [
+          "bin",
+          "tray"
+        ],
+        "requirements": "Marked destination B, spatially distinct from destination A.",
+        "reference_sources": []
+      },
+      "candidates": [],
+      "request": {
+        "owner": "cad_creator",
+        "status": "needs_reference_or_design",
+        "reference_sources": [],
+        "output": "SimReady USD plus source and validation manifest",
+        "required_evidence": [
+          "source_provenance",
+          "dimensions_and_units",
+          "collision_geometry",
+          "mass_and_inertia",
+          "material_and_friction",
+          "articulation_if_applicable",
+          "grasp_accessibility",
+          "native_task_preflight",
+          "preview_images"
+        ],
+        "image_only_geometry": "candidate_until_dimensions_and_physics_are_measured"
+      }
+    },
+    {
+      "role": "operator_desk",
+      "requirements": {
+        "id": "operator_desk",
+        "kind": "background",
+        "search_terms": [
+          "desk"
+        ],
+        "requirements": "Sterile operator desk outside manipulation and navigation corridors.",
+        "reference_sources": []
+      },
+      "candidates": [
+        {
+          "asset_id": "vintage_desk_lamp",
+          "file": "/home/kimate/Omniverse_Nemotron_Ext/workspace/asset_library/vintage_desk_lamp/vintage_desk_lamp.usda",
+          "matched_terms": [
+            "desk"
+          ],
+          "status": "candidate_requires_task_preflight",
+          "catalogue_category": "articulated_verified"
+        }
+      ],
+      "request": {
+        "owner": "cad_creator",
+        "status": "review_catalogue_candidates",
+        "reference_sources": [],
+        "output": "SimReady USD plus source and validation manifest",
+        "required_evidence": [
+          "source_provenance",
+          "dimensions_and_units",
+          "collision_geometry",
+          "mass_and_inertia",
+          "material_and_friction",
+          "articulation_if_applicable",
+          "grasp_accessibility",
+          "native_task_preflight",
+          "preview_images"
+        ],
+        "image_only_geometry": "candidate_until_dimensions_and_physics_are_measured"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "nominal",
+      "split": "development",
+      "variation": {
+        "object_variant": "development_a",
+        "layout": "wide_aisle",
+        "lighting": "neutral",
+        "pose": "nominal"
+      }
+    },
+    {
+      "id": "pose_offset",
+      "split": "development",
+      "variation": {
+        "object_variant": "development_a",
+        "layout": "wide_aisle",
+        "lighting": "neutral",
+        "pose": "offset_and_yaw"
+      }
+    },
+    {
+      "id": "second_shape",
+      "split": "development",
+      "variation": {
+        "object_variant": "development_b",
+        "layout": "wide_aisle",
+        "lighting": "neutral",
+        "pose": "nominal"
+      }
+    },
+    {
+      "id": "second_layout",
+      "split": "development",
+      "variation": {
+        "object_variant": "development_b",
+        "layout": "benches_repositioned",
+        "lighting": "oblique",
+        "pose": "offset_and_yaw"
+      }
+    },
+    {
+      "id": "reserved_object",
+      "split": "heldout",
+      "variation": {
+        "object_variant": "reserved_c",
+        "layout": "wide_aisle",
+        "lighting": "neutral",
+        "pose": "nominal"
+      }
+    },
+    {
+      "id": "reserved_combination",
+      "split": "heldout",
+      "variation": {
+        "object_variant": "reserved_c",
+        "layout": "reserved_layout",
+        "lighting": "lower_illumination",
+        "pose": "reserved_pose"
+      }
+    }
+  ],
+  "lessons": [
+    {
+      "id": "bench_transfer",
+      "title": "Move the sealed container to the inspection bench",
+      "trigger": "Aida, move the sealed container to the inspection bench.",
+      "prerequisites": [],
+      "family": "pick_hold_place",
+      "transfers": [
+        {
+          "object": "sealed_container",
+          "source": "receiving_bench",
+          "destination": "inspection_bench",
+          "hands": [
+            "left"
+          ]
+        }
+      ],
+      "criteria": {
+        "correct_object": {
+          "op": "eq",
+          "value": true
+        },
+        "destination_match": {
+          "op": "eq",
+          "value": true
+        },
+        "stable_supported_placement": {
+          "op": "eq",
+          "value": true
+        },
+        "released": {
+          "op": "eq",
+          "value": true
+        },
+        "retained_during_transport": {
+          "op": "eq",
+          "value": true
+        },
+        "container_sealed": {
+          "op": "eq",
+          "value": true
+        },
+        "collision_violation_count": {
+          "op": "eq",
+          "value": 0
+        }
+      },
+      "required_stage_evidence": [
+        "trigger_received",
+        "task_admitted",
+        "navigate_and_stage",
+        "acquire_preload",
+        "transport_and_hold",
+        "place_and_release",
+        "brain_judgment",
+        "user_notification"
+      ],
+      "efficiency_metrics": [
+        "planning_wall_s",
+        "execution_sim_s",
+        "execution_wall_s",
+        "real_time_factor",
+        "navigation_distance_m",
+        "recoveries",
+        "peak_contact_force_n",
+        "pregrasp_overlap_s"
+      ],
+      "order": 0,
+      "rationale": "Builds the foundational skill of identifying and transferring a sealed inert container between benches, with stable placement and retention through transport. Vary object pose and bench layout to develop generalization while tracking motion efficiency.",
+      "teacher_hint": "Ask the learner to observe the container and both approaches before moving. If it struggles, guide it to compare grasp and placement options, then review collision-free motion, retention, and trial evidence without changing success criteria.",
+      "capability_gaps": [],
+      "status": "awaiting_scene_and_native_preflight",
+      "contract_sha256": "c7fce0d00c08f4b7a580aaf780a1aad5ce9deb1a326ee6ddbfeb239d945ab914"
+    },
+    {
+      "id": "store_container",
+      "title": "Put the sealed container in open storage",
+      "trigger": "Aida, put the sealed container in open storage.",
+      "prerequisites": [
+        "bench_transfer"
+      ],
+      "family": "pick_hold_place",
+      "transfers": [
+        {
+          "object": "sealed_container",
+          "source": "inspection_bench",
+          "destination": "storage_bin",
+          "hands": [
+            "left"
+          ]
+        }
+      ],
+      "criteria": {
+        "correct_object": {
+          "op": "eq",
+          "value": true
+        },
+        "destination_match": {
+          "op": "eq",
+          "value": true
+        },
+        "stable_supported_placement": {
+          "op": "eq",
+          "value": true
+        },
+        "released": {
+          "op": "eq",
+          "value": true
+        },
+        "retained_during_transport": {
+          "op": "eq",
+          "value": true
+        },
+        "container_sealed": {
+          "op": "eq",
+          "value": true
+        },
+        "collision_violation_count": {
+          "op": "eq",
+          "value": 0
+        },
+        "object_contained": {
+          "op": "eq",
+          "value": true
+        }
+      },
+      "required_stage_evidence": [
+        "trigger_received",
+        "task_admitted",
+        "navigate_and_stage",
+        "acquire_preload",
+        "transport_and_hold",
+        "place_and_release",
+        "brain_judgment",
+        "user_notification"
+      ],
+      "efficiency_metrics": [
+        "planning_wall_s",
+        "execution_sim_s",
+        "execution_wall_s",
+        "real_time_factor",
+        "navigation_distance_m",
+        "recoveries",
+        "peak_contact_force_n",
+        "pregrasp_overlap_s"
+      ],
+      "order": 1,
+      "rationale": "Extends bench-to-bench handling to placement inside an open receptacle, teaching the learner to account for interior geometry and verify containment. Vary the container pose and storage approach while encouraging efficient, collision-free motion.",
+      "teacher_hint": "Have the learner inspect the bin opening and reachable approach before grasping. If placement fails, prompt it to reassess alignment and interior clearance; use the established recovery order and preserve every attempt.",
+      "capability_gaps": [],
+      "status": "awaiting_scene_and_native_preflight",
+      "contract_sha256": "0836e96ac1108a45c6cddfc30981c87d4e0ea7ec756e66afd3afd62fe4054002"
+    },
+    {
+      "id": "retrieve_container",
+      "title": "Retrieve the sealed container from storage",
+      "trigger": "Aida, retrieve the sealed container from storage.",
+      "prerequisites": [
+        "store_container"
+      ],
+      "family": "pick_hold_place",
+      "transfers": [
+        {
+          "object": "sealed_container",
+          "source": "storage_bin",
+          "destination": "inspection_bench",
+          "hands": [
+            "left"
+          ]
+        }
+      ],
+      "criteria": {
+        "correct_object": {
+          "op": "eq",
+          "value": true
+        },
+        "destination_match": {
+          "op": "eq",
+          "value": true
+        },
+        "stable_supported_placement": {
+          "op": "eq",
+          "value": true
+        },
+        "released": {
+          "op": "eq",
+          "value": true
+        },
+        "retained_during_transport": {
+          "op": "eq",
+          "value": true
+        },
+        "container_sealed": {
+          "op": "eq",
+          "value": true
+        },
+        "collision_violation_count": {
+          "op": "eq",
+          "value": 0
+        }
+      },
+      "required_stage_evidence": [
+        "trigger_received",
+        "task_admitted",
+        "navigate_and_stage",
+        "acquire_preload",
+        "transport_and_hold",
+        "place_and_release",
+        "brain_judgment",
+        "user_notification"
+      ],
+      "efficiency_metrics": [
+        "planning_wall_s",
+        "execution_sim_s",
+        "execution_wall_s",
+        "real_time_factor",
+        "navigation_distance_m",
+        "recoveries",
+        "peak_contact_force_n",
+        "pregrasp_overlap_s"
+      ],
+      "order": 2,
+      "rationale": "Teaches retrieval from an enclosed storage location and placement on a bench, requiring the learner to adapt grasp access and withdrawal motion to the compartment geometry.",
+      "teacher_hint": "Ask the learner to identify a clear grasp and withdrawal path before entering the bin. If it encounters difficulty, direct attention to observed geometry and safe retreat options, then compare motion efficiency across attempts.",
+      "capability_gaps": [],
+      "status": "awaiting_scene_and_native_preflight",
+      "contract_sha256": "7da849def8c944082667959654d3aac0054050360ae699705a8a011c0208f938"
+    },
+    {
+      "id": "sort_containers",
+      "title": "Sort the two sealed containers into their marked bins",
+      "trigger": "Aida, sort the two sealed containers into their marked bins.",
+      "prerequisites": [
+        "bench_transfer"
+      ],
+      "family": "pick_hold_place",
+      "transfers": [
+        {
+          "object": "sealed_container",
+          "source": "receiving_bench",
+          "destination": "sort_bin_a",
+          "hands": [
+            "left"
+          ]
+        },
+        {
+          "object": "second_container",
+          "source": "receiving_bench",
+          "destination": "sort_bin_b",
+          "hands": [
+            "left"
+          ]
+        }
+      ],
+      "criteria": {
+        "correct_object": {
+          "op": "eq",
+          "value": true
+        },
+        "destination_match": {
+          "op": "eq",
+          "value": true
+        },
+        "stable_supported_placement": {
+          "op": "eq",
+          "value": true
+        },
+        "released": {
+          "op": "eq",
+          "value": true
+        },
+        "retained_during_transport": {
+          "op": "eq",
+          "value": true
+        },
+        "container_sealed": {
+          "op": "eq",
+          "value": true
+        },
+        "collision_violation_count": {
+          "op": "eq",
+          "value": 0
+        },
+        "all_transfers_verified": {
+          "op": "eq",
+          "value": true
+        }
+      },
+      "required_stage_evidence": [
+        "trigger_received",
+        "task_admitted",
+        "navigate_and_stage",
+        "acquire_preload",
+        "transport_and_hold",
+        "place_and_release",
+        "brain_judgment",
+        "user_notification"
+      ],
+      "efficiency_metrics": [
+        "planning_wall_s",
+        "execution_sim_s",
+        "execution_wall_s",
+        "real_time_factor",
+        "navigation_distance_m",
+        "recoveries",
+        "peak_contact_force_n",
+        "pregrasp_overlap_s"
+      ],
+      "order": 3,
+      "rationale": "Develops identity-to-label matching across two transfers, generalizing beyond mesh identity by requiring decisions based on the marked destination. The learner must complete and verify both transfers efficiently without collisions.",
+      "teacher_hint": "Ask the learner to verify each container\u2019s identity and destination label before moving it. If it mixes up assignments, pause for observation and have it state the mapping, then assess both placements and retained evidence.",
+      "capability_gaps": [],
+      "status": "awaiting_scene_and_native_preflight",
+      "contract_sha256": "f791ce0061e2bbec22978035946d1da69291b85f6600949dc68caac5fdff57bd"
+    },
+    {
+      "id": "tray_transport",
+      "title": "Move the loaded tray to the inspection bench",
+      "trigger": "Aida, move the loaded tray to the inspection bench.",
+      "prerequisites": [
+        "bench_transfer"
+      ],
+      "family": "pick_hold_place",
+      "transfers": [
+        {
+          "object": "carry_tray",
+          "source": "receiving_bench",
+          "destination": "inspection_bench",
+          "hands": [
+            "left",
+            "right"
+          ]
+        }
+      ],
+      "criteria": {
+        "correct_object": {
+          "op": "eq",
+          "value": true
+        },
+        "destination_match": {
+          "op": "eq",
+          "value": true
+        },
+        "stable_supported_placement": {
+          "op": "eq",
+          "value": true
+        },
+        "released": {
+          "op": "eq",
+          "value": true
+        },
+        "retained_during_transport": {
+          "op": "eq",
+          "value": true
+        },
+        "container_sealed": {
+          "op": "eq",
+          "value": true
+        },
+        "collision_violation_count": {
+          "op": "eq",
+          "value": 0
+        },
+        "both_hands_loaded": {
+          "op": "eq",
+          "value": true
+        },
+        "payload_retained": {
+          "op": "eq",
+          "value": true
+        }
+      },
+      "required_stage_evidence": [
+        "trigger_received",
+        "task_admitted",
+        "navigate_and_stage",
+        "acquire_preload",
+        "transport_and_hold",
+        "place_and_release",
+        "brain_judgment",
+        "user_notification"
+      ],
+      "efficiency_metrics": [
+        "planning_wall_s",
+        "execution_sim_s",
+        "execution_wall_s",
+        "real_time_factor",
+        "navigation_distance_m",
+        "recoveries",
+        "peak_contact_force_n",
+        "pregrasp_overlap_s"
+      ],
+      "order": 4,
+      "rationale": "Introduces coordinated bilateral grasp and transport of a loaded tray, teaching balanced handling, payload retention, and stable placement while accounting for the tray\u2019s access geometry.",
+      "teacher_hint": "Prompt the learner to inspect both grasp edges and the restrained payload, then plan a balanced approach. If the tray shifts, guide it to review hand loading and transport motion without exceeding resident safety controls.",
+      "capability_gaps": [],
+      "status": "awaiting_scene_and_native_preflight",
+      "contract_sha256": "6abe6a835db70b8367a1badc909aee2632a6e95029001d0cdf745c17129d2fa9"
+    },
+    {
+      "id": "delivery_resume",
+      "title": "Resume a paused sealed-container delivery",
+      "trigger": "Aida, resume a paused sealed-container delivery.",
+      "prerequisites": [
+        "bench_transfer"
+      ],
+      "family": "pick_hold_place",
+      "transfers": [
+        {
+          "object": "sealed_container",
+          "source": "receiving_bench",
+          "destination": "inspection_bench",
+          "hands": [
+            "left"
+          ]
+        }
+      ],
+      "criteria": {
+        "correct_object": {
+          "op": "eq",
+          "value": true
+        },
+        "destination_match": {
+          "op": "eq",
+          "value": true
+        },
+        "stable_supported_placement": {
+          "op": "eq",
+          "value": true
+        },
+        "released": {
+          "op": "eq",
+          "value": true
+        },
+        "retained_during_transport": {
+          "op": "eq",
+          "value": true
+        },
+        "container_sealed": {
+          "op": "eq",
+          "value": true
+        },
+        "collision_violation_count": {
+          "op": "eq",
+          "value": 0
+        },
+        "pause_respected": {
+          "op": "eq",
+          "value": true
+        },
+        "resume_authorized": {
+          "op": "eq",
+          "value": true
+        }
+      },
+      "required_stage_evidence": [
+        "trigger_received",
+        "task_admitted",
+        "navigate_and_stage",
+        "acquire_preload",
+        "transport_and_hold",
+        "place_and_release",
+        "brain_judgment",
+        "user_notification"
+      ],
+      "efficiency_metrics": [
+        "planning_wall_s",
+        "execution_sim_s",
+        "execution_wall_s",
+        "real_time_factor",
+        "navigation_distance_m",
+        "recoveries",
+        "peak_contact_force_n",
+        "pregrasp_overlap_s"
+      ],
+      "order": 5,
+      "rationale": "Teaches safe continuation of a delivery only after a measured pause and explicit resume authorization. This distinguishes a genuinely paused-and-resumed transfer from uninterrupted motion while retaining the foundational transfer skills.",
+      "teacher_hint": "Require the learner to demonstrate the pause and wait for an explicit resume trigger before continuing. If authorization is absent or state is uncertain, instruct it to remain paused and seek teacher review.",
+      "capability_gaps": [],
+      "status": "awaiting_scene_and_native_preflight",
+      "contract_sha256": "7eab8519074f9901035099307055b988ee3e8f76479af18b7e18abbbe229a2ac"
+    }
+  ],
+  "status": "requested",
+  "auto_execute": false
+}

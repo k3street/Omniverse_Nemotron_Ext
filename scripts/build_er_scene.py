@@ -337,6 +337,16 @@ def _chess(stage, obj, chess: dict, label: str | None) -> dict:
     return out
 
 
+def object_clearances(stage, root, others=("/World/Environment", "/World/Fixtures"), clearance=0.005, exclude=()):
+    """An object's colliders that come within `clearance` of an environment
+    collider (box to box; `exclude` the object's own support), at the authored
+    pose: a refrigerator built 3 mm from a wall - no box overlap - started
+    inside it once PhysX cooked its convex decomposition, and the settle
+    tipped it 45 deg (2026-10-16). Returns [(collider, other, gap m)]."""
+    return [(a, b, round(-d, 4)) for a, b, d in robot_overlaps(stage, root, others, min_depth=-clearance)
+            if not any(b == e or b.startswith(e + "/") for e in exclude)]
+
+
 def robot_overlaps(stage, robot_root="/World/Robot", others=("/World/Environment", "/World/Fixtures"), min_depth=0.01):
     """The robot's link colliders whose world boxes overlap a collider of the
     environment by more than min_depth on every axis, at the robot's authored
@@ -366,8 +376,9 @@ def robot_overlaps(stage, robot_root="/World/Robot", others=("/World/Environment
     mine = colliders(robot_root)
     if not mine:
         return []
-    lo = [min(r.GetMin()[k] for _, r in mine) for k in range(3)]
-    hi = [max(r.GetMax()[k] for _, r in mine) for k in range(3)]
+    grow = max(0.0, -float(min_depth))                         # a clearance asked for: look that much further
+    lo = [min(r.GetMin()[k] for _, r in mine) - grow for k in range(3)]
+    hi = [max(r.GetMax()[k] for _, r in mine) + grow for k in range(3)]
     near = [(pth, r) for root in others for pth, r in colliders(root)
             if all(r.GetMax()[k] > lo[k] and r.GetMin()[k] < hi[k] for k in range(3))]
     hits = []
@@ -416,6 +427,64 @@ def build(spec: dict, out_dir: Path) -> Path:
             a.Set(value)                                        # written in this scene's layer, not the source
     # --- fixtures: static boxes of the scene's own (a drying rail on a wall) ----
     for fx in env.get("fixtures") or []:
+        if fx.get("parts"):
+            # a fixture of several shapes (a screw: its shank and its head), one body when
+            # kinematic - a law moves it each physics step (behaviors.screw_drive)
+            root_fx = UsdGeom.Xform.Define(stage, f"/World/Fixtures/{fx['name']}")
+            root_fx.AddTranslateOp().Set(Gf.Vec3d(*fx["position"]))
+            for pt in fx["parts"]:
+                pp = f"/World/Fixtures/{fx['name']}/{pt['name']}"
+                if pt.get("shape") == "cylinder":
+                    sh = UsdGeom.Cylinder.Define(stage, pp)
+                    sh.CreateAxisAttr(pt.get("axis", "X"))
+                    sh.CreateRadiusAttr(float(pt["radius"]))
+                    sh.CreateHeightAttr(float(pt["length"]))
+                    sh.AddTranslateOp().Set(Gf.Vec3d(*pt.get("offset", [0.0, 0.0, 0.0])))
+                else:
+                    sh = UsdGeom.Cube.Define(stage, pp)
+                    sh.CreateSizeAttr(1.0)
+                    sh.AddTranslateOp().Set(Gf.Vec3d(*pt.get("offset", [0.0, 0.0, 0.0])))
+                    sh.AddScaleOp().Set(Gf.Vec3f(*pt["size"]))
+                if pt.get("color") or fx.get("color"):
+                    sh.CreateDisplayColorAttr(Vt.Vec3fArray([Gf.Vec3f(*(pt.get("color") or fx["color"]))]))
+                UsdPhysics.CollisionAPI.Apply(sh.GetPrim())
+                if fx.get("physics"):
+                    _object_physics(stage, sh.GetPrim(), {**fx["physics"], "material_only": True}, f"/World/PhysicsMaterials/{fx['name']}")
+            if fx.get("kinematic"):
+                UsdPhysics.RigidBodyAPI.Apply(root_fx.GetPrim()).CreateKinematicEnabledAttr(True)
+                # its look, apart from its body: a twin of plain shapes the replay moves for the
+                # renderer, the body's own shapes hidden. Writing the body's USD transform to show
+                # it moving fed back into PhysX as a teleport and changed the take (the screw
+                # seated 0.4 mm short and the drill was lost, where the same plan passed, 2026-10-16)
+                vis = UsdGeom.Xform.Define(stage, f"/World/FixtureVisuals/{fx['name']}")
+                vis.AddTranslateOp().Set(Gf.Vec3d(*fx["position"]))
+                vis.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Quatd(1.0, Gf.Vec3d(0.0, 0.0, 0.0)))
+                for pt in fx["parts"]:
+                    vp = f"/World/FixtureVisuals/{fx['name']}/{pt['name']}"
+                    src = stage.GetPrimAtPath(f"/World/Fixtures/{fx['name']}/{pt['name']}")
+                    if pt.get("shape") == "cylinder":
+                        vs = UsdGeom.Cylinder.Define(stage, vp)
+                        vs.CreateAxisAttr(pt.get("axis", "X")); vs.CreateRadiusAttr(float(pt["radius"])); vs.CreateHeightAttr(float(pt["length"]))
+                        vs.AddTranslateOp().Set(Gf.Vec3d(*pt.get("offset", [0.0, 0.0, 0.0])))
+                    else:
+                        vs = UsdGeom.Cube.Define(stage, vp)
+                        vs.CreateSizeAttr(1.0)
+                        vs.AddTranslateOp().Set(Gf.Vec3d(*pt.get("offset", [0.0, 0.0, 0.0])))
+                        vs.AddScaleOp().Set(Gf.Vec3f(*pt["size"]))
+                    if pt.get("color") or fx.get("color"):
+                        vs.CreateDisplayColorAttr(Vt.Vec3fArray([Gf.Vec3f(*(pt.get("color") or fx["color"]))]))
+                    UsdGeom.Imageable(src).MakeInvisible()
+            continue
+        holes = fx.get("holes")
+        if fx.get("holes_from"):
+            # the hole a take drilled, kept: its outcome (material_laws via the replay) builds this board
+            got = json.loads(Path(_path(fx["holes_from"])).read_text())
+            if [round(float(v), 6) for v in got.get("board_size", [])] != [round(float(v), 6) for v in fx["size"]]:
+                raise SystemExit(f"fixture {fx['name']}: holes_from {fx['holes_from']} was drilled in a board of {got.get('board_size')}, not {fx['size']}")
+            holes = got["holes"]
+        if holes:
+            _holed_board(stage, fx, holes)
+            continue
         if fx.get("shape") == "cylinder":
             # a round peg or rail: axis X|Y|Z, radius, length (an exact
             # cylinder collider, no decomposition to bulge into a loop's hole)
@@ -434,6 +503,8 @@ def build(spec: dict, out_dir: Path) -> Path:
         UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
         if fx.get("physics"):
             _object_physics(stage, cube.GetPrim(), {**fx["physics"], "material_only": True}, f"/World/PhysicsMaterials/{fx['name']}")
+        if fx.get("drillable"):
+            _drillable_twin(stage, fx)
     bc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
     support = stage.GetPrimAtPath(in_env(env["support"]))
     if not support:
@@ -492,7 +563,7 @@ def build(spec: dict, out_dir: Path) -> Path:
         if lo is not None and hi is not None and not (lo - 1e-6 <= v <= hi + 1e-6):
             raise SystemExit(f"posture {name}={v:.4f} is outside its limits [{lo}, {hi}]")
         UsdPhysics.DriveAPI.Apply(jp, kind).CreateTargetPositionAttr(v)
-        jp.AddAppliedSchema(f"PhysxJointStateAPI:{kind}")                  # PhysX starts the joint here
+        jp.AddAppliedSchema(joint_state_schema(kind))                       # PhysX starts the joint here
         jp.CreateAttribute(f"state:{kind}:physics:position", Sdf.ValueTypeNames.Float).Set(v)
         jp.CreateAttribute(f"state:{kind}:physics:velocity", Sdf.ValueTypeNames.Float).Set(0.0)
         posed[name] = round(v, 4)
@@ -772,6 +843,8 @@ def build(spec: dict, out_dir: Path) -> Path:
             print(f"[joint] {o['name']}.{jname} drive {({k: v for k, v in gains.items() if k != 'why'})}")
         if o.get("physics") and not o.get("deformable"):
             _object_physics(stage, prim.GetPrim(), o["physics"], f"/World/PhysicsMaterials/{o['name']}")
+        for at in o.get("attachments") or []:
+            _attach(stage, prim.GetPrim(), o["name"], at)
         for jname, angle in (o.get("joint_state") or {}).items():
             # the asset's joint authored at this state (degrees for a revolute joint):
             # a scissors hung handles-up stays closed, its loops stacked with
@@ -781,7 +854,7 @@ def build(spec: dict, out_dir: Path) -> Path:
                 raise SystemExit(f"{o['name']}: no joint named {jname}")
             kind = "linear" if joint.IsA(UsdPhysics.PrismaticJoint) else "angular"
             jo = stage.OverridePrim(joint.GetPath())
-            jo.AddAppliedSchema(f"PhysicsJointStateAPI:{kind}")
+            jo.AddAppliedSchema(joint_state_schema(kind))
             jo.CreateAttribute(f"state:{kind}:physics:position", Sdf.ValueTypeNames.Float).Set(float(angle))
             jo.CreateAttribute(f"state:{kind}:physics:velocity", Sdf.ValueTypeNames.Float).Set(0.0)
             print(f"[joint] {o['name']}.{jname} authored at {angle} ({kind})")
@@ -796,6 +869,11 @@ def build(spec: dict, out_dir: Path) -> Path:
                        "yaw_deg": round(float(o.get("yaw_deg", 0.0)), 2), "chess": chess_info, "overhang": overhang_info, "hang": hang_info,
                        "filtered_body_pairs": [[a.split("/")[-1], b.split("/")[-1]] for a, b in filtered_pairs],
                        "size_m": [round(float(s), 4) for s in orng.GetSize()]})
+
+    # --- a drillable board: the bit's colliders filtered against it (the law is their contact) ---
+    for fx in env.get("fixtures") or []:
+        if fx.get("drillable"):
+            _filter_bit(stage, fx)
 
     # --- lights the spec adds (pointing down: UsdLux area lights emit along -Z) --
     if spec.get("lights"):
@@ -848,6 +926,25 @@ def build(spec: dict, out_dir: Path) -> Path:
         UsdGeom.Xformable(c.GetPrim()).AddTransformOp().Set(
             Gf.Matrix4d().SetLookAt(Gf.Vec3d(*cam["eye"]), Gf.Vec3d(*cam["target"]), Gf.Vec3d(0, 0, 1)).GetInverse())
 
+    sup_root = support.GetPath().pathString
+    for o in spec.get("objects", []):
+        if o.get("hang") or o.get("deformable"):
+            continue                                                 # hung on a peg / a cloth: in contact by design
+        near_ = object_clearances(stage, f"/World/Objects/{o['name']}", exclude=[sup_root] + [
+            "/World/Environment" + q[len(env.get("prim", "")):] if env.get("prim") and q.startswith(env.get("prim", "")) else q
+            for q in o.get("touching", [])])
+        if near_:
+            worst = {}
+            for a, b, gp_ in near_:
+                worst[b] = min(worst.get(b, 1.0), gp_)
+            raise SystemExit(f"{o['name']} starts within {0.5:.1f} cm of the environment: " + "; ".join(
+                f"{b} ({100 * v:.1f} cm)" for b, v in sorted(worst.items(), key=lambda kv: kv[1])[:6])
+                + " - move it, or name what it rests against in the object's 'touching'")
+    inside_ = camera_eyes_inside(stage, {"Overview": spec["overview_camera"]["eye"],
+                                         **{c["name"]: c["eye"] for c in spec.get("extra_cameras", [])}})
+    if inside_:
+        raise SystemExit("camera eyes inside the room's furniture: " + "; ".join(f"{c} in {p}" for c, p in inside_)
+                         + " - move the eye (film_camera.py aims one by line of sight)")
     clash = robot_overlaps(stage)
     if clash:
         worst = {}
@@ -859,12 +956,219 @@ def build(spec: dict, out_dir: Path) -> Path:
     world.GetPrim().SetCustomDataByKey("er:support_top_m", round(top, 4))
     stage.GetRootLayer().Save()
     (out_dir / "build.json").write_text(json.dumps(
-        {"scene": str(out), "support": env["support"], "support_top_m": round(top, 4),
+        {"scene": str(out), "build_code_sha256": build_code_sha(), "support": env["support"], "support_top_m": round(top, 4),
          "support_range": [[round(v, 3) for v in srng.GetMin()], [round(v, 3) for v in srng.GetMax()]],
          "robot_joints_posed": posed, "hand_mechanics": hand_mechanics, "collision_filtered_pairs": filtered,
          "support_collision": support_collision,
          "objects": placed}, indent=1))
     return out
+
+
+def joint_state_schema(kind: str) -> str:
+    """The applied-schema name that makes PhysX start a joint at an authored
+    state ('angular' or 'linear'): PhysX registers it as PhysicsJointStateAPI
+    (omni.usd.schema.physx plugInfo schemaIdentifier). The robot's posture was
+    authored as 'PhysxJointStateAPI', which PhysX does not know: every robot
+    started at its zero pose and its drives swung the arms into the posture
+    during the settle (backlog, 2026-10-15; fixed 2026-10-17)."""
+    if kind not in ("angular", "linear"):
+        raise ValueError(f"joint state kind {kind!r}")
+    return f"PhysicsJointStateAPI:{kind}"
+
+
+def _mesh_piece(stage, path, piece, color=None, collide=True):
+    """One convex piece (material_laws.hole_pieces) as a mesh: its own convex hull in PhysX."""
+    from pxr import Gf, UsdGeom, UsdPhysics, Vt
+    m = UsdGeom.Mesh.Define(stage, path)
+    m.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*q) for q in piece["points"]]))
+    m.CreateFaceVertexCountsAttr(Vt.IntArray([len(f) for f in piece["faces"]]))
+    m.CreateFaceVertexIndicesAttr(Vt.IntArray([i for f in piece["faces"] for i in f]))
+    m.CreateSubdivisionSchemeAttr("none")
+    if color:
+        m.CreateDisplayColorAttr(Vt.Vec3fArray([Gf.Vec3f(*color)]))
+    if collide:
+        UsdPhysics.CollisionAPI.Apply(m.GetPrim())
+        UsdPhysics.MeshCollisionAPI.Apply(m.GetPrim()).CreateApproximationAttr("convexHull")
+    return m
+
+
+def _holed_board(stage, fx, holes):
+    """A box board with the hole a take drilled (or a spec gives): the ring of convex prisms
+    round it and, for a blind hole, the board behind its bottom - exact colliders, so a peg
+    or a screw meets the hole the bit left (material_laws.hole_pieces)."""
+    from pxr import UsdGeom
+    from material_laws import board_frame, hole_pieces
+    if len(holes) != 1:
+        raise SystemExit(f"fixture {fx['name']}: one hole per board ({len(holes)} given)")
+    h = holes[0]
+    board = board_frame(fx["size"], fx["position"], h["out"])
+    UsdGeom.Xform.Define(stage, f"/World/Fixtures/{fx['name']}")
+    for pc in hole_pieces(board, h, int(h.get("sides", 16))):
+        m = _mesh_piece(stage, f"/World/Fixtures/{fx['name']}/{pc['name']}", pc, fx.get("color"))
+        if fx.get("physics"):
+            _object_physics(stage, m.GetPrim(), {**fx["physics"], "material_only": True}, f"/World/PhysicsMaterials/{fx['name']}")
+    print(f"[fixture] {fx['name']}: a {2000 * float(h['r']):.2f} mm hole {1000 * float(h['depth_m']):.1f} mm deep at {[round(float(v), 4) for v in h['entry']]}")
+
+
+def _drillable_twin(stage, fx):
+    """The look of a board a bit will cut: a twin of the solid board and, hidden until the
+    cut starts, the pieces the replay shapes to the hole as it deepens (their points set
+    each tick; no physics on them). The physics board is hidden: the twin is its look."""
+    from pxr import Gf, UsdGeom, Vt
+    vis = UsdGeom.Xform.Define(stage, f"/World/FixtureVisuals/{fx['name']}")
+    solid = UsdGeom.Cube.Define(stage, f"{vis.GetPath()}/Solid")
+    solid.CreateSizeAttr(1.0)
+    solid.AddTranslateOp().Set(Gf.Vec3d(*fx["position"]))
+    solid.AddScaleOp().Set(Gf.Vec3f(*fx["size"]))
+    if fx.get("color"):
+        solid.CreateDisplayColorAttr(Vt.Vec3fArray([Gf.Vec3f(*fx["color"])]))
+    sides = int(fx["drillable"].get("sides", 16))
+    for name in [f"Ring{i:02d}" for i in range(sides)] + ["Behind"]:
+        m = _mesh_piece(stage, f"{vis.GetPath()}/{name}", {"points": [], "faces": []}, fx.get("color"), collide=False)
+        UsdGeom.Imageable(m).MakeInvisible()
+    UsdGeom.Imageable(stage.GetPrimAtPath(f"/World/Fixtures/{fx['name']}")).MakeInvisible()
+
+
+def _filter_bit(stage, fx):
+    """The bit's colliders and the drillable board do not collide in PhysX: the cutting law
+    (material_laws.drill_cut, in the replay) is the wood's push on the bit."""
+    from pxr import Sdf, Usd
+    dr = fx["drillable"]
+    root = stage.GetPrimAtPath(f"/World/Objects/{dr['object']}")
+    board = stage.GetPrimAtPath(f"/World/Fixtures/{fx['name']}")
+    if not root or not board:
+        raise SystemExit(f"fixture {fx['name']}: drillable by {dr['object']}, which is not in the scene")
+    board.AddAppliedSchema("PhysicsFilteredPairsAPI")
+    rel = board.GetRelationship("physics:filteredPairs") or board.CreateRelationship("physics:filteredPairs")
+    for a in dr["attachments"]:
+        q = next((q for q in Usd.PrimRange(root) if q.GetName() == a), None)
+        if q is None:
+            raise SystemExit(f"fixture {fx['name']}: drillable by {dr['object']}'s {a}, which it does not have")
+        rel.AddTarget(Sdf.Path(q.GetPath().pathString))
+
+
+def _attach(stage, root, oname, at):
+    """A part the scene adds to an asset, as a collider of one of its bodies (a
+    screwdriver bit in a drill's chuck): a cylinder on the line of a named
+    joint's axis, beyond the far face of a named body (the chuck's nose) by its
+    length less what is inserted, built in the body's own frame so it turns
+    with it. Returns its prim path."""
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics, Vt
+
+    def named(name, body=False):
+        q = next((q for q in Usd.PrimRange(root) if q.GetName() == name and (not body or q.HasAPI(UsdPhysics.RigidBodyAPI))), None)
+        if q is None:
+            raise SystemExit(f"{oname}: attachment {at['name']} names no {'body' if body else 'prim'} {name!r}")
+        return q
+    body, joint, nose = named(at["body"], True), named(at["along_joint"]), named(at["from_body"])
+    xc = UsdGeom.XformCache()
+    jt = UsdPhysics.Joint(joint)
+    b1 = stage.GetPrimAtPath(jt.GetBody1Rel().GetTargets()[0])
+    M1 = xc.GetLocalToWorldTransform(b1)
+    lp, lr = jt.GetLocalPos1Attr().Get(), jt.GetLocalRot1Attr().Get()
+    ax = {"X": Gf.Vec3d(1, 0, 0), "Y": Gf.Vec3d(0, 1, 0), "Z": Gf.Vec3d(0, 0, 1)}[str(joint.GetAttribute("physics:axis").Get() or "X")]
+    o_w = M1.Transform(Gf.Vec3d(lp))
+    a_w = M1.TransformDir(Gf.Rotation(Gf.Quatd(lr.GetReal(), Gf.Vec3d(lr.GetImaginary()))).TransformDir(ax)).GetNormalized()
+    nr = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]).ComputeWorldBound(nose).ComputeAlignedRange()
+    corners = [Gf.Vec3d(x_, y_, z_) for x_ in (nr.GetMin()[0], nr.GetMax()[0]) for y_ in (nr.GetMin()[1], nr.GetMax()[1])
+               for z_ in (nr.GetMin()[2], nr.GetMax()[2])]
+    d = a_w if (nr.GetMidpoint() - o_w) * a_w >= 0 else -a_w                  # the tool's front: the nose's side of the axis
+    far = max((c - o_w) * d for c in corners)
+    length, insert = float(at["length"]), float(at.get("insert_m", 0.0))
+    centre = o_w + d * (far - insert + length / 2.0)
+    Mb = xc.GetLocalToWorldTransform(body)
+    inv = Mb.GetInverse()
+    lc, ld = inv.Transform(centre), inv.TransformDir(d)
+    scale = ld.GetLength()                                                   # the body's frame may be scaled (an asset in cm)
+    ld = ld / scale
+    k = max(range(3), key=lambda i: abs(ld[i]))
+    if abs(ld[k]) < 0.999:
+        raise SystemExit(f"{oname}: attachment {at['name']}: the joint's axis is not along one of {body.GetName()}'s axes")
+    cyl = UsdGeom.Cylinder.Define(stage, body.GetPath().AppendChild(at["name"]))
+    cyl.CreateAxisAttr("XYZ"[k])
+    cyl.CreateRadiusAttr(float(at["radius"]) * scale)
+    cyl.CreateHeightAttr(length * scale)
+    cyl.AddTranslateOp().Set(lc)
+    if at.get("color"):
+        cyl.CreateDisplayColorAttr(Vt.Vec3fArray([Gf.Vec3f(*at["color"])]))
+    UsdPhysics.CollisionAPI.Apply(cyl.GetPrim())
+    if at.get("mass_kg"):
+        UsdPhysics.MassAPI.Apply(cyl.GetPrim()).CreateMassAttr(float(at["mass_kg"]))
+    # the tip and axis in the BODY's own frame (rotation only, metres): a reader needs only the
+    # body's live pose - the replay's stage has the object moved to its settled pose by the time it
+    # reads, and the world record taken against that frame put the tip 18 mm off (2026-10-16)
+    import numpy as _np
+    _M = _np.array(Mb).T
+    _Rn = _M[:3, :3] / _np.linalg.norm(_M[:3, :3], axis=0)
+    _tip_w = _np.array(list(centre + d * length / 2.0))
+    cyl.GetPrim().SetCustomDataByKey("er:attachment", json.dumps({"tip_world_at_build": _tip_w.tolist(), "axis_world_at_build": list(d), "length_m": length,
+                                                                    "tip_body": (_Rn.T @ (_tip_w - _M[:3, 3])).tolist(),
+                                                                    "axis_body": (_Rn.T @ _np.array(list(d))).tolist()}))
+    print(f"[attach] {oname}.{at['name']} on {body.GetName()}: centre {[round(v, 4) for v in centre]}, pointing {[round(v, 3) for v in d]}, "
+          f"{length * 1000:.0f} mm, its tip at {[round(v, 4) for v in centre + d * length / 2.0]}")
+    return cyl.GetPath().pathString
+
+
+def camera_eyes_inside(stage, eyes, root="/World/Environment", max_side_m=3.0):
+    """Camera eyes inside a piece of the room - a furniture-sized mesh's box
+    (no side over max_side_m: a room's shell or floor slab spans the room and
+    holds every eye). An overview eye built inside a wardrobe filmed 2,680
+    black frames (2026-10-16). Returns [(camera, prim path)]."""
+    from pxr import Usd, UsdGeom
+    bb = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    rp = stage.GetPrimAtPath(root)
+    if not rp:
+        return []
+    boxes = []
+    for q in Usd.PrimRange(rp):
+        if q.IsA(UsdGeom.Mesh) and q.IsActive():
+            r = bb.ComputeWorldBound(q).ComputeAlignedRange()
+            if r.IsEmpty() or max(r.GetSize()) > max_side_m:
+                continue
+            boxes.append((q.GetPath().pathString, r))
+    out = []
+    for name, e in eyes.items():
+        for path, r in boxes:
+            if all(r.GetMin()[k] < e[k] < r.GetMax()[k] for k in range(3)):
+                out.append((name, path))
+                break
+    return out
+
+
+def foreign_reference(spec, scene_dir):
+    """The replay's plan from another scene: grasp_replay.reference must be
+    this scene's own grasp_plan/targets.npz (what plan_er_grasp writes). A
+    variant config copied its base's reference and replayed the base scene's
+    plan - the trigger test the variant had dropped - while its own fresh plan
+    went unused (2026-10-16). Returns the problem, or None."""
+    gr = spec.get("grasp_replay") or {}
+    ref = gr.get("reference")
+    if not ref or gr.get("reference_foreign_why"):
+        return None                                   # none, or another's recording on purpose (a config says why)
+    own = (Path(scene_dir) / "grasp_plan" / "targets.npz").resolve()
+    got = Path(str(ref)).expanduser().resolve()
+    return None if got == own else f"grasp_replay.reference is {ref}, not this scene's own plan {own}"
+
+
+def build_code_sha() -> str:
+    """The hash of this builder's own source: a scene records the code that built it."""
+    import hashlib
+    return hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()
+
+
+def stale_build(scene_dir) -> str | None:
+    """A scene built by other builder code than the one here: the replay's live plan rebuilds
+    the scene mid-run, so the first run on an old build starts from that build and every run
+    after from the new one - a drill take's first physics-only run read the trigger 2.5 points
+    apart from the next two, which agreed with each other and with the filmed take to 0.0 mm
+    (2026-10-17; most likely the 2026-10-15 'filmed vs physics-only' gap too). None when current."""
+    bj = Path(scene_dir) / "build.json"
+    if not bj.exists():
+        return "no build.json"
+    got = json.loads(bj.read_text()).get("build_code_sha256")
+    if got is None:
+        return "built before builds were stamped with their code"
+    return None if got == build_code_sha() else f"built by other builder code ({got[:12]} vs {build_code_sha()[:12]})"
 
 
 def config_drift(config_spec, built_spec, path=""):

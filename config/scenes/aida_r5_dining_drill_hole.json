@@ -1,0 +1,319 @@
+{
+ "extends": "aida_r5_dining_drill.json",
+ "name": "aida_r5_dining_drill_hole",
+ "purpose": "the R5 drills a 1/8 in pilot hole through an 18 mm birch-plywood board with the cordless drill held in its left hand: the first material interaction - the wood is a cutting law (material_laws.drill_cut) and the hole the take cuts is its outcome, built as the board's colliders by the scenes after it (holes_from)",
+ "environment": {
+  "fixtures": [
+   {
+    "name": "Board",
+    "size": [
+     0.2,
+     0.018,
+     0.3
+    ],
+    "position": [
+     4.8,
+     0.88175,
+     0.858
+    ],
+    "color": [
+     0.8,
+     0.68,
+     0.5
+    ],
+    "physics": {
+     "static_friction": 0.5,
+     "dynamic_friction": 0.4
+    },
+    "drillable": {
+     "object": "Drill",
+     "attachments": [
+      "Bit"
+     ],
+     "sides": 16
+    },
+    "why": "the screw take's 18 mm birch-plywood board standing on the dining table, its face square to the spindle as the lift leaves it, static (clamped) - solid this time: the bit cuts its own hole. Its colliders pass the bit (build_er_scene._filter_bit): the wood is the replay's cutting law; its look is a twin the replay opens to the hole as it deepens"
+   }
+  ]
+ },
+ "screw_drive": {
+  "fixture": "Board",
+  "head": [
+   4.8,
+   0.87275,
+   0.949
+  ],
+  "out": [
+   0.0,
+   -1.0,
+   0.0
+  ],
+  "pitch_m": 0.00015,
+  "start_depth_m": 0.0,
+  "seat_depth_m": 0.0195,
+  "bit": {
+   "object": "Drill",
+   "body": "Drill_01_Drill_01_0_part01",
+   "attachment": "Bit"
+  },
+  "rpm": 450.0,
+  "throttle": 0.33,
+  "feed_fraction": 1.0,
+  "standoff_m": 0.015,
+  "preload_m": 0.004,
+  "over_m": 0.0,
+  "seat_s": 0.3,
+  "pull_max_rad": 1.6,
+  "back_off_m": 0.04,
+  "hold_s": 1.0,
+  "why": "the screw's planner on a hole's axis (screw_then.py -> screw_drive_planner.py): the bit brought onto the face's normal at the screw take's site, 15 mm off the face, the trigger pulled there (spin), looked at again, then fed along the axis at 0.25 mm a turn of the chuck's planned 150 rpm (the index's third of the trigger, as in the screw take) through the 18 mm board and 1.5 mm past its back, held 0.3 s, the trigger let go, the bit drawn back 4 cm",
+  "pitch_why": "a feed of 0.15 mm/rev, inside the source's 0.1-0.5 mm/rev (Szwajka & Trzepiecinski 2018): the law's chip at that feed wants ~25 N of thrust from a 3.2 mm bit in 710 kg/m3 plywood; take 2 (0.25 mm/rev, ~33 N) held ~6 N as the drill pitched in the grip",
+  "preload_why": "the hand's lead into the face: the arm and the thumbless grip push through ~3-5 N per mm the hand leads the tip (take 2: 6 N at ~1.5 mm, the drill pitched 0.6 deg in the hand), so a cut wanting ~25 N wants the hand ~4 mm ahead",
+  "resqueeze_s": 1000.0,
+  "resqueeze_why": "no re-squeeze in the drive: its dip let go of the trigger and the index came back at 39 N - the jolt kicked the bit out of its 0.3 mm dimple (take 2, tick 1963); the trigger creeps instead (a third to a fifth of its travel), and the law cuts by the turns it gets"
+ },
+ "objects": [
+  {
+   "name": "Drill",
+   "asset_id": "drill_1",
+   "usd": "~/Omniverse_Nemotron_Ext/workspace/assets_fixed/drill_1_simready.usda",
+   "category": "articulated_verified",
+   "xy": [
+    4.8,
+    0.66
+   ],
+   "yaw_deg": -90.0,
+   "target": true,
+   "label": "the cordless drill",
+   "physics": {
+    "static_friction": 0.8,
+    "dynamic_friction": 0.6,
+    "collision_overrides": {
+     "Drill_01_Drill_01_0_part00": {
+      "approximation": "sdf",
+      "sdf_resolution": 256
+     }
+    },
+    "collision_overrides_why": "the drill body's convex decomposition (16 hulls, PhysX default) covers 25 of the trigger's 46 vertices and the face the finger presses: every rig pull stalled on the body's hull in front of the trigger. An SDF (256: 0.7 mm cells over 18 cm) is the body's own surface; the robot's casing already collides through one in these CPU-physics scenes"
+   },
+   "why": "drill_1: the library's articulated power drill (chuck, clutch, trigger, forward/reverse switch, press-fit battery, the motor law in simReady:behaviors), reprocessed 2026-10-15 so its links carry the class's mass (1.46 kg). 18 cm long and 18.5 cm tall, a compact drill's size (drill_65b826 is the same model at 31 cm). Turned -90 deg: its chuck (asset -x) points along world +y, away from the robot; standing on its battery, the handle 4.7 cm behind the footprint's centre, 9 cm in from the table's edge",
+   "attachments": [
+    {
+     "name": "Bit",
+     "body": "Drill_01_Drill_01_0_part01",
+     "along_joint": "chuck",
+     "from_body": "Drill_01_Drill_01_0_part09",
+     "shape": "cylinder",
+     "radius": 0.0015875,
+     "length": 0.058,
+     "insert_m": 0.008,
+     "mass_kg": 0.004,
+     "color": [
+      0.72,
+      0.62,
+      0.35
+     ],
+     "why": "a 1/8 in (3.175 mm) jobber twist bit, 50 mm out of the chuck (8 mm in the jaws): the pilot hole a #8 wood screw wants in hardwood plywood; its flutes are the law's two blades"
+    }
+   ]
+  }
+ ],
+ "grasp_plan": {
+  "task": "tool_grip",
+  "support_parts": "split",
+  "tool_grip": {
+   "hand": "left",
+   "palm_gap_m": 0.003,
+   "index_touch_rad": [
+    0.8,
+    1.5
+   ],
+   "pull_max_rad": 1.6,
+   "why": "the pistol grip of a left hand: the palm on the handle's left side (the tool's left: up x forward), the fingers pointing forward and wrapping the handle's front, the index uppermost at the trigger's height, the thumb round the back; the hand's frame from the tool's own parts (the motor behaviour's throttle joint is the trigger, its body the handle's body, the output joint's axis the spindle) - nothing hand-placed",
+   "thumb": "off",
+   "thumb_why": "the thumb clear of the tool, out of the grip: the search's only thumb that met the tool closed on the barrel's TOP and pressed the drill down with 13-17 N, a load the fingers then held as well as its weight (drill take 3, 2026-10-15); no thumb rotation wraps the handle without striking it first",
+   "settle_shifts_m": [
+    [
+     0.0,
+     0.0,
+     -0.01
+    ]
+   ],
+   "settle_shifts_why": "seated at the heel the drill no longer sags down the handle (0.3 mm on the rig) but sits 1 cm deeper toward the wrist than the seat predicts (rig, 2026-10-15); the index must meet the trigger first, with room to pull, there too",
+   "yaw_deg": [
+    -25,
+    -20,
+    -15,
+    -10,
+    -5,
+    0,
+    5,
+    10
+   ],
+   "roll_deg": [
+    -15,
+    -10,
+    -5,
+    0,
+    5,
+    10
+   ],
+   "along_m": [
+    -0.012,
+    -0.011,
+    -0.01,
+    -0.009,
+    -0.008,
+    -0.007,
+    -0.006,
+    -0.005,
+    -0.004,
+    -0.003,
+    -0.002,
+    -0.001,
+    0.0,
+    0.001,
+    0.002,
+    0.003,
+    0.004,
+    0.005,
+    0.006,
+    0.007,
+    0.008,
+    0.009,
+    0.01,
+    0.011,
+    0.012
+   ],
+   "along_why": "1 mm steps up the handle: the index must lie within the trigger's height and the middle below its bottom edge, and the gap between the two fingers is 4 mm - the trigger's bottom edge has to land in it",
+   "finger_edge_m": -0.006,
+   "finger_edge_why": "the index may overhang the trigger's bottom edge by up to 6 mm: with the body's exact (SDF) surface there is open space in front of the handle under the trigger (the 'stall on the body below the trigger' was the convex decomposition's bloat); the middle must stay off the trigger and its travel - it pre-pulled it 2.9 mm and blocked it at 3.3 mm (SDF rig)",
+   "force_score_weight": 0.0,
+   "force_score_why": "the index's modelled force does not rank this drill's grips: it is computed where the grip puts the drill, and the drill settles 1-2.5 cm and 4-7 deg in the hand before the pull. Ranked by it, the planner chose a grip that pulled the trigger 15% (take 7) against the 50% of the grip the old ranking chose (take 4); the knuckle grips it favours pulled 54-68% (takes 5-6, 2026-10-15). The model gates nothing here until it predicts the settle (backlog)",
+   "incumbent": {
+    "yaw_deg": -10.0,
+    "roll_deg": -5.0,
+    "along_m": -0.003
+   },
+   "incumbent_why": "the best grip the critic loop has measured on this drill (take 4, 2026-10-15: trigger 50%, three grip features failed - thumb_opposes, full_trigger_travel, seats_as_planned). Tried: knuckle pull (takes 5-6: 68% with the middle on the trigger, 54% with the drill sliding 2.5 cm), the force-ranked grip (take 7: 15%). Replace it when a take fails fewer features",
+   "trigger": false,
+   "trigger_why": "the main plan only takes the drill up: the drive (screw_drive) pulls the trigger, planned live against where the drill settled in the hand"
+  },
+  "approach_m": 0.07,
+  "lift_m": 0.08,
+  "pull_s": 0.8,
+  "run_s": 2.0,
+  "release_s": 0.6,
+  "hold_s": 1.5,
+  "why": "reach a staging pose 7 cm to the handle's left with the hand open (the thumb laid flat), slide in to 3 mm from the handle, close the middle, ring, pinky and thumb (the grip command) with the index stopped just short of the trigger, lift 8 cm on the shoulder slide (HomeHero's lift rule), pull the trigger, run 2 s, let it go, hold"
+ },
+ "grasp_replay": {
+  "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_dining_drill_hole/grasp_plan/targets.npz",
+  "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+  "lift_offset_m": 0.0,
+  "control_hz": 30,
+  "finger_q2_coefficient": 1.05851325,
+  "hold_s": 0.0,
+  "controller": "homehero_r5_action",
+  "hand_model": {
+   "kind": "ability_hand",
+   "calibration": "config/ability_hand_calibration.json",
+   "collision_voltage": 8.0,
+   "postcontact_voltage": 2.0,
+   "grip_speed": 0.5,
+   "why": "halt-on-collision (ICD word 007) set near the full supply, as for the scissors: the position loop governs, each digit squeezes until it stalls at full voltage and its worm then holds it. A power grip on a 1.46 kg tool wants that squeeze, and the index must push into the trigger's spring (1500 N/m, 15 N at full travel) - at the 3 V default it halted on first touching the trigger. One threshold for the whole hand, as on the real hand. Post-contact (word 008) at 2 V, the top of the ICD's range: with 0 V the squeeze stored at the halt drained out of the pads as the 1.46 kg drill sagged in the hand during the lift and it slid out (drill take 3); a current after contact keeps the digits closing in as the load moves, as the can and the towel use; the worm still holds every digit against its load"
+  },
+  "tool": {
+   "behavior": "motor",
+   "drive_damping_per_deg": 0.05,
+   "drive_max_force": 1.2,
+   "why": "the drill's motor law (behaviors.motor) run on its joints each control tick: the trigger's travel and the switch give the chuck's target speed (forward, 1500 rpm at full travel); the chuck's drive a velocity drive (no spring), damping 0.05 per degree, 5 N m - the asset's 0.001 is a free spindle's, not a motor's",
+   "behavior_overrides": {
+    "max_rpm": 450.0
+   },
+   "behavior_overrides_why": "the DCD771's low gear (0-450 rpm), the one a screw is driven in; the asset's 1500 rpm is its high gear",
+   "drive_max_force_why": "the clutch: set where the screw seats and the clutch then slips (1.2 N m: above the ~1 N m the thread takes to form, below the 3-5 N m a joint is tightened to) - at 1.5 N m the stalled motor's reaction kicked the drill back in the thumbless grip as the head seated; the drill's own 24/42 N m would strip it; DeWalt does not publish the clutch's torque per position"
+  },
+  "live_plan": true,
+  "live_plan_why": "the drill settles on its battery after the build drops it 2 mm; the grip is planned against where it then stands",
+  "why": "the drill's tool grip (plan_er_grasp.py, task tool_grip, tool_grip_planner.py)",
+  "then": [
+   "screw_drive:align",
+   "screw_drive:align",
+   "screw_drive:spin",
+   "screw_drive:align",
+   "screw_drive:drive"
+  ],
+  "then_why": "the screw take's sequence on the hole's axis: align (twice), spin at the standoff, align again, drive (feed through); each planned live from the bit's measured pose",
+  "film": {
+   "cuts": [
+    {
+     "from_stage": "align",
+     "camera": "ScrewSide"
+    }
+   ],
+   "why": "the close-up on the grip and the lift, then from the side on the bit and the screw for the drive"
+  },
+  "hole": {
+   "fixture": "Board",
+   "out": [
+    0.0,
+    -1.0,
+    0.0
+   ],
+   "bit_d_m": 0.003175,
+   "blades": 2,
+   "material": "wood_birch_plywood",
+   "density_kg_m3": 710.0,
+   "target_depth_m": 0.018,
+   "k_n_per_m": 20000.0,
+   "c_n_s_per_m": 150.0,
+   "sources": {
+    "cutting": "Szwajka & Trzepiecinski (2018) BioResources 13(4) 8263-8278, Fig. 6 (MDF 742 kg/m3, 9.3 mm two-blade drill)",
+    "density": "Latvijas Finieris Riga Ply EPD: birch plywood 710 kg/m3"
+   },
+   "why": "material_laws.drill_cut every physics step: the thrust the bit's tip presses on the uncut wood buys its chip (below ~13.5 N it rubs); the chip advances the hole's bottom two blades a turn and loads the chuck with its torque; the wall holds the bit to the line it entered on. Through the board, the hole is the take's outcome (grasp/outcome.json)",
+   "k_why": "the wood's push as a damped spring an explicit force can carry at 120 Hz on the 1.46 kg drill (omega dt ~1, c dt / m ~0.9): ~1.7 mm of the tip past the cut's bottom at the ~33 N a 0.25 mm/rev feed wants"
+  }
+ },
+ "extra_cameras": [
+  {
+   "name": "GraspCloseup",
+   "eye": [
+    5.166,
+    0.816,
+    0.944
+   ],
+   "target": [
+    4.79,
+    0.6,
+    0.86
+   ],
+   "focal_length_mm": 24.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "why": "aimed by line of sight (scripts/film_camera.py on the passing rig's log: the robot's links posed from the logged joints, sight lines to the index tip, the palm and the drill body over 76 ticks of the close, lift, pull and release): from the drill's right side, 45 cm out, 30 deg toward its front, 15 deg up - where the fingertips wrap the handle's front and the index sits on the trigger; every sight line clear"
+  },
+  {
+   "name": "ScrewSide",
+   "eye": [
+    5.12,
+    0.79,
+    1.0
+   ],
+   "target": [
+    4.8,
+    0.835,
+    0.95
+   ],
+   "focal_length_mm": 24.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "why": "square to the bit's axis at the screw's height, from the drill's free side (the hand holds it from the other): the bit's tip on the screw's head, the screw turning into the board edge-on"
+  }
+ ]
+}

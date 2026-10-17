@@ -120,7 +120,9 @@ def target_class(spec: dict, scene_dir: Path) -> tuple[str | None, dict]:
     class, else its registry category's name, else the spec's label."""
     obj = next((o for o in spec.get("objects", []) if o.get("target") or o.get("target_member")), spec.get("objects", [{}])[0])
     aid = obj.get("asset_id")
-    cls = None
+    cls = obj.get("class")                                       # the scene may name it (a refrigerator, not appliance_large)
+    if cls:
+        return cls, obj
     q = REPO / "workspace" / "review_queue" / f"{aid}.json"
     if q.exists():
         e = json.loads(q.read_text())
@@ -140,7 +142,7 @@ def measured(result: dict) -> dict:
     for k in ("pass", "lifted", "held", "target_peak_rise_m", "target_end_rise_m", "hand_object_drift_m"):
         if k in result:
             keep[k] = result[k]
-    for block in ("push", "tool", "loop", "cloth", "move"):
+    for block in ("push", "tool", "loop", "door", "cloth", "move"):
         if isinstance(result.get(block), dict):
             keep[block] = {k: v for k, v in result[block].items() if k != "planned"}
     return keep
@@ -160,7 +162,11 @@ def measured_cap(cls: str, spec: dict, result: dict) -> tuple[int | None, list[s
         nonlocal cap
         cap = c if cap is None else min(cap, c)
         reasons.append(why)
-    held = bool(result.get("held")) or bool((result.get("tool") or {}).get("pass")) or bool((result.get("push") or {}).get("still_held"))
+    # held: lifted and kept, a tool worked in the hand, a pushed half kept - or a door
+    # worked by its handle (a refrigerator's is never lifted: the generic test capped
+    # a door opened 34 deg at rung 0, 2026-10-16)
+    held = bool(result.get("held")) or bool((result.get("tool") or {}).get("pass")) or bool((result.get("push") or {}).get("still_held")) \
+        or bool((result.get("door") or {}).get("pass")) or bool((result.get("door") or {}).get("tripped"))
     if not held:
         lower(0, "the object was not held through the run")
     if cls == "scissors":
@@ -170,14 +176,54 @@ def measured_cap(cls: str, spec: dict, result: dict) -> tuple[int | None, list[s
             lower(1, "the record shows no passing loop verdict: the blades were not opened and closed by the holding hand's spread")
         if not any(o.get("category") == "cloth" or "sheet" in str(o.get("asset_id", "")) or "paper" in str(o.get("asset_id", "")) for o in spec.get("objects", [])):
             lower(2, "there is no material in the scene to cut")
+    if cls == "microwave":
+        dr = result.get("door") or {}
+        if not dr.get("tripped"):
+            lower(0, "the release button never tripped the latch")
+        elif (dr.get("popped_deg") or 0) < 5.0:
+            lower(0, "the latch let go but the door did not pop")
+        elif (dr.get("max_deg") or 0) < 80.0:
+            lower(1, f"the door opened {dr.get('max_deg')} deg - short of the 80 deg a dish goes in through")
+        elif dr.get("opened_by_hand") is not True:
+            # the swing must be the hand's: a door on a tilted hinge crept to 90 deg by itself (2026-10-16)
+            lower(1, f"the door stood {dr.get('max_deg')} deg open but the hand did not swing it there")
+        lower(2, "no dish was put in")
+    if cls == "refrigerator":
+        dr = result.get("door") or {}
+        if not dr.get("seal_broken"):
+            lower(0, "the door's gasket held: the door never opened")
+        elif (dr.get("max_deg") or 0) < 60.0:
+            lower(1, f"the door opened {dr.get('max_deg')} deg - less than the 60 deg to reach in")
+        lower(2, "nothing was taken from or put in the refrigerator")
     if cls == "power_drill":
         tool = result.get("tool") or {}
-        if not tool.get("pass"):
+        screw = result.get("screw")
+        if screw is not None:
+            # a drive under load has no free-running test: the trigger's work is the screw turned
+            if (screw.get("turns") or 0.0) < 1.0:
+                lower(1, "the trigger never turned the screw")
+        elif result.get("hole") is not None:
+            if (result["hole"].get("turns") or 0.0) < 1.0:
+                lower(1, "the trigger never turned the bit in the wood")
+        elif not tool.get("ran_per_law", tool.get("pass")):
+            # the ladder's rung 2 in its own words (the record's ran_per_law); how far the trigger
+            # went is the grip's full_trigger_travel, not the rung
             lower(1, "the trigger did not run the chuck at the law's speed and stop it on release")
-        if any(o.get("joint_state", {}).get("direction") is not None for o in spec.get("objects", [])):
+        if any(o.get("joint_state", {}).get("direction") is not None for o in spec.get("objects", [])) and not tool.get("switch_set_by_hand"):
             lower(2, "the forward/reverse switch was authored in the scene, not set by the hand")
-        if not any("bit" in str(o.get("asset_id", "")) or "workpiece" in str(o.get("name", "")).lower() for o in spec.get("objects", [])):
+        bit = any("bit" in str(o.get("asset_id", "")) or any("bit" in str(a.get("name", "")).lower() for a in o.get("attachments", []))
+                  for o in spec.get("objects", []))
+        work = bool(spec.get("screw_drive")) or any("workpiece" in str(o.get("name", "")).lower() for o in spec.get("objects", []))
+        if not (bit and work):
             lower(3, "there is no bit and no workpiece: no work was done")
+        elif screw is not None and not screw.get("pass"):
+            lower(3, f"the screw went {screw.get('drove_mm')} of {screw.get('needed_mm')} mm"
+                     + (", stripped" if screw.get("stripped") else "") + ("" if screw.get("held") else ", the drill not held"))
+        elif result.get("hole") is not None and not result["hole"].get("pass"):
+            # material removed: the hole the bit cut (material_laws.drill_cut), its depth and size
+            hl = result["hole"]
+            lower(3, f"the hole went {hl.get('depth_mm')} of {hl.get('needed_mm')} mm ({hl.get('diameter_mm')} mm across for a "
+                     f"{hl.get('bit_mm')} mm bit, peak thrust {hl.get('thrust_peak_n')} N)" + ("" if hl.get("held") else ", the drill not held"))
     return cap, reasons
 
 
@@ -191,6 +237,23 @@ def _quat_xyzw(q_wxyz):
 def _rows(log: list, stages) -> list:
     stages = [stages] if isinstance(stages, str) else list(stages)
     return [r for r in log if r.get("stage") in stages]
+
+
+def _stage_rows(log: list, stage: str) -> list:
+    """A stage's rows for the grip's measures: where the take reuses a stage's
+    name in a part before the object was in hand (a press's 'release' and
+    'hold' before the drill was taken up), only its rows from the last 'close'
+    on - the hand's slide to the drill after the press read as the drill
+    sliding 218 mm in the hand (switch take, 2026-10-17)."""
+    closes = [i for i, r in enumerate(log) if r.get("stage") == "close"]
+    if closes:
+        k = closes[-1]
+        while k > 0 and log[k - 1].get("stage") == "close":
+            k -= 1
+        after = [r for r in log[k:] if r.get("stage") == stage]
+        if after:
+            return after
+    return _rows(log, stage)
 
 
 def _in_hand_pose(r: dict):
@@ -217,9 +280,10 @@ def grip_measures(log: list, result: dict) -> dict:
     for r in log:
         if not stages or stages[-1] != r.get("stage"):
             stages.append(r.get("stage"))
-    out = {"stages": stages, "digit_n": {}, "digit_n_by_body": {}, "curl": {}, "in_hand": {}, "on_control_n": {}}
+    out = {"stages": stages, "digit_n": {}, "digit_n_by_body": {}, "curl": {}, "in_hand": {}, "on_control_n": {},
+           "bodies": {"button": (result.get("door") or {}).get("button_body"), "cabinet": (result.get("door") or {}).get("cabinet_body")}}
     for st in stages:
-        rows = _rows(log, st)
+        rows = _stage_rows(log, st)
         cn = [r["contact_n"] for r in rows if isinstance(r.get("contact_n"), dict)]
         if cn:
             out["digit_n"][st] = {d: round(float(np.mean([c.get(d, 0.0) for c in cn])), 2) for d in FINGERS + ("palm",)}
@@ -242,6 +306,10 @@ def grip_measures(log: list, result: dict) -> dict:
             (R0, p0), (R1, p1) = poses
             out["in_hand"][st] = {"turn_deg": round(float(np.degrees((R0.inv() * R1).magnitude())), 2),
                                   "slide_mm": round(float(np.linalg.norm(p1 - p0) * 1000), 1)}
+        thr = [(r.get("tool") or {}).get("throttle") for r in rows]
+        thr = [x for x in thr if isinstance(x, (int, float))]
+        if thr:
+            out.setdefault("trigger_by_stage", {})[st] = round(float(max(thr)), 3)
         trig = [(r.get("tool") or {}).get("on_trigger_n") for r in rows]
         trig = [t for t in trig if isinstance(t, dict)]
         if trig:
@@ -278,6 +346,27 @@ def grip_findings(grip: dict, gm: dict, spec: dict) -> list[dict]:
                 got = {d: round(float(np.mean([x.get(b, {}).get(d, 0.0) for x in per])), 2) for d, b in want.items()}
                 ok = all(v >= f.get("min_n", 0.3) for v in got.values())
                 ev = "mean contact over " + ", ".join(st) + ": " + ", ".join(f"{d} on {want[d]} {v} N" for d, v in got.items())
+        elif m == "digit_on_body":
+            # a digit's force on one body of the object, named by its role in the record (a
+            # microwave's release button: the press read 0.0 N on the door, the target)
+            body = (gm.get("bodies") or {}).get(f["body_role"])
+            per = [gm.get("digit_n_by_body", {}).get(s_) for s_ in st]
+            per = [x for x in per if x and body in x]
+            if body and per:
+                got = round(float(np.mean([x[body].get(f["digit"], 0.0) for x in per])), 2)
+                if "max_n" in f:                                       # a ceiling: a digit kept OFF a body (the panel round a button)
+                    ok = got <= f["max_n"]
+                    ev = f"the {f['digit']} on the {f['body_role']} ({body}) over {', '.join(st)}: {got} N mean (allowed {f['max_n']} N)"
+                else:
+                    ok = got >= f.get("min_n", 1.0)
+                    ev = f"the {f['digit']} on the {f['body_role']} ({body}) over {', '.join(st)}: {got} N mean (needs >= {f.get('min_n', 1.0)} N)"
+        elif m == "no_contact":
+            # the hand kept off the target through these stages (a door left to pop by its latch)
+            vals = [gm["digit_n"][s_] for s_ in st if s_ in gm["digit_n"]]
+            if vals:
+                peak = max(sum(v for k, v in row.items() if k != "palm") + row.get("palm", 0.0) for row in vals)
+                ok = peak <= f.get("max_n", 0.5)
+                ev = f"the hand's mean contact on it over {', '.join(st)}: at most {peak:.2f} N (allowed {f.get('max_n', 0.5)} N)"
         elif m == "thumb_opposes":
             flex = [gm["curl"][s]["thumb"].get("flex_rad", gm["curl"][s]["thumb"]["at_rad"]) for s in st if s in gm["curl"]]
             force = [gm["digit_n"][s]["thumb"] for s in st if s in gm["digit_n"]]
@@ -297,9 +386,15 @@ def grip_findings(grip: dict, gm: dict, spec: dict) -> list[dict]:
                 ok = all(per.get(d, 0.0) > f.get("min_n", 1.0) for d in f["only"]) and not others
                 ev = "peak force on the control: " + ", ".join(f"{d} {v} N" for d, v in per.items())
         elif m == "trigger_fraction":
-            if "trigger_fraction" in gm:
-                ok = gm["trigger_fraction"] >= f["min"]
-                ev = f"peak pull {gm['trigger_fraction']:.0%} of the trigger's travel (needs {f['min']:.0%})"
+            # the peak over the feature's own stages, from the log's ticks: one number the replay took
+            # over "pull" and "run" read 0 % for a screw driven 15.8 turns on the trigger held through
+            # "spin", "drive" and "seat" (Gemini 4 judged on it, 2026-10-16)
+            per = [gm.get("trigger_by_stage", {}).get(s_) for s_ in st]
+            per = [x for x in per if x is not None]
+            frac = max(per) if per else gm.get("trigger_fraction")
+            if frac is not None:
+                ok = frac >= f["min"]
+                ev = f"peak pull {frac:.0%} of the trigger's travel (needs {f['min']:.0%})"
                 cs = [gm["curl"][s]["index"] for s in st if s in gm["curl"]]
                 if cs and not ok:
                     c = cs[-1]
@@ -645,6 +740,19 @@ def critique(scene_dir: Path, judges: list[str], record_only: bool = False, blin
                                   "judge": v["judge"], "rung_reached": v["rung_reached"], **v["next_task"], "status": "proposed"})
         BACKLOG.parent.mkdir(parents=True, exist_ok=True)
         BACKLOG.write_text(json.dumps(backlog, indent=1))
+    # the curricula's tasks against this take: a requirement it met closes, the next one opens
+    # (curriculum_intake.py; the Studio's API read when it runs)
+    try:
+        import curriculum_intake as _ci
+        _res = _ci.derive()
+        backlog = json.loads(BACKLOG.read_text()) if BACKLOG.exists() else {"tasks": []}
+        out["curriculum"] = _ci.update_backlog(backlog, _res["tasks"], _ci.met_requirements(_res["lessons"]), out["at"][:10])
+        BACKLOG.write_text(json.dumps(backlog, indent=1))
+        _nt = _ci.next_task(backlog)
+        out["curriculum"]["next"] = _nt and _nt["id"]
+        (scene_dir / out_name).write_text(json.dumps(out, indent=1))
+    except Exception as e:  # noqa: BLE001 - the critique stands without it
+        out["curriculum"] = {"error": f"{type(e).__name__}: {e}"}
     return out
 
 
@@ -677,6 +785,8 @@ def main() -> int:
                 print(f"      measure: {m}")
         else:
             print(f"[{v['judge']}] {v.get('error') or v.get('skipped')}")
+    if out.get("curriculum"):
+        print(f"[curricula] {json.dumps(out['curriculum'])}")
     for w in out.get("measured_cap_why", []):
         print(f"   record: {w}")
     for f in out.get("grip_findings", []):

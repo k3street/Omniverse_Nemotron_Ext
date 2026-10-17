@@ -74,7 +74,8 @@
     },
     "preload_why": "the recording holds the fingers where they stopped on the mug, not where they were driven: replayed open-loop the hand closes to the touching pose and squeezes nothing (measured: no rise). HomeHero drove past contact and held 3-12 N per finger, 10-24 N on the thumb; this drives past the recorded pose by a fixed amount, ramped in as the hand closes",
     "controller": "homehero_r5_action",
-    "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)"
+    "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)",
+    "reference_foreign_why": "HomeHero's audited R5 pickup recording (reference_learning_v1), replayed on purpose: no plan of this scene's own"
   },
   "objects": [
     {

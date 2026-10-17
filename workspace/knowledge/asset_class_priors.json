@@ -2149,7 +2149,8 @@
        "stages": [
         "settle",
         "run",
-        "hold"
+        "hold",
+        "drive"
        ],
        "min_n": 1.0
       },
@@ -2160,7 +2161,8 @@
        "stages": [
         "settle",
         "run",
-        "hold"
+        "hold",
+        "drive"
        ],
        "min_flex_rad": 0.4,
        "min_n": 1.0
@@ -2171,7 +2173,10 @@
        "measure": "control_digits",
        "stages": [
         "pull",
-        "run"
+        "run",
+        "spin",
+        "drive",
+        "seat"
        ],
        "only": [
         "index"
@@ -2185,7 +2190,10 @@
        "measure": "trigger_fraction",
        "stages": [
         "pull",
-        "run"
+        "run",
+        "spin",
+        "drive",
+        "seat"
        ],
        "min": 0.9
       },
@@ -2196,7 +2204,10 @@
        "stages": [
         "pull",
         "run",
-        "release"
+        "release",
+        "spin",
+        "drive",
+        "seat"
        ],
        "max_turn_deg": 5.0,
        "max_slide_mm": 5.0
@@ -5503,6 +5514,131 @@
    "source": "vlm",
    "proposed_by": "\u043c\u0435\u0440\u0430_\u043f\u043e\u0440\u0442\u043d\u043e\u0432\u0441\u043a\u0430\u044f_\u0441_\u0440\u0435\u043b\u044c\u0435\u0444\u043d\u044b\u043c\u0438_\u0434\u0435\u043b\u0435\u043d\u0438\u044f\u043c\u0438",
    "proposed_on": "2026-10-05"
+  },
+  "refrigerator": {
+   "keywords": [
+    "fridge",
+    "refrigerator"
+   ],
+   "max_dim_m": [
+    1.4,
+    2.1
+   ],
+   "mass_kg": [
+    45,
+    130
+   ],
+   "articulable": true,
+   "use": {
+    "purpose": "keep food cold behind insulated doors that seal shut",
+    "operated_by": "one hand pulls the door's handle: the fingers round the bar or into the recess, a firm pull breaks the magnetic gasket (20-45 N at the handle), then the door swings on its hinge with the hand; the person steps aside or back from the door's swing; it is closed by a push until the gasket draws it shut",
+    "work_signal": "the door open wide enough to reach a shelf, then shut and sealed again",
+    "ladder": [
+     "the door's seal broken by the hand at its handle: the door opened a few degrees against the gasket",
+     "the door swung open by the hand far enough to reach in (60 deg or more), without the robot in the door's way",
+     "an item taken from or put on a shelf with the door open",
+     "the door closed again until the gasket seals it"
+    ],
+    "grip": {
+     "how": "the fingers wrapped round the handle's bar (or hooked into its recess), the palm on its front; the pull along the door's arc, not straight back, so the hand keeps the handle while the door swings",
+     "features": [
+      {
+       "id": "fingers_on_handle",
+       "text": "the fingers hold the handle while the door is pulled",
+       "measure": "digit_n",
+       "digits": [
+        "index",
+        "middle",
+        "ring"
+       ],
+       "stages": [
+        "pull"
+       ],
+       "min_n": 0.5
+      },
+      {
+       "id": "handle_kept",
+       "text": "the handle stays in the hand through the pull (it does not slide out of the fingers)",
+       "measure": "in_hand_motion",
+       "stages": [
+        "pull"
+       ],
+       "max_turn_deg": 10.0,
+       "max_slide_mm": 15.0
+      }
+     ],
+     "why": "curated 2026-10-16 for the task critic's grip judgment on a refrigerator's door"
+    },
+    "why": "curated 2026-10-16 for the task critic; the opening force from magnet suppliers' figures (22-44 N) and 16 CFR 1750.5's 66.7 N ceiling (from inside)"
+   },
+   "why": "a class of its own (not appliance_large's ovens and washers): its use, its seal and its ladder differ"
+  },
+  "microwave": {
+   "keywords": [
+    "microwave"
+   ],
+   "max_dim_m": [
+    0.4,
+    0.7
+   ],
+   "mass_kg": [
+    8,
+    25
+   ],
+   "articulable": true,
+   "use": {
+    "purpose": "heat food behind a door that latches shut while it runs",
+    "operated_by": "a fingertip presses the door-release button (or a hand pulls the handle) until the latch lets go and the door pops ajar; the hand then swings the door open by its edge; a dish goes in on the turntable; the door is pushed shut until it latches; the time is set and start pressed",
+    "work_signal": "the turntable turns with the door latched and the light on, then the food comes out hot",
+    "ladder": [
+     "the door released by its button: the latch lets go under a fingertip's press and the door pops ajar",
+     "the door swung open by the hand far enough to put a dish in (80 deg or more)",
+     "a dish put in on the turntable and the door pushed shut until it latches",
+     "it is run: the time set, start pressed, the turntable turning"
+    ],
+    "grip": {
+     "how": "the release button pressed with the pad or tip of the index, the other fingers folded away from the panel; the door left alone until it pops, then taken by its free edge, the fingers curled round behind it",
+     "features": [
+      {
+       "id": "door_untouched_while_pressing",
+       "text": "the hand stays off the door while it presses the button (the pop is the latch's doing, not a pull)",
+       "measure": "no_contact",
+       "stages": [
+        "press",
+        "pressed"
+       ],
+       "max_n": 0.5
+      },
+      {
+       "id": "index_presses_the_button",
+       "text": "the index's pad presses the release button home: its force is what trips the latch",
+       "measure": "digit_on_body",
+       "digit": "index",
+       "body_role": "button",
+       "stages": [
+        "pressed"
+       ],
+       "min_n": 5.0,
+       "why": "the scene's button spring (1000 N/m) needs 6 N at its 6 mm trip; held pressed past it, the index carries ~5 N or more (the forum's ~10 N for a real one). Added after Gemini 4 found the press measured only against the door (2026-10-16)"
+      },
+      {
+       "id": "index_off_the_panel",
+       "text": "the press stops at the button: the index does not bear on the panel round it",
+       "measure": "digit_on_body",
+       "digit": "index",
+       "body_role": "cabinet",
+       "stages": [
+        "pressed"
+       ],
+       "max_n": 2.0,
+       "why": "a person stops when the latch lets go; pressed through, the index pad met the bezel at 8.76 mm and loaded the cabinet with 15 N (2026-10-16)"
+      }
+     ],
+     "why": "curated 2026-10-16 for the task critic"
+    },
+    "why": "curated 2026-10-16; the button force (~10 N) from a forum's 2-2.5 lbf for microwave door buttons - no manufacturer figure found"
+   },
+   "why": "a class of its own (not appliance_small's kettles and toasters)"
   }
  }
 }

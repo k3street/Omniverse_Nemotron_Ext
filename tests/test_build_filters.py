@@ -137,3 +137,146 @@ def test_config_drift_names_what_the_build_did_not_take():
     built["grasp_plan"]["lift_m"] = 0.0
     assert config_drift(cfg, built) == []
     assert config_drift({"a": [1, 2]}, {"a": [1]}) == ["/a"]
+
+
+def test_an_object_built_against_a_wall_is_caught_by_its_clearance():
+    from build_er_scene import object_clearances
+    st = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageMetersPerUnit(st, 1.0)
+
+    def box(path, lo, hi):
+        c = UsdGeom.Cube.Define(st, path)
+        c.CreateSizeAttr(1.0)
+        xf = UsdGeom.XformCommonAPI(c)
+        xf.SetTranslate(Gf.Vec3d(*[(a + b) / 2 for a, b in zip(lo, hi)]))
+        xf.SetScale(Gf.Vec3f(*[b - a for a, b in zip(lo, hi)]))
+        UsdPhysics.CollisionAPI.Apply(c.GetPrim())
+    box("/World/Environment/wall", (-1, -1.61, 0), (1, -1.50, 2.5))
+    box("/World/Environment/floor", (-3, -3, -0.01), (3, 3, 0.0))
+    box("/World/Objects/Fridge/body", (-0.3, -1.497, 0.001), (0.3, -0.87, 1.75))
+    near = object_clearances(st, "/World/Objects/Fridge", exclude=["/World/Environment/floor"])
+    assert [(b, g) for _, b, g in near] == [("/World/Environment/wall", 0.003)]
+    box("/World/Objects/Fridge2/body", (-0.3, -1.46, 0.001), (0.3, -0.83, 1.75))
+    assert object_clearances(st, "/World/Objects/Fridge2", exclude=["/World/Environment/floor"]) == []
+
+
+def test_a_camera_eye_inside_furniture_is_refused_but_not_one_inside_the_room():
+    from pxr import Usd, UsdGeom
+
+    from build_er_scene import camera_eyes_inside
+    st = Usd.Stage.CreateInMemory()
+    UsdGeom.Xform.Define(st, "/World/Environment")
+    wardrobe = UsdGeom.Cube.Define(st, "/World/Environment/wardrobe")               # a 2 x 0.8 x 2.6 m box
+    wardrobe.CreateSizeAttr(1.0)
+    UsdGeom.XformCommonAPI(wardrobe).SetScale((2.0, 0.8, 2.6))
+    UsdGeom.XformCommonAPI(wardrobe).SetTranslate((0.3, 1.9, 1.3))
+    m = UsdGeom.Mesh.Define(st, "/World/Environment/wardrobe_mesh")
+    m.CreatePointsAttr([(-0.7, 1.5, 0.0), (1.3, 1.5, 0.0), (1.3, 2.3, 2.6), (-0.7, 2.3, 2.6)])
+    m.CreateFaceVertexCountsAttr([4]); m.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+    shell = UsdGeom.Mesh.Define(st, "/World/Environment/room_shell")                # spans the whole room
+    shell.CreatePointsAttr([(-5, -5, 0), (5, -5, 0), (5, 5, 3), (-5, 5, 3)])
+    shell.CreateFaceVertexCountsAttr([4]); shell.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+    hits = camera_eyes_inside(st, {"Overview": (0.25, 1.85, 1.65), "Close": (0.46, 0.56, 1.56)})
+    assert hits == [("Overview", "/World/Environment/wardrobe_mesh")]
+
+
+def test_a_scene_replays_only_its_own_plan(tmp_path):
+    from build_er_scene import foreign_reference
+    own = tmp_path / "scenes" / "aida_r5_dining_drill_screw"
+    base = tmp_path / "scenes" / "aida_r5_dining_drill"
+    ok = {"grasp_replay": {"reference": str(own / "grasp_plan" / "targets.npz")}}
+    copied = {"grasp_replay": {"reference": str(base / "grasp_plan" / "targets.npz")}}
+    assert foreign_reference(ok, own) is None
+    assert "not this scene's own plan" in foreign_reference(copied, own)
+    assert foreign_reference({"grasp_replay": {}}, own) is None
+
+
+def test_another_scenes_recording_is_allowed_only_when_the_config_says_why(tmp_path):
+    from build_er_scene import foreign_reference
+    own = tmp_path / "scenes" / "aida_r5_dining_mug_grasp"
+    rec = {"grasp_replay": {"reference": "/x/HomeHero/reference.npz", "reference_foreign_why": "HomeHero's audited recording"}}
+    assert foreign_reference(rec, own) is None
+
+
+def test_an_attachment_records_its_tip_in_its_bodys_frame():
+    import json as _json
+
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    from build_er_scene import _attach
+    st = Usd.Stage.CreateInMemory()
+    root = UsdGeom.Xform.Define(st, "/Drill")
+    UsdGeom.XformCommonAPI(root).SetTranslate((1.0, 2.0, 0.5))
+    UsdGeom.XformCommonAPI(root).SetRotate((0.0, 0.0, -90.0))
+    house = UsdGeom.Xform.Define(st, "/Drill/house"); UsdPhysics.RigidBodyAPI.Apply(house.GetPrim())
+    chuck = UsdGeom.Xform.Define(st, "/Drill/chuck"); UsdPhysics.RigidBodyAPI.Apply(chuck.GetPrim())
+    nose = UsdGeom.Cube.Define(st, "/Drill/chuck/nose"); nose.CreateSizeAttr(0.01)
+    UsdGeom.XformCommonAPI(nose).SetTranslate((-0.12, 0.0, 0.15))             # the nose along the drill's -x, 15 cm up
+    j = UsdPhysics.RevoluteJoint.Define(st, "/Drill/chuck_joint")
+    j.CreateBody0Rel().SetTargets(["/Drill/house"]); j.CreateBody1Rel().SetTargets(["/Drill/chuck"])
+    j.CreateAxisAttr("X"); j.CreateLocalPos1Attr(Gf.Vec3f(-0.10, 0.0, 0.15)); j.CreateLocalRot1Attr(Gf.Quatf(1, 0, 0, 0))
+    path = _attach(st, root.GetPrim(), "Drill", {"name": "Bit", "body": "chuck", "along_joint": "chuck_joint", "from_body": "nose",
+                                                 "radius": 0.003, "length": 0.05, "insert_m": 0.005})
+    rec = _json.loads(st.GetPrimAtPath(path).GetCustomDataByKey("er:attachment"))
+    M = np.array(UsdGeom.XformCache().GetLocalToWorldTransform(st.GetPrimAtPath("/Drill/chuck"))).T
+    R = M[:3, :3] / np.linalg.norm(M[:3, :3], axis=0)
+    assert np.allclose(M[:3, 3] + R @ np.asarray(rec["tip_body"]), rec["tip_world_at_build"], atol=1e-9)
+    assert np.allclose(R @ np.asarray(rec["axis_body"]), rec["axis_world_at_build"], atol=1e-9)
+    # the drill's -x turned -90 deg about z is world +y: the bit points out of the nose, 45 mm beyond it
+    assert np.allclose(rec["axis_world_at_build"], [0.0, 1.0, 0.0], atol=1e-9)
+    assert abs(rec["tip_world_at_build"][1] - (2.0 + 0.125 + 0.045)) < 1e-6
+
+
+def test_joint_states_use_the_schema_name_physx_registers():
+    import glob
+    import json as _json
+
+    from build_er_scene import joint_state_schema
+    assert joint_state_schema("angular") == "PhysicsJointStateAPI:angular"
+    assert joint_state_schema("linear") == "PhysicsJointStateAPI:linear"
+    with pytest.raises(ValueError):
+        joint_state_schema("prismatic")
+    infos = glob.glob(str(Path.home() / "Documents/Github/isaacsim/_build/linux-aarch64/release/extscache/omni.usd.schema.physx-*"
+                          / Path("plugins/PhysxSchema/resources/plugInfo.json")))
+    if infos:                                                       # against PhysX's own registry, where it is installed
+        text = Path(infos[0]).read_text()
+        assert '"schemaIdentifier": "PhysicsJointStateAPI"' in text
+        assert "PhysxJointStateAPI" not in text
+
+
+def test_a_scene_built_by_other_builder_code_is_stale(tmp_path):
+    import json as _json
+
+    from build_er_scene import build_code_sha, stale_build
+    (tmp_path / "build.json").write_text(_json.dumps({"build_code_sha256": build_code_sha()}))
+    assert stale_build(tmp_path) is None
+    (tmp_path / "build.json").write_text(_json.dumps({"build_code_sha256": "0" * 64}))
+    assert "other builder code" in stale_build(tmp_path)
+    (tmp_path / "build.json").write_text(_json.dumps({}))
+    assert "before builds were stamped" in stale_build(tmp_path)
+
+
+def test_a_drilled_hole_is_built_as_the_boards_colliders_and_a_drillable_board_passes_only_the_bit():
+    from build_er_scene import _drillable_twin, _filter_bit, _holed_board
+    stage = Usd.Stage.CreateInMemory()
+    fx = {"name": "Board", "size": [0.2, 0.018, 0.3], "position": [4.8, 0.88175, 0.858]}
+    hole = {"entry": [4.8, 0.87275, 0.949], "r": 0.0016, "depth_m": 0.018, "out": [0.0, -1.0, 0.0], "sides": 16}
+    _holed_board(stage, fx, [hole])
+    pieces = stage.GetPrimAtPath("/World/Fixtures/Board").GetChildren()
+    assert len(pieces) == 16                                            # through: the ring alone, no board behind
+    assert all(UsdPhysics.MeshCollisionAPI(q).GetApproximationAttr().Get() == "convexHull" for q in pieces)
+    pts = np.asarray(UsdGeom.Mesh(pieces[0]).GetPointsAttr().Get(), float)
+    assert abs(pts[:, 1].min() - 0.87275) < 1e-6 and abs(pts[:, 1].max() - 0.89075) < 1e-6
+    stage2 = Usd.Stage.CreateInMemory()
+    cube = UsdGeom.Cube.Define(stage2, "/World/Fixtures/Board")
+    UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+    UsdGeom.Xform.Define(stage2, "/World/Objects/Drill/Chuck")
+    UsdGeom.Cylinder.Define(stage2, "/World/Objects/Drill/Chuck/Bit")
+    dfx = dict(fx, drillable={"object": "Drill", "attachments": ["Bit"], "sides": 16})
+    _drillable_twin(stage2, dfx)
+    _filter_bit(stage2, dfx)
+    board = stage2.GetPrimAtPath("/World/Fixtures/Board")
+    assert [str(p) for p in board.GetRelationship("physics:filteredPairs").GetTargets()] == ["/World/Objects/Drill/Chuck/Bit"]
+    assert UsdGeom.Imageable(board).ComputeVisibility() == UsdGeom.Tokens.invisible
+    twin = stage2.GetPrimAtPath("/World/FixtureVisuals/Board")
+    assert len(twin.GetChildren()) == 18 and not any(q.HasAPI(UsdPhysics.CollisionAPI) for q in twin.GetChildren())

@@ -185,6 +185,89 @@ def main() -> int:
                        stage_ticks={k: int(sum(1 for x in stages if x == k)) for k in dict.fromkeys(stages)})
         print(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else float(o)))
         return 0
+    if task["kind"] == "button_press":
+        # a push button pressed with the index (a microwave's door release): button_press_planner.py
+        from aida_r5_grasp_planner import reachable_slide_bounds
+        from button_press_planner import plan_button_press
+        bounds = reachable_slide_bounds(planner.original_bounds,
+                                        {"arm_lower": lower[:8].tolist(), "arm_upper": upper[:8].tolist(),
+                                         "gravity_offset": gravity_offset}, config["planning"]["slide_headroom_m"])
+        g.bounds = bounds
+
+        def make_checker(extra):
+            c = Checker(g, Path(config["planning"]["collision_cache"]), list(req["obstacles"]) + list(extra),
+                        clearance=config["planning"]["table_margin_m"])
+            apply_to_checker(c)
+            return c
+        res = plan_button_press(req, g, planner.checker, measured, lower, upper, ACTION_STEP, bounds[0], make_checker)
+        out = {"planner": "button_press_planner (HomeHero geometry, checker, RRT)", "task": {k: v for k, v in task.items() if k != "button"},
+               "passed": bool(res.get("passed")), "reason": res.get("reason"), "slide_gravity_offset": dict(sg), "entry": entry_info,
+               "collision_exceptions_dropped": exceptions_dropped,
+               **{k: res[k] for k in ("grip", "palm", "rrt", "candidates", "tried", "rejected", "screen") if k in res}}
+        if res.get("passed"):
+            start = np.asarray(req["measured"], float)
+            arr = np.vstack([start] + entry + list(res["targets"][1:]))
+            stages = ["start"] + ["entry"] * len(entry) + list(res["stages"][1:])
+            np.savez(req["out_npz"], targets=arr, stages=np.asarray(stages))
+            out.update(targets=req["out_npz"], ticks=len(arr), seconds_at_30hz=round(len(arr) / 30, 2),
+                       stage_ticks={k: int(sum(1 for x in stages if x == k)) for k in dict.fromkeys(stages)})
+        print(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else float(o)))
+        return 0
+    if task["kind"] == "screw_drive":
+        # a screw driven with the drill already in the hand: screw_drive_planner.py
+        from aida_r5_grasp_planner import reachable_slide_bounds
+        from screw_drive_planner import plan_screw_drive
+        bounds = reachable_slide_bounds(planner.original_bounds,
+                                        {"arm_lower": lower[:8].tolist(), "arm_upper": upper[:8].tolist(),
+                                         "gravity_offset": gravity_offset}, config["planning"]["slide_headroom_m"])
+        g.bounds = bounds
+
+        def make_checker_s(extra):
+            c = Checker(g, Path(config["planning"]["collision_cache"]), list(req["obstacles"]) + list(extra),
+                        clearance=config["planning"]["table_margin_m"])
+            apply_to_checker(c)
+            return c
+        res = plan_screw_drive(req, g, planner.checker, measured, lower, upper, ACTION_STEP, bounds[0], make_checker_s)
+        out = {"planner": "screw_drive_planner (HomeHero geometry, checker)", "task": {k: v for k, v in task.items() if k != "screw"},
+               "passed": bool(res.get("passed")), "reason": res.get("reason"), "slide_gravity_offset": dict(sg), "entry": entry_info,
+               **{k: res[k] for k in ("drive",) if k in res}}
+        if res.get("passed"):
+            start = np.asarray(req["measured"], float)
+            arr = np.vstack([start] + entry + list(res["targets"][1:]))
+            stages = ["start"] + ["entry"] * len(entry) + list(res["stages"][1:])
+            np.savez(req["out_npz"], targets=arr, stages=np.asarray(stages))
+            out.update(targets=req["out_npz"], ticks=len(arr), seconds_at_30hz=round(len(arr) / 30, 2),
+                       stage_ticks={k: int(sum(1 for x in stages if x == k)) for k in dict.fromkeys(stages)})
+        print(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else float(o)))
+        return 0
+    if task["kind"] == "door_open":
+        # a hinged door opened by its handle (a refrigerator's): door_open_planner.py
+        from aida_r5_grasp_planner import reachable_slide_bounds
+        from door_open_planner import plan_door_open
+        bounds = reachable_slide_bounds(planner.original_bounds,
+                                        {"arm_lower": lower[:8].tolist(), "arm_upper": upper[:8].tolist(),
+                                         "gravity_offset": gravity_offset}, config["planning"]["slide_headroom_m"])
+        g.bounds = bounds
+
+        def make_checker(extra):
+            c = Checker(g, Path(config["planning"]["collision_cache"]), list(req["obstacles"]) + list(extra),
+                        clearance=config["planning"]["table_margin_m"])
+            apply_to_checker(c)
+            return c
+        res = plan_door_open(req, g, planner.checker, measured, lower, upper, ACTION_STEP, bounds[0], make_checker)
+        out = {"planner": "door_open_planner (HomeHero geometry, checker, RRT)", "task": {k: v for k, v in task.items() if k != "door"},
+               "passed": bool(res.get("passed")), "reason": res.get("reason"), "slide_gravity_offset": dict(sg), "entry": entry_info,
+               "collision_exceptions_dropped": exceptions_dropped,
+               **{k: res[k] for k in ("grip", "palm", "pull_deg", "door_angle_before_deg", "reposed", "approach", "backed_off_ticks", "retreat_ok", "rrt", "candidates", "tried", "search", "screen", "best") if k in res}}
+        if res.get("passed"):
+            start = np.asarray(req["measured"], float)
+            arr = np.vstack([start] + entry + list(res["targets"][1:]))
+            stages = ["start"] + ["entry"] * len(entry) + list(res["stages"][1:])
+            np.savez(req["out_npz"], targets=arr, stages=np.asarray(stages))
+            out.update(targets=req["out_npz"], ticks=len(arr), seconds_at_30hz=round(len(arr) / 30, 2),
+                       stage_ticks={k: int(sum(1 for x in stages if x == k)) for k in dict.fromkeys(stages)})
+        print(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else float(o)))
+        return 0
     if task["kind"] == "tool_grip":
         # a tool taken by its handle, a finger on its control (a drill's
         # trigger): tool_grip_planner.py, HomeHero's geometry, checker and RRT
@@ -204,7 +287,7 @@ def main() -> int:
         out = {"planner": "tool_grip_planner (HomeHero geometry, checker, RRT)", "task": {k: v for k, v in task.items() if k != "tool"},
                "passed": bool(res.get("passed")), "reason": res.get("reason"), "slide_gravity_offset": dict(sg), "entry": entry_info,
                "collision_exceptions_dropped": exceptions_dropped,
-               **{k: res[k] for k in ("grip", "palm", "index_pre_rad", "lifted_m", "frame", "rrt", "candidates", "tried", "screen", "best") if k in res}}
+               **{k: res[k] for k in ("grip", "palm", "index_pre_rad", "lifted_m", "switch", "frame", "rrt", "candidates", "tried", "screen", "best") if k in res}}
         if res.get("passed"):
             start = np.asarray(req["measured"], float)
             arr = np.vstack([start] + entry + list(res["targets"][1:]))

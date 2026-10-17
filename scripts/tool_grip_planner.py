@@ -713,6 +713,134 @@ def search_grips(hand, tool, opts):
                  "tool_hulls": len(hulls_tool), "trigger_hulls": len(hulls_trig)}
 
 
+def thumb_switch_press(hand, R, o, q_hand, tool, opts):
+    """The holding hand's thumb on the tool's slide switch (a drill's forward/
+    reverse button, a push-through slider whose two ends stand out of either
+    side of the housing): the thumb rotation and flex at which its pad first
+    meets the END the hand is on, pressing it toward the other end - the
+    thumb turned from the grip's rotation without sweeping through the tool,
+    then flexed until it touches, the touch on the end's face and the pad
+    moving along the push there. opts: switch_body (the end pressed),
+    switch_other_body, switch_travel_m. Returns (press | None, reasons)."""
+    from scipy.spatial import cKDTree
+
+    P = tool["bodies"]
+    sw, other = opts["switch_body"], opts["switch_other_body"]
+    S = np.asarray(P[sw], float)
+    u = np.asarray(P[other], float).mean(0) - S.mean(0)
+    u /= np.linalg.norm(u)                                              # the push: from the end pressed toward the other
+    Sp, up_ = (S - o) @ R, R.T @ u
+    s_min = float((Sp @ up_).min())
+    tree = cKDTree(Sp)
+    up_tool = R.T @ np.asarray(tool["up"], float)
+    fwd_tool = R.T @ np.asarray(tool["forward"], float)
+    # the tool's other parts sliced along its up AND its forward axis, a point inside only when
+    # inside both: slices along up alone span the barrel at the switch's height and fill the corner
+    # under its overhang where the switch sits - every thumb on the switch read as in the housing
+    _bodies = [(np.asarray(v, float) - o) @ R for k, v in P.items() if k not in (sw, other)]
+    hulls_up = [h for B in _bodies for h in slab_hulls(B, up_tool, band=0.004)]
+    hulls_fw = [h for B in _bodies for h in slab_hulls(B, fwd_tool, band=0.004)]
+    tool_tree = cKDTree(np.vstack(_bodies))                              # how deep a thumb point is: to the nearest surface point
+
+    graze = float(opts.get("switch_graze_m", 0.0025))
+
+    def in_tool(T, tol=0.0005):
+        # inside both slicings AND deeper than `graze` from the tool's sampled surface: the slices
+        # still over-fill the corner under the barrel by ~2 mm - the one grip whose thumb reaches the
+        # switch's face (0.2 mm) sat 2.0 mm "inside" there, where the other grips' thumbs sat 8-20 mm in
+        m = inside(T, hulls_up, tol) & inside(T, hulls_fw, tol)
+        if m.any():
+            m[np.flatnonzero(m)] = tool_tree.query(T[m])[0] > graze
+        return m
+    sw_hulls = slab_hulls(Sp, up_tool, band=0.002, min_points=4)
+    rot0 = float(q_hand[5])
+    why, found = {}, []
+    face_tree = cKDTree(Sp[(Sp @ up_) <= s_min + 0.0015])
+    reach = {}                                                          # per rotation: the thumb's nearest approach to the face, collisions aside
+    for rot in np.arange(float(opts.get("switch_rot_lo", -1.5)), float(opts.get("switch_rot_hi", 0.3)) + 1e-9, 0.1):
+        best = (1e9, None, None)
+        for flex in np.arange(0.0, 1.6, 0.05):
+            T = hand.digit("thumb", np.r_[np.asarray(q_hand, float)[:4], flex, rot])
+            dmin = float(face_tree.query(T)[0].min())
+            m_in = in_tool(T)
+            depth = float(tool_tree.query(T[m_in])[0].max()) if m_in.any() else 0.0
+            if dmin < best[0]:
+                best = (dmin, round(float(flex), 2), round(depth * 1000, 1))
+        reach[round(float(rot), 2)] = {"closest_mm": round(best[0] * 1000, 1), "at_flex": best[1], "deepest_in_housing_mm": best[2]}
+    why["reach"] = reach
+    why["grip_thumb_rot"] = round(rot0, 3)
+
+    def tally(k):
+        why[k] = why.get(k, 0) + 1
+    # the thumb's two joints planned together: a breadth-first search over (rotation, flex) from
+    # the grip's thumb, through poses clear of the tool and the switch, to a pose whose pad meets
+    # the switch's end face moving along the push - the straight turn-then-flex went through the
+    # housing for every grip, the one face it can reach lying in the corner under the barrel
+    from collections import deque
+    rots = np.round(np.arange(float(opts.get("switch_rot_lo", -1.5)), float(opts.get("switch_rot_hi", 0.3)) + 1e-9, 0.05), 3)
+    flexes = np.round(np.arange(0.0, 1.6 + 1e-9, 0.04), 3)
+    cell = {}
+
+    def state(a, b):
+        if (a, b) not in cell:
+            q = np.r_[np.asarray(q_hand, float)[:4], flexes[b], rots[a]]
+            T = hand.digit("thumb", q)
+            if in_tool(T).any():
+                cell[(a, b)] = ("blocked", None)
+            else:
+                d, ii = tree.query(T)
+                j = int(np.argmin(d))
+                if d[j] >= 0.0012:
+                    cell[(a, b)] = ("free", None)
+                else:
+                    on_face = float(Sp[ii[j]] @ up_) <= s_min + 0.0015
+                    q2 = q.copy(); q2[4] = min(flexes[b] + 0.02, 1.6)
+                    v = hand.digit("thumb", q2)[j] - T[j]
+                    along = float(v @ up_) / (float(np.linalg.norm(v)) + 1e-12)
+                    ok = on_face and along >= float(opts.get("switch_min_along", 0.3))
+                    cell[(a, b)] = ("goal" if ok else "touch", {"along": along, "speed": float(np.linalg.norm(v)) / 0.02})
+        return cell[(a, b)]
+    a0 = int(np.argmin(np.abs(rots - rot0)))
+    if state(a0, 0)[0] == "blocked":
+        why["the grip's own thumb is in the tool"] = 1
+        return None, why
+    seen, prev, goal = {(a0, 0)}, {}, None
+    dq = deque([(a0, 0)])
+    while dq and goal is None:
+        a, b = dq.popleft()
+        for da in (-1, 0, 1):
+            for db in (-1, 0, 1):
+                n = (a + da, b + db)
+                if n in seen or not (0 <= n[0] < len(rots) and 0 <= n[1] < len(flexes)):
+                    continue
+                seen.add(n)
+                st, info = state(*n)
+                if st == "goal":
+                    prev[n] = (a, b); goal = (n, info); break
+                if st == "free":
+                    prev[n] = (a, b); dq.append(n)
+            if goal:
+                break
+    why["cells"] = {k: sum(1 for v in cell.values() if v[0] == k) for k in ("free", "blocked", "touch", "goal")}
+    if goal is not None:
+        (ga, gb), info = goal
+        path_ = [(ga, gb)]
+        while path_[-1] in prev:
+            path_.append(prev[path_[-1]])
+        path_ = [(float(rots[a]), float(flexes[b])) for a, b in reversed(path_)]
+        flex_c = float(flexes[gb])
+        found.append({"rot": float(rots[ga]), "flex_contact": flex_c, "along": round(info["along"], 3),
+                      "flex_press": round(flex_c + float(opts.get("switch_travel_m", 0.003)) / max(info["along"] * info["speed"], 1e-4)
+                                          + float(opts.get("switch_press_margin_rad", 0.15)), 3),
+                      "path": path_, "push_world": np.round(u, 4).tolist()})
+    else:
+        tally("no clear thumb path onto the switch's end")
+    if not found:
+        return None, why
+    found.sort(key=lambda c: (-c["along"], abs(c["rot"] - rot0)))
+    return found[0], why
+
+
 def plan_tool_grip(req, g, checker, start, lower, upper, action_step, slide_bounds, make_checker):
     """The whole plan from `start` (14). make_checker(extra_boxes) -> a
     Checker with the request's obstacles plus those boxes."""
@@ -892,17 +1020,40 @@ def plan_tool_grip(req, g, checker, start, lower, upper, action_step, slide_boun
                 tried.append({"candidate": cand["score"], "rejected": f"the lift stops at {lifted * 100:.1f} cm (IK or a collision)"})
                 continue
         hold(0.5, "settle")
-        # the pull: the index driven toward pull_max - it stalls on the trigger's
-        # spring and its worm holds it there; the run; the release
-        q_pull = path[-1].copy(); q_pull[8] = float(opts.get("pull_max_rad", 1.6))
-        walk(q_pull, "pull")
-        hold(float(task.get("run_s", 2.0)), "run")
-        # the release: the index back to where it waited (its curl is part of the grip:
-        # opened all the way, the drill slid 12 mm and dropped 8 mm in the hand, take 8;
-        # the trigger still held in after take 5's release was the MIDDLE on it, which
-        # the whole-close rule above now keeps off, 2026-10-15)
-        q_rel = path[-1].copy(); q_rel[8] = float(opts.get("index_release_rad", q_pre))
-        walk(q_rel, "release")
+        switch = None
+        if opts.get("switch_body"):
+            # the forward/reverse switch set by the holding hand's thumb before any trigger: turned
+            # to the switch, pressed until it stalls at the switch's stop, let go, turned back
+            switch, sw_why = thumb_switch_press(hand, R, o, path[-1][8:], tool, opts)
+            if switch is None:
+                tried.append({"candidate": cand["score"], "rejected": f"no thumb onto the switch: {sw_why}"})
+                continue
+            for rot_, flex_ in switch["path"][1:]:
+                q_t = path[-1].copy(); q_t[13] = rot_; q_t[12] = flex_
+                walk(q_t, "thumb_turn", hand_free=True)
+                hold(0.1, "thumb_turn")
+            q_t = path[-1].copy(); q_t[12] = min(switch["flex_press"], 1.6)
+            walk(q_t, "switch", hand_free=True)
+            hold(float(opts.get("switch_hold_s", 0.8)), "switch")
+            for rot_, flex_ in reversed(switch["path"][:-1]):
+                q_t = path[-1].copy(); q_t[13] = rot_; q_t[12] = flex_
+                walk(q_t, "switch_release", hand_free=True)
+                hold(0.1, "switch_release")
+            hold(0.3, "thumb_back")
+        if opts.get("trigger", True):
+            # the pull: the index driven toward pull_max - it stalls on the trigger's
+            # spring and its worm holds it there; the run; the release
+            q_pull = path[-1].copy(); q_pull[8] = float(opts.get("pull_max_rad", 1.6))
+            walk(q_pull, "pull")
+            hold(float(task.get("run_s", 2.0)), "run")
+            # the release: the index back to where it waited (its curl is part of the grip:
+            # opened all the way, the drill slid 12 mm and dropped 8 mm in the hand, take 8;
+            # the trigger still held in after take 5's release was the MIDDLE on it, which
+            # the whole-close rule above now keeps off, 2026-10-15)
+            q_rel = path[-1].copy(); q_rel[8] = float(opts.get("index_release_rad", q_pre))
+            walk(q_rel, "release")
+        # (trigger false: the tool held up and still - a later stage works it, planned
+        # against where it settled in the hand: a screw's drive, screw_then.py)
         hold(float(task.get("hold_s", 1.5)), "hold")
         arr = np.asarray(path)
         # the ticks screened against the table and the robot with the hand as
@@ -926,7 +1077,7 @@ def plan_tool_grip(req, g, checker, start, lower, upper, action_step, slide_boun
         pb, Rb = g.pose()
         return {"passed": True, "targets": arr, "stages": stages, "grip": {k: v for k, v in cand.items() if k not in ("R", "o")},
                 "palm": {"p": pb.round(4).tolist(), "q_xyzw": Rotation.from_matrix(Rb).as_quat().round(5).tolist()},
-                "index_pre_rad": round(q_pre, 3), "lifted_m": round(lifted, 4), "frame": frame, "rrt": info,
+                "index_pre_rad": round(q_pre, 3), "lifted_m": round(lifted, 4), "frame": frame, "rrt": info, "switch": switch,
                 "candidates": len(cands), "tried": tried, "screen": {k: sc[k] for k in ("passed", "waypoints")}}
     return {"passed": False, "reason": f"{len(cands)} grip candidates, none planned", "tried": tried[:12], "frame": frame,
             "best": [{k: v for k, v in c.items() if k not in ("R", "o")} for c in cands[:3]]}

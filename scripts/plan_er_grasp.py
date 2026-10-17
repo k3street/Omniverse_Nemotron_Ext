@@ -165,7 +165,7 @@ def _loop_grip_task(stage, obj, xc, d, gp, drop):
             **{k: gp[k] for k in ("lift_m", "cycles", "hold_s", "rrt_timeout_s") if k in gp}}
 
 
-def _tool_grip_task(stage, tool, xc, d, gp, drop):
+def _tool_grip_task(stage, tool, xc, d, gp, drop, poses_path=None):
     """A motor tool's parts, by its own behaviour (simReady:behaviors, the
     motor law): the throttle joint's body is the trigger and its other body
     the handle's; the power press-fit's body the battery; the output joint
@@ -189,7 +189,10 @@ def _tool_grip_task(stage, tool, xc, d, gp, drop):
     for k in ("throttle", "output"):
         if beh.get(k) not in joints:
             raise SystemExit(f"{tool.GetName()}: the motor's {k} joint {beh.get(k)!r} is not in the asset")
-    settled = json.loads((d / "settled_poses.json").read_text())["bodies"] if (d / "settled_poses.json").exists() else {}
+    # the bodies where they rest - or where they are NOW (a replay's live poses: a drill whose switch the
+    # hand has just set, gripped by a later stage, tool_then.py)
+    pp_ = Path(poses_path) if poses_path else d / "settled_poses.json"
+    settled = json.loads(pp_.read_text())["bodies"] if pp_.exists() else {}
 
     def world_fn(body):
         """authored-world point(s) -> where the body is now"""
@@ -277,6 +280,202 @@ def _tool_grip_task(stage, tool, xc, d, gp, drop):
             **{k: gp[k] for k in ("approach_m", "lift_m", "close_s", "pull_s", "run_s", "release_s", "hold_s", "rrt_timeout_s") if k in gp}}
 
 
+def _button_press_task(stage, obj, xc, d, gp, drop):
+    """A push button's parts at their settled poses: the button's surface,
+    its prismatic joint's axis in the world and its travel (the way its range
+    runs is inward), and the appliance's other bodies (what the hand must
+    clear: the panel around it, the door beside it)."""
+    import numpy as np
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    from tool_grip_planner import sample_faces
+
+    opts = gp.get("button_press", {})
+    jp = next((q for q in Usd.PrimRange(obj) if q.IsA(UsdPhysics.PrismaticJoint) and q.GetName() == opts.get("joint")), None)
+    if jp is None:
+        raise SystemExit(f"{obj.GetName()}: button_press.joint {opts.get('joint')!r} is not a prismatic joint of the asset")
+    j = UsdPhysics.PrismaticJoint(jp)
+    b0 = stage.GetPrimAtPath(j.GetBody0Rel().GetTargets()[0])
+    b1 = stage.GetPrimAtPath(j.GetBody1Rel().GetTargets()[0])
+    settled = json.loads((d / "settled_poses.json").read_text())["bodies"] if (d / "settled_poses.json").exists() else {}
+
+    def world_fn(body):
+        sp = settled.get(body.GetPath().pathString)
+        M = xc.GetLocalToWorldTransform(body)
+        if sp:
+            return lambda W: _at_settled_pose(np.atleast_2d(W), M, sp)[0]
+        return lambda W: np.atleast_2d(W) - drop
+
+    def surface(prim, spacing):
+        P = []
+        it = iter(Usd.PrimRange(prim))
+        for m in it:
+            if m != prim and m.HasAPI(UsdPhysics.RigidBodyAPI):
+                it.PruneChildren()
+                continue
+            if m.IsA(UsdGeom.Mesh) and UsdGeom.Imageable(m).GetPurposeAttr().Get() != "guide":
+                M = xc.GetLocalToWorldTransform(m)
+                mesh = UsdGeom.Mesh(m)
+                V = np.asarray([list(M.Transform(Gf.Vec3d(*v))) for v in mesh.GetPointsAttr().Get()], float)
+                P.append(sample_faces(V, list(mesh.GetFaceVertexCountsAttr().Get()), list(mesh.GetFaceVertexIndicesAttr().Get()), spacing))
+        return np.vstack(P) if P else np.zeros((0, 3))
+
+    rng = np.random.default_rng(0)
+
+    def thin(P, k):
+        return P[rng.choice(len(P), k, replace=False)] if len(P) > k else P
+    button_pts = thin(world_fn(b1)(surface(b1, 0.002)), 4000)
+    M0 = xc.GetLocalToWorldTransform(b0)
+    lr = j.GetLocalRot0Attr().Get()
+    ax = {"X": Gf.Vec3d(1, 0, 0), "Y": Gf.Vec3d(0, 1, 0), "Z": Gf.Vec3d(0, 0, 1)}[str(j.GetAxisAttr().Get() or "X")]
+    lp = j.GetLocalPos0Attr().Get()
+    a0 = np.asarray(list(M0.Transform(Gf.Vec3d(lp))), float)
+    a1 = np.asarray(list(M0.Transform(Gf.Vec3d(lp) + Gf.Rotation(Gf.Quatd(lr.GetReal(), Gf.Vec3d(lr.GetImaginary()))).TransformDir(ax) * 0.1)), float)
+    w = world_fn(b0)(np.vstack([a0, a1]))
+    axis = (w[1] - w[0]) / np.linalg.norm(w[1] - w[0])
+    lo, hi = float(j.GetLowerLimitAttr().Get()), float(j.GetUpperLimitAttr().Get())
+    sign = 1.0 if abs(hi) >= abs(lo) else -1.0
+    others = {}
+    for b in Usd.PrimRange(obj):
+        if b.HasAPI(UsdPhysics.RigidBodyAPI) and b != b1 and b.IsActive():
+            P = thin(world_fn(b)(surface(b, float(opts.get("body_sample_m", 0.01)))), int(opts.get("body_points", 15000)))
+            if len(P):
+                others[b.GetName()] = np.round(P, 4).tolist()
+    body_c = np.asarray(others[b0.GetName()], float).mean(0) if b0.GetName() in others else button_pts.mean(0)
+    inward = float((body_c - button_pts.mean(0)) @ (axis * sign))
+    print(f"[button] {obj.GetName()}: {jp.GetName()} on {b1.GetName()} ({len(button_pts)} points, centre {np.round(button_pts.mean(0), 3).tolist()}), "
+          f"press along {np.round(axis * sign, 3).tolist()} {'(into the body)' if inward > 0 else '(OUT of the body - check the joint)'}, "
+          f"travel {max(abs(lo), abs(hi)) * 1000:.1f} mm; {len(others)} other bodies", flush=True)
+    # the door the button releases, and how far it swings by itself: the hand stays out of it
+    swing_ = None
+    if opts.get("door_joint"):
+        dt_ = _door_open_task(stage, obj, xc, d, {"door_open": {"joint": opts["door_joint"], "handle": "@edge", "edge_m": 0.03,
+                                                                 "door_points": 6000}}, drop)
+        swing_ = {k: dt_["door"][k] for k in ("door_points", "handle_points", "hinge", "axis")}
+        swing_["door_body"] = dt_["door"]["name"]
+        swing_["sweep_deg"] = float(opts.get("clear_swing_deg", 25.0))
+    return {"kind": "button_press",
+            "button": {"name": b1.GetName(), "joint": jp.GetName(), "axis": axis.tolist(), "travel_sign": sign, "travel_m": max(abs(lo), abs(hi)),
+                       "button_points": np.round(button_pts, 4).tolist(), "others": others, **({"door_swing": swing_} if swing_ else {})},
+            "button_press": dict(opts, object_name=obj.GetName()),
+            **{k: gp[k] for k in ("approach_m", "hold_s", "rrt_timeout_s") if k in gp}}
+
+
+def _door_open_task(stage, obj, xc, d, gp, drop, poses_path=None):
+    """A hinged door's parts at their settled poses: the door's hinge (the
+    joint's frame on the door body, in the world) and axis, its limits and
+    which way it opens, the door's surface, its handle's surface (the named
+    prim under the door), and the appliance's other bodies as obstacles."""
+    import numpy as np
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    from tool_grip_planner import sample_faces
+
+    opts = gp.get("door_open", {})
+    joints = {q.GetName(): q for q in Usd.PrimRange(obj) if q.IsA(UsdPhysics.Joint)}
+    jp = joints.get(opts.get("joint"))
+    if jp is None or not jp.IsA(UsdPhysics.RevoluteJoint):
+        raise SystemExit(f"{obj.GetName()}: door_open.joint {opts.get('joint')!r} is not a revolute joint of the asset")
+    j = UsdPhysics.RevoluteJoint(jp)
+    door = stage.GetPrimAtPath(j.GetBody1Rel().GetTargets()[0])
+    # the bodies where they rest - or where they are NOW (a replay's live poses: a door popped ajar)
+    pp_ = Path(poses_path) if poses_path else d / "settled_poses.json"
+    settled = json.loads(pp_.read_text())["bodies"] if pp_.exists() else {}
+
+    def world_fn(body):
+        sp = settled.get(body.GetPath().pathString)
+        M = xc.GetLocalToWorldTransform(body)
+        if sp:
+            return lambda W: _at_settled_pose(np.atleast_2d(W), M, sp)[0]
+        return lambda W: np.atleast_2d(W) - drop
+
+    def surface(prim, spacing, skip_bodies=True):
+        P = []
+        it = iter(Usd.PrimRange(prim))
+        for m in it:
+            if skip_bodies and m != prim and m.HasAPI(UsdPhysics.RigidBodyAPI):
+                it.PruneChildren()
+                continue
+            if m.IsA(UsdGeom.Mesh) and UsdGeom.Imageable(m).GetPurposeAttr().Get() != "guide":
+                M = xc.GetLocalToWorldTransform(m)
+                mesh = UsdGeom.Mesh(m)
+                V = np.asarray([list(M.Transform(Gf.Vec3d(*v))) for v in mesh.GetPointsAttr().Get()], float)
+                P.append(sample_faces(V, list(mesh.GetFaceVertexCountsAttr().Get()), list(mesh.GetFaceVertexIndicesAttr().Get()), spacing))
+        return np.vstack(P) if P else np.zeros((0, 3))
+
+    fd = world_fn(door)
+    rng = np.random.default_rng(0)
+
+    def thin(P, k):
+        return P[rng.choice(len(P), k, replace=False)] if len(P) > k else P
+    # dense meshes (the door's 1.9 M samples at 8 mm): thinned to what the hulls need
+    door_pts = thin(fd(surface(door, float(opts.get("door_sample_m", 0.008)))), int(opts.get("door_points", 40000)))
+    handle = None
+    if opts.get("handle") != "@edge":
+        handle = next((q for q in Usd.PrimRange(door) if q.GetName() == opts.get("handle")), None)
+        if handle is None:
+            raise SystemExit(f"{obj.GetName()}: door_open.handle {opts.get('handle')!r} is not under the door {door.GetName()}")
+        handle_pts = thin(fd(surface(handle, float(opts.get("handle_sample_m", 0.002)))), int(opts.get("handle_points", 8000)))
+    # the hinge: the joint's frame on the door body, carried to the settled pose
+    M1 = xc.GetLocalToWorldTransform(door)
+    lp = j.GetLocalPos1Attr().Get(); lr = j.GetLocalRot1Attr().Get()
+    ax = {"X": Gf.Vec3d(1, 0, 0), "Y": Gf.Vec3d(0, 1, 0), "Z": Gf.Vec3d(0, 0, 1)}[str(j.GetAxisAttr().Get() or "Z")]
+    ax_b = Gf.Rotation(Gf.Quatd(lr.GetReal(), Gf.Vec3d(lr.GetImaginary()))).TransformDir(ax)
+    h0 = np.asarray(list(M1.Transform(Gf.Vec3d(lp))), float)
+    h1 = np.asarray(list(M1.Transform(Gf.Vec3d(lp) + ax_b * 0.1)), float)
+    w = fd(np.vstack([h0, h1]))
+    hinge, axis = w[0], (w[1] - w[0]) / np.linalg.norm(w[1] - w[0])
+    if handle is None:
+        # no handle: the door's free edge is what the fingers take (a microwave's door, popped
+        # ajar by its latch) - the strip of the door within edge_m of its farthest line from the hinge
+        rad = np.linalg.norm((door_pts - hinge) - np.outer((door_pts - hinge) @ axis, axis), axis=1)
+        handle_pts = door_pts[rad > rad.max() - float(opts.get("edge_m", 0.03))]
+    lo, hi = float(j.GetLowerLimitAttr().Get()), float(j.GetUpperLimitAttr().Get())
+    # how far the door stands open now: its authored (shut) surface carried by the body it
+    # hangs on, against where it is - a door popped ajar is planned to an angle, not a push
+    angle_deg = 0.0
+    b0t = j.GetBody0Rel().GetTargets()
+    if b0t:
+        Pa = surface(door, 0.03)
+        if len(Pa):
+            v0 = world_fn(stage.GetPrimAtPath(b0t[0]))(Pa).mean(0) - hinge
+            v1 = fd(Pa).mean(0) - hinge
+            v0, v1 = v0 - axis * (v0 @ axis), v1 - axis * (v1 @ axis)
+            angle_deg = float(abs(np.degrees(np.arctan2(np.cross(v0, v1) @ axis, v0 @ v1))))
+    others = {}
+    for b in Usd.PrimRange(obj):
+        if b.HasAPI(UsdPhysics.RigidBodyAPI) and b != door and b.IsActive():
+            P = thin(world_fn(b)(surface(b, float(opts.get("body_sample_m", 0.02)))), int(opts.get("body_points", 12000)))
+            if len(P):
+                others[b.GetName()] = np.round(P, 4).tolist()
+    print(f"[door] {obj.GetName()}: door {door.GetName()} hinge {np.round(hinge, 3).tolist()} axis {np.round(axis, 3).tolist()} limits [{lo}, {hi}] deg; "
+          f"handle {handle.GetName() if handle is not None else 'its free edge'} ({len(handle_pts)} points, z {handle_pts[:, 2].min():.3f}-{handle_pts[:, 2].max():.3f}); "
+          f"door {len(door_pts)} points; {len(others)} other bodies; open {angle_deg:.1f} deg now", flush=True)
+    return {"kind": "door_open",
+            "door": {"name": door.GetName(), "joint": jp.GetName(), "hinge": hinge.tolist(), "axis": axis.tolist(), "angle_deg": round(angle_deg, 2),
+                     "lower_deg": lo, "upper_deg": hi, "open_sign": 1.0 if abs(hi) >= abs(lo) else -1.0,
+                     "door_points": np.round(door_pts, 4).tolist(), "handle_points": np.round(handle_pts, 4).tolist(), "others": others},
+            "door_open": dict(opts, object_name=obj.GetName()),
+            **{k: gp[k] for k in ("approach_m", "close_s", "hold_s", "rrt_timeout_s") if k in gp}}
+
+
+def then_request(base: dict, hold_row, task: dict, out_npz) -> dict:
+    """A stage after the first, as a request: the scene's first request with
+    this stage's task, starting where the stage before left the arm, and its
+    IK seeded by the first stage's seeds (HomeHero's reset arm) and the arm the
+    scene was authored in as well as that start. The stage before leaves the
+    arm in a posture of its own (a press reaching across with the wrist
+    rolled); seeds scattered only about it land in its basin (the drill's
+    switch, 2026-10-17: after the press, 8 grip candidates, none with IK clear
+    of the torso; with these seeds, 1492 ticks)."""
+    seeds = list(task.get("ik_seeds") or []) + list(base.get("task", {}).get("ik_seeds") or [])
+    if base.get("measured") is not None:
+        seeds.append([float(v) for v in base["measured"]])
+    req = dict(base, task=dict(task, ik_seeds=seeds), measured=[float(v) for v in hold_row[:14]], out_npz=str(out_npz))
+    req.pop("ik_seeds", None)
+    return req
+
+
 def main() -> int:
     import numpy as np
     from pxr import Gf, Usd, UsdGeom
@@ -289,6 +488,10 @@ def main() -> int:
     args = ap.parse_args()
     spec = load_spec(args.spec)
     d = REPO / "workspace" / "scenes" / spec["name"]
+    from build_er_scene import foreign_reference
+    _foreign = foreign_reference(spec, d)
+    if _foreign:
+        raise SystemExit(f"{spec['name']}: {_foreign}")
     build(spec, d)
     (d / "spec.json").write_text(json.dumps(spec, indent=1))
     stage = Usd.Stage.Open(str(d / "scene.usda"))
@@ -543,6 +746,10 @@ def main() -> int:
             task["tool"]["finger_torque_nm"] = float(cal["stall_torque_per_volt_nm"]["finger"]) * min(v, float(cal.get("supply_v", 8.4)))
     if gp.get("task") == "loop_grip":
         task = _loop_grip_task(stage, target_obj, xc, d, gp, DROP)
+    if gp.get("task") == "door_open":
+        task = _door_open_task(stage, target_obj, xc, d, gp, DROP)
+    if gp.get("task") == "button_press":
+        task = _button_press_task(stage, target_obj, xc, d, gp, DROP)
     if gp.get("task") == "pinch_place":
         # a pinch at a height up the piece, across its width there; set down
         # on the destination with the grip point at the same height above it
@@ -617,6 +824,19 @@ def main() -> int:
     if task and task["kind"] == "loop_grip":
         print(f"GRASP_PLAN OK {spec['name']}: loop_grip, {plan['ticks']} ticks ({plan['seconds_at_30hz']} s at 30 Hz), stages {plan['stage_ticks']}, "
               f"grip {plan.get('grip')}, holes {plan.get('holes')}")
+        return 0
+    if task and task["kind"] == "button_press":
+        gr_ = plan.get("grip", {})
+        print(f"GRASP_PLAN OK {spec['name']}: button_press, {plan['ticks']} ticks ({plan['seconds_at_30hz']} s at 30 Hz), stages {plan['stage_ticks']}, "
+              f"the index on the button rolled {gr_.get('roll_deg')} deg (tilts {gr_.get('tilt_deg')}), pressed {gr_.get('press_m')} m along {gr_.get('press_dir')}, "
+              f"{plan.get('candidates')} candidates")
+        return 0
+    if task and task["kind"] == "door_open":
+        gr_ = plan.get("grip", {})
+        print(f"GRASP_PLAN OK {spec['name']}: door_open, {plan['ticks']} ticks ({plan['seconds_at_30hz']} s at 30 Hz), stages {plan['stage_ticks']}, "
+              f"the bar gripped with {sorted((gr_.get('wrap') or {}).items())} (x {gr_.get('x_sign')}, yaw {gr_.get('yaw_deg')}, "
+              f"{gr_.get('height_m')} m up the bar, {gr_.get('depth_m')} m along the fingers), the door pulled to {plan.get('pull_deg')} deg, "
+              f"{plan.get('candidates')} candidates")
         return 0
     if task and task["kind"] == "tool_grip":
         gr_ = plan.get("grip", {})
