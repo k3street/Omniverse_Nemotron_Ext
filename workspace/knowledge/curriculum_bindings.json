@@ -6,7 +6,8 @@
   "homehero_scenario_queue": 2,
   "homehero_interaction": 3,
   "nemotron_use_ladder": 4,
-  "_why": "HomeHero's lab handoff (2026-10-17): 'the new laboratory scene is the current scene-development focus'; its scenario queue (same day) ranks microwave, tool transfer, drawer storage; then its interaction curriculum; then our own use ladders"
+  "_why": "HomeHero's lab handoff (2026-10-17): 'the new laboratory scene is the current scene-development focus'; its scenario queue (same day) ranks microwave, tool transfer, drawer storage; then its interaction curriculum; then our own use ladders; a task the user asks for directly (nemotron_user_task, 2026-10-17: the pill bottle packed with tweezers) comes first",
+  "nemotron_user_task": 0
  },
  "sources": {
   "homehero_root": "/home/kimate/Documents/Github/HomeHero",
@@ -107,6 +108,18 @@
   "sheet_hold": {
    "what": "the other hand holds a sheet for the cut",
    "needs": "a right-arm pinch of a sheet held through the left hand's cut (bimanual)"
+  },
+  "tool_pinch": {
+   "what": "a small tool (tweezers) held in a precision grip between thumb and fingers, its arms squeezed by the hand",
+   "needs": "a precision-grip planner on a slim tool: the thumb against the index and middle on the arms, the squeeze closing the tips (the pinch planner on the tool's arms)"
+  },
+  "tool_tip_place": {
+   "what": "a held tool's tips brought onto a small object, closed on it, carried and opened over a place",
+   "needs": "pinch_place planned for the tool's tips instead of the fingertips: the tip pair's frame from the tool's joints, the hand's squeeze as the tips' close"
+  },
+  "cap_turn": {
+   "what": "the hand turns a cap on a bottle the other hand (or a holder) keeps still, and lifts it off",
+   "needs": "a wrist-roll stage pinching the cap, regrasping between strokes; the bottle held by a fitted holder or the right hand"
   }
  },
  "measures": {
@@ -115,13 +128,15 @@
   "stable_supported_placement": "move.pass",
   "released": "move.released",
   "retained_during_transport": "move.pass",
-  "_unmeasured_why": "collision_violation_count (the robot's contacts with anything but the target and supports), object_contained, all_transfers_verified (several moves in one record), both_hands_loaded and payload_retained have no field in our records yet; pause_respected and resume_authorized are HomeHero Brain's, not a scene measure",
+  "_unmeasured_why": "object_contained, all_transfers_verified (several moves in one record), both_hands_loaded and payload_retained have no field in our records yet; pause_respected and resume_authorized are HomeHero Brain's, not a scene measure",
   "_homehero_owned": [
    "pause_respected",
    "resume_authorized"
   ],
   "container_sealed": "container.sealed",
-  "_container_sealed_why": "replay_grasp records container.sealed by the target's structure: no joints, one rigid body, its cap cannot open (a jointed lid is not read as sealed)"
+  "_container_sealed_why": "replay_grasp records container.sealed by the target's structure: no joints, one rigid body, its cap cannot open (a jointed lid is not read as sealed)",
+  "collision_violation_count": "collision_violation_count",
+  "_collision_why": "replay_grasp counts the episodes in which the robot's arm and hand touch anything that is neither the robot nor the target (collision_measure.py; PhysX's contact report read each control tick)"
  },
  "lessons": {
   "homehero.interaction.household_mug.pick_place": {
@@ -447,6 +462,85 @@
     "door_push"
    ],
    "scene": null
+  },
+  "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench": {
+   "scene": "aida_r5_lab_bench_transfer",
+   "record": "move.pass",
+   "why": "nominal case: pills_linezolid moved receiving -> inspection bench in the generated lab, filmed (2026-10-17)"
+  },
+  "nemotron.ladder.pill_bottle.r2": {
+   "interactions": [
+    "cap_thread",
+    "small_parts_contact"
+   ],
+   "planners": [
+    "cap_turn"
+   ],
+   "scene": null,
+   "asset": "pill bottle",
+   "source": "nemotron_user_task"
+  },
+  "nemotron.ladder.pill_bottle.r3": {
+   "interactions": [
+    "tweezer_flex",
+    "small_parts_contact"
+   ],
+   "planners": [
+    "tool_pinch",
+    "tool_tip_place"
+   ],
+   "scene": null,
+   "asset": "pill bottle",
+   "source": "nemotron_user_task"
+  },
+  "nemotron.ladder.pill_bottle.r4": {
+   "interactions": [
+    "cap_thread",
+    "tweezer_flex",
+    "small_parts_contact"
+   ],
+   "planners": [
+    "tool_tip_place",
+    "cap_turn"
+   ],
+   "scene": null,
+   "asset": "pill bottle",
+   "source": "nemotron_user_task"
+  },
+  "nemotron.ladder.tweezers.r1": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "tool_pinch"
+   ],
+   "scene": null,
+   "asset": "tweezers",
+   "source": "nemotron_user_task"
+  },
+  "nemotron.ladder.tweezers.r2": {
+   "interactions": [
+    "tweezer_flex"
+   ],
+   "planners": [
+    "tool_pinch"
+   ],
+   "scene": null,
+   "asset": "tweezers",
+   "source": "nemotron_user_task"
+  },
+  "nemotron.ladder.tweezers.r3": {
+   "interactions": [
+    "tweezer_flex",
+    "small_parts_contact"
+   ],
+   "planners": [
+    "tool_pinch",
+    "tool_tip_place"
+   ],
+   "scene": null,
+   "asset": "tweezers",
+   "source": "nemotron_user_task"
   }
  },
  "occupations": {
@@ -460,8 +554,27 @@
       "record": "pass"
      },
      "why": "a screw-capped plastic pill bottle (59 x 59 x 87 mm, 0.096 kg; one rigid body, its cap fixed: sealed), machine-approved 2026-10-17 as pill_bottle; the R5's left hand took it off the dining table and held it 5.9 cm up with no drift (filmed). Its label reads 'Linezolid': an inert training prop, not a hazardous material"
+    },
+    "receiving_bench": {
+     "asset": "station:ReceivingBench (make_lab_env.py)",
+     "preflight": {
+      "scene": "aida_r5_lab_bench_transfer",
+      "record": "move.pass"
+     },
+     "why": "a white laminate bench top 0.70 x 0.75 m at 0.708 m on steel legs; the container picked off it"
+    },
+    "inspection_bench": {
+     "asset": "station:InspectionBench (make_lab_env.py)",
+     "preflight": {
+      "scene": "aida_r5_lab_bench_transfer",
+      "record": "move.pass"
+     },
+     "why": "the second bench end to end with the first; the container set down on it upright, 1.6 mm from its mark"
     }
-   }
+   },
+   "scene": "aida_r5_lab_bench_transfer",
+   "one_stance": true,
+   "one_stance_why": "the generated lab (make_lab_env.py) stands the receiving and inspection benches end to end along the R5's left at the dining table's measured height and edge: one stance reaches both (aida_r5_lab_bench_transfer passes). Nav2 between stations is HomeHero's; a layout across the room would need base_motion"
   }
  }
 }

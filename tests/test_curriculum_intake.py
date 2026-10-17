@@ -137,3 +137,33 @@ def test_a_bound_role_is_met_only_by_a_passing_preflight(monkeypatch):
     assert not r["met"] and r["work"].startswith("pass a preflight take of simple_tray")
     b["occupations"]["lab"]["roles"]["carry_tray"] = "simple_tray"
     assert not ci.requirements(_occ_lesson(), b, REG, _Lib())[0]["met"]
+
+
+def test_a_one_stance_layout_needs_no_base_motion_and_a_partial_binding_keeps_inference(monkeypatch):
+    monkeypatch.setattr(ci, "_proven", lambda pb: (False, "no take"))
+    b = dict(BIND, occupations={"lab": {"one_stance": True}},
+             lessons={"homehero.occupation.lab.tray": {"scene": "aida_r5_lab_bench_transfer", "record": "move.pass"}})
+    ids = [r["id"] for r in ci.requirements(_occ_lesson(), b, REG, _Lib())]
+    assert "planner:base_motion" not in ids and "planner:pinch_place" in ids and "interaction:rigid_contact" in ids
+    assert "take:homehero.occupation.lab.tray" in ids
+
+
+def test_criteria_are_read_through_their_measures_by_op_and_value():
+    meas = {"released": "move.released", "collision_violation_count": "collision_violation_count", "destination_match": "move.ended_on"}
+    crit = {"released": {"op": "eq", "value": True}, "collision_violation_count": {"op": "eq", "value": 0},
+            "destination_match": {"op": "eq", "value": True}, "pause_respected": {"op": "eq", "value": True}}
+    rec = {"move": {"released": True, "ended_on": "InspectionBench"}, "collision_violation_count": 2}
+    assert ci.criteria_failed(crit, meas, rec) == ["collision_violation_count eq 0 (got 2)"]
+    rec["collision_violation_count"] = 0
+    assert ci.criteria_failed(crit, meas, rec) == []
+    rec["move"]["ended_on"] = None
+    assert ci.criteria_failed(crit, meas, rec) == ["destination_match eq True (got None)"]
+
+
+def test_a_rig_file_can_prove_a_mechanism(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(ci, "REPO", tmp_path)
+    (tmp_path / "rig.json").write_text(json.dumps({"spring": {"pass": True}, "drop": {"pass": False}}))
+    assert ci._proven({"file": "rig.json", "record": "spring.pass"})[0]
+    assert not ci._proven({"file": "rig.json", "record": "drop.pass"})[0]
+    assert not ci._proven({"file": "missing.json", "record": "x"})[0]

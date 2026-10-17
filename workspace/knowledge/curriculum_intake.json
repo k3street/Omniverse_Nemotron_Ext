@@ -1,5 +1,5 @@
 {
- "at": "2026-10-17T13:53:11",
+ "at": "2026-10-17T16:14:13",
  "superseded_revisions": [
   {
    "occupation": "laboratory_materials_handler",
@@ -25,7 +25,7 @@
     "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
     "title": "Laboratory materials handler"
    },
-   "next": "asset:laboratory_materials_handler:receiving_bench",
+   "next": "handoff:laboratory_materials_handler",
    "requirements": [
     {
      "id": "asset:laboratory_materials_handler:sealed_inert_container",
@@ -36,14 +36,14 @@
     {
      "id": "asset:laboratory_materials_handler:receiving_bench",
      "step": "asset",
-     "met": false,
-     "evidence": "no approved asset by ['receiving bench', 'laboratory workbench', 'bench'] (12 pending)"
+     "met": true,
+     "evidence": "bound to station:ReceivingBench (make_lab_env.py); preflight aida_r5_lab_bench_transfer move.pass = True"
     },
     {
      "id": "asset:laboratory_materials_handler:inspection_bench",
      "step": "asset",
-     "met": false,
-     "evidence": "no approved asset by ['inspection bench', 'laboratory workbench', 'bench'] (12 pending)"
+     "met": true,
+     "evidence": "bound to station:InspectionBench (make_lab_env.py); preflight aida_r5_lab_bench_transfer move.pass = True"
     },
     {
      "id": "interaction:rigid_contact",
@@ -58,16 +58,10 @@
      "evidence": "aida_r5_dining_chess move.pass = True"
     },
     {
-     "id": "planner:base_motion",
-     "step": "planner",
-     "met": false,
-     "evidence": "no planner"
-    },
-    {
      "id": "scene:laboratory_materials_handler",
      "step": "scene",
-     "met": false,
-     "evidence": "none built"
+     "met": true,
+     "evidence": "bound to aida_r5_lab_bench_transfer"
     },
     {
      "id": "measure:correct_object",
@@ -102,14 +96,14 @@
     {
      "id": "measure:collision_violation_count",
      "step": "measure",
-     "met": false,
-     "evidence": "no record field"
+     "met": true,
+     "evidence": "record field collision_violation_count"
     },
     {
      "id": "take:homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
      "step": "take",
-     "met": false,
-     "evidence": "no take"
+     "met": true,
+     "evidence": "aida_r5_lab_bench_transfer move.pass = True"
     },
     {
      "id": "handoff:laboratory_materials_handler",
@@ -128,7 +122,7 @@
     "curriculum_sha256": "95a7a7b9006f37106267b8665841b367b2d1eea5f8dd5e4e538ca5cebdc30201",
     "title": "Laboratory materials handler"
    },
-   "next": "asset:laboratory_materials_handler:inspection_bench",
+   "next": "asset:laboratory_materials_handler:open_storage_bin",
    "requirements": [
     {
      "id": "asset:laboratory_materials_handler:sealed_inert_container",
@@ -139,8 +133,8 @@
     {
      "id": "asset:laboratory_materials_handler:inspection_bench",
      "step": "asset",
-     "met": false,
-     "evidence": "no approved asset by ['inspection bench', 'laboratory workbench', 'bench'] (12 pending)"
+     "met": true,
+     "evidence": "bound to station:InspectionBench (make_lab_env.py); preflight aida_r5_lab_bench_transfer move.pass = True"
     },
     {
      "id": "asset:laboratory_materials_handler:open_storage_bin",
@@ -161,12 +155,6 @@
      "evidence": "aida_r5_dining_chess move.pass = True"
     },
     {
-     "id": "planner:base_motion",
-     "step": "planner",
-     "met": false,
-     "evidence": "no planner"
-    },
-    {
      "id": "planner:place_inside",
      "step": "planner",
      "met": false,
@@ -175,8 +163,8 @@
     {
      "id": "scene:laboratory_materials_handler",
      "step": "scene",
-     "met": false,
-     "evidence": "none built"
+     "met": true,
+     "evidence": "bound to aida_r5_lab_bench_transfer"
     },
     {
      "id": "measure:correct_object",
@@ -211,14 +199,14 @@
     {
      "id": "measure:collision_violation_count",
      "step": "measure",
-     "met": false,
-     "evidence": "no record field"
+     "met": true,
+     "evidence": "record field collision_violation_count"
     },
     {
      "id": "take:homehero.occupation.laboratory_materials_handler.store_container_in_open_bin",
      "step": "take",
-     "met": false,
-     "evidence": "no take"
+     "met": true,
+     "evidence": "aida_r5_lab_bench_transfer pass = True"
     },
     {
      "id": "handoff:laboratory_materials_handler",
@@ -254,8 +242,8 @@
     {
      "id": "asset:laboratory_materials_handler:inspection_bench",
      "step": "asset",
-     "met": false,
-     "evidence": "no approved asset by ['inspection bench', 'laboratory workbench', 'bench'] (12 pending)"
+     "met": true,
+     "evidence": "bound to station:InspectionBench (make_lab_env.py); preflight aida_r5_lab_bench_transfer move.pass = True"
     },
     {
      "id": "interaction:rigid_contact",
@@ -270,16 +258,10 @@
      "evidence": "aida_r5_dining_chess move.pass = True"
     },
     {
-     "id": "planner:base_motion",
-     "step": "planner",
-     "met": false,
-     "evidence": "no planner"
-    },
-    {
      "id": "scene:laboratory_materials_handler",
      "step": "scene",
-     "met": false,
-     "evidence": "none built"
+     "met": true,
+     "evidence": "bound to aida_r5_lab_bench_transfer"
     },
     {
      "id": "measure:correct_object",
@@ -314,14 +296,14 @@
     {
      "id": "measure:collision_violation_count",
      "step": "measure",
-     "met": false,
-     "evidence": "no record field"
+     "met": true,
+     "evidence": "record field collision_violation_count"
     },
     {
      "id": "take:homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
      "step": "take",
-     "met": false,
-     "evidence": "no take"
+     "met": true,
+     "evidence": "aida_r5_lab_bench_transfer pass = True"
     },
     {
      "id": "handoff:laboratory_materials_handler",
@@ -351,14 +333,14 @@
     {
      "id": "asset:laboratory_materials_handler:receiving_bench",
      "step": "asset",
-     "met": false,
-     "evidence": "no approved asset by ['receiving bench', 'laboratory workbench', 'bench'] (12 pending)"
+     "met": true,
+     "evidence": "bound to station:ReceivingBench (make_lab_env.py); preflight aida_r5_lab_bench_transfer move.pass = True"
     },
     {
      "id": "asset:laboratory_materials_handler:inspection_bench",
      "step": "asset",
-     "met": false,
-     "evidence": "no approved asset by ['inspection bench', 'laboratory workbench', 'bench'] (12 pending)"
+     "met": true,
+     "evidence": "bound to station:InspectionBench (make_lab_env.py); preflight aida_r5_lab_bench_transfer move.pass = True"
     },
     {
      "id": "interaction:rigid_contact",
@@ -379,16 +361,10 @@
      "evidence": "no planner"
     },
     {
-     "id": "planner:base_motion",
-     "step": "planner",
-     "met": false,
-     "evidence": "no planner"
-    },
-    {
      "id": "scene:laboratory_materials_handler",
      "step": "scene",
-     "met": false,
-     "evidence": "none built"
+     "met": true,
+     "evidence": "bound to aida_r5_lab_bench_transfer"
     },
     {
      "id": "measure:correct_object",
@@ -423,8 +399,8 @@
     {
      "id": "measure:collision_violation_count",
      "step": "measure",
-     "met": false,
-     "evidence": "no record field"
+     "met": true,
+     "evidence": "record field collision_violation_count"
     },
     {
      "id": "measure:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches:additional_outcome_1",
@@ -435,8 +411,8 @@
     {
      "id": "take:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
      "step": "take",
-     "met": false,
-     "evidence": "no take"
+     "met": true,
+     "evidence": "aida_r5_lab_bench_transfer pass = True"
     },
     {
      "id": "handoff:laboratory_materials_handler",
@@ -1712,55 +1688,341 @@
      "evidence": "none named"
     }
    ]
+  },
+  {
+   "key": "nemotron.ladder.pill_bottle.r2",
+   "title": "pill_bottle rung 2: the cap opened by the hand: turned off its thread and lifted away, the pills still inside",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "interaction:cap_thread",
+   "requirements": [
+    {
+     "id": "asset:pill bottle",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['pills_linezolid']"
+    },
+    {
+     "id": "interaction:cap_thread",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "interaction:small_parts_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json drop.pass = True"
+    },
+    {
+     "id": "planner:cap_turn",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:nemotron.ladder.pill_bottle.r2",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.pill_bottle.r3",
+   "title": "pill_bottle rung 3: pills moved one at a time with tweezers: packed from a tray into the open bottle, or unpacked from it onto the tray",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "planner:tool_pinch",
+   "requirements": [
+    {
+     "id": "asset:pill bottle",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['pills_linezolid']"
+    },
+    {
+     "id": "interaction:tweezer_flex",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+    },
+    {
+     "id": "interaction:small_parts_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json drop.pass = True"
+    },
+    {
+     "id": "planner:tool_pinch",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:tool_tip_place",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:nemotron.ladder.pill_bottle.r3",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.pill_bottle.r4",
+   "title": "pill_bottle rung 4: the bottle packed with a counted set of pills and its cap screwed back on until it seats",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "interaction:cap_thread",
+   "requirements": [
+    {
+     "id": "asset:pill bottle",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['pills_linezolid']"
+    },
+    {
+     "id": "interaction:cap_thread",
+     "step": "interaction",
+     "met": false,
+     "evidence": "no law"
+    },
+    {
+     "id": "interaction:tweezer_flex",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+    },
+    {
+     "id": "interaction:small_parts_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json drop.pass = True"
+    },
+    {
+     "id": "planner:tool_tip_place",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:cap_turn",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:nemotron.ladder.pill_bottle.r4",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.tweezers.r1",
+   "title": "tweezers rung 1: held in a precision grip and lifted",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "planner:tool_pinch",
+   "requirements": [
+    {
+     "id": "asset:tweezers",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['simple_tweezers']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:tool_pinch",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:nemotron.ladder.tweezers.r1",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.tweezers.r2",
+   "title": "tweezers rung 2: the tips closed by the hand's squeeze and opened by its release (the arms' spring)",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "planner:tool_pinch",
+   "requirements": [
+    {
+     "id": "asset:tweezers",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['simple_tweezers']"
+    },
+    {
+     "id": "interaction:tweezer_flex",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+    },
+    {
+     "id": "planner:tool_pinch",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:nemotron.ladder.tweezers.r2",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
+  },
+  {
+   "key": "nemotron.ladder.tweezers.r3",
+   "title": "tweezers rung 3: a small object picked between the tips, carried and let go where it is wanted",
+   "source": {
+    "kind": "nemotron_use_ladder",
+    "origin": "asset_class_priors.json"
+   },
+   "next": "planner:tool_pinch",
+   "requirements": [
+    {
+     "id": "asset:tweezers",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['simple_tweezers']"
+    },
+    {
+     "id": "interaction:tweezer_flex",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+    },
+    {
+     "id": "interaction:small_parts_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json drop.pass = True"
+    },
+    {
+     "id": "planner:tool_pinch",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:tool_tip_place",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:nemotron.ladder.tweezers.r3",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    }
+   ]
   }
  ],
  "open": [
   {
-   "id": "cur:asset:laboratory_materials_handler:receiving_bench",
-   "priority": 10001,
+   "id": "cur:planner:tool_pinch",
+   "priority": 122,
    "actionable": true,
-   "title": "asset for the receiving bench (Laboratory materials handler)",
+   "title": "the tool pinch planner",
+   "blocks": 4
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.tweezers.r1",
+   "priority": 133,
+   "actionable": false,
+   "title": "a scene for tweezers rung 1: held in a precision grip and lifted",
+   "blocks": 1
+  },
+  {
+   "id": "cur:interaction:cap_thread",
+   "priority": 211,
+   "actionable": true,
+   "title": "the cap thread interaction",
    "blocks": 2
   },
   {
-   "id": "cur:asset:laboratory_materials_handler:inspection_bench",
-   "priority": 10002,
-   "actionable": true,
-   "title": "asset for the inspection bench (Laboratory materials handler)",
-   "blocks": 4
+   "id": "cur:planner:cap_turn",
+   "priority": 223,
+   "actionable": false,
+   "title": "the cap turn planner",
+   "blocks": 2
   },
   {
-   "id": "cur:planner:base_motion",
-   "priority": 10025,
+   "id": "cur:scene:nemotron.ladder.tweezers.r2",
+   "priority": 233,
    "actionable": false,
-   "title": "the base motion planner",
-   "blocks": 4
+   "title": "a scene for tweezers rung 2: the tips closed by the hand's squeeze and opened by its release (the arms' spring)",
+   "blocks": 1
   },
   {
-   "id": "cur:scene:laboratory_materials_handler",
-   "priority": 10036,
+   "id": "cur:scene:nemotron.ladder.pill_bottle.r2",
+   "priority": 234,
    "actionable": false,
-   "title": "the Laboratory materials handler scene (scene_45d46bc54017)",
-   "blocks": 4
+   "title": "a scene for pill_bottle rung 2: the cap opened by the hand: turned off its thread and lifted away, the pills still inside",
+   "blocks": 1
   },
   {
-   "id": "cur:measure:collision_violation_count",
-   "priority": 10049,
+   "id": "cur:planner:tool_tip_place",
+   "priority": 324,
    "actionable": false,
-   "title": "measure 'collision_violation_count' in the take's record",
-   "blocks": 4
+   "title": "the tool tip place planner",
+   "blocks": 3
   },
   {
-   "id": "cur:take:homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
-   "priority": 10059,
+   "id": "cur:scene:nemotron.ladder.pill_bottle.r3",
+   "priority": 335,
    "actionable": false,
-   "title": "a passing take: Move a container to the inspection bench",
+   "title": "a scene for pill_bottle rung 3: pills moved one at a time with tweezers: packed from a tray into the open bottle, or unpacked from it onto the tray",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.tweezers.r3",
+   "priority": 335,
+   "actionable": false,
+   "title": "a scene for tweezers rung 3: a small object picked between the tips, carried and let go where it is wanted",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.pill_bottle.r4",
+   "priority": 436,
+   "actionable": false,
+   "title": "a scene for pill_bottle rung 4: the bottle packed with a counted set of pills and its cap screwed back on until it seats",
    "blocks": 1
   },
   {
    "id": "cur:handoff:laboratory_materials_handler",
    "priority": 10069,
-   "actionable": false,
+   "actionable": true,
    "title": "the evidence handoff for laboratory_materials_handler",
    "blocks": 4
   },
@@ -1773,24 +2035,10 @@
   },
   {
    "id": "cur:planner:place_inside",
-   "priority": 10126,
+   "priority": 10125,
    "actionable": true,
    "title": "the place inside planner",
    "blocks": 6
-  },
-  {
-   "id": "cur:take:homehero.occupation.laboratory_materials_handler.store_container_in_open_bin",
-   "priority": 10159,
-   "actionable": false,
-   "title": "a passing take: Store a container in the open bin",
-   "blocks": 1
-  },
-  {
-   "id": "cur:take:homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
-   "priority": 10259,
-   "actionable": false,
-   "title": "a passing take: Retrieve a container from the open bin",
-   "blocks": 1
   },
   {
    "id": "cur:asset:laboratory_materials_handler:loaded_tray",
@@ -1811,13 +2059,6 @@
    "priority": 10349,
    "actionable": false,
    "title": "measure 'additional_outcome_1' (Keep the inert container on the tray throughout transport.) in the take's record",
-   "blocks": 1
-  },
-  {
-   "id": "cur:take:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
-   "priority": 10359,
-   "actionable": false,
-   "title": "a passing take: Carry a loaded tray between benches",
    "blocks": 1
   },
   {

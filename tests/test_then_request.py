@@ -38,3 +38,15 @@ def test_a_stage_own_seeds_come_first_and_the_inputs_are_not_changed():
     assert req["task"]["ik_seeds"][0] == [1.0] * 8
     assert task["ik_seeds"] == [[1.0] * 8]
     assert base["measured"] == AUTHORED and base["task"]["ik_seeds"] == [RESET]
+
+
+def test_a_cylinder_with_vertices_only_at_its_ends_has_its_width_halfway_up():
+    import math
+    from plan_er_grasp import slice_width
+    ring = [[0.03 * math.cos(2 * math.pi * k / 24), 0.03 * math.sin(2 * math.pi * k / 24)] for k in range(24)]
+    pts = [[x, y, 0.0] for x, y in ring] + [[x, y, 0.09] for x, y in ring]
+    w = slice_width(pts, [0.0, 0.0], 0.054)
+    assert abs(w - 0.06) < 0.001
+    # a cone narrows up its height
+    cone = [[x, y, 0.0] for x, y in ring] + [[0.0, 0.0, 0.1]]
+    assert abs(slice_width(cone, [0.0, 0.0], 0.05) - 0.03) < 0.001

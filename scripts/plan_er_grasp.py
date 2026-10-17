@@ -459,6 +459,49 @@ def _door_open_task(stage, obj, xc, d, gp, drop, poses_path=None):
             **{k: gp[k] for k in ("approach_m", "close_s", "hold_s", "rrt_timeout_s") if k in gp}}
 
 
+def station_obstacles(stage, bc) -> list[dict]:
+    """Every station of a generated environment (make_lab_env.py's er:station
+    prims: benches, a bin, a desk), each collider part its own box - its parts
+    are boxes, so exact. The support alone (one bench's top) left the arm
+    routed through the other bench and its own legs (the lab, 2026-10-17)."""
+    from pxr import Usd, UsdPhysics
+    out = []
+    env = stage.GetPrimAtPath("/World/Environment")
+    if not env:
+        return out
+    for q in Usd.PrimRange(env):
+        if not q.HasCustomDataKey("er:station"):
+            continue
+        for part in Usd.PrimRange(q):
+            if part != q and part.HasAPI(UsdPhysics.CollisionAPI):
+                r = bc.ComputeWorldBound(part).ComputeAlignedRange()
+                out.append(dict(id=f"{q.GetName()}:{part.GetName()}", min=[float(v) for v in r.GetMin()], max=[float(v) for v in r.GetMax()]))
+    return out
+
+
+def slice_width(points, axis_xy, z: float) -> float:
+    """An object's width at height z across its axis: twice the farthest point of
+    the slice of its points' convex hull at z (each hull edge that crosses z,
+    interpolated). The points within 3 mm of z read a low-poly bottle - a
+    cylinder with vertices only at its ends - as empty (2026-10-17)."""
+    import numpy as np
+    from scipy.spatial import ConvexHull
+    P = np.asarray(points, float)
+    hull = ConvexHull(P)
+    cut = []
+    for simplex in hull.simplices:
+        for i in range(3):
+            a, b = P[simplex[i]], P[simplex[(i + 1) % 3]]
+            if (a[2] - z) * (b[2] - z) <= 0 and a[2] != b[2]:
+                cut.append(a + (b - a) * (z - a[2]) / (b[2] - a[2]))
+            elif a[2] == z:
+                cut.append(a)
+    if not cut:
+        raise SystemExit(f"slice_width: nothing of the object at height {z:.4f}")
+    C = np.asarray(cut)
+    return float(2 * np.linalg.norm(C[:, :2] - np.asarray(axis_xy, float), axis=1).max())
+
+
 def then_request(base: dict, hold_row, task: dict, out_npz) -> dict:
     """A stage after the first, as a request: the scene's first request with
     this stage's task, starting where the stage before left the arm, and its
@@ -560,6 +603,7 @@ def main() -> int:
         from support_geometry import mesh_samples, support_boxes
         otop = float(bc.ComputeWorldBound(oprim).ComputeAlignedRange().GetMax()[2])
         obstacles += [dict(b, id=f"{oprim.GetName()}:{b['id']}") for b in support_boxes(mesh_samples(oprim, otop), otop)]
+    obstacles += station_obstacles(stage, bc)
     tpath = target.GetPath().pathString
     obstacles_all = []
     for p in objs:
@@ -757,8 +801,7 @@ def main() -> int:
         base_z, height = float(allpts[:, 2].min()), float(np.ptp(allpts[:, 2]))
         axis_xy = (allpts[:, :2].max(0) + allpts[:, :2].min(0)) / 2
         gz = base_z + float(gp.get("grip_height_fraction", 0.85)) * height
-        band = allpts[np.abs(allpts[:, 2] - gz) < 0.003]
-        width = float(2 * np.linalg.norm(band[:, :2] - axis_xy, axis=1).max())
+        width = slice_width(allpts, axis_xy, gz)
         dest = json.loads(stage.GetPrimAtPath("/World").GetCustomDataByKey("er:destination"))
         dc = list(np.asarray(dest["centre_world_at_build"], float) - DROP)
         task = {"kind": "pinch_place", "grip_point": [float(axis_xy[0]), float(axis_xy[1]), gz],

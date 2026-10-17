@@ -1,0 +1,126 @@
+{
+ "extends": "aida_r5_dining_pillbottle_grasp.json",
+ "name": "aida_r5_lab_bench_transfer",
+ "purpose": "HomeHero's laboratory materials handler, lesson move_container_to_inspection_bench (curriculum 95a7a7b9, nominal case): the R5 moves the sealed inert container (pills_linezolid, its qualified role asset) from the receiving bench to the inspection bench in the generated sterile lab (make_lab_env.py), one stance reaching both",
+ "environment": {
+  "usd": "~/Omniverse_Nemotron_Ext/workspace/generated_scenes/sterile_materials_lab_v1/lab.usda",
+  "prim": "/Root",
+  "support": "/Root/Stations/ReceivingBench/Top",
+  "deactivate": [],
+  "attribute_overrides": {},
+  "why": "the generated laboratory (scripts/make_lab_env.py - run it first): benches at the dining table's measured top (0.708 m) and front edge, where the R5's grasps and place pass; the open Euro-container bin and the operator desk"
+ },
+ "objects": [
+  {
+   "name": "Target",
+   "asset_id": "pills_linezolid",
+   "xy": [
+    4.5,
+    0.764
+   ],
+   "yaw_deg": 30,
+   "target": true,
+   "label": "the sealed inert container",
+   "why": "the qualified sealed_inert_container (pills_linezolid, preflight aida_r5_dining_pillbottle_grasp) on the receiving bench, 15 cm short of where the can grasp took its can"
+  }
+ ],
+ "destination": {
+  "station": "InspectionBench",
+  "xy": [
+   4.85,
+   0.764
+  ],
+  "label": "the inspection bench",
+  "why": "the inspection bench's area 35 cm along the bench run from the pick, at the same depth"
+ },
+ "grasp_plan": {
+  "task": "pinch_place",
+  "grip_height_fraction": 0.6,
+  "pregrasp_height_m": 0.06,
+  "curl_rad": 1.5,
+  "open_clearance_m": 0.007,
+  "close_s": 1.0,
+  "lift_m": 0.04,
+  "set_down_gap_m": 0.002,
+  "release_s": 0.7,
+  "retreat_m": 0.06,
+  "hold_s": 1.0,
+  "why": "HomeHero's pick_hold_place for a sealed container: pinch_place_planner.py (the pawn's planner, its cuMotion reach), the bottle pinched across its body at 0.6 of its height, lifted 4 cm on the slide, carried to the inspection bench, set down from 2 mm, released, the hand withdrawn",
+  "reach_why": "the free-space reach by NVIDIA cuMotion (Isaac Sim 6's GPU graph planner, scripts/cumotion_reach.py): tens of milliseconds per candidate where HomeHero's Python RRT found nothing in 300 s; every candidate screened with HomeHero's mesh checker, the first clean one taken, the RRT the fallback",
+  "open_clearance_why": "7 mm either side when open: the king on e1 stands 44 mm behind the pawn on the thumb's side",
+  "reach": "cumotion",
+  "cumotion_seeds": 8,
+  "grip_why": "just under the head (0.70 of the pawn's height: the ball's underside is at 0.68, the neck widening into it): the pads close on the neck and the rising fingertip arcs wedge beneath the overhang. At the head's equator (0.85) the arcs met the 16.5 mm ball tangentially, nudged the 13.6 g pawn 2 mm aside and rode over its crown, never loading the motors to the stall (measured in PhysX); at the neck itself (0.62) the thumb met the king on e1 in every reachable heading"
+ },
+ "overview_camera": {
+  "eye": [
+   6.3,
+   -1.8,
+   1.9
+  ],
+  "target": [
+   4.7,
+   0.8,
+   0.8
+  ],
+  "focal_length_mm": 18.0,
+  "resolution": [
+   1600,
+   900
+  ],
+  "why": "from the room's south-east corner, the robot and both benches"
+ },
+ "extra_cameras": [
+  {
+   "name": "GraspCloseup",
+   "eye": [
+    5.3,
+    1.2,
+    1.35
+   ],
+   "target": [
+    4.68,
+    0.76,
+    0.78
+   ],
+   "focal_length_mm": 20.0,
+   "resolution": [
+    1280,
+    720
+   ],
+   "why": "the replay's close-up (the film's main view): above the inspection bench's back, inside the room's north wall, on the pick, the carry and the place"
+  }
+ ],
+ "lights": [],
+ "grasp_replay": {
+  "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_lab_bench_transfer/grasp_plan/targets.npz",
+  "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+  "lift_offset_m": 0.0,
+  "control_hz": 30,
+  "finger_q2_coefficient": 1.05851325,
+  "hold_s": 0.0,
+  "why": "the planned chess move (plan_er_grasp.py, task pinch_place)",
+  "controller": "homehero_r5_action",
+  "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)",
+  "hand_model": {
+   "kind": "ability_hand",
+   "calibration": "config/ability_hand_calibration.json",
+   "collision_voltage": 8.0,
+   "postcontact_voltage": 0.0,
+   "grip_speed": 0.3,
+   "why": "the halt (word 007) set above the force band, 8.0 V, so the position loop governs the squeeze: at the 3.0 V default the index stalls at about 3 N, the band's floor, and could tighten no further. Driven by the grip command alone this pinch failed every way: at 3.0 V the thumb flicked the 14 g pawn out before it stalled; at 1.0 V with 0.8 V post-contact the digits crept closed during the carry and rolled it out at 61 deg; at 1.0 V with 0 V the stored 2.4 N drained in half a second of lift"
+  },
+  "grip": {
+   "mode": "force_band",
+   "min_n": 3.0,
+   "max_n": 6.0,
+   "tightening_step_rad": 0.0015,
+   "unloading_step_rad": 0.002,
+   "digits": [
+    "index",
+    "thumb"
+   ],
+   "why": "HomeHero's grip on the real hand (aida_mesh_contact.maintain_grip): free closing at 0.004 rad per tick until contact, then positions at 30 Hz, each digit tightened at 0.0015 rad per tick while its fingertip force is under the minimum, unloaded above the maximum; the lift waits until both digits are in band for 6 ticks. HomeHero's 3 N minimum: at 1.5 N the pinch let the pawn tilt 5 deg and slip out in the first centimetre of lift"
+  }
+ }
+}

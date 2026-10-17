@@ -280,3 +280,27 @@ def test_a_drilled_hole_is_built_as_the_boards_colliders_and_a_drillable_board_p
     assert UsdGeom.Imageable(board).ComputeVisibility() == UsdGeom.Tokens.invisible
     twin = stage2.GetPrimAtPath("/World/FixtureVisuals/Board")
     assert len(twin.GetChildren()) == 18 and not any(q.HasAPI(UsdPhysics.CollisionAPI) for q in twin.GetChildren())
+
+
+def test_a_scene_without_the_films_close_up_is_refused_at_the_build():
+    from build_er_scene import film_cameras_missing
+    assert film_cameras_missing({"extra_cameras": []}) == ["GraspCloseup"]
+    assert film_cameras_missing({"extra_cameras": [{"name": "GraspCloseup"}]}) == []
+
+
+def test_every_station_part_is_an_obstacle_for_the_planner():
+    from plan_er_grasp import station_obstacles
+    stage = Usd.Stage.CreateInMemory()
+    st = UsdGeom.Xform.Define(stage, "/World/Environment/Stations/Bench")
+    st.GetPrim().SetCustomDataByKey("er:station", '{"role": "inspection_bench"}')
+    for name, c, sz in (("Top", (0.0, 0.0, 0.7), (0.7, 0.75, 0.025)), ("Leg0", (0.3, 0.3, 0.35), (0.04, 0.04, 0.68))):
+        cube = UsdGeom.Cube.Define(stage, f"/World/Environment/Stations/Bench/{name}")
+        cube.CreateSizeAttr(1.0)
+        cube.AddTranslateOp().Set(Gf.Vec3d(*c))
+        cube.AddScaleOp().Set(Gf.Vec3f(*sz))
+        UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+    UsdGeom.Cube.Define(stage, "/World/Environment/Decor")                     # not a station: not an obstacle
+    bc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    obs = {o["id"]: o for o in station_obstacles(stage, bc)}
+    assert sorted(obs) == ["Bench:Leg0", "Bench:Top"]
+    assert np.allclose(obs["Bench:Leg0"]["min"], [0.28, 0.28, 0.01]) and np.allclose(obs["Bench:Top"]["max"], [0.35, 0.375, 0.7125])

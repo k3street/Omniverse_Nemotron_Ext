@@ -144,6 +144,7 @@ def lessons_from_occupation(c: dict, rank: int) -> list[dict]:
             "moves_between_stations": any(t.get("source") != t.get("destination") for t in tr),
             "into_receptacle": any(roles.get(t.get("destination"), {}).get("requirements", {}).get("kind") == "receptacle" for t in tr),
             "criteria": list((L.get("criteria") or {}).keys()),
+            "criteria_spec": L.get("criteria") or {},
             # the Studio names a criterion it drafted from a capability gap 'additional_outcome_<k>':
             # its meaning is the k-th 'measurement_adapter_required:' gap
             "criteria_notes": {f"additional_outcome_{k + 1}": g.split(":", 1)[1].strip() for k, g in
@@ -192,7 +193,10 @@ def lessons_from_ladders(priors: dict, bindings: dict, rank: int) -> list[dict]:
         lad = ((priors.get(cls) or {}).get("use") or {}).get("ladder") or []
         if k < 1 or k > len(lad):
             continue
-        out.append({"key": key, "kind": "nemotron_use_ladder", "rank": rank, "order": k, "title": f"{cls} rung {k}: {lad[k - 1]}",
+        # a rung the user asked for directly ranks as their task (bindings: source nemotron_user_task)
+        src = bindings["lessons"][key].get("source")
+        r_ = int(bindings.get("source_rank", {}).get(src, rank)) if src else rank
+        out.append({"key": key, "kind": "nemotron_use_ladder", "rank": r_, "order": k, "title": f"{cls} rung {k}: {lad[k - 1]}",
                     "text": lad[k - 1], "asset": cls, "source": {"kind": "nemotron_use_ladder", "origin": "asset_class_priors.json"},
                     "no_take": True})
     return out
@@ -242,8 +246,16 @@ def _record(scene: str) -> dict | None:
 
 
 def _proven(pb: dict | None) -> tuple[bool, str]:
+    """A take's record field (scene) - or a rig's (file: a mechanism proved in PhysX on its own,
+    rig_pill_kit.py's tweezers' spring against the beam law) - that must be true."""
     if not pb:
         return False, "no take named to prove it"
+    if pb.get("file"):
+        rec = _load(REPO / pb["file"])
+        if rec is None:
+            return False, f"{pb['file']} not written"
+        v = _get(rec, pb["record"])
+        return bool(v), f"{pb['file']} {pb['record']} = {v}"
     rec = _record(pb["scene"])
     if rec is None:
         return False, f"{pb['scene']} has no take"
@@ -281,6 +293,29 @@ def check_planner(entry: dict | None, pid: str) -> tuple[bool, str, str]:
         return False, "no planner", entry.get("needs") or f"write the {pid} planner"
     ok, ev = _proven(entry.get("proven_by"))
     return ok, ev, "" if ok else f"a take proving {pid}"
+
+
+def criteria_failed(criteria: dict, measures: dict, rec: dict) -> list[str]:
+    """The lesson's criteria a record fails, each read through its measure field
+    (curriculum_bindings measures) by its op (eq, le, ge, lt, gt) and value;
+    a criterion with no field is the measure task's, not counted here."""
+    ops = {"eq": lambda a, b: a == b, "le": lambda a, b: a <= b, "ge": lambda a, b: a >= b,
+           "lt": lambda a, b: a < b, "gt": lambda a, b: a > b}
+    out = []
+    for name, c in criteria.items():
+        field = measures.get(name)
+        if not field or name.startswith("_") or not isinstance(c, dict) or c.get("op") not in ops:
+            continue
+        got = _get(rec, field)
+        want = c.get("value")
+        if isinstance(want, bool):
+            got = bool(got) if got is not None else None
+        try:
+            if got is None or not ops[c["op"]](got, want):
+                out.append(f"{name} {c['op']} {want} (got {got})")
+        except TypeError:
+            out.append(f"{name} {c['op']} {want} (got {got})")
+    return out
 
 
 def requirements(L: dict, b: dict, reg: dict, lib: Library) -> list[dict]:
@@ -337,8 +372,8 @@ def requirements(L: dict, b: dict, reg: dict, lib: Library) -> list[dict]:
 
     # interactions
     entries = {e["id"]: e for e in reg.get("interactions", [])}
-    if bind is not None:
-        iids = bind.get("interactions", [])
+    if bind is not None and "interactions" in bind:
+        iids = bind["interactions"]
     else:
         iids = [e["id"] for e in reg.get("interactions", []) if _terms_in(L["text"], e.get("terms", []))]
         if L.get("family") == "pick_hold_place" and "rigid_contact" not in iids:
@@ -353,15 +388,17 @@ def requirements(L: dict, b: dict, reg: dict, lib: Library) -> list[dict]:
 
     # planners
     planners = b.get("planners", {})
-    if bind is not None:
-        pids = list(bind.get("planners", []))
+    occ_layout = ((b.get("occupations") or {}).get(L.get("group")) or {}) if L["kind"] == "homehero_occupation" else {}
+    if bind is not None and "planners" in bind:
+        pids = list(bind["planners"])
     else:
         pids = []
         if L.get("family") == "pick_hold_place":
             pids.append("pinch_place")
         if L.get("hands", 1) >= 2:
             pids.append("bimanual_carry")
-        if L.get("moves_between_stations"):
+        if L.get("moves_between_stations") and not occ_layout.get("one_stance"):
+            # a layout whose stations one stance reaches needs no base motion (HomeHero's Nav2 is its own)
             pids.append("base_motion")
         if L.get("into_receptacle"):
             pids.append("place_inside")
@@ -374,7 +411,7 @@ def requirements(L: dict, b: dict, reg: dict, lib: Library) -> list[dict]:
 
     # scene
     if L["kind"] == "homehero_occupation":
-        sc = ((b.get("occupations") or {}).get(L["group"]) or {}).get("scene")
+        sc = (bind or {}).get("scene") or ((b.get("occupations") or {}).get(L["group"]) or {}).get("scene")
         sr = L["scene_request"]
         add(f"scene:{L['group']}", "scene", f"the {L['source']['title']} scene ({sr.get('id')})", bool(sc and (REPO / 'config' / 'scenes' / f'{sc}.json').exists()),
             f"bound to {sc}" if sc else "none built", "" if sc else
@@ -404,8 +441,13 @@ def requirements(L: dict, b: dict, reg: dict, lib: Library) -> list[dict]:
         field = (bind or {}).get("record") or "pass"
         rec = _record(sc) if sc else None
         v = _get(rec, field) if rec else None
-        add(f"take:{L['key']}", "take", f"a passing take: {L['title']}", bool(v),
-            f"{sc} {field} = {v}" if rec else "no take", "" if v else f"run and pass a take for '{L['title']}'" + (f" in {sc}" if sc else ""))
+        # and the lesson's frozen criteria, each by its op and value on the field that measures it
+        crit_fail = criteria_failed(L.get("criteria_spec") or {}, b.get("measures", {}), rec) if rec else []
+        ok = bool(v) and not crit_fail
+        add(f"take:{L['key']}", "take", f"a passing take: {L['title']}", ok,
+            (f"{sc} {field} = {v}" + (f"; criteria not met: {crit_fail}" if crit_fail else "")) if rec else "no take",
+            "" if ok else f"run and pass a take for '{L['title']}'" + (f" in {sc}" if sc else "")
+            + (f" meeting {crit_fail}" if crit_fail else ""))
 
     # the handoff
     if L.get("handoff") or (bind or {}).get("handoff"):

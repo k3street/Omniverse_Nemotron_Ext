@@ -870,6 +870,10 @@ def build(spec: dict, out_dir: Path) -> Path:
                        "filtered_body_pairs": [[a.split("/")[-1], b.split("/")[-1]] for a, b in filtered_pairs],
                        "size_m": [round(float(s), 4) for s in orng.GetSize()]})
 
+    # --- a place destination at a station of the environment (a bench's area, a bin's floor) ---
+    if spec.get("destination"):
+        _station_destination(stage, spec["destination"], in_env)
+
     # --- a drillable board: the bit's colliders filtered against it (the law is their contact) ---
     for fx in env.get("fixtures") or []:
         if fx.get("drillable"):
@@ -898,6 +902,9 @@ def build(spec: dict, out_dir: Path) -> Path:
             UsdGeom.XformCommonAPI(light).SetTranslate(Gf.Vec3d(*li["position"]))
 
     # --- cameras --------------------------------------------------------------
+    _missing = film_cameras_missing(spec)
+    if _missing:
+        raise SystemExit(f"{spec['name']}: the replay films through {_missing}, which the scene does not define (extra_cameras)")
     hc = spec["head_camera"]
     UsdGeom.Xform.Define(stage, "/World/Cameras")
     head = UsdGeom.Camera.Define(stage, "/World/Cameras/HeadRGB")
@@ -974,6 +981,28 @@ def joint_state_schema(kind: str) -> str:
     if kind not in ("angular", "linear"):
         raise ValueError(f"joint state kind {kind!r}")
     return f"PhysicsJointStateAPI:{kind}"
+
+
+def _station_destination(stage, dest: dict, in_env) -> dict:
+    """The place destination as a station's region (the environment's er:station:
+    role, top, region; make_lab_env.py), written where the planner and the replay
+    read it (/World customData er:destination): its centre (or the spec's xy in
+    it) at the surface an object rests on - a bin's floor, a bench's top."""
+    import json as _json
+    prim = stage.GetPrimAtPath(in_env(f"/Root/Stations/{dest['station']}"))
+    if not prim or not prim.HasCustomDataKey("er:station"):
+        raise SystemExit(f"destination: no station {dest['station']} (er:station) in the environment")
+    info = _json.loads(prim.GetCustomDataByKey("er:station"))
+    lo, hi = info["region"]["min"], info["region"]["max"]
+    xy = dest.get("xy") or [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2]
+    if not (lo[0] <= xy[0] <= hi[0] and lo[1] <= xy[1] <= hi[1]):
+        raise SystemExit(f"destination: {xy} is outside {dest['station']}'s region {lo} - {hi}")
+    z = float(info.get("floor_z", info["top_z"]))
+    d = {"kind": "region", "station": dest["station"], "role": info["role"], "label": dest.get("label", info["role"].replace("_", " ")),
+         "min": lo, "max": hi, "top_z": z, "centre_world_at_build": [round(float(xy[0]), 4), round(float(xy[1]), 4), round(z, 4)]}
+    stage.GetPrimAtPath("/World").SetCustomDataByKey("er:destination", _json.dumps(d))
+    print(f"[destination] {d['label']}: {d['station']} at {d['centre_world_at_build']}")
+    return d
 
 
 def _mesh_piece(stage, path, piece, color=None, collide=True):
@@ -1148,6 +1177,16 @@ def foreign_reference(spec, scene_dir):
     own = (Path(scene_dir) / "grasp_plan" / "targets.npz").resolve()
     got = Path(str(ref)).expanduser().resolve()
     return None if got == own else f"grasp_replay.reference is {ref}, not this scene's own plan {own}"
+
+
+FILM_CAMERAS = ("GraspCloseup",)        # replay_grasp's render products beside the head and overview cameras
+
+
+def film_cameras_missing(spec: dict) -> list[str]:
+    """The film's cameras a spec does not define: refused at the build, not after a
+    take waited 13 minutes for the Isaac slot and its film crashed (the lab, 2026-10-17)."""
+    have = {c.get("name") for c in spec.get("extra_cameras") or []}
+    return [n for n in FILM_CAMERAS if n not in have]
 
 
 def build_code_sha() -> str:

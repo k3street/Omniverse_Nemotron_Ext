@@ -3067,8 +3067,17 @@
    "source": "curated",
    "proposed_by": "realistic_tweezers",
    "proposed_on": "2026-10-03",
-   "_doc": "the arms flex at the root - a compliant mechanism, no pin: rigid until flex bodies",
-   "curated_on": "2026-10-03"
+   "_doc": "the arms flex at the root - a compliant mechanism, no pin: modelled as each arm on a root hinge with the arm's bending stiffness as the hinge's spring (k_theta = 3EI/L, make_pill_kit.py)",
+   "curated_on": "2026-10-03",
+   "use": {
+    "ladder": [
+     "held in a precision grip and lifted",
+     "the tips closed by the hand's squeeze and opened by its release (the arms' spring)",
+     "a small object picked between the tips, carried and let go where it is wanted",
+     "a series of small objects picked and placed in turn (a pill bottle packed)"
+    ],
+    "why": "the user's task (2026-10-17): tweezers pick single pills"
+   }
   },
   "rubiks_cube": {
    "keywords": [
@@ -5658,7 +5667,7 @@
     0.005,
     0.25
    ],
-   "articulable": false,
+   "articulable": true,
    "typical_materials": [
     "plastic_abs"
    ],
@@ -5666,7 +5675,38 @@
    "sources": {
     "size": "pharmacy pill vials, Fisher Scientific listings: 6 dram 63 mm x 22 mm, 16 dram 80 x 31 mm, 30 dram 91 x 41 mm (heights without the cap; a cap adds ~1 cm); 60-dram vials run to ~136 mm (retailer listings). https://www.fishersci.com/shop/products/vial-6-dram-amber-safe-cap/502643414 , https://www.fishersci.com/shop/products/vial-30-dram-bluesafe-cap/502643423"
    },
-   "why": "a screw- or snap-capped plastic pill/sample bottle: the 'bottle' class's 0.1-0.4 m (drink bottles) refused a 95 mm pill bottle (pills_linezolid, 2026-10-17); HomeHero's laboratory occupation wants a sealed inert container of this kind"
+   "why": "a screw- or snap-capped plastic pill/sample bottle: the 'bottle' class's 0.1-0.4 m (drink bottles) refused a 95 mm pill bottle (pills_linezolid, 2026-10-17); HomeHero's laboratory occupation wants a sealed inert container of this kind",
+   "use": {
+    "ladder": [
+     "held and carried upright",
+     "the cap opened by the hand: turned off its thread and lifted away, the pills still inside",
+     "pills moved one at a time with tweezers: packed from a tray into the open bottle, or unpacked from it onto the tray",
+     "the bottle packed with a counted set of pills and its cap screwed back on until it seats"
+    ],
+    "why": "the user's task (2026-10-17): an openable pill bottle packed or unpacked one pill at a time with tweezers or tongs"
+   }
+  },
+  "pill_tablet": {
+   "keywords": [
+    "tablet",
+    "pill"
+   ],
+   "max_dim_m": [
+    0.004,
+    0.022
+   ],
+   "mass_kg": [
+    5e-05,
+    0.002
+   ],
+   "articulable": false,
+   "typical_materials": [
+    "ceramic"
+   ],
+   "source": "curated",
+   "sources": {
+    "size": "FDA guidance 'Size, Shape, and Other Physical Attributes of Generic Tablets and Capsules' (Rev. 1, 2022): a tablet's largest dimension should not exceed 22 mm (https://fda.gov/media/161902/download)"
+   }
   }
  }
 }

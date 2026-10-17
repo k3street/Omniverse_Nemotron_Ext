@@ -997,8 +997,10 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): bound to station:ReceivingBench (make_lab_env.py); preflight aida_r5_lab_bench_transfer move.pass = True"
   },
   {
    "id": "cur:asset:laboratory_materials_handler:inspection_bench",
@@ -1034,8 +1036,10 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): bound to station:InspectionBench (make_lab_env.py); preflight aida_r5_lab_bench_transfer move.pass = True"
   },
   {
    "id": "cur:planner:base_motion",
@@ -1058,9 +1062,11 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
+   "status": "superseded",
    "first_seen": "2026-10-17",
-   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json"
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json",
+   "closed_at": "2026-10-17",
+   "closed_why": "no current curriculum lesson needs it (2026-10-17)"
   },
   {
    "id": "cur:scene:laboratory_materials_handler",
@@ -1083,8 +1089,10 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): bound to aida_r5_lab_bench_transfer"
   },
   {
    "id": "cur:measure:collision_violation_count",
@@ -1099,7 +1107,7 @@
     "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
     "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
     "homehero_occupation"
@@ -1107,20 +1115,22 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): record field collision_violation_count"
   },
   {
    "id": "cur:take:homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench",
    "kind": "take",
    "title": "a passing take: Move a container to the inspection bench",
-   "description": "run and pass a take for 'Move a container to the inspection bench'",
-   "evidence": "no take",
+   "description": "run and pass a take for 'Move a container to the inspection bench' in aida_r5_lab_bench_transfer meeting ['collision_violation_count eq 0 (got None)']",
+   "evidence": "aida_r5_lab_bench_transfer move.pass = True; criteria not met: ['collision_violation_count eq 0 (got None)']",
    "priority": 10059,
    "blocks": [
     "homehero.occupation.laboratory_materials_handler.move_container_to_inspection_bench"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
     "homehero_occupation"
@@ -1128,8 +1138,10 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_bench_transfer move.pass = True"
   },
   {
    "id": "cur:handoff:laboratory_materials_handler",
@@ -1144,7 +1156,7 @@
     "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
     "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
     "homehero_occupation"
@@ -1196,7 +1208,7 @@
    "title": "the place inside planner",
    "description": "pinch_place with the receptacle's walls as obstacles and the cavity floor as the destination; a record of the object contained",
    "evidence": "no planner",
-   "priority": 10126,
+   "priority": 10125,
    "blocks": [
     "homehero.interaction.drawer_kit_10.store",
     "homehero.interaction.microwave_1.place_item",
@@ -1225,8 +1237,8 @@
    "id": "cur:take:homehero.occupation.laboratory_materials_handler.store_container_in_open_bin",
    "kind": "take",
    "title": "a passing take: Store a container in the open bin",
-   "description": "run and pass a take for 'Store a container in the open bin'",
-   "evidence": "no take",
+   "description": "run and pass a take for 'Store a container in the open bin' in aida_r5_lab_bench_transfer meeting ['collision_violation_count eq 0 (got None)']",
+   "evidence": "aida_r5_lab_bench_transfer pass = True; criteria not met: ['collision_violation_count eq 0 (got None)']",
    "priority": 10159,
    "blocks": [
     "homehero.occupation.laboratory_materials_handler.store_container_in_open_bin"
@@ -1239,15 +1251,17 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_bench_transfer pass = True"
   },
   {
    "id": "cur:take:homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin",
    "kind": "take",
    "title": "a passing take: Retrieve a container from the open bin",
-   "description": "run and pass a take for 'Retrieve a container from the open bin'",
-   "evidence": "no take",
+   "description": "run and pass a take for 'Retrieve a container from the open bin' in aida_r5_lab_bench_transfer meeting ['collision_violation_count eq 0 (got None)']",
+   "evidence": "aida_r5_lab_bench_transfer pass = True; criteria not met: ['collision_violation_count eq 0 (got None)']",
    "priority": 10259,
    "blocks": [
     "homehero.occupation.laboratory_materials_handler.retrieve_container_from_open_bin"
@@ -1260,8 +1274,10 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_bench_transfer pass = True"
   },
   {
    "id": "cur:asset:laboratory_materials_handler:loaded_tray",
@@ -1344,8 +1360,8 @@
    "id": "cur:take:homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches",
    "kind": "take",
    "title": "a passing take: Carry a loaded tray between benches",
-   "description": "run and pass a take for 'Carry a loaded tray between benches'",
-   "evidence": "no take",
+   "description": "run and pass a take for 'Carry a loaded tray between benches' in aida_r5_lab_bench_transfer meeting ['collision_violation_count eq 0 (got None)']",
+   "evidence": "aida_r5_lab_bench_transfer pass = True; criteria not met: ['collision_violation_count eq 0 (got None)']",
    "priority": 10359,
    "blocks": [
     "homehero.occupation.laboratory_materials_handler.carry_loaded_tray_between_benches"
@@ -1358,8 +1374,10 @@
    "parents": [
     "hh_lab_materials_scene_v1"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_bench_transfer pass = True"
   },
   {
    "id": "cur:interaction:latch_close",
@@ -2544,6 +2562,254 @@
    ],
    "first_seen": "2026-10-17",
    "findings": "2026-10-17, offline (tool_grip_planner on the hole scene's own request, HomeHero's adapter): no grip turns the palm behind the handle and keeps the index on the trigger. Yaw (the hand about the handle) 15-100 deg with the heel seat: every candidate rejected (no wrap: the fingers pass the handle; open hand in the tool: the palm's top in the barrel's overhang; the index misses the trigger). Yaw 45-60 deg, roll -15..15, placement free along and across the fingers (seat_at_heel off), handle depth 8 and 10 cm: 7,500 placements, none - 3,054 open hands in the tool, ~1,050 where the fingers wrapped but the index could not reach the trigger round the handle's side. Friction (mu ~0.8) puts the palm's face on the push only from ~50 deg. Left: (a) the thumb behind the handle under the overhang (thumb_opposes; the search's only thumb so far closed on the barrel's top), or (b) the right hand on the drill's back - the push a person adds with the other hand (needs the right arm in HomeHero's checker: planner bimanual)"
+  },
+  {
+   "id": "nemotron_stale_extents_v1",
+   "kind": "pipeline",
+   "status": "proposed",
+   "first_seen": "2026-10-17",
+   "title": "Asset meshes carry stale extents: bounds read from them overstate the object",
+   "description": "pills_linezolid's bottle mesh says 59 x 59 mm (and 72 mm at a 30 deg yaw) in its authored extent; its points span 43-51 mm (a tapered body). USD's BBoxCache reads the extent, so the approval's size gate, the scene's bounds and the region verdict's bottom height all read the inflated box; the pinch planner (points) read 49 mm, rightly. Rule: the ingest recomputes every mesh's extent from its points (UsdGeom.Boundable.ComputeExtentFromPlugins) - a versioned ingest rule with a test, swept over the library (reprocess --stages ingest)",
+   "success_measures": [
+    "every library mesh's extent equals its points' bounds",
+    "pills_linezolid's approval size reads ~0.087 m tall, 0.051 m across"
+   ]
+  },
+  {
+   "id": "cur:interaction:cap_thread",
+   "kind": "interaction",
+   "title": "the cap thread interaction",
+   "description": "an openable bottle (cap a separate body on a prismatic+revolute pair coupled by the thread law each step, released past one turn); a law test and a take",
+   "evidence": "no law",
+   "priority": 211,
+   "blocks": [
+    "nemotron.ladder.pill_bottle.r2",
+    "nemotron.ladder.pill_bottle.r4"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "interaction_kind": "mechanism",
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:interaction:small_parts_contact",
+   "kind": "interaction",
+   "title": "the small parts contact interaction",
+   "description": "tablets generated with sourced sizes, contact offsets at their scale and CCD where they fall; a drop test into the bottle that keeps every pill",
+   "evidence": "no law",
+   "priority": 212,
+   "blocks": [
+    "nemotron.ladder.pill_bottle.r2",
+    "nemotron.ladder.pill_bottle.r3",
+    "nemotron.ladder.pill_bottle.r4",
+    "nemotron.ladder.tweezers.r3"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "interaction_kind": "contact",
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): workspace/asset_library/pill_kit_rig.json drop.pass = True"
+  },
+  {
+   "id": "cur:planner:cap_turn",
+   "kind": "planner",
+   "title": "the cap turn planner",
+   "description": "a wrist-roll stage pinching the cap, regrasping between strokes; the bottle held by a fitted holder or the right hand",
+   "evidence": "no planner",
+   "priority": 223,
+   "blocks": [
+    "nemotron.ladder.pill_bottle.r2",
+    "nemotron.ladder.pill_bottle.r4"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.pill_bottle.r2",
+   "kind": "scene",
+   "title": "a scene for pill_bottle rung 2: the cap opened by the hand: turned off its thread and lifted away, the pills still inside",
+   "description": "build a scene for 'pill_bottle rung 2: the cap opened by the hand: turned off its thread and lifted away, the pills still inside'",
+   "evidence": "none named",
+   "priority": 234,
+   "blocks": [
+    "nemotron.ladder.pill_bottle.r2"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:interaction:tweezer_flex",
+   "kind": "interaction",
+   "title": "the tweezer flex interaction",
+   "description": "tweezers built with each arm on a root hinge (spring k_theta = 3EI/L from the arm's section and length, stainless E); a rig test that the tips' force and travel match the beam law",
+   "evidence": "no law",
+   "priority": 211,
+   "blocks": [
+    "nemotron.ladder.pill_bottle.r3",
+    "nemotron.ladder.pill_bottle.r4",
+    "nemotron.ladder.tweezers.r2",
+    "nemotron.ladder.tweezers.r3"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "interaction_kind": "mechanism",
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): workspace/asset_library/pill_kit_rig.json spring.pass = True"
+  },
+  {
+   "id": "cur:planner:tool_pinch",
+   "kind": "planner",
+   "title": "the tool pinch planner",
+   "description": "a precision-grip planner on a slim tool: the thumb against the index and middle on the arms, the squeeze closing the tips (the pinch planner on the tool's arms)",
+   "evidence": "no planner",
+   "priority": 122,
+   "blocks": [
+    "nemotron.ladder.pill_bottle.r3",
+    "nemotron.ladder.tweezers.r1",
+    "nemotron.ladder.tweezers.r2",
+    "nemotron.ladder.tweezers.r3"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:tool_tip_place",
+   "kind": "planner",
+   "title": "the tool tip place planner",
+   "description": "pinch_place planned for the tool's tips instead of the fingertips: the tip pair's frame from the tool's joints, the hand's squeeze as the tips' close",
+   "evidence": "no planner",
+   "priority": 324,
+   "blocks": [
+    "nemotron.ladder.pill_bottle.r3",
+    "nemotron.ladder.pill_bottle.r4",
+    "nemotron.ladder.tweezers.r3"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.pill_bottle.r3",
+   "kind": "scene",
+   "title": "a scene for pill_bottle rung 3: pills moved one at a time with tweezers: packed from a tray into the open bottle, or unpacked from it onto the tray",
+   "description": "build a scene for 'pill_bottle rung 3: pills moved one at a time with tweezers: packed from a tray into the open bottle, or unpacked from it onto the tray'",
+   "evidence": "none named",
+   "priority": 335,
+   "blocks": [
+    "nemotron.ladder.pill_bottle.r3"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.pill_bottle.r4",
+   "kind": "scene",
+   "title": "a scene for pill_bottle rung 4: the bottle packed with a counted set of pills and its cap screwed back on until it seats",
+   "description": "build a scene for 'pill_bottle rung 4: the bottle packed with a counted set of pills and its cap screwed back on until it seats'",
+   "evidence": "none named",
+   "priority": 436,
+   "blocks": [
+    "nemotron.ladder.pill_bottle.r4"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.tweezers.r1",
+   "kind": "scene",
+   "title": "a scene for tweezers rung 1: held in a precision grip and lifted",
+   "description": "build a scene for 'tweezers rung 1: held in a precision grip and lifted'",
+   "evidence": "none named",
+   "priority": 133,
+   "blocks": [
+    "nemotron.ladder.tweezers.r1"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.tweezers.r2",
+   "kind": "scene",
+   "title": "a scene for tweezers rung 2: the tips closed by the hand's squeeze and opened by its release (the arms' spring)",
+   "description": "build a scene for 'tweezers rung 2: the tips closed by the hand's squeeze and opened by its release (the arms' spring)'",
+   "evidence": "none named",
+   "priority": 233,
+   "blocks": [
+    "nemotron.ladder.tweezers.r2"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:scene:nemotron.ladder.tweezers.r3",
+   "kind": "scene",
+   "title": "a scene for tweezers rung 3: a small object picked between the tips, carried and let go where it is wanted",
+   "description": "build a scene for 'tweezers rung 3: a small object picked between the tips, carried and let go where it is wanted'",
+   "evidence": "none named",
+   "priority": 335,
+   "blocks": [
+    "nemotron.ladder.tweezers.r3"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
   }
  ]
 }

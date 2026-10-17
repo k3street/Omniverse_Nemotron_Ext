@@ -2,61 +2,278 @@
  "schema": "nemotron.physical_interactions.v1",
  "_doc": "Every physical response a lesson can ask a scene for: rigid contact PhysX gives, mechanisms our laws add to an asset's joints, and material interactions (what a tool does TO a workpiece, with an outcome the scene keeps). scripts/curriculum_intake.py maps each curriculum lesson to these (curriculum_bindings.json, or the 'terms' below as a fallback) and checks each one: 'law' importable, 'test' present, and 'proven_by' a scene whose last take's record has that field true. A missing interaction, or one never proven in a take, becomes a backlog task with 'needs' as its work.",
  "interactions": [
-  {"id": "rigid_contact", "kind": "contact", "builtin": true,
+  {
+   "id": "rigid_contact",
+   "kind": "contact",
+   "builtin": true,
    "what": "rigid bodies touch, rest on supports, are lifted, carried and set down (PhysX contact and friction)",
-   "terms": ["lift", "place", "carry", "transfer", "rest", "released", "release and", "retained", "support", "sort", "store", "retrieve", "withdraw", "transport", "set down", "put in"],
-   "proven_by": {"scene": "aida_r5_dining_chess", "record": "move.pass"}},
-  {"id": "joint_pivot", "kind": "mechanism", "builtin": true,
+   "terms": [
+    "lift",
+    "place",
+    "carry",
+    "transfer",
+    "rest",
+    "released",
+    "release and",
+    "retained",
+    "support",
+    "sort",
+    "store",
+    "retrieve",
+    "withdraw",
+    "transport",
+    "set down",
+    "put in"
+   ],
+   "proven_by": {
+    "scene": "aida_r5_dining_chess",
+    "record": "move.pass"
+   }
+  },
+  {
+   "id": "joint_pivot",
+   "kind": "mechanism",
+   "builtin": true,
    "what": "an asset's own revolute joint turning freely within its limits (a scissors pivot)",
-   "terms": ["pivot", "the blades", "open and close"],
-   "proven_by": {"scene": "aida_r5_rail_scissors", "record": "push.opened_by_the_hand"}},
-  {"id": "hinge_friction", "kind": "mechanism", "law": "behaviors:hinge_friction", "test": "tests/test_hinge_friction_law.py",
+   "terms": [
+    "pivot",
+    "the blades",
+    "open and close"
+   ],
+   "proven_by": {
+    "scene": "aida_r5_rail_scissors",
+    "record": "push.opened_by_the_hand"
+   }
+  },
+  {
+   "id": "hinge_friction",
+   "kind": "mechanism",
+   "law": "behaviors:hinge_friction",
+   "test": "tests/test_hinge_friction_law.py",
    "what": "a door's hinge holds where it is left: friction against its turning",
-   "terms": ["hinge", "swing", "door open", "push the door", "pull the door", "lid"],
-   "proven_by": {"scene": "aida_r5_kitchen_microwave", "record": "door.opened_by_hand"}},
-  {"id": "latch_kick", "kind": "mechanism", "law": "behaviors:latch_kick", "test": "tests/test_latch_kick_law.py",
+   "terms": [
+    "hinge",
+    "swing",
+    "door open",
+    "push the door",
+    "pull the door",
+    "lid"
+   ],
+   "proven_by": {
+    "scene": "aida_r5_kitchen_microwave",
+    "record": "door.opened_by_hand"
+   }
+  },
+  {
+   "id": "latch_kick",
+   "kind": "mechanism",
+   "law": "behaviors:latch_kick",
+   "test": "tests/test_latch_kick_law.py",
    "what": "a button trips a latch and a spring kicks the door open a few degrees",
-   "terms": ["releases the latch", "latch lets go", "spring opens", "button transition", "released by its button"],
-   "proven_by": {"scene": "aida_r5_kitchen_microwave", "record": "door.tripped"}},
-  {"id": "gasket", "kind": "mechanism", "law": "behaviors:gasket", "test": "tests/test_gasket_law.py",
+   "terms": [
+    "releases the latch",
+    "latch lets go",
+    "spring opens",
+    "button transition",
+    "released by its button"
+   ],
+   "proven_by": {
+    "scene": "aida_r5_kitchen_microwave",
+    "record": "door.tripped"
+   }
+  },
+  {
+   "id": "gasket",
+   "kind": "mechanism",
+   "law": "behaviors:gasket",
+   "test": "tests/test_gasket_law.py",
    "what": "a magnetic door gasket holding the door shut until pulled past it, and drawing it shut at the end of a close",
-   "terms": ["gasket", "seal broken", "seals it"],
-   "proven_by": {"scene": "aida_r5_living_fridge", "record": "door.seal_broken"}},
-  {"id": "latch_close", "kind": "mechanism",
+   "terms": [
+    "gasket",
+    "seal broken",
+    "seals it"
+   ],
+   "proven_by": {
+    "scene": "aida_r5_living_fridge",
+    "record": "door.seal_broken"
+   }
+  },
+  {
+   "id": "latch_close",
+   "kind": "mechanism",
    "what": "a door's latch catching as it is pushed shut: the strike rides the latch's ramp and clicks home past a closing-force threshold",
-   "terms": ["until it latches", "pushed shut", "latch engagement"],
-   "needs": "a sourced latch law (the closing force and travel of an appliance door latch) run on the door's hinge, latch_kick's state re-armed when it catches; a record of the door closed and latched"},
-  {"id": "drawer_slide", "kind": "mechanism",
+   "terms": [
+    "until it latches",
+    "pushed shut",
+    "latch engagement"
+   ],
+   "needs": "a sourced latch law (the closing force and travel of an appliance door latch) run on the door's hinge, latch_kick's state re-armed when it catches; a record of the door closed and latched"
+  },
+  {
+   "id": "drawer_slide",
+   "kind": "mechanism",
    "what": "a drawer running on its slides: rolling/sliding friction, end stops, the drawer's travel recorded",
-   "terms": ["drawer"],
-   "needs": "the drawer asset's prismatic joints with a sourced slide friction law (behaviors), end stops at the asset's travel; a record of the travel the hand caused"},
-  {"id": "motor", "kind": "mechanism", "law": "behaviors:motor",
+   "terms": [
+    "drawer"
+   ],
+   "needs": "the drawer asset's prismatic joints with a sourced slide friction law (behaviors), end stops at the asset's travel; a record of the travel the hand caused"
+  },
+  {
+   "id": "motor",
+   "kind": "mechanism",
+   "law": "behaviors:motor",
    "what": "a power tool's motor: the trigger's travel sets the output speed by the motor's law",
-   "terms": ["trigger", "chuck spins", "motor"],
-   "proven_by": {"scene": "aida_r5_dining_drill_screw", "record": "screw.pass"}},
-  {"id": "appliance_run", "kind": "mechanism",
+   "terms": [
+    "trigger",
+    "chuck spins",
+    "motor"
+   ],
+   "proven_by": {
+    "scene": "aida_r5_dining_drill_screw",
+    "record": "screw.pass"
+   }
+  },
+  {
+   "id": "appliance_run",
+   "kind": "mechanism",
    "what": "an appliance run from its panel: time set, start pressed, the turntable turning",
-   "terms": ["time set", "start pressed", "turntable turning"],
-   "needs": "the microwave's panel buttons as pressable parts with a state machine (time, start), and its turntable on a motor law; a record of the run"},
-  {"id": "screw_drive_wood", "kind": "material", "law": "behaviors:screw_drive", "test": "tests/test_screw_drive_law.py",
-   "tools": ["power_drill", "screwdriver"], "workpiece": ["wood_birch_plywood"],
+   "terms": [
+    "time set",
+    "start pressed",
+    "turntable turning"
+   ],
+   "needs": "the microwave's panel buttons as pressable parts with a state machine (time, start), and its turntable on a motor law; a record of the run"
+  },
+  {
+   "id": "screw_drive_wood",
+   "kind": "material",
+   "law": "behaviors:screw_drive",
+   "test": "tests/test_screw_drive_law.py",
+   "tools": [
+    "power_drill",
+    "screwdriver"
+   ],
+   "workpiece": [
+    "wood_birch_plywood"
+   ],
    "what": "a wood screw turned in by a bit: it advances its pitch a turn while the thread forms, seats, tightens, strips past the stripping torque",
-   "terms": ["screw driven", "turn supported screw", "screw rotation", "screw into", "drive a screw", "drives the screw"],
-   "proven_by": {"scene": "aida_r5_dining_drill_screw", "record": "screw.pass"}},
-  {"id": "drill_hole_wood", "kind": "material", "law": "material_laws:drill_cut", "outcome": "material_laws:hole_pieces", "test": "tests/test_drill_hole_law.py",
-   "tools": ["power_drill"], "workpiece": ["wood_birch_plywood", "mdf"],
+   "terms": [
+    "screw driven",
+    "turn supported screw",
+    "screw rotation",
+    "screw into",
+    "drive a screw",
+    "drives the screw"
+   ],
+   "proven_by": {
+    "scene": "aida_r5_dining_drill_screw",
+    "record": "screw.pass"
+   }
+  },
+  {
+   "id": "drill_hole_wood",
+   "kind": "material",
+   "law": "material_laws:drill_cut",
+   "outcome": "material_laws:hole_pieces",
+   "test": "tests/test_drill_hole_law.py",
+   "tools": [
+    "power_drill"
+   ],
+   "workpiece": [
+    "wood_birch_plywood",
+    "mdf"
+   ],
    "what": "a twist bit cutting a hole: the thrust buys the chip (Szwajka & Trzepiecinski 2018), the chip sets the torque on the chuck, the hole's bottom advances with the feed; the board keeps the hole (its convex pieces) for the tasks after",
-   "terms": ["material removed", "drill a hole", "drilled hole", "bore", "pressed into a workpiece"],
-   "proven_by": {"scene": "aida_r5_dining_drill_hole", "record": "hole.pass"}},
-  {"id": "cut_sheet_scissors", "kind": "material",
-   "tools": ["scissors"], "workpiece": ["paper_kraft"],
+   "terms": [
+    "material removed",
+    "drill a hole",
+    "drilled hole",
+    "bore",
+    "pressed into a workpiece"
+   ],
+   "proven_by": {
+    "scene": "aida_r5_dining_drill_hole",
+    "record": "hole.pass"
+   }
+  },
+  {
+   "id": "cut_sheet_scissors",
+   "kind": "material",
+   "tools": [
+    "scissors"
+   ],
+   "workpiece": [
+    "paper_kraft"
+   ],
    "what": "scissors closing across a sheet part it where the blades cross; repeated closes cut along a line",
-   "terms": ["sheet is cut", "cut along a line", "cut the paper", "cutting paper"],
-   "needs": "a sheet (paper_kraft) that can part: pieces joined along a fine grid whose joins break where the blades' crossing point passes and the shear force (sourced: paper's shear strength x thickness x the length in the bite) is met; the cut's length and the two pieces recorded; a scene with a sheet held by the other hand"},
-  {"id": "impact_strike", "kind": "material",
-   "tools": ["hammer"], "workpiece": ["wood_pine"],
+   "terms": [
+    "sheet is cut",
+    "cut along a line",
+    "cut the paper",
+    "cutting paper"
+   ],
+   "needs": "a sheet (paper_kraft) that can part: pieces joined along a fine grid whose joins break where the blades' crossing point passes and the shear force (sourced: paper's shear strength x thickness x the length in the bite) is met; the cut's length and the two pieces recorded; a scene with a sheet held by the other hand"
+  },
+  {
+   "id": "impact_strike",
+   "kind": "material",
+   "tools": [
+    "hammer"
+   ],
+   "workpiece": [
+    "wood_pine"
+   ],
    "what": "a hammer's head striking a target: the impulse measured, a nail's advance per blow against its driving resistance",
-   "terms": ["strike", "impact", "tap the", "bounded impact", "nail"],
-   "needs": "an impact law: the head's contact impulse read from the contact report, a nail fixture advancing per blow against a sourced withdrawal/driving resistance in wood; the blows and the nail's depth recorded"}
+   "terms": [
+    "strike",
+    "impact",
+    "tap the",
+    "bounded impact",
+    "nail"
+   ],
+   "needs": "an impact law: the head's contact impulse read from the contact report, a nail fixture advancing per blow against a sourced withdrawal/driving resistance in wood; the blows and the nail's depth recorded"
+  },
+  {
+   "id": "tweezer_flex",
+   "kind": "mechanism",
+   "what": "tweezers' arms closing under the hand's squeeze and springing open on release: each arm a root hinge whose spring is the steel arm's bending stiffness",
+   "terms": [
+    "tips closed",
+    "arms' spring",
+    "between the tips"
+   ],
+   "law": "make_pill_kit:tweezer_spring",
+   "test": "tests/test_pill_kit.py",
+   "proven_by": {
+    "file": "workspace/asset_library/pill_kit_rig.json",
+    "record": "spring.pass"
+   }
+  },
+  {
+   "id": "cap_thread",
+   "kind": "mechanism",
+   "what": "a screw cap on a one-turn (GPI 400) thread: turned, it rises a pitch a turn until it leaves the thread and lifts off; turned back on, it seats",
+   "terms": [
+    "turned off its thread",
+    "cap screwed",
+    "cap opened"
+   ],
+   "needs": "an openable bottle (cap a separate body on a prismatic+revolute pair coupled by the thread law each step, released past one turn); a law test and a take"
+  },
+  {
+   "id": "small_parts_contact",
+   "kind": "contact",
+   "what": "pills: small rigid bodies (a few mm, a fraction of a gram) resting, rolling and dropped into a bottle without tunnelling",
+   "terms": [
+    "pills",
+    "pill"
+   ],
+   "builtin": true,
+   "test": "tests/test_pill_kit.py",
+   "proven_by": {
+    "file": "workspace/asset_library/pill_kit_rig.json",
+    "record": "drop.pass"
+   }
+  }
  ]
 }

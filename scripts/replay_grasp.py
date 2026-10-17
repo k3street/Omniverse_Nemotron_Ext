@@ -247,7 +247,8 @@ if _plan_json.exists() and json.loads(_plan_json.read_text()).get("collision_exc
         app.close()
         raise SystemExit(2)
 
-if args.contacts:
+if True:
+    # (every take: the robot's collisions are a measure - collision_measure.py; --contacts adds the per-tick pair log)
     # PhysX's contact report on every left-arm and hand link: which actor
     # pairs touch, each tick (what blocks the arm when it stalls short).
     # Applied before the stage attaches: PhysX ignores the flag afterwards
@@ -778,17 +779,27 @@ if HM:
         print(f"[hand] no contact view: {e}", flush=True)
 
 
-CONTACT_ALL = None
-if args.contacts:
-    from omni.physx import get_physx_simulation_interface
-    CONTACT_ALL = get_physx_simulation_interface()
+from omni.physx import get_physx_simulation_interface
+CONTACT_ALL = get_physx_simulation_interface()
+ROBOT_TOUCHES = []                                       # each tick's partners (collision_measure.partners)
+ROBOT_ANY = [0]                                          # ticks the robot touched anything (the target too): the report is live
 
 
 def link_contacts(top=6):
-    if CONTACT_ALL is None:
-        return None
+    """The robot links' contacts this tick: the top pairs (logged with --contacts) and, every tick, what the
+    robot touches that is neither itself nor the target (the collision measure)."""
     from pxr import PhysicsSchemaTools
+    from collision_measure import partners as _partners
     headers, _ = CONTACT_ALL.get_contact_report()
+    full = []
+    for h in headers:
+        if int(h.type) != 2:
+            full.append((str(PhysicsSchemaTools.intToSdfPath(h.actor0)), str(PhysicsSchemaTools.intToSdfPath(h.actor1))))
+    ROBOT_TOUCHES.append(_partners(full, "/World/Robot", [str(target.GetPath())]))
+    # the report is live if the robot touches anything at all (the target in its grip): a zero count
+    # from a dead report would read as a clean take
+    if any(a.startswith("/World/Robot/") != b.startswith("/World/Robot/") for a, b in full):
+        ROBOT_ANY[0] += 1
     pairs = {}
     for h in headers:
         if int(h.type) == 2:                                  # lost
@@ -1446,8 +1457,11 @@ for tick, (plan_i, row, stage_name) in enumerate(schedule()):
         entry["target_xy"] = [round(float(c[0]), 4), round(float(c[1]), 4)]
         entry["fingers_q2_over_q1"] = [round(float(qv[dof[f"psyonic_left_{f}_q2"]] / qv[dof[f"psyonic_left_{f}_q1"]]), 3)
                                        if abs(qv[dof[f"psyonic_left_{f}_q1"]]) > 0.05 else None for f in fingers]
-    if CONTACT_ALL is not None:
-        entry["link_contacts"] = link_contacts()
+    _lc = link_contacts()
+    if args.contacts:
+        entry["link_contacts"] = _lc
+    if ROBOT_TOUCHES and ROBOT_TOUCHES[-1]:
+        entry["robot_touches"] = ROBOT_TOUCHES[-1]
     log.append(entry)
     if args.max_ticks and tick >= args.max_ticks:
         print(f"[replay] stopped at tick {tick} (--max-ticks)", flush=True)
@@ -1815,6 +1829,32 @@ if PIECES0 is not None:
                         and not moved)
     result["move"] = move
     result["pass"] = move["pass"]
+if DEST and DEST.get("kind") == "region":
+    # a transfer to a station's region (a bench's marked area, a bin's floor): the object inside the
+    # region and resting on that station's surface (its bottom within 1 cm of it), upright, carried
+    # (risen 1 cm or more), let go - HomeHero's destination_match, stable_supported_placement, released
+    _rng = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]) \
+        .ComputeWorldBound(target).ComputeAlignedRange()
+    _c = np.array(_rng.GetMidpoint(), float)
+    _lo, _hi = DEST["min"], DEST["max"]
+    _inside = bool(_lo[0] <= _c[0] <= _hi[0] and _lo[1] <= _c[1] <= _hi[1])
+    _above = float(_rng.GetMin()[2]) - float(DEST["top_z"])
+    _on = abs(_above) <= 0.01
+    _tilt = log[-1].get("target_tilt_deg") if log else None
+    _touch = log[-1].get("contact_n") if log else None
+    _released = _touch is None or sum(v for k, v in _touch.items()) < 0.05
+    move = {"to": DEST.get("label"), "station": DEST.get("station"), "ended_on": DEST.get("station") if _inside and _on else None,
+            "in_region": _inside, "bottom_above_surface_mm": round(_above * 1000, 1),
+            "from_centre_m": round(float(np.linalg.norm((_c - np.asarray(DEST["centre_world_at_build"], float))[:2])), 4),
+            "tilt_deg": _tilt, "carried_peak_rise_m": round(peak, 4), "released": _released}
+    move["pass"] = bool(_inside and _on and (_tilt or 0) < 10 and peak >= 0.01 and _released)
+    result["move"] = move
+    result["pass"] = move["pass"]
+# the robot's collisions: what its arm and hand touched that is neither the robot nor the target
+# (HomeHero's collision_violation_count: the episodes)
+from collision_measure import tally as _tally
+result["collisions"] = dict(_tally(ROBOT_TOUCHES), robot_contact_ticks=ROBOT_ANY[0], report_live=ROBOT_ANY[0] > 0)
+result["collision_violation_count"] = result["collisions"]["episodes"]
 # a container's seal, by its structure: a target with no joints is one rigid body - its cap or lid
 # cannot open (HomeHero's container_sealed criterion; a jointed lid needs its joint's state read)
 _tjs = [q.GetName() for q in Usd.PrimRange(target) if q.IsA(UsdPhysics.Joint)]
@@ -1835,7 +1875,9 @@ if args.no_video:
         mv = result["move"]
         print(f"MOVE {'PASS' if mv['pass'] else 'FAIL'} {spec['name']} (no video): {result['target']} ended on {mv['ended_on']} "
               f"({mv['from_centre_m']} m from the centre of {mv['to']}), tilt {mv['tilt_deg']} deg, carried {mv['carried_peak_rise_m']} m up, "
-              f"released {mv['released']}, others moved {mv['others_moved_over_1cm']}; {mv['fen_placement']}", flush=True)
+              f"released {mv['released']}" + (f", others moved {mv['others_moved_over_1cm']}; {mv['fen_placement']}" if "fen_placement" in mv
+                                              else f"; in the region {mv.get('in_region')}, {mv.get('bottom_above_surface_mm')} mm above its surface"),
+              flush=True)
     print(f"GRASP {'PASS' if result['pass'] else 'FAIL'} {spec['name']} (no video): rose {100 * peak:.1f} cm at peak, "
           f"{100 * end:.1f} cm at the end; hand-to-object drift since liftoff {drift} m", flush=True)
     print("GRASP_RESULT " + json.dumps(result), flush=True)
@@ -1854,7 +1896,9 @@ if "move" in result:
     mv = result["move"]
     print(f"MOVE {'PASS' if mv['pass'] else 'FAIL'} {spec['name']}: {result['target']} ended on {mv['ended_on']} "
           f"({mv['from_centre_m']} m from the centre of {mv['to']}), tilt {mv['tilt_deg']} deg, carried {mv['carried_peak_rise_m']} m up, "
-          f"released {mv['released']}, others moved {mv['others_moved_over_1cm']}; {mv['fen_placement']}", flush=True)
+          f"released {mv['released']}" + (f", others moved {mv['others_moved_over_1cm']}; {mv['fen_placement']}" if "fen_placement" in mv
+                                          else f"; in the region {mv.get('in_region')}, {mv.get('bottom_above_surface_mm')} mm above its surface"),
+          flush=True)
 print(f"GRASP {'PASS' if result['pass'] else 'FAIL'} {spec['name']}: {result['target']} rose {100 * peak:.1f} cm at peak, "
       f"{100 * end:.1f} cm at the end of the hold; hand-to-object drift since liftoff {drift} m", flush=True)
 print("GRASP_RESULT " + json.dumps(result), flush=True)
