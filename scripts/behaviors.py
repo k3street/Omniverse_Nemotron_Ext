@@ -205,6 +205,82 @@ def screw_drive(state: dict, dphi_rad: float, engaged: bool, pitch_m: float, sea
     return t
 
 
+def cap_thread(state: dict, u_rad: float, torque_n_m: float = 0.0, *, turns: float, retention: float = 0.5,
+               run_n_m: float = 0.02, seat_rad: float = math.radians(5.0), applied_n_m: float = 0.0,
+               free_pose: dict | None = None, pitch_m: float = 0.0, align_m: float = 0.0015,
+               align_rad: float = math.radians(5.0), catch_m: float = 0.002, seat_tol_rad: float = math.radians(1.0),
+               past_end_rad: float = math.radians(2.0)) -> dict:
+    """One physics step of a screw cap on its bottle's thread (a GPI 400
+    finish: one turn). On the thread the asset's joint pair holds the cap to
+    its helix (a revolute and a prismatic coupled a pitch a turn); this law
+    says what the pair does. `u_rad` is the cap's turn off its seat (positive
+    opens), `torque_n_m` the torque the hand puts on it (positive opens).
+
+    Seated (u under seat_rad, not yet broken loose) the closure holds with its
+    removal torque: `retention` x the torque it was last applied with - 40-60 %
+    of the application torque 24 h after capping (Oberk, "How to make sure
+    your cap is tight enough"; a 38 mm closure is applied at 17-26 in-lb and
+    removed at 7-16): the caller locks its turn ('locked'). An opening torque
+    from the hand that reaches the hold - or a turn past seat_rad - breaks it
+    loose, and it turns against the thread's running friction. Turned away from
+    its seat (past seat_rad) and back down onto it (within seat_tol_rad: the
+    joint's stop holds it there), it is seated again, and the closing torque the
+    hand holds there is the new application torque - not while it is still
+    leaving the seat it just broke loose from (it re-locked 2 ms after breaking
+    loose, 0.6 deg up, on the rig, 2026-10-17). Turned past_end_rad past
+    `turns` it leaves the thread: state['on'] goes False and the caller releases the
+    pair (the cap free). A free cap lifted clear of the neck (higher than
+    catch_m over the thread's start) and set back on it - its axis within
+    align_m and align_rad of the bottle's, its height within catch_m above
+    the thread's start (free_pose {'off_axis_m', 'tilt_rad', 'height_m' above
+    its seat}) - catches the thread at its top; one only leaving the thread
+    does not.
+
+    Updates `state` ({'on', 'broken', 'away', 'applied_n_m', 'closing_n_m', 'clear'}) and
+    returns {'on', 'locked' (seated and held: the turn locked), 'friction_n_m'
+    (the turning friction now), 'event' ('broke_loose' | 'off_thread' |
+    'on_thread' | 'seated' | None)}."""
+    state.setdefault("on", True)
+    state.setdefault("broken", False)
+    state.setdefault("applied_n_m", float(applied_n_m))
+    state.setdefault("closing_n_m", 0.0)
+    state.setdefault("away", False)
+    event = None
+    top = 2 * math.pi * float(turns)
+    if not state["on"]:
+        fp = free_pose or {}
+        over = fp.get("height_m", -1.0) - pitch_m * turns
+        if over > catch_m:
+            state["clear"] = True
+        if (state.get("clear") and fp.get("off_axis_m", 1.0) <= align_m and fp.get("tilt_rad", 1.0) <= align_rad
+                and 0.0 <= over <= catch_m):
+            state.update(on=True, broken=True, away=True, closing_n_m=0.0, clear=False)
+            # caught: the caller counts its turn from the thread's end from here (the turn it has now is a free cap's -
+            # read in the same step, a turn already past the end let it go again at once, 2026-10-17)
+            return {"on": True, "locked": False, "friction_n_m": float(run_n_m), "event": "on_thread"}
+        else:
+            return {"on": False, "locked": False, "friction_n_m": 0.0, "event": None}
+    u = float(u_rad)
+    if u >= top + past_end_rad:
+        state.update(on=False, clear=False)
+        return {"on": False, "locked": False, "friction_n_m": 0.0, "event": "off_thread"}
+    if state["broken"] and u > seat_rad:
+        state["away"] = True
+    if u <= seat_tol_rad:
+        state["closing_n_m"] = max(state["closing_n_m"], -float(torque_n_m))
+    if state["broken"]:
+        if u <= seat_tol_rad and state["away"]:
+            state.update(broken=False, away=False, applied_n_m=state["closing_n_m"])
+            event = "seated"
+    elif u > seat_rad or float(torque_n_m) >= retention * state["applied_n_m"] > 0.0:
+        state.update(broken=True, away=u > seat_rad, closing_n_m=0.0)
+        event = "broke_loose"
+    if not state["broken"] and u <= seat_tol_rad:
+        state["applied_n_m"] = max(state["applied_n_m"], state["closing_n_m"])
+    held = 0.0 if state["broken"] else retention * state["applied_n_m"]
+    return {"on": True, "locked": not state["broken"], "friction_n_m": max(held, run_n_m), "event": event}
+
+
 def wheeled_base(b: dict, v: float, w: float) -> dict:
     """Differential drive: wheel target velocities (deg/s, joint sign) for a
     forward speed v (m/s) and a turn rate w (rad/s, left positive).

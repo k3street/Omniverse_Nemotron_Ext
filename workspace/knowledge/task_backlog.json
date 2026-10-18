@@ -2592,8 +2592,10 @@
     "nemotron_use_ladder"
    ],
    "interaction_kind": "mechanism",
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): workspace/asset_library/pill_kit_rig.json thread.pass = True"
   },
   {
    "id": "cur:interaction:small_parts_contact",
@@ -2623,14 +2625,14 @@
    "id": "cur:planner:cap_turn",
    "kind": "planner",
    "title": "the cap turn planner",
-   "description": "a wrist-roll stage pinching the cap, regrasping between strokes; the bottle held by a fitted holder or the right hand",
-   "evidence": "no planner",
-   "priority": 223,
+   "description": "a take proving cap_turn",
+   "evidence": "aida_r5_lab_vial_open cap.pass = False",
+   "priority": 222,
    "blocks": [
     "nemotron.ladder.pill_bottle.r2",
     "nemotron.ladder.pill_bottle.r4"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
     "nemotron_use_ladder"
@@ -2653,8 +2655,10 @@
    "curriculum_sources": [
     "nemotron_use_ladder"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_vial_open"
   },
   {
    "id": "cur:interaction:tweezer_flex",
@@ -2684,10 +2688,14 @@
    "id": "cur:planner:tool_pinch",
    "kind": "planner",
    "title": "the tool pinch planner",
-   "description": "a precision-grip planner on a slim tool: the thumb against the index and middle on the arms, the squeeze closing the tips (the pinch planner on the tool's arms)",
-   "evidence": "no planner",
-   "priority": 122,
+   "description": "a take proving tool_pinch",
+   "evidence": "aida_r5_lab_pill_pack pass = False",
+   "priority": 121,
    "blocks": [
+    "homehero.interaction.tweezers_115.acquire_from_fixture",
+    "homehero.interaction.tweezers_115.operate_from_fixture",
+    "homehero.interaction.tweezers_115.prepare_and_use",
+    "homehero.interaction.tweezers_115.prepare_flat_pickup",
     "nemotron.ladder.pill_bottle.r3",
     "nemotron.ladder.tweezers.r1",
     "nemotron.ladder.tweezers.r2",
@@ -2696,20 +2704,21 @@
    "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
+    "homehero_interaction",
     "nemotron_use_ladder"
    ],
    "status": "done",
    "first_seen": "2026-10-17",
    "closed_at": "2026-10-17",
-   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_pill_pack pass = True"
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_pill_pack held = True"
   },
   {
    "id": "cur:planner:tool_tip_place",
    "kind": "planner",
    "title": "the tool tip place planner",
-   "description": "pinch_place planned for the tool's tips instead of the fingertips: the tip pair's frame from the tool's joints, the hand's squeeze as the tips' close",
-   "evidence": "no planner",
-   "priority": 324,
+   "description": "a take proving tool_tip_place",
+   "evidence": "aida_r5_lab_pill_pack pack.pass = False",
+   "priority": 323,
    "blocks": [
     "homehero.interaction.tweezers_115.operate_from_fixture",
     "homehero.interaction.tweezers_115.prepare_and_use",
@@ -2723,8 +2732,10 @@
     "homehero_interaction",
     "nemotron_use_ladder"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-18",
+   "closed_why": "met (curriculum_intake 2026-10-18): aida_r5_lab_pill_pack pack.pass = True"
   },
   {
    "id": "cur:scene:nemotron.ladder.pill_bottle.r3",
@@ -2741,8 +2752,10 @@
    "curriculum_sources": [
     "nemotron_use_ladder"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_pill_pack"
   },
   {
    "id": "cur:scene:nemotron.ladder.pill_bottle.r4",
@@ -2797,8 +2810,10 @@
    "curriculum_sources": [
     "nemotron_use_ladder"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_pill_pack"
   },
   {
    "id": "cur:scene:nemotron.ladder.tweezers.r3",
@@ -2815,8 +2830,10 @@
    "curriculum_sources": [
     "nemotron_use_ladder"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_pill_pack"
   },
   {
    "id": "cur:asset:household_mug",
@@ -3156,16 +3173,18 @@
    "curriculum_sources": [
     "homehero_interaction"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_pill_pack"
   },
   {
    "id": "cur:take:homehero.interaction.tweezers_115.operate_from_fixture",
    "kind": "take",
    "title": "a passing take: Articulated 115 mm tweezers: operate from fixture",
-   "description": "run and pass a take for 'Articulated 115 mm tweezers: operate from fixture'",
-   "evidence": "no take",
-   "priority": 32356,
+   "description": "run and pass a take for 'Articulated 115 mm tweezers: operate from fixture' in aida_r5_lab_pill_pack",
+   "evidence": "aida_r5_lab_pill_pack pack.pass = False",
+   "priority": 32355,
    "blocks": [
     "homehero.interaction.tweezers_115.operate_from_fixture"
    ],
@@ -3174,8 +3193,10 @@
    "curriculum_sources": [
     "homehero_interaction"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-18",
+   "closed_why": "met (curriculum_intake 2026-10-18): aida_r5_lab_pill_pack pack.pass = True"
   },
   {
    "id": "cur:binding:homehero.interaction.tweezers_115.prepare_and_use:planner",

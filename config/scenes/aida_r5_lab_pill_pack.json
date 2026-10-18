@@ -1,7 +1,7 @@
 {
  "extends": "aida_r5_lab_bench_transfer.json",
  "name": "aida_r5_lab_pill_pack",
- "purpose": "the user's task (2026-10-17): a pill vial packed one tablet at a time with tweezers. Stage 1 here: the R5 takes the tweezers out of their cradle in a precision pinch across the arms and lifts them (tweezers rung 1); the tablets and the open vial wait beside them for the tool-tip stages",
+ "purpose": "the user's task (2026-10-17): a pill vial packed one tablet at a time with tweezers. The R5 takes the tweezers out of their cradle in a tripod on their cushion grips (stage 1), then - planned live from the tweezers as they sit in its hand - closes their tips on a tablet, lifts it, carries it over the open vial and lets it drop in (tool_tip_place)",
  "environment": {
   "usd": "~/Omniverse_Nemotron_Ext/workspace/generated_scenes/sterile_materials_lab_v1/lab.usda",
   "prim": "/Root",
@@ -107,6 +107,65 @@
      }
     ],
     "why": "two posts holding the tweezers on edge 45 mm up (the open fingers reach below the pinch: at 25 mm they met the bench), one at the root, one at the tips' end - the 10 cm between them free for the hand (a post 28 mm from the grip met the open fingers); walls either side of each post keep them standing"
+   },
+   {
+    "name": "TabletStands",
+    "position": [
+     4.7,
+     0.7,
+     0.708
+    ],
+    "color": [
+     0.86,
+     0.87,
+     0.9
+    ],
+    "physics": {
+     "static_friction": 0.6,
+     "dynamic_friction": 0.5
+    },
+    "parts": [
+     {
+      "name": "Post1",
+      "size": [
+       0.03,
+       0.03,
+       0.04
+      ],
+      "offset": [
+       0.0,
+       0.0,
+       0.02
+      ]
+     },
+     {
+      "name": "Post2",
+      "size": [
+       0.03,
+       0.03,
+       0.04
+      ],
+      "offset": [
+       0.04,
+       -0.04,
+       0.02
+      ]
+     },
+     {
+      "name": "Post3",
+      "size": [
+       0.03,
+       0.03,
+       0.04
+      ],
+      "offset": [
+       -0.04,
+       0.04,
+       0.02
+      ]
+     }
+    ],
+    "why": "each tablet on a 30 mm stand 4 cm up: with the tweezers' tips 15 cm out from the palm, a tablet flat on the bench left no grasp (the hand's outer fingers in the bench in every orientation the arm reached); 4 cm up, all six spots surveyed plan (2026-10-17)"
    }
   ]
  },
@@ -162,10 +221,11 @@
    "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/tablet/tablet.usda",
    "category": "generated",
    "xy": [
-    4.57,
-    0.84
+    4.7,
+    0.7
    ],
-   "label": "a tablet"
+   "label": "a tablet on its stand",
+   "on": "TabletStands/Post1"
   },
   {
    "name": "Tablet2",
@@ -173,10 +233,11 @@
    "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/tablet/tablet.usda",
    "category": "generated",
    "xy": [
-    4.6,
-    0.84
+    4.74,
+    0.66
    ],
-   "label": "a tablet"
+   "label": "a tablet on its stand",
+   "on": "TabletStands/Post2"
   },
   {
    "name": "Tablet3",
@@ -184,10 +245,11 @@
    "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/tablet/tablet.usda",
    "category": "generated",
    "xy": [
-    4.585,
-    0.87
+    4.66,
+    0.74
    ],
-   "label": "a tablet"
+   "label": "a tablet on its stand",
+   "on": "TabletStands/Post3"
   }
  ],
  "destination": null,
@@ -240,7 +302,39 @@
     "middle",
     "thumb"
    ],
-   "why": "a hold, not a squeeze: 14.6 g of tweezers needs ~0.1 N a pad with friction; at 0.4-1.2 N an arm moves < 0.3 mm (its spring 1440 N/m at 55 mm), the tips stay open for the tablet stages"
-  }
+   "why": "a hold, not a squeeze: 14.6 g of tweezers needs ~0.1 N a pad with friction; at 0.4-1.2 N an arm moves < 0.3 mm (its spring 1440 N/m at 55 mm), the tips stay open for the tablet stages",
+   "squeeze": {
+    "min_n": 3.5,
+    "max_n": 5.0,
+    "digits": [
+     "thumb"
+    ],
+    "tighten": 0.003,
+    "why": "the thumb pressed to 3.5-5 N against index and middle (held where they are): at the cushion grips (55 mm out) ~3.2 N closes the tips 4 mm a side onto an 8 mm tablet (their 16 mm rest gap), the rest presses it (~0.5 N a tip; it weighs 0.2 g). One digit banded: three banded against each other - the thumb carrying both fingers' share - chase each other"
+   }
+  },
+  "then": [
+   "tool_tip_place:approach",
+   "tool_tip_place:correct"
+  ],
+  "then_why": "the tool's tips take the tablet, planned live from where the tweezers sit in the hand: first to over the tablet, then - looked at again there - the hand only moved so the tips' midpoint is over it, straight down, closed, carried and let go (tool_tip_then.py --correct). Planned once at the hold, the tweezers shifted in the light grip on the way and the tips closed on nothing; re-planned in full from over the tablet, the hand re-staged and the tips met the round tablet 2 mm off its centre line and squirted it out"
+ },
+ "payload": {
+  "object": "Tablet1",
+  "into": "Vial",
+  "why": "the tablet the tips take, and the vial it is packed into (the replay's PACK verdict: inside its cavity, carried, let go)"
+ },
+ "tool_tip_place": {
+  "lift_m": 0.11,
+  "pregrasp_height_m": 0.04,
+  "close_s": 1.2,
+  "release_s": 1.5,
+  "retreat_m": 0.05,
+  "hold_s": 1.0,
+  "drop_above_m": 0.015,
+  "squeeze_rad": 0.08,
+  "reach": "cumotion",
+  "cumotion_seeds": 8,
+  "why": "the tablet lifted 11 cm (clear of the vial's 91 mm rim), carried over the vial's mouth, lowered to 15 mm above it and let go; the squeeze itself is the force band's (grasp_replay.grip.squeeze)"
  }
 }

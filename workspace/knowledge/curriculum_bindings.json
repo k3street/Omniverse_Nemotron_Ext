@@ -114,17 +114,28 @@
    "what": "a small tool (tweezers) held in a precision grip between thumb and fingers, its arms squeezed by the hand",
    "proven_by": {
     "scene": "aida_r5_lab_pill_pack",
-    "record": "pass"
+    "record": "held",
+    "why": "the pickup's own record (held after the lift): the take's 'pass' is the tablet stage's too"
    },
    "how": "tool_pick (plan_er_grasp._tool_pick_task): a tripod pinch_lift - thumb against index and middle on the tweezers' cushion grips, the closing axis held to their opening axis, the finger row along them, the middle at its own flexion level with the index on the face; the cradle and the tool's own cells obstacles for the reach"
   },
   "tool_tip_place": {
+   "module": "tool_tip_then",
    "what": "a held tool's tips brought onto a small object, closed on it, carried and opened over a place",
-   "needs": "pinch_place planned for the tool's tips instead of the fingertips: the tip pair's frame from the tool's joints, the hand's squeeze as the tips' close"
+   "how": "tool_tip_then.py, a then-stage planned live: the tips (1 mm from the arms' ends) from the tool's live poses, the hand as it is (the digits where they stopped on the tool), pinch_place_planner's tool mode - the thumb alone squeezes; the part on a stand clear of the bench",
+   "proven_by": {
+    "scene": "aida_r5_lab_pill_pack",
+    "record": "pack.pass"
+   }
   },
   "cap_turn": {
+   "module": "pinch_place_planner",
    "what": "the hand turns a cap on a bottle the other hand (or a holder) keeps still, and lifts it off",
-   "needs": "a wrist-roll stage pinching the cap, regrasping between strokes; the bottle held by a fitted holder or the right hand"
+   "how": "cap_turn (plan_er_grasp._cap_turn_task): a tripod across the cap's skirt, turned about the bottle's axis in strokes (80 deg: the wrist's roll), rising with the thread a pitch a turn; between strokes the hand lets go, rises clear, turns back and grips again; opening, the cap is lifted off at the end (behaviors.cap_thread lets it go). The bottle in a bench clamp (build_er_scene clamp_body).",
+   "proven_by": {
+    "scene": "aida_r5_lab_vial_open",
+    "record": "cap.pass"
+   }
   },
   "grasp_preparation": {
    "what": "a tool repositioned before its working grasp (slid, pivoted on its support, placed in a fixture, regrasped) when the grasp a task needs is not accessible",
@@ -489,9 +500,10 @@
    "planners": [
     "cap_turn"
    ],
-   "scene": null,
+   "scene": "aida_r5_lab_vial_open",
    "asset": "pill bottle",
-   "source": "nemotron_user_task"
+   "source": "nemotron_user_task",
+   "record": "cap.pass"
   },
   "nemotron.ladder.pill_bottle.r3": {
    "interactions": [
@@ -502,9 +514,10 @@
     "tool_pinch",
     "tool_tip_place"
    ],
-   "scene": null,
+   "scene": "aida_r5_lab_pill_pack",
    "asset": "pill bottle",
-   "source": "nemotron_user_task"
+   "source": "nemotron_user_task",
+   "record": "pack.pass"
   },
   "nemotron.ladder.pill_bottle.r4": {
    "interactions": [
@@ -539,9 +552,10 @@
    "planners": [
     "tool_pinch"
    ],
-   "scene": null,
+   "scene": "aida_r5_lab_pill_pack",
    "asset": "tweezers",
-   "source": "nemotron_user_task"
+   "source": "nemotron_user_task",
+   "record": "pack.pass"
   },
   "nemotron.ladder.tweezers.r3": {
    "interactions": [
@@ -552,9 +566,10 @@
     "tool_pinch",
     "tool_tip_place"
    ],
-   "scene": null,
+   "scene": "aida_r5_lab_pill_pack",
    "asset": "tweezers",
-   "source": "nemotron_user_task"
+   "source": "nemotron_user_task",
+   "record": "pack.pass"
   },
   "homehero.interaction.tweezers_115.acquire_from_fixture": {
    "interactions": [
@@ -578,8 +593,9 @@
     "tool_pinch",
     "tool_tip_place"
    ],
-   "scene": null,
-   "why": "the tablet stage of the pill-packing task (pill_bottle rung 3): tip gap, tip force and the tablet moved are its evidence"
+   "scene": "aida_r5_lab_pill_pack",
+   "why": "the tablet stage of the pill-packing task (pill_bottle rung 3): tip gap, tip force and the tablet moved are its evidence",
+   "record": "pack.pass"
   },
   "homehero.interaction.tweezers_115.prepare_flat_pickup": {
    "interactions": [

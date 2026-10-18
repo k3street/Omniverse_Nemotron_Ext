@@ -22,6 +22,9 @@ def test_the_tweezers_spring_is_the_arms_cantilever():
     assert abs(s["k_theta_n_m_per_rad"] - s["k_tip_n_per_m"] * L ** 2) < 1e-9
     assert abs(s["k_theta_n_m_per_deg"] - s["k_theta_n_m_per_rad"] * math.pi / 180) < 1e-12
     assert 1.0 < s["tip_force_closed_n"] < 5.0                 # a squeeze a hand gives, not a vice's
+    # one hinge carries both arms: the angle between them closes under both beams in series, over both rest angles
+    assert abs(s["k_rel_n_m_per_deg"] - s["k_theta_n_m_per_deg"] / 2) < 1e-15
+    assert abs(s["rel_rest_deg"] - 2 * s["rest_angle_deg"]) < 1e-12
 
 
 def test_the_tweezers_weigh_what_the_listings_say():

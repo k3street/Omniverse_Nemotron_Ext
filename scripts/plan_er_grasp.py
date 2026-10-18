@@ -529,6 +529,33 @@ def _tool_pick_task(stage, tool, xc, gp, drop) -> dict:
                                   "reach", "cumotion_seeds", "staging_back_m", "rrt_timeout_s") if k in gp}}
 
 
+def _cap_turn_task(stage, obj, xc, gp, drop) -> dict:
+    """A screw cap (a generated bottle's, on its thread: make_pill_kit.cap_thread_pair) turned by the hand in strokes:
+    a tripod across the cap's skirt at its mid-height, the hand turning about the bottle's axis. turn_deg positive
+    opens (counter-clockwise from above), by default the whole thread and a stroke's margin past it - the law lets
+    the cap go at the thread's end - then lifts it off; negative screws it on."""
+    import numpy as np
+    from pxr import Gf, Usd
+    root = next((q for q in Usd.PrimRange(obj) if q.HasCustomDataKey("er:generated")), None)
+    meta = json.loads(root.GetCustomDataByKey("er:generated")) if root else {}
+    th = meta.get("thread")
+    if not th or not meta.get("cap"):
+        raise SystemExit("cap_turn: the target is not a generated bottle with a threaded cap (er:generated thread)")
+    cap = root.GetChild(meta["cap"])
+    M = xc.GetLocalToWorldTransform(cap)
+    skirt = float(meta["cap_h_m"]) - 0.002                                    # the cap's top 2 mm over its skirt
+    grip = np.asarray(M.Transform(Gf.Vec3d(0.0, 0.0, skirt / 2.0)), float) - drop
+    turn = float(gp.get("turn_deg", 360.0 * float(th["turns"]) + float(gp.get("past_thread_deg", 20.0))))
+    return {"kind": "cap_turn", "grip_point": grip.tolist(), "grip_width_m": float(meta["cap_d_m"]),
+            "object_base_z": float(grip[2]) - skirt / 2.0, "object_height_m": skirt, "place_point": grip.tolist(),
+            "tripod": bool(gp.get("tripod", True)), "turn_deg": turn, "stroke_deg": float(gp.get("stroke_deg", 80.0)),
+            "pitch_m": float(th["pitch_m"]),
+            "cap": {"asset_id": meta.get("asset_id"), "turns": float(th["turns"]), "seat_z_m": float(th["seat_z_m"])},
+            **{k: gp[k] for k in ("lift_m", "close_s", "hold_s", "release_s", "stroke_hold_s", "regrip_rise_m", "retreat_m",
+                                  "pregrasp_height_m", "open_clearance_m", "curl_rad", "reach", "cumotion_seeds", "staging_back_m",
+                                  "rrt_timeout_s") if k in gp}}
+
+
 def fixture_obstacles(stage, bc) -> list[dict]:
     """The scene's own fixtures (/World/Fixtures: a cradle, a rail, a board), each collider its own box: a plan
     that passes through one collides in PhysX (the tweezers' cradle was not in the plan, 2026-10-17)."""
@@ -586,6 +613,16 @@ def slice_width(points, axis_xy, z: float) -> float:
         raise SystemExit(f"slice_width: nothing of the object at height {z:.4f}")
     C = np.asarray(cut)
     return float(2 * np.linalg.norm(C[:, :2] - np.asarray(axis_xy, float), axis=1).max())
+
+
+def hold_with_live_hand(row, hand_q) -> list:
+    """A then-stage's start with the hand as the physics left it: the plan row's arm, its hand columns (index,
+    middle, ring, pinky flexion, thumb flexion, thumb rotation) the digits' live positions. A tool held in the hand
+    stops the digits short of the close command; planned from the command (1.74 rad: a fist), the checker found the
+    index in the thumb and the palm in 40 % of the tweezers' tip stage's orientations (2026-10-17)."""
+    out = [float(v) for v in row]
+    out[8:14] = [float(v) for v in hand_q][:6]
+    return out
 
 
 def then_request(base: dict, hold_row, task: dict, out_npz) -> dict:
@@ -881,6 +918,8 @@ def main() -> int:
             m_ = np.asarray(members)
             obstacles.append(dict(id=f"held:{k_[0]}_{k_[1]}_{k_[2]}", min=(m_.min(0) - 0.003).tolist(), max=(m_.max(0) + 0.003).tolist()))
         task["held_obstacle_boxes"] = len(cells)
+    if gp.get("task") == "cap_turn":
+        task = _cap_turn_task(stage, target_obj, xc, gp, DROP)
     if gp.get("task") == "tool_grip":
         task = _tool_grip_task(stage, target_obj, xc, d, gp, DROP)
         # the index's strength: a finger's stall torque at the hand's collision

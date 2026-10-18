@@ -133,6 +133,49 @@ def pinch_configuration(g, width_m, curl=1.5, clearance_m=0.02, tripod=False):
             "open_midpoint_palm": (pi + pt) / 2}
 
 
+def tool_tip_pinch(g, start, tp):
+    """A held tool's tips as the pinch (tool_tip_then.py): the tips' midpoint and opening axis carried into the palm's frame
+    at the hand's measured pose (the start), the hold the hand has as 'open' (the tool kept, its tips at rest) and that hold
+    squeezed by squeeze_rad on the gripping digits as 'closed' (the replay's force band does the squeezing); the tool's
+    points in the palm's frame, for its own clearance."""
+    start = np.asarray(start, float)
+    g.forward(start)
+    p0, R0 = g.pose()
+    tips = np.asarray(tp["tips_world"], float)
+    mid_w = tips.mean(axis=0)
+    ax_w = tips[1] - tips[0]
+    gap = float(np.linalg.norm(ax_w))
+    ax_w = ax_w / gap
+    ho = start[8:14].copy()
+    hc = ho.copy()
+    sq = float(tp.get("squeeze_rad", 0.08))
+    for k in tp.get("squeeze_digits", [0, 1, 4]):
+        hc[k] = min(1.74, hc[k] + sq)
+    pts = np.asarray(tp.get("points_world") or [], float).reshape(-1, 3)
+    return {"closed": hc, "open": ho, "midpoint_palm": R0.T @ (mid_w - p0), "axis_palm": R0.T @ ax_w, "opposition": None,
+            "closing_palm": None, "tool": True, "tip_gap_m": round(gap, 5),
+            "points_palm": ((pts - p0) @ R0) if len(pts) else None}
+
+
+def tool_clear(g, q, pinch, obstacles, spare=None, margin=0.001) -> list[str]:
+    """The held tool's points at configuration q against the obstacle boxes (the robot's own clearance is the checker's):
+    the boxes any point is inside, but those `spare` names (the object the tips take)."""
+    P = pinch.get("points_palm")
+    if P is None or not len(P):
+        return []
+    g.forward(np.asarray(q, float))
+    p, R = g.pose()
+    W = p + np.asarray(P) @ R.T
+    hit = []
+    for o in obstacles:
+        if spare and any(o["id"].startswith(sp) for sp in spare):
+            continue
+        lo, hi = np.asarray(o["min"]) - margin, np.asarray(o["max"]) + margin
+        if np.any(np.all((W >= lo) & (W <= hi), axis=1)):
+            hit.append(o["id"])
+    return hit
+
+
 def _rotation_taking(a_from, b_from, a_to, b_to):
     def frame(a, b):
         a = a / np.linalg.norm(a)
@@ -149,8 +192,12 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     step = np.asarray(action_step, float)
     grip_point = np.asarray(task["grip_point"], float)
     place_point = np.asarray(task["place_point"], float)      # where the grip point is to be, set down
-    pinch = pinch_configuration(g, float(task["grip_width_m"]), float(task.get("curl_rad", 1.5)),
-                                float(task.get("open_clearance_m", 0.02)), tripod=bool(task.get("tripod")))
+    tp = task.get("tool_pinch")
+    if tp:
+        pinch = tool_tip_pinch(g, start, tp)
+    else:
+        pinch = pinch_configuration(g, float(task["grip_width_m"]), float(task.get("curl_rad", 1.5)),
+                                    float(task.get("open_clearance_m", 0.02)), tripod=bool(task.get("tripod")))
     hc, ho = pinch["closed"], pinch["open"]
     m, a = pinch["midpoint_palm"], pinch["axis_palm"]
     b = np.cross(a, [0.0, 0.0, 1.0])
@@ -179,62 +226,85 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     row = np.asarray(task["finger_row_axis"], float) if task.get("finger_row_axis") else None
     cos_row = np.cos(np.radians(float(task.get("finger_row_tolerance_deg", 25.0))))
     why["row_off_tool"] = 0
-    for psi in np.radians(np.arange(0, 360, 15)):             # index-to-thumb either way round: different grasps
-        a_w = np.array([np.cos(psi), np.sin(psi), 0.0])
-        if normal is not None and abs(float(a_w @ normal)) < cos_tol:
-            why["axis_off_normal"] += 1
+
+    def _orientations():
+        if task.get("keep_orientation"):
+            # a correction: the hand as it is turned now, only moved - re-chosen from the sweep, the hand swung to
+            # another grasp on the way and the tool shifted in it again (2026-10-18). If that turn will not do (the
+            # tool, slipped shallower, put its end into the tablet's stand), the least roll about the pinch axis that
+            # does: the axis stays where it is
+            g.forward(np.r_[seed[:8], ho])
+            R0 = g.pose()[1]
+            a0 = R0 @ a
+            for d in (0, 5, -5, 10, -10, 15, -15, 20, -20):
+                yield 0.0, float(np.radians(d)), Rotation.from_rotvec(a0 * np.radians(d)).as_matrix() @ R0
+            return
+        for psi in np.radians(np.arange(0, 360, 15)):         # index-to-thumb either way round: different grasps
+            a_w = np.array([np.cos(psi), np.sin(psi), 0.0])
+            if normal is not None and abs(float(a_w @ normal)) < cos_tol:
+                why["axis_off_normal"] += 1
+                continue
+            u, v = up, np.cross(a_w, up)
+            for phi in np.radians(np.arange(0, 360, 15)):
+                R = _rotation_taking(a, b, a_w, np.cos(phi) * u + np.sin(phi) * v)
+                if row is not None and abs(float(R[:, 0] @ row)) < cos_row:
+                    why["row_off_tool"] += 1
+                    continue
+                yield psi, phi, R
+    for psi, phi, R in _orientations():
+        p = grip_point - R @ m
+        # the palm above the grip for a piece on a table (not beside or
+        # under it); a hanging sheet is pinched with the hand level, the
+        # palm beside the corner, so a cloth task allows any palm height
+        # from the hem up
+        if p[2] - grip_point[2] < (-0.02 if task.get("kind") == "pinch_lift" else 0.03):
             continue
-        u, v = up, np.cross(a_w, up)
-        for phi in np.radians(np.arange(0, 360, 15)):
-            R = _rotation_taking(a, b, a_w, np.cos(phi) * u + np.sin(phi) * v)
-            if row is not None and abs(float(R[:, 0] @ row)) < cos_row:
-                why["row_off_tool"] += 1
+        tried += 1
+        for sd in seeds:
+            q, fit = g.solve(np.r_[sd, ho], p, R)
+            if fit["passed"]:
+                break
+        if not fit["passed"]:
+            why["ik"] += 1
+            examples.setdefault("ik", {"position_error_m": round(fit["position_error_m"], 4), "palm": p.round(3).tolist()})
+            continue
+        q_open, q_closed = np.r_[q[:8], ho], np.r_[q[:8], hc]
+        bad = None
+        if not checker(q_open):
+            bad = ("open_collides", q_open)
+        elif not checker(q_closed):
+            bad = ("closed_collides", q_closed)
+        if bad:
+            why[bad[0]] += 1
+            pairs = checker(bad[1], details=True)[:3]
+            for a_, b_ in pairs:
+                key = f"{a_.split('/')[-2]} x {b_.split('/')[-2] if '/' in b_ else b_}"
+                examples.setdefault(bad[0], {}).setdefault(key, 0)
+                examples[bad[0]][key] += 1
+            continue
+        qp, fitp = g.solve(np.r_[q[:8], ho], p + pre_h * up, R)
+        if not fitp["passed"]:
+            why["pregrasp_ik"] += 1
+            continue
+        if not checker(qp):
+            why["pregrasp_collides"] += 1
+            continue
+        if tp:
+            # the held tool clear of the scene at the grasp (its tips meet the object: spared) and above it
+            hits = tool_clear(g, q_open, pinch, req["obstacles"], spare=tp.get("spare_obstacles"))
+            if hits:
+                why["tool_collides"] = why.get("tool_collides", 0) + 1
+                examples.setdefault("tool_collides", {}).update({h: examples.get("tool_collides", {}).get(h, 0) + 1 for h in hits[:3]})
                 continue
-            p = grip_point - R @ m
-            # the palm above the grip for a piece on a table (not beside or
-            # under it); a hanging sheet is pinched with the hand level, the
-            # palm beside the corner, so a cloth task allows any palm height
-            # from the hem up
-            if p[2] - grip_point[2] < (-0.02 if task.get("kind") == "pinch_lift" else 0.03):
-                continue
-            tried += 1
-            for sd in seeds:
-                q, fit = g.solve(np.r_[sd, ho], p, R)
-                if fit["passed"]:
-                    break
-            if not fit["passed"]:
-                why["ik"] += 1
-                examples.setdefault("ik", {"position_error_m": round(fit["position_error_m"], 4), "palm": p.round(3).tolist()})
-                continue
-            q_open, q_closed = np.r_[q[:8], ho], np.r_[q[:8], hc]
-            bad = None
-            if not checker(q_open):
-                bad = ("open_collides", q_open)
-            elif not checker(q_closed):
-                bad = ("closed_collides", q_closed)
-            if bad:
-                why[bad[0]] += 1
-                pairs = checker(bad[1], details=True)[:3]
-                for a_, b_ in pairs:
-                    key = f"{a_.split('/')[-2]} x {b_.split('/')[-2] if '/' in b_ else b_}"
-                    examples.setdefault(bad[0], {}).setdefault(key, 0)
-                    examples[bad[0]][key] += 1
-                continue
-            qp, fitp = g.solve(np.r_[q[:8], ho], p + pre_h * up, R)
-            if not fitp["passed"]:
-                why["pregrasp_ik"] += 1
-                continue
-            if not checker(qp):
-                why["pregrasp_collides"] += 1
-                continue
-            # how much of each digit's closing motion is vertical in the world:
-            # a pinch that closes level only squeezes; one whose tips rise as
-            # they close levers the piece (measured: a 14 g pawn rolled out at
-            # 61 deg as the digits crept closed during the carry)
-            rise = sum(abs((R @ pinch["closing_palm"][d])[2]) / np.linalg.norm(pinch["closing_palm"][d]) for d in ("index", "thumb")) / 2
-            options.append({"cost": float(np.linalg.norm(q[:8] - seed[:8])), "q": q_open, "q_pre": qp, "p": p, "R": R,
-                            "rise": round(float(rise), 3),
-                            "heading_deg": round(float(np.degrees(psi)), 1), "roll_deg": round(float(np.degrees(phi)), 1)})
+        # how much of each digit's closing motion is vertical in the world:
+        # a pinch that closes level only squeezes; one whose tips rise as
+        # they close levers the piece (measured: a 14 g pawn rolled out at
+        # 61 deg as the digits crept closed during the carry)
+        rise = 0.0 if tp else \
+            sum(abs((R @ pinch["closing_palm"][d])[2]) / np.linalg.norm(pinch["closing_palm"][d]) for d in ("index", "thumb")) / 2
+        options.append({"cost": float(np.linalg.norm(q[:8] - seed[:8])), "q": q_open, "q_pre": qp, "p": p, "R": R,
+                        "rise": round(float(rise), 3),
+                        "heading_deg": round(float(np.degrees(psi)), 1), "roll_deg": round(float(np.degrees(phi)), 1)})
     if not options:
         return {"passed": False, "reason": f"no reachable, collision-free pinch over {tried} hand orientations: {why}",
                 "pinch": _jsonable(pinch), "rejections": why, "examples": examples}
@@ -248,13 +318,30 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     feasible = []
     if task.get("kind") == "pinch_lift":
         feasible = [{**o, "place_yaw": 0.0} for o in options]       # no place: every grasp is a candidate
+    elif task.get("kind") == "cap_turn":
+        # a cap turned in strokes: each grasp must also reach its stroke's end - the hand turned about the cap's axis
+        # (the vertical through the grip) by the stroke, risen with the thread - closed and clear
+        a = _stroke_rad(task)
+        rise = float(task.get("pitch_m", 0.0)) * a / (2 * np.pi)
+        for o in options:
+            Rz = Rotation.from_euler("z", a).as_matrix()
+            R2 = Rz @ o["R"]
+            p2 = grip_point + np.array([0.0, 0.0, rise]) - R2 @ m
+            q2, fit2 = g.solve(np.r_[o["q"][:8], hc], p2, R2)
+            if fit2["passed"] and checker(np.r_[q2[:8], hc]):
+                feasible.append({**o, "place_yaw": 0.0})
+        why["stroke_unreachable"] = len(options) - len(feasible)
+        if not feasible:
+            return {"passed": False, "reason": f"none of {len(options)} cap grasps reaches its stroke's end: {why}",
+                    "pinch": _jsonable(pinch), "rejections": why, "examples": examples}
     for o in ([] if feasible else options):
         for yw in yaws:
             Rz = Rotation.from_euler("z", yw).as_matrix()
             R2 = Rz @ o["R"]
             p2 = place_point + np.array([0, 0, lift]) - R2 @ m
             q2, fit2 = g.solve(np.r_[o["q"][:8], hc], p2, R2)
-            if fit2["passed"] and checker(np.r_[q2[:8], hc]):
+            if fit2["passed"] and checker(np.r_[q2[:8], hc]) and not (tp and tool_clear(g, np.r_[q2[:8], hc], pinch, req["obstacles"],
+                                                                                         spare=tp.get("spare_obstacles"))):
                 feasible.append({**o, "place_yaw": float(yw)})
                 break
     why["place_unreachable"] = len(options) - len(feasible)
@@ -267,7 +354,7 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     for choice in options[:8]:                                 # the cheapest whose whole path checks out
         try:
             result = _path(choice, req, g, checker, seed, hc, ho, grip_point, place_point, step, lower, upper,
-                           slide_bounds, joint_path, screen, m, axis_palm=pinch["axis_palm"])
+                           slide_bounds, joint_path, screen, m, axis_palm=pinch["axis_palm"], tool_points=pinch.get("points_palm"))
         except RuntimeError as e:                              # HomeHero's RRT out of budget
             result = {"passed": False, "reason": f"reach: {e}"}
         from checker_boxes import restore_boxes
@@ -279,6 +366,22 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
             return result
         last = result
     return {**last, "pinch": _jsonable(pinch), "options": len(options), "tried": tried, "rejections": why}
+
+
+def _stroke_rad(task) -> float:
+    """A cap_turn's stroke (rad, signed as the turn: positive opens, counter-clockwise from above)."""
+    return float(np.radians(abs(float(task.get("stroke_deg", 80.0)))) * np.sign(float(task["turn_deg"])))
+
+
+def cap_strokes(turn_deg: float, stroke_deg: float) -> list[float]:
+    """The strokes (deg, signed) that make up a cap's turn: whole strokes, the last one the remainder."""
+    total, s = float(turn_deg), abs(float(stroke_deg))
+    out, done = [], 0.0
+    while abs(total) - abs(done) > 1e-9:
+        a = min(s, abs(total) - abs(done))
+        out.append(float(np.copysign(a, total)))
+        done += out[-1]
+    return out
 
 
 def closure_contact(g, checker, cloud, q_arm, ho, s_max=1.74, step=0.01, tripod=False):
@@ -320,11 +423,12 @@ def closure_contact(g, checker, cloud, q_arm, ho, s_max=1.74, step=0.01, tripod=
 
 
 def _jsonable(d):
+    d = {k: v for k, v in d.items() if k != "points_palm"}      # a tool's point cloud: not for the record
     return {k: (v.round(4).tolist() if isinstance(v, np.ndarray) else v) for k, v in d.items()}
 
 
 def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step, lower, upper, slide_bounds,
-          joint_path, screen, m, axis_palm=None):
+          joint_path, screen, m, axis_palm=None, tool_points=None):
     task = req["task"]
     path, stages = [np.asarray(start, float)], ["start"]
 
@@ -452,7 +556,7 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     else:
         clearances = {}
     staging_tried = []                                          # the record: why each direction was passed over
-    for d_name, d_ in dirs:
+    for d_name, d_ in ([] if task.get("direct") else dirs):
         for back in (float(task.get("staging_back_m", 0.10)), 0.07, 0.13):
             p_st = p_pre + d_ * back
             q_st, f_st = g.solve(goal, p_st, R_pre)
@@ -466,7 +570,13 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
         if staged:
             break
     legs = None
-    if task.get("reach") == "cumotion":
+    if task.get("direct"):
+        # a correction stage: straight from where the hand is to over the piece - no reach, no staging
+        legs, rrt = [], {"algorithm": "direct: straight from where the hand is (a correction)"}
+        err = straight(p_pre, R_pre, "approach", ho)
+        if err:
+            return {"passed": False, "reason": "direct approach: " + err}
+    elif task.get("reach") == "cumotion":
         # NVIDIA cuMotion (Isaac Sim 6's planner, GPU graph search) for the
         # free-space reach: candidates in tens of milliseconds, each screened
         # here with HomeHero's mesh checker; the RRT below is the fallback
@@ -501,6 +611,12 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
         err = straight(staged[1], staged[2], "approach", ho)
         if err:
             return {"passed": False, "reason": err}
+    if task.get("stop_after") == "approach":
+        # a look before the close: the path ends over the piece, and the next stage is planned from where the hand
+        # and what it holds are THEN (a held tool shifts in a light grip on the way: planned at the hold, the
+        # tweezers' tips met the tablet's place to 0.4 mm and closed on nothing, 2026-10-18)
+        hold(0.3, "approach")
+        return _finish(path, stages, step, lower, upper, checker, hc, screen, rrt, 0.0, None)
     # the grasp height, settled by the closure the hand will make: lowered
     # by 2 mm steps until index and thumb both meet the piece before they
     # meet each other (measured: at the first height the tips rose 9 mm
@@ -521,6 +637,11 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
         label = "lowered_m"
         moves = [np.array([0.0, 0.0, -d]) for d in offsets]
     tried_closure = []
+    if task.get("tool_pinch"):
+        # a tool's tips close on the piece, not the digits: the tips straddle it at the grasp (their gap is the tool's)
+        offsets, moves = [], []
+        closure = {"tool_tips": True, "ok": True}
+        p_grasp = p_grasp0
     for d, mv in zip(offsets, moves):
         p_grasp = p_grasp0 + mv
         q_g, fit = g.solve(np.r_[path[-1][:8], ho], p_grasp, choice["R"])
@@ -534,16 +655,84 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
             break
     if closure is None or not closure["ok"]:
         return {"passed": False, "reason": f"no grasp {'offset' if task.get('cloth_normal') else 'height'} where the pinch closes on the piece: {tried_closure[-6:]}"}
+    if task.get("tool_pinch"):
+        # the tool's descent screened too: its points clear of the scene down the line (the piece spared)
+        q_g, fit = g.solve(np.r_[path[-1][:8], ho], p_grasp, choice["R"])
+        hits = tool_clear(g, q_g, {"points_palm": tool_points}, req["obstacles"],
+                          spare=task["tool_pinch"].get("spare_obstacles")) if tool_points is not None else []
+        if hits:
+            return {"passed": False, "reason": f"the tool meets {hits[:3]} at the grasp"}
     err = straight(p_grasp, choice["R"], "descend", ho)
     if err:
         return {"passed": False, "reason": err}
-    # close: the grip command, index and thumb flexor driven closed (and a tripod's middle); held
+    # close: the grip command, index and thumb flexor driven closed (and a tripod's middle); held - or a held tool
+    # squeezed (its tips close on the piece; the replay's force band sets how hard)
     grip = path[-1].copy()
-    grip[8], grip[12] = 1.74, 1.74
-    if task.get("tripod"):
-        grip[9] = 1.74
+    if task.get("tool_pinch"):
+        grip[8:14] = hc
+    else:
+        grip[8], grip[12] = 1.74, 1.74
+        if task.get("tripod"):
+            grip[9] = 1.74
     walk(grip, "close", hand_free=True)
     hold(float(task.get("close_s", 1.0)), "close")
+    if task.get("kind") == "cap_turn":
+        # the cap turned in strokes: the closed hand turns about the cap's axis (the vertical through the grip), rising
+        # with the thread a pitch a turn; between strokes it lets go, rises clear, turns back and grips again at the
+        # height the stroke left the cap. Opening (turn_deg > 0), the cap - off its thread - is lifted away at the end
+        pitch = float(task.get("pitch_m", 0.0))
+        clear = float(task.get("regrip_rise_m", 0.012))
+        up = np.array([0.0, 0.0, 1.0])
+        strokes = cap_strokes(float(task["turn_deg"]), float(task.get("stroke_deg", 80.0)))
+        for k, a_deg in enumerate(strokes):
+            a = float(np.radians(a_deg))
+            g.forward(np.r_[path[-1][:8], hc])
+            p_now, R_now = g.pose()
+            err = straight(p_now + up * (pitch * a / (2 * np.pi)), R_now, "turn", hc, yaw=a, pivot=m)
+            if err:
+                return {"passed": False, "reason": f"stroke {k + 1}/{len(strokes)}: {err}"}
+            hold(float(task.get("stroke_hold_s", 0.2)), "turn")
+            if k == len(strokes) - 1:
+                break
+            rel = path[-1].copy()
+            rel[8], rel[9], rel[12] = ho[0], ho[1], ho[4]
+            walk(rel, "release", hand_free=True)
+            hold(float(task.get("release_s", 0.5)), "release")
+            g.forward(np.r_[path[-1][:8], ho])
+            p_now, R_now = g.pose()
+            for target, yaw in ((p_now + up * clear, 0.0), (p_now + up * clear, -a), (None, 0.0)):
+                if target is None:
+                    g.forward(np.r_[path[-1][:8], ho])
+                    p_back, _ = g.pose()
+                    target = p_back - up * clear
+                g.forward(np.r_[path[-1][:8], ho])
+                _, R_cur = g.pose()
+                err = straight(target, R_cur, "regrip", ho, yaw=yaw, pivot=m)
+                if err:
+                    return {"passed": False, "reason": f"regrip after stroke {k + 1}: {err}"}
+            grip = path[-1].copy()
+            grip[8], grip[9], grip[12] = 1.74, 1.74, 1.74
+            walk(grip, "close", hand_free=True)
+            hold(float(task.get("close_s", 1.0)), "close")
+        if float(task["turn_deg"]) > 0:
+            g.forward(np.r_[path[-1][:8], hc])
+            p_now, R_now = g.pose()
+            err = straight(p_now + up * float(task.get("lift_m", 0.04)), R_now, "lift", hc)
+            if err:
+                return {"passed": False, "reason": "lift the cap off: " + err}
+            hold(float(task.get("hold_s", 1.5)), "hold")
+            return _finish(path, stages, step, lower, upper, checker, hc, screen, rrt, float(task.get("lift_m", 0.04)), closure)
+        rel = path[-1].copy()
+        rel[8], rel[9], rel[12] = ho[0], ho[1], ho[4]
+        walk(rel, "release", hand_free=True)
+        hold(float(task.get("release_s", 0.5)), "release")
+        g.forward(np.r_[path[-1][:8], ho])
+        p_now, R_now = g.pose()
+        err = straight(p_now + up * float(task.get("retreat_m", 0.05)), R_now, "retreat", ho)
+        if err:
+            return {"passed": False, "reason": "retreat: " + err}
+        hold(float(task.get("hold_s", 1.0)), "hold")
+        return _finish(path, stages, step, lower, upper, checker, hc, screen, rrt, 0.0, closure)
     lift = float(task.get("lift_m", 0.03))
     z0 = path[-1][0]
     if task.get("kind") == "pinch_lift":
@@ -596,10 +785,16 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     err = straight(target, R_now, "carry", hc, yaw=choice.get("place_yaw", 0.0), pivot=m)
     if err:
         return {"passed": False, "reason": err}
-    slide(-(lifted - float(task.get("set_down_gap_m", 0.002))), "lower")
+    if task.get("tool_pinch"):
+        # dropped, not set down: lowered only to the place's height (a vial's mouth), not to the table
+        slide(-max(0.0, float(grip_point[2]) + lifted - float(place_point[2])), "lower")
+    else:
+        slide(-(lifted - float(task.get("set_down_gap_m", 0.002))), "lower")
     hold(0.3, "lower")
     rel = path[-1].copy()
     rel[8], rel[12] = ho[0], ho[4]
+    if task.get("tripod") or task.get("tool_pinch"):
+        rel[9] = ho[1]
     walk(rel, "release", hand_free=True)
     hold(float(task.get("release_s", 0.7)), "release")
     slide(float(task.get("retreat_m", 0.06)), "retreat")

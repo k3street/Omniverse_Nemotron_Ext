@@ -214,10 +214,13 @@ if BIMANUAL and spec.get("finger_push"):
 # before the simulation starts, and its contact view after - one test for both (the
 # views were made for an appliance's bodies without the report: all four came back
 # empty, 2026-10-16)
-ALL_BODY_CONTACTS = (spec.get("grasp_plan") or {}).get("task") in ("loop_grip", "button_press", "door_open", "tool_pick") or bool(gr.get("door"))
+ALL_BODY_CONTACTS = (spec.get("grasp_plan") or {}).get("task") in ("loop_grip", "button_press", "door_open", "tool_pick", "cap_turn") \
+    or bool(gr.get("door"))
 # a grip held on several bodies of one articulated object (a scissors' two halves, a tweezers' two arms): the
 # hand's force on it is the sum over its bodies - the tweezers' root, its first body, carries none of the pinch
-GRIP_ON_ALL_BODIES = (spec.get("grasp_plan") or {}).get("task") in ("loop_grip", "tool_pick")
+# (a cap turned on a clamped bottle: the digits are on the cap, not the bottle's first body - read on the bottle alone,
+# the band saw 0 N and tightened the digits to a stall, 2026-10-18)
+GRIP_ON_ALL_BODIES = (spec.get("grasp_plan") or {}).get("task") in ("loop_grip", "tool_pick", "cap_turn")
 if HM and not CLOTH:
     # the grip force each digit puts on the target, read like HomeHero's
     # object contact sensor (a sensor on the object, filtered by hand link)
@@ -236,6 +239,14 @@ if HM and not CLOTH:
                 _q.AddAppliedSchema("PhysxContactReportAPI")
                 _q.CreateAttribute("physxContactReport:threshold", Sdf.ValueTypeNames.Float).Set(0.0)
 
+if gr.get("cap"):
+    # the cap's contacts with the hand are read for its torque (cap_hand_torque): the report on its body before the
+    # simulation starts, or its contact view finds no entries (the rig's torque test, 2026-10-17)
+    _cr = next(q for q in Usd.PrimRange(stage.GetPrimAtPath(f"/World/Objects/{gr['cap']['object']}")) if q.HasCustomDataKey("er:generated"))
+    _cq = _cr.GetChild(json.loads(_cr.GetCustomDataByKey("er:generated"))["cap"])
+    _cq.AddAppliedSchema("PhysxContactReportAPI")
+    _cq.CreateAttribute("physxContactReport:threshold", Sdf.ValueTypeNames.Float).Set(0.0)
+
 # the plan and the scene must agree on the asset's collision exceptions: a plan
 # made with them dropped drives the shoulder into the housing band of a scene
 # that still models it (10 minutes of stalled arm, found 2026-10-15 on the towel)
@@ -250,6 +261,23 @@ if _plan_json.exists() and json.loads(_plan_json.read_text()).get("collision_exc
         app.close()
         raise SystemExit(2)
 
+# a payload a held tool moves (spec payload: a tablet into a vial): its body, the tool's arms, the object it goes into
+PAYLOAD = None
+if spec.get("payload"):
+    _pay = spec["payload"]
+    _pobj = stage.GetPrimAtPath(f"/World/Objects/{_pay['object']}")
+    _pb = next(q for q in Usd.PrimRange(_pobj) if q.HasAPI(UsdPhysics.RigidBodyAPI))
+    _pb.AddAppliedSchema("PhysxContactReportAPI")
+    _pb.CreateAttribute("physxContactReport:threshold", Sdf.ValueTypeNames.Float).Set(0.0)
+    _troot = next(q for q in Usd.PrimRange(target) if q.HasCustomDataKey("er:generated"))
+    _tmeta = json.loads(_troot.GetCustomDataByKey("er:generated"))
+    _droot = next(q for q in Usd.PrimRange(stage.GetPrimAtPath(f"/World/Objects/{_pay['into']}")) if q.HasCustomDataKey("er:generated"))
+    _dmeta = json.loads(_droot.GetCustomDataByKey("er:generated"))
+    _pmeta = json.loads(next(q for q in Usd.PrimRange(_pobj) if q.HasCustomDataKey("er:generated")).GetCustomDataByKey("er:generated"))
+    PAYLOAD = {"body": _pb.GetPath().pathString, "arms": [_troot.GetChild(_tmeta["arms"]["upper"]).GetPath().pathString,
+                                                           _troot.GetChild(_tmeta["arms"]["lower"]).GetPath().pathString],
+               "L": float(_tmeta["spring"]["flex_length_m"]), "into_body": _droot.GetChild(_dmeta["body"]).GetPath().pathString,
+               "into": _dmeta, "size": _pmeta["size_m"], "z0": None, "view": None}
 ROBOT_LINKS = []                                          # the arm and hand links the collision measure watches
 if True:
     # (every take: the robot's collisions are a measure - collision_measure.py; --contacts adds the per-tick pair log)
@@ -616,6 +644,112 @@ if gr.get("door"):
                                            f"then kicked {DOOR['kw']['kick_torque_n_m']} N m to {np.degrees(DOOR['kw']['kick_end_rad']):.0f} deg"), flush=True)
 
 
+# a screw cap on its bottle's thread (grasp_replay.cap): the asset's D6 joint holds it on the bottle's axis
+# (make_pill_kit.cap_thread_pair) and behaviors.cap_thread says what it does, every physics step - its turn locked
+# while the closure holds, freed when the hand's torque breaks it loose, its height driven a pitch a turn, the
+# joint switched off at the thread's end and on again when the cap is set back on the neck. The hand's torque on
+# the cap about the bottle's axis is read from its contacts with the hand (normal and friction forces at their points).
+CAP = None
+if gr.get("cap"):
+    from behaviors import cap_thread as _cap_law
+    _cc = gr["cap"]
+    _croot = next(q for q in Usd.PrimRange(stage.GetPrimAtPath(f"/World/Objects/{_cc['object']}")) if q.HasCustomDataKey("er:generated"))
+    _cmeta = json.loads(_croot.GetCustomDataByKey("er:generated"))
+    _th = _cmeta.get("thread") or {}
+    if "joint" not in _th:
+        raise SystemExit(f"grasp_replay.cap: {_cc['object']} has no threaded cap (make_pill_kit.cap_thread_pair) - regenerate the kit, rebuild")
+
+    def _cpath(rel):
+        return _croot.GetPath().AppendPath(rel).pathString
+    _jp = stage.GetPrimAtPath(_cpath(_th["joint"]))
+    CAP = {"body": _cpath(_cmeta["body"]), "cap": _cpath(_cmeta["cap"]),
+           "enabled": _jp.GetAttribute("physics:jointEnabled"), "target": _jp.GetAttribute(_th["height_target_attr"]),
+           "lock_k": _jp.GetAttribute(_th["twist_lock"]["stiffness_attr"]), "lock_target": _jp.GetAttribute(_th["twist_lock"]["target_attr"]),
+           "lock_n_m_per_deg": float(_th["twist_lock"]["n_m_per_deg"]), "locked": True, "target_now": 0.0,
+           "th": _th, "state": {}, "u": 0.0, "yaw": None, "events": [], "last": {}, "contacts": None,
+           "torque_max": 0.0, "u_max": 0.0, "lifted_m": 0.0,
+           "kw": dict(turns=float(_th["turns"]), retention=float(_th["retention"]), run_n_m=float(_th["run_n_m"]),
+                      pitch_m=float(_th["pitch_m"]), applied_n_m=float(_cc.get("applied_n_m", 0.6))),
+           "idx": np.arange(1, dtype=np.int32)}
+    print(f"[cap] {_cc['object']}: thread {_th['turns'] * 360:.0f} deg at {_th['pitch_m'] * 1000:.2f} mm a turn; seated, applied at "
+          f"{CAP['kw']['applied_n_m']} N m - held to {CAP['kw']['retention'] * CAP['kw']['applied_n_m']:.2f} N m", flush=True)
+
+
+def cap_hand_torque(centre, axis) -> float:
+    """The hand's torque on the cap about the bottle's axis (N m, positive opens): its contact forces - normal and
+    friction - at their points, from the cap's contact view filtered to the hand's links."""
+    cv = CAP["contacts"]
+    if cv is None:
+        return 0.0
+    from collision_measure import contact_torque
+    try:
+        fn, pts, nrm, _sep, cnt, st_ = cv.get_contact_data(DT)
+        ff, fpts, fcnt, fst = cv.get_friction_data(DT)
+    except Exception:  # noqa: BLE001
+        return 0.0
+    return contact_torque(fn, pts, nrm, cnt, st_, ff, fpts, fcnt, fst, centre, axis)
+
+
+def cap_lock(on: bool):
+    """The cap's turn held where it is (the twist drive stiff, its target that angle: the closure holds) or free
+    (no stiffness: the drive's damping is the thread's drag). A twist limit freed at run time PhysX refuses."""
+    if on != CAP["locked"]:
+        if on:
+            # held where it is: its physical twist on the bottle - not the law's turn, which counts from the thread's
+            # end once a cap is caught (locked at the law's angle, a caught cap was wrenched 17 deg on the rig)
+            CAP["lock_target"].Set(float(np.degrees(CAP["yaw"] or 0.0)))
+        CAP["lock_k"].Set(CAP["lock_n_m_per_deg"] if on else 0.0)
+        CAP["locked"] = on
+
+
+def cap_step():
+    """The cap law on the cap's turn off its seat (its yaw on the bottle, unwrapped step by step) and the hand's
+    torque; the law's events worked on the joint pair. Every physics step."""
+    C = CAP
+    bp_, cp_ = body_pose(C["body"]), body_pose(C["cap"])
+    if bp_ is None or cp_ is None:
+        return
+    Rb, Rc = quat_to_R(bp_[1]), quat_to_R(cp_[1])
+    Rrel = Rb.T @ Rc
+    yaw = float(np.arctan2(Rrel[1, 0], Rrel[0, 0]))
+    if C["yaw"] is not None:
+        C["u"] += (yaw - C["yaw"] + np.pi) % (2 * np.pi) - np.pi
+    C["yaw"] = yaw
+    rel = Rb.T @ (cp_[0] - bp_[0])
+    height = float(rel[2] - C["th"]["seat_z_m"])
+    axis = Rb[:, 2]
+    tq = cap_hand_torque(bp_[0] + axis * float(rel[2]), axis)
+    r = _cap_law(C["state"], C["u"], tq, free_pose={"off_axis_m": float(np.hypot(rel[0], rel[1])),
+                                                     "tilt_rad": float(np.arccos(np.clip(Rrel[2, 2], -1.0, 1.0))), "height_m": height}, **C["kw"])
+    if r["event"] == "off_thread":
+        C["enabled"].Set(False)
+    elif r["event"] == "on_thread":
+        # caught at the thread's start: its turn counted from the thread's end, the joint on again (it draws the cap
+        # onto the axis and upright, its height to the thread's start)
+        C["u"] = 2 * np.pi * C["kw"]["turns"]
+        cap_lock(False)
+        C["target"].Set(float(C["kw"]["pitch_m"] * C["kw"]["turns"]))
+        C["enabled"].Set(True)
+    if r["on"]:
+        cap_lock(r["locked"])
+        if not r["locked"]:
+            z = float(C["kw"]["pitch_m"] * C["u"] / (2 * np.pi))         # the helix: a pitch a turn
+            if abs(z - C["target_now"]) > 1e-6:
+                C["target"].Set(z)
+                C["target_now"] = z
+    if r["event"]:
+        C["events"].append({"t": round(CLOCK[0], 3), "event": r["event"], "u_deg": round(float(np.degrees(C["u"])), 1),
+                            "height_mm": round(height * 1000, 2), "hand_torque_n_m": round(tq, 3)})
+        print(f"[cap] {r['event']} at {np.degrees(C['u']):.1f} deg, {height * 1000:.2f} mm up, hand {tq:+.3f} N m", flush=True)
+    C["torque_max"] = max(C["torque_max"], abs(tq))
+    C["u_max"] = max(C["u_max"], C["u"])
+    if not r["on"]:
+        C["lifted_m"] = max(C["lifted_m"], height - C["kw"]["pitch_m"] * C["kw"]["turns"])
+    C["last"] = {"on": r["on"], "u_deg": round(float(np.degrees(C["u"])), 1), "height_mm": round(height * 1000, 2),
+                 "friction_n_m": round(float(r["friction_n_m"]), 3), "hand_torque_n_m": round(tq, 3),
+                 "applied_n_m": round(float(C["state"].get("applied_n_m", 0.0)), 3), "broken": bool(C["state"].get("broken"))}
+
+
 def door_step():
     """The gasket law on the door's measured angle: a closing torque of the
     opening force at the handle, times exp(-gap / decay) with the gap the
@@ -762,6 +896,11 @@ if HM:
         if CLOTH:
             raise RuntimeError("a deformable target has no rigid contact view")
         CONTACTS = sim_view.create_rigid_contact_view(TARGET_RB.GetPath().pathString, filter_patterns=HAND_LINKS)
+        if PAYLOAD is not None:
+            try:
+                PAYLOAD["view"] = sim_view.create_rigid_contact_view(PAYLOAD["body"], filter_patterns=PAYLOAD["arms"])
+            except Exception as e:  # noqa: BLE001
+                print(f"[payload] no tip contact view ({type(e).__name__}: {e})", flush=True)
         try:
             ROBOT_NET = sim_view.create_rigid_contact_view(ROBOT_LINKS)
             # a list of sensors takes a filter list per sensor
@@ -791,6 +930,11 @@ if HM:
                 CONTACTS_MORE.append(cv_)
         if TOOL is not None:
             TOOL["trigger_contacts"] = sim_view.create_rigid_contact_view(TOOL["trigger_path"], filter_patterns=HAND_LINKS)
+        if CAP is not None:
+            try:
+                CAP["contacts"] = sim_view.create_rigid_contact_view(CAP["cap"], filter_patterns=HAND_LINKS, max_contact_data_count=512)
+            except Exception as e:  # noqa: BLE001
+                print(f"[cap] no contact view on the cap ({type(e).__name__}: {e}): the hand's torque goes unmeasured", flush=True)
     except Exception as e:                              # the grip still runs; its forces go unmeasured
         print(f"[hand] no contact view: {e}", flush=True)
 
@@ -799,6 +943,31 @@ from omni.physx import get_physx_simulation_interface
 CONTACT_ALL = get_physx_simulation_interface()
 ROBOT_TOUCHES = []                                       # each tick's partners (collision_measure.partners)
 ROBOT_ANY = [0]                                          # ticks the robot touched anything (the target too): the report is live
+
+
+def payload_state() -> dict:
+    """The held tool's tips (each arm's inner face at the pinch point, tool_tip_place.tip_from_end_m from its end) -
+    their gap and midpoint - and the force they put on the payload; the payload's position. HomeHero's tool_tip_gap
+    and tool_tip_force, from the physics."""
+    tips = []
+    from_end = float((spec.get("tool_tip_place") or {}).get("tip_from_end_m", 0.001))
+    for k, ap in enumerate(PAYLOAD["arms"]):
+        bp_ = body_pose(ap)
+        if bp_ is None:
+            return {}
+        sgn = 1.0 if k == 0 else -1.0
+        tips.append(bp_[0] + quat_to_R(bp_[1]) @ np.array([PAYLOAD["L"] - from_end, 0.0, -sgn * 0.0005]))
+    pp_ = body_pose(PAYLOAD["body"])
+    f = None
+    if PAYLOAD.get("view") is not None:
+        try:
+            f = float(np.linalg.norm(np.asarray(PAYLOAD["view"].get_contact_force_matrix(DT), float).reshape(-1, 3), axis=1).sum())
+        except Exception:  # noqa: BLE001
+            f = None
+    if PAYLOAD["z0"] is None and pp_ is not None:
+        PAYLOAD["z0"] = float(pp_[0][2])
+    return {"tip_gap_mm": round(float(np.linalg.norm(tips[0] - tips[1])) * 1000, 2), "tip_force_n": None if f is None else round(f, 3),
+            "tips_mid": np.round((tips[0] + tips[1]) / 2, 4).tolist(), "p": None if pp_ is None else np.round(pp_[0], 4).tolist()}
 
 
 def robot_touches(threshold_n: float = 0.05) -> list[str]:
@@ -927,6 +1096,8 @@ def simulate(seconds):
             screw_step()                                # the screw on the bit, every physics step
         if HOLE is not None:
             hole_step()                                 # the wood under the bit, every physics step
+        if CAP is not None:
+            cap_step()                                  # the cap on its thread, every physics step
         px.update_simulation(DT, CLOCK[0])
         CLOCK[0] += DT
     px.update_transformations(False, True, False, False)
@@ -1228,6 +1399,12 @@ def plan_then(hold_row, at_tick, k=0, stage="finger_push"):
     stroke = stage.split(":")[1] if ":" in stage else "both"
     px.update_transformations(False, True, False, False)
     (scene_dir / f"settled_poses_hold{sfx}.json").write_text(json.dumps({"live_from_replay": True, "tick": at_tick, "stage": stage, "bodies": live_bodies()}, indent=1))
+    if stage.split(":")[0] == "tool_tip_place":
+        # a held tool's tips: planned from the hand as it is - the digits stopped on the tool - not the close command
+        from plan_er_grasp import hold_with_live_hand
+        _qa = np.asarray(art.get_dof_positions(), float)[0]
+        hold_row = hold_with_live_hand(hold_row, [_qa[dof[f"psyonic_left_{d}_q1"]] for d in ("index", "middle", "ring", "pinky")]
+                                       + [_qa[dof["psyonic_left_thumb_q2"]], _qa[dof["psyonic_left_thumb_q1"]]])
     np.savez(scene_dir / "grasp_plan" / f"hold{sfx}.npz", targets=np.asarray([hold_row], float), stages=np.asarray(["hold"]))
     env = {k: v for k, v in os.environ.items()
            if k not in ("PYTHONPATH", "PYTHONHOME", "LD_LIBRARY_PATH", "LD_PRELOAD") and not k.startswith(("CARB", "OMNI", "ISAAC", "KIT", "EXP_PATH"))}
@@ -1237,22 +1414,27 @@ def plan_then(hold_row, at_tick, k=0, stage="finger_push"):
     door_stage = stage.split(":")[0] == "door_edge"
     screw_stage = stage.split(":")[0] == "screw_drive"
     tool_stage = stage.split(":")[0] == "tool_grip"
+    tip_stage = stage.split(":")[0] == "tool_tip_place"
     # a door's next stage (door_then.py: the door where it is now, its free edge the handle),
     # or the other hand's push on a held object (finger_push_planner.py)
     tool_ = ("door_then.py" if door_stage else "screw_then.py" if screw_stage else "tool_then.py" if tool_stage
-             else "finger_push_planner.py")
+             else "tool_tip_then.py" if tip_stage else "finger_push_planner.py")
     cmd = [os.path.expanduser("~/Documents/Github/HomeHero/.venv/bin/python"), str(Path(__file__).resolve().parent / tool_),
            str(scene_dir), "--hold", str(scene_dir / "grasp_plan" / f"hold{sfx}.npz"), "--poses", str(scene_dir / f"settled_poses_hold{sfx}.json"),
-           "--out", str(out_npz)] + ([] if door_stage or tool_stage else ["--part", stage.split(":")[1] if ":" in stage else "drive"] if screw_stage
+           "--out", str(out_npz)] + ((["--correct"] if stage.endswith(":correct") else ["--stop-after", stage.split(":")[1]] if ":" in stage else [])
+                                     if tip_stage else
+                                     [] if door_stage or tool_stage else ["--part", stage.split(":")[1] if ":" in stage else "drive"] if screw_stage
                                      else ["--stroke", stroke])
     r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=1800)
-    verdict = next((ln for ln in r.stdout.splitlines() if ln.startswith(("PUSH_PLAN", "DOOR_PLAN", "SCREW_PLAN", "TOOL_PLAN"))), None)
+    verdict = next((ln for ln in r.stdout.splitlines() if ln.startswith(("PUSH_PLAN", "DOOR_PLAN", "SCREW_PLAN", "TOOL_PLAN", "TIP_PLAN"))), None)
     (scene_dir / "grasp_plan" / f"then_plan{sfx}.log").write_text(r.stdout[-20000:] + "\n--- stderr ---\n" + r.stderr[-20000:])
     print(f"[then {k} {stage}] {verdict or 'the push planner printed no verdict'}", flush=True)
     THEN["plans"].append(f"{stage}: {verdict}")
     THEN["plan"] = " | ".join(THEN["plans"])
-    if not (verdict or "").startswith(("PUSH_PLAN OK", "DOOR_PLAN OK", "SCREW_PLAN OK", "TOOL_PLAN OK")):
+    if not (verdict or "").startswith(("PUSH_PLAN OK", "DOOR_PLAN OK", "SCREW_PLAN OK", "TOOL_PLAN OK", "TIP_PLAN OK")):
         return None
+    if tip_stage and THEN.get("tip_from_row") is None:
+        THEN["tip_from_row"] = len(rows)                    # the tips' rows: squeezed and released by their own bands
     z = np.load(out_npz)
     return [np.asarray(x, float) for x in z["targets"][1:]], [str(x) for x in z["stages"][1:]]
 
@@ -1302,6 +1484,26 @@ def schedule():
                 print(f"[acquisition] ABORT before {stage} row {i}: {acquisition['reason']} "
                       f"after {acquisition['waited_s']:.3f} s; holding the last command and ending replay", flush=True)
                 return
+        if (PAYLOAD is not None and THEN.get("tip_from_row") is not None and i > THEN["tip_from_row"] and stage == "lift"
+                and STAGES and STAGES[i - 1] == "close" and tip_wait["complete"] is None):
+            # a held tool's tips closing on the piece: the lift waits until they hold it (their force on it, from its
+            # contact view, at the floor for load_ticks), the thumb's squeeze band still closing them - the close's 37
+            # ticks ended with the tips 8.9 mm apart over an 8 mm tablet, and they met above it as it rose (2026-10-18)
+            prev = rows[i - 1]
+            for _ in range(int(TIP_WAIT_S * hz)):
+                f_ = (payload_state().get("tip_force_n") or 0.0)
+                tip_wait["loaded"] = tip_wait["loaded"] + 1 if f_ >= TIP_MIN_N else 0
+                if tip_wait["loaded"] >= GB["load_ticks"]:
+                    break
+                tip_wait["ticks"] += 1
+                yield i - 1, prev, "tip_wait"
+            tip_wait["complete"] = tip_wait["loaded"] >= GB["load_ticks"]
+            print(f"[tip] {'held' if tip_wait['complete'] else 'NOT held'} after {tip_wait['ticks'] / hz:.2f} s "
+                  f"(tips {payload_state().get('tip_gap_mm')} mm apart, {payload_state().get('tip_force_n')} N on the piece)", flush=True)
+            if not tip_wait["complete"]:
+                print(f"[acquisition] ABORT before the tips' {stage} row {i}: the tips do not hold the piece after "
+                      f"{TIP_WAIT_S:.1f} s; holding the last command and ending replay", flush=True)
+                return
         if THEN["stages"] and THEN["next"] < len(THEN["stages"]) and i == len(rows) - 1:
             k = THEN["next"]; THEN["next"] += 1
             more = plan_then(row, i, k, THEN["stages"][k])
@@ -1330,6 +1532,9 @@ GB = {"min_n": float(GRIP.get("min_n", 3.0)), "max_n": float(GRIP.get("max_n", 1
       "contact_n": float(GRIP.get("contact_n", 0.5)), "load_ticks": int(GRIP.get("load_ticks", 6)),
       "digits": GRIP.get("digits", ["index", "thumb"])}
 grip_loaded = {"ticks": 0}
+tip_wait = {"complete": None, "ticks": 0, "loaded": 0}                 # a held tool's tips on the piece (schedule)
+TIP_WAIT_S = float((spec.get("tool_tip_place") or {}).get("grip_wait_s", 4.0))
+TIP_MIN_N = float((spec.get("tool_tip_place") or {}).get("grip_min_n", 0.2))
 GRIP_DOF = {"index": dof["psyonic_left_index_q1"], "middle": dof["psyonic_left_middle_q1"],    # a tripod's middle beside the index
             "thumb": dof["psyonic_left_thumb_q2"]}
 grip_cmd = {}
@@ -1338,25 +1543,39 @@ for tick, (plan_i, row, stage_name) in enumerate(schedule()):
     tg = to_targets(row)
     for n, v in tg.items():
         CMD[0, dof[n]] = v
-    if FORCE_BAND and stage_name in ("close", "grip_wait", "lift", "carry", "lower"):
+    _tip_rows = THEN.get("tip_from_row") is not None and plan_i >= THEN["tip_from_row"]
+    # a held compliant tool keeps its band through the hold: the plan's closed command is the firmware's (it squeezes until
+    # it stalls), and in the hold after the lift it squeezed the tweezers shut - their tips 0 mm apart (2026-10-17)
+    _held_tool = (spec.get("grasp_plan") or {}).get("task") == "tool_pick" and bool(grip_cmd)
+    _band_stages = ("close", "grip_wait", "tip_wait", "lift", "carry", "lower") + (("release", "retreat", "hold") if _tip_rows else ()) \
+        + (("turn", "hold") if (spec.get("grasp_plan") or {}).get("task") == "cap_turn" else ())     # a cap gripped through each stroke
+    if FORCE_BAND and (stage_name in _band_stages or _held_tool):
         forces = digit_forces() or {}
-        for d in GB["digits"]:
+        # a held tool's tips: squeezed (the squeeze band) while they take, lift, carry and lower the payload, back to the
+        # hold's band to let it go - the tool stays in the hand, its tips open (grip.squeeze in the spec)
+        _gb = dict(GB, **GRIP.get("squeeze", {})) if (_tip_rows and stage_name in ("close", "tip_wait", "lift", "carry", "lower")) else GB
+        for d in _gb["digits"]:
             i = GRIP_DOF[d]
             if d not in grip_cmd:
                 grip_cmd[d] = float(np.asarray(art.get_dof_positions(), float)[0, i])   # from where the digit is
             f = float(forces.get(d, 0.0))
-            if f < GB["contact_n"] and not grip_cmd.get(d + "_touched"):
-                grip_cmd[d] += GB["free"]                  # free space: close at HomeHero's free step
-            elif f < GB["min_n"]:
+            if f < _gb["contact_n"] and not grip_cmd.get(d + "_touched"):
+                grip_cmd[d] += _gb["free"]                 # free space: close at HomeHero's free step
+            elif f < _gb["min_n"]:
                 grip_cmd[d + "_touched"] = True
-                grip_cmd[d] += GB["tighten"]
-            elif f > GB["max_n"]:
+                grip_cmd[d] += _gb["tighten"]
+            elif f > _gb["max_n"]:
                 grip_cmd[d + "_touched"] = True
-                grip_cmd[d] -= GB["unload"]
+                grip_cmd[d] -= _gb["unload"]
             else:
                 grip_cmd[d + "_touched"] = True
             grip_cmd[d] = float(np.clip(grip_cmd[d], 0.0, 1.74))
             CMD[0, i] = grip_cmd[d]
+        # the hold's digits outside this band (index and middle while the thumb squeezes) stay where the band last held them:
+        # the plan's command for them is the firmware's full close, which stalls only at its own force
+        for d in GB["digits"]:
+            if d not in _gb["digits"] and d in grip_cmd:
+                CMD[0, GRIP_DOF[d]] = grip_cmd[d]
         loaded = all(float(forces.get(d, 0.0)) >= GB["min_n"] for d in GB["digits"])
         grip_loaded["ticks"] = grip_loaded["ticks"] + 1 if loaded else 0
     elif FORCE_BAND and grip_cmd:
@@ -1488,6 +1707,10 @@ for tick, (plan_i, row, stage_name) in enumerate(schedule()):
         entry["target_xy"] = [round(float(c[0]), 4), round(float(c[1]), 4)]
         entry["fingers_q2_over_q1"] = [round(float(qv[dof[f"psyonic_left_{f}_q2"]] / qv[dof[f"psyonic_left_{f}_q1"]]), 3)
                                        if abs(qv[dof[f"psyonic_left_{f}_q1"]]) > 0.05 else None for f in fingers]
+    if PAYLOAD is not None:
+        entry["payload"] = payload_state()
+    if CAP is not None:
+        entry["cap"] = dict(CAP["last"])
     _lc = link_contacts()
     if args.contacts:
         entry["link_contacts"] = _lc
@@ -1881,6 +2104,48 @@ if DEST and DEST.get("kind") == "region":
     move["pass"] = bool(_inside and _on and (_tilt or 0) < 10 and peak >= 0.01 and _released)
     result["move"] = move
     result["pass"] = move["pass"]
+if PAYLOAD is not None:
+    # the payload where it was to go: inside the object's cavity (within its inner radius, between its floor and its
+    # mouth), carried there (risen 5 cm or more), let go (the tips at the end farther apart than it is wide)
+    pl = [r["payload"] for r in log if r.get("payload") and r["payload"].get("p")]
+    ib = body_pose(PAYLOAD["into_body"])
+    pend = np.asarray(pl[-1]["p"], float) if pl else None
+    rel = (quat_to_R(ib[1]).T @ (pend - ib[0])) if (ib is not None and pend is not None) else None
+    dm = PAYLOAD["into"]
+    inside = bool(rel is not None and np.hypot(rel[0], rel[1]) < dm["inner_d_m"] / 2 and dm["floor_z_m"] - 0.001 < rel[2] < dm["opening_z_m"])
+    rise = max((p_["p"][2] - PAYLOAD["z0"] for p_ in pl), default=0.0) if PAYLOAD["z0"] is not None else 0.0
+    gaps = [p_["tip_gap_mm"] for p_ in pl]
+    forces = [p_["tip_force_n"] for p_ in pl if p_.get("tip_force_n") is not None]
+    pack = {"payload": spec["payload"]["object"], "into": spec["payload"]["into"], "inside": inside,
+            "end_in_object_frame_mm": None if rel is None else np.round(rel * 1000, 1).tolist(),
+            "carried_peak_rise_m": round(float(rise), 4), "tip_gap_min_mm": min(gaps, default=None), "tip_gap_end_mm": gaps[-1] if gaps else None,
+            "tip_force_peak_n": round(max(forces), 3) if forces else None,
+            "released": bool(gaps and gaps[-1] > 1000 * float(PAYLOAD["size"][0]))}
+    pack["pass"] = bool(inside and rise >= 0.05 and pack["released"])
+    result["pack"] = pack
+    result["pass"] = pack["pass"] and bool(result.get("held"))
+    print(f"PACK {'PASS' if pack['pass'] else 'FAIL'} {spec['name']}: {pack['payload']} {'inside' if inside else 'NOT inside'} {pack['into']} "
+          f"(at {pack['end_in_object_frame_mm']} mm in its frame), carried {pack['carried_peak_rise_m']} m up, tips {pack['tip_gap_min_mm']} mm "
+          f"at their closest, {pack['tip_gap_end_mm']} mm at the end, peak tip force {pack['tip_force_peak_n']} N", flush=True)
+if CAP is not None:
+    # the cap's turn: opened - off its thread and carried 2 cm clear of the thread's end; closed - caught, screwed
+    # down and seated (its new hold the torque the hand closed it with)
+    _opening = float((spec.get("grasp_plan") or {}).get("turn_deg", 1.0)) > 0
+    _ev = [e["event"] for e in CAP["events"]]
+    _st = CAP["state"]
+    cap = {"opening": _opening, "events": CAP["events"], "turned_deg": round(float(np.degrees(CAP["u_max"])), 1),
+           "off_thread": "off_thread" in _ev, "broke_loose": "broke_loose" in _ev, "lifted_clear_mm": round(CAP["lifted_m"] * 1000, 1),
+           "hand_torque_peak_n_m": round(CAP["torque_max"], 3), "applied_n_m": round(float(_st.get("applied_n_m", 0.0)), 3),
+           "held_at_n_m": round(float(_st.get("applied_n_m", 0.0)) * CAP["kw"]["retention"], 3), "end": CAP["last"]}
+    if _opening:
+        cap["pass"] = bool(cap["off_thread"] and CAP["lifted_m"] >= 0.02)
+    else:
+        cap["pass"] = bool("seated" in _ev and _st.get("on") and not _st.get("broken"))
+    result["cap"] = cap
+    result["pass"] = cap["pass"]
+    print(f"CAP {'PASS' if cap['pass'] else 'FAIL'} {spec['name']}: {'opened' if _opening else 'closed'} - turned {cap['turned_deg']} deg, "
+          f"events {_ev}, lifted {cap['lifted_clear_mm']} mm clear, hand torque peak {cap['hand_torque_peak_n_m']} N m "
+          f"(held at {cap['held_at_n_m']} N m)", flush=True)
 # the robot's collisions: what its arm and hand touched that is neither the robot nor the target
 # (HomeHero's collision_violation_count: the episodes)
 from collision_measure import tally as _tally
@@ -1892,6 +2157,12 @@ result["collision_violation_count"] = result["collisions"]["episodes"] if result
 _tjs = [q.GetName() for q in Usd.PrimRange(target) if q.IsA(UsdPhysics.Joint)]
 result["container"] = {"sealed": not _tjs, "joints": _tjs[:8],
                        "why": "one rigid body: its cap cannot open" if not _tjs else "jointed: its lid's state is not read here"}
+if CAP is not None:
+    # a threaded cap's state is read: sealed while it is on its thread and seated
+    _sealed = bool(CAP["state"].get("on", True) and not CAP["state"].get("broken"))
+    result["container"] = {"sealed": _sealed, "joints": _tjs[:8],
+                           "why": "the cap seated on its thread" if _sealed else ("the cap off its thread" if not CAP["state"].get("on", True)
+                                                                                 else "the cap broken loose on its thread")}
 apply_acquisition_outcome(result, acquisition)
 (out / "acquisition.json").write_text(json.dumps(acquisition, indent=1))
 (out / "grasp.json").write_text(json.dumps(result, indent=1))

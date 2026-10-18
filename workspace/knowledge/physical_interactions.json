@@ -236,7 +236,7 @@
   {
    "id": "tweezer_flex",
    "kind": "mechanism",
-   "what": "tweezers' arms closing under the hand's squeeze and springing open on release: each arm a root hinge whose spring is the steel arm's bending stiffness",
+   "what": "tweezers' arms closing under the hand's squeeze and springing open on release: one hinge at the root (the lower arm's, the upper welded) carries both steel arms' bending stiffness in series (k_theta/2); proved squeezed while floating, as a hand holds them",
    "terms": [
     "tips closed",
     "arms' spring",
@@ -246,19 +246,25 @@
    "test": "tests/test_pill_kit.py",
    "proven_by": {
     "file": "workspace/asset_library/pill_kit_rig.json",
-    "record": "spring.pass"
+    "record": "floating.pass"
    }
   },
   {
    "id": "cap_thread",
    "kind": "mechanism",
-   "what": "a screw cap on a one-turn (GPI 400) thread: turned, it rises a pitch a turn until it leaves the thread and lifts off; turned back on, it seats",
+   "what": "a screw cap on a one-turn (GPI 400) thread: seated it holds with its removal torque (half the torque it was applied with, Oberk); broken loose it turns on the thread's drag, rising a pitch a turn, leaves the thread at its end and lifts off; set back on the neck it catches, screws down and seats, and the torque it is closed with is its next hold",
    "terms": [
     "turned off its thread",
     "cap screwed",
     "cap opened"
    ],
-   "needs": "an openable bottle (cap a separate body on a prismatic+revolute pair coupled by the thread law each step, released past one turn); a law test and a take"
+   "law": "behaviors:cap_thread",
+   "test": "tests/test_cap_thread_law.py",
+   "asset": "make_pill_kit:cap_thread_pair",
+   "proven_by": {
+    "file": "workspace/asset_library/pill_kit_rig.json",
+    "record": "thread.pass"
+   }
   },
   {
    "id": "small_parts_contact",

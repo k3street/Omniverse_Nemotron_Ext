@@ -687,8 +687,9 @@ def build(spec: dict, out_dir: Path) -> Path:
             x, y = (x, c) if axis == "y" else (c, y)
             overhang_info = {"edge": ov["edge"], "m": float(ov["m"]), "edge_coordinate": round(edge, 4), "centre": round(c, 4)}
             print(f"[place] {o['name']}: the support's {ov['edge']} edge at {edge:.4f}, {float(ov['m']) * 100:.1f} cm overhang -> {axis} = {c:.4f}")
-        # the asset's footprint centre over (x, y), its lowest point 2 mm above the top
-        z = top - float(orng.GetMin()[2]) + 0.002
+        # the asset's footprint centre over (x, y), its lowest point 2 mm above the top - the support's, or the
+        # top of the fixture part it is set on (a tablet on its stand)
+        z = (fixture_top(stage, o["on"], x, y) if o.get("on") else top) - float(orng.GetMin()[2]) + 0.002
         if (o.get("chess") or {}).get("white_toward_robot"):
             # turned so the ranks run away from the robot: white on its side
             rd = _chess_meta(odef)["rank_dir"]
@@ -716,8 +717,8 @@ def build(spec: dict, out_dir: Path) -> Path:
         else:
             oxf.SetTranslate(Gf.Vec3d(x - cx, y - cy, z))
             oxf.SetRotate(Gf.Vec3f(0, 0, float(o.get("yaw_deg", 0.0))))
-        if o.get("hang"):
-            pass                                                   # off the support by design
+        if o.get("hang") or o.get("on"):
+            pass                                                   # off the support by design (or on a fixture's part)
         elif o.get("overhang"):
             # hung over an edge: the footprint must overlap the support (over a
             # 6 cm rail the towel's centre lies past the rail, 28 cm hanging)
@@ -749,6 +750,12 @@ def build(spec: dict, out_dir: Path) -> Path:
                 raise SystemExit(f"{o['name']}: deactivate names no prim {pname!r}")
             stage.OverridePrim(q_.GetPath()).SetActive(False)
             print(f"[deactivate] {o['name']}: {pname}")
+        for jp in joints_to_switched_off(prim.GetPrim()):
+            stage.OverridePrim(jp).SetActive(False)
+            print(f"[deactivate] {o['name']}: {jp.name} (a joint to a body switched off)")
+        if o.get("clamp"):
+            cj = clamp_body(stage, prim.GetPrim(), o["name"], o["clamp"]["body"])
+            print(f"[clamp] {o['name']}.{o['clamp']['body']} held to the world at {cj}")
         for bname, kg in (o.get("body_masses_kg") or {}).items():
             b_ = next((q for q in Usd.PrimRange(prim.GetPrim()) if q.GetName() == bname and q.HasAPI(UsdPhysics.RigidBodyAPI)), None)
             if b_ is None:
@@ -939,7 +946,7 @@ def build(spec: dict, out_dir: Path) -> Path:
             continue                                                 # hung on a peg / a cloth: in contact by design
         near_ = object_clearances(stage, f"/World/Objects/{o['name']}", exclude=[sup_root] + [
             "/World/Environment" + q[len(env.get("prim", "")):] if env.get("prim") and q.startswith(env.get("prim", "")) else q
-            for q in o.get("touching", [])])
+            for q in o.get("touching", [])] + ([f"/World/Fixtures/{o['on']}"] if o.get("on") else []))   # set on it: touching by declaration
         if near_:
             worst = {}
             for a, b, gp_ in near_:
@@ -968,6 +975,60 @@ def build(spec: dict, out_dir: Path) -> Path:
          "robot_joints_posed": posed, "hand_mechanics": hand_mechanics, "collision_filtered_pairs": filtered,
          "support_collision": support_collision,
          "objects": placed}, indent=1))
+    return out
+
+
+def fixture_top(stage, part: str, x: float, y: float) -> float:
+    """The top of a fixture's part ('Fixture/Part' under /World/Fixtures) an object is set on at (x, y): refused if
+    there is no such part or (x, y) is not over it."""
+    from pxr import Usd, UsdGeom
+    q = stage.GetPrimAtPath(f"/World/Fixtures/{part}")
+    if not q:
+        raise SystemExit(f"'on': no fixture part /World/Fixtures/{part}")
+    r = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]).ComputeWorldBound(q).ComputeAlignedRange()
+    if not (r.GetMin()[0] < x < r.GetMax()[0] and r.GetMin()[1] < y < r.GetMax()[1]):
+        raise SystemExit(f"'on': ({x}, {y}) is not over {part}")
+    return float(r.GetMax()[2])
+
+
+def clamp_body(stage, root, oname: str, body_name: str, drop_m: float = 0.002) -> str:
+    """A body of an object held where it stands, as a bench clamp or a fitted holder holds a bottle while its cap is
+    turned: a fixed joint from the world to the body at its built pose, lowered by the build's drop (objects are
+    placed drop_m over their support to fall onto it; the clamp sets this one down). Returns the joint's path."""
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+    body = next((q for q in Usd.PrimRange(root) if q.GetName() == body_name and q.HasAPI(UsdPhysics.RigidBodyAPI)), None)
+    if body is None:
+        raise SystemExit(f"{oname}: clamp names no body {body_name!r}")
+    M = UsdGeom.XformCache().GetLocalToWorldTransform(body)
+    t = M.ExtractTranslation()
+    r = M.RemoveScaleShear().ExtractRotationQuat()
+    fj = UsdPhysics.FixedJoint.Define(stage, f"/World/Clamps/{oname}")
+    fj.CreateBody1Rel().SetTargets([body.GetPath()])
+    fj.CreateLocalPos0Attr(Gf.Vec3f(float(t[0]), float(t[1]), float(t[2]) - drop_m))
+    fj.CreateLocalRot0Attr(Gf.Quatf(float(r.GetReal()), Gf.Vec3f(*[float(v) for v in r.GetImaginary()])))
+    fj.CreateLocalPos1Attr(Gf.Vec3f(0.0, 0.0, 0.0))
+    fj.CreateLocalRot1Attr(Gf.Quatf(1.0, Gf.Vec3f(0.0, 0.0, 0.0)))
+    return fj.GetPath().pathString
+
+
+def joints_to_switched_off(root) -> list:
+    """The joints under `root` whose bodies are switched off (an inactive prim or under one): a joint left on with a
+    body gone ties its other body to the world - the open vial's cap removed, its thread's carrier would hang there
+    (2026-10-17). Returned to be switched off with it."""
+    from pxr import Usd
+    stage = root.GetStage()
+    out = []
+    for q in Usd.PrimRange(root):
+        for rel in ("physics:body0", "physics:body1"):
+            r = q.GetRelationship(rel)
+            if not r:
+                continue
+            for t in r.GetTargets():
+                if any(not stage.GetPrimAtPath(a).IsActive() for a in t.GetPrefixes() if stage.GetPrimAtPath(a)):
+                    out.append(q.GetPath())
+                    break
+            if out and out[-1] == q.GetPath():
+                break
     return out
 
 

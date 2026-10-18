@@ -297,7 +297,7 @@ def main() -> int:
                        stage_ticks={k: int(sum(1 for x in stages if x == k)) for k in dict.fromkeys(stages)})
         print(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else float(o)))
         return 0
-    if task["kind"] in ("pinch_place", "pinch_lift"):
+    if task["kind"] in ("pinch_place", "pinch_lift", "cap_turn"):
         # a pinch pick-and-place (a chess move): planned with HomeHero's
         # geometry, checker and RRT by pinch_place_planner.py, from where the
         # reach left the arm, inside the slide's compensated travel

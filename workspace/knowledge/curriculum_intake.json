@@ -1,5 +1,5 @@
 {
- "at": "2026-10-17T20:14:43",
+ "at": "2026-10-18T02:06:30",
  "superseded_revisions": [
   {
    "occupation": "laboratory_materials_handler",
@@ -1533,13 +1533,13 @@
      "id": "interaction:tweezer_flex",
      "step": "interaction",
      "met": true,
-     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+     "evidence": "workspace/asset_library/pill_kit_rig.json floating.pass = True"
     },
     {
      "id": "planner:tool_pinch",
      "step": "planner",
      "met": true,
-     "evidence": "aida_r5_lab_pill_pack pass = True"
+     "evidence": "aida_r5_lab_pill_pack held = True"
     },
     {
      "id": "planner:place_tool",
@@ -1592,7 +1592,7 @@
      "id": "planner:tool_pinch",
      "step": "planner",
      "met": true,
-     "evidence": "aida_r5_lab_pill_pack pass = True"
+     "evidence": "aida_r5_lab_pill_pack held = True"
     },
     {
      "id": "scene:homehero.interaction.tweezers_115.prepare_flat_pickup",
@@ -1615,19 +1615,13 @@
     "kind": "homehero_interaction",
     "origin": "aida_interaction_curriculum_v1.json"
    },
-   "next": "planner:tool_tip_place",
+   "next": null,
    "requirements": [
-    {
-     "id": "asset:tweezers",
-     "step": "asset",
-     "met": true,
-     "evidence": "verified/approved: ['simple_tweezers', 'tweezers_115']"
-    },
     {
      "id": "interaction:tweezer_flex",
      "step": "interaction",
      "met": true,
-     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+     "evidence": "workspace/asset_library/pill_kit_rig.json floating.pass = True"
     },
     {
      "id": "interaction:small_parts_contact",
@@ -1639,25 +1633,25 @@
      "id": "planner:tool_pinch",
      "step": "planner",
      "met": true,
-     "evidence": "aida_r5_lab_pill_pack pass = True"
+     "evidence": "aida_r5_lab_pill_pack held = True"
     },
     {
      "id": "planner:tool_tip_place",
      "step": "planner",
-     "met": false,
-     "evidence": "no planner"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pack.pass = True"
     },
     {
      "id": "scene:homehero.interaction.tweezers_115.operate_from_fixture",
      "step": "scene",
-     "met": false,
-     "evidence": "none named"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack"
     },
     {
      "id": "take:homehero.interaction.tweezers_115.operate_from_fixture",
      "step": "take",
-     "met": false,
-     "evidence": "no take"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pack.pass = True"
     }
    ]
   },
@@ -1686,7 +1680,7 @@
      "id": "interaction:tweezer_flex",
      "step": "interaction",
      "met": true,
-     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+     "evidence": "workspace/asset_library/pill_kit_rig.json floating.pass = True"
     },
     {
      "id": "interaction:small_parts_contact",
@@ -1704,13 +1698,13 @@
      "id": "planner:tool_pinch",
      "step": "planner",
      "met": true,
-     "evidence": "aida_r5_lab_pill_pack pass = True"
+     "evidence": "aida_r5_lab_pill_pack held = True"
     },
     {
      "id": "planner:tool_tip_place",
      "step": "planner",
-     "met": false,
-     "evidence": "no planner"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pack.pass = True"
     },
     {
      "id": "scene:homehero.interaction.tweezers_115.prepare_and_use",
@@ -2043,19 +2037,13 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "interaction:cap_thread",
+   "next": "planner:cap_turn",
    "requirements": [
-    {
-     "id": "asset:pill bottle",
-     "step": "asset",
-     "met": true,
-     "evidence": "verified/approved: ['pills_linezolid']"
-    },
     {
      "id": "interaction:cap_thread",
      "step": "interaction",
-     "met": false,
-     "evidence": "no law"
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json thread.pass = True"
     },
     {
      "id": "interaction:small_parts_contact",
@@ -2067,13 +2055,13 @@
      "id": "planner:cap_turn",
      "step": "planner",
      "met": false,
-     "evidence": "no planner"
+     "evidence": "aida_r5_lab_vial_open cap.pass = False"
     },
     {
      "id": "scene:nemotron.ladder.pill_bottle.r2",
      "step": "scene",
-     "met": false,
-     "evidence": "none named"
+     "met": true,
+     "evidence": "aida_r5_lab_vial_open"
     }
    ]
   },
@@ -2084,19 +2072,13 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "planner:tool_tip_place",
+   "next": null,
    "requirements": [
-    {
-     "id": "asset:pill bottle",
-     "step": "asset",
-     "met": true,
-     "evidence": "verified/approved: ['pills_linezolid']"
-    },
     {
      "id": "interaction:tweezer_flex",
      "step": "interaction",
      "met": true,
-     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+     "evidence": "workspace/asset_library/pill_kit_rig.json floating.pass = True"
     },
     {
      "id": "interaction:small_parts_contact",
@@ -2108,19 +2090,19 @@
      "id": "planner:tool_pinch",
      "step": "planner",
      "met": true,
-     "evidence": "aida_r5_lab_pill_pack pass = True"
+     "evidence": "aida_r5_lab_pill_pack held = True"
     },
     {
      "id": "planner:tool_tip_place",
      "step": "planner",
-     "met": false,
-     "evidence": "no planner"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pack.pass = True"
     },
     {
      "id": "scene:nemotron.ladder.pill_bottle.r3",
      "step": "scene",
-     "met": false,
-     "evidence": "none named"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack"
     }
    ]
   },
@@ -2131,7 +2113,7 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "interaction:cap_thread",
+   "next": "planner:cap_turn",
    "requirements": [
     {
      "id": "asset:pill bottle",
@@ -2142,14 +2124,14 @@
     {
      "id": "interaction:cap_thread",
      "step": "interaction",
-     "met": false,
-     "evidence": "no law"
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json thread.pass = True"
     },
     {
      "id": "interaction:tweezer_flex",
      "step": "interaction",
      "met": true,
-     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+     "evidence": "workspace/asset_library/pill_kit_rig.json floating.pass = True"
     },
     {
      "id": "interaction:small_parts_contact",
@@ -2160,14 +2142,14 @@
     {
      "id": "planner:tool_tip_place",
      "step": "planner",
-     "met": false,
-     "evidence": "no planner"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pack.pass = True"
     },
     {
      "id": "planner:cap_turn",
      "step": "planner",
      "met": false,
-     "evidence": "no planner"
+     "evidence": "aida_r5_lab_vial_open cap.pass = False"
     },
     {
      "id": "scene:nemotron.ladder.pill_bottle.r4",
@@ -2196,7 +2178,7 @@
      "id": "planner:tool_pinch",
      "step": "planner",
      "met": true,
-     "evidence": "aida_r5_lab_pill_pack pass = True"
+     "evidence": "aida_r5_lab_pill_pack held = True"
     },
     {
      "id": "scene:nemotron.ladder.tweezers.r1",
@@ -2213,31 +2195,25 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "scene:nemotron.ladder.tweezers.r2",
+   "next": null,
    "requirements": [
-    {
-     "id": "asset:tweezers",
-     "step": "asset",
-     "met": true,
-     "evidence": "verified/approved: ['simple_tweezers', 'tweezers_115']"
-    },
     {
      "id": "interaction:tweezer_flex",
      "step": "interaction",
      "met": true,
-     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+     "evidence": "workspace/asset_library/pill_kit_rig.json floating.pass = True"
     },
     {
      "id": "planner:tool_pinch",
      "step": "planner",
      "met": true,
-     "evidence": "aida_r5_lab_pill_pack pass = True"
+     "evidence": "aida_r5_lab_pill_pack held = True"
     },
     {
      "id": "scene:nemotron.ladder.tweezers.r2",
      "step": "scene",
-     "met": false,
-     "evidence": "none named"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack"
     }
    ]
   },
@@ -2248,19 +2224,13 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "planner:tool_tip_place",
+   "next": null,
    "requirements": [
-    {
-     "id": "asset:tweezers",
-     "step": "asset",
-     "met": true,
-     "evidence": "verified/approved: ['simple_tweezers', 'tweezers_115']"
-    },
     {
      "id": "interaction:tweezer_flex",
      "step": "interaction",
      "met": true,
-     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+     "evidence": "workspace/asset_library/pill_kit_rig.json floating.pass = True"
     },
     {
      "id": "interaction:small_parts_contact",
@@ -2272,72 +2242,30 @@
      "id": "planner:tool_pinch",
      "step": "planner",
      "met": true,
-     "evidence": "aida_r5_lab_pill_pack pass = True"
+     "evidence": "aida_r5_lab_pill_pack held = True"
     },
     {
      "id": "planner:tool_tip_place",
      "step": "planner",
-     "met": false,
-     "evidence": "no planner"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pack.pass = True"
     },
     {
      "id": "scene:nemotron.ladder.tweezers.r3",
      "step": "scene",
-     "met": false,
-     "evidence": "none named"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack"
     }
    ]
   }
  ],
  "open": [
   {
-   "id": "cur:interaction:cap_thread",
-   "priority": 211,
-   "actionable": true,
-   "title": "the cap thread interaction",
-   "blocks": 2
-  },
-  {
    "id": "cur:planner:cap_turn",
-   "priority": 223,
-   "actionable": false,
+   "priority": 222,
+   "actionable": true,
    "title": "the cap turn planner",
    "blocks": 2
-  },
-  {
-   "id": "cur:scene:nemotron.ladder.tweezers.r2",
-   "priority": 233,
-   "actionable": true,
-   "title": "a scene for tweezers rung 2: the tips closed by the hand's squeeze and opened by its release (the arms' spring)",
-   "blocks": 1
-  },
-  {
-   "id": "cur:scene:nemotron.ladder.pill_bottle.r2",
-   "priority": 234,
-   "actionable": false,
-   "title": "a scene for pill_bottle rung 2: the cap opened by the hand: turned off its thread and lifted away, the pills still inside",
-   "blocks": 1
-  },
-  {
-   "id": "cur:planner:tool_tip_place",
-   "priority": 324,
-   "actionable": true,
-   "title": "the tool tip place planner",
-   "blocks": 5
-  },
-  {
-   "id": "cur:scene:nemotron.ladder.pill_bottle.r3",
-   "priority": 335,
-   "actionable": false,
-   "title": "a scene for pill_bottle rung 3: pills moved one at a time with tweezers: packed from a tray into the open bottle, or unpacked from it onto the tray",
-   "blocks": 1
-  },
-  {
-   "id": "cur:scene:nemotron.ladder.tweezers.r3",
-   "priority": 335,
-   "actionable": false,
-   "title": "a scene for tweezers rung 3: a small object picked between the tips, carried and let go where it is wanted",
-   "blocks": 1
   },
   {
    "id": "cur:scene:nemotron.ladder.pill_bottle.r4",
@@ -2785,20 +2713,6 @@
    "priority": 32255,
    "actionable": false,
    "title": "a passing take: Articulated 115 mm tweezers: prepare flat pickup",
-   "blocks": 1
-  },
-  {
-   "id": "cur:scene:homehero.interaction.tweezers_115.operate_from_fixture",
-   "priority": 32335,
-   "actionable": false,
-   "title": "a scene for Articulated 115 mm tweezers: operate from fixture",
-   "blocks": 1
-  },
-  {
-   "id": "cur:take:homehero.interaction.tweezers_115.operate_from_fixture",
-   "priority": 32356,
-   "actionable": false,
-   "title": "a passing take: Articulated 115 mm tweezers: operate from fixture",
    "blocks": 1
   },
   {

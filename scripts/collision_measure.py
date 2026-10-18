@@ -32,3 +32,23 @@ def tally(ticks: list[list[str]]) -> dict:
             by[p] = by.get(p, 0) + 1
         prev = now
     return {"touch_ticks": touch, "episodes": sum(by.values()), "by_partner": dict(sorted(by.items(), key=lambda kv: -kv[1]))}
+
+
+def contact_torque(normal_forces, points, normals, counts, starts, friction_forces, friction_points, friction_counts,
+                   friction_starts, centre, axis) -> float:
+    """The torque about an axis through `centre` (N m, right-handed about `axis`) that a sensor body's contacts put on
+    it, from a tensor RigidContactView's get_contact_data and get_friction_data: each normal force (magnitude x normal)
+    and each friction force at its point. The forces' sense - on the sensor - is proved on the rig (rig_pill_kit
+    torque_sign: a finger dragging the cap anticlockwise reads positive)."""
+    import numpy as np
+    c, a = np.asarray(centre, float), np.asarray(axis, float)
+    tq = 0.0
+    sets = ((np.asarray(normal_forces, float).reshape(-1, 1) * np.asarray(normals, float).reshape(-1, 3), np.asarray(points, float).reshape(-1, 3),
+             np.asarray(counts).reshape(-1), np.asarray(starts).reshape(-1)),
+            (np.asarray(friction_forces, float).reshape(-1, 3), np.asarray(friction_points, float).reshape(-1, 3),
+             np.asarray(friction_counts).reshape(-1), np.asarray(friction_starts).reshape(-1)))
+    for F, P, C_, S_ in sets:
+        for n, s0 in zip(C_, S_):
+            for i in range(int(s0), int(s0) + int(n)):
+                tq += float(np.cross(P[i] - c, F[i]) @ a)
+    return tq

@@ -350,4 +350,62 @@ def test_a_tool_pick_holds_the_pinch_axis_to_the_tweezers_opening_and_the_finger
     assert task["kind"] == "pinch_lift" and task["tripod"]
     assert abs(abs(task["cloth_normal"][1]) - 1.0) < 1e-6                       # the opening axis: world y
     assert np.allclose(task["finger_row_axis"], [1.0, 0.0, 0.0], atol=1e-6)    # the arms' length: world x
-    assert abs(task["grip_point"][0] - (4.455 + 0.015 + 0.055)) < 1e-3 and 0.002 < task["grip_width_m"] < 0.014
+    # across the cushion grips 55 mm out: narrower than the open tips with both arms' and sleeves' thickness
+    from make_pill_kit import TWEEZERS as TW
+    assert abs(task["grip_point"][0] - (4.455 + 0.015 + 0.055)) < 1e-3
+    assert 0.002 < task["grip_width_m"] < TW["tip_gap"] + 2 * (TW["thick"] + TW["sleeve_thick"])
+
+
+def test_a_joint_to_a_body_the_scene_switched_off_goes_off_with_it():
+    from build_er_scene import joints_to_switched_off
+    st = Usd.Stage.CreateInMemory()
+    UsdGeom.Xform.Define(st, "/World/Vial")
+    _body(st, "/World/Vial/Body", (0.0, 0.0, 0.0))
+    _body(st, "/World/Vial/Cap", (0.0, 0.0, 0.1))
+    UsdGeom.Scope.Define(st, "/World/Vial/Thread")
+    _body(st, "/World/Vial/Thread/Carrier", (0.0, 0.0, 0.1))
+    lift = UsdPhysics.PrismaticJoint.Define(st, "/World/Vial/Thread/Lift")
+    lift.CreateBody0Rel().SetTargets([Sdf.Path("/World/Vial/Body")])
+    lift.CreateBody1Rel().SetTargets([Sdf.Path("/World/Vial/Thread/Carrier")])
+    turn = UsdPhysics.RevoluteJoint.Define(st, "/World/Vial/Thread/Turn")
+    turn.CreateBody0Rel().SetTargets([Sdf.Path("/World/Vial/Thread/Carrier")])
+    turn.CreateBody1Rel().SetTargets([Sdf.Path("/World/Vial/Cap")])
+    root = st.GetPrimAtPath("/World/Vial")
+    assert joints_to_switched_off(root) == []
+    st.GetPrimAtPath("/World/Vial/Cap").SetActive(False)
+    assert joints_to_switched_off(root) == [Sdf.Path("/World/Vial/Thread/Turn")]
+    # a joint to a body under a switched-off prim goes too
+    st.GetPrimAtPath("/World/Vial/Cap").SetActive(True)
+    _body(st, "/World/Vial/Cap/Liner", (0.0, 0.0, 0.1))
+    turn.CreateBody1Rel().SetTargets([Sdf.Path("/World/Vial/Cap/Liner")])
+    st.GetPrimAtPath("/World/Vial/Cap").SetActive(False)
+    assert joints_to_switched_off(root) == [Sdf.Path("/World/Vial/Thread/Turn")]
+
+
+def test_a_clamped_body_is_held_to_the_world_where_it_was_set_down():
+    from build_er_scene import clamp_body
+    st = Usd.Stage.CreateInMemory()
+    x = UsdGeom.Xform.Define(st, "/World/Objects/Vial")
+    x.AddTranslateOp().Set(Gf.Vec3d(4.6, 0.66, 0.710))
+    _body(st, "/World/Objects/Vial/Body", (0.0, 0.0, 0.0))
+    path = clamp_body(st, x.GetPrim(), "Vial", "Body")
+    j = UsdPhysics.FixedJoint(st.GetPrimAtPath(path))
+    assert j.GetBody1Rel().GetTargets() == [Sdf.Path("/World/Objects/Vial/Body")] and not j.GetBody0Rel().GetTargets()
+    assert np.allclose(list(j.GetLocalPos0Attr().Get()), [4.6, 0.66, 0.708], atol=1e-6)    # set down by the build's 2 mm drop
+    with pytest.raises(SystemExit):
+        clamp_body(st, x.GetPrim(), "Vial", "Cap")
+
+
+def test_an_object_set_on_a_fixture_part_rests_on_its_top():
+    from build_er_scene import fixture_top
+    st = Usd.Stage.CreateInMemory()
+    UsdGeom.Xform.Define(st, "/World/Fixtures/TabletStands").AddTranslateOp().Set(Gf.Vec3d(4.70, 0.70, 0.708))
+    post = UsdGeom.Cube.Define(st, "/World/Fixtures/TabletStands/Post1")
+    post.CreateSizeAttr(1.0)
+    post.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, 0.02))
+    post.AddScaleOp().Set(Gf.Vec3f(0.03, 0.03, 0.04))
+    assert abs(fixture_top(st, "TabletStands/Post1", 4.70, 0.70) - 0.748) < 1e-9
+    with pytest.raises(SystemExit):
+        fixture_top(st, "TabletStands/Post1", 4.74, 0.70)                    # beside the post
+    with pytest.raises(SystemExit):
+        fixture_top(st, "TabletStands/Post9", 4.70, 0.70)

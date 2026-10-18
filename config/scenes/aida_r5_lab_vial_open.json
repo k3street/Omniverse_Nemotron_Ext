@@ -1,0 +1,84 @@
+{
+ "extends": "aida_r5_lab_pill_pack.json",
+ "name": "aida_r5_lab_vial_open",
+ "purpose": "the user's task (2026-10-17), its first step: the capped pill vial opened. The vial clamped on the bench, the R5's left hand grips the cap in a tripod and turns it off its one-turn thread in strokes - turning, letting go, turning back, gripping again - then lifts it away (behaviors.cap_thread: the closure's hold, the thread's drag, the cap let go at the thread's end)",
+ "environment": {
+  "fixtures": []
+ },
+ "objects": [
+  {
+   "name": "Vial",
+   "asset_id": "pill_vial",
+   "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/pill_vial/pill_vial.usda",
+   "category": "generated",
+   "xy": [
+    4.615,
+    0.66
+   ],
+   "label": "the capped pill vial",
+   "why": "the 30-dram vial, capped, its cap seated on its one-turn thread (make_pill_kit.cap_thread_pair)",
+   "target": true,
+   "clamp": {
+    "body": "Body",
+    "why": "held in a bench clamp while its cap is turned, as a holder or the other hand holds it (the R5's right hand is not yet in these takes)"
+   }
+  }
+ ],
+ "destination": null,
+ "payload": null,
+ "tool_tip_place": null,
+ "grasp_plan": {
+  "task": "cap_turn",
+  "tripod": true,
+  "stroke_deg": 80.0,
+  "regrip_rise_m": 0.012,
+  "lift_m": 0.04,
+  "pregrasp_height_m": 0.05,
+  "open_clearance_m": 0.01,
+  "curl_rad": 1.5,
+  "close_s": 1.0,
+  "release_s": 0.5,
+  "stroke_hold_s": 0.2,
+  "hold_s": 1.5,
+  "reach": "cumotion",
+  "cumotion_seeds": 8,
+  "why": "a tripod across the cap's skirt (thumb against index and middle), turned about the vial's axis 80 deg a stroke - the wrist's roll is +-55 to +-100 deg - the whole thread and 20 deg past it, then the cap lifted 4 cm"
+ },
+ "grasp_replay": {
+  "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_lab_vial_open/grasp_plan/targets.npz",
+  "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+  "lift_offset_m": 0.0,
+  "control_hz": 30,
+  "finger_q2_coefficient": 1.05851325,
+  "hold_s": 0.0,
+  "why": "the planned cap turn (plan_er_grasp.py, task cap_turn)",
+  "controller": "homehero_r5_action",
+  "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)",
+  "hand_model": {
+   "kind": "ability_hand",
+   "calibration": "config/ability_hand_calibration.json",
+   "collision_voltage": 8.0,
+   "postcontact_voltage": 0.0,
+   "grip_speed": 0.3,
+   "why": "the halt (word 007) set above the force band, 8.0 V, so the position loop governs the squeeze: at the 3.0 V default the index stalls at about 3 N, the band's floor, and could tighten no further. Driven by the grip command alone this pinch failed every way: at 3.0 V the thumb flicked the 14 g pawn out before it stalled; at 1.0 V with 0.8 V post-contact the digits crept closed during the carry and rolled it out at 61 deg; at 1.0 V with 0 V the stored 2.4 N drained in half a second of lift"
+  },
+  "grip": {
+   "mode": "force_band",
+   "min_n": 3.0,
+   "max_n": 5.0,
+   "tightening_step_rad": 0.002,
+   "unloading_step_rad": 0.002,
+   "digits": [
+    "index",
+    "middle",
+    "thumb"
+   ],
+   "why": "a twisting grip: the closure's hold of 0.15 N m at the cap's 22 mm radius is 6.8 N round its rim; with the pads' friction near 1 that is ~2.3 N a digit - held at 3-5 N, under the fingertip's ~8 N stall"
+  },
+  "cap": {
+   "object": "Vial",
+   "applied_n_m": 0.3,
+   "why": "the cap as tight as the R5's hand closes it (reasoned until a closing take measures it: three digits at ~5 N, friction ~0.9, on a 22 mm radius - 0.3 N m); a machine-capped 38 mm closure is applied at 1.9-2.9 N m (Oberk), past what the hand can turn"
+  }
+ }
+}
