@@ -544,7 +544,9 @@ def _cap_turn_task(stage, obj, xc, gp, drop) -> dict:
     cap = root.GetChild(meta["cap"])
     M = xc.GetLocalToWorldTransform(cap)
     skirt = float(meta["cap_h_m"]) - 0.002                                    # the cap's top 2 mm over its skirt
-    grip = np.asarray(M.Transform(Gf.Vec3d(0.0, 0.0, skirt / 2.0)), float) - drop
+    # gripped low on the skirt (35 % up by default): pads closing with any rise ride up it, and at mid-height they
+    # reached the top edge and slid off at the lift (2026-10-18)
+    grip = np.asarray(M.Transform(Gf.Vec3d(0.0, 0.0, skirt * float(gp.get("grip_height_frac", 0.35)))), float) - drop
     turn = float(gp.get("turn_deg", 360.0 * float(th["turns"]) + float(gp.get("past_thread_deg", 20.0))))
     return {"kind": "cap_turn", "grip_point": grip.tolist(), "grip_width_m": float(meta["cap_d_m"]),
             "object_base_z": float(grip[2]) - skirt / 2.0, "object_height_m": skirt, "place_point": grip.tolist(),

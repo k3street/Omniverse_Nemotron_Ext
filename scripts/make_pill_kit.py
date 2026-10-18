@@ -177,7 +177,7 @@ THREAD = {"turns": 1.0, "pitch_m": 0.00423, "retention": 0.5, "run_n_m": 0.02, "
           "height_k_n_per_m": 5000.0, "height_c_n_s_per_m": 10.0, "lock_n_m_per_deg": 1.0}
 
 
-def cap_thread_pair(st, seat_z: float) -> dict:
+def cap_thread_pair(st, seat_z: float, skirt: float = 0.010) -> dict:
     """The cap's thread as one D6 joint from the body to the cap (/World/PillVial/Thread/Joint), its x-axis the
     vial's: the cap held on the axis and upright (transY, transZ, rotY, rotZ locked), free to turn (rotX, the
     joint's twist - unbounded, where a revolute's limits stop at +-180 deg) and to rise (transX, from its seat to a
@@ -219,6 +219,12 @@ def cap_thread_pair(st, seat_z: float) -> dict:
     d.CreateDampingAttr(t["run_n_m"] / t["turn_deg_s"])                # N m per deg/s: the running friction at 90 deg/s
     return {"turns": t["turns"], "pitch_m": t["pitch_m"], "seat_z_m": seat_z, "retention": t["retention"], "run_n_m": t["run_n_m"],
             "joint": "Thread/Joint", "height_target_attr": "drive:transX:physics:targetPosition",
+            # off the thread the cap rests on its end and lifts away along the neck (its skirt round it) until clear:
+            # the height drive let go (stiffness and damping: its damping alone held a lifted cap, the rig 2026-10-18),
+            # the height's floor raised to the thread's end; past skirt_m + 2 mm the joint goes
+            "lift_off": {"height_stiffness_attr": "drive:transX:physics:stiffness", "height_damping_attr": "drive:transX:physics:damping",
+                         "height_limit_attrs":
+                         ["limit:transX:physics:low", "limit:transX:physics:high"], "clear_m": round(skirt + 0.002, 4)},
             "twist_lock": {"stiffness_attr": "drive:rotX:physics:stiffness", "target_attr": "drive:rotX:physics:targetPosition",
                            "n_m_per_deg": t["lock_n_m_per_deg"]}}
 
@@ -264,7 +270,7 @@ def make_vial(out: Path) -> dict:
             "outer_d_m": 2 * v["r_out"], "inner_d_m": 2 * r_in * math.cos(math.pi / v["sides"]), "height_m": v["h"],
             "cap_d_m": 2 * v["cap_r_out"], "cap_h_m": v["cap_h"], "body_mass_kg": round(vol_body * v["density"], 5),
             "cap_mass_kg": round(vol_cap * v["density"], 5), "opening_z_m": v["h"], "floor_z_m": v["floor"],
-            "thread": dict(cap_thread_pair(st, v["h"] - v["cap_h"] + v["cap_top"]), law="behaviors:cap_thread",
+            "thread": dict(cap_thread_pair(st, v["h"] - v["cap_h"] + v["cap_top"], v["cap_h"] - v["cap_top"]), law="behaviors:cap_thread",
                            why="GPI 400: one turn; 6 threads per inch for a ~38-43 mm neck (reasoned)")}
     root.GetPrim().SetCustomDataByKey("er:generated", json.dumps({"by": "scripts/make_pill_kit.py", **meta,
                                                                   "sources": {k: SOURCES[k] for k in ("vial", "cap_thread", "cap_torque")}}))

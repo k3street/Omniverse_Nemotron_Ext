@@ -64,7 +64,7 @@
   },
   "grip": {
    "mode": "force_band",
-   "min_n": 3.0,
+   "min_n": 2.0,
    "max_n": 5.0,
    "tightening_step_rad": 0.002,
    "unloading_step_rad": 0.002,
@@ -73,7 +73,7 @@
     "middle",
     "thumb"
    ],
-   "why": "a twisting grip: the closure's hold of 0.15 N m at the cap's 22 mm radius is 6.8 N round its rim; with the pads' friction near 1 that is ~2.3 N a digit - held at 3-5 N, under the fingertip's ~8 N stall"
+   "why": "a twisting grip: the closure's hold of 0.15 N m at the cap's 22 mm radius is 6.8 N round its rim; the strokes broke it loose with the digits at 3-4 N. The floor at 2 N: in a tripod the thumb opposes index and middle at an angle and reads below them (2.5-2.9 N against 3.2-4.1) - with a 3 N floor the band never read 'loaded' and the lift that takes the freed cap away aborted (2026-10-18); under the fingertip's ~8 N stall"
   },
   "cap": {
    "object": "Vial",

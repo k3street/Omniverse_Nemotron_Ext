@@ -268,6 +268,11 @@ def thread_test() -> dict:
     target = jp.GetAttribute(th["height_target_attr"])
     tl = th["twist_lock"]
     k_a, tgt_a = jp.GetAttribute(tl["stiffness_attr"]), jp.GetAttribute(tl["target_attr"])
+    lo = th["lift_off"]
+    lk_a = jp.GetAttribute(lo["height_stiffness_attr"])
+    lc_a = jp.GetAttribute(lo["height_damping_attr"])
+    ll_a = [jp.GetAttribute(a) for a in lo["height_limit_attrs"]]
+    lift_on = (lk_a.Get(), [a.Get() for a in ll_a], lc_a.Get())
     omni.timeline.get_timeline_interface().play()
     for _ in range(3):
         app.update()
@@ -276,7 +281,7 @@ def thread_test() -> dict:
     px = omni.physx.get_physx_interface()
     law = {}
     kw = dict(turns=th["turns"], retention=th["retention"], run_n_m=th["run_n_m"], pitch_m=th["pitch_m"])
-    track = {"u": 0.0, "yaw": None, "t": 0.0, "locked": True, "target": 0.0}
+    track = {"u": 0.0, "yaw": None, "t": 0.0, "locked": True, "target": 0.0, "lifting": False}
     log = []
 
     def lock(on):
@@ -307,14 +312,29 @@ def thread_test() -> dict:
             r = cap_thread(law, track["u"], math.copysign(torque_n_m, speed_deg_s) if speed_deg_s else 0.0, applied_n_m=0.6,
                            free_pose={"off_axis_m": off, "tilt_rad": tilt, "height_m": height}, **kw)
             if r["event"] == "off_thread":
-                enabled.Set(False)
+                # resting on the thread's end, lifting off along the neck: the height drive let go, its floor raised
+                lock(False)
+                lk_a.Set(0.0)
+                lc_a.Set(0.0)
+                ll_a[0].Set(float(th["pitch_m"] * th["turns"]))
+                ll_a[1].Set(float(th["pitch_m"] * th["turns"] + 0.05))
+                track["lifting"] = True
                 hand.GetPrim().GetAttribute("physics:jointEnabled").Set(False)
             elif r["event"] == "on_thread":
                 # caught at the thread's start: the turn counted from the thread's end, the joint on again
                 track["u"] = 2 * math.pi * th["turns"]
+                lk_a.Set(float(lift_on[0]))
+                lc_a.Set(float(lift_on[2]))
+                ll_a[0].Set(float(lift_on[1][0]))
+                ll_a[1].Set(float(lift_on[1][1]))
                 target.Set(float(th["pitch_m"] * th["turns"]))
                 lock(False)
                 enabled.Set(True)
+            if track["lifting"] and height > th["pitch_m"] * th["turns"] + lo["clear_m"]:
+                enabled.Set(False)                                          # clear of the neck: free
+                track["lifting"] = False
+                log.append({"t": round(track["t"], 3), "event": "clear_of_neck", "u_deg": round(math.degrees(track["u"]), 1),
+                            "height_mm": round(height * 1000, 2)})
             if r["on"]:
                 lock(r["locked"])
                 if not r["locked"]:
@@ -358,7 +378,8 @@ def thread_test() -> dict:
               "broke_loose": math.radians(out["broke_0.45"]["u_deg"]) > seat,
               "pitch": abs(slope - want) < 0.05 * want,
               "off_thread": any(e["event"] == "off_thread" for e in log),
-              "lifted_off": lifted_mm > th["pitch_m"] * th["turns"] * 1000 + 5.0,
+              "rests_on_thread_end": abs(out["off"]["height_mm"] - th["pitch_m"] * th["turns"] * 1000) < 0.5,
+              "lifted_off": lifted_mm > th["pitch_m"] * th["turns"] * 1000 + 5.0 and any(e["event"] == "clear_of_neck" for e in log),
               "caught": any(e["event"] == "on_thread" for e in log),
               "seated": any(e["event"] == "seated" for e in log) and abs(out["closed_0.4"]["height_mm"]) < 0.5,
               "applied_0.4": applied is not None and abs(applied - 0.4) < 1e-6,

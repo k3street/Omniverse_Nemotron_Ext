@@ -666,6 +666,12 @@ if gr.get("cap"):
            "enabled": _jp.GetAttribute("physics:jointEnabled"), "target": _jp.GetAttribute(_th["height_target_attr"]),
            "lock_k": _jp.GetAttribute(_th["twist_lock"]["stiffness_attr"]), "lock_target": _jp.GetAttribute(_th["twist_lock"]["target_attr"]),
            "lock_n_m_per_deg": float(_th["twist_lock"]["n_m_per_deg"]), "locked": True, "target_now": 0.0,
+           "lift_k": _jp.GetAttribute(_th["lift_off"]["height_stiffness_attr"]),
+           "lift_c": _jp.GetAttribute(_th["lift_off"]["height_damping_attr"]),
+           "lift_lim": [_jp.GetAttribute(a) for a in _th["lift_off"]["height_limit_attrs"]], "clear_m": float(_th["lift_off"]["clear_m"]),
+           "lifting": False, "lift_k_on": float(_jp.GetAttribute(_th["lift_off"]["height_stiffness_attr"]).Get()),
+           "lift_c_on": float(_jp.GetAttribute(_th["lift_off"]["height_damping_attr"]).Get()),
+           "lift_lim_on": [float(_jp.GetAttribute(a).Get()) for a in _th["lift_off"]["height_limit_attrs"]],
            "th": _th, "state": {}, "u": 0.0, "yaw": None, "events": [], "last": {}, "contacts": None,
            "torque_max": 0.0, "u_max": 0.0, "lifted_m": 0.0,
            "kw": dict(turns=float(_th["turns"]), retention=float(_th["retention"]), run_n_m=float(_th["run_n_m"]),
@@ -722,14 +728,31 @@ def cap_step():
     r = _cap_law(C["state"], C["u"], tq, free_pose={"off_axis_m": float(np.hypot(rel[0], rel[1])),
                                                      "tilt_rad": float(np.arccos(np.clip(Rrel[2, 2], -1.0, 1.0))), "height_m": height}, **C["kw"])
     if r["event"] == "off_thread":
-        C["enabled"].Set(False)
+        # off the thread it rests on the thread's end and lifts off along the neck, its skirt round it: the joint
+        # kept, its height drive let go, the height's floor the thread's end - switched off, the cap fell 4 mm to the
+        # rim out of the fingers in the last stroke (2026-10-18)
+        cap_lock(False)
+        C["lift_k"].Set(0.0)
+        C["lift_c"].Set(0.0)
+        C["lift_lim"][0].Set(float(C["kw"]["pitch_m"] * C["kw"]["turns"]))
+        C["lift_lim"][1].Set(float(C["kw"]["pitch_m"] * C["kw"]["turns"] + 0.05))
+        C["lifting"] = True
     elif r["event"] == "on_thread":
         # caught at the thread's start: its turn counted from the thread's end, the joint on again (it draws the cap
         # onto the axis and upright, its height to the thread's start)
         C["u"] = 2 * np.pi * C["kw"]["turns"]
         cap_lock(False)
+        C["lift_k"].Set(float(C["lift_k_on"]))
+        C["lift_c"].Set(float(C["lift_c_on"]))
+        C["lift_lim"][0].Set(float(C["lift_lim_on"][0]))
+        C["lift_lim"][1].Set(float(C["lift_lim_on"][1]))
         C["target"].Set(float(C["kw"]["pitch_m"] * C["kw"]["turns"]))
         C["enabled"].Set(True)
+    if C["lifting"] and height > C["kw"]["pitch_m"] * C["kw"]["turns"] + C["clear_m"]:
+        C["enabled"].Set(False)                                         # clear of the neck: free
+        C["lifting"] = False
+        C["events"].append({"t": round(CLOCK[0], 3), "event": "clear_of_neck", "height_mm": round(height * 1000, 2)})
+        print(f"[cap] clear of the neck at {height * 1000:.1f} mm up", flush=True)
     if r["on"]:
         cap_lock(r["locked"])
         if not r["locked"]:

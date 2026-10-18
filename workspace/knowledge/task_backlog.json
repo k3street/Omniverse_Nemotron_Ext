@@ -2637,8 +2637,10 @@
    "curriculum_sources": [
     "nemotron_use_ladder"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-18",
+   "closed_why": "met (curriculum_intake 2026-10-18): aida_r5_lab_vial_open cap.pass = True"
   },
   {
    "id": "cur:scene:nemotron.ladder.pill_bottle.r2",
@@ -2767,7 +2769,7 @@
    "blocks": [
     "nemotron.ladder.pill_bottle.r4"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
     "nemotron_use_ladder"
@@ -3293,6 +3295,25 @@
    ],
    "status": "proposed",
    "first_seen": "2026-10-17"
+  },
+  {
+   "id": "nemotron_unpack_vial_v1",
+   "kind": "capability",
+   "status": "proposed",
+   "class": "pill_bottle",
+   "from_scene": "aida_r5_lab_pill_pack",
+   "title": "Unpack the pill vial one tablet at a time with the tweezers: the tips into the vial, a tablet out of it",
+   "description": "the user's task (2026-10-17) both ways: packed (aida_r5_lab_pill_pack PASS) and unpacked. The tweezers' tips reach ~45 mm past the hand's grip (55 mm from the hinge, the tips 100 mm out) - short of the floor of any common pharmacy vial: the 30-dram is 91 mm deep, the 6-dram 60 mm tall with a 22 mm neck (Calpac BVSC06 https://www.calpaclab.com/blue-pharmacy-vials-easy-snap-caps-blue-6-dram-22ml/psa-bvsc06; Fisher's 6-dram 63 x 22 mm), the 13-dram 63-70 mm with a 33 mm opening (Calpac AVRSC13). A person unpacks a vial by tipping it over a counting tray and picking the tablets there; tweezers go into a vial only for its top layer. So: (1) a pour - the opened vial tipped over a tray by the hand (a new interaction: small parts poured, each landing on the tray, none lost - small_parts_contact's drop rig extended), then (2) packing's tip stage on the tray (approach, look and correct, tip_wait) to a stand or a second vial. Alternatively the grip taken nearer the root (the sleeves from 40 mm: ~60 mm of reach) for a tablet near a fuller vial's top",
+   "success_measures": [
+    "the vial tipped over the tray: its tablets out on the tray, none off it",
+    "a tablet then taken from the tray by the tips (tip_wait held) and set on its place",
+    "UNPACK PASS: the vial empty, the tablets on the tray or placed"
+   ],
+   "related": [
+    "aida_r5_lab_pill_pack (packing, PASS 2026-10-18)",
+    "nemotron.ladder.pill_bottle.r4"
+   ],
+   "first_seen": "2026-10-18"
   }
  ]
 }

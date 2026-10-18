@@ -308,9 +308,11 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     if not options:
         return {"passed": False, "reason": f"no reachable, collision-free pinch over {tried} hand orientations: {why}",
                 "pinch": _jsonable(pinch), "rejections": why, "examples": examples}
-    # level closing first (within 0.15 of the levellest), then the least arm motion
+    # level closing first (within 0.15 of the levellest), then the least arm motion. A cap: within 0.05 - its skirt
+    # is 10 mm, and pads closing 22 % upward rode up it to the top edge and slid off it at the lift (2026-10-18)
     best_rise = min(o["rise"] for o in options)
-    options.sort(key=lambda o: (o["rise"] > best_rise + 0.15, o["cost"]))
+    rise_tol = float(task.get("rise_tolerance", 0.05 if task.get("kind") == "cap_turn" else 0.15))
+    options.sort(key=lambda o: (o["rise"] > best_rise + rise_tol, o["cost"]))
     # the place: the same grip over the destination, lifted, possibly turned
     # about the vertical through the grip (the piece stays upright)
     lift = float(task.get("lift_m", 0.03))

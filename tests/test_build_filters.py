@@ -409,3 +409,20 @@ def test_an_object_set_on_a_fixture_part_rests_on_its_top():
         fixture_top(st, "TabletStands/Post1", 4.74, 0.70)                    # beside the post
     with pytest.raises(SystemExit):
         fixture_top(st, "TabletStands/Post9", 4.70, 0.70)
+
+
+def test_a_cap_turn_grips_low_on_the_skirt_and_turns_past_the_thread(tmp_path):
+    from make_pill_kit import make_vial
+    from plan_er_grasp import _cap_turn_task
+    meta = make_vial(tmp_path / "vial.usda")
+    stage = Usd.Stage.CreateInMemory()
+    obj = UsdGeom.Xform.Define(stage, "/World/Objects/Vial")
+    obj.GetPrim().GetReferences().AddReference(str(tmp_path / "vial.usda"))
+    UsdGeom.XformCommonAPI(obj).SetTranslate(Gf.Vec3d(4.615, 0.66, 0.710))
+    task = _cap_turn_task(stage, obj.GetPrim(), UsdGeom.XformCache(), {}, np.array([0.0, 0.0, 0.002]))
+    th = meta["thread"]
+    skirt = meta["cap_h_m"] - 0.002
+    assert task["kind"] == "cap_turn" and abs(task["grip_width_m"] - meta["cap_d_m"]) < 1e-12
+    # 35 % up the skirt from its bottom (the cap seated), less the build's 2 mm drop
+    assert abs(task["grip_point"][2] - (0.710 + th["seat_z_m"] + 0.35 * skirt - 0.002)) < 1e-9
+    assert task["turn_deg"] > 360.0 * th["turns"] and abs(task["pitch_m"] - th["pitch_m"]) < 1e-12

@@ -1,5 +1,5 @@
 {
- "at": "2026-10-18T02:06:30",
+ "at": "2026-10-18T05:59:01",
  "superseded_revisions": [
   {
    "occupation": "laboratory_materials_handler",
@@ -2037,7 +2037,7 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "planner:cap_turn",
+   "next": null,
    "requirements": [
     {
      "id": "interaction:cap_thread",
@@ -2054,8 +2054,8 @@
     {
      "id": "planner:cap_turn",
      "step": "planner",
-     "met": false,
-     "evidence": "aida_r5_lab_vial_open cap.pass = False"
+     "met": true,
+     "evidence": "aida_r5_lab_vial_open cap.pass = True"
     },
     {
      "id": "scene:nemotron.ladder.pill_bottle.r2",
@@ -2113,7 +2113,7 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "planner:cap_turn",
+   "next": "scene:nemotron.ladder.pill_bottle.r4",
    "requirements": [
     {
      "id": "asset:pill bottle",
@@ -2148,8 +2148,8 @@
     {
      "id": "planner:cap_turn",
      "step": "planner",
-     "met": false,
-     "evidence": "aida_r5_lab_vial_open cap.pass = False"
+     "met": true,
+     "evidence": "aida_r5_lab_vial_open cap.pass = True"
     },
     {
      "id": "scene:nemotron.ladder.pill_bottle.r4",
@@ -2261,16 +2261,9 @@
  ],
  "open": [
   {
-   "id": "cur:planner:cap_turn",
-   "priority": 222,
-   "actionable": true,
-   "title": "the cap turn planner",
-   "blocks": 2
-  },
-  {
    "id": "cur:scene:nemotron.ladder.pill_bottle.r4",
    "priority": 436,
-   "actionable": false,
+   "actionable": true,
    "title": "a scene for pill_bottle rung 4: the bottle packed with a counted set of pills and its cap screwed back on until it seats",
    "blocks": 1
   },
