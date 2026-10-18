@@ -547,6 +547,10 @@ def _cap_turn_task(stage, obj, xc, gp, drop) -> dict:
     # gripped low on the skirt (35 % up by default): pads closing with any rise ride up it, and at mid-height they
     # reached the top edge and slid off at the lift (2026-10-18)
     grip = np.asarray(M.Transform(Gf.Vec3d(0.0, 0.0, skirt * float(gp.get("grip_height_frac", 0.35)))), float) - drop
+    if gp.get("cap_start") == "on_neck":
+        # the cap set loose on the neck at the thread's start (the replay puts it there; grasp_replay.cap.start), a
+        # pitch a turn above its seat: screwed on from there
+        grip = grip + np.array([0.0, 0.0, float(th["pitch_m"]) * float(th["turns"]) + 0.0005])
     turn = float(gp.get("turn_deg", 360.0 * float(th["turns"]) + float(gp.get("past_thread_deg", 20.0))))
     return {"kind": "cap_turn", "grip_point": grip.tolist(), "grip_width_m": float(meta["cap_d_m"]),
             "object_base_z": float(grip[2]) - skirt / 2.0, "object_height_m": skirt, "place_point": grip.tolist(),

@@ -1,0 +1,63 @@
+{
+ "extends": "aida_r5_lab_vial_open.json",
+ "name": "aida_r5_lab_vial_close",
+ "purpose": "the user's task (2026-10-17), the vial closed again: the cap set on the neck at the thread's start, the R5's left hand screws it on in strokes until it seats - the torque it closes it with is what holds it next time (behaviors.cap_thread); pill_bottle rung 4's closing",
+ "grasp_plan": {
+  "task": "cap_turn",
+  "tripod": true,
+  "stroke_deg": 80.0,
+  "regrip_rise_m": 0.012,
+  "lift_m": 0.04,
+  "pregrasp_height_m": 0.05,
+  "open_clearance_m": 0.01,
+  "curl_rad": 1.5,
+  "close_s": 1.0,
+  "release_s": 0.5,
+  "stroke_hold_s": 0.2,
+  "hold_s": 1.5,
+  "reach": "cumotion",
+  "cumotion_seeds": 8,
+  "why": "a tripod low on the cap's skirt, turned clockwise (seen from above) about the vial's axis 80 deg a stroke - the whole thread and 20 deg more, the last of it into the seat, where the closing torque the hand holds is the closure's new application torque - then let go and the hand withdrawn",
+  "turn_deg": -380.0,
+  "cap_start": "on_neck",
+  "retreat_m": 0.05
+ },
+ "grasp_replay": {
+  "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_lab_vial_close/grasp_plan/targets.npz",
+  "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+  "lift_offset_m": 0.0,
+  "control_hz": 30,
+  "finger_q2_coefficient": 1.05851325,
+  "hold_s": 0.0,
+  "why": "the planned cap turn, closing (plan_er_grasp.py, task cap_turn, turn_deg < 0)",
+  "controller": "homehero_r5_action",
+  "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)",
+  "hand_model": {
+   "kind": "ability_hand",
+   "calibration": "config/ability_hand_calibration.json",
+   "collision_voltage": 8.0,
+   "postcontact_voltage": 0.0,
+   "grip_speed": 0.3,
+   "why": "the halt (word 007) set above the force band, 8.0 V, so the position loop governs the squeeze: at the 3.0 V default the index stalls at about 3 N, the band's floor, and could tighten no further. Driven by the grip command alone this pinch failed every way: at 3.0 V the thumb flicked the 14 g pawn out before it stalled; at 1.0 V with 0.8 V post-contact the digits crept closed during the carry and rolled it out at 61 deg; at 1.0 V with 0 V the stored 2.4 N drained in half a second of lift"
+  },
+  "grip": {
+   "mode": "force_band",
+   "min_n": 2.0,
+   "max_n": 5.0,
+   "tightening_step_rad": 0.002,
+   "unloading_step_rad": 0.002,
+   "digits": [
+    "index",
+    "middle",
+    "thumb"
+   ],
+   "why": "a twisting grip: the closure's hold of 0.15 N m at the cap's 22 mm radius is 6.8 N round its rim; the strokes broke it loose with the digits at 3-4 N. The floor at 2 N: in a tripod the thumb opposes index and middle at an angle and reads below them (2.5-2.9 N against 3.2-4.1) - with a 3 N floor the band never read 'loaded' and the lift that takes the freed cap away aborted (2026-10-18); under the fingertip's ~8 N stall"
+  },
+  "cap": {
+   "object": "Vial",
+   "start": "on_neck",
+   "applied_n_m": 0.3,
+   "why": "the cap set loose on the neck at the thread's start (as a hand sets it there before turning it), caught by the thread's law and screwed on; the 0.3 N m is only the law's starting record - the take's own closing torque replaces it at the seat"
+  }
+ }
+}

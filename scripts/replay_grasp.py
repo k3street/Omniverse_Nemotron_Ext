@@ -677,6 +677,16 @@ if gr.get("cap"):
            "kw": dict(turns=float(_th["turns"]), retention=float(_th["retention"]), run_n_m=float(_th["run_n_m"]),
                       pitch_m=float(_th["pitch_m"]), applied_n_m=float(_cc.get("applied_n_m", 0.6))),
            "idx": np.arange(1, dtype=np.int32)}
+    if _cc.get("start") == "on_neck":
+        # the cap set loose on the neck at the thread's start, not yet on the thread: the joint off, the cap a pitch a
+        # turn (and 0.5 mm) over its seat; the law catches it there (clear: it came from above) and the hand screws it on
+        CAP["enabled"].Set(False)
+        CAP["state"].update(on=False, clear=True)
+        _bp0 = body_pose(CAP["body"])
+        _cv0 = sim_view.create_rigid_body_view(CAP["cap"])
+        _p0 = _bp0[0] + quat_to_R(_bp0[1]) @ np.array([0.0, 0.0, _th["seat_z_m"] + _th["pitch_m"] * _th["turns"] + 0.0005])
+        _cv0.set_transforms(np.asarray([[*_p0, *_bp0[1][1:], _bp0[1][0]]], np.float32), np.arange(1, dtype=np.int32))
+        print(f"[cap] set on the neck at the thread's start, {(_th['pitch_m'] * _th['turns'] + 0.0005) * 1000:.2f} mm over its seat", flush=True)
     print(f"[cap] {_cc['object']}: thread {_th['turns'] * 360:.0f} deg at {_th['pitch_m'] * 1000:.2f} mm a turn; seated, applied at "
           f"{CAP['kw']['applied_n_m']} N m - held to {CAP['kw']['retention'] * CAP['kw']['applied_n_m']:.2f} N m", flush=True)
 
