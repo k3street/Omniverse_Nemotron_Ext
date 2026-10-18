@@ -110,8 +110,13 @@
    "needs": "a right-arm pinch of a sheet held through the left hand's cut (bimanual)"
   },
   "tool_pinch": {
+   "module": "pinch_place_planner",
    "what": "a small tool (tweezers) held in a precision grip between thumb and fingers, its arms squeezed by the hand",
-   "needs": "a precision-grip planner on a slim tool: the thumb against the index and middle on the arms, the squeeze closing the tips (the pinch planner on the tool's arms)"
+   "proven_by": {
+    "scene": "aida_r5_lab_pill_pack",
+    "record": "pass"
+   },
+   "how": "tool_pick (plan_er_grasp._tool_pick_task): a tripod pinch_lift - thumb against index and middle on the tweezers' cushion grips, the closing axis held to their opening axis, the finger row along them, the middle at its own flexion level with the index on the face; the cradle and the tool's own cells obstacles for the reach"
   },
   "tool_tip_place": {
    "what": "a held tool's tips brought onto a small object, closed on it, carried and opened over a place",
@@ -120,6 +125,14 @@
   "cap_turn": {
    "what": "the hand turns a cap on a bottle the other hand (or a holder) keeps still, and lifts it off",
    "needs": "a wrist-roll stage pinching the cap, regrasping between strokes; the bottle held by a fitted holder or the right hand"
+  },
+  "grasp_preparation": {
+   "what": "a tool repositioned before its working grasp (slid, pivoted on its support, placed in a fixture, regrasped) when the grasp a task needs is not accessible",
+   "needs": "preparation primitives (slide_on_support, pivot_on_support, place_in_fixture, supported_regrasp) planned against the grasp the use needs; HomeHero's homehero.grasp_preparation.v1"
+  },
+  "place_tool": {
+   "what": "a held tool set down on a requested support, stable, and let go",
+   "needs": "the pinch planner's place for a held tool (pinch_place with the tool as the target and a station/fixture destination)"
   }
  },
  "measures": {
@@ -514,9 +527,10 @@
    "planners": [
     "tool_pinch"
    ],
-   "scene": null,
+   "scene": "aida_r5_lab_pill_pack",
    "asset": "tweezers",
-   "source": "nemotron_user_task"
+   "source": "nemotron_user_task",
+   "record": "pass"
   },
   "nemotron.ladder.tweezers.r2": {
    "interactions": [
@@ -541,6 +555,67 @@
    "scene": null,
    "asset": "tweezers",
    "source": "nemotron_user_task"
+  },
+  "homehero.interaction.tweezers_115.acquire_from_fixture": {
+   "interactions": [
+    "rigid_contact",
+    "tweezer_flex"
+   ],
+   "planners": [
+    "tool_pinch",
+    "place_tool"
+   ],
+   "scene": "aida_r5_lab_pill_pack",
+   "record": "move.pass",
+   "why": "the tweezers taken from the cradle and held (aida_r5_lab_pill_pack passes the acquisition: tripod on the cushion grips, 5.5 cm up, 4.5 mm drift); HomeHero's completion also asks for a stable supported placement after the carry - not in the take yet"
+  },
+  "homehero.interaction.tweezers_115.operate_from_fixture": {
+   "interactions": [
+    "tweezer_flex",
+    "small_parts_contact"
+   ],
+   "planners": [
+    "tool_pinch",
+    "tool_tip_place"
+   ],
+   "scene": null,
+   "why": "the tablet stage of the pill-packing task (pill_bottle rung 3): tip gap, tip force and the tablet moved are its evidence"
+  },
+  "homehero.interaction.tweezers_115.prepare_flat_pickup": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "grasp_preparation",
+    "tool_pinch"
+   ],
+   "scene": null,
+   "why": "tweezers lying flat: no pinch across the arms until they are slid, pivoted or put in a fixture"
+  },
+  "homehero.interaction.tweezers_115.prepare_and_use": {
+   "interactions": [
+    "rigid_contact",
+    "tweezer_flex",
+    "small_parts_contact"
+   ],
+   "planners": [
+    "grasp_preparation",
+    "tool_pinch",
+    "tool_tip_place"
+   ],
+   "scene": null
+  },
+  "homehero.interaction.drill_1.prepare_operating_grasp": {
+   "interactions": [
+    "rigid_contact"
+   ],
+   "planners": [
+    "grasp_preparation",
+    "tool_grip",
+    "place_tool"
+   ],
+   "scene": null,
+   "why": "the drill standing with its trigger out of reach: the drill scenes start it trigger-accessible (no preparation in them)"
   }
  },
  "occupations": {

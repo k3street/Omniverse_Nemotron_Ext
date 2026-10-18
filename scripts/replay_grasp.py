@@ -214,7 +214,10 @@ if BIMANUAL and spec.get("finger_push"):
 # before the simulation starts, and its contact view after - one test for both (the
 # views were made for an appliance's bodies without the report: all four came back
 # empty, 2026-10-16)
-ALL_BODY_CONTACTS = (spec.get("grasp_plan") or {}).get("task") in ("loop_grip", "button_press", "door_open") or bool(gr.get("door"))
+ALL_BODY_CONTACTS = (spec.get("grasp_plan") or {}).get("task") in ("loop_grip", "button_press", "door_open", "tool_pick") or bool(gr.get("door"))
+# a grip held on several bodies of one articulated object (a scissors' two halves, a tweezers' two arms): the
+# hand's force on it is the sum over its bodies - the tweezers' root, its first body, carries none of the pinch
+GRIP_ON_ALL_BODIES = (spec.get("grasp_plan") or {}).get("task") in ("loop_grip", "tool_pick")
 if HM and not CLOTH:
     # the grip force each digit puts on the target, read like HomeHero's
     # object contact sensor (a sensor on the object, filtered by hand link)
@@ -247,6 +250,7 @@ if _plan_json.exists() and json.loads(_plan_json.read_text()).get("collision_exc
         app.close()
         raise SystemExit(2)
 
+ROBOT_LINKS = []                                          # the arm and hand links the collision measure watches
 if True:
     # (every take: the robot's collisions are a measure - collision_measure.py; --contacts adds the per-tick pair log)
     # PhysX's contact report on every left-arm and hand link: which actor
@@ -259,6 +263,7 @@ if True:
                                                  or (BIMANUAL and q.GetName().startswith(("amber_right_", "psyonic_right_")))):
             q.AddAppliedSchema("PhysxContactReportAPI")
             q.CreateAttribute("physxContactReport:threshold", Sdf.ValueTypeNames.Float).Set(0.0)
+            ROBOT_LINKS.append(q.GetPath().pathString)
             n_rep += 1
     print(f"[contacts] reporting on {n_rep} links", flush=True)
 
@@ -714,6 +719,7 @@ FINGERS = ("index", "middle", "ring", "pinky")
 HAND = None
 HAND_R = None
 CONTACTS = None
+ROBOT_NET = ROBOT_TGT = ROBOT_SELF = None
 CONTACTS_MORE = []
 if HM:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -756,6 +762,16 @@ if HM:
         if CLOTH:
             raise RuntimeError("a deformable target has no rigid contact view")
         CONTACTS = sim_view.create_rigid_contact_view(TARGET_RB.GetPath().pathString, filter_patterns=HAND_LINKS)
+        try:
+            ROBOT_NET = sim_view.create_rigid_contact_view(ROBOT_LINKS)
+            # a list of sensors takes a filter list per sensor
+            ROBOT_TGT = sim_view.create_rigid_contact_view(ROBOT_LINKS, filter_patterns=[list(BODY_PATHS.values())] * len(ROBOT_LINKS))
+            # and the robot itself: a finger on a finger is not a collision (the tripod's index and thumb met: 8 'episodes')
+            _rb = [q.GetPath().pathString for q in Usd.PrimRange(stage.GetPrimAtPath("/World/Robot")) if q.HasAPI(UsdPhysics.RigidBodyAPI)]
+            ROBOT_SELF = sim_view.create_rigid_contact_view(ROBOT_LINKS, filter_patterns=[_rb] * len(ROBOT_LINKS))
+        except Exception as e:  # noqa: BLE001 - the measure stands down, the take goes on
+            print(f"[collisions] no robot contact views ({type(e).__name__}: {e}): the robot's collisions go unmeasured", flush=True)
+            ROBOT_NET = ROBOT_TGT = ROBOT_SELF = None
         if ALL_BODY_CONTACTS:
             # every body of the object, logged body by body: the scissors' index is in the
             # OTHER half's loop (the target body is the thumb's half); a microwave's index
@@ -785,6 +801,24 @@ ROBOT_TOUCHES = []                                       # each tick's partners 
 ROBOT_ANY = [0]                                          # ticks the robot touched anything (the target too): the report is live
 
 
+def robot_touches(threshold_n: float = 0.05) -> list[str]:
+    """The arm and hand links touching anything but the target this tick: each link's net contact
+    force (a tensor contact view, unfiltered) less its force from the target's bodies (a view filtered
+    by them). PhysX's contact-event report read nothing in these takes (the live check: 0 robot contacts
+    with the fingers on the tweezers, 2026-10-17); the views are what reads the hand's grip."""
+    if ROBOT_NET is None:
+        return []
+    net = np.asarray(ROBOT_NET.get_net_contact_forces(DT), float).reshape(-1, 3)
+    tgt = np.asarray(ROBOT_TGT.get_contact_force_matrix(DT), float).reshape(len(ROBOT_LINKS), -1, 3).sum(1) \
+        if ROBOT_TGT is not None else np.zeros_like(net)
+    slf = np.asarray(ROBOT_SELF.get_contact_force_matrix(DT), float).reshape(len(ROBOT_LINKS), -1, 3).sum(1) \
+        if ROBOT_SELF is not None else np.zeros_like(net)
+    if np.linalg.norm(net, axis=1).max(initial=0.0) > threshold_n:
+        ROBOT_ANY[0] += 1
+    other = np.linalg.norm(net - tgt - slf, axis=1)
+    return sorted(ROBOT_LINKS[i].split("/")[-1] for i in np.nonzero(other > threshold_n)[0])
+
+
 def link_contacts(top=6):
     """The robot links' contacts this tick: the top pairs (logged with --contacts) and, every tick, what the
     robot touches that is neither itself nor the target (the collision measure)."""
@@ -795,11 +829,7 @@ def link_contacts(top=6):
     for h in headers:
         if int(h.type) != 2:
             full.append((str(PhysicsSchemaTools.intToSdfPath(h.actor0)), str(PhysicsSchemaTools.intToSdfPath(h.actor1))))
-    ROBOT_TOUCHES.append(_partners(full, "/World/Robot", [str(target.GetPath())]))
-    # the report is live if the robot touches anything at all (the target in its grip): a zero count
-    # from a dead report would read as a clean take
-    if any(a.startswith("/World/Robot/") != b.startswith("/World/Robot/") for a, b in full):
-        ROBOT_ANY[0] += 1
+    ROBOT_TOUCHES.append(robot_touches())
     pairs = {}
     for h in headers:
         if int(h.type) == 2:                                  # lost
@@ -854,8 +884,8 @@ def digit_forces():
         return None
     m = np.asarray(CONTACTS.get_contact_force_matrix(DT), float).reshape(-1, 3)
     n = np.linalg.norm(m, axis=1)
-    if (spec.get("grasp_plan") or {}).get("task") == "loop_grip":
-        for cv_ in CONTACTS_MORE:                               # the object's other bodies (a loop grip's other half)
+    if GRIP_ON_ALL_BODIES:
+        for cv_ in CONTACTS_MORE:                               # the object's other bodies (a loop grip's other half, a tweezers' arm)
             n = n + np.linalg.norm(np.asarray(cv_.get_contact_force_matrix(DT), float).reshape(-1, 3), axis=1)
     per = [round(float(n[2 * k] + n[2 * k + 1]), 3) for k in range(5)]
     return {"index": per[0], "middle": per[1], "ring": per[2], "pinky": per[3], "thumb": per[4],
@@ -1300,7 +1330,8 @@ GB = {"min_n": float(GRIP.get("min_n", 3.0)), "max_n": float(GRIP.get("max_n", 1
       "contact_n": float(GRIP.get("contact_n", 0.5)), "load_ticks": int(GRIP.get("load_ticks", 6)),
       "digits": GRIP.get("digits", ["index", "thumb"])}
 grip_loaded = {"ticks": 0}
-GRIP_DOF = {"index": dof["psyonic_left_index_q1"], "thumb": dof["psyonic_left_thumb_q2"]}
+GRIP_DOF = {"index": dof["psyonic_left_index_q1"], "middle": dof["psyonic_left_middle_q1"],    # a tripod's middle beside the index
+            "thumb": dof["psyonic_left_thumb_q2"]}
 grip_cmd = {}
 
 for tick, (plan_i, row, stage_name) in enumerate(schedule()):
@@ -1854,7 +1885,8 @@ if DEST and DEST.get("kind") == "region":
 # (HomeHero's collision_violation_count: the episodes)
 from collision_measure import tally as _tally
 result["collisions"] = dict(_tally(ROBOT_TOUCHES), robot_contact_ticks=ROBOT_ANY[0], report_live=ROBOT_ANY[0] > 0)
-result["collision_violation_count"] = result["collisions"]["episodes"]
+# unmeasured is not clean: with no robot contact read at all (not even its grip) the count is None
+result["collision_violation_count"] = result["collisions"]["episodes"] if result["collisions"]["report_live"] else None
 # a container's seal, by its structure: a target with no joints is one rigid body - its cap or lid
 # cannot open (HomeHero's container_sealed criterion; a jointed lid needs its joint's state read)
 _tjs = [q.GetName() for q in Usd.PrimRange(target) if q.IsA(UsdPhysics.Joint)]

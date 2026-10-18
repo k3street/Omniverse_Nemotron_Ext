@@ -459,6 +459,92 @@ def _door_open_task(stage, obj, xc, d, gp, drop, poses_path=None):
             **{k: gp[k] for k in ("approach_m", "close_s", "hold_s", "rrt_timeout_s") if k in gp}}
 
 
+def gprim_points(q, M) -> list[list[float]]:
+    """A shape's points in world: a mesh's vertices, a cube's corners, a cylinder's two end rings (16 a
+    ring) - generated tools and tablets are cubes and cylinders, and a cloud of meshes alone was empty
+    for them (the tweezers, 2026-10-17)."""
+    import math
+    from pxr import Gf, UsdGeom
+    if q.IsA(UsdGeom.Mesh):
+        return [list(M.Transform(Gf.Vec3d(*v))) for v in (UsdGeom.Mesh(q).GetPointsAttr().Get() or [])]
+    if q.IsA(UsdGeom.Cube):
+        h = float(UsdGeom.Cube(q).GetSizeAttr().Get() or 2.0) / 2
+        return [list(M.Transform(Gf.Vec3d(x, y, z))) for x in (-h, h) for y in (-h, h) for z in (-h, h)]
+    if q.IsA(UsdGeom.Cylinder):
+        c = UsdGeom.Cylinder(q)
+        r, hh, ax = float(c.GetRadiusAttr().Get()), float(c.GetHeightAttr().Get()) / 2, str(c.GetAxisAttr().Get() or "Z")
+        out = []
+        for z in (-hh, hh):
+            for k in range(16):
+                a, b = r * math.cos(2 * math.pi * k / 16), r * math.sin(2 * math.pi * k / 16)
+                v = {"X": (z, a, b), "Y": (a, z, b), "Z": (a, b, z)}[ax]
+                out.append(list(M.Transform(Gf.Vec3d(*v))))
+        return out
+    return []
+
+
+def tool_grip_frame(meta: dict, grip_from_root_m: float):
+    """A generated tweezers' grip in its own frame (make_pill_kit.py's er:generated): the point on the
+    midline grip_from_root_m from the root's far end, the opening axis (+z) and the arms' outer width there."""
+    import math
+    import numpy as np
+    spr = meta["spring"]
+    th = math.radians(spr["rest_angle_deg"])
+    thick = 0.001 if "thick_m" not in meta else float(meta["thick_m"])
+    hinge_off = thick / 2 + 0.0002
+    root = float(meta.get("root_m", 0.015))
+    s_ = float(grip_from_root_m)
+    outer = 2 * (hinge_off + s_ * math.sin(th)) + thick
+    sl = meta.get("grip_sleeve")
+    if sl and sl["from_m"] <= s_ <= sl["to_m"]:
+        outer += 2 * float(sl["thick_m"])                    # over the cushion grips
+    return np.array([root + s_ * math.cos(th), 0.0, 0.0]), np.array([0.0, 0.0, 1.0]), outer
+
+
+def _tool_pick_task(stage, tool, xc, gp, drop) -> dict:
+    """A slim tool (generated tweezers) taken in a precision pinch across its arms at a point along them:
+    a pinch_lift whose closing axis is held to the tool's opening axis (the planner's closing-axis rule)."""
+    import numpy as np
+    from pxr import Gf, Usd
+    root = next((q for q in Usd.PrimRange(tool) if q.HasCustomDataKey("er:generated")), None)
+    if root is None:
+        raise SystemExit("tool_pick: the target is not a generated tool (no er:generated)")
+    meta = json.loads(root.GetCustomDataByKey("er:generated"))
+    p_loc, ax_loc, width = tool_grip_frame(meta, float(gp.get("grip_from_root_m", 0.055)))
+    M = xc.GetLocalToWorldTransform(root)
+    grip = np.asarray(M.Transform(Gf.Vec3d(*p_loc)), float) - drop
+    axis = np.asarray(M.TransformDir(Gf.Vec3d(*ax_loc)), float)
+    axis /= np.linalg.norm(axis)
+    along = np.asarray(M.TransformDir(Gf.Vec3d(1.0, 0.0, 0.0)), float)       # the arms' length, root to tips
+    along /= np.linalg.norm(along)
+    return {"kind": "pinch_lift", "grip_point": grip.tolist(), "grip_width_m": float(width),
+            "cloth_normal": axis.tolist(), "closing_axis_tolerance_deg": float(gp.get("closing_axis_tolerance_deg", 10.0)),
+            "object_base_z": float(grip[2]) - 0.0045, "object_height_m": 0.009, "place_point": grip.tolist(),
+            "lift_mode": gp.get("lift_mode", "palm"), "tripod": bool(gp.get("tripod", True)),
+            "finger_row_axis": along.tolist() if gp.get("tripod", True) else None,
+            "finger_row_tolerance_deg": float(gp.get("finger_row_tolerance_deg", 25.0)),
+            "tool": {"asset_id": meta.get("asset_id"), "grip_from_root_m": float(gp.get("grip_from_root_m", 0.055)),
+                                                               "opening_axis": axis.tolist()},
+            **{k: gp[k] for k in ("lift_m", "close_s", "hold_s", "pregrasp_height_m", "open_clearance_m", "curl_rad",
+                                  "reach", "cumotion_seeds", "staging_back_m", "rrt_timeout_s") if k in gp}}
+
+
+def fixture_obstacles(stage, bc) -> list[dict]:
+    """The scene's own fixtures (/World/Fixtures: a cradle, a rail, a board), each collider its own box: a plan
+    that passes through one collides in PhysX (the tweezers' cradle was not in the plan, 2026-10-17)."""
+    from pxr import Usd, UsdPhysics
+    root = stage.GetPrimAtPath("/World/Fixtures")
+    out = []
+    if not root:
+        return out
+    for q in Usd.PrimRange(root):
+        if q.HasAPI(UsdPhysics.CollisionAPI):
+            r = bc.ComputeWorldBound(q).ComputeAlignedRange()
+            out.append(dict(id=f"fixture:{q.GetParent().GetName()}:{q.GetName()}", min=[float(v) for v in r.GetMin()],
+                            max=[float(v) for v in r.GetMax()]))
+    return out
+
+
 def station_obstacles(stage, bc) -> list[dict]:
     """Every station of a generated environment (make_lab_env.py's er:station
     prims: benches, a bin, a desk), each collider part its own box - its parts
@@ -563,9 +649,8 @@ def main() -> int:
         # a cloth: where it came to rest in PhysX (settle_cloth.py), not the flat sheet it was placed as
         pts = np.load(settled)[target_obj.GetName()].tolist()
     for q in ([] if cloth else Usd.PrimRange(target)):
-        if q.IsA(UsdGeom.Mesh) and q.GetName() != "simMesh":
-            M = xc.GetLocalToWorldTransform(q)
-            pts += [list(M.Transform(Gf.Vec3d(*v))) for v in UsdGeom.Mesh(q).GetPointsAttr().Get()]
+        if q.GetName() != "simMesh":
+            pts += gprim_points(q, xc.GetLocalToWorldTransform(q))
     # the build sets every object down 2 mm above the support and the replay
     # settles it first, so the planned geometry is 2 mm high (measured: the
     # pinch skimmed the pawn's crown); planned against the settled pose
@@ -604,6 +689,7 @@ def main() -> int:
         otop = float(bc.ComputeWorldBound(oprim).ComputeAlignedRange().GetMax()[2])
         obstacles += [dict(b, id=f"{oprim.GetName()}:{b['id']}") for b in support_boxes(mesh_samples(oprim, otop), otop)]
     obstacles += station_obstacles(stage, bc)
+    obstacles += fixture_obstacles(stage, bc)
     tpath = target.GetPath().pathString
     obstacles_all = []
     for p in objs:
@@ -779,6 +865,22 @@ def main() -> int:
                 "place_point": grip.tolist(), "lift_mode": gp.get("lift_mode", "palm"), "corner": corner.tolist(),
                 **{k: gp[k] for k in ("lift_m", "lift_out_xy", "after_lift_xy", "close_s", "hold_s", "pregrasp_height_m", "open_clearance_m", "curl_rad",
                                       "reach", "cumotion_seeds", "staging_back_m", "rrt_timeout_s") if k in gp}}
+    if gp.get("task") == "tool_pick":
+        task = _tool_pick_task(stage, target_obj, xc, gp, DROP)
+        # the tool is the reach's to clear but where the fingers take it: its points in 1 cm cells,
+        # none within free_r of the grip; dropped once it is in the hand (the pinch planner drops held:)
+        # - the reach swept the thumb through the tweezers at 114 N and flung them out of the cradle (2026-10-17)
+        free_r, cell = float(gp.get("grip_free_radius_m", 0.02)), 0.01
+        g_ = np.asarray(task["grip_point"], float)
+        cells = {}
+        for q_ in np.asarray(pts, float) - DROP:
+            if np.linalg.norm(q_ - g_) < free_r:
+                continue
+            cells.setdefault(tuple(np.floor(q_ / cell).astype(int)), []).append(q_)
+        for k_, members in cells.items():
+            m_ = np.asarray(members)
+            obstacles.append(dict(id=f"held:{k_[0]}_{k_[1]}_{k_[2]}", min=(m_.min(0) - 0.003).tolist(), max=(m_.max(0) + 0.003).tolist()))
+        task["held_obstacle_boxes"] = len(cells)
     if gp.get("task") == "tool_grip":
         task = _tool_grip_task(stage, target_obj, xc, d, gp, DROP)
         # the index's strength: a finger's stall torque at the hand's collision

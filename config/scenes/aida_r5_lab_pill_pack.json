@@ -1,0 +1,246 @@
+{
+ "extends": "aida_r5_lab_bench_transfer.json",
+ "name": "aida_r5_lab_pill_pack",
+ "purpose": "the user's task (2026-10-17): a pill vial packed one tablet at a time with tweezers. Stage 1 here: the R5 takes the tweezers out of their cradle in a precision pinch across the arms and lifts them (tweezers rung 1); the tablets and the open vial wait beside them for the tool-tip stages",
+ "environment": {
+  "usd": "~/Omniverse_Nemotron_Ext/workspace/generated_scenes/sterile_materials_lab_v1/lab.usda",
+  "prim": "/Root",
+  "support": "/Root/Stations/ReceivingBench/Top",
+  "deactivate": [],
+  "attribute_overrides": {},
+  "why": "the generated laboratory (scripts/make_lab_env.py - run it first): benches at the dining table's measured top (0.708 m) and front edge, where the R5's grasps and place pass; the open Euro-container bin and the operator desk",
+  "fixtures": [
+   {
+    "name": "TweezerCradle",
+    "position": [
+     4.505,
+     0.74,
+     0.708
+    ],
+    "color": [
+     0.55,
+     0.57,
+     0.6
+    ],
+    "physics": {
+     "static_friction": 0.6,
+     "dynamic_friction": 0.5
+    },
+    "parts": [
+     {
+      "name": "RootPost",
+      "size": [
+       0.006,
+       0.02,
+       0.045
+      ],
+      "offset": [
+       -0.045,
+       0.0,
+       0.0225
+      ]
+     },
+     {
+      "name": "RootWallA",
+      "size": [
+       0.006,
+       0.002,
+       0.006
+      ],
+      "offset": [
+       -0.045,
+       0.0035,
+       0.048
+      ]
+     },
+     {
+      "name": "RootWallB",
+      "size": [
+       0.006,
+       0.002,
+       0.006
+      ],
+      "offset": [
+       -0.045,
+       -0.0035,
+       0.048
+      ]
+     },
+     {
+      "name": "TipPost",
+      "size": [
+       0.006,
+       0.03,
+       0.045
+      ],
+      "offset": [
+       0.058,
+       0.0,
+       0.0225
+      ]
+     },
+     {
+      "name": "TipWallA",
+      "size": [
+       0.006,
+       0.002,
+       0.006
+      ],
+      "offset": [
+       0.058,
+       0.0095,
+       0.048
+      ]
+     },
+     {
+      "name": "TipWallB",
+      "size": [
+       0.006,
+       0.002,
+       0.006
+      ],
+      "offset": [
+       0.058,
+       -0.0095,
+       0.048
+      ]
+     }
+    ],
+    "why": "two posts holding the tweezers on edge 45 mm up (the open fingers reach below the pinch: at 25 mm they met the bench), one at the root, one at the tips' end - the 10 cm between them free for the hand (a post 28 mm from the grip met the open fingers); walls either side of each post keep them standing"
+   }
+  ]
+ },
+ "objects": [
+  {
+   "name": "Tweezers",
+   "asset_id": "tweezers_115",
+   "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/tweezers_115/tweezers_115.usda",
+   "category": "articulated_generated",
+   "xy": [
+    4.455,
+    0.74
+   ],
+   "target": true,
+   "label": "the tweezers",
+   "hang": {
+    "point": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "at": [
+     4.455,
+     0.74,
+     0.7579999999999999
+    ],
+    "rpy_deg": [
+     90.0,
+     0.0,
+     0.0
+    ]
+   },
+   "why": "make_pill_kit.py's 115 mm tweezers (spring arms proved on the rig) on edge in the cradle, root toward -x, tips toward +x"
+  },
+  {
+   "name": "Vial",
+   "asset_id": "pill_vial",
+   "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/pill_vial/pill_vial.usda",
+   "category": "generated",
+   "xy": [
+    4.615,
+    0.66
+   ],
+   "deactivate": [
+    "Cap"
+   ],
+   "label": "the open pill vial",
+   "why": "the 30-dram vial standing open (its cap off) for the tablets"
+  },
+  {
+   "name": "Tablet1",
+   "asset_id": "tablet",
+   "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/tablet/tablet.usda",
+   "category": "generated",
+   "xy": [
+    4.57,
+    0.84
+   ],
+   "label": "a tablet"
+  },
+  {
+   "name": "Tablet2",
+   "asset_id": "tablet",
+   "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/tablet/tablet.usda",
+   "category": "generated",
+   "xy": [
+    4.6,
+    0.84
+   ],
+   "label": "a tablet"
+  },
+  {
+   "name": "Tablet3",
+   "asset_id": "tablet",
+   "usd": "~/Omniverse_Nemotron_Ext/workspace/asset_library/tablet/tablet.usda",
+   "category": "generated",
+   "xy": [
+    4.585,
+    0.87
+   ],
+   "label": "a tablet"
+  }
+ ],
+ "destination": null,
+ "grasp_plan": {
+  "task": "tool_pick",
+  "grip_from_root_m": 0.055,
+  "closing_axis_tolerance_deg": 10.0,
+  "lift_m": 0.05,
+  "pregrasp_height_m": 0.05,
+  "open_clearance_m": 0.008,
+  "curl_rad": 1.5,
+  "close_s": 1.0,
+  "hold_s": 1.5,
+  "reach": "cumotion",
+  "cumotion_seeds": 8,
+  "why": "a precision pinch, thumb against index, across both arms 55 mm out from the root (the grip a person takes, short of the tips), its closing axis held within 10 deg of the arms' opening axis; lifted 5 cm out of the cradle",
+  "tripod": true,
+  "tripod_why": "thumb against index and middle side by side: a two-point pinch let the tweezers turn about the pinch line and fall back into the cradle at the lift (their centre of mass ~2 cm off the grip, ~4x the pads' torsional friction)",
+  "grip_free_radius_m": 0.03,
+  "grip_free_radius_why": "the tripod's three pads and the open fingers round the grip: 2 cm left the tool's own cells under the index",
+  "finger_row_tolerance_deg": 25.0,
+  "finger_row_tolerance_why": "the hand's pinch axis is ~18 deg off square to its finger row: no roll brings the row nearer the tool (12 deg left no grasp); the middle's own flexion, matched along the pinch axis, puts both pads on the face"
+ },
+ "grasp_replay": {
+  "reference": "~/Omniverse_Nemotron_Ext/workspace/scenes/aida_r5_lab_pill_pack/grasp_plan/targets.npz",
+  "robot": "/home/kimate/Documents/Github/HomeHero/artifacts/isaac/aida_r5_20261004/reference_learning_v1/robot.json",
+  "lift_offset_m": 0.0,
+  "control_hz": 30,
+  "finger_q2_coefficient": 1.05851325,
+  "hold_s": 0.0,
+  "why": "the planned chess move (plan_er_grasp.py, task pinch_place)",
+  "controller": "homehero_r5_action",
+  "controller_why": "HomeHero's recordings and planner paths are commands to its R5 action layer (gravity-compensated arm targets, gravity feed-forward elsewhere); plain targets leave the shoulder slide 7.5 mm under its target (7.6 kg on 10 kN/m)",
+  "hand_model": {
+   "kind": "ability_hand",
+   "calibration": "config/ability_hand_calibration.json",
+   "collision_voltage": 8.0,
+   "postcontact_voltage": 0.0,
+   "grip_speed": 0.3,
+   "why": "the halt (word 007) set above the force band, 8.0 V, so the position loop governs the squeeze: at the 3.0 V default the index stalls at about 3 N, the band's floor, and could tighten no further. Driven by the grip command alone this pinch failed every way: at 3.0 V the thumb flicked the 14 g pawn out before it stalled; at 1.0 V with 0.8 V post-contact the digits crept closed during the carry and rolled it out at 61 deg; at 1.0 V with 0 V the stored 2.4 N drained in half a second of lift"
+  },
+  "grip": {
+   "mode": "force_band",
+   "min_n": 0.4,
+   "max_n": 1.2,
+   "tightening_step_rad": 0.001,
+   "unloading_step_rad": 0.002,
+   "digits": [
+    "index",
+    "middle",
+    "thumb"
+   ],
+   "why": "a hold, not a squeeze: 14.6 g of tweezers needs ~0.1 N a pad with friction; at 0.4-1.2 N an arm moves < 0.3 mm (its spring 1440 N/m at 55 mm), the tips stay open for the tablet stages"
+  }
+ }
+}

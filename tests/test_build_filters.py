@@ -304,3 +304,50 @@ def test_every_station_part_is_an_obstacle_for_the_planner():
     obs = {o["id"]: o for o in station_obstacles(stage, bc)}
     assert sorted(obs) == ["Bench:Leg0", "Bench:Top"]
     assert np.allclose(obs["Bench:Leg0"]["min"], [0.28, 0.28, 0.01]) and np.allclose(obs["Bench:Top"]["max"], [0.35, 0.375, 0.7125])
+
+
+def test_a_target_cloud_takes_cubes_and_cylinders_too():
+    from plan_er_grasp import gprim_points
+    stage = Usd.Stage.CreateInMemory()
+    cube = UsdGeom.Cube.Define(stage, "/C")
+    cube.CreateSizeAttr(1.0)
+    cube.AddTranslateOp().Set(Gf.Vec3d(1.0, 0.0, 0.0))
+    cube.AddScaleOp().Set(Gf.Vec3f(0.1, 0.02, 0.004))
+    cyl = UsdGeom.Cylinder.Define(stage, "/T")
+    cyl.CreateAxisAttr("Z"); cyl.CreateRadiusAttr(0.005); cyl.CreateHeightAttr(0.004)
+    xc = UsdGeom.XformCache()
+    P = np.asarray(gprim_points(cube.GetPrim(), xc.GetLocalToWorldTransform(cube.GetPrim())))
+    assert P.shape == (8, 3) and np.allclose(P.min(0), [0.95, -0.01, -0.002]) and np.allclose(P.max(0), [1.05, 0.01, 0.002])
+    T = np.asarray(gprim_points(cyl.GetPrim(), xc.GetLocalToWorldTransform(cyl.GetPrim())))
+    assert T.shape == (32, 3) and np.allclose(np.hypot(T[:, 0], T[:, 1]), 0.005) and np.allclose(sorted(set(np.round(T[:, 2], 4))), [-0.002, 0.002])
+
+
+def test_the_scenes_fixtures_are_the_planners_obstacles():
+    from plan_er_grasp import fixture_obstacles
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.Xform.Define(stage, "/World/Fixtures/Cradle")
+    post = UsdGeom.Cube.Define(stage, "/World/Fixtures/Cradle/Post")
+    post.CreateSizeAttr(1.0)
+    post.AddTranslateOp().Set(Gf.Vec3d(1.0, 0.0, 0.0125))
+    post.AddScaleOp().Set(Gf.Vec3f(0.006, 0.02, 0.025))
+    UsdPhysics.CollisionAPI.Apply(post.GetPrim())
+    UsdGeom.Cube.Define(stage, "/World/Fixtures/Cradle/Label")                  # no collider: not an obstacle
+    bc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    obs = fixture_obstacles(stage, bc)
+    assert [o["id"] for o in obs] == ["fixture:Cradle:Post"] and np.allclose(obs[0]["max"], [1.003, 0.01, 0.025])
+
+
+def test_a_tool_pick_holds_the_pinch_axis_to_the_tweezers_opening_and_the_finger_row_along_them(tmp_path):
+    from make_pill_kit import make_tweezers
+    from plan_er_grasp import _tool_pick_task
+    make_tweezers(tmp_path / "tw.usda")
+    stage = Usd.Stage.CreateInMemory()
+    obj = UsdGeom.Xform.Define(stage, "/World/Objects/Tweezers")
+    obj.GetPrim().GetReferences().AddReference(str(tmp_path / "tw.usda"))
+    UsdGeom.XformCommonAPI(obj).SetTranslate(Gf.Vec3d(4.455, 0.74, 0.758))
+    UsdGeom.XformCommonAPI(obj).SetRotate(Gf.Vec3f(90.0, 0.0, 0.0))            # on edge: the arms open along world y
+    task = _tool_pick_task(stage, obj.GetPrim(), UsdGeom.XformCache(), {"grip_from_root_m": 0.055}, np.zeros(3))
+    assert task["kind"] == "pinch_lift" and task["tripod"]
+    assert abs(abs(task["cloth_normal"][1]) - 1.0) < 1e-6                       # the opening axis: world y
+    assert np.allclose(task["finger_row_axis"], [1.0, 0.0, 0.0], atol=1e-6)    # the arms' length: world x
+    assert abs(task["grip_point"][0] - (4.455 + 0.015 + 0.055)) < 1e-3 and 0.002 < task["grip_width_m"] < 0.014

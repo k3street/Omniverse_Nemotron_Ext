@@ -44,7 +44,10 @@ TABLET = {"d": 0.010, "t": 0.004, "density": 1250.0}
 VIAL = {"r_out": 0.0205, "wall": 0.0012, "h": 0.091, "floor": 0.0015, "sides": 24, "density": 905.0,
         "cap_r_out": 0.022, "cap_wall": 0.0013, "cap_h": 0.012, "cap_top": 0.002}
 TWEEZERS = {"length": 0.115, "root": 0.015, "width": 0.009, "thick": 0.0010, "tip_len": 0.025, "tip_width": 0.003,
-            "tip_gap": 0.012, "E": 193e9, "density": 8000.0}
+            "tip_gap": 0.012, "E": 193e9, "density": 8000.0,
+            # cushion grips (ergonomic tweezers' rubber sleeves): a 15 mm band for the fingers' pads where a bare 9 mm arm
+            # left a tripod's three pads spanning its whole height - the hand rolled it off the middle (2026-10-17)
+            "sleeve_from": 0.040, "sleeve_to": 0.075, "sleeve_height": 0.015, "sleeve_thick": 0.0025, "sleeve_density": 1100.0}
 
 
 HINGE_OFF = TWEEZERS["thick"] / 2 + 0.0002                    # each arm's hinge off the midline (over the root block's face)
@@ -211,6 +214,7 @@ def make_tweezers(out: Path) -> dict:
     spr = tweezer_spring()
     st, root = _stage(out, "Tweezers")
     steel = _material(st, "/World/Tweezers", "Steel", 0.75, 0.58, 0.25)
+    rubber = _material(st, "/World/Tweezers", "Rubber", 0.9, 0.8, 0.1)
     grey = (0.78, 0.79, 0.81)
     UsdPhysics.ArticulationRootAPI.Apply(root.GetPrim())
 
@@ -233,7 +237,8 @@ def make_tweezers(out: Path) -> dict:
     box("/World/Tweezers/Root/Block", [tw["root"], tw["width"], root_h], [tw["root"] / 2, 0.0, 0.0])
     m_root = tw["root"] * tw["width"] * root_h * tw["density"]
     UsdPhysics.MassAPI.Apply(rootb.GetPrim()).CreateMassAttr(m_root)
-    m_arm = ((L - tw["tip_len"]) * tw["width"] + tw["tip_len"] * tw["tip_width"]) * tw["thick"] * tw["density"]
+    m_arm = ((L - tw["tip_len"]) * tw["width"] + tw["tip_len"] * tw["tip_width"]) * tw["thick"] * tw["density"] \
+        + (tw["sleeve_to"] - tw["sleeve_from"]) * tw["sleeve_height"] * tw["sleeve_thick"] * tw["sleeve_density"]
     joints = {}
     for side, sgn in (("Upper", 1.0), ("Lower", -1.0)):
         arm = UsdGeom.Xform.Define(st, f"/World/Tweezers/{side}Arm")
@@ -245,6 +250,11 @@ def make_tweezers(out: Path) -> dict:
         main = L - tw["tip_len"]
         box(f"/World/Tweezers/{side}Arm/Blade", [main, tw["width"], tw["thick"]], [main / 2, 0.0, 0.0])
         box(f"/World/Tweezers/{side}Arm/Tip", [tw["tip_len"], tw["tip_width"], tw["thick"]], [main + tw["tip_len"] / 2, 0.0, 0.0])
+        # the cushion grip on the arm's outer face (away from the other arm: +z for the upper, -z for the lower)
+        sl = box(f"/World/Tweezers/{side}Arm/Grip", [tw["sleeve_to"] - tw["sleeve_from"], tw["sleeve_height"], tw["sleeve_thick"]],
+                 [(tw["sleeve_from"] + tw["sleeve_to"]) / 2, 0.0, sgn * (tw["thick"] + tw["sleeve_thick"]) / 2])
+        sl.CreateDisplayColorAttr(Vt.Vec3fArray([Gf.Vec3f(0.12, 0.35, 0.65)]))
+        _bind(sl.GetPrim(), rubber)
         j = UsdPhysics.RevoluteJoint.Define(st, f"/World/Tweezers/{side}Hinge")
         j.CreateBody0Rel().SetTargets([rootb.GetPath()])
         j.CreateBody1Rel().SetTargets([arm.GetPath()])
@@ -268,6 +278,7 @@ def make_tweezers(out: Path) -> dict:
         joints[side] = j.GetPath().pathString
     total = m_root + 2 * m_arm
     meta = {"asset_id": "tweezers_115", "class": "tweezers", "length_m": tw["length"], "mass_kg": round(total, 5), "joints": joints,
+            "grip_sleeve": {"from_m": tw["sleeve_from"], "to_m": tw["sleeve_to"], "height_m": tw["sleeve_height"], "thick_m": tw["sleeve_thick"]},
             "arms": {"upper": "UpperArm", "lower": "LowerArm"}, "tip_gap_m": tw["tip_gap"], "spring": spr}
     root.GetPrim().SetCustomDataByKey("er:generated", json.dumps({"by": "scripts/make_pill_kit.py", **meta, "sources": {"tweezers": SOURCES["tweezers"]}}))
     st.GetRootLayer().Save()

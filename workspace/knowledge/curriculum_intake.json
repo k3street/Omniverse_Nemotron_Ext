@@ -1,5 +1,5 @@
 {
- "at": "2026-10-17T16:14:13",
+ "at": "2026-10-17T20:14:43",
  "superseded_revisions": [
   {
    "occupation": "laboratory_materials_handler",
@@ -682,6 +682,47 @@
    ]
   },
   {
+   "key": "homehero.interaction.household_mug.prepare_handle_pick_place",
+   "title": "Household mug: prepare handle pick place",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "asset:household_mug",
+   "requirements": [
+    {
+     "id": "asset:household_mug",
+     "step": "asset",
+     "met": false,
+     "evidence": "none approved (0 candidates)"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "binding:homehero.interaction.household_mug.prepare_handle_pick_place:planner",
+     "step": "planner",
+     "met": false,
+     "evidence": "family 'part_grasp_tool_use' has no planner mapping"
+    },
+    {
+     "id": "scene:homehero.interaction.household_mug.prepare_handle_pick_place",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.household_mug.prepare_handle_pick_place",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
    "key": "homehero.interaction.scissor.edge_pickup",
    "title": "Articulated scissors: edge pickup",
    "source": {
@@ -760,6 +801,47 @@
      "step": "take",
      "met": true,
      "evidence": "aida_r5_rail_scissors push.opened_by_the_hand = True"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.scissor.prepare_flat_pickup",
+   "title": "Articulated scissors: prepare flat pickup",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "binding:homehero.interaction.scissor.prepare_flat_pickup:planner",
+   "requirements": [
+    {
+     "id": "asset:scissor",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['scissor']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "binding:homehero.interaction.scissor.prepare_flat_pickup:planner",
+     "step": "planner",
+     "met": false,
+     "evidence": "family 'part_grasp_tool_use' has no planner mapping"
+    },
+    {
+     "id": "scene:homehero.interaction.scissor.prepare_flat_pickup",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.scissor.prepare_flat_pickup",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
     }
    ]
   },
@@ -1380,6 +1462,271 @@
    ]
   },
   {
+   "key": "homehero.interaction.drill_1.prepare_operating_grasp",
+   "title": "Articulated cordless drill: prepare operating grasp",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "planner:grasp_preparation",
+   "requirements": [
+    {
+     "id": "asset:drill",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['drill_1']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:grasp_preparation",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:tool_grip",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_dining_drill_screw held = True"
+    },
+    {
+     "id": "planner:place_tool",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.drill_1.prepare_operating_grasp",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.drill_1.prepare_operating_grasp",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.tweezers_115.acquire_from_fixture",
+   "title": "Articulated 115 mm tweezers: acquire from fixture",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "planner:place_tool",
+   "requirements": [
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "interaction:tweezer_flex",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+    },
+    {
+     "id": "planner:tool_pinch",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pass = True"
+    },
+    {
+     "id": "planner:place_tool",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.tweezers_115.acquire_from_fixture",
+     "step": "scene",
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack"
+    },
+    {
+     "id": "take:homehero.interaction.tweezers_115.acquire_from_fixture",
+     "step": "take",
+     "met": false,
+     "evidence": "aida_r5_lab_pill_pack move.pass = None"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.tweezers_115.prepare_flat_pickup",
+   "title": "Articulated 115 mm tweezers: prepare flat pickup",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "planner:grasp_preparation",
+   "requirements": [
+    {
+     "id": "asset:tweezers",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['simple_tweezers', 'tweezers_115']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "planner:grasp_preparation",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:tool_pinch",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pass = True"
+    },
+    {
+     "id": "scene:homehero.interaction.tweezers_115.prepare_flat_pickup",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.tweezers_115.prepare_flat_pickup",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.tweezers_115.operate_from_fixture",
+   "title": "Articulated 115 mm tweezers: operate from fixture",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "planner:tool_tip_place",
+   "requirements": [
+    {
+     "id": "asset:tweezers",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['simple_tweezers', 'tweezers_115']"
+    },
+    {
+     "id": "interaction:tweezer_flex",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+    },
+    {
+     "id": "interaction:small_parts_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json drop.pass = True"
+    },
+    {
+     "id": "planner:tool_pinch",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pass = True"
+    },
+    {
+     "id": "planner:tool_tip_place",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.tweezers_115.operate_from_fixture",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.tweezers_115.operate_from_fixture",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
+   "key": "homehero.interaction.tweezers_115.prepare_and_use",
+   "title": "Articulated 115 mm tweezers: prepare and use",
+   "source": {
+    "kind": "homehero_interaction",
+    "origin": "aida_interaction_curriculum_v1.json"
+   },
+   "next": "planner:grasp_preparation",
+   "requirements": [
+    {
+     "id": "asset:tweezers",
+     "step": "asset",
+     "met": true,
+     "evidence": "verified/approved: ['simple_tweezers', 'tweezers_115']"
+    },
+    {
+     "id": "interaction:rigid_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "aida_r5_dining_chess move.pass = True"
+    },
+    {
+     "id": "interaction:tweezer_flex",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json spring.pass = True"
+    },
+    {
+     "id": "interaction:small_parts_contact",
+     "step": "interaction",
+     "met": true,
+     "evidence": "workspace/asset_library/pill_kit_rig.json drop.pass = True"
+    },
+    {
+     "id": "planner:grasp_preparation",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "planner:tool_pinch",
+     "step": "planner",
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pass = True"
+    },
+    {
+     "id": "planner:tool_tip_place",
+     "step": "planner",
+     "met": false,
+     "evidence": "no planner"
+    },
+    {
+     "id": "scene:homehero.interaction.tweezers_115.prepare_and_use",
+     "step": "scene",
+     "met": false,
+     "evidence": "none named"
+    },
+    {
+     "id": "take:homehero.interaction.tweezers_115.prepare_and_use",
+     "step": "take",
+     "met": false,
+     "evidence": "no take"
+    }
+   ]
+  },
+  {
    "key": "nemotron.ladder.power_drill.r4",
    "title": "power_drill rung 4: a bit in the chuck pressed into a workpiece: material removed or a screw driven",
    "source": {
@@ -1737,7 +2084,7 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "planner:tool_pinch",
+   "next": "planner:tool_tip_place",
    "requirements": [
     {
      "id": "asset:pill bottle",
@@ -1760,8 +2107,8 @@
     {
      "id": "planner:tool_pinch",
      "step": "planner",
-     "met": false,
-     "evidence": "no planner"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pass = True"
     },
     {
      "id": "planner:tool_tip_place",
@@ -1837,14 +2184,8 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "planner:tool_pinch",
+   "next": null,
    "requirements": [
-    {
-     "id": "asset:tweezers",
-     "step": "asset",
-     "met": true,
-     "evidence": "verified/approved: ['simple_tweezers']"
-    },
     {
      "id": "interaction:rigid_contact",
      "step": "interaction",
@@ -1854,14 +2195,14 @@
     {
      "id": "planner:tool_pinch",
      "step": "planner",
-     "met": false,
-     "evidence": "no planner"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pass = True"
     },
     {
      "id": "scene:nemotron.ladder.tweezers.r1",
      "step": "scene",
-     "met": false,
-     "evidence": "none named"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack"
     }
    ]
   },
@@ -1872,13 +2213,13 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "planner:tool_pinch",
+   "next": "scene:nemotron.ladder.tweezers.r2",
    "requirements": [
     {
      "id": "asset:tweezers",
      "step": "asset",
      "met": true,
-     "evidence": "verified/approved: ['simple_tweezers']"
+     "evidence": "verified/approved: ['simple_tweezers', 'tweezers_115']"
     },
     {
      "id": "interaction:tweezer_flex",
@@ -1889,8 +2230,8 @@
     {
      "id": "planner:tool_pinch",
      "step": "planner",
-     "met": false,
-     "evidence": "no planner"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pass = True"
     },
     {
      "id": "scene:nemotron.ladder.tweezers.r2",
@@ -1907,13 +2248,13 @@
     "kind": "nemotron_use_ladder",
     "origin": "asset_class_priors.json"
    },
-   "next": "planner:tool_pinch",
+   "next": "planner:tool_tip_place",
    "requirements": [
     {
      "id": "asset:tweezers",
      "step": "asset",
      "met": true,
-     "evidence": "verified/approved: ['simple_tweezers']"
+     "evidence": "verified/approved: ['simple_tweezers', 'tweezers_115']"
     },
     {
      "id": "interaction:tweezer_flex",
@@ -1930,8 +2271,8 @@
     {
      "id": "planner:tool_pinch",
      "step": "planner",
-     "met": false,
-     "evidence": "no planner"
+     "met": true,
+     "evidence": "aida_r5_lab_pill_pack pass = True"
     },
     {
      "id": "planner:tool_tip_place",
@@ -1950,20 +2291,6 @@
  ],
  "open": [
   {
-   "id": "cur:planner:tool_pinch",
-   "priority": 122,
-   "actionable": true,
-   "title": "the tool pinch planner",
-   "blocks": 4
-  },
-  {
-   "id": "cur:scene:nemotron.ladder.tweezers.r1",
-   "priority": 133,
-   "actionable": false,
-   "title": "a scene for tweezers rung 1: held in a precision grip and lifted",
-   "blocks": 1
-  },
-  {
    "id": "cur:interaction:cap_thread",
    "priority": 211,
    "actionable": true,
@@ -1980,7 +2307,7 @@
   {
    "id": "cur:scene:nemotron.ladder.tweezers.r2",
    "priority": 233,
-   "actionable": false,
+   "actionable": true,
    "title": "a scene for tweezers rung 2: the tips closed by the hand's squeeze and opened by its release (the arms' spring)",
    "blocks": 1
   },
@@ -1994,9 +2321,9 @@
   {
    "id": "cur:planner:tool_tip_place",
    "priority": 324,
-   "actionable": false,
+   "actionable": true,
    "title": "the tool tip place planner",
-   "blocks": 3
+   "blocks": 5
   },
   {
    "id": "cur:scene:nemotron.ladder.pill_bottle.r3",
@@ -2153,213 +2480,339 @@
    "blocks": 1
   },
   {
+   "id": "cur:asset:household_mug",
+   "priority": 30200,
+   "actionable": true,
+   "title": "a sim-ready household mug",
+   "blocks": 1
+  },
+  {
+   "id": "cur:binding:homehero.interaction.household_mug.prepare_handle_pick_place:planner",
+   "priority": 30222,
+   "actionable": false,
+   "title": "map 'Household mug: prepare handle pick place' to our planners",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.household_mug.prepare_handle_pick_place",
+   "priority": 30233,
+   "actionable": false,
+   "title": "a scene for Household mug: prepare handle pick place",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.household_mug.prepare_handle_pick_place",
+   "priority": 30254,
+   "actionable": false,
+   "title": "a passing take: Household mug: prepare handle pick place",
+   "blocks": 1
+  },
+  {
    "id": "cur:scene:homehero.interaction.scissor.edge_pickup",
-   "priority": 30234,
+   "priority": 30334,
    "actionable": false,
    "title": "a scene for Articulated scissors: edge pickup",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.scissor.edge_pickup",
-   "priority": 30255,
+   "priority": 30355,
    "actionable": false,
    "title": "a passing take: Articulated scissors: edge pickup",
    "blocks": 1
   },
   {
+   "id": "cur:binding:homehero.interaction.scissor.prepare_flat_pickup:planner",
+   "priority": 30522,
+   "actionable": true,
+   "title": "map 'Articulated scissors: prepare flat pickup' to our planners",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.scissor.prepare_flat_pickup",
+   "priority": 30533,
+   "actionable": false,
+   "title": "a scene for Articulated scissors: prepare flat pickup",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.scissor.prepare_flat_pickup",
+   "priority": 30554,
+   "actionable": false,
+   "title": "a passing take: Articulated scissors: prepare flat pickup",
+   "blocks": 1
+  },
+  {
    "id": "cur:asset:screwdriver",
-   "priority": 30400,
+   "priority": 30600,
    "actionable": true,
    "title": "a sim-ready screwdriver",
    "blocks": 3
   },
   {
    "id": "cur:scene:homehero.interaction.screwdriver.pick_place",
-   "priority": 30434,
+   "priority": 30634,
    "actionable": false,
    "title": "a scene for Screwdriver: pick place",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.screwdriver.pick_place",
-   "priority": 30455,
+   "priority": 30655,
    "actionable": false,
    "title": "a passing take: Screwdriver: pick place",
    "blocks": 1
   },
   {
    "id": "cur:planner:hand_turn",
-   "priority": 30523,
+   "priority": 30723,
    "actionable": false,
    "title": "the hand turn planner",
    "blocks": 2
   },
   {
    "id": "cur:scene:homehero.interaction.screwdriver.engage_tip",
-   "priority": 30534,
+   "priority": 30734,
    "actionable": false,
    "title": "a scene for Screwdriver: engage tip",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.screwdriver.engage_tip",
-   "priority": 30555,
+   "priority": 30755,
    "actionable": false,
    "title": "a passing take: Screwdriver: engage tip",
    "blocks": 1
   },
   {
    "id": "cur:scene:homehero.interaction.screwdriver.turn_screw",
-   "priority": 30634,
+   "priority": 30834,
    "actionable": false,
    "title": "a scene for Screwdriver: turn screw",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.screwdriver.turn_screw",
-   "priority": 30655,
+   "priority": 30855,
    "actionable": false,
    "title": "a passing take: Screwdriver: turn screw",
    "blocks": 1
   },
   {
    "id": "cur:asset:hammer",
-   "priority": 30700,
+   "priority": 30900,
    "actionable": true,
    "title": "a sim-ready hammer",
    "blocks": 2
   },
   {
    "id": "cur:scene:homehero.interaction.hammer.pick_place",
-   "priority": 30734,
+   "priority": 30934,
    "actionable": false,
    "title": "a scene for Hammer: pick place",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.hammer.pick_place",
-   "priority": 30755,
+   "priority": 30955,
    "actionable": false,
    "title": "a passing take: Hammer: pick place",
    "blocks": 1
   },
   {
    "id": "cur:interaction:impact_strike",
-   "priority": 30811,
+   "priority": 31011,
    "actionable": false,
    "title": "the impact strike interaction",
    "blocks": 1
   },
   {
    "id": "cur:planner:strike",
-   "priority": 30823,
+   "priority": 31023,
    "actionable": false,
    "title": "the strike planner",
    "blocks": 1
   },
   {
    "id": "cur:scene:homehero.interaction.hammer.tap_target",
-   "priority": 30834,
+   "priority": 31034,
    "actionable": false,
    "title": "a scene for Hammer: tap target",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.hammer.tap_target",
-   "priority": 30855,
+   "priority": 31055,
    "actionable": false,
    "title": "a passing take: Hammer: tap target",
    "blocks": 1
   },
   {
    "id": "cur:planner:drawer_pull",
-   "priority": 30922,
+   "priority": 31122,
    "actionable": false,
    "title": "the drawer pull planner",
    "blocks": 2
   },
   {
    "id": "cur:scene:homehero.interaction.drawer_kit_10.open",
-   "priority": 30933,
+   "priority": 31133,
    "actionable": false,
    "title": "a scene for Workshop drawer cabinet: open",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.drawer_kit_10.open",
-   "priority": 30954,
+   "priority": 31154,
    "actionable": false,
    "title": "a passing take: Workshop drawer cabinet: open",
    "blocks": 1
   },
   {
    "id": "cur:scene:homehero.interaction.drawer_kit_10.close",
-   "priority": 31033,
+   "priority": 31233,
    "actionable": false,
    "title": "a scene for Workshop drawer cabinet: close",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.drawer_kit_10.close",
-   "priority": 31054,
+   "priority": 31254,
    "actionable": false,
    "title": "a passing take: Workshop drawer cabinet: close",
    "blocks": 1
   },
   {
    "id": "cur:scene:homehero.interaction.drawer_kit_10.store",
-   "priority": 31134,
+   "priority": 31334,
    "actionable": false,
    "title": "a scene for Workshop drawer cabinet: store",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.drawer_kit_10.store",
-   "priority": 31155,
+   "priority": 31355,
    "actionable": false,
    "title": "a passing take: Workshop drawer cabinet: store",
    "blocks": 1
   },
   {
    "id": "cur:scene:homehero.interaction.drawer_kit_10.retrieve",
-   "priority": 31234,
+   "priority": 31434,
    "actionable": false,
    "title": "a scene for Workshop drawer cabinet: retrieve",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.drawer_kit_10.retrieve",
-   "priority": 31255,
+   "priority": 31455,
    "actionable": false,
    "title": "a passing take: Workshop drawer cabinet: retrieve",
    "blocks": 1
   },
   {
    "id": "cur:scene:homehero.interaction.fridge_1.close",
-   "priority": 31434,
+   "priority": 31634,
    "actionable": true,
    "title": "a scene for Refrigerator: close",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.fridge_1.close",
-   "priority": 31455,
+   "priority": 31655,
    "actionable": false,
    "title": "a passing take: Refrigerator: close",
    "blocks": 1
   },
   {
    "id": "cur:scene:homehero.interaction.microwave_1.place_item",
-   "priority": 31733,
+   "priority": 31933,
    "actionable": false,
    "title": "a scene for Microwave: place item",
    "blocks": 1
   },
   {
    "id": "cur:take:homehero.interaction.microwave_1.place_item",
-   "priority": 31754,
+   "priority": 31954,
    "actionable": false,
    "title": "a passing take: Microwave: place item",
+   "blocks": 1
+  },
+  {
+   "id": "cur:planner:grasp_preparation",
+   "priority": 32022,
+   "actionable": true,
+   "title": "the grasp preparation planner",
+   "blocks": 3
+  },
+  {
+   "id": "cur:planner:place_tool",
+   "priority": 32024,
+   "actionable": true,
+   "title": "the place tool planner",
+   "blocks": 2
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drill_1.prepare_operating_grasp",
+   "priority": 32035,
+   "actionable": false,
+   "title": "a scene for Articulated cordless drill: prepare operating grasp",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.drill_1.prepare_operating_grasp",
+   "priority": 32056,
+   "actionable": false,
+   "title": "a passing take: Articulated cordless drill: prepare operating grasp",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.tweezers_115.acquire_from_fixture",
+   "priority": 32155,
+   "actionable": false,
+   "title": "a passing take: Articulated 115 mm tweezers: acquire from fixture",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.tweezers_115.prepare_flat_pickup",
+   "priority": 32234,
+   "actionable": false,
+   "title": "a scene for Articulated 115 mm tweezers: prepare flat pickup",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.tweezers_115.prepare_flat_pickup",
+   "priority": 32255,
+   "actionable": false,
+   "title": "a passing take: Articulated 115 mm tweezers: prepare flat pickup",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.tweezers_115.operate_from_fixture",
+   "priority": 32335,
+   "actionable": false,
+   "title": "a scene for Articulated 115 mm tweezers: operate from fixture",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.tweezers_115.operate_from_fixture",
+   "priority": 32356,
+   "actionable": false,
+   "title": "a passing take: Articulated 115 mm tweezers: operate from fixture",
+   "blocks": 1
+  },
+  {
+   "id": "cur:scene:homehero.interaction.tweezers_115.prepare_and_use",
+   "priority": 32437,
+   "actionable": false,
+   "title": "a scene for Articulated 115 mm tweezers: prepare and use",
+   "blocks": 1
+  },
+  {
+   "id": "cur:take:homehero.interaction.tweezers_115.prepare_and_use",
+   "priority": 32458,
+   "actionable": false,
+   "title": "a passing take: Articulated 115 mm tweezers: prepare and use",
    "blocks": 1
   },
   {

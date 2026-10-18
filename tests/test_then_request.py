@@ -50,3 +50,18 @@ def test_a_cylinder_with_vertices_only_at_its_ends_has_its_width_halfway_up():
     # a cone narrows up its height
     cone = [[x, y, 0.0] for x, y in ring] + [[0.0, 0.0, 0.1]]
     assert abs(slice_width(cone, [0.0, 0.0], 0.05) - 0.03) < 0.001
+
+
+def test_the_tweezers_grip_is_on_the_midline_across_the_arms_outer_faces():
+    import math
+    from make_pill_kit import tweezer_spring, TWEEZERS
+    from plan_er_grasp import tool_grip_frame
+    meta = {"spring": tweezer_spring()}
+    p, ax, w = tool_grip_frame(meta, 0.055)
+    th = math.radians(meta["spring"]["rest_angle_deg"])
+    assert abs(p[0] - (0.015 + 0.055 * math.cos(th))) < 1e-12 and p[1] == 0 and p[2] == 0
+    assert list(ax) == [0.0, 0.0, 1.0]
+    # at the tips' reach (the full flexing length) the outer width is the 12 mm gap plus both arms' thickness
+    _, _, w_tip = tool_grip_frame(meta, TWEEZERS["length"] - TWEEZERS["root"])
+    assert abs(w_tip - (TWEEZERS["tip_gap"] + 2 * TWEEZERS["thick"])) < 3e-4
+    assert w < w_tip

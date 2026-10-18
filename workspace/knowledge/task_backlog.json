@@ -1680,7 +1680,7 @@
    "title": "a scene for Articulated scissors: edge pickup",
    "description": "build a scene for 'Articulated scissors: edge pickup'",
    "evidence": "none named",
-   "priority": 30234,
+   "priority": 30334,
    "blocks": [
     "homehero.interaction.scissor.edge_pickup"
    ],
@@ -1698,7 +1698,7 @@
    "title": "a passing take: Articulated scissors: edge pickup",
    "description": "run and pass a take for 'Articulated scissors: edge pickup'",
    "evidence": "no take",
-   "priority": 30255,
+   "priority": 30355,
    "blocks": [
     "homehero.interaction.scissor.edge_pickup"
    ],
@@ -1716,7 +1716,7 @@
    "title": "a sim-ready screwdriver",
    "description": "bring a screwdriver through the asset pipeline (HomeHero's source: SketchFab_Assets/Screw_Driver(1).usdz)",
    "evidence": "none approved (9 candidates)",
-   "priority": 30400,
+   "priority": 30600,
    "blocks": [
     "homehero.interaction.screwdriver.engage_tip",
     "homehero.interaction.screwdriver.pick_place",
@@ -1747,7 +1747,7 @@
    "title": "a scene for Screwdriver: pick place",
    "description": "build a scene for 'Screwdriver: pick place'",
    "evidence": "none named",
-   "priority": 30434,
+   "priority": 30634,
    "blocks": [
     "homehero.interaction.screwdriver.pick_place"
    ],
@@ -1765,7 +1765,7 @@
    "title": "a passing take: Screwdriver: pick place",
    "description": "run and pass a take for 'Screwdriver: pick place'",
    "evidence": "no take",
-   "priority": 30455,
+   "priority": 30655,
    "blocks": [
     "homehero.interaction.screwdriver.pick_place"
    ],
@@ -1783,7 +1783,7 @@
    "title": "the hand turn planner",
    "description": "a wrist-roll stage holding the tip seated, regrasping between turns",
    "evidence": "no planner",
-   "priority": 30523,
+   "priority": 30723,
    "blocks": [
     "homehero.interaction.screwdriver.engage_tip",
     "homehero.interaction.screwdriver.turn_screw"
@@ -1802,7 +1802,7 @@
    "title": "a scene for Screwdriver: engage tip",
    "description": "build a scene for 'Screwdriver: engage tip'",
    "evidence": "none named",
-   "priority": 30534,
+   "priority": 30734,
    "blocks": [
     "homehero.interaction.screwdriver.engage_tip"
    ],
@@ -1820,7 +1820,7 @@
    "title": "a passing take: Screwdriver: engage tip",
    "description": "run and pass a take for 'Screwdriver: engage tip'",
    "evidence": "no take",
-   "priority": 30555,
+   "priority": 30755,
    "blocks": [
     "homehero.interaction.screwdriver.engage_tip"
    ],
@@ -1838,7 +1838,7 @@
    "title": "a scene for Screwdriver: turn screw",
    "description": "build a scene for 'Screwdriver: turn screw'",
    "evidence": "none named",
-   "priority": 30634,
+   "priority": 30834,
    "blocks": [
     "homehero.interaction.screwdriver.turn_screw"
    ],
@@ -1856,7 +1856,7 @@
    "title": "a passing take: Screwdriver: turn screw",
    "description": "run and pass a take for 'Screwdriver: turn screw'",
    "evidence": "no take",
-   "priority": 30655,
+   "priority": 30855,
    "blocks": [
     "homehero.interaction.screwdriver.turn_screw"
    ],
@@ -1874,7 +1874,7 @@
    "title": "a sim-ready hammer",
    "description": "bring a hammer through the asset pipeline (HomeHero's source: SketchFab_Assets/Tools/Stanley_Hammer.usdz)",
    "evidence": "none approved (4 candidates)",
-   "priority": 30700,
+   "priority": 30900,
    "blocks": [
     "homehero.interaction.hammer.pick_place",
     "homehero.interaction.hammer.tap_target"
@@ -1899,7 +1899,7 @@
    "title": "a scene for Hammer: pick place",
    "description": "build a scene for 'Hammer: pick place'",
    "evidence": "none named",
-   "priority": 30734,
+   "priority": 30934,
    "blocks": [
     "homehero.interaction.hammer.pick_place"
    ],
@@ -1917,7 +1917,7 @@
    "title": "a passing take: Hammer: pick place",
    "description": "run and pass a take for 'Hammer: pick place'",
    "evidence": "no take",
-   "priority": 30755,
+   "priority": 30955,
    "blocks": [
     "homehero.interaction.hammer.pick_place"
    ],
@@ -1935,7 +1935,7 @@
    "title": "the impact strike interaction",
    "description": "an impact law: the head's contact impulse read from the contact report, a nail fixture advancing per blow against a sourced withdrawal/driving resistance in wood; the blows and the nail's depth recorded",
    "evidence": "no law",
-   "priority": 30811,
+   "priority": 31011,
    "blocks": [
     "homehero.interaction.hammer.tap_target"
    ],
@@ -1954,7 +1954,7 @@
    "title": "the strike planner",
    "description": "a swing plan (the head's path and speed at contact) and the impact's record",
    "evidence": "no planner",
-   "priority": 30823,
+   "priority": 31023,
    "blocks": [
     "homehero.interaction.hammer.tap_target"
    ],
@@ -1972,7 +1972,7 @@
    "title": "a scene for Hammer: tap target",
    "description": "build a scene for 'Hammer: tap target'",
    "evidence": "none named",
-   "priority": 30834,
+   "priority": 31034,
    "blocks": [
     "homehero.interaction.hammer.tap_target"
    ],
@@ -1990,7 +1990,7 @@
    "title": "a passing take: Hammer: tap target",
    "description": "run and pass a take for 'Hammer: tap target'",
    "evidence": "no take",
-   "priority": 30855,
+   "priority": 31055,
    "blocks": [
     "homehero.interaction.hammer.tap_target"
    ],
@@ -2008,7 +2008,7 @@
    "title": "the drawer pull planner",
    "description": "a prismatic-joint version of door_open_planner (a straight pull along the slides)",
    "evidence": "no planner",
-   "priority": 30922,
+   "priority": 31122,
    "blocks": [
     "homehero.interaction.drawer_kit_10.close",
     "homehero.interaction.drawer_kit_10.open"
@@ -2027,7 +2027,7 @@
    "title": "a scene for Workshop drawer cabinet: open",
    "description": "build a scene for 'Workshop drawer cabinet: open'",
    "evidence": "none named",
-   "priority": 30933,
+   "priority": 31133,
    "blocks": [
     "homehero.interaction.drawer_kit_10.open"
    ],
@@ -2045,7 +2045,7 @@
    "title": "a passing take: Workshop drawer cabinet: open",
    "description": "run and pass a take for 'Workshop drawer cabinet: open'",
    "evidence": "no take",
-   "priority": 30954,
+   "priority": 31154,
    "blocks": [
     "homehero.interaction.drawer_kit_10.open"
    ],
@@ -2063,7 +2063,7 @@
    "title": "a scene for Workshop drawer cabinet: close",
    "description": "build a scene for 'Workshop drawer cabinet: close'",
    "evidence": "none named",
-   "priority": 31033,
+   "priority": 31233,
    "blocks": [
     "homehero.interaction.drawer_kit_10.close"
    ],
@@ -2081,7 +2081,7 @@
    "title": "a passing take: Workshop drawer cabinet: close",
    "description": "run and pass a take for 'Workshop drawer cabinet: close'",
    "evidence": "no take",
-   "priority": 31054,
+   "priority": 31254,
    "blocks": [
     "homehero.interaction.drawer_kit_10.close"
    ],
@@ -2099,7 +2099,7 @@
    "title": "a scene for Workshop drawer cabinet: store",
    "description": "build a scene for 'Workshop drawer cabinet: store'",
    "evidence": "none named",
-   "priority": 31134,
+   "priority": 31334,
    "blocks": [
     "homehero.interaction.drawer_kit_10.store"
    ],
@@ -2117,7 +2117,7 @@
    "title": "a passing take: Workshop drawer cabinet: store",
    "description": "run and pass a take for 'Workshop drawer cabinet: store'",
    "evidence": "no take",
-   "priority": 31155,
+   "priority": 31355,
    "blocks": [
     "homehero.interaction.drawer_kit_10.store"
    ],
@@ -2135,7 +2135,7 @@
    "title": "a scene for Workshop drawer cabinet: retrieve",
    "description": "build a scene for 'Workshop drawer cabinet: retrieve'",
    "evidence": "none named",
-   "priority": 31234,
+   "priority": 31434,
    "blocks": [
     "homehero.interaction.drawer_kit_10.retrieve"
    ],
@@ -2153,7 +2153,7 @@
    "title": "a passing take: Workshop drawer cabinet: retrieve",
    "description": "run and pass a take for 'Workshop drawer cabinet: retrieve'",
    "evidence": "no take",
-   "priority": 31255,
+   "priority": 31455,
    "blocks": [
     "homehero.interaction.drawer_kit_10.retrieve"
    ],
@@ -2171,7 +2171,7 @@
    "title": "a scene for Refrigerator: close",
    "description": "build a scene for 'Refrigerator: close'",
    "evidence": "none named",
-   "priority": 31434,
+   "priority": 31634,
    "blocks": [
     "homehero.interaction.fridge_1.close"
    ],
@@ -2189,7 +2189,7 @@
    "title": "a passing take: Refrigerator: close",
    "description": "run and pass a take for 'Refrigerator: close'",
    "evidence": "no take",
-   "priority": 31455,
+   "priority": 31655,
    "blocks": [
     "homehero.interaction.fridge_1.close"
    ],
@@ -2207,7 +2207,7 @@
    "title": "a scene for Microwave: place item",
    "description": "build a scene for 'Microwave: place item'",
    "evidence": "none named",
-   "priority": 31733,
+   "priority": 31933,
    "blocks": [
     "homehero.interaction.microwave_1.place_item"
    ],
@@ -2225,7 +2225,7 @@
    "title": "a passing take: Microwave: place item",
    "description": "run and pass a take for 'Microwave: place item'",
    "evidence": "no take",
-   "priority": 31754,
+   "priority": 31954,
    "blocks": [
     "homehero.interaction.microwave_1.place_item"
    ],
@@ -2698,8 +2698,10 @@
    "curriculum_sources": [
     "nemotron_use_ladder"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_pill_pack pass = True"
   },
   {
    "id": "cur:planner:tool_tip_place",
@@ -2709,13 +2711,16 @@
    "evidence": "no planner",
    "priority": 324,
    "blocks": [
+    "homehero.interaction.tweezers_115.operate_from_fixture",
+    "homehero.interaction.tweezers_115.prepare_and_use",
     "nemotron.ladder.pill_bottle.r3",
     "nemotron.ladder.pill_bottle.r4",
     "nemotron.ladder.tweezers.r3"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
+    "homehero_interaction",
     "nemotron_use_ladder"
    ],
    "status": "proposed",
@@ -2772,8 +2777,10 @@
    "curriculum_sources": [
     "nemotron_use_ladder"
    ],
-   "status": "proposed",
-   "first_seen": "2026-10-17"
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_pill_pack"
   },
   {
    "id": "cur:scene:nemotron.ladder.tweezers.r2",
@@ -2785,7 +2792,7 @@
    "blocks": [
     "nemotron.ladder.tweezers.r2"
    ],
-   "actionable": false,
+   "actionable": true,
    "from": "curriculum_intake",
    "curriculum_sources": [
     "nemotron_use_ladder"
@@ -2807,6 +2814,461 @@
    "from": "curriculum_intake",
    "curriculum_sources": [
     "nemotron_use_ladder"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:asset:household_mug",
+   "kind": "asset",
+   "title": "a sim-ready household mug",
+   "description": "bring a household_mug through the asset pipeline (HomeHero's source: SketchFab_Assets/Soviet_Enamel_Mug.usdz)",
+   "evidence": "none approved (0 candidates)",
+   "priority": 30200,
+   "blocks": [
+    "homehero.interaction.household_mug.prepare_handle_pick_place"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "candidates": [],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:binding:homehero.interaction.household_mug.prepare_handle_pick_place:planner",
+   "kind": "planner",
+   "title": "map 'Household mug: prepare handle pick place' to our planners",
+   "description": "add homehero.interaction.household_mug.prepare_handle_pick_place to curriculum_bindings.json lessons with its planners",
+   "evidence": "family 'part_grasp_tool_use' has no planner mapping",
+   "priority": 30222,
+   "blocks": [
+    "homehero.interaction.household_mug.prepare_handle_pick_place"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17",
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.household_mug.prepare_handle_pick_place",
+   "kind": "scene",
+   "title": "a scene for Household mug: prepare handle pick place",
+   "description": "build a scene for 'Household mug: prepare handle pick place'",
+   "evidence": "none named",
+   "priority": 30233,
+   "blocks": [
+    "homehero.interaction.household_mug.prepare_handle_pick_place"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.household_mug.prepare_handle_pick_place",
+   "kind": "take",
+   "title": "a passing take: Household mug: prepare handle pick place",
+   "description": "run and pass a take for 'Household mug: prepare handle pick place'",
+   "evidence": "no take",
+   "priority": 30254,
+   "blocks": [
+    "homehero.interaction.household_mug.prepare_handle_pick_place"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:binding:homehero.interaction.scissor.prepare_flat_pickup:planner",
+   "kind": "planner",
+   "title": "map 'Articulated scissors: prepare flat pickup' to our planners",
+   "description": "add homehero.interaction.scissor.prepare_flat_pickup to curriculum_bindings.json lessons with its planners",
+   "evidence": "family 'part_grasp_tool_use' has no planner mapping",
+   "priority": 30522,
+   "blocks": [
+    "homehero.interaction.scissor.prepare_flat_pickup"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17",
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.scissor.prepare_flat_pickup",
+   "kind": "scene",
+   "title": "a scene for Articulated scissors: prepare flat pickup",
+   "description": "build a scene for 'Articulated scissors: prepare flat pickup'",
+   "evidence": "none named",
+   "priority": 30533,
+   "blocks": [
+    "homehero.interaction.scissor.prepare_flat_pickup"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.scissor.prepare_flat_pickup",
+   "kind": "take",
+   "title": "a passing take: Articulated scissors: prepare flat pickup",
+   "description": "run and pass a take for 'Articulated scissors: prepare flat pickup'",
+   "evidence": "no take",
+   "priority": 30554,
+   "blocks": [
+    "homehero.interaction.scissor.prepare_flat_pickup"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:binding:homehero.interaction.drill_1.prepare_operating_grasp:planner",
+   "kind": "planner",
+   "title": "map 'Articulated cordless drill: prepare operating grasp' to our planners",
+   "description": "add homehero.interaction.drill_1.prepare_operating_grasp to curriculum_bindings.json lessons with its planners",
+   "evidence": "family 'part_grasp_tool_use' has no planner mapping",
+   "priority": 32022,
+   "blocks": [
+    "homehero.interaction.drill_1.prepare_operating_grasp"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json",
+   "status": "superseded",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "no current curriculum lesson needs it (2026-10-17)"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.drill_1.prepare_operating_grasp",
+   "kind": "scene",
+   "title": "a scene for Articulated cordless drill: prepare operating grasp",
+   "description": "build a scene for 'Articulated cordless drill: prepare operating grasp'",
+   "evidence": "none named",
+   "priority": 32035,
+   "blocks": [
+    "homehero.interaction.drill_1.prepare_operating_grasp"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.drill_1.prepare_operating_grasp",
+   "kind": "take",
+   "title": "a passing take: Articulated cordless drill: prepare operating grasp",
+   "description": "run and pass a take for 'Articulated cordless drill: prepare operating grasp'",
+   "evidence": "no take",
+   "priority": 32056,
+   "blocks": [
+    "homehero.interaction.drill_1.prepare_operating_grasp"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:binding:homehero.interaction.tweezers_115.acquire_from_fixture:planner",
+   "kind": "planner",
+   "title": "map 'Articulated 115 mm tweezers: acquire from fixture' to our planners",
+   "description": "add homehero.interaction.tweezers_115.acquire_from_fixture to curriculum_bindings.json lessons with its planners",
+   "evidence": "family 'part_grasp_tool_use' has no planner mapping",
+   "priority": 32122,
+   "blocks": [
+    "homehero.interaction.tweezers_115.acquire_from_fixture"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json",
+   "status": "superseded",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "no current curriculum lesson needs it (2026-10-17)"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.tweezers_115.acquire_from_fixture",
+   "kind": "scene",
+   "title": "a scene for Articulated 115 mm tweezers: acquire from fixture",
+   "description": "build a scene for 'Articulated 115 mm tweezers: acquire from fixture'",
+   "evidence": "none named",
+   "priority": 32133,
+   "blocks": [
+    "homehero.interaction.tweezers_115.acquire_from_fixture"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "done",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "met (curriculum_intake 2026-10-17): aida_r5_lab_pill_pack"
+  },
+  {
+   "id": "cur:take:homehero.interaction.tweezers_115.acquire_from_fixture",
+   "kind": "take",
+   "title": "a passing take: Articulated 115 mm tweezers: acquire from fixture",
+   "description": "run and pass a take for 'Articulated 115 mm tweezers: acquire from fixture' in aida_r5_lab_pill_pack",
+   "evidence": "aida_r5_lab_pill_pack move.pass = None",
+   "priority": 32155,
+   "blocks": [
+    "homehero.interaction.tweezers_115.acquire_from_fixture"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:binding:homehero.interaction.tweezers_115.prepare_flat_pickup:planner",
+   "kind": "planner",
+   "title": "map 'Articulated 115 mm tweezers: prepare flat pickup' to our planners",
+   "description": "add homehero.interaction.tweezers_115.prepare_flat_pickup to curriculum_bindings.json lessons with its planners",
+   "evidence": "family 'part_grasp_tool_use' has no planner mapping",
+   "priority": 32222,
+   "blocks": [
+    "homehero.interaction.tweezers_115.prepare_flat_pickup"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json",
+   "status": "superseded",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "no current curriculum lesson needs it (2026-10-17)"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.tweezers_115.prepare_flat_pickup",
+   "kind": "scene",
+   "title": "a scene for Articulated 115 mm tweezers: prepare flat pickup",
+   "description": "build a scene for 'Articulated 115 mm tweezers: prepare flat pickup'",
+   "evidence": "none named",
+   "priority": 32234,
+   "blocks": [
+    "homehero.interaction.tweezers_115.prepare_flat_pickup"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.tweezers_115.prepare_flat_pickup",
+   "kind": "take",
+   "title": "a passing take: Articulated 115 mm tweezers: prepare flat pickup",
+   "description": "run and pass a take for 'Articulated 115 mm tweezers: prepare flat pickup'",
+   "evidence": "no take",
+   "priority": 32255,
+   "blocks": [
+    "homehero.interaction.tweezers_115.prepare_flat_pickup"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:binding:homehero.interaction.tweezers_115.operate_from_fixture:planner",
+   "kind": "planner",
+   "title": "map 'Articulated 115 mm tweezers: operate from fixture' to our planners",
+   "description": "add homehero.interaction.tweezers_115.operate_from_fixture to curriculum_bindings.json lessons with its planners",
+   "evidence": "family 'part_grasp_tool_use' has no planner mapping",
+   "priority": 32322,
+   "blocks": [
+    "homehero.interaction.tweezers_115.operate_from_fixture"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json",
+   "status": "superseded",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "no current curriculum lesson needs it (2026-10-17)"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.tweezers_115.operate_from_fixture",
+   "kind": "scene",
+   "title": "a scene for Articulated 115 mm tweezers: operate from fixture",
+   "description": "build a scene for 'Articulated 115 mm tweezers: operate from fixture'",
+   "evidence": "none named",
+   "priority": 32335,
+   "blocks": [
+    "homehero.interaction.tweezers_115.operate_from_fixture"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.tweezers_115.operate_from_fixture",
+   "kind": "take",
+   "title": "a passing take: Articulated 115 mm tweezers: operate from fixture",
+   "description": "run and pass a take for 'Articulated 115 mm tweezers: operate from fixture'",
+   "evidence": "no take",
+   "priority": 32356,
+   "blocks": [
+    "homehero.interaction.tweezers_115.operate_from_fixture"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:binding:homehero.interaction.tweezers_115.prepare_and_use:planner",
+   "kind": "planner",
+   "title": "map 'Articulated 115 mm tweezers: prepare and use' to our planners",
+   "description": "add homehero.interaction.tweezers_115.prepare_and_use to curriculum_bindings.json lessons with its planners",
+   "evidence": "family 'part_grasp_tool_use' has no planner mapping",
+   "priority": 32422,
+   "blocks": [
+    "homehero.interaction.tweezers_115.prepare_and_use"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "confirm": "matched by the registries' terms, not a binding: confirm the mapping in curriculum_bindings.json",
+   "status": "superseded",
+   "first_seen": "2026-10-17",
+   "closed_at": "2026-10-17",
+   "closed_why": "no current curriculum lesson needs it (2026-10-17)"
+  },
+  {
+   "id": "cur:scene:homehero.interaction.tweezers_115.prepare_and_use",
+   "kind": "scene",
+   "title": "a scene for Articulated 115 mm tweezers: prepare and use",
+   "description": "build a scene for 'Articulated 115 mm tweezers: prepare and use'",
+   "evidence": "none named",
+   "priority": 32437,
+   "blocks": [
+    "homehero.interaction.tweezers_115.prepare_and_use"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:take:homehero.interaction.tweezers_115.prepare_and_use",
+   "kind": "take",
+   "title": "a passing take: Articulated 115 mm tweezers: prepare and use",
+   "description": "run and pass a take for 'Articulated 115 mm tweezers: prepare and use'",
+   "evidence": "no take",
+   "priority": 32458,
+   "blocks": [
+    "homehero.interaction.tweezers_115.prepare_and_use"
+   ],
+   "actionable": false,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:grasp_preparation",
+   "kind": "planner",
+   "title": "the grasp preparation planner",
+   "description": "preparation primitives (slide_on_support, pivot_on_support, place_in_fixture, supported_regrasp) planned against the grasp the use needs; HomeHero's homehero.grasp_preparation.v1",
+   "evidence": "no planner",
+   "priority": 32022,
+   "blocks": [
+    "homehero.interaction.drill_1.prepare_operating_grasp",
+    "homehero.interaction.tweezers_115.prepare_and_use",
+    "homehero.interaction.tweezers_115.prepare_flat_pickup"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
+   ],
+   "status": "proposed",
+   "first_seen": "2026-10-17"
+  },
+  {
+   "id": "cur:planner:place_tool",
+   "kind": "planner",
+   "title": "the place tool planner",
+   "description": "the pinch planner's place for a held tool (pinch_place with the tool as the target and a station/fixture destination)",
+   "evidence": "no planner",
+   "priority": 32024,
+   "blocks": [
+    "homehero.interaction.drill_1.prepare_operating_grasp",
+    "homehero.interaction.tweezers_115.acquire_from_fixture"
+   ],
+   "actionable": true,
+   "from": "curriculum_intake",
+   "curriculum_sources": [
+    "homehero_interaction"
    ],
    "status": "proposed",
    "first_seen": "2026-10-17"

@@ -45,28 +45,38 @@ def _tip(link):
     return cloud[np.argmax(np.linalg.norm(cloud, axis=1))]          # the fingertip: farthest from the joint
 
 
-def pinch_configuration(g, width_m, curl=1.5, clearance_m=0.02):
+def pinch_configuration(g, width_m, curl=1.5, clearance_m=0.02, tripod=False):
     """Index and thumb flexion and thumb rotation that close their tips on
     each other across width_m, best opposed; and the preshape that opens
     them clearance_m either side. Returned with the pinch's midpoint and
-    line in the palm frame."""
+    line in the palm frame. A tripod: the middle finger beside the index (its
+    flexion the index's), the thumb against the two - a slim tool held by two
+    pads on one side resists turning about the pinch line, which a two-point
+    pinch does not (the tweezers turned out of it at the lift, 2026-10-17)."""
     from prepare_aida_r5_transfer import PALM
     tip_i, tip_t = _tip("psyonic_left_index_L2"), _tip("psyonic_left_thumb_L2")
-    fid = {n: g.model.getFrameId(n) for n in (PALM, "psyonic_left_index_L2", "psyonic_left_thumb_L2")}
+    tip_m = _tip("psyonic_left_middle_L2") if tripod else None
+    fid = {n: g.model.getFrameId(n) for n in (PALM, "psyonic_left_index_L2", "psyonic_left_thumb_L2", "psyonic_left_middle_L2")}
     arm0 = np.zeros(8)
+    mid_off = [0.0]                                           # the middle's flexion less the index's (a tripod)
 
     def tips(h):
+        if tripod:
+            h = np.asarray(h, float).copy()
+            h[1] = h[0] + mid_off[0]
         g.forward(np.r_[arm0, h])
         T = g.data.oMf[fid[PALM]]
-        return (T.actInv(g.data.oMf[fid["psyonic_left_index_L2"]].act(tip_i)),
-                T.actInv(g.data.oMf[fid["psyonic_left_thumb_L2"]].act(tip_t)))
+        pi = T.actInv(g.data.oMf[fid["psyonic_left_index_L2"]].act(tip_i))
+        if tripod:                                            # the index side: between the index's and the middle's tips
+            pi = (pi + T.actInv(g.data.oMf[fid["psyonic_left_middle_L2"]].act(tip_m))) / 2
+        return pi, T.actInv(g.data.oMf[fid["psyonic_left_thumb_L2"]].act(tip_t))
 
     want = width_m + 0.004               # the tip points are the fingertips' outer surface
     best = None
     for qi in np.linspace(0.4, 1.3, 19):
         for qf in np.linspace(0.3, 1.3, 21):
             for qr in np.linspace(-1.74, -0.5, 11):
-                h = np.array([qi, curl, curl, curl, qf, qr])
+                h = np.array([qi, qi if tripod else curl, curl, curl, qf, qr])
                 pi, pt = tips(h)
                 d = float(np.linalg.norm(pt - pi))
                 if abs(d - want) > 0.004:
@@ -81,11 +91,32 @@ def pinch_configuration(g, width_m, curl=1.5, clearance_m=0.02):
     if best is None:
         raise ValueError(f"no index-thumb pinch closes across {width_m:.4f} m")
     opp, hc, mid, axis, d = best
+    if tripod:
+        # the middle is longer than the index: at its flexion its tip reached ~1 cm past the index's and passed under
+        # a 9 mm tweezers arm (2026-10-17) - its own flexion, its tip level with the index's but for the finger row (x)
+        def middle_off(qm):
+            g.forward(np.r_[arm0, hc[0], qm, hc[2:]])
+            T = g.data.oMf[fid[PALM]]
+            pm = T.actInv(g.data.oMf[fid["psyonic_left_middle_L2"]].act(tip_m))
+            pi_ = T.actInv(g.data.oMf[fid["psyonic_left_index_L2"]].act(tip_i))
+            # both pads on the same face: the middle's tip level with the index's along the pinch's axis (the
+            # height along the fingers may differ by a few mm on the face) - matched across and along together,
+            # it stood 6.5 mm off the arm's face and passed over its 9 mm edge as the band closed it (2026-10-17)
+            return abs(float((pm - pi_) @ axis))
+        qms = np.linspace(0.0, 1.74, 88)
+        qm = float(qms[int(np.argmin([middle_off(q) for q in qms]))])
+        mid_off[0] = qm - float(hc[0])
+        hc = hc.copy()
+        hc[1] = qm
+        pi_, pt_ = tips(hc)
+        mid = (pi_ + pt_) / 2
     ho = hc.copy()
     for delta in np.arange(0.02, 1.0, 0.02):              # both digits back along their arcs together
         ho = hc.copy()
         ho[0] = max(0.0, hc[0] - delta)
         ho[4] = max(0.0, hc[4] - delta)
+        if tripod:
+            ho[1] = ho[0] + mid_off[0]
         pi, pt = tips(ho)
         if np.linalg.norm(pt - pi) >= width_m + 2 * clearance_m:
             break
@@ -97,6 +128,7 @@ def pinch_configuration(g, width_m, curl=1.5, clearance_m=0.02):
     pic, ptc = tips(hc)
     closing = {"index": (pi2 - pic) / 0.01, "thumb": (pt2 - ptc) / 0.01}
     return {"closed": hc, "open": ho, "midpoint_palm": mid, "axis_palm": axis, "opposition": opp, "closing_palm": closing,
+            "middle_offset_rad": round(mid_off[0], 4) if tripod else None,
             "closed_separation_m": d, "open_separation_m": float(np.linalg.norm(pt - pi)),
             "open_midpoint_palm": (pi + pt) / 2}
 
@@ -118,7 +150,7 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     grip_point = np.asarray(task["grip_point"], float)
     place_point = np.asarray(task["place_point"], float)      # where the grip point is to be, set down
     pinch = pinch_configuration(g, float(task["grip_width_m"]), float(task.get("curl_rad", 1.5)),
-                                float(task.get("open_clearance_m", 0.02)))
+                                float(task.get("open_clearance_m", 0.02)), tripod=bool(task.get("tripod")))
     hc, ho = pinch["closed"], pinch["open"]
     m, a = pinch["midpoint_palm"], pinch["axis_palm"]
     b = np.cross(a, [0.0, 0.0, 1.0])
@@ -142,6 +174,11 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     # between them (2026-10-15)
     normal = np.asarray(task["cloth_normal"], float) if task.get("cloth_normal") else None
     cos_tol = np.cos(np.radians(float(task.get("closing_axis_tolerance_deg", 30.0))))
+    # a tripod on a slim tool: the finger row (the palm's x, pinky to index) along the tool, so the index and
+    # the middle both land on its arm - rolled across it, the middle passed 2 cm under a 9 mm arm (2026-10-17)
+    row = np.asarray(task["finger_row_axis"], float) if task.get("finger_row_axis") else None
+    cos_row = np.cos(np.radians(float(task.get("finger_row_tolerance_deg", 25.0))))
+    why["row_off_tool"] = 0
     for psi in np.radians(np.arange(0, 360, 15)):             # index-to-thumb either way round: different grasps
         a_w = np.array([np.cos(psi), np.sin(psi), 0.0])
         if normal is not None and abs(float(a_w @ normal)) < cos_tol:
@@ -150,6 +187,9 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
         u, v = up, np.cross(a_w, up)
         for phi in np.radians(np.arange(0, 360, 15)):
             R = _rotation_taking(a, b, a_w, np.cos(phi) * u + np.sin(phi) * v)
+            if row is not None and abs(float(R[:, 0] @ row)) < cos_row:
+                why["row_off_tool"] += 1
+                continue
             p = grip_point - R @ m
             # the palm above the grip for a piece on a table (not beside or
             # under it); a hanging sheet is pinched with the hand level, the
@@ -241,7 +281,7 @@ def plan_pinch_place(req, g, checker, start, lower, upper, action_step, slide_bo
     return {**last, "pinch": _jsonable(pinch), "options": len(options), "tried": tried, "rejections": why}
 
 
-def closure_contact(g, checker, cloud, q_arm, ho, s_max=1.74, step=0.01):
+def closure_contact(g, checker, cloud, q_arm, ho, s_max=1.74, step=0.01, tripod=False):
     """Close index and thumb from the preshape as the hand's firmware does
     (both at once, the other digits held) and report, from the collision
     hulls, when each first touches the object and when they touch each
@@ -259,6 +299,8 @@ def closure_contact(g, checker, cloud, q_arm, ho, s_max=1.74, step=0.01):
     for sv in np.arange(ho[0], s_max + 1e-9, step):
         h = ho.copy()
         h[0], h[4] = sv, ho[4] + (sv - ho[0])
+        if tripod:
+            h[1] = sv + (ho[1] - ho[0])                       # the middle with the index, at its own offset
         checker.g.forward(np.r_[q_arm, h])
         poses = {d: checker.g.pose(f"psyonic_left_{d}_L2") for d in ("index", "thumb")}
         tf = {d: coal.Transform3s(poses[d][1], poses[d][0]) for d in poses}
@@ -485,7 +527,7 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
         if not fit["passed"] or not checker(q_g):
             tried_closure.append({label: round(d, 4), "rejected": "ik" if not fit["passed"] else "collides"})
             continue
-        ok, first = closure_contact(g, checker, req["cloud"], q_g[:8], ho)
+        ok, first = closure_contact(g, checker, req["cloud"], q_g[:8], ho, tripod=bool(task.get("tripod")))
         closure = {label: round(d, 4), "first_contact": first, "ok": ok}
         tried_closure.append(closure)
         if ok:
@@ -495,9 +537,11 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
     err = straight(p_grasp, choice["R"], "descend", ho)
     if err:
         return {"passed": False, "reason": err}
-    # close: the grip command, index and thumb flexor driven closed; held
+    # close: the grip command, index and thumb flexor driven closed (and a tripod's middle); held
     grip = path[-1].copy()
     grip[8], grip[12] = 1.74, 1.74
+    if task.get("tripod"):
+        grip[9] = 1.74
     walk(grip, "close", hand_free=True)
     hold(float(task.get("close_s", 1.0)), "close")
     lift = float(task.get("lift_m", 0.03))
@@ -510,6 +554,7 @@ def _path(choice, req, g, checker, start, hc, ho, grip_point, place_point, step,
         # them back before the next option
         from checker_boxes import drop_boxes
         drop_boxes(checker, "cloth:")
+        drop_boxes(checker, "held:")                             # a tool's cells (tool_pick): in the hand from here
     if task.get("lift_mode") == "palm":
         # the palm straight up by lift_m, IK per 5 mm with the hand closed,
         # screened (a cloth corner: more than the slide's travel)
@@ -590,6 +635,7 @@ def _finish(path, stages, step, lower, upper, checker, hc, screen, rrt, lifted, 
         sc = screen(checker, before)
         if carried:
             drop_boxes(checker, "cloth:")
+            drop_boxes(checker, "held:")
     screened = before + in_hand
     if not sc["passed"]:
         return {"passed": False, "reason": f"collision in the path: {sc['collisions'][:1]}"}
