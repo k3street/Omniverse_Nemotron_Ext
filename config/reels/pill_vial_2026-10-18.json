@@ -1,0 +1,123 @@
+{
+ "name": "pill_vial_2026-10-18",
+ "card_seconds": 2.5,
+ "title_card": {
+  "title": "A pill vial: packed, opened, closed",
+  "kicker": "The user's task  \u00b7  Oct 17-18 2026",
+  "lines": [
+   "Tweezers pack a tablet one at a time; the vial's cap opened and screwed back on",
+   "Physics takes in Isaac Sim 6; speeds marked on each clip"
+  ],
+  "seconds": 4.0
+ },
+ "chapters": [
+  {
+   "scene": "aida_r5_lab_pill_pack",
+   "date": "Oct 18",
+   "title": "A tablet into the vial, with tweezers",
+   "lines": [
+    "Tweezers from their cradle in a tripod; the tips closed on an 8 mm tablet on its stand, carried, let go over the open vial"
+   ],
+   "result": "PACK PASS: held 8.18 mm apart at 1.18 N, carried 11 cm, inside the vial",
+   "segments": [
+    {
+     "from": "descend",
+     "to": "hold",
+     "speed": 1.5,
+     "caption": "the tweezers taken from their cradle in a tripod grip, on their cushion grips"
+    },
+    {
+     "from": "descend#2",
+     "to": "lift#2",
+     "speed": 1.0,
+     "caption": "re-planned over the tablet from where the tips really are; closed until they hold it"
+    },
+    {
+     "from": "carry",
+     "to": "retreat",
+     "speed": 1.5,
+     "caption": "carried over the vial's mouth and let go: it drops in"
+    }
+   ],
+   "crop": [
+    240,
+    50,
+    640,
+    360
+   ],
+   "crop_why": "a zoom on the work, clear of the film's head-camera inset (x >= 880, y >= 416)"
+  },
+  {
+   "scene": "aida_r5_lab_vial_open",
+   "date": "Oct 18",
+   "title": "The vial opened",
+   "lines": [
+    "A screw cap on a one-turn thread: seated it holds at half the torque it was closed with (Oberk: 40-60 %)"
+   ],
+   "result": "CAP PASS: broke loose at 0.152 N m, turned 375 deg in 5 strokes, lifted 40 mm clear",
+   "segments": [
+    {
+     "from": "close",
+     "to": "turn",
+     "speed": 1.5,
+     "caption": "the cap gripped low on its skirt and turned until it breaks loose"
+    },
+    {
+     "from": "release",
+     "to": "regrip#4",
+     "speed": 6,
+     "caption": "80-degree strokes: let go, turn back, grip again - it rises 4.2 mm a turn"
+    },
+    {
+     "from": "close#5",
+     "to": "hold",
+     "speed": 1.5,
+     "caption": "the last stroke takes it off the thread; lifted away"
+    }
+   ],
+   "crop": [
+    260,
+    80,
+    600,
+    338
+   ],
+   "crop_why": "a zoom on the work, clear of the film's head-camera inset (x >= 880, y >= 416)"
+  },
+  {
+   "scene": "aida_r5_lab_vial_close",
+   "date": "Oct 18",
+   "title": "The vial closed again",
+   "lines": [
+    "The cap set loose on the neck; the thread catches it and the hand screws it down"
+   ],
+   "result": "CAP PASS: seated; closed at 0.351 N m - its next hold 0.176 N m",
+   "segments": [
+    {
+     "from": "close",
+     "to": "turn",
+     "speed": 1.5,
+     "caption": "the cap set on the neck at the thread's start, gripped and turned"
+    },
+    {
+     "from": "release",
+     "to": "regrip#4",
+     "speed": 6,
+     "caption": "screwed down stroke by stroke"
+    },
+    {
+     "from": "close#5",
+     "to": "hold",
+     "speed": 1.5,
+     "caption": "seated: the torque it is closed with is what holds it next time"
+    }
+   ],
+   "crop": [
+    260,
+    80,
+    600,
+    338
+   ],
+   "crop_why": "a zoom on the work, clear of the film's head-camera inset (x >= 880, y >= 416)"
+  }
+ ]
+}

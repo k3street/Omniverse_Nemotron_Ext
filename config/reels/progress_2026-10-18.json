@@ -1,0 +1,323 @@
+{
+ "name": "progress_2026-10-18",
+ "card_seconds": 2.5,
+ "title_card": {
+  "title": "Aida R5 in Isaac Sim: what it can do so far",
+  "kicker": "Nemotron sim-ready pipeline  \u00b7  Oct 13-18 2026",
+  "lines": [
+   "Every clip is a physics take (PhysX 5 in Isaac Sim 6): planned, then run with the robot's own controller",
+   "Speeds are marked on each clip"
+  ],
+  "seconds": 4.0
+ },
+ "chapters": [
+  {
+   "scene": "aida_r5_dining_mug_grasp",
+   "date": "Oct 13",
+   "title": "A recorded grasp, replayed",
+   "lines": [
+    "HomeHero's recorded R5 grasp played through its gravity-compensated action layer in Isaac Sim 6"
+   ],
+   "result": "PASS: the red mug lifted 7.0 cm and held",
+   "segments": [
+    {
+     "from_tick": 280,
+     "to": "hold",
+     "speed": 2.5,
+     "caption": "a recorded grasp, replayed in PhysX"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_dining_can_grasp",
+   "date": "Oct 14",
+   "title": "Its own grasp, planned",
+   "lines": [
+    "HomeHero's grasp planner against the scene's point cloud"
+   ],
+   "result": "PASS: the can lifted 5.8 cm, 0.2 mm drift in the hand",
+   "segments": [
+    {
+     "from": "descend",
+     "to": "hold",
+     "speed": 2,
+     "caption": "planned, descended, closed, lifted"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_dining_chess",
+   "date": "Oct 14",
+   "title": "A pinch: a chess move",
+   "lines": [
+    "A fingertip pinch carries a pawn e2-e4 between its neighbours"
+   ],
+   "result": "PASS: the pawn on e4, 1.6 cm from the square's centre, upright; no other piece moved",
+   "segments": [
+    {
+     "from": "descend",
+     "to": "retreat",
+     "speed": 2,
+     "caption": "pinched, carried a square on, set down and let go"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_rail_scissors",
+   "date": "Oct 15",
+   "title": "Scissors: two hands",
+   "lines": [
+    "Scissors taken off their peg; the other hand works their pivot"
+   ],
+   "result": "PASS: lifted 7 cm off the peg; the blades closed and opened by the right hand",
+   "segments": [
+    {
+     "from": "close",
+     "to": "carry",
+     "speed": 3,
+     "caption": "the left hand takes the scissors off their peg"
+    },
+    {
+     "from": "push_approach",
+     "to": "push_release",
+     "speed": 2,
+     "caption": "the right hand pushes the blades shut"
+    },
+    {
+     "from": "open_approach",
+     "to": "open_release",
+     "speed": 2,
+     "caption": "and presses them open"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_living_fridge",
+   "date": "Oct 16",
+   "title": "A fridge door, past its gasket",
+   "lines": [
+    "A sourced magnetic-gasket law: 35 N at the handle to break the seal"
+   ],
+   "result": "PASS: seal broken, the door pulled to 34 deg (planned 34)",
+   "segments": [
+    {
+     "from": "close",
+     "to": "pulled",
+     "speed": 6,
+     "caption": "the handle gripped and the door pulled open through the gasket"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_kitchen_microwave",
+   "date": "Oct 16",
+   "title": "A microwave: button, latch, door",
+   "lines": [
+    "The release button trips the latch and a spring kicks the door open; then the door is pulled wide by its edge"
+   ],
+   "result": "PASS: the button pressed 6.7 mm, the latch tripped, the door to 71 deg",
+   "segments": [
+    {
+     "from": "press",
+     "to": "retreat",
+     "speed": 1.5,
+     "caption": "the release button pressed: the latch lets go, the door kicks open"
+    },
+    {
+     "from": "close",
+     "to": "pulled",
+     "speed": 5,
+     "caption": "then pulled wide by its free edge"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_dining_drill_screw",
+   "date": "Oct 16",
+   "title": "A drill drives a screw",
+   "lines": [
+    "A motor law on the trigger, a #8 screw law in birch plywood: the screw advances a pitch a turn and seats"
+   ],
+   "result": "PASS: driven 26.8 mm in 15.8 turns, seated, not stripped",
+   "segments": [
+    {
+     "from": "close",
+     "to": "hold",
+     "speed": 3,
+     "caption": "the drill picked up by its grip"
+    },
+    {
+     "from": "align",
+     "to": "seat",
+     "speed": 4,
+     "caption": "the bit looked at, put in the screw's recess, and the screw driven home"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_dining_drill_switch",
+   "date": "Oct 17",
+   "title": "The drill's switch, then its trigger",
+   "lines": [
+    "The direction switch set by the hand, then the drill gripped and run"
+   ],
+   "result": "PASS: switch set by the hand; the chuck at 289 rpm, as the motor law says for that pull",
+   "segments": [
+    {
+     "from": "press",
+     "to": "release",
+     "speed": 1,
+     "caption": "the direction switch pressed"
+    },
+    {
+     "from": "close",
+     "to": "run",
+     "speed": 2,
+     "caption": "then the drill gripped and its trigger pulled: the chuck runs"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_dining_pillbottle_grasp",
+   "date": "Oct 17",
+   "title": "An asset the pipeline approved",
+   "lines": [
+    "A pill bottle classified, scaled, given its mass and materials, approved by the review hub, then picked"
+   ],
+   "result": "PASS: lifted 5.9 cm and held",
+   "segments": [
+    {
+     "from": "descend",
+     "to": "hold",
+     "speed": 2,
+     "caption": "a newly approved asset picked up"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_lab_bench_transfer",
+   "date": "Oct 17",
+   "title": "HomeHero's first lab lesson",
+   "lines": [
+    "A sealed container moved from the receiving bench to the inspection bench in a generated lab"
+   ],
+   "result": "PASS: on the inspection bench's region, 1.6 mm from its centre, upright, let go",
+   "segments": [
+    {
+     "from": "descend",
+     "to": "retreat",
+     "speed": 4,
+     "caption": "taken from one bench and set down on the other"
+    }
+   ]
+  },
+  {
+   "scene": "aida_r5_lab_pill_pack",
+   "date": "Oct 18",
+   "title": "A tablet into the vial, with tweezers",
+   "lines": [
+    "Tweezers from their cradle in a tripod; the tips closed on an 8 mm tablet on its stand, carried, let go over the open vial"
+   ],
+   "result": "PACK PASS: held 8.18 mm apart at 1.18 N, carried 11 cm, inside the vial",
+   "segments": [
+    {
+     "from": "descend",
+     "to": "hold",
+     "speed": 2,
+     "caption": "the tweezers taken from their cradle in a tripod grip, on their cushion grips"
+    },
+    {
+     "from": "descend#2",
+     "to": "lift#2",
+     "speed": 1.5,
+     "caption": "re-planned over the tablet from where the tips really are; closed until they hold it"
+    },
+    {
+     "from": "carry",
+     "to": "retreat",
+     "speed": 2,
+     "caption": "carried over the vial's mouth and let go: it drops in"
+    }
+   ],
+   "crop": [
+    240,
+    50,
+    640,
+    360
+   ],
+   "crop_why": "a zoom on the work, clear of the film's head-camera inset (x >= 880, y >= 416)"
+  },
+  {
+   "scene": "aida_r5_lab_vial_open",
+   "date": "Oct 18",
+   "title": "The vial opened",
+   "lines": [
+    "A screw cap on a one-turn thread: seated it holds at half the torque it was closed with (Oberk: 40-60 %)"
+   ],
+   "result": "CAP PASS: broke loose at 0.152 N m, turned 375 deg in 5 strokes, lifted 40 mm clear",
+   "segments": [
+    {
+     "from": "close",
+     "to": "turn",
+     "speed": 2,
+     "caption": "the cap gripped low on its skirt and turned until it breaks loose"
+    },
+    {
+     "from": "release",
+     "to": "regrip#4",
+     "speed": 8,
+     "caption": "80-degree strokes: let go, turn back, grip again - it rises 4.2 mm a turn"
+    },
+    {
+     "from": "close#5",
+     "to": "hold",
+     "speed": 2,
+     "caption": "the last stroke takes it off the thread; lifted away"
+    }
+   ],
+   "crop": [
+    260,
+    80,
+    600,
+    338
+   ],
+   "crop_why": "a zoom on the work, clear of the film's head-camera inset (x >= 880, y >= 416)"
+  },
+  {
+   "scene": "aida_r5_lab_vial_close",
+   "date": "Oct 18",
+   "title": "The vial closed again",
+   "lines": [
+    "The cap set loose on the neck; the thread catches it and the hand screws it down"
+   ],
+   "result": "CAP PASS: seated; closed at 0.351 N m - its next hold 0.176 N m",
+   "segments": [
+    {
+     "from": "close",
+     "to": "turn",
+     "speed": 2,
+     "caption": "the cap set on the neck at the thread's start, gripped and turned"
+    },
+    {
+     "from": "release",
+     "to": "regrip#4",
+     "speed": 8,
+     "caption": "screwed down stroke by stroke"
+    },
+    {
+     "from": "close#5",
+     "to": "hold",
+     "speed": 2,
+     "caption": "seated: the torque it is closed with is what holds it next time"
+    }
+   ],
+   "crop": [
+    260,
+    80,
+    600,
+    338
+   ],
+   "crop_why": "a zoom on the work, clear of the film's head-camera inset (x >= 880, y >= 416)"
+  }
+ ]
+}
