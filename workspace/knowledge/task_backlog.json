@@ -3314,6 +3314,27 @@
     "nemotron.ladder.pill_bottle.r4"
    ],
    "first_seen": "2026-10-18"
+  },
+  {
+   "id": "nemotron_bimanual_cap_v1",
+   "kind": "capability",
+   "status": "proposed",
+   "queued_behind": "the GPU (in use by the user, 2026-10-18) and the downloads batch",
+   "class": "pill_bottle",
+   "from_scene": "aida_r5_lab_vial_open",
+   "title": "Open and close the pill vial with both hands: the left holds the vial, the right turns the cap",
+   "description": "the user's ask (2026-10-18). Today a bench clamp holds the vial (aida_r5_lab_vial_open / _close PASS). With both hands: (1) the left hand picks the vial off the bench and brings it to the robot's midline, where the right arm reaches (the scissors' carry, after_lift_xy; the vial's bench spot is ~0.75 m to the left, out of the right arm's reach); its grip now reacts the cap's torque - ~9 N tangential to open (0.18 N m on a 41 mm body), ~17 N to close to 0.35 N m. (2) A right-hand cap_turn then-stage planned live about the vial's axis where the left hand holds it: strokes and regrips as now, on HomeHero's both-arm geometry (r5_arm_side solve_right, set_active(RIGHT_LINKS)) as finger_push_planner does, with the right hand's own tripod. (3) The replay's grip band and cap_hand_torque on the right hand's digits (both read the left hand today). Then an opening and a closing take, each ~2-3 h of Isaac time",
+   "success_measures": [
+    "CAP PASS opened with the vial in the left hand: broke loose, off the thread, lifted 20 mm+ clear",
+    "CAP PASS closed the same way: seated, its closing torque recorded",
+    "the vial turns < 10 deg in the left hand under the stroke torque"
+   ],
+   "related": [
+    "aida_r5_lab_vial_open",
+    "aida_r5_lab_vial_close",
+    "aida_r5_rail_scissors (two hands)"
+   ],
+   "first_seen": "2026-10-18"
   }
  ]
 }
