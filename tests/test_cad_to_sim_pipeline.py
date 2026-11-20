@@ -22,11 +22,18 @@ def test_cad_mcp_tool_schemas_complete():
         "convert_cad_to_simready_usd",
         "verify_asset_dual_7a",
         "compose_omniverse_workcell_stage",
+        "render_or_simulate_in_blender_ovrtx",
         "run_cad_to_sim_e2e",
     }
     for name in names:
         assert handles_cad_ecosystem_tool(name)
     assert not handles_cad_ecosystem_tool("nonexistent_tool")
+
+    from service.isaac_assist_service.mcp_server import MCPServer
+
+    server = MCPServer()
+    registered = {t["name"] for t in server._mcp_tools}
+    assert names.issubset(registered)
 
 
 def test_cross_platform_rpc_port_resolution(monkeypatch):
@@ -75,3 +82,75 @@ def test_parametric_cad_and_layered_usd_authoring(tmp_path: Path):
     assert vsets.HasVariantSet("PhysicsFidelity")
     assert vsets.HasVariantSet("MaterialFinish")
     assert simready["validation"]["errors"] == 0
+
+
+def test_clean_blender_env_strips_venv_and_sets_profile(tmp_path: Path, monkeypatch):
+    from scripts import cad_to_sim_pipeline as pipe
+
+    monkeypatch.setenv("VIRTUAL_ENV", r"H:\isaacsim7-venv")
+    monkeypatch.setenv("PYTHONPATH", r"H:\isaacsim7-venv\Lib\site-packages")
+    monkeypatch.setenv("OMNI_USER", "test")
+    monkeypatch.setenv("OVRTX_CUSTOM", "leak")
+
+    env = pipe._build_clean_blender_env(str(tmp_path))
+    assert "VIRTUAL_ENV" not in env
+    assert "PYTHONPATH" not in env
+    assert "OMNI_USER" not in env
+    assert "OVRTX_CUSTOM" not in env
+    assert env["BLENDER_USER_EXTENSIONS"] == str(tmp_path / "extensions")
+    assert (tmp_path / "extensions").is_dir()
+
+
+def test_mcp_blender_ovrtx_tool_roundtrip(tmp_path: Path):
+    import asyncio
+    import json
+    import pytest
+    from scripts import cad_to_sim_pipeline as pipe
+    from service.isaac_assist_service.mcp_server import MCPServer
+
+    try:
+        rt = pipe.resolve_blender_ovrtx_runtime()
+    except FileNotFoundError:
+        pytest.skip("Blender 5.2+ runtime not installed on this host")
+    if not rt.get("profile_dir"):
+        pytest.skip("Isolated ovrtx profile not configured on this host")
+
+    fixture_usd = (
+        Path(__file__).resolve().parents[1]
+        / "workspace"
+        / "cad_pipeline"
+        / "cad_machined_shaft"
+        / "simready_usd"
+        / "cad_machined_shaft_simready.usda"
+    )
+    if not fixture_usd.is_file():
+        pytest.skip("Sample SimReady CAD USD not generated yet")
+
+    server = MCPServer()
+    resp = asyncio.run(
+        server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 42,
+                "method": "tools/call",
+                "params": {
+                    "name": "render_or_simulate_in_blender_ovrtx",
+                    "arguments": {
+                        "usd_paths": [str(fixture_usd)],
+                        "job_id": "pytest_mcp_ovrtx",
+                        "simulate_frames": 20,
+                        "substeps": 2,
+                        "resolution": [320, 180],
+                        "samples": 4,
+                        "output_dir": str(tmp_path / "ovrtx_out"),
+                    },
+                },
+            }
+        )
+    )
+    assert resp["result"]["isError"] is False
+    payload = json.loads(resp["result"]["content"][0]["text"])
+    assert payload["status"] == "passed"
+    assert Path(payload["ovrtx_render"]["render_png_path"]).is_file()
+    assert Path(payload["blend_path"]).is_file()
+    assert payload["ovphysx_simulation"]["frames_simulated"] == 20
