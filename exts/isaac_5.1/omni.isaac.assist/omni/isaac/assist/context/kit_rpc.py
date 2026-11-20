@@ -133,7 +133,8 @@ class KitRPCServer:
         # Remove the port file
         try:
             import os
-            os.unlink("/tmp/isaac_assist_rpc_port")
+            import tempfile
+            os.unlink(os.path.join(tempfile.gettempdir(), "isaac_assist_rpc_port"))
         except Exception:
             pass
         carb.log_warn("[IsaacAssist] Kit RPC server stopped")
@@ -193,7 +194,10 @@ class KitRPCServer:
         self.port = bound_port
         # Write bound port to a well-known file so the FastAPI service can discover it
         try:
-            with open("/tmp/isaac_assist_rpc_port", "w") as _pf:
+            import os
+            import tempfile
+            _port_path = os.path.join(tempfile.gettempdir(), "isaac_assist_rpc_port")
+            with open(_port_path, "w") as _pf:
                 _pf.write(str(bound_port))
         except Exception:
             pass

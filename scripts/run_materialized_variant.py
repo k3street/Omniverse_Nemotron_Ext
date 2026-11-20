@@ -57,12 +57,17 @@ def variant_log_path(variant: Dict[str, Any]) -> Path:
 
 
 def _kit_rpc_health(timeout_s: float = 1.0) -> Dict[str, Any]:
+    import tempfile
     port = "8001"
-    port_file = Path("/tmp/isaac_assist_rpc_port")
-    if port_file.exists():
-        candidate = port_file.read_text(encoding="utf-8").strip()
-        if candidate.isdigit():
-            port = candidate
+    for port_file in (
+        Path(tempfile.gettempdir()) / "isaac_assist_rpc_port",
+        Path("/tmp/isaac_assist_rpc_port"),
+    ):
+        if port_file.exists():
+            candidate = port_file.read_text(encoding="utf-8").strip()
+            if candidate.isdigit():
+                port = candidate
+                break
     url = f"http://127.0.0.1:{port}/health"
     try:
         with urllib.request.urlopen(url, timeout=timeout_s) as response:

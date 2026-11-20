@@ -13,15 +13,36 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger(__name__)
 # KIT_RPC_PORT env-var allows per-process targeting of a specific Kit instance
 # in a multi-Kit pool. Defaults to 8001 (single-Kit baseline).
-KIT_RPC_BASE = f"http://127.0.0.1:{os.environ.get('KIT_RPC_PORT', '8001')}"
+def _resolve_kit_rpc_base() -> str:
+    """Resolve Kit RPC base URL from KIT_RPC_PORT env var or temp port file."""
+    explicit = os.environ.get("KIT_RPC_PORT")
+    if explicit:
+        return f"http://127.0.0.1:{explicit}"
+    import tempfile
+    for candidate in (
+        os.path.join(tempfile.gettempdir(), "isaac_assist_rpc_port"),
+        "/tmp/isaac_assist_rpc_port",
+    ):
+        try:
+            with open(candidate, encoding="utf-8") as pf:
+                val = pf.read().strip()
+                if val.isdigit():
+                    return f"http://127.0.0.1:{val}"
+        except OSError:
+            continue
+    return "http://127.0.0.1:8001"
+
+
+KIT_RPC_BASE = _resolve_kit_rpc_base()
 
 
 async def _get(path: str, params: Dict = None) -> Dict[str, Any]:
     """HTTP GET against the Kit RPC base URL; returns ``{"error": ...}`` on failure."""
+    base = _resolve_kit_rpc_base()
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{KIT_RPC_BASE}{path}", params=params, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            async with session.get(f"{base}{path}", params=params, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status != 200:
                     return {"error": f"Kit RPC {path} returned {resp.status}"}
                 return await resp.json()
@@ -32,10 +53,11 @@ async def _get(path: str, params: Dict = None) -> Dict[str, Any]:
 
 async def _post(path: str, body: Dict) -> Dict[str, Any]:
     """HTTP POST against the Kit RPC base URL; returns ``{"error": ...}`` on failure."""
+    base = _resolve_kit_rpc_base()
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
-            async with session.post(f"{KIT_RPC_BASE}{path}", json=body, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            async with session.post(f"{base}{path}", json=body, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status != 200:
                     return {"error": f"Kit RPC {path} returned {resp.status}"}
                 return await resp.json()

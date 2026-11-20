@@ -95,6 +95,8 @@ class MCPServer:
         self._settings = SettingsManager()
         from .mcp_floorplan_tools import mcp_floorplan_tool_schemas
         self._floorplan_tools = mcp_floorplan_tool_schemas()
+        from .mcp_cad_ecosystem_tools import mcp_cad_ecosystem_tool_schemas
+        self._cad_ecosystem_tools = mcp_cad_ecosystem_tool_schemas()
 
         # Apply rich descriptions for LLM tool selection accuracy (Phase 12 prep)
         try:
@@ -142,6 +144,7 @@ class MCPServer:
             },
         })
         mcp_tools.extend(self._floorplan_tools)
+        mcp_tools.extend(self._cad_ecosystem_tools)
         return mcp_tools
 
     # ── JSON-RPC dispatch ───────────────────────────────────────────────
@@ -244,6 +247,13 @@ class MCPServer:
         from .mcp_floorplan_tools import handles_floorplan_tool, call_floorplan_tool
         if handles_floorplan_tool(tool_name):
             payload = await call_floorplan_tool(tool_name, arguments)
+            return {
+                "content": [{"type": "text", "text": json.dumps(payload, indent=2, default=str)}],
+                "isError": False,
+            }
+        from .mcp_cad_ecosystem_tools import handles_cad_ecosystem_tool, call_cad_ecosystem_tool
+        if handles_cad_ecosystem_tool(tool_name):
+            payload = await call_cad_ecosystem_tool(tool_name, arguments)
             return {
                 "content": [{"type": "text", "text": json.dumps(payload, indent=2, default=str)}],
                 "isError": False,

@@ -25,6 +25,7 @@ from .finetune.routes import router as finetune_router
 from .scene_workspace.routes import router as scene_workspace_router
 from .manipulation.routes import router as manipulation_router
 from .multimodal.routes import router as multimodal_canvas_router
+from .mcp_cad_ecosystem_tools import router as cad_pipeline_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ app.include_router(finetune_router, prefix="/api/v1/finetune", tags=["Fine-tunin
 app.include_router(scene_workspace_router, prefix="/api/v1/scenes", tags=["Scene Workspace"])
 app.include_router(manipulation_router, prefix="/api/v1/manipulation", tags=["Manipulation Planner"])
 app.include_router(multimodal_canvas_router, prefix="/api/v1/canvas", tags=["Multimodal Canvas"])
+app.include_router(cad_pipeline_router, prefix="/api/v1/cad_pipeline", tags=["CAD to Simulation Pipeline"])
 
 _floorplan_dist = Path(__file__).resolve().parents[2] / "web" / "floor-plan-ui" / "dist"
 if _floorplan_dist.exists():

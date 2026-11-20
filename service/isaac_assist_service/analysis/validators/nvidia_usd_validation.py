@@ -40,10 +40,14 @@ def resolve_validator_command() -> list[str] | None:
         found = shutil.which(configured)
         return [found] if found else None
 
-    sidecar_python = REPO_ROOT / ".venv-omniverse-tools" / "bin" / "python"
     bridge = REPO_ROOT / "scripts" / "nvidia_usd_validate_bridge.py"
-    if sidecar_python.is_file() and bridge.is_file():
-        return [str(sidecar_python), str(bridge)]
+    for sidecar_python in (
+        REPO_ROOT / ".venv-omniverse-tools" / "bin" / "python",
+        REPO_ROOT / ".venv-omniverse-tools" / "Scripts" / "python.exe",
+        Path(r"H:\isaacsim7-venv\Scripts\python.exe"),
+    ):
+        if sidecar_python.is_file() and bridge.is_file():
+            return [str(sidecar_python), str(bridge)]
     found = shutil.which("nvidia_usd_validate")
     return [found] if found else None
 

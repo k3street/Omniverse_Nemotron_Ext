@@ -33,13 +33,21 @@ PROTOCOL_VERSION = "2024-11-05"
 def _service_url() -> str:
     """Kit RPC base URL: env override, then the port file the RPC server
     writes on bind, then the default 8001."""
+    import tempfile
     override = os.environ.get("ISAAC_ASSIST_URL")
     if override:
         return override.rstrip("/")
-    try:
-        port = int(open("/tmp/isaac_assist_rpc_port").read().strip())
-    except (OSError, ValueError):
-        port = 8001
+    port = 8001
+    for candidate in (
+        os.path.join(tempfile.gettempdir(), "isaac_assist_rpc_port"),
+        "/tmp/isaac_assist_rpc_port",
+    ):
+        try:
+            with open(candidate, encoding="utf-8") as pf:
+                port = int(pf.read().strip())
+                break
+        except (OSError, ValueError):
+            continue
     return f"http://127.0.0.1:{port}"
 
 

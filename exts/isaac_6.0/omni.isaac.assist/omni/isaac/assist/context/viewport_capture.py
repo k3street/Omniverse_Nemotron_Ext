@@ -24,15 +24,39 @@ async def capture_viewport_png(max_dim: int = 1280) -> Dict[str, Any]:
     Downsampling keeps vision LLM tokens reasonable.
     """
     try:
-        from omni.kit.viewport.utility import get_active_viewport, capture_viewport_to_file
+        import threading
+        from .kit_rpc import _SYNC_EXEC_QUEUE
 
-        viewport = get_active_viewport()
-        if viewport is None:
-            return {"error": "No active viewport found"}
-
-        # Write to a temp file
+        # Remove stale capture file first so we detect the fresh render cleanly
         tmp_path = os.path.join(tempfile.gettempdir(), "isaac_assist_capture.png")
-        capture_helper = capture_viewport_to_file(viewport, file_path=tmp_path)
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
+
+        # Dispatch capture_viewport_to_file onto Kit's main thread (_kit_exec_tick)
+        # so Hydra/RTX viewport is never called from the background aiohttp thread.
+        escaped_tmp = tmp_path.replace("\\", "/")
+        holder = {"result": None, "event": threading.Event()}
+        _SYNC_EXEC_QUEUE.put(
+            (
+                "from omni.kit.viewport.utility import get_active_viewport, capture_viewport_to_file\n"
+                "vp = get_active_viewport()\n"
+                "if vp is None:\n"
+                "    raise RuntimeError('No active viewport found')\n"
+                f"_cap = capture_viewport_to_file(vp, file_path='{escaped_tmp}')\n",
+                holder,
+            )
+        )
+        for _ in range(30):
+            if holder["event"].is_set():
+                break
+            await asyncio.sleep(0.1)
+        if not holder["event"].is_set():
+            return {"error": "Main-thread viewport capture dispatch timed out"}
+        if not holder["result"]["success"]:
+            return {"error": holder["result"]["output"]}
 
         # Wait up to 5 seconds for the render to land
         for _ in range(50):
