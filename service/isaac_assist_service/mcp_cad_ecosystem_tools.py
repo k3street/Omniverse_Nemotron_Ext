@@ -28,6 +28,7 @@ _CAD_TOOL_NAMES = frozenset(
         "convert_cad_to_simready_usd",
         "verify_asset_dual_7a",
         "compose_omniverse_workcell_stage",
+        "render_or_simulate_in_blender_ovrtx",
         "run_cad_to_sim_e2e",
     }
 )
@@ -127,10 +128,67 @@ def mcp_cad_ecosystem_tool_schemas() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "render_or_simulate_in_blender_ovrtx",
+            "description": (
+                "Import one or more SimReady OpenUSD CAD assets into Blender 5.2+ with NVIDIA ovrtx-blender-example, "
+                "convert physics via bpy.ops.ov.physics_convert_simready() (preserving authored mass, COM, inertia, "
+                "friction, and convexDecomposition colliders), run external OVPhysX sidecar simulation, and render a "
+                "path-traced OVRTX_EXAMPLE PNG frame + interactive .blend file."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "usd_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of SimReady .usda/.usdc/.usd paths to import into the Blender workcell.",
+                    },
+                    "assets": {
+                        "type": "array",
+                        "description": (
+                            "Optional per-asset placement overrides: "
+                            "[{usd_path, name, location:[x,y,z], rotation_euler_deg:[rx,ry,rz], role:'STATIC'|'DYNAMIC'|'KINEMATIC'}]."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "usd_path": {"type": "string"},
+                                "name": {"type": "string"},
+                                "location": {"type": "array", "items": {"type": "number"}},
+                                "rotation_euler_deg": {"type": "array", "items": {"type": "number"}},
+                                "role": {"type": "string", "enum": ["STATIC", "DYNAMIC", "KINEMATIC"], "default": "DYNAMIC"},
+                            },
+                            "required": ["usd_path"],
+                        },
+                    },
+                    "job_id": {"type": "string", "description": "Optional output folder/blend identifier."},
+                    "simulate_frames": {
+                        "type": "integer",
+                        "default": 48,
+                        "description": "Frames to simulate in OVPhysX before rendering (0 or 1 skips physics simulation).",
+                    },
+                    "substeps": {"type": "integer", "default": 2},
+                    "resolution": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "default": [1280, 720],
+                        "description": "[width, height] render resolution in pixels.",
+                    },
+                    "samples": {"type": "integer", "default": 32},
+                    "output_dir": {"type": "string"},
+                    "launch_gui": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, also launch an interactive Blender + ovrtx GUI window on the saved .blend.",
+                    },
+                },
+            },
+        },
+        {
             "name": "run_cad_to_sim_e2e",
             "description": (
                 "Execute the full CAD -> SimReady USD -> 7.0.0a1 ovphysx+ovnewton verification -> "
-                "governed OpenUSD workcell pipeline end-to-end."
+                "governed OpenUSD workcell (and optional Blender ovrtx verification) pipeline end-to-end."
             ),
             "inputSchema": {
                 "type": "object",
@@ -139,6 +197,7 @@ def mcp_cad_ecosystem_tool_schemas() -> List[Dict[str, Any]]:
                     "fixture_material": {"type": "string", "default": "6061_t6_aluminum"},
                     "workpiece_material": {"type": "string", "default": "pla"},
                     "deploy_live": {"type": "boolean", "default": False},
+                    "include_blender_ovrtx": {"type": "boolean", "default": False},
                 },
             },
         },
@@ -180,11 +239,25 @@ def _execute_sync(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             gsplat_backdrop_usd=arguments.get("gsplat_backdrop_usd"),
             deploy_live=bool(arguments.get("deploy_live", False)),
         )
+    if tool_name == "render_or_simulate_in_blender_ovrtx":
+        res = arguments.get("resolution") or [1280, 720]
+        return mod.render_or_simulate_in_blender_ovrtx(
+            usd_paths=arguments.get("usd_paths"),
+            assets=arguments.get("assets"),
+            job_id=arguments.get("job_id"),
+            simulate_frames=int(arguments.get("simulate_frames", 48)),
+            substeps=int(arguments.get("substeps", 2)),
+            resolution=(int(res[0]), int(res[1])),
+            samples=int(arguments.get("samples", 32)),
+            output_dir=arguments.get("output_dir"),
+            launch_gui=bool(arguments.get("launch_gui", False)),
+        )
     if tool_name == "run_cad_to_sim_e2e":
         workcell_id = arguments.get("workcell_id", "nemotron_cad_cell_v1")
         fix_mat = arguments.get("fixture_material", "6061_t6_aluminum")
         wp_mat = arguments.get("workpiece_material", "pla")
         deploy_live = bool(arguments.get("deploy_live", False))
+        include_blender = bool(arguments.get("include_blender_ovrtx", False))
         fix_cad = mod.design_parametric_cad("cad_slotted_fixture", "slotted_fixture", fix_mat)
         wp_cad = mod.design_parametric_cad("cad_machined_shaft", "machined_shaft", wp_mat)
         fix_usd = mod.convert_cad_to_simready_usd(fix_cad["step_path"], "cad_slotted_fixture", fix_mat)
@@ -197,12 +270,18 @@ def _execute_sync(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             workpiece_usd_path=wp_usd["root_usd_path"],
             deploy_live=deploy_live,
         )
-        return {
+        out: Dict[str, Any] = {
             "fixture": {"cad": fix_cad, "simready": fix_usd, "verification_7a": fix_ver},
             "workpiece": {"cad": wp_cad, "simready": wp_usd, "verification_7a": wp_ver},
             "workcell": workcell,
             "all_gates_passed": bool(fix_ver["passed"] and wp_ver["passed"]),
         }
+        if include_blender:
+            out["blender_ovrtx"] = mod.render_or_simulate_in_blender_ovrtx(
+                usd_paths=[fix_usd["root_usd_path"], wp_usd["root_usd_path"]],
+                job_id=f"{workcell_id}_ovrtx",
+            )
+        return out
     raise ValueError(f"Unsupported CAD ecosystem tool: {tool_name}")
 
 
@@ -246,11 +325,24 @@ class ComposeWorkcellRequest(BaseModel):
     deploy_live: bool = False
 
 
+class BlenderOvrtxRequest(BaseModel):
+    usd_paths: Optional[List[str]] = None
+    assets: Optional[List[Dict[str, Any]]] = None
+    job_id: Optional[str] = None
+    simulate_frames: int = 48
+    substeps: int = 2
+    resolution: List[int] = Field(default_factory=lambda: [1280, 720])
+    samples: int = 32
+    output_dir: Optional[str] = None
+    launch_gui: bool = False
+
+
 class RunE2ERequest(BaseModel):
     workcell_id: str = "nemotron_cad_cell_v1"
     fixture_material: str = "6061_t6_aluminum"
     workpiece_material: str = "pla"
     deploy_live: bool = False
+    include_blender_ovrtx: bool = False
 
 
 @router.post("/design")
@@ -281,6 +373,14 @@ async def api_verify_7a(req: Verify7aRequest):
 async def api_compose_workcell(req: ComposeWorkcellRequest):
     try:
         return await call_cad_ecosystem_tool("compose_omniverse_workcell_stage", req.model_dump())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/blender_ovrtx")
+async def api_blender_ovrtx(req: BlenderOvrtxRequest):
+    try:
+        return await call_cad_ecosystem_tool("render_or_simulate_in_blender_ovrtx", req.model_dump())
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

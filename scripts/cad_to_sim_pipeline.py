@@ -2100,6 +2100,21 @@ def _build_cli() -> argparse.ArgumentParser:
     p_demo = sub.add_parser("demo-e2e", help="Run full CAD -> SimReady -> 7.0a Dual Physics -> Workcell pipeline")
     p_demo.add_argument("--workcell-id", default="nemotron_cad_cell_v1")
     p_demo.add_argument("--deploy-live", action="store_true")
+    p_demo.add_argument("--include-blender-ovrtx", action="store_true")
+
+    p_blender = sub.add_parser(
+        "blender-ovrtx",
+        help="Import SimReady USD assets into Blender 5.2+ with ovrtx, simulate in OVPhysX, and render PNG + .blend",
+    )
+    p_blender.add_argument("--usd", nargs="+", required=True, type=Path, help="One or more SimReady USD paths")
+    p_blender.add_argument("--job-id", default=None)
+    p_blender.add_argument("--simulate-frames", type=int, default=48)
+    p_blender.add_argument("--substeps", type=int, default=2)
+    p_blender.add_argument("--width", type=int, default=1280)
+    p_blender.add_argument("--height", type=int, default=720)
+    p_blender.add_argument("--samples", type=int, default=32)
+    p_blender.add_argument("--output-dir", type=Path, default=None)
+    p_blender.add_argument("--launch-gui", action="store_true")
 
     return parser
 
@@ -2191,8 +2206,27 @@ def main() -> int:
             "workpiece": {"cad": wp_cad, "simready": wp_usd, "verification_7a": wp_ver},
             "workcell": workcell,
         }
+        if args.include_blender_ovrtx:
+            summary["blender_ovrtx"] = render_or_simulate_in_blender_ovrtx(
+                usd_paths=[fix_usd["root_usd_path"], wp_usd["root_usd_path"]],
+                job_id=f"{args.workcell_id}_ovrtx",
+            )
         print(json.dumps(summary, indent=2))
         return 0 if (fix_ver["passed"] and wp_ver["passed"]) else 1
+
+    if args.cmd == "blender-ovrtx":
+        res = render_or_simulate_in_blender_ovrtx(
+            usd_paths=args.usd,
+            job_id=args.job_id,
+            simulate_frames=args.simulate_frames,
+            substeps=args.substeps,
+            resolution=(args.width, args.height),
+            samples=args.samples,
+            output_dir=args.output_dir,
+            launch_gui=args.launch_gui,
+        )
+        print(json.dumps(res, indent=2))
+        return 0
 
     return 1
 
