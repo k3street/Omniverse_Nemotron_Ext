@@ -24,6 +24,9 @@ def test_cad_mcp_tool_schemas_complete():
         "compose_omniverse_workcell_stage",
         "render_or_simulate_in_blender_ovrtx",
         "run_cad_to_sim_e2e",
+        "extract_cad_creator_r2_hybrid",
+        "simulate_mujoco_r2_grasp_and_mate",
+        "run_full_cad_mujoco_isaac_blender_showcase",
     }
     for name in names:
         assert handles_cad_ecosystem_tool(name)

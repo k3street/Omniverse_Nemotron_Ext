@@ -1,0 +1,39 @@
+{
+  "schema": "amber_v0.5.minimal_motion_retargeting_proof.v1",
+  "core_principle": "Capture Glove and tool_gripper_r4 share identical 6-DoF joint topology (5 rotary + 1 3-pos thumb), link lengths, contact pad offsets, 9-channel tactile layout, and radial-cheek ArduCam extrinsics, reducing motion retargeting to the 6x6 identity matrix q_r4 = I_6 @ q_glove.",
+  "urdf_revolute_dofs": {
+    "right": 6,
+    "left": 6
+  },
+  "analytical_500_pose_identity_audit": {
+    "sampled_glove_configurations": 500,
+    "retargeting_map": "q_r4 = I_6 @ q_glove (pure 1:1 joint-angle identity)",
+    "retargeting_matrix_condition_number": 1.0,
+    "glove_sensed_dofs": 6,
+    "r4_actuated_dofs": 6,
+    "unobserved_robot_dofs": 0,
+    "ik_iterations_per_step": 0,
+    "mean_retargeting_compute_ms": 0.034634,
+    "max_fingertip_and_camera_fk_discrepancy_mm": 0.0
+  },
+  "live_mujoco_311_zero_ik_playback": {
+    "mujoco_version": "3.11.0",
+    "steps_simulated": 1600,
+    "canister_mass_kg": 0.32,
+    "initial_canister_z_mm": 191.5,
+    "final_canister_z_mm": 276.57,
+    "aerial_lift_mm": 85.07,
+    "retargeting_equation_executed": "data.ctrl[2:8] = q_glove  # I_6 identity, 0 IK",
+    "peak_9ch_tactile_forces_N": {
+      "ch0_thumb_contactile": 334.26,
+      "ch1_index_contactile": 167.03,
+      "ch2_ulnar_mid_contactile": 192.62,
+      "ch3_ulnar_ring_contactile": 110.42,
+      "ch4_ulnar_pinkie_contactile": 144.18,
+      "ch5_8_palm_fsr07_sum": 0.0
+    },
+    "render_path": "C:\\Users\\Owner\\Documents\\Github\\Omniverse_Nemotron_Ext\\workspace\\amber_gripper_r4\\renders\\r4_mujoco_zero_ik_grasp.png",
+    "egocentric_arducam_path": "C:\\Users\\Owner\\Documents\\Github\\Omniverse_Nemotron_Ext\\workspace\\amber_gripper_r4\\renders\\r4_arducam_egocentric_view.png",
+    "pass": true
+  }
+}

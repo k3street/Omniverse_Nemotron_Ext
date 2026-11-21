@@ -7,16 +7,27 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _PIPELINE_SCRIPT = REPO_ROOT / "scripts" / "cad_to_sim_pipeline.py"
+_R2_HYBRID_SCRIPT = REPO_ROOT / "scripts" / "r2_hybrid_ecosystem_pipeline.py"
 
 
 def _load_pipeline_module():
     spec = importlib.util.spec_from_file_location("isaac_assist_cad_to_sim_pipeline", _PIPELINE_SCRIPT)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Cannot load CAD pipeline script at {_PIPELINE_SCRIPT}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_r2_hybrid_module():
+    spec = importlib.util.spec_from_file_location("isaac_assist_r2_hybrid_pipeline", _R2_HYBRID_SCRIPT)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load R2 hybrid pipeline script at {_R2_HYBRID_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -30,6 +41,9 @@ _CAD_TOOL_NAMES = frozenset(
         "compose_omniverse_workcell_stage",
         "render_or_simulate_in_blender_ovrtx",
         "run_cad_to_sim_e2e",
+        "extract_cad_creator_r2_hybrid",
+        "simulate_mujoco_r2_grasp_and_mate",
+        "run_full_cad_mujoco_isaac_blender_showcase",
     }
 )
 
@@ -201,6 +215,63 @@ def mcp_cad_ecosystem_tool_schemas() -> List[Dict[str, Any]]:
                 },
             },
         },
+        {
+            "name": "extract_cad_creator_r2_hybrid",
+            "description": (
+                "Read-only OpenCASCADE (OCP) extraction of CAD Creator's 9-link articulated R2 3-Finger Tactile Gripper "
+                "(with Contactile 3DFBS-12T fingertip sensors) + B-Rep telemetry cartridge & chamfered mating dock into "
+                "per-link .step/.stl, URDF, exact GProp mass/inertia, and B-Rep clearance verification."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "output_dir": {"type": "string"},
+                    "cad_creator_root": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "simulate_mujoco_r2_grasp_and_mate",
+            "description": (
+                "Compile SHA-256-stamped MJCF from the CAD Creator R2 Gripper manifest and run closed-loop MuJoCo 3.11 "
+                "3-finger tactile grasp, aerial lift, lateral transport, and chamfered dock insertion with 3 Contactile "
+                "<touch> sensors + 1280x720 offscreen renders."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "manifest_path": {"type": "string"},
+                    "output_dir": {"type": "string"},
+                },
+                "required": ["manifest_path"],
+            },
+        },
+        {
+            "name": "run_full_cad_mujoco_isaac_blender_showcase",
+            "description": (
+                "Run the complete 5-system showcase end-to-end: CAD Creator OpenCASCADE (R2 3-Finger Tactile Gripper + "
+                "Workpiece) -> MuJoCo 3.11 closed-loop tactile grasp & insertion -> Isaac Sim 7.0.0a1 dual-engine "
+                "verification + live Omniverse Kit & ROS 2 Jazzy /tf -> Blender 5.2.1 + ovrtx path-traced renders & .blend."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "deploy_live_isaac": {"type": "boolean", "default": True},
+                    "blender_resolution": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "default": [1280, 720],
+                    },
+                    "blender_samples": {"type": "integer", "default": 32},
+                    "output_dir": {"type": "string"},
+                    "open_visible_at_end": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Pop open live MuJoCo 3.11 viewer, Blender 5.2.1 ovrtx GUI, Isaac Sim playback, and HTML Mission Control report at completion.",
+                    },
+                },
+            },
+        },
     ]
 
 
@@ -282,6 +353,28 @@ def _execute_sync(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 job_id=f"{workcell_id}_ovrtx",
             )
         return out
+    if tool_name == "extract_cad_creator_r2_hybrid":
+        r2_mod = _load_r2_hybrid_module()
+        return r2_mod.extract_cad_creator_r2_hybrid(
+            output_dir=arguments.get("output_dir"),
+            cad_creator_root=arguments.get("cad_creator_root"),
+        )
+    if tool_name == "simulate_mujoco_r2_grasp_and_mate":
+        r2_mod = _load_r2_hybrid_module()
+        return r2_mod.simulate_mujoco_r2_grasp_and_mate(
+            manifest_or_path=arguments["manifest_path"],
+            output_dir=arguments.get("output_dir"),
+        )
+    if tool_name == "run_full_cad_mujoco_isaac_blender_showcase":
+        r2_mod = _load_r2_hybrid_module()
+        res = arguments.get("blender_resolution") or [1280, 720]
+        return r2_mod.run_full_cad_mujoco_isaac_blender_showcase(
+            deploy_live_isaac=bool(arguments.get("deploy_live_isaac", True)),
+            blender_resolution=(int(res[0]), int(res[1])),
+            blender_samples=int(arguments.get("blender_samples", 32)),
+            output_dir=arguments.get("output_dir"),
+            open_visible_at_end=bool(arguments.get("open_visible_at_end", True)),
+        )
     raise ValueError(f"Unsupported CAD ecosystem tool: {tool_name}")
 
 
@@ -385,9 +478,64 @@ async def api_blender_ovrtx(req: BlenderOvrtxRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class R2ExtractRequest(BaseModel):
+    output_dir: Optional[str] = None
+    cad_creator_root: Optional[str] = None
+
+
+class R2MujocoRequest(BaseModel):
+    manifest_path: str
+    output_dir: Optional[str] = None
+
+
+class R2ShowcaseRequest(BaseModel):
+    deploy_live_isaac: bool = True
+    blender_resolution: List[int] = Field(default_factory=lambda: [1280, 720])
+    blender_samples: int = 32
+    output_dir: Optional[str] = None
+    open_visible_at_end: bool = True
+
+
 @router.post("/e2e")
 async def api_run_e2e(req: RunE2ERequest):
     try:
         return await call_cad_ecosystem_tool("run_cad_to_sim_e2e", req.model_dump())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/r2_extract")
+async def api_r2_extract(req: R2ExtractRequest):
+    try:
+        return await call_cad_ecosystem_tool("extract_cad_creator_r2_hybrid", req.model_dump())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/r2_mujoco")
+async def api_r2_mujoco(req: R2MujocoRequest):
+    try:
+        return await call_cad_ecosystem_tool("simulate_mujoco_r2_grasp_and_mate", req.model_dump())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+async def api_r2_dashboard():
+    dash = REPO_ROOT / "workspace" / "r2_hybrid_showcase" / "r2_showcase_dashboard.html"
+    if not dash.is_file():
+        r2_mod = _load_r2_hybrid_module()
+        summary_file = REPO_ROOT / "workspace" / "r2_hybrid_showcase" / "r2_five_system_summary.json"
+        if not summary_file.is_file():
+            raise HTTPException(status_code=404, detail="Run r2_showcase first to generate dashboard.")
+        import json as _json
+        r2_mod.generate_r2_visual_dashboard_html(_json.loads(summary_file.read_text(encoding="utf-8")), dash.parent)
+    return HTMLResponse(content=dash.read_text(encoding="utf-8"))
+
+
+@router.post("/r2_showcase")
+async def api_r2_showcase(req: R2ShowcaseRequest):
+    try:
+        return await call_cad_ecosystem_tool("run_full_cad_mujoco_isaac_blender_showcase", req.model_dump())
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

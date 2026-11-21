@@ -1,0 +1,264 @@
+{
+  "project": "Amber v0.5 Tool Gripper R4 (True Capture-Glove C-Mouth Architecture + Full R2/R3 Engineering Inheritance + Wrist Tool Changer R2)",
+  "cad_creator_readonly": true,
+  "default_cad_pose": "glove_showcase",
+  "wrist_tool_changer_r2": {
+    "z_tool_top_mm": 18.949747468305834,
+    "z_pilot_bottom_mm": -84.64553390593272,
+    "body_od_mm": 101.0,
+    "tool_plate_od_mm": 70.0,
+    "added_length_mm": 111.59528137423855,
+    "tool_screw_angles_deg": [
+      30.0,
+      150.0,
+      225.0
+    ],
+    "tool_screw_pcd_r_mm": 22.0,
+    "central_bore_d_mm": 12.0
+  },
+  "sizing_and_reach": {
+    "L1_mm": 56.0,
+    "L2_mm": 54.0,
+    "D_mm": 70.0,
+    "tool_point_reach_mm": 176.4,
+    "reach_limit_mm": 193.0,
+    "palm_width_mm": 98.0,
+    "width_limit_mm": 125.0
+  },
+  "hands": {
+    "right": {
+      "step_with_changer_path": "C:\\Users\\Owner\\Documents\\Github\\Omniverse_Nemotron_Ext\\workspace\\amber_gripper_r4\\cad\\amber_gripper_r4_right_with_changer.step",
+      "urdf_path": "C:\\Users\\Owner\\Documents\\Github\\Omniverse_Nemotron_Ext\\workspace\\amber_gripper_r4\\urdf\\amber_gripper_r4_right.urdf",
+      "r4_gripper_only_mass_kg": 0.5016,
+      "total_with_changer_mass_kg": 1.7103,
+      "part_count_total": 154,
+      "part_count_r4": 81,
+      "part_count_changer_r2": 73,
+      "qualification": {
+        "glove_showcase": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 41.252,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 57.986,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 6.292,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 50.857,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.688
+          },
+          "task_contacts_mm": {},
+          "pass": true
+        },
+        "open": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 93.286,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 101.429,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 5.131,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.365,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 56.866
+          },
+          "task_contacts_mm": {},
+          "pass": true
+        },
+        "thumb_slot_neg20": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 32.378,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 57.467,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 10.678,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 50.478,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.688
+          },
+          "task_contacts_mm": {},
+          "pass": true
+        },
+        "wrap_bottle_1l": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 49.409,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 45.788,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 3.99,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.303,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.852
+          },
+          "task_contacts_mm": {
+            "bottle_to_contoured_palm_skin_mm": 0.0,
+            "bottle_to_thumb_skin_mm": 0.0,
+            "bottle_to_index_skin_mm": 0.0,
+            "bottle_to_ulnar_skin_mm": 0.0
+          },
+          "pass": true
+        },
+        "hook_bar_max": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 24.104,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 26.842,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 13.115,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 53.499,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 54.47
+          },
+          "task_contacts_mm": {
+            "index_to_ada_bar_mm": 0.0,
+            "ulnar_to_ada_bar_mm": 0.0,
+            "clearance_to_ada_door_wall_mm": 14.876
+          },
+          "pass": true
+        },
+        "pinch_pen": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 0.349,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 10.106,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 7.05,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 43.652,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 45.819
+          },
+          "task_contacts_mm": {
+            "thumb_to_pen_mm": 0.704,
+            "index_to_pen_mm": 0.609,
+            "ulnar_to_pen_mm": 0.0,
+            "fingertips_to_table_gap_mm": 0.502
+          },
+          "pass": true
+        }
+      },
+      "all_benchmarks_passed": true
+    },
+    "left": {
+      "step_with_changer_path": "C:\\Users\\Owner\\Documents\\Github\\Omniverse_Nemotron_Ext\\workspace\\amber_gripper_r4\\cad\\amber_gripper_r4_left_with_changer.step",
+      "urdf_path": "C:\\Users\\Owner\\Documents\\Github\\Omniverse_Nemotron_Ext\\workspace\\amber_gripper_r4\\urdf\\amber_gripper_r4_left.urdf",
+      "r4_gripper_only_mass_kg": 0.5016,
+      "total_with_changer_mass_kg": 1.7103,
+      "part_count_total": 154,
+      "part_count_r4": 81,
+      "part_count_changer_r2": 73,
+      "qualification": {
+        "glove_showcase": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 41.252,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 57.986,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 6.292,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 50.857,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.688
+          },
+          "task_contacts_mm": {},
+          "pass": true
+        },
+        "open": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 93.286,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 101.429,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 5.131,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.365,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 56.866
+          },
+          "task_contacts_mm": {},
+          "pass": true
+        },
+        "thumb_slot_neg20": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 32.378,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 57.467,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 10.678,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 50.478,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.688
+          },
+          "task_contacts_mm": {},
+          "pass": true
+        },
+        "wrap_bottle_1l": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 49.409,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 45.788,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 3.99,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.303,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 55.852
+          },
+          "task_contacts_mm": {
+            "bottle_to_contoured_palm_skin_mm": 0.0,
+            "bottle_to_thumb_skin_mm": 0.0,
+            "bottle_to_index_skin_mm": 0.0,
+            "bottle_to_ulnar_skin_mm": 0.0
+          },
+          "pass": true
+        },
+        "hook_bar_max": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 24.104,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 26.842,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 13.115,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 53.499,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 54.47
+          },
+          "task_contacts_mm": {
+            "index_to_ada_bar_mm": 0.0,
+            "ulnar_to_ada_bar_mm": 0.0,
+            "clearance_to_ada_door_wall_mm": 14.876
+          },
+          "pass": true
+        },
+        "pinch_pen": {
+          "self_interference_count": 0,
+          "interferences": [],
+          "clearances_mm": {
+            "r4_thumb_dist_7075_vs_r4_index_dist_7075": 0.349,
+            "r4_thumb_dist_7075_vs_r4_ulnar_dist_7075": 10.106,
+            "r4_index_dist_7075_vs_r4_ulnar_dist_7075": 3.0,
+            "r4_index_prox_twin_strut_frame_vs_r4_ulnar_prox_twin_strut_frame": 7.0,
+            "r4_thumb_dist_7075_vs_r4_forward_palmar_apron_shelf": 7.05,
+            "r4_index_dist_7075_vs_r4_chamfered_mcp_palmar_block": 43.652,
+            "r4_ulnar_dist_7075_vs_r4_chamfered_mcp_palmar_block": 45.819
+          },
+          "task_contacts_mm": {
+            "thumb_to_pen_mm": 0.704,
+            "index_to_pen_mm": 0.609,
+            "ulnar_to_pen_mm": 0.0,
+            "fingertips_to_table_gap_mm": 0.502
+          },
+          "pass": true
+        }
+      },
+      "all_benchmarks_passed": true
+    }
+  },
+  "bilateral_pair_step_path": "C:\\Users\\Owner\\Documents\\Github\\Omniverse_Nemotron_Ext\\workspace\\amber_gripper_r4\\cad\\amber_gripper_r4_bilateral_pair_with_changers.step",
+  "teleop_contract_path": "C:\\Users\\Owner\\Documents\\Github\\Omniverse_Nemotron_Ext\\workspace\\amber_gripper_r4\\teleop\\glove_to_r4_teleop_contract.json"
+}

@@ -1,0 +1,91 @@
+{
+  "schema": "amber_v0.5.capture_glove_to_r4_teleop_and_r2_r3_inheritance.v3",
+  "glove_visual_and_kinematic_parity": {
+    "reference": "CSU Chico MECA-440B Team 10 Things Capture Glove (Slide 11 Final CAD)",
+    "palm_chassis": "Winged bent-angle radial & ulnar cheek plates + forward sloped palmar apron + elevated horizontal \u00d813 mm MCP knuckle shaft + chamfered upper MCP palmar block + dual side cheek camera/sensor pods",
+    "upper_digits": "24 mm Index (twin-bar clevis + chiseled distal block) + 52 mm Coupled Middle-Fourth-Pinkie (twin-strut open ladder + wide chiseled distal paddle) overhanging the C-mouth",
+    "opposing_thumb": "Low radial-palmar worm-locked -20/0/+20 deg 3-position opposition turret + enlarged 28 mm pentagonal chiseled thumb block with dorsal alignment ridge",
+    "rotary_hubs": "5 exposed 6-notched dark-grey rotary joint encoder caps matching the glove's 5 Bourns rotary sensors"
+  },
+  "inherited_engineering_rules_preserved": {
+    "sizing_and_reach": {
+      "L1_mm": 56.0,
+      "L2_mm": 54.0,
+      "palm_width_mm": 98.0,
+      "tool_point_reach_mm": 176.4,
+      "limit_mm": 193.0
+    },
+    "palm_stability_surface": "Moulded twin-eminence Shore A 60 PU palmar saddle + 4x Ohmite FSR07 force zones + chamfered MCP palmar block",
+    "transmission_and_palm_packaging": "two_drives_per_finger + drives_fixed_in_palm inside enclosed 2-layer 3-deck lower wrist-palm belly (6x Pololu HPCB worm-locked SK78 tendon spools + 7th thumb opposition worm + 500 Hz reflex PCB)",
+    "serviceability_and_table_pinch": "Removable M1.6 dorsal tip service crowns + 1+1+3 flush Contactile 3DFBS-12T-50N domes + 0.50 mm flat-bevel table pen pinch (GR3-PEN-01)",
+    "bolt_interface": {
+      "angles_deg": [
+        30.0,
+        150.0,
+        225.0
+      ],
+      "pcd_radius_mm": 22.0,
+      "bilateral_rule": "Un-mirrored \u00d852x6 mm base_disc so both Right and Left hands lock onto any standardized Wrist_Tool_Changer_R2"
+    }
+  },
+  "minimal_motion_retargeting": {
+    "equation": "q_r4 = I_6 @ q_glove  (exact 6x6 identity matrix, gain = 1.000, offset = 0.000 rad)",
+    "ik_solver_required": false,
+    "neural_retargeter_required": false,
+    "unobserved_robot_dofs": 0,
+    "channel_map_6dof": [
+      {
+        "idx": 0,
+        "glove_sensor": "Bourns Rotary 0 (Index MCP)",
+        "r4_urdf_joint": "r4_index_mcp_joint",
+        "palm_drive": "Layer1_Spool_0",
+        "gain": 1.0,
+        "offset_rad": 0.0
+      },
+      {
+        "idx": 1,
+        "glove_sensor": "Bourns Rotary 1 (Index PIP)",
+        "r4_urdf_joint": "r4_index_pip_joint",
+        "palm_drive": "Layer2_Spool_0",
+        "gain": 1.0,
+        "offset_rad": 0.0
+      },
+      {
+        "idx": 2,
+        "glove_sensor": "Bourns Rotary 2 (Coupled Ulnar MCP)",
+        "r4_urdf_joint": "r4_ulnar_mcp_joint",
+        "palm_drive": "Layer1_Spool_1",
+        "gain": 1.0,
+        "offset_rad": 0.0
+      },
+      {
+        "idx": 3,
+        "glove_sensor": "Bourns Rotary 3 (Coupled Ulnar PIP)",
+        "r4_urdf_joint": "r4_ulnar_pip_joint",
+        "palm_drive": "Layer2_Spool_1",
+        "gain": 1.0,
+        "offset_rad": 0.0
+      },
+      {
+        "idx": 4,
+        "glove_sensor": "3-Position Thumb Slot (-20/0/+20 deg)",
+        "r4_urdf_joint": "r4_thumb_opposition_joint",
+        "palm_drive": "Layer2_WormGear_2",
+        "gain": 1.0,
+        "offset_rad": 0.0
+      },
+      {
+        "idx": 5,
+        "glove_sensor": "Bourns Rotary 4 (Thumb Flexion, 28 deg fixed block)",
+        "r4_urdf_joint": "r4_thumb_flex_joint",
+        "palm_drive": "Layer1_Spool_2",
+        "gain": 1.0,
+        "offset_rad": 0.0
+      }
+    ],
+    "observation_space_parity": {
+      "tactile_9ch": "1x Thumb + 1x Index + 3x Coupled Ulnar + 4x Palmar Saddle (direct 1:1 channel index match)",
+      "egocentric_rgb": "Radial cheek ArduCam wedge at identical T_palm_to_cam extrinsics"
+    }
+  }
+}

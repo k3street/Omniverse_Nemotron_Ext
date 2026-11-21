@@ -118,8 +118,9 @@ def resolve_freecad_python() -> str:
     if explicit and Path(explicit).is_file():
         return explicit
     candidates = [
-        r"C:\Program Files\FreeCAD 1.0\bin\python.exe",
+        r"H:\FreeCAD-1.1.4\bin\python.exe",
         r"C:\Program Files\FreeCAD 1.1\bin\python.exe",
+        r"C:\Program Files\FreeCAD 1.0\bin\python.exe",
         r"C:\Program Files\FreeCAD\bin\python.exe",
         "/usr/bin/freecadcmd",
         "/usr/local/bin/freecadcmd",
